@@ -1,0 +1,11 @@
+# Go toolchain
+coverage.out
+coverage.html
+*.test
+*.cpuprofile
+*.heapprofile
+
+# Common in OSs and IDEs
+.idea
+.vscode
+.DS_Store
