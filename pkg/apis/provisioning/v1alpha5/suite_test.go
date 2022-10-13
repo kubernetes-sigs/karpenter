@@ -20,7 +20,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/Pallinder/go-randomdata"
@@ -70,22 +69,22 @@ var _ = Describe("Validation", func() {
 		Expect(provisioner.Validate(ctx)).To(Succeed())
 	})
 	It("should succeed on a valid empty ttl", func() {
-		provisioner.Spec.TTLSecondsAfterEmpty = aws.Int64(30)
+		provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(30)
 		Expect(provisioner.Validate(ctx)).To(Succeed())
 	})
 	It("should fail if both consolidation and TTLSecondsAfterEmpty are enabled", func() {
 		provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(30)
-		provisioner.Spec.Consolidation = &Consolidation{Enabled: aws.Bool(true)}
+		provisioner.Spec.Consolidation = &Consolidation{Enabled: ptr.Bool(true)}
 		Expect(provisioner.Validate(ctx)).ToNot(Succeed())
 	})
 	It("should succeed if consolidation is off and TTLSecondsAfterEmpty is set", func() {
 		provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(30)
-		provisioner.Spec.Consolidation = &Consolidation{Enabled: aws.Bool(false)}
+		provisioner.Spec.Consolidation = &Consolidation{Enabled: ptr.Bool(false)}
 		Expect(provisioner.Validate(ctx)).To(Succeed())
 	})
 	It("should succeed if consolidation is on and TTLSecondsAfterEmpty is not set", func() {
 		provisioner.Spec.TTLSecondsAfterEmpty = nil
-		provisioner.Spec.Consolidation = &Consolidation{Enabled: aws.Bool(true)}
+		provisioner.Spec.Consolidation = &Consolidation{Enabled: ptr.Bool(true)}
 		Expect(provisioner.Validate(ctx)).To(Succeed())
 	})
 
