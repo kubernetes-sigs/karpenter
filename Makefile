@@ -1,10 +1,10 @@
 help: ## Display help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
-presubmit: toolchain verify test ## Run all steps required for code to be checked in
+presubmit: verify test ## Run all steps required for code to be checked in
 
 test: ## Run tests
-	go test -run=${TEST_FILTER} ./... \
+	go test -v -run=${TEST_FILTER} ./... \
 		-race \
 		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
 
@@ -28,4 +28,4 @@ codegen: ## Generate code. Must be run if changes are made to ./pkg/apis/...
 toolchain: ## Install developer toolchain
 	./hack/toolchain.sh
 
-.PHONY: help presubmit test verify codegen toolchain
+.PHONY: help presubmit dev test verify codegen toolchain
