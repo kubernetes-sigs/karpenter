@@ -22,6 +22,7 @@ jobs:
           ~/go/bin/
           ~/.kubebuilder/bin
         key: ${{ runner.os }}-go-cache-${{ hashFiles('**/go.sum') }}
+    - run: make toolchain
     - run: make presubmit
     - uses: shogo82148/actions-goveralls@v1
       with:
