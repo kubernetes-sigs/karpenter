@@ -10,7 +10,7 @@ require (
 	go.uber.org/multierr v1.8.0
 	k8s.io/api v0.25.2
 	k8s.io/apimachinery v0.25.2
-	knative.dev/pkg v0.0.0-20221014164553-b812affa3893
+	knative.dev/pkg v0.0.0-20221011175852-714b7630a836
 	sigs.k8s.io/controller-runtime v0.13.0
 )
 
