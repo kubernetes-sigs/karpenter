@@ -30,12 +30,6 @@ var (
 	CapacityTypeSpot                     = "spot"
 	CapacityTypeOnDemand                 = "on-demand"
 
-	// Deprecated, these should live in aws/karpenter, but neutral concepts currently rely on them.
-	ResourceNVIDIAGPU    v1.ResourceName = "nvidia.com/gpu"
-	ResourceAMDGPU       v1.ResourceName = "amd.com/gpu"
-	ResourceAWSNeuron    v1.ResourceName = "aws.amazon.com/neuron"
-	ResourceAWSPodENI    v1.ResourceName = "vpc.amazonaws.com/pod-eni"
-
 	// Karpenter specific domains and labels
 	KarpenterLabelDomain              = "karpenter.sh"
 	ProvisionerNameLabelKey           = Group + "/provisioner-name"
