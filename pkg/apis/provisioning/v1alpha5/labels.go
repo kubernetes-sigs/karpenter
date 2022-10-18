@@ -23,21 +23,28 @@ import (
 )
 
 var (
-	ArchitectureAmd64    = "amd64"
-	ArchitectureArm64    = "arm64"
-	OperatingSystemLinux = "linux"
+	// Well known labels and resources
+	ArchitectureAmd64                    = "amd64"
+	ArchitectureArm64                    = "arm64"
+	OperatingSystemLinux                 = "linux"
+	CapacityTypeSpot                     = "spot"
+	CapacityTypeOnDemand                 = "on-demand"
+
+	// Deprecated, these should live in aws/karpenter, but neutral concepts currently rely on them.
+	ResourceNVIDIAGPU    v1.ResourceName = "nvidia.com/gpu"
+	ResourceAMDGPU       v1.ResourceName = "amd.com/gpu"
+	ResourceAWSNeuron    v1.ResourceName = "aws.amazon.com/neuron"
+	ResourceAWSPodENI    v1.ResourceName = "vpc.amazonaws.com/pod-eni"
 
 	// Karpenter specific domains and labels
-	KarpenterLabelDomain = "karpenter.sh"
-
+	KarpenterLabelDomain              = "karpenter.sh"
 	ProvisionerNameLabelKey           = Group + "/provisioner-name"
 	DoNotEvictPodAnnotationKey        = Group + "/do-not-evict"
 	DoNotConsolidateNodeAnnotationKey = KarpenterLabelDomain + "/do-not-consolidate"
 	EmptinessTimestampAnnotationKey   = Group + "/emptiness-timestamp"
 	TerminationFinalizer              = Group + "/termination"
-
-	LabelCapacityType    = KarpenterLabelDomain + "/capacity-type"
-	LabelNodeInitialized = KarpenterLabelDomain + "/initialized"
+	LabelNodeInitialized              = KarpenterLabelDomain + "/initialized"
+	LabelCapacityType                 = KarpenterLabelDomain + "/capacity-type"
 
 	// RestrictedLabelDomains are either prohibited by the kubelet or reserved by karpenter
 	RestrictedLabelDomains = sets.NewString(
