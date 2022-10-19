@@ -15,6 +15,8 @@ limitations under the License.
 package functional
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 )
 
@@ -41,4 +43,20 @@ func SplitCommaSeparatedString(value string) []string {
 		result = append(result, strings.TrimSpace(value))
 	}
 	return result
+}
+
+// DeepCopyJSON encodes the object using json and then decodes it back into the struct
+// NOTE: this only deep-copies fields that are exported through JSON
+func DeepCopyJSON[T any](v *T) (*T, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	dec := json.NewDecoder(&buf)
+	var cp T
+	if err := dec.Decode(&cp); err != nil {
+		return nil, err
+	}
+	return &cp, nil
 }
