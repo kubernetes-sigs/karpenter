@@ -38,6 +38,7 @@ import (
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -60,7 +61,6 @@ var clientSet *kubernetes.Clientset
 var recorder *test.EventRecorder
 var nodeStateController *state.NodeController
 var fakeClock *clock.FakeClock
-var cfg *test.Config
 var onDemandInstances []cloudprovider.InstanceType
 var mostExpensiveInstance cloudprovider.InstanceType
 var mostExpensiveOffering cloudprovider.Offering
@@ -75,14 +75,14 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(ctx, func(e *test.Environment) {
+		ctx = settings.ToContext(ctx, test.Settings())
 		cloudProvider = &fake.CloudProvider{}
-		cfg = test.NewConfig()
 		fakeClock = clock.NewFakeClock(time.Now())
-		cluster = state.NewCluster(fakeClock, cfg, env.Client, cloudProvider)
+		cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
 		nodeStateController = state.NewNodeController(env.Client, cluster)
 		clientSet = kubernetes.NewForConfigOrDie(e.Config)
 		recorder = test.NewEventRecorder()
-		provisioner = provisioning.NewProvisioner(ctx, cfg, env.Client, clientSet.CoreV1(), recorder, cloudProvider, cluster)
+		provisioner = provisioning.NewProvisioner(ctx, env.Client, clientSet.CoreV1(), recorder, cloudProvider, cluster, test.SettingsStore{})
 		provisioningController = provisioning.NewController(env.Client, provisioner, recorder)
 	})
 	Expect(env.Start()).To(Succeed(), "Failed to start environment")

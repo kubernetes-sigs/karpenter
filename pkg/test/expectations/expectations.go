@@ -287,3 +287,19 @@ func ExpectSkew(ctx context.Context, c client.Client, namespace string, constrai
 	}
 	return ExpectWithOffset(1, skew)
 }
+
+type gomegaKeyType struct{}
+
+var gomegaKey = gomegaKeyType{}
+
+func GomegaWithContext(ctx context.Context, g Gomega) context.Context {
+	return context.WithValue(ctx, gomegaKey, g)
+}
+
+func GomegaFromContext(ctx context.Context) Gomega {
+	data := ctx.Value(gomegaKey)
+	if data == nil {
+		panic("Gomega not defined in context")
+	}
+	return data.(Gomega)
+}

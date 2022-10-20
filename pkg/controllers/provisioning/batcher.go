@@ -18,26 +18,28 @@ import (
 	"context"
 	"time"
 
-	"github.com/aws/karpenter-core/pkg/config"
+	"github.com/aws/karpenter-core/pkg/apis/config/settings"
+	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
 )
 
 // Batcher separates a stream of Trigger() calls into windowed slices. The
 // window is dynamic and will be extended if additional items are added up to a
 // maximum batch duration.
 type Batcher struct {
-	running   context.Context
+	running      context.Context
+	settingStore settingsstore.Store
+
 	trigger   chan struct{}
 	immediate chan struct{}
-	config    config.Config
 }
 
 // NewBatcher is a constructor for the Batcher
-func NewBatcher(running context.Context, cfg config.Config) *Batcher {
+func NewBatcher(running context.Context, settingStore settingsstore.Store) *Batcher {
 	return &Batcher{
-		config:    cfg,
-		running:   running,
-		trigger:   make(chan struct{}), // triggering shouldn't block
-		immediate: make(chan struct{}),
+		running:      running,
+		settingStore: settingStore,
+		trigger:      make(chan struct{}), // triggering shouldn't block
+		immediate:    make(chan struct{}),
 	}
 }
 
@@ -57,8 +59,9 @@ func (b *Batcher) TriggerImmediate() {
 	b.immediate <- struct{}{}
 }
 
-// Wait starts a batching window and returns a slice of items when closed.
-func (b *Batcher) Wait() (window time.Duration) {
+// Wait starts a batching window and continues waiting as long as it continues receiving triggers within
+// the idleDuration, up to the maxDuration
+func (b *Batcher) Wait(ctx context.Context) {
 	var start time.Time
 	select {
 	case <-b.trigger:
@@ -71,12 +74,8 @@ func (b *Batcher) Wait() (window time.Duration) {
 		return
 	}
 
-	defer func() {
-		window = time.Since(start)
-	}()
-
-	timeout := time.NewTimer(b.config.BatchMaxDuration())
-	idle := time.NewTimer(b.config.BatchIdleDuration())
+	timeout := time.NewTimer(settings.FromContext(ctx).BatchMaxDuration)
+	idle := time.NewTimer(settings.FromContext(ctx).BatchIdleDuration)
 	for {
 		select {
 		case <-b.trigger:
@@ -87,7 +86,7 @@ func (b *Batcher) Wait() (window time.Duration) {
 			if !idle.Stop() {
 				<-idle.C
 			}
-			idle.Reset(b.config.BatchIdleDuration())
+			idle.Reset(settings.FromContext(ctx).BatchIdleDuration)
 		case <-b.immediate:
 			return
 		case <-timeout.C:

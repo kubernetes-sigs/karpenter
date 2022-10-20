@@ -41,9 +41,9 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
+	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/config"
 	scheduler "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
@@ -58,18 +58,20 @@ import (
 // unit testing purposes so we can avoid a lengthy delay in cluster sync.
 var WaitForClusterSync = true
 
-func NewProvisioner(ctx context.Context, cfg config.Config, kubeClient client.Client, coreV1Client corev1.CoreV1Interface, recorder events.Recorder, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Provisioner {
+func NewProvisioner(ctx context.Context, kubeClient client.Client, coreV1Client corev1.CoreV1Interface,
+	recorder events.Recorder, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster, settingStore settingsstore.Store) *Provisioner {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("provisioning"))
 	running, stop := context.WithCancel(ctx)
 	p := &Provisioner{
 		Stop:           stop,
-		batcher:        NewBatcher(running, cfg),
+		batcher:        NewBatcher(running, settingStore),
 		cloudProvider:  cloudProvider,
 		kubeClient:     kubeClient,
 		coreV1Client:   coreV1Client,
 		volumeTopology: NewVolumeTopology(kubeClient),
 		cluster:        cluster,
 		recorder:       recorder,
+		settingsStore:  settingStore,
 	}
 	p.cond = sync.NewCond(&p.mu)
 	go p.Start(running)
@@ -88,6 +90,7 @@ type Provisioner struct {
 	volumeTopology *VolumeTopology
 	cluster        *state.Cluster
 	recorder       events.Recorder
+	settingsStore  settingsstore.Store
 
 	mu   sync.Mutex
 	cond *sync.Cond
@@ -107,9 +110,10 @@ func (p *Provisioner) TriggerAndWait() {
 
 func (p *Provisioner) Start(ctx context.Context) {
 	for ctx.Err() == nil {
-		if errs := p.Provision(ctx); errs != nil {
+		innerCtx := p.settingsStore.InjectSettings(ctx)
+		if errs := p.Provision(innerCtx); errs != nil {
 			for _, err := range multierr.Errors(errs) {
-				logging.FromContext(ctx).Errorf("Provisioning failed, %s", err)
+				logging.FromContext(innerCtx).Errorf("Provisioning failed, %s", err)
 			}
 		}
 	}
@@ -118,7 +122,7 @@ func (p *Provisioner) Start(ctx context.Context) {
 
 func (p *Provisioner) Provision(ctx context.Context) error {
 	// Batch pods
-	p.batcher.Wait()
+	p.batcher.Wait(ctx)
 	defer func() {
 		// wake any waiters on the cond, this is only used for unit testing to ensure we can sync on the
 		// provisioning loop for reliable tests

@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	"github.com/aws/karpenter-core/pkg/config"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 	"github.com/aws/karpenter-core/pkg/operator/options"
@@ -47,7 +46,7 @@ type Context struct {
 
 	EventRecorder     events.Recorder      // Decorated recorder for Karpenter core events
 	BaseEventRecorder record.EventRecorder // Recorder from controller manager for use by other components
-	Config            config.Config
+	ConfigMapWatcher  *informer.InformedWatcher
 	KubeClient        client.Client
 	Clientset         *kubernetes.Clientset
 	Clock             clock.Clock
@@ -76,15 +75,6 @@ func NewOrDie() (Context, manager.Manager) {
 		debug.SetMemoryLimit(newLimit)
 	}
 
-	cfg, err := config.New(ctx, clientSet, cmw)
-	if err != nil {
-		// this does not happen if the config map is missing or invalid, only if some other error occurs
-		logging.FromContext(ctx).Fatalf("unable to load config, %s", err)
-	}
-	if err := cmw.Start(ctx.Done()); err != nil {
-		logging.FromContext(ctx).Errorf("watching configmaps, config changes won't be applied immediately, %s", err)
-	}
-
 	manager := NewManagerOrDie(ctx, controllerRuntimeConfig, opts)
 
 	baseRecorder := manager.GetEventRecorderFor(appName)
@@ -96,7 +86,7 @@ func NewOrDie() (Context, manager.Manager) {
 		Context:           ctx,
 		EventRecorder:     recorder,
 		BaseEventRecorder: baseRecorder,
-		Config:            cfg,
+		ConfigMapWatcher:  cmw,
 		Clientset:         clientSet,
 		KubeClient:        manager.GetClient(),
 		Clock:             clock.RealClock{},
