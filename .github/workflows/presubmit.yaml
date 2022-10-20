@@ -7,6 +7,11 @@ on:
 jobs:
   presubmit:
     runs-on: ubuntu-latest
+    strategy:
+        matrix:
+          k8sVersion: ["1.20.x", "1.21.x", "1.22.x", "1.23.x", "1.24.x"]
+    env:
+      K8S_VERSION: ${{ matrix.k8sVersion }}
     steps:
     - uses: actions/checkout@v3
     - run: sed -En 's/^go[[:space:]]+([[:digit:].]+)$/GO_VERSION=\1/p' go.mod >> $GITHUB_ENV
