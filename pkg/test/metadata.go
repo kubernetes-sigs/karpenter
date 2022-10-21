@@ -26,6 +26,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const DiscoveryLabel = "testing.karpenter.sh/test-id"
+
 var (
 	sequentialNumber     = 0
 	randomizer           = rand.New(rand.NewSource(time.Now().UnixNano())) //nolint
@@ -43,6 +45,7 @@ func ObjectMeta(overrides ...metav1.ObjectMeta) metav1.ObjectMeta {
 	return MustMerge(metav1.ObjectMeta{
 		Name:      RandomName(),
 		Namespace: "default",
+		Labels:    map[string]string{DiscoveryLabel: "unspecified"}, // For cleanup discovery
 	}, overrides...)
 }
 
