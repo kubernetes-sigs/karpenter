@@ -24,11 +24,11 @@ import (
 
 var (
 	// Well known labels and resources
-	ArchitectureAmd64                    = "amd64"
-	ArchitectureArm64                    = "arm64"
-	OperatingSystemLinux                 = "linux"
-	CapacityTypeSpot                     = "spot"
-	CapacityTypeOnDemand                 = "on-demand"
+	ArchitectureAmd64    = "amd64"
+	ArchitectureArm64    = "arm64"
+	OperatingSystemLinux = "linux"
+	CapacityTypeSpot     = "spot"
+	CapacityTypeOnDemand = "on-demand"
 
 	// Karpenter specific domains and labels
 	KarpenterLabelDomain              = "karpenter.sh"
