@@ -25,9 +25,8 @@ import (
 )
 
 type Builder struct {
-	mgr           manager.Manager
-	name          string
-	leaderElected bool
+	mgr  manager.Manager
+	name string
 }
 
 func NewSingletonManagedBy(m manager.Manager) Builder {
@@ -41,27 +40,20 @@ func (b Builder) Named(n string) Builder {
 	return b
 }
 
-func (b Builder) LeaderElected() Builder {
-	b.leaderElected = true
-	return b
-}
-
 func (b Builder) Complete(r reconcile.Reconciler) error {
-	return b.mgr.Add(newSingleton(r, b.name, b.leaderElected))
+	return b.mgr.Add(newSingleton(r, b.name))
 }
 
 type Singleton struct {
 	reconcile.Reconciler
 
-	name          string
-	leaderElected bool
+	name string
 }
 
-func newSingleton(r reconcile.Reconciler, name string, leaderElected bool) *Singleton {
+func newSingleton(r reconcile.Reconciler, name string) *Singleton {
 	return &Singleton{
-		Reconciler:    r,
-		name:          name,
-		leaderElected: leaderElected,
+		Reconciler: r,
+		name:       name,
 	}
 }
 
@@ -85,5 +77,5 @@ func (s *Singleton) Start(ctx context.Context) error {
 }
 
 func (s *Singleton) NeedLeaderElection() bool {
-	return s.leaderElected
+	return true
 }

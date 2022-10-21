@@ -92,7 +92,6 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controller.NewSingletonManagedBy(m).
 		Named("consolidation").
-		LeaderElected().
 		Complete(c)
 }
 

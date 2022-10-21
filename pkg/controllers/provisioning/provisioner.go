@@ -18,9 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"net/http"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/imdario/mergo"
@@ -73,9 +71,6 @@ type Provisioner struct {
 	volumeTopology *VolumeTopology
 	cluster        *state.Cluster
 	recorder       events.Recorder
-
-	mu   sync.Mutex
-	cond *sync.Cond
 }
 
 func NewProvisioner(ctx context.Context, cfg config.Config, kubeClient client.Client, coreV1Client corev1.CoreV1Interface, recorder events.Recorder, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Provisioner {
@@ -91,7 +86,6 @@ func NewProvisioner(ctx context.Context, cfg config.Config, kubeClient client.Cl
 		cluster:        cluster,
 		recorder:       recorder,
 	}
-	p.cond = sync.NewCond(&p.mu)
 	return p
 }
 
@@ -99,12 +93,8 @@ func (p *Provisioner) Trigger() {
 	p.batcher.Trigger()
 }
 
-// Deprecated: TriggerAndWait is used for unit testing purposes only
-func (p *Provisioner) TriggerAndWait() {
-	p.mu.Lock()
+func (p *Provisioner) TriggerImmediate() {
 	p.batcher.TriggerImmediate()
-	p.cond.Wait()
-	p.mu.Unlock()
 }
 
 func (p *Provisioner) Register(_ context.Context, mgr manager.Manager) error {
@@ -116,13 +106,6 @@ func (p *Provisioner) Register(_ context.Context, mgr manager.Manager) error {
 func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
 	// Batch pods
 	p.batcher.Wait()
-	defer func() {
-		// wake any waiters on the cond, this is only used for unit testing to ensure we can sync on the
-		// provisioning loop for reliable tests
-		p.mu.Lock()
-		p.cond.Broadcast()
-		p.mu.Unlock()
-	}()
 
 	// wait to ensure that our cluster state is synced with the current known nodes to prevent over-provisioning
 	for WaitForClusterSync {
@@ -413,13 +396,6 @@ func (p *Provisioner) injectTopology(ctx context.Context, pods []*v1.Pod) []*v1.
 		}
 	}
 	return schedulablePods
-}
-
-func (p *Provisioner) LivenessProbe(req *http.Request) error {
-	p.mu.Lock()
-	//nolint: staticcheck
-	p.mu.Unlock()
-	return nil
 }
 
 // cheapestOfferingPrice gets the cheapest price of an offering on an instance type given

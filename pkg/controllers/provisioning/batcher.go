@@ -36,7 +36,7 @@ func NewBatcher(running context.Context, cfg config.Config) *Batcher {
 	return &Batcher{
 		config:    cfg,
 		running:   running,
-		trigger:   make(chan struct{}), // triggering shouldn't block
+		trigger:   make(chan struct{}, 100), // triggering shouldn't block
 		immediate: make(chan struct{}),
 	}
 }

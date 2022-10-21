@@ -175,8 +175,8 @@ func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objects ...cl
 	}
 }
 
-func ExpectProvisioned(ctx context.Context, c client.Client, controller *provisioning.Controller, pods ...*v1.Pod) (result []*v1.Pod) {
-	ExpectProvisionedNoBindingWithOffset(1, ctx, c, controller, pods...)
+func ExpectProvisioned(ctx context.Context, c client.Client, controller *provisioning.Controller, provisioner *provisioning.Provisioner, pods ...*v1.Pod) (result []*v1.Pod) {
+	ExpectProvisionedNoBindingWithOffset(1, ctx, c, controller, provisioner, pods...)
 
 	recorder := controller.Recorder().(*test.EventRecorder)
 	recorder.ForEachBinding(func(pod *v1.Pod, node *v1.Node) {
@@ -192,11 +192,11 @@ func ExpectProvisioned(ctx context.Context, c client.Client, controller *provisi
 	return
 }
 
-func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, controller *provisioning.Controller, pods ...*v1.Pod) (result []*v1.Pod) {
-	return ExpectProvisionedNoBindingWithOffset(1, ctx, c, controller, pods...)
+func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, controller *provisioning.Controller, provisioner *provisioning.Provisioner, pods ...*v1.Pod) (result []*v1.Pod) {
+	return ExpectProvisionedNoBindingWithOffset(1, ctx, c, controller, provisioner, pods...)
 }
 
-func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c client.Client, controller *provisioning.Controller, pods ...*v1.Pod) (result []*v1.Pod) {
+func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c client.Client, controller *provisioning.Controller, provisioner *provisioning.Provisioner, pods ...*v1.Pod) (result []*v1.Pod) {
 	// Persist objects
 	for _, pod := range pods {
 		ExpectAppliedWithOffset(offset+1, ctx, c, pod)
@@ -211,7 +211,9 @@ func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c cli
 		_, _ = controller.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(pod)})
 	}
 
-	controller.TriggerAndWait() //nolint , method is deprecated and used for unit testing only
+	// TODO: Check the error on the provisioner reconcile
+	go provisioner.TriggerImmediate()
+	_, _ = provisioner.Reconcile(ctx, reconcile.Request{})
 
 	// Update objects after reconciling
 	for _, pod := range pods {
