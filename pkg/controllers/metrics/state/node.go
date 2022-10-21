@@ -149,7 +149,7 @@ func NewNodeScraper(cluster *state.Cluster) *NodeScraper {
 	}
 }
 
-func (ns *NodeScraper) Scrape(ctx context.Context) {
+func (ns *NodeScraper) Scrape(_ context.Context) {
 	currentGaugeLabels := make(map[*prometheus.GaugeVec]sets.String)
 	forEachGaugeVec(func(g *prometheus.GaugeVec) {
 		currentGaugeLabels[g] = sets.NewString()

@@ -18,50 +18,40 @@ import (
 	"context"
 	"time"
 
-	"knative.dev/pkg/logging"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
-const tickPeriodSeconds = 5
+const pollingPeriod = 5 * time.Second
 
 type Scraper interface {
 	Scrape(context.Context)
 }
 
-type MetricScraper struct {
+type MetricScrapingController struct {
 	cluster  *state.Cluster
 	scrapers []Scraper
 }
 
-func StartMetricScraper(ctx context.Context, cluster *state.Cluster) {
-	mc := &MetricScraper{
-		cluster: cluster,
+func NewMetricScrapingController(cluster *state.Cluster) *MetricScrapingController {
+	return &MetricScrapingController{
+		cluster:  cluster,
+		scrapers: []Scraper{NewNodeScraper(cluster)},
 	}
-	mc.init(ctx)
 }
 
-func (ms *MetricScraper) init(ctx context.Context) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("metric-scraper"))
+func (ms *MetricScrapingController) Register(_ context.Context, mgr manager.Manager) error {
+	return controller.NewSingletonManagedBy(mgr).
+		Named("metric-scraper").
+		Complete(ms)
+}
 
-	ms.scrapers = append(ms.scrapers, []Scraper{
-		NewNodeScraper(ms.cluster),
-	}...)
-
-	go func() {
-		ticker := time.NewTicker(tickPeriodSeconds * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				logging.FromContext(ctx).Debugf("Terminating metric-scraper")
-				return
-			case <-ticker.C:
-				for _, c := range ms.scrapers {
-					c.Scrape(ctx)
-				}
-			}
-		}
-	}()
+func (ms *MetricScrapingController) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
+	for _, scraper := range ms.scrapers {
+		scraper.Scrape(ctx)
+	}
+	return reconcile.Result{RequeueAfter: pollingPeriod}, nil
 }

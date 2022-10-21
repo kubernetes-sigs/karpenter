@@ -12,3 +12,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+package controller
+
+import "net/http"
+
+// HealthCheck is an interface for a controller that exposes a LivenessProbe
+type HealthCheck interface {
+	LivenessProbe(req *http.Request) error
+}

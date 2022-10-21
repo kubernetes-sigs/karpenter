@@ -27,18 +27,19 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/termination"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/operator"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
 func init() {
 	metrics.MustRegister() // Registers cross-controller metrics
 }
 
-func GetControllers(ctx operator.Context, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider) []operator.Controller {
+func GetControllers(ctx operator.Context, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider) []controller.Controller {
 	provisioner := provisioning.NewProvisioner(ctx, ctx.Config, ctx.KubeClient, ctx.Clientset.CoreV1(), ctx.EventRecorder, cloudProvider, cluster)
 
-	metricsstate.StartMetricScraper(ctx, cluster)
-
-	return []operator.Controller{
+	return []controller.Controller{
+		provisioner,
+		metricsstate.NewMetricScrapingController(cluster),
 		provisioning.NewController(ctx.KubeClient, provisioner, ctx.EventRecorder),
 		state.NewNodeController(ctx.KubeClient, cluster),
 		state.NewPodController(ctx.KubeClient, cluster),
