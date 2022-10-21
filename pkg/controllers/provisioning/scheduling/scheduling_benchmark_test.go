@@ -27,9 +27,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	clock "k8s.io/utils/clock/testing"
-
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/utils/clock"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
