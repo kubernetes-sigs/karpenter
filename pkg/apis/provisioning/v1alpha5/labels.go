@@ -31,23 +31,26 @@ var (
 	CapacityTypeOnDemand = "on-demand"
 
 	// Karpenter specific domains and labels
-	KarpenterLabelDomain              = "karpenter.sh"
 	ProvisionerNameLabelKey           = Group + "/provisioner-name"
 	DoNotEvictPodAnnotationKey        = Group + "/do-not-evict"
-	DoNotConsolidateNodeAnnotationKey = KarpenterLabelDomain + "/do-not-consolidate"
+	DoNotConsolidateNodeAnnotationKey = Group + "/do-not-consolidate"
 	EmptinessTimestampAnnotationKey   = Group + "/emptiness-timestamp"
 	TerminationFinalizer              = Group + "/termination"
-	LabelNodeInitialized              = KarpenterLabelDomain + "/initialized"
-	LabelCapacityType                 = KarpenterLabelDomain + "/capacity-type"
+	LabelNodeInitialized              = Group + "/initialized"
+	LabelCapacityType                 = Group + "/capacity-type"
+
+	// Tags for infrastructure resources deployed into cloudproviders' accounts
+	DiscoveryTagKey = Group + "/discovery"
+	ManagedByTagKey = Group + "/managed-by"
 
 	// RestrictedLabelDomains are either prohibited by the kubelet or reserved by karpenter
 	RestrictedLabelDomains = sets.NewString(
 		"kubernetes.io",
 		"k8s.io",
-		KarpenterLabelDomain,
+		Group,
 	)
 
-	// LabelDomainException are sub-domains of the RestrictedLabelDomains but allowed because
+	// LabelDomainExceptions are sub-domains of the RestrictedLabelDomains but allowed because
 	// they are not used in a context where they may be passed as argument to kubelet.
 	LabelDomainExceptions = sets.NewString(
 		"kops.k8s.io",
