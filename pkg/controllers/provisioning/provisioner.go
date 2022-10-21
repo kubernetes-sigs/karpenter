@@ -37,13 +37,16 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/config"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/config"
 	scheduler "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
@@ -57,24 +60,6 @@ import (
 // WaitForClusterSync controls whether or not we synchronize before scheduling. This is exposed for
 // unit testing purposes so we can avoid a lengthy delay in cluster sync.
 var WaitForClusterSync = true
-
-func NewProvisioner(ctx context.Context, cfg config.Config, kubeClient client.Client, coreV1Client corev1.CoreV1Interface, recorder events.Recorder, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Provisioner {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("provisioning"))
-	running, stop := context.WithCancel(ctx)
-	p := &Provisioner{
-		Stop:           stop,
-		batcher:        NewBatcher(running, cfg),
-		cloudProvider:  cloudProvider,
-		kubeClient:     kubeClient,
-		coreV1Client:   coreV1Client,
-		volumeTopology: NewVolumeTopology(kubeClient),
-		cluster:        cluster,
-		recorder:       recorder,
-	}
-	p.cond = sync.NewCond(&p.mu)
-	go p.Start(running)
-	return p
-}
 
 // Provisioner waits for enqueued pods, batches them, creates capacity and binds the pods to the capacity.
 type Provisioner struct {
@@ -93,6 +78,23 @@ type Provisioner struct {
 	cond *sync.Cond
 }
 
+func NewProvisioner(ctx context.Context, cfg config.Config, kubeClient client.Client, coreV1Client corev1.CoreV1Interface, recorder events.Recorder, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Provisioner {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("provisioning"))
+	running, stop := context.WithCancel(ctx)
+	p := &Provisioner{
+		Stop:           stop,
+		batcher:        NewBatcher(running, cfg),
+		cloudProvider:  cloudProvider,
+		kubeClient:     kubeClient,
+		coreV1Client:   coreV1Client,
+		volumeTopology: NewVolumeTopology(kubeClient),
+		cluster:        cluster,
+		recorder:       recorder,
+	}
+	p.cond = sync.NewCond(&p.mu)
+	return p
+}
+
 func (p *Provisioner) Trigger() {
 	p.batcher.Trigger()
 }
@@ -105,18 +107,13 @@ func (p *Provisioner) TriggerAndWait() {
 	p.mu.Unlock()
 }
 
-func (p *Provisioner) Start(ctx context.Context) {
-	for ctx.Err() == nil {
-		if errs := p.Provision(ctx); errs != nil {
-			for _, err := range multierr.Errors(errs) {
-				logging.FromContext(ctx).Errorf("Provisioning failed, %s", err)
-			}
-		}
-	}
-	logging.FromContext(ctx).Info("Stopped provisioner")
+func (p *Provisioner) Register(_ context.Context, mgr manager.Manager) error {
+	return controller.NewSingletonManagedBy(mgr).
+		Named("provisioning").
+		Complete(p)
 }
 
-func (p *Provisioner) Provision(ctx context.Context) error {
+func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
 	// Batch pods
 	p.batcher.Wait()
 	defer func() {
@@ -159,7 +156,7 @@ func (p *Provisioner) Provision(ctx context.Context) error {
 	// Get pods, exit if nothing to do
 	pendingPods, err := p.getPendingPods(ctx)
 	if err != nil {
-		return err
+		return reconcile.Result{}, err
 	}
 	// Get pods from nodes that are preparing for deletion
 	// We do this after getting the pending pods so that we undershoot if pods are
@@ -167,20 +164,20 @@ func (p *Provisioner) Provision(ctx context.Context) error {
 	// NOTE: The assumption is that these nodes are cordoned and no additional pods will schedule to them
 	deletingNodePods, err := node.GetNodePods(ctx, p.kubeClient, lo.Map(markedForDeletionNodes, func(n *state.Node, _ int) *v1.Node { return n.Node })...)
 	if err != nil {
-		return err
+		return reconcile.Result{}, err
 	}
 	pods := append(pendingPods, deletingNodePods...)
 	if len(pods) == 0 {
-		return nil
+		return reconcile.Result{}, err
 	}
 
 	// Schedule pods to potential nodes, exit if nothing to do
 	nodes, err := p.schedule(ctx, pods, stateNodes)
 	if err != nil {
-		return err
+		return reconcile.Result{}, err
 	}
 	if len(nodes) == 0 {
-		return nil
+		return reconcile.Result{}, err
 	}
 
 	nodeNames, err := p.LaunchNodes(ctx, LaunchOptions{RecordPodNomination: true}, nodes...)
@@ -189,7 +186,7 @@ func (p *Provisioner) Provision(ctx context.Context) error {
 	successfullyCreatedNodeCount := lo.CountBy(nodeNames, func(name string) bool { return name != "" })
 	metrics.NodesCreatedCounter.WithLabelValues(metrics.ProvisioningReason).Add(float64(successfullyCreatedNodeCount))
 
-	return err
+	return reconcile.Result{}, err
 }
 
 type LaunchOptions struct {

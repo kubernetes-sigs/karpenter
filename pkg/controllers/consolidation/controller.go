@@ -37,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -88,25 +89,11 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 	}
 }
 
-func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("consolidation"))
-	go func() {
-		select {
-		case <-ctx.Done():
-			return
-		case <-m.Elected():
-			for {
-				select {
-				case <-ctx.Done():
-					logging.FromContext(ctx).Infof("Shutting down")
-					return
-				case <-c.clock.After(pollingPeriod):
-					_, _ = c.Reconcile(ctx, reconcile.Request{})
-				}
-			}
-		}
-	}()
-	return nil
+func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	return controller.NewSingletonManagedBy(m).
+		Named("consolidation").
+		LeaderElected().
+		Complete(c)
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
@@ -123,8 +110,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	} else if result == DeprovisioningResultNothingToDo {
 		c.lastConsolidationState = clusterState
 	}
-
-	return reconcile.Result{}, nil
+	return reconcile.Result{RequeueAfter: pollingPeriod}, nil
 }
 
 // candidateNode is a node that we are considering for consolidation along with extra information to be used in
