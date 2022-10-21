@@ -20,8 +20,6 @@ import (
 	"fmt"
 	"runtime/debug"
 
-	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/configmap/informer"
@@ -29,7 +27,6 @@ import (
 	knativeinjection "knative.dev/pkg/injection"
 	"knative.dev/pkg/injection/sharedmain"
 	"knative.dev/pkg/logging"
-	"knative.dev/pkg/metrics"
 	"knative.dev/pkg/system"
 	"knative.dev/pkg/webhook"
 	"knative.dev/pkg/webhook/certificates"
@@ -68,11 +65,6 @@ func Initialize(injectCloudProvider func(cloudprovider.Context) cloudprovider.Cl
 	cmw := informer.NewInformedWatcher(clientSet, system.Namespace())
 	ctx := injection.LoggingContextOrDie(component, config, cmw)
 	ctx = knativeinjection.WithNamespaceScope(ctx, system.Namespace())
-
-	// TODO: Consider customizing these observability metrics later by creating an observability ConfigMap
-	// NOTE: This is here because Knative's defaulting mechanism for this was broken starting in
-	// https://github.com/knative/pkg/pull/2610. DO NOT REMOVE THIS LINE OR THE PROCESS WILL CRASH
-	ctx = metrics.WithConfig(ctx, lo.Must(metrics.NewObservabilityConfigFromConfigMap(&v1.ConfigMap{})))
 
 	ctx = webhook.WithOptions(ctx, webhook.Options{
 		Port:        opts.WebhookPort,
