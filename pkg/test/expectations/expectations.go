@@ -166,6 +166,15 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 	wg.Wait()
 }
 
+func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objects ...client.Object) {
+	for _, object := range objects {
+		ExpectWithOffset(1, c.Get(ctx, client.ObjectKeyFromObject(object), object)).To(Succeed())
+		mergeFrom := client.MergeFrom(object.DeepCopyObject().(client.Object))
+		object.SetFinalizers([]string{})
+		ExpectWithOffset(1, c.Patch(ctx, object, mergeFrom)).To(Succeed())
+	}
+}
+
 func ExpectProvisioned(ctx context.Context, c client.Client, controller *provisioning.Controller, pods ...*v1.Pod) (result []*v1.Pod) {
 	ExpectProvisionedNoBindingWithOffset(1, ctx, c, controller, pods...)
 
@@ -215,6 +224,11 @@ func ExpectReconcileSucceeded(ctx context.Context, reconciler reconcile.Reconcil
 	result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 	ExpectWithOffset(1, err).ToNot(HaveOccurred())
 	return result
+}
+
+func ExpectReconcileFailed(ctx context.Context, reconciler reconcile.Reconciler, key client.ObjectKey) {
+	result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+	ExpectWithOffset(1, err).ToNot(Succeed(), fmt.Sprintf("got result, %v", result))
 }
 
 func ExpectMetric(prefix string) *prometheus.MetricFamily {
