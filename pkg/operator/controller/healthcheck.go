@@ -14,17 +14,9 @@ limitations under the License.
 
 package controller
 
-import (
-	"context"
+import "net/http"
 
-	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-)
-
-// Controller defines a controller that can be registered with controller-runtime
-type Controller interface {
-	reconcile.Reconciler
-
-	// Register will register the controller with the manager
-	Register(context.Context, manager.Manager) error
+// HealthCheck is an interface for a controller that exposes a LivenessProbe
+type HealthCheck interface {
+	LivenessProbe(req *http.Request) error
 }

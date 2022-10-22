@@ -99,13 +99,13 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	// the last cluster consolidation wasn't able to improve things and nothing has changed regarding
 	// the cluster that makes us think we would be successful now
 	if c.lastConsolidationState == c.cluster.ClusterConsolidationState() {
-		return reconcile.Result{}, nil
+		return reconcile.Result{RequeueAfter: pollingPeriod}, nil
 	}
 
 	clusterState := c.cluster.ClusterConsolidationState()
 	result, err := c.ProcessCluster(ctx)
 	if err != nil {
-		logging.FromContext(ctx).Errorf("consolidating cluster, %s", err)
+		return reconcile.Result{}, fmt.Errorf("consolidating cluster, %w", err)
 	} else if result == DeprovisioningResultNothingToDo {
 		c.lastConsolidationState = clusterState
 	}

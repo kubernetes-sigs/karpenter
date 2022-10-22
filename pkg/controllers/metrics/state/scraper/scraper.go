@@ -12,19 +12,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package scraper
 
-import (
-	"context"
+import "context"
 
-	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-)
-
-// Controller defines a controller that can be registered with controller-runtime
-type Controller interface {
-	reconcile.Reconciler
-
-	// Register will register the controller with the manager
-	Register(context.Context, manager.Manager) error
+type Scraper interface {
+	Scrape(context.Context)
 }

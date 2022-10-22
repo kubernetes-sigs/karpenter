@@ -39,7 +39,7 @@ func GetControllers(ctx operator.Context, cluster *state.Cluster, cloudProvider 
 
 	return []controller.Controller{
 		provisioner,
-		metricsstate.NewMetricScrapingController(cluster),
+		metricsstate.NewController(cluster),
 		provisioning.NewController(ctx.KubeClient, provisioner, ctx.EventRecorder),
 		state.NewNodeController(ctx.KubeClient, cluster),
 		state.NewPodController(ctx.KubeClient, cluster),

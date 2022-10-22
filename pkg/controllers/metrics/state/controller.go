@@ -21,36 +21,33 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/aws/karpenter-core/pkg/controllers/metrics/state/scraper"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
 const pollingPeriod = 5 * time.Second
 
-type Scraper interface {
-	Scrape(context.Context)
-}
-
-type MetricScrapingController struct {
+type Controller struct {
 	cluster  *state.Cluster
-	scrapers []Scraper
+	scrapers []scraper.Scraper
 }
 
-func NewMetricScrapingController(cluster *state.Cluster) *MetricScrapingController {
-	return &MetricScrapingController{
+func NewController(cluster *state.Cluster) *Controller {
+	return &Controller{
 		cluster:  cluster,
-		scrapers: []Scraper{NewNodeScraper(cluster)},
+		scrapers: []scraper.Scraper{scraper.NewNodeScraper(cluster)},
 	}
 }
 
-func (ms *MetricScrapingController) Register(_ context.Context, mgr manager.Manager) error {
+func (c *Controller) Register(_ context.Context, mgr manager.Manager) error {
 	return controller.NewSingletonManagedBy(mgr).
 		Named("metric-scraper").
-		Complete(ms)
+		Complete(c)
 }
 
-func (ms *MetricScrapingController) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
-	for _, scraper := range ms.scrapers {
+func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
+	for _, scraper := range c.scrapers {
 		scraper.Scrape(ctx)
 	}
 	return reconcile.Result{RequeueAfter: pollingPeriod}, nil

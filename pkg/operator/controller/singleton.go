@@ -18,15 +18,23 @@ import (
 	"context"
 	"time"
 
+	"github.com/samber/lo"
 	"go.uber.org/multierr"
+	"k8s.io/client-go/util/workqueue"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/ratelimiter"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
+type Options struct {
+	DisableWaitOnError bool
+}
+
 type Builder struct {
-	mgr  manager.Manager
-	name string
+	mgr     manager.Manager
+	name    string
+	options Options
 }
 
 func NewSingletonManagedBy(m manager.Manager) Builder {
@@ -40,38 +48,60 @@ func (b Builder) Named(n string) Builder {
 	return b
 }
 
+func (b Builder) WithOptions(o Options) Builder {
+	b.options = o
+	return b
+}
+
 func (b Builder) Complete(r reconcile.Reconciler) error {
-	return b.mgr.Add(newSingleton(r, b.name))
+	return b.mgr.Add(newSingleton(r, b.name, b.options))
 }
 
 type Singleton struct {
 	reconcile.Reconciler
 
-	name string
+	name        string
+	options     Options
+	rateLimiter ratelimiter.RateLimiter
 }
 
-func newSingleton(r reconcile.Reconciler, name string) *Singleton {
+func newSingleton(r reconcile.Reconciler, name string, opts Options) *Singleton {
 	return &Singleton{
-		Reconciler: r,
-		name:       name,
+		Reconciler:  r,
+		name:        name,
+		options:     opts,
+		rateLimiter: workqueue.DefaultItemBasedRateLimiter(),
 	}
 }
+
+var singletonRequest = reconcile.Request{}
 
 func (s *Singleton) Start(ctx context.Context) error {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(s.name))
 	logging.FromContext(ctx).Infof("Starting Controller")
 	defer logging.FromContext(ctx).Infof("Stopping Controller")
 	for {
-		res, errs := s.Reconcile(ctx, reconcile.Request{})
-		if errs != nil {
+		var waitDuration time.Duration
+		res, errs := s.Reconcile(ctx, singletonRequest)
+
+		switch {
+		case errs != nil:
 			for _, err := range multierr.Errors(errs) {
 				logging.FromContext(ctx).Error(err)
 			}
+			if !s.options.DisableWaitOnError {
+				waitDuration = s.rateLimiter.When(singletonRequest)
+			}
+		case res.Requeue:
+			waitDuration = s.rateLimiter.When(singletonRequest)
+		default:
+			waitDuration = lo.Ternary(res.RequeueAfter > 0, res.RequeueAfter, time.Duration(0))
+			s.rateLimiter.Forget(singletonRequest)
 		}
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-time.After(res.RequeueAfter):
+		case <-time.After(waitDuration):
 		}
 	}
 }

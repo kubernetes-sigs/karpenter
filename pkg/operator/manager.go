@@ -71,6 +71,10 @@ func RegisterControllers(ctx context.Context, m manager.Manager, controllers ...
 		if err := c.Register(ctx, m); err != nil {
 			panic(err)
 		}
+		// if the controller implements a liveness check, connect it
+		if lp, ok := c.(controller.HealthCheck); ok {
+			utilruntime.Must(m.AddHealthzCheck(fmt.Sprintf("%T", c), lp.LivenessProbe))
+		}
 	}
 	if err := m.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		panic(fmt.Sprintf("Failed to add health probe, %s", err))

@@ -100,6 +100,9 @@ func (p *Provisioner) TriggerImmediate() {
 func (p *Provisioner) Register(_ context.Context, mgr manager.Manager) error {
 	return controller.NewSingletonManagedBy(mgr).
 		Named("provisioning").
+		WithOptions(controller.Options{
+			DisableWaitOnError: true,
+		}).
 		Complete(p)
 }
 
@@ -151,7 +154,7 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (recon
 	}
 	pods := append(pendingPods, deletingNodePods...)
 	if len(pods) == 0 {
-		return reconcile.Result{}, err
+		return reconcile.Result{}, nil
 	}
 
 	// Schedule pods to potential nodes, exit if nothing to do
@@ -160,7 +163,7 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (recon
 		return reconcile.Result{}, err
 	}
 	if len(nodes) == 0 {
-		return reconcile.Result{}, err
+		return reconcile.Result{}, nil
 	}
 
 	nodeNames, err := p.LaunchNodes(ctx, LaunchOptions{RecordPodNomination: true}, nodes...)
