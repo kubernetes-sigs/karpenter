@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"k8s.io/apimachinery/pkg/util/version"
+	"knative.dev/pkg/system"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
@@ -67,6 +68,7 @@ func NewEnvironment(ctx context.Context, options ...EnvironmentOption) *Environm
 	provisioning.WaitForClusterSync = false
 
 	ctx, stop := context.WithCancel(ctx)
+	os.Setenv(system.NamespaceEnvKey, "default")
 	return &Environment{
 		Environment: envtest.Environment{
 			CRDDirectoryPaths: []string{

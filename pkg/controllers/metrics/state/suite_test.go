@@ -28,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
@@ -43,7 +44,6 @@ import (
 )
 
 var ctx context.Context
-var cfg *test.Config
 var fakeClock *clock.FakeClock
 var env *test.Environment
 var cluster *state.Cluster
@@ -55,7 +55,6 @@ var nodeScraper *statemetrics.NodeScraper
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
-	cfg = test.NewConfig()
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Controllers/Metrics/State")
 }
@@ -64,9 +63,10 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(ctx, func(e *test.Environment) {})
 	Expect(env.Start()).To(Succeed(), "Failed to start environment")
 
+	ctx = settings.ToContext(ctx, test.Settings())
 	cloudProvider = &fake.CloudProvider{InstanceTypes: fake.InstanceTypesAssorted()}
 	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(fakeClock, cfg, env.Client, cloudProvider)
+	cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
 	provisioner = test.Provisioner(test.ProvisionerOptions{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
 	nodeController = state.NewNodeController(env.Client, cluster)
 	podController = state.NewPodController(env.Client, cluster)

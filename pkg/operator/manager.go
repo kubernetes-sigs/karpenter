@@ -31,27 +31,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 	"github.com/aws/karpenter-core/pkg/operator/options"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
+	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
 )
-
-// Controller is an interface implemented by Karpenter custom resources.
-type Controller interface {
-	// Reconcile hands a hydrated kubernetes resource to the controller for
-	// reconciliation. Any changes made to the resource's status are persisted
-	// after Reconcile returns, even if it returns an error.
-	Reconcile(context.Context, reconcile.Request) (reconcile.Result, error)
-	// Register will register the controller with the manager
-	Register(context.Context, manager.Manager) error
-}
-
-// HealthCheck is an interface for a controller that exposes a LivenessProbe
-type HealthCheck interface {
-	LivenessProbe(req *http.Request) error
-}
 
 // NewManagerOrDie instantiates a controller manager or panics
 func NewManagerOrDie(ctx context.Context, config *rest.Config, opts *options.Options) manager.Manager {
@@ -81,13 +67,14 @@ func NewManagerOrDie(ctx context.Context, config *rest.Config, opts *options.Opt
 }
 
 // RegisterControllers registers a set of controllers to the controller manager
-func RegisterControllers(ctx context.Context, m manager.Manager, controllers ...Controller) manager.Manager {
+func RegisterControllers(ctx context.Context, settingsStore settingsstore.Store, m manager.Manager, controllers ...controller.Controller) manager.Manager {
 	for _, c := range controllers {
+		c = controller.InjectSettings(c, settingsStore) // inject settings in the controller reconcile loop
 		if err := c.Register(ctx, m); err != nil {
 			panic(err)
 		}
 		// if the controller implements a liveness check, connect it
-		if lp, ok := c.(HealthCheck); ok {
+		if lp, ok := c.(controller.HealthCheck); ok {
 			utilruntime.Must(m.AddHealthzCheck(fmt.Sprintf("%T", c), lp.LivenessProbe))
 		}
 	}
