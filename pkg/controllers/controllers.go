@@ -15,6 +15,12 @@ limitations under the License.
 package controllers
 
 import (
+	"context"
+
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/utils/clock"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/consolidation"
 	"github.com/aws/karpenter-core/pkg/controllers/counter"
@@ -25,8 +31,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/controllers/termination"
+	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
-	"github.com/aws/karpenter-core/pkg/operator"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
 )
@@ -35,20 +41,30 @@ func init() {
 	metrics.MustRegister() // Registers cross-controller metrics
 }
 
-func GetControllers(ctx operator.Context, cluster *state.Cluster, settingsStore settingsstore.Store, cloudProvider cloudprovider.CloudProvider) []controller.Controller {
-	provisioner := provisioning.NewProvisioner(ctx, ctx.KubeClient, ctx.Clientset.CoreV1(), ctx.EventRecorder, cloudProvider, cluster, settingsStore)
+func NewControllers(
+	ctx context.Context,
+	clock clock.Clock,
+	kubeClient client.Client,
+	kubernetesInterface kubernetes.Interface,
+	cluster *state.Cluster,
+	eventRecorder events.Recorder,
+	settingsStore settingsstore.Store,
+	cloudProvider cloudprovider.CloudProvider,
+) []controller.Controller {
+	provisioner := provisioning.NewProvisioner(ctx, kubeClient, kubernetesInterface.CoreV1(), eventRecorder, cloudProvider, cluster, settingsStore)
 
 	metricsstate.StartMetricScraper(ctx, cluster)
+
 	return []controller.Controller{
-		provisioning.NewController(ctx.KubeClient, provisioner, ctx.EventRecorder),
-		state.NewNodeController(ctx.KubeClient, cluster),
-		state.NewPodController(ctx.KubeClient, cluster),
-		state.NewProvisionerController(ctx.KubeClient, cluster),
-		node.NewController(ctx.Clock, ctx.KubeClient, cloudProvider, cluster),
-		termination.NewController(ctx, ctx.Clock, ctx.KubeClient, ctx.Clientset.CoreV1(), ctx.EventRecorder, cloudProvider),
-		metricspod.NewController(ctx.KubeClient),
-		metricsprovisioner.NewController(ctx.KubeClient),
-		counter.NewController(ctx.KubeClient, cluster),
-		consolidation.NewController(ctx.Clock, ctx.KubeClient, provisioner, cloudProvider, ctx.EventRecorder, cluster),
+		provisioning.NewController(kubeClient, provisioner, eventRecorder),
+		state.NewNodeController(kubeClient, cluster),
+		state.NewPodController(kubeClient, cluster),
+		state.NewProvisionerController(kubeClient, cluster),
+		node.NewController(clock, kubeClient, cloudProvider, cluster),
+		termination.NewController(ctx, clock, kubeClient, kubernetesInterface.CoreV1(), eventRecorder, cloudProvider),
+		metricspod.NewController(kubeClient),
+		metricsprovisioner.NewController(kubeClient),
+		counter.NewController(kubeClient, cluster),
+		consolidation.NewController(clock, kubeClient, provisioner, cloudProvider, eventRecorder, cluster),
 	}
 }

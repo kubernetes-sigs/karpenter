@@ -57,7 +57,7 @@ var controller *consolidation.Controller
 var provisioningController *provisioning.Controller
 var provisioner *provisioning.Provisioner
 var cloudProvider *fake.CloudProvider
-var clientSet *kubernetes.Clientset
+var kubernetesInterface kubernetes.Interface
 var recorder *test.EventRecorder
 var nodeStateController *state.NodeController
 var fakeClock *clock.FakeClock
@@ -80,9 +80,9 @@ var _ = BeforeSuite(func() {
 		fakeClock = clock.NewFakeClock(time.Now())
 		cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
 		nodeStateController = state.NewNodeController(env.Client, cluster)
-		clientSet = kubernetes.NewForConfigOrDie(e.Config)
+		kubernetesInterface = kubernetes.NewForConfigOrDie(e.Config)
 		recorder = test.NewEventRecorder()
-		provisioner = provisioning.NewProvisioner(ctx, env.Client, clientSet.CoreV1(), recorder, cloudProvider, cluster, test.SettingsStore{})
+		provisioner = provisioning.NewProvisioner(ctx, env.Client, kubernetesInterface.CoreV1(), recorder, cloudProvider, cluster, test.SettingsStore{})
 		provisioningController = provisioning.NewController(env.Client, provisioner, recorder)
 	})
 	Expect(env.Start()).To(Succeed(), "Failed to start environment")

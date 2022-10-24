@@ -41,7 +41,7 @@ type store struct {
 	stores map[*config.Registration]*configmap.UntypedStore
 }
 
-func WatchSettingsOrDie(ctx context.Context, clientSet *kubernetes.Clientset, cmw *informer.InformedWatcher, registrations ...*config.Registration) Store {
+func WatchSettingsOrDie(ctx context.Context, kubernetesInterface kubernetes.Interface, cmw *informer.InformedWatcher, registrations ...*config.Registration) Store {
 	ss := &store{
 		registrations: registrations,
 		stores:        map[*config.Registration]*configmap.UntypedStore{},
@@ -61,7 +61,7 @@ func WatchSettingsOrDie(ctx context.Context, clientSet *kubernetes.Clientset, cm
 
 		// TODO: Remove this Get once we don't rely on this settingsStore for initialization
 		// Attempt to get the ConfigMap since WatchWithDefault doesn't wait for Add event form API-server
-		cm, err := clientSet.CoreV1().ConfigMaps(cmw.Namespace).Get(ctx, registration.ConfigMapName, metav1.GetOptions{})
+		cm, err := kubernetesInterface.CoreV1().ConfigMaps(cmw.Namespace).Get(ctx, registration.ConfigMapName, metav1.GetOptions{})
 		if err != nil {
 			if errors.IsNotFound(err) {
 				cm = &v1.ConfigMap{

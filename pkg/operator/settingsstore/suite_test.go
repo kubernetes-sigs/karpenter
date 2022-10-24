@@ -40,7 +40,7 @@ import (
 var ctx context.Context
 var env *test.Environment
 var cmw *informer.InformedWatcher
-var clientSet *kubernetes.Clientset
+var kubernetesInterface kubernetes.Interface
 var ss settingsstore.Store
 var defaultConfigMap *v1.ConfigMap
 
@@ -52,8 +52,8 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeEach(func() {
 	env = test.NewEnvironment(ctx, func(e *test.Environment) {
-		clientSet = kubernetes.NewForConfigOrDie(e.Config)
-		cmw = informer.NewInformedWatcher(clientSet, system.Namespace())
+		kubernetesInterface = kubernetes.NewForConfigOrDie(e.Config)
+		cmw = informer.NewInformedWatcher(kubernetesInterface, system.Namespace())
 
 		defaultConfigMap = &v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
@@ -73,7 +73,7 @@ var _ = AfterEach(func() {
 var _ = Describe("Operator Settings", func() {
 	BeforeEach(func() {
 		ExpectApplied(ctx, env.Client, defaultConfigMap)
-		ss = settingsstore.WatchSettingsOrDie(env.Ctx, clientSet, cmw, settings.Registration)
+		ss = settingsstore.WatchSettingsOrDie(env.Ctx, kubernetesInterface, cmw, settings.Registration)
 		Expect(cmw.Start(env.Ctx.Done())).To(Succeed())
 	})
 	It("should have default values", func() {
@@ -112,7 +112,7 @@ var _ = Describe("Multiple Settings", func() {
 		ExpectApplied(ctx, env.Client, defaultConfigMap)
 	})
 	It("should get operator settings and features from same configMap", func() {
-		ss = settingsstore.WatchSettingsOrDie(env.Ctx, clientSet, cmw, settings.Registration, fake.SettingsRegistration)
+		ss = settingsstore.WatchSettingsOrDie(env.Ctx, kubernetesInterface, cmw, settings.Registration, fake.SettingsRegistration)
 		Expect(cmw.Start(env.Ctx.Done())).To(Succeed())
 		Eventually(func(g Gomega) {
 			testCtx := ss.InjectSettings(ctx)
@@ -121,7 +121,7 @@ var _ = Describe("Multiple Settings", func() {
 		}).Should(Succeed())
 	})
 	It("should get operator settings and features from same configMap", func() {
-		ss = settingsstore.WatchSettingsOrDie(env.Ctx, clientSet, cmw, settings.Registration, fake.SettingsRegistration)
+		ss = settingsstore.WatchSettingsOrDie(env.Ctx, kubernetesInterface, cmw, settings.Registration, fake.SettingsRegistration)
 		Expect(cmw.Start(env.Ctx.Done())).To(Succeed())
 
 		cm := defaultConfigMap.DeepCopy()
@@ -145,7 +145,7 @@ var _ = Describe("Multiple Settings", func() {
 
 var _ = Describe("ConfigMap Doesn't Exist on Startup", func() {
 	It("should default if the configMap doesn't exist on startup", func() {
-		ss = settingsstore.WatchSettingsOrDie(env.Ctx, clientSet, cmw, settings.Registration)
+		ss = settingsstore.WatchSettingsOrDie(env.Ctx, kubernetesInterface, cmw, settings.Registration)
 		_ = cmw.Start(env.Ctx.Done())
 
 		Eventually(func(g Gomega) {
@@ -156,7 +156,7 @@ var _ = Describe("ConfigMap Doesn't Exist on Startup", func() {
 		}).Should(Succeed())
 	})
 	It("should start watching settings when ConfigMap is added", func() {
-		ss = settingsstore.WatchSettingsOrDie(env.Ctx, clientSet, cmw, settings.Registration)
+		ss = settingsstore.WatchSettingsOrDie(env.Ctx, kubernetesInterface, cmw, settings.Registration)
 		_ = cmw.Start(env.Ctx.Done())
 
 		cm := defaultConfigMap.DeepCopy()

@@ -32,10 +32,10 @@ import (
 type Context struct {
 	context.Context
 
-	ClientSet     *kubernetes.Clientset
-	KubeClient    client.Client
-	EventRecorder record.EventRecorder
-	Clock         clock.Clock
+	KubernetesInterface kubernetes.Interface
+	KubeClient          client.Client
+	EventRecorder       record.EventRecorder
+	Clock               clock.Clock
 	// StartAsync is a channel that is closed when leader election has been won.  This is a signal to start any  async
 	// processing that should only occur while the cloud provider is the leader.
 	StartAsync <-chan struct{}
