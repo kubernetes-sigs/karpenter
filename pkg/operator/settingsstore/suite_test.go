@@ -16,18 +16,15 @@ package settingsstore_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/configmap/informer"
 	"knative.dev/pkg/system"
 
-	"github.com/aws/karpenter-core/pkg/apis/config"
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
 	"github.com/aws/karpenter-core/pkg/test"
@@ -36,6 +33,7 @@ import (
 	. "github.com/onsi/gomega"
 	. "knative.dev/pkg/logging/testing"
 
+	"github.com/aws/karpenter-core/pkg/operator/settingsstore/fake"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
@@ -110,16 +108,16 @@ var _ = Describe("Operator Settings", func() {
 
 var _ = Describe("Multiple Settings", func() {
 	It("should get operator settings and features from same configMap", func() {
-		ss = settingsstore.WatchSettings(env.Ctx, cmw, settings.Registration, Registration)
+		ss = settingsstore.WatchSettings(env.Ctx, cmw, settings.Registration, fake.SettingsRegistration)
 		Expect(cmw.Start(env.Ctx.Done())).To(Succeed())
 		Eventually(func(g Gomega) {
 			testCtx := ss.InjectSettings(ctx)
-			s := FromContext(testCtx)
+			s := fake.SettingsFromContext(testCtx)
 			g.Expect(s.TestArg).To(Equal("default"))
 		}).Should(Succeed())
 	})
 	It("should get operator settings and features from same configMap", func() {
-		ss = settingsstore.WatchSettings(env.Ctx, cmw, settings.Registration, Registration)
+		ss = settingsstore.WatchSettings(env.Ctx, cmw, settings.Registration, fake.SettingsRegistration)
 		Expect(cmw.Start(env.Ctx.Done())).To(Succeed())
 
 		cm := defaultConfigMap.DeepCopy()
@@ -133,46 +131,10 @@ var _ = Describe("Multiple Settings", func() {
 		Eventually(func(g Gomega) {
 			testCtx := ss.InjectSettings(ctx)
 			s := settings.FromContext(testCtx)
-			fs := FromContext(testCtx)
+			fs := fake.SettingsFromContext(testCtx)
 			g.Expect(s.BatchIdleDuration).To(Equal(2 * time.Second))
 			g.Expect(s.BatchMaxDuration).To(Equal(15 * time.Second))
 			g.Expect(fs.TestArg).To(Equal("my-value"))
 		}).Should(Succeed())
 	})
 })
-
-// FakeSettings Registration START -----------
-
-var Registration = &config.Registration{
-	ConfigMapName: "karpenter-global-settings",
-	Constructor:   NewFakeSettingsFromConfigMap,
-}
-
-var defaultSettings = FakeSettings{
-	TestArg: "default",
-}
-
-type FakeSettings struct {
-	TestArg string
-}
-
-func NewFakeSettingsFromConfigMap(cm *v1.ConfigMap) (FakeSettings, error) {
-	s := defaultSettings
-
-	if err := configmap.Parse(cm.Data,
-		configmap.AsString("testArg", &s.TestArg),
-	); err != nil {
-		// Failing to parse means that there is some error in the Settings, so we should crash
-		panic(fmt.Sprintf("parsing config data, %v", err))
-	}
-	return s, nil
-}
-
-func FromContext(ctx context.Context) FakeSettings {
-	data := ctx.Value(Registration)
-	if data == nil {
-		// This is developer error if this happens, so we should panic
-		panic("settings doesn't exist in context")
-	}
-	return data.(FakeSettings)
-}

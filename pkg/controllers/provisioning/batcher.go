@@ -19,27 +19,24 @@ import (
 	"time"
 
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
-	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
 )
 
 // Batcher separates a stream of Trigger() calls into windowed slices. The
 // window is dynamic and will be extended if additional items are added up to a
 // maximum batch duration.
 type Batcher struct {
-	running      context.Context
-	settingStore settingsstore.Store
+	running context.Context
 
 	trigger   chan struct{}
 	immediate chan struct{}
 }
 
 // NewBatcher is a constructor for the Batcher
-func NewBatcher(running context.Context, settingStore settingsstore.Store) *Batcher {
+func NewBatcher(running context.Context) *Batcher {
 	return &Batcher{
-		running:      running,
-		settingStore: settingStore,
-		trigger:      make(chan struct{}), // triggering shouldn't block
-		immediate:    make(chan struct{}),
+		running:   running,
+		trigger:   make(chan struct{}), // triggering shouldn't block
+		immediate: make(chan struct{}),
 	}
 }
 

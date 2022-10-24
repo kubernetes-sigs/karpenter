@@ -59,19 +59,19 @@ import (
 var WaitForClusterSync = true
 
 func NewProvisioner(ctx context.Context, kubeClient client.Client, coreV1Client corev1.CoreV1Interface,
-	recorder events.Recorder, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster, settingStore settingsstore.Store) *Provisioner {
+	recorder events.Recorder, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster, settingsStore settingsstore.Store) *Provisioner {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("provisioning"))
 	running, stop := context.WithCancel(ctx)
 	p := &Provisioner{
 		Stop:           stop,
-		batcher:        NewBatcher(running, settingStore),
+		batcher:        NewBatcher(running),
 		cloudProvider:  cloudProvider,
 		kubeClient:     kubeClient,
 		coreV1Client:   coreV1Client,
 		volumeTopology: NewVolumeTopology(kubeClient),
 		cluster:        cluster,
 		recorder:       recorder,
-		settingsStore:  settingStore,
+		settingsStore:  settingsStore,
 	}
 	p.cond = sync.NewCond(&p.mu)
 	go p.Start(running)
