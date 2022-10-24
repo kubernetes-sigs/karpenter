@@ -55,7 +55,7 @@ var _ = BeforeEach(func() {
 	env = test.NewEnvironment(ctx, func(e *test.Environment) {
 		clientSet := kubernetes.NewForConfigOrDie(e.Config)
 		cmw = informer.NewInformedWatcher(clientSet, system.Namespace())
-		ss = settingsstore.WatchSettings(e.Ctx, cmw, settings.Registration)
+		ss = settingsstore.WatchSettingsOrDie(e.Ctx, clientSet, cmw, settings.Registration)
 
 		defaultConfigMap = &v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
@@ -78,8 +78,8 @@ var _ = Describe("Core Settings", func() {
 	It("should inject default settings into Reconcile loop", func() {
 		ExpectApplied(ctx, env.Client, defaultConfigMap.DeepCopy())
 		expected := settings.Settings{
-			BatchMaxDuration:  time.Second * 10,
-			BatchIdleDuration: time.Second * 1,
+			BatchMaxDuration:  metav1.Duration{Duration: time.Second * 10},
+			BatchIdleDuration: metav1.Duration{Duration: time.Second * 1},
 		}
 
 		fakeController := &FakeController{
@@ -96,13 +96,13 @@ var _ = Describe("Core Settings", func() {
 	})
 	It("should inject custom settings into Reconcile loop", func() {
 		expected := settings.Settings{
-			BatchMaxDuration:  time.Second * 30,
-			BatchIdleDuration: time.Second * 5,
+			BatchMaxDuration:  metav1.Duration{Duration: time.Second * 30},
+			BatchIdleDuration: metav1.Duration{Duration: time.Second * 5},
 		}
 		cm := defaultConfigMap.DeepCopy()
 		cm.Data = map[string]string{
-			"batchMaxDuration":  expected.BatchMaxDuration.String(),
-			"batchIdleDuration": expected.BatchIdleDuration.String(),
+			"batchMaxDuration":  expected.BatchMaxDuration.Duration.String(),
+			"batchIdleDuration": expected.BatchIdleDuration.Duration.String(),
 		}
 		ExpectApplied(ctx, env.Client, cm)
 
@@ -121,8 +121,8 @@ var _ = Describe("Core Settings", func() {
 })
 
 func ExpectSettingsMatch(g Gomega, a settings.Settings, b settings.Settings) {
-	g.Expect(a.BatchMaxDuration == b.BatchMaxDuration &&
-		a.BatchIdleDuration == b.BatchIdleDuration).To(BeTrue())
+	g.Expect(a.BatchMaxDuration.Duration == b.BatchMaxDuration.Duration &&
+		a.BatchIdleDuration.Duration == b.BatchIdleDuration.Duration).To(BeTrue())
 }
 
 func ExpectOperatorSettingsInjected(expected settings.Settings) ReconcileAssertion {

@@ -16,8 +16,10 @@ package fake
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"knative.dev/pkg/configmap"
 
@@ -27,6 +29,7 @@ import (
 var SettingsRegistration = &config.Registration{
 	ConfigMapName: "karpenter-global-settings",
 	Constructor:   NewFakeSettingsFromConfigMap,
+	DefaultData:   lo.Must(defaultSettings.Data()),
 }
 
 var defaultSettings = Settings{
@@ -34,7 +37,16 @@ var defaultSettings = Settings{
 }
 
 type Settings struct {
-	TestArg string
+	TestArg string `json:"testArg"`
+}
+
+func (s Settings) Data() (map[string]string, error) {
+	d := map[string]string{}
+
+	if err := json.Unmarshal(lo.Must(json.Marshal(defaultSettings)), &d); err != nil {
+		return d, err
+	}
+	return d, nil
 }
 
 func NewFakeSettingsFromConfigMap(cm *v1.ConfigMap) (Settings, error) {

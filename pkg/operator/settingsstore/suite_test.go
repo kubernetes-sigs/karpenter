@@ -40,6 +40,7 @@ import (
 var ctx context.Context
 var env *test.Environment
 var cmw *informer.InformedWatcher
+var clientSet *kubernetes.Clientset
 var ss settingsstore.Store
 var defaultConfigMap *v1.ConfigMap
 
@@ -51,7 +52,7 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeEach(func() {
 	env = test.NewEnvironment(ctx, func(e *test.Environment) {
-		clientSet := kubernetes.NewForConfigOrDie(e.Config)
+		clientSet = kubernetes.NewForConfigOrDie(e.Config)
 		cmw = informer.NewInformedWatcher(clientSet, system.Namespace())
 
 		defaultConfigMap = &v1.ConfigMap{
@@ -60,35 +61,35 @@ var _ = BeforeEach(func() {
 				Namespace: system.Namespace(),
 			},
 		}
-		ExpectApplied(ctx, e.Client, defaultConfigMap)
 	})
 	Expect(env.Start()).To(Succeed())
 })
 
 var _ = AfterEach(func() {
-	Expect(env.Client.Delete(ctx, defaultConfigMap.DeepCopy())).To(Succeed())
+	ExpectDeleted(ctx, env.Client, defaultConfigMap.DeepCopy())
 	Expect(env.Stop()).To(Succeed())
 })
 
 var _ = Describe("Operator Settings", func() {
 	BeforeEach(func() {
-		ss = settingsstore.WatchSettings(env.Ctx, cmw, settings.Registration)
+		ExpectApplied(ctx, env.Client, defaultConfigMap)
+		ss = settingsstore.WatchSettingsOrDie(env.Ctx, clientSet, cmw, settings.Registration)
 		Expect(cmw.Start(env.Ctx.Done())).To(Succeed())
 	})
 	It("should have default values", func() {
 		Eventually(func(g Gomega) {
 			testCtx := ss.InjectSettings(ctx)
 			s := settings.FromContext(testCtx)
-			g.Expect(s.BatchIdleDuration).To(Equal(1 * time.Second))
-			g.Expect(s.BatchMaxDuration).To(Equal(10 * time.Second))
+			g.Expect(s.BatchIdleDuration.Duration).To(Equal(1 * time.Second))
+			g.Expect(s.BatchMaxDuration.Duration).To(Equal(10 * time.Second))
 		}).Should(Succeed())
 	})
 	It("should update if values are changed", func() {
 		Eventually(func(g Gomega) {
 			testCtx := ss.InjectSettings(ctx)
 			s := settings.FromContext(testCtx)
-			g.Expect(s.BatchIdleDuration).To(Equal(1 * time.Second))
-			g.Expect(s.BatchMaxDuration).To(Equal(10 * time.Second))
+			g.Expect(s.BatchIdleDuration.Duration).To(Equal(1 * time.Second))
+			g.Expect(s.BatchMaxDuration.Duration).To(Equal(10 * time.Second))
 		})
 		cm := defaultConfigMap.DeepCopy()
 		cm.Data = map[string]string{
@@ -100,15 +101,18 @@ var _ = Describe("Operator Settings", func() {
 		Eventually(func(g Gomega) {
 			testCtx := ss.InjectSettings(ctx)
 			s := settings.FromContext(testCtx)
-			g.Expect(s.BatchIdleDuration).To(Equal(2 * time.Second))
-			g.Expect(s.BatchMaxDuration).To(Equal(15 * time.Second))
+			g.Expect(s.BatchIdleDuration.Duration).To(Equal(2 * time.Second))
+			g.Expect(s.BatchMaxDuration.Duration).To(Equal(15 * time.Second))
 		}).Should(Succeed())
 	})
 })
 
 var _ = Describe("Multiple Settings", func() {
+	BeforeEach(func() {
+		ExpectApplied(ctx, env.Client, defaultConfigMap)
+	})
 	It("should get operator settings and features from same configMap", func() {
-		ss = settingsstore.WatchSettings(env.Ctx, cmw, settings.Registration, fake.SettingsRegistration)
+		ss = settingsstore.WatchSettingsOrDie(env.Ctx, clientSet, cmw, settings.Registration, fake.SettingsRegistration)
 		Expect(cmw.Start(env.Ctx.Done())).To(Succeed())
 		Eventually(func(g Gomega) {
 			testCtx := ss.InjectSettings(ctx)
@@ -117,7 +121,7 @@ var _ = Describe("Multiple Settings", func() {
 		}).Should(Succeed())
 	})
 	It("should get operator settings and features from same configMap", func() {
-		ss = settingsstore.WatchSettings(env.Ctx, cmw, settings.Registration, fake.SettingsRegistration)
+		ss = settingsstore.WatchSettingsOrDie(env.Ctx, clientSet, cmw, settings.Registration, fake.SettingsRegistration)
 		Expect(cmw.Start(env.Ctx.Done())).To(Succeed())
 
 		cm := defaultConfigMap.DeepCopy()
@@ -132,9 +136,41 @@ var _ = Describe("Multiple Settings", func() {
 			testCtx := ss.InjectSettings(ctx)
 			s := settings.FromContext(testCtx)
 			fs := fake.SettingsFromContext(testCtx)
-			g.Expect(s.BatchIdleDuration).To(Equal(2 * time.Second))
-			g.Expect(s.BatchMaxDuration).To(Equal(15 * time.Second))
+			g.Expect(s.BatchIdleDuration.Duration).To(Equal(2 * time.Second))
+			g.Expect(s.BatchMaxDuration.Duration).To(Equal(15 * time.Second))
 			g.Expect(fs.TestArg).To(Equal("my-value"))
+		}).Should(Succeed())
+	})
+})
+
+var _ = Describe("ConfigMap Doesn't Exist on Startup", func() {
+	It("should default if the configMap doesn't exist on startup", func() {
+		ss = settingsstore.WatchSettingsOrDie(env.Ctx, clientSet, cmw, settings.Registration)
+		_ = cmw.Start(env.Ctx.Done())
+
+		Eventually(func(g Gomega) {
+			testCtx := ss.InjectSettings(ctx)
+			s := settings.FromContext(testCtx)
+			g.Expect(s.BatchIdleDuration.Duration).To(Equal(1 * time.Second))
+			g.Expect(s.BatchMaxDuration.Duration).To(Equal(10 * time.Second))
+		}).Should(Succeed())
+	})
+	It("should start watching settings when ConfigMap is added", func() {
+		ss = settingsstore.WatchSettingsOrDie(env.Ctx, clientSet, cmw, settings.Registration)
+		_ = cmw.Start(env.Ctx.Done())
+
+		cm := defaultConfigMap.DeepCopy()
+		cm.Data = map[string]string{
+			"batchIdleDuration": "2s",
+			"batchMaxDuration":  "15s",
+		}
+		ExpectApplied(ctx, env.Client, cm)
+
+		Eventually(func(g Gomega) {
+			testCtx := ss.InjectSettings(ctx)
+			s := settings.FromContext(testCtx)
+			g.Expect(s.BatchIdleDuration.Duration).To(Equal(2 * time.Second))
+			g.Expect(s.BatchMaxDuration.Duration).To(Equal(15 * time.Second))
 		}).Should(Succeed())
 	})
 })
