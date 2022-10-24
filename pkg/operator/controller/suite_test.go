@@ -53,9 +53,9 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeEach(func() {
 	env = test.NewEnvironment(ctx, func(e *test.Environment) {
-		clientSet := kubernetes.NewForConfigOrDie(e.Config)
-		cmw = informer.NewInformedWatcher(clientSet, system.Namespace())
-		ss = settingsstore.WatchSettingsOrDie(e.Ctx, clientSet, cmw, settings.Registration)
+		kubernetesInterface := kubernetes.NewForConfigOrDie(e.Config)
+		cmw = informer.NewInformedWatcher(kubernetesInterface, system.Namespace())
+		ss = settingsstore.WatchSettingsOrDie(e.Ctx, kubernetesInterface, cmw, settings.Registration)
 
 		defaultConfigMap = &v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{

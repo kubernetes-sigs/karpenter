@@ -14,7 +14,28 @@ limitations under the License.
 
 package operator
 
-import "github.com/go-logr/logr"
+import (
+	"context"
+
+	"github.com/go-logr/logr"
+	"go.uber.org/zap"
+	"k8s.io/client-go/rest"
+	"knative.dev/pkg/configmap/informer"
+	"knative.dev/pkg/injection"
+	"knative.dev/pkg/injection/sharedmain"
+	"knative.dev/pkg/logging"
+)
+
+// LoggingContextOrDie injects a logger into the returned context. The logger is
+// configured by the ConfigMap `config-logging` and live updates the level.
+func NewLogger(ctx context.Context, componentName string, config *rest.Config, cmw *informer.InformedWatcher) *zap.SugaredLogger {
+	ctx, startinformers := injection.EnableInjectionOrDie(ctx, config)
+	logger, atomicLevel := sharedmain.SetupLoggerOrDie(ctx, componentName)
+	rest.SetDefaultWarningHandler(&logging.WarningHandler{Logger: logger})
+	sharedmain.WatchLoggingConfigOrDie(ctx, cmw, logger, atomicLevel, componentName)
+	startinformers()
+	return logger
+}
 
 type ignoreDebugEventsSink struct {
 	name string
