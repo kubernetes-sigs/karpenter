@@ -18,6 +18,8 @@ import (
 	"context"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 )
 
@@ -29,7 +31,7 @@ func (ss SettingsStore) InjectSettings(ctx context.Context) context.Context {
 
 func Settings() settings.Settings {
 	return settings.Settings{
-		BatchMaxDuration:  time.Second * 10,
-		BatchIdleDuration: time.Second,
+		BatchMaxDuration:  metav1.Duration{Duration: time.Second * 10},
+		BatchIdleDuration: metav1.Duration{Duration: time.Second},
 	}
 }

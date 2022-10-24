@@ -16,10 +16,13 @@ package settings
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/configmap"
 
 	"github.com/aws/karpenter-core/pkg/apis/config"
@@ -30,16 +33,26 @@ var ContextKey = Registration
 var Registration = &config.Registration{
 	ConfigMapName: "karpenter-global-settings",
 	Constructor:   NewSettingsFromConfigMap,
+	DefaultData:   lo.Must(defaultSettings.Data()),
 }
 
 var defaultSettings = Settings{
-	BatchMaxDuration:  time.Second * 10,
-	BatchIdleDuration: time.Second * 1,
+	BatchMaxDuration:  metav1.Duration{Duration: time.Second * 10},
+	BatchIdleDuration: metav1.Duration{Duration: time.Second * 1},
 }
 
 type Settings struct {
-	BatchMaxDuration  time.Duration
-	BatchIdleDuration time.Duration
+	BatchMaxDuration  metav1.Duration `json:"batchMaxDuration"`
+	BatchIdleDuration metav1.Duration `json:"batchIdleDuration"`
+}
+
+func (s Settings) Data() (map[string]string, error) {
+	d := map[string]string{}
+
+	if err := json.Unmarshal(lo.Must(json.Marshal(defaultSettings)), &d); err != nil {
+		return d, fmt.Errorf("unmarshalling json data, %w", err)
+	}
+	return d, nil
 }
 
 // NewSettingsFromConfigMap creates a Settings from the supplied ConfigMap
@@ -47,8 +60,8 @@ func NewSettingsFromConfigMap(cm *v1.ConfigMap) (Settings, error) {
 	s := defaultSettings
 
 	if err := configmap.Parse(cm.Data,
-		AsPositiveDuration("batchMaxDuration", &s.BatchMaxDuration),
-		AsPositiveDuration("batchIdleDuration", &s.BatchIdleDuration),
+		AsPositiveMetaDuration("batchMaxDuration", &s.BatchMaxDuration),
+		AsPositiveMetaDuration("batchIdleDuration", &s.BatchIdleDuration),
 	); err != nil {
 		// Failing to parse means that there is some error in the Settings, so we should crash
 		panic(fmt.Sprintf("parsing config data, %v", err))
@@ -56,8 +69,8 @@ func NewSettingsFromConfigMap(cm *v1.ConfigMap) (Settings, error) {
 	return s, nil
 }
 
-// AsPositiveDuration parses the value at key as a time.Duration into the target, if it exists.
-func AsPositiveDuration(key string, target *time.Duration) configmap.ParseFunc {
+// AsPositiveMetaDuration parses the value at key as a time.Duration into the target, if it exists.
+func AsPositiveMetaDuration(key string, target *metav1.Duration) configmap.ParseFunc {
 	return func(data map[string]string) error {
 		if raw, ok := data[key]; ok {
 			val, err := time.ParseDuration(raw)
@@ -67,7 +80,7 @@ func AsPositiveDuration(key string, target *time.Duration) configmap.ParseFunc {
 			if val <= 0 {
 				return fmt.Errorf("duration value is not positive %q: %q", key, val)
 			}
-			*target = val
+			*target = metav1.Duration{Duration: val}
 		}
 		return nil
 	}

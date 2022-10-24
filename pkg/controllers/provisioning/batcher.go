@@ -71,8 +71,8 @@ func (b *Batcher) Wait(ctx context.Context) {
 		return
 	}
 
-	timeout := time.NewTimer(settings.FromContext(ctx).BatchMaxDuration)
-	idle := time.NewTimer(settings.FromContext(ctx).BatchIdleDuration)
+	timeout := time.NewTimer(settings.FromContext(ctx).BatchMaxDuration.Duration)
+	idle := time.NewTimer(settings.FromContext(ctx).BatchIdleDuration.Duration)
 	for {
 		select {
 		case <-b.trigger:
@@ -83,7 +83,7 @@ func (b *Batcher) Wait(ctx context.Context) {
 			if !idle.Stop() {
 				<-idle.C
 			}
-			idle.Reset(settings.FromContext(ctx).BatchIdleDuration)
+			idle.Reset(settings.FromContext(ctx).BatchIdleDuration.Duration)
 		case <-b.immediate:
 			return
 		case <-timeout.C:

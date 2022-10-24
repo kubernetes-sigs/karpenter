@@ -532,7 +532,7 @@ var _ = Describe("Node Resource Level", func() {
 	})
 	It("should trigger node nomination eviction observers", func() {
 		// Reduce the nomination timeframe for a quicker test
-		ctx = settings.ToContext(ctx, settings.Settings{BatchMaxDuration: time.Second, BatchIdleDuration: time.Second})
+		ctx = settings.ToContext(ctx, settings.Settings{BatchMaxDuration: metav1.Duration{Duration: time.Second}, BatchIdleDuration: metav1.Duration{Duration: time.Second}})
 		cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
 
 		node := test.Node(test.NodeOptions{

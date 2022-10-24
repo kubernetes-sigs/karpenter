@@ -16,8 +16,13 @@ package settingsstore
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/samber/lo"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/configmap/informer"
 	"knative.dev/pkg/logging"
@@ -36,12 +41,16 @@ type store struct {
 	stores map[*config.Registration]*configmap.UntypedStore
 }
 
-func WatchSettings(ctx context.Context, cmw *informer.InformedWatcher, registrations ...*config.Registration) Store {
+func WatchSettingsOrDie(ctx context.Context, clientSet *kubernetes.Clientset, cmw *informer.InformedWatcher, registrations ...*config.Registration) Store {
 	ss := &store{
 		registrations: registrations,
 		stores:        map[*config.Registration]*configmap.UntypedStore{},
 	}
 	for _, registration := range registrations {
+		if err := registration.Validate(); err != nil {
+			panic(fmt.Sprintf("Validating settings registration, %v", err))
+		}
+
 		ss.stores[registration] = configmap.NewUntypedStore(
 			registration.ConfigMapName,
 			logging.FromContext(ctx),
@@ -49,7 +58,27 @@ func WatchSettings(ctx context.Context, cmw *informer.InformedWatcher, registrat
 				registration.ConfigMapName: registration.Constructor,
 			},
 		)
-		ss.stores[registration].WatchConfigs(cmw)
+
+		// TODO: Remove this Get once we don't rely on this settingsStore for initialization
+		// Attempt to get the ConfigMap since WatchWithDefault doesn't wait for Add event form API-server
+		cm, err := clientSet.CoreV1().ConfigMaps(cmw.Namespace).Get(ctx, registration.ConfigMapName, metav1.GetOptions{})
+		if err != nil {
+			if errors.IsNotFound(err) {
+				cm = &v1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      registration.ConfigMapName,
+						Namespace: cmw.Namespace,
+					},
+					Data: registration.DefaultData,
+				}
+			} else {
+				panic(fmt.Sprintf("Getting settings %v, %v", registration.ConfigMapName, err))
+			}
+		}
+
+		// TODO: Move this to ss.stores[registration].WatchConfigs(cmw) when the UntypedStores
+		// implements a default mechanism
+		cmw.WatchWithDefault(*cm, ss.stores[registration].OnConfigChanged)
 	}
 	return ss
 }

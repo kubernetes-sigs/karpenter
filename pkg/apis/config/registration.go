@@ -14,6 +14,12 @@ limitations under the License.
 
 package config
 
+import (
+	"fmt"
+
+	"knative.dev/pkg/configmap"
+)
+
 // Constructor should take the form func(*v1.ConfigMap) (T, error)
 type Constructor interface{}
 
@@ -21,5 +27,19 @@ type Constructor interface{}
 // and to be injected into the Reconcile() contexts of controllers
 type Registration struct {
 	ConfigMapName string
-	Constructor   Constructor
+	Constructor   interface{}
+	DefaultData   map[string]string
+}
+
+func (r Registration) Validate() error {
+	if r.ConfigMapName == "" {
+		return fmt.Errorf("configMap cannot be empty in SettingsStore registration")
+	}
+	if err := configmap.ValidateConstructor(r.Constructor); err != nil {
+		return fmt.Errorf("constructor validation failed in SettingsStore registration, %w", err)
+	}
+	if r.DefaultData == nil {
+		return fmt.Errorf("default value cannot be empty in SettingsStore registration")
+	}
+	return nil
 }

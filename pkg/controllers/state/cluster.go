@@ -76,7 +76,7 @@ func NewCluster(ctx context.Context, clk clock.Clock, client client.Client, cp c
 	// The nominationPeriod is how long we consider a node as 'likely to be used' after a pending pod was
 	// nominated for it. This time can very depending on the batching window size + time spent scheduling
 	// so we try to adjust based off the window size.
-	nominationPeriod := 2 * settings.FromContext(ctx).BatchMaxDuration
+	nominationPeriod := 2 * settings.FromContext(ctx).BatchMaxDuration.Duration
 	if nominationPeriod < 10*time.Second {
 		nominationPeriod = 10 * time.Second
 	}
