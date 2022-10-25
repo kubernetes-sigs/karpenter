@@ -88,8 +88,7 @@ func New() *Options {
 		newLimit := int64(float64(opts.MemoryLimit) * 0.9)
 		debug.SetMemoryLimit(newLimit)
 	}
-
-	return opts.MustParse()
+	return opts
 }
 
 // MustParse reads the user passed flags, environment variables, and default values.
