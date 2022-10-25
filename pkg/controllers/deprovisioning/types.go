@@ -12,18 +12,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package consolidation
+package deprovisioning
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/metrics"
 
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
+	"github.com/aws/karpenter-core/pkg/controllers/state"
+)
+
+const (
+	deprovisioningTTL time.Duration = 15 * time.Second
 )
 
 // DeprovisioningResult is used to indicate the action of consolidating so we can optimize by not trying to consolidate if
@@ -52,47 +59,88 @@ func (r DeprovisioningResult) String() string {
 	}
 }
 
-type deprovisionAction byte
+type deprovisioner interface {
+	sortCandidates([]candidateNode) []candidateNode
+	shouldNotBeDeprovisioned(context.Context, *state.Node, *v1alpha5.Provisioner, []*v1.Pod) bool
+	computeCommand([]candidateNode) (DeprovisioningCommand, error)
+	executeCommand(context.Context, DeprovisioningCommand) (DeprovisioningResult, error)
+	validateCommand(DeprovisioningCommand) (bool, error)
+	isExecutableAction(deprovisioningAction) bool
+	string() string
+	getTTL() time.Duration
+}
+
+type deprovisioningAction byte
 
 const (
-	deprovisionActionUnknown deprovisionAction = iota
-	deprovisionActionNotPossible
-	deprovisionActionDelete
-	deprovisionActionDeleteEmpty
-	deprovisionActionReplace
-	deprovisionActionDoNothing
-	deprovisionActionFailed
+	deprovisioningActionUnknown deprovisioningAction = iota
+	deprovisioningActionNotPossible
+	deprovisioningActionDeleteConsolidation
+	deprovisioningActionReplaceConsolidation
+	deprovisioningActionDeleteEmpty
+	deprovisioningActionDeleteExpiration
+	deprovisioningActionReplaceExpiration
+	deprovisioningActionDoNothing
+	deprovisioningActionFailed
 )
 
-func (a deprovisionAction) String() string {
+func (a deprovisioningAction) isExecutable() bool {
+	return a == deprovisioningActionDeleteConsolidation ||
+		a == deprovisioningActionReplaceConsolidation ||
+		a == deprovisioningActionDeleteEmpty ||
+		a == deprovisioningActionDeleteExpiration ||
+		a == deprovisioningActionReplaceExpiration
+}
+
+func (a deprovisioningAction) getMetricsReasonName() string {
+	if a == deprovisioningActionDeleteConsolidation || a == deprovisioningActionReplaceConsolidation {
+		return metrics.ConsolidationReason
+	} else if a == deprovisioningActionDeleteExpiration || a == deprovisioningActionReplaceExpiration {
+		return metrics.ExpirationReason
+	} else if a == deprovisioningActionDeleteEmpty {
+		return metrics.EmptinessReason
+	}
+	return ""
+}
+
+func (a deprovisioningAction) needsReplacement() bool {
+	return a == deprovisioningActionReplaceConsolidation ||
+		a == deprovisioningActionReplaceExpiration
+}
+
+func (a deprovisioningAction) String() string {
 	switch a {
-	case deprovisionActionUnknown:
+	case deprovisioningActionUnknown:
 		return "Unknown"
-	case deprovisionActionNotPossible:
+	case deprovisioningActionNotPossible:
 		return "Not Possible"
-	case deprovisionActionDelete:
-		return "Delete"
-	case deprovisionActionDeleteEmpty:
-		return "Delete (empty node)"
-	case deprovisionActionReplace:
-		return "Replace"
-	case deprovisionActionDoNothing:
+	case deprovisioningActionDeleteConsolidation:
+		return "Delete (Consolidation)"
+	case deprovisioningActionDeleteEmpty:
+		return "Delete (Emptiness)"
+	case deprovisioningActionReplaceConsolidation:
+		return "Replace (Consolidation)"
+	case deprovisioningActionDeleteExpiration:
+		return "Delete (Expiration)"
+	case deprovisioningActionReplaceExpiration:
+		return "Replace (Expiraiton)"
+	case deprovisioningActionDoNothing:
 		return "NoAction"
-	case deprovisionActionFailed:
+	case deprovisioningActionFailed:
 		return "Failed"
 	default:
 		return fmt.Sprintf("Unknown (%d)", a)
 	}
 }
 
-type lifecycleCommand struct {
+type DeprovisioningCommand struct {
 	nodesToRemove   []*v1.Node
-	action          deprovisionAction
+	action          deprovisioningAction
 	replacementNode *scheduling.Node
 	created         time.Time
 }
 
-func (o lifecycleCommand) String() string {
+func (o DeprovisioningCommand) String() string {
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, "%s, terminating %d nodes ", o.action, len(o.nodesToRemove))
 	for i, old := range o.nodesToRemove {

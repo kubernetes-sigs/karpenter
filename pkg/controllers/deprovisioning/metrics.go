@@ -12,13 +12,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package consolidation
+package deprovisioning
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
-	"github.com/aws/karpenter-core/pkg/metrics"
+	"github.com/aws/karpenter/pkg/metrics"
 )
 
 func init() {

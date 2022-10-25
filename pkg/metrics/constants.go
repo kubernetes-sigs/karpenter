@@ -28,6 +28,7 @@ const (
 	ProvisionerLabel = "provisioner"
 
 	// Reasons for CREATE/DELETE shared metrics
+	DeprovisioningReason = "deprovisioning"
 	ConsolidationReason = "consolidation"
 	ProvisioningReason  = "provisioning"
 	ExpirationReason    = "expiration"

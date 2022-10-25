@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package consolidation
+package deprovisioning
 
 import (
 	"context"
@@ -32,7 +32,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
-	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -61,7 +60,9 @@ type Controller struct {
 	recorder               events.Recorder
 	clock                  clock.Clock
 	cloudProvider          cloudprovider.CloudProvider
-	lastConsolidationState int64
+	emptiness              *Emptiness
+	expiration             *Expiration
+	consolidation          *Consolidation
 }
 
 // pollingPeriod that we inspect cluster to look for opportunities to consolidate
@@ -88,12 +89,15 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 		provisioner:   provisioner,
 		recorder:      recorder,
 		cloudProvider: cp,
+		emptiness:     &Emptiness{kubeClient: kubeClient, clock: clk, cluster: cluster},
+		expiration:    &Expiration{kubeClient: kubeClient, clock: clk},
+		consolidation: NewConsolidation(clk, kubeClient, provisioner, cp, recorder, cluster),
 	}
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
 	return operatorcontroller.NewSingletonManagedBy(m).
-		Named("consolidation")
+		Named("deprovisioning")
 }
 
 func (c *Controller) LivenessProbe(_ *http.Request) error {
@@ -101,17 +105,22 @@ func (c *Controller) LivenessProbe(_ *http.Request) error {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
-	// the last cluster consolidation wasn't able to improve things and nothing has changed regarding
-	// the cluster that makes us think we would be successful now
-	if c.lastConsolidationState == c.cluster.ClusterConsolidationState() {
-		return reconcile.Result{RequeueAfter: pollingPeriod}, nil
-	}
-
-	clusterState := c.cluster.ClusterConsolidationState()
 	result, err := c.ProcessCluster(ctx)
 	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("consolidating cluster, %w", err)
-	} else if result == DeprovisioningResultNothingToDo {
+		return reconcile.Result{}, fmt.Errorf("deprovisioning cluster, %w", err)
+	}
+
+	switch result {
+	case DeprovisioningResultRetry:
+		return
+	}
+	if result == DeprovisioningResultFailed || err != nil {
+		return reconcile.Result{}, fmt.Errorf("deprovisioning cluster, %w", err)
+	} else if result == DeprovisioningResultRetry {
+		return reconcile.Result{Requeue: true}, nil
+	} else
+
+	else if result == DeprovisioningResultNothingToDo {
 		c.lastConsolidationState = clusterState
 	}
 	return reconcile.Result{RequeueAfter: pollingPeriod}, nil
@@ -131,22 +140,53 @@ type candidateNode struct {
 
 // ProcessCluster is exposed for unit testing purposes
 func (c *Controller) ProcessCluster(ctx context.Context) (DeprovisioningResult, error) {
-
-	// range over the different lifecycle methods. We'll only let one method perform an action
-	for _, fn := range []func(ctx context.Context, candidates []candidateNode) (DeprovisioningResult, error){
-		c.deleteEmptyNodes,
-		c.consolidateNodes,
+	// range over the different deprovisioning methods. We'll only let one method perform an action
+	for _, d := range []deprovisioner{
+		c.emptiness,
+		c.expiration,
+		c.consolidation,
 	} {
 		// capture new cluster state before each attempt
-		candidates, err := c.candidateNodes(ctx)
+		candidates, err := c.candidateNodes(ctx, d.shouldNotBeDeprovisioned)
 		if err != nil {
 			return DeprovisioningResultFailed, fmt.Errorf("determining candidate nodes, %w", err)
 		}
+		// If there are no candidate nodes, move to the next deprovisioner.
 		if len(candidates) == 0 {
-			return DeprovisioningResultNothingToDo, nil
+			continue
+			// return DeprovisioningResultNothingToDo, nil
+		}
+		// Sort candidates by each deprovisioner's priority
+		candidates = d.sortCandidates(candidates)
+
+		cmd, err := d.computeCommand(candidates)
+		if err != nil {
+			return DeprovisioningResultFailed, err
+		}
+		// Only continue with the rest of the logic if the command has an executable action for the given deprovisioner
+		if !d.isExecutableAction(cmd.action) {
+			continue
+		}
+		// deprovisioningTTL is how long we wait before re-validating our lifecycle command
+		remainingDelay := d.getTTL() - c.clock.Since(cmd.created)
+		if remainingDelay > 0 {
+			select {
+			case <-ctx.Done():
+				return DeprovisioningResultFailed, fmt.Errorf("context canceled during %s", d.string())
+			case <-c.clock.After(remainingDelay):
+			}
 		}
 
-		result, err := fn(ctx, candidates)
+		ok, err := d.validateCommand(cmd)
+		if err != nil {
+			return DeprovisioningResultFailed, fmt.Errorf("validating command, %w", err)
+		}
+		// If cluster state has changed and validation fails, retry.
+		if !ok {
+			return DeprovisioningResultRetry, nil
+		}
+
+		result, err := c.executeCommand(ctx, cmd)
 		if err != nil {
 			return DeprovisioningResultFailed, err
 		}
@@ -160,79 +200,79 @@ func (c *Controller) ProcessCluster(ctx context.Context) (DeprovisioningResult, 
 }
 
 // consolidateNodes looks at the non-empty nodes and executes the first viable consolidation action
-func (c *Controller) consolidateNodes(ctx context.Context, candidates []candidateNode) (DeprovisioningResult, error) {
-	pdbs, err := NewPDBLimits(ctx, c.kubeClient)
-	if err != nil {
-		return DeprovisioningResultFailed, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
-	}
+// func (c *Controller) consolidateNodes(ctx context.Context, candidates []candidateNode) (DeprovisioningResult, error) {
+// 	pdbs, err := NewPDBLimits(ctx, c.kubeClient)
+// 	if err != nil {
+// 		return DeprovisioningResultFailed, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
+// 	}
 
-	// the remaining nodes are all non-empty, so we just consolidate the first one that we can
-	sort.Slice(candidates, byNodeDisruptionCost(candidates))
-	validationFailed := false
-	for _, node := range candidates {
-		// is this a node that we can terminate?  This check is meant to be fast so we can save the expense of simulated
-		// scheduling unless its really needed
-		if err = c.canBeTerminated(node, pdbs); err != nil {
-			continue
-		}
+// 	// the remaining nodes are all non-empty, so we just consolidate the first one that we can
+// 	sort.Slice(candidates, byNodeDisruptionCost(candidates))
+// 	validationFailed := false
+// 	for _, node := range candidates {
+// 		// is this a node that we can terminate?  This check is meant to be fast so we can save the expense of simulated
+// 		// scheduling unless its really needed
+// 		if err = c.canBeTerminated(node, pdbs); err != nil {
+// 			continue
+// 		}
 
-		cmd, err := c.computeNodeConsolidationOption(ctx, node)
-		if err != nil {
-			logging.FromContext(ctx).Errorf("calculating consolidation option, %s", err)
-			continue
-		}
-		if cmd.action == deprovisionActionDelete || cmd.action == deprovisionActionReplace {
-			isValid, err := c.validateCommand(ctx, cmd)
-			if err != nil {
-				logging.FromContext(ctx).Errorf("validating command, %s", err)
-				continue
-			}
-			if !isValid {
-				validationFailed = true
-				logging.FromContext(ctx).Debugf("skipping consolidation %s due to failing validation", cmd)
-				continue
-			}
-			// perform the first consolidation we can since we are looking at nodes in ascending order of disruption cost
-			c.executeCommand(ctx, cmd)
-			return DeprovisioningResultSuccess, nil
-		}
-	}
-	// if any validation failed the cluster state is in flux so we want to retry instead of waiting on the cluster
-	// state to change again.
-	if validationFailed {
-		return DeprovisioningResultRetry, nil
-	}
-	return DeprovisioningResultNothingToDo, nil
-}
+// 		cmd, err := c.computeNodeConsolidationOption(ctx, node)
+// 		if err != nil {
+// 			logging.FromContext(ctx).Errorf("calculating consolidation option, %s", err)
+// 			continue
+// 		}
+// 		if cmd.action == deprovisioningActionDeleteConsolidation || cmd.action == deprovisioningActionReplaceConsolidation {
+// 			isValid, err := c.validateCommand(ctx, cmd)
+// 			if err != nil {
+// 				logging.FromContext(ctx).Errorf("validating command, %s", err)
+// 				continue
+// 			}
+// 			if !isValid {
+// 				validationFailed = true
+// 				logging.FromContext(ctx).Debugf("skipping consolidation %s due to failing validation", cmd)
+// 				continue
+// 			}
+// 			// perform the first consolidation we can since we are looking at nodes in ascending order of disruption cost
+// 			c.executeCommand(ctx, cmd)
+// 			return DeprovisioningResultSuccess, nil
+// 		}
+// 	}
+// 	// if any validation failed the cluster state is in flux so we want to retry instead of waiting on the cluster
+// 	// state to change again.
+// 	if validationFailed {
+// 		return DeprovisioningResultRetry, nil
+// 	}
+// 	return DeprovisioningResultNothingToDo, nil
+// }
 
 // deleteEmptyNodes identifies any empty nodes and if possible, deletes them.
-func (c *Controller) deleteEmptyNodes(ctx context.Context, candidates []candidateNode) (DeprovisioningResult, error) {
-	emptyNodes := lo.Filter(candidates, func(n candidateNode, _ int) bool { return len(n.pods) == 0 })
-	// first see if there are empty nodes that we can delete immediately, and if so delete them all at once
-	if len(emptyNodes) == 0 {
-		return DeprovisioningResultNothingToDo, nil
-	}
+// func (c *Controller) deleteEmptyNodes(ctx context.Context, candidates []candidateNode) (DeprovisioningResult, error) {
+// 	emptyNodes := lo.Filter(candidates, func(n candidateNode, _ int) bool { return len(n.pods) == 0 })
+// 	// first see if there are empty nodes that we can delete immediately, and if so delete them all at once
+// 	if len(emptyNodes) == 0 {
+// 		return DeprovisioningResultNothingToDo, nil
+// 	}
 
-	cmd := lifecycleCommand{
-		nodesToRemove: lo.Map(emptyNodes, func(n candidateNode, _ int) *v1.Node { return n.Node }),
-		action:        deprovisionActionDeleteEmpty,
-		created:       c.clock.Now(),
-	}
-	isValid, err := c.validateCommand(ctx, cmd)
-	if err != nil {
-		return DeprovisioningResultFailed, fmt.Errorf("validating command, %w", err)
-	}
-	if !isValid {
-		return DeprovisioningResultRetry, nil
-	}
+// 	cmd := DeprovisioningCommand{
+// 		nodesToRemove: lo.Map(emptyNodes, func(n candidateNode, _ int) *v1.Node { return n.Node }),
+// 		action:        deprovisioningActionDeleteEmpty,
+// 		created:       c.clock.Now(),
+// 	}
+// 	isValid, err := c.validateCommand(ctx, cmd)
+// 	if err != nil {
+// 		return DeprovisioningResultFailed, fmt.Errorf("validating command, %w", err)
+// 	}
+// 	if !isValid {
+// 		return DeprovisioningResultRetry, nil
+// 	}
 
-	c.executeCommand(ctx, cmd)
-	return DeprovisioningResultSuccess, nil
-}
+// 	c.executeCommand(ctx, cmd)
+// 	return DeprovisioningResultSuccess, nil
+// }
 
 // candidateNodes returns nodes that appear to be currently consolidatable based off of their provisioner
 // nolint:gocyclo
-func (c *Controller) candidateNodes(ctx context.Context) ([]candidateNode, error) {
+func (c *Controller) candidateNodes(ctx context.Context, shouldNotDeprovision func(context.Context, *state.Node, *v1alpha5.Provisioner, []*v1.Pod) bool) ([]candidateNode, error) {
 	provisioners, instanceTypesByProvisioner, err := c.buildProvisionerMap(ctx)
 	if err != nil {
 		return nil, err
@@ -257,7 +297,7 @@ func (c *Controller) candidateNodes(ctx context.Context) ([]candidateNode, error
 
 		instanceType := instanceTypeMap[n.Node.Labels[v1.LabelInstanceTypeStable]]
 		// skip any nodes that we can't determine the instance of or for which we don't have consolidation enabled
-		if instanceType == nil || provisioner.Spec.Consolidation == nil || !ptr.BoolValue(provisioner.Spec.Consolidation.Enabled) {
+		if instanceType == nil {
 			return true
 		}
 
@@ -281,14 +321,13 @@ func (c *Controller) candidateNodes(ctx context.Context) ([]candidateNode, error
 			return true
 		}
 
-		// skip nodes that are annotated as do-not-consolidate
-		if n.Node.Annotations[v1alpha5.DoNotConsolidateNodeAnnotationKey] == "true" {
-			return true
-		}
-
 		pods, err := nodeutils.GetNodePods(ctx, c.kubeClient, n.Node)
 		if err != nil {
 			logging.FromContext(ctx).Errorf("Determining node pods, %s", err)
+			return true
+		}
+
+		if shouldNotDeprovision(ctx, n, provisioner, pods) {
 			return true
 		}
 
@@ -338,25 +377,20 @@ func (c *Controller) buildProvisionerMap(ctx context.Context) (map[string]*v1alp
 	return provisioners, instanceTypesByProvisioner, nil
 }
 
-func (c *Controller) executeCommand(ctx context.Context, action lifecycleCommand) {
-	if action.action != deprovisionActionDelete &&
-		action.action != deprovisionActionReplace &&
-		action.action != deprovisionActionDeleteEmpty {
-		logging.FromContext(ctx).Errorf("Invalid disruption action calculated: %s", action.action)
-		return
+func (c *Controller) executeCommand(ctx context.Context, command DeprovisioningCommand) (DeprovisioningResult, error) {
+	// Shouldn't happen, but check one more time to see if action is executable
+	if !command.action.isExecutable() {
+		return DeprovisioningResultNothingToDo, nil
 	}
-
-	consolidationActionsPerformedCounter.With(prometheus.Labels{"action": action.action.String()}).Add(1)
-
+	consolidationActionsPerformedCounter.With(prometheus.Labels{"action": command.action.String()}).Add(1)
 	// action's stringer
-	logging.FromContext(ctx).Infof("Consolidating via %s", action.String())
+	logging.FromContext(ctx).Infof("Deprovisioning via %s", command.action.String())
 
-	if action.action == deprovisionActionReplace {
-		if err := c.launchReplacementNode(ctx, action); err != nil {
+	if command.action.needsReplacement() {
+		if err := c.launchReplacementNode(ctx, command); err != nil {
 			// If we failed to launch the replacement, don't consolidate.  If this is some permanent failure,
 			// we don't want to disrupt workloads with no way to provision new nodes for them.
-			logging.FromContext(ctx).Errorf("Launching replacement node, %s", err)
-			return
+			return DeprovisioningResultFailed, fmt.Errorf("launching replacement node, %s", err)
 		}
 	}
 
@@ -365,15 +399,16 @@ func (c *Controller) executeCommand(ctx context.Context, action lifecycleCommand
 		if err := c.kubeClient.Delete(ctx, oldNode); err != nil {
 			logging.FromContext(ctx).Errorf("Deleting node, %s", err)
 		} else {
-			metrics.NodesTerminatedCounter.WithLabelValues(metrics.ConsolidationReason).Inc()
+			metrics.NodesTerminatedCounter.WithLabelValues(command.action.getMetricsReasonName()).Inc()
 		}
 	}
 
 	// We wait for nodes to delete to ensure we don't start another round of consolidation until this node is fully
 	// deleted.
-	for _, oldnode := range action.nodesToRemove {
+	for _, oldnode := range command.nodesToRemove {
 		c.waitForDeletion(ctx, oldnode)
 	}
+	return DeprovisioningResultSuccess, nil
 }
 
 // waitForDeletion waits for the specified node to be removed from the API server. This deletion can take some period
@@ -411,7 +446,7 @@ func byNodeDisruptionCost(nodes []candidateNode) func(i int, j int) bool {
 }
 
 // launchReplacementNode launches a replacement node and blocks until it is ready
-func (c *Controller) launchReplacementNode(ctx context.Context, action lifecycleCommand) error {
+func (c *Controller) launchReplacementNode(ctx context.Context, action DeprovisioningCommand) error {
 	defer metrics.Measure(consolidationReplacementNodeInitializedHistogram)()
 	if len(action.nodesToRemove) != 1 {
 		return fmt.Errorf("expected a single node to replace, found %d", len(action.nodesToRemove))
@@ -508,46 +543,46 @@ func (c *Controller) calculateLifetimeRemaining(node candidateNode) float64 {
 }
 
 //nolint:gocyclo
-func (c *Controller) computeNodeConsolidationOption(ctx context.Context, node candidateNode) (lifecycleCommand, error) {
+func (c *Controller) computeNodeConsolidationOption(ctx context.Context, node candidateNode) (DeprovisioningCommand, error) {
 	defer metrics.Measure(consolidationDurationHistogram.WithLabelValues("Replace/Delete"))()
-	newNodes, allPodsScheduled, err := c.simulateScheduling(ctx, node)
+	newNodes, allPodsScheduled, err := c.consolidation.simulateScheduling(ctx, node)
 	if err != nil {
 		// if a candidate node is now deleting, just retry
 		if errors.Is(err, errCandidateNodeDeleting) {
-			return lifecycleCommand{action: deprovisionActionDoNothing}, nil
+			return DeprovisioningCommand{action: deprovisioningActionDoNothing}, nil
 		}
-		return lifecycleCommand{}, err
+		return DeprovisioningCommand{}, err
 	}
 
 	// if not all of the pods were scheduled, we can't do anything
 	if !allPodsScheduled {
-		return lifecycleCommand{action: deprovisionActionNotPossible}, nil
+		return DeprovisioningCommand{action: deprovisioningActionNotPossible}, nil
 	}
 
 	// were we able to schedule all the pods on the inflight nodes?
 	if len(newNodes) == 0 {
-		return lifecycleCommand{
+		return DeprovisioningCommand{
 			nodesToRemove: []*v1.Node{node.Node},
-			action:        deprovisionActionDelete,
+			action:        deprovisioningActionDeleteConsolidation,
 			created:       c.clock.Now(),
 		}, nil
 	}
 
 	// we're not going to turn a single node into multiple nodes
 	if len(newNodes) != 1 {
-		return lifecycleCommand{action: deprovisionActionNotPossible}, nil
+		return DeprovisioningCommand{action: deprovisioningActionNotPossible}, nil
 	}
 
 	// get the current node price based on the offering
 	// fallback if we can't find the specific zonal pricing data
 	offering, ok := cloudprovider.GetOffering(node.instanceType, node.capacityType, node.zone)
 	if !ok {
-		return lifecycleCommand{action: deprovisionActionFailed}, fmt.Errorf("getting offering price from candidate node, %w", err)
+		return DeprovisioningCommand{action: deprovisioningActionFailed}, fmt.Errorf("getting offering price from candidate node, %w", err)
 	}
 	newNodes[0].InstanceTypeOptions = filterByPrice(newNodes[0].InstanceTypeOptions, newNodes[0].Requirements, offering.Price)
 	if len(newNodes[0].InstanceTypeOptions) == 0 {
 		// no instance types remain after filtering by price
-		return lifecycleCommand{action: deprovisionActionNotPossible}, nil
+		return DeprovisioningCommand{action: deprovisioningActionNotPossible}, nil
 	}
 
 	// If the existing node is spot and the replacement is spot, we don't consolidate.  We don't have a reliable
@@ -555,7 +590,7 @@ func (c *Controller) computeNodeConsolidationOption(ctx context.Context, node ca
 	// a spot node with one that is less available and more likely to be reclaimed).
 	if node.capacityType == v1alpha5.CapacityTypeSpot &&
 		newNodes[0].Requirements.Get(v1alpha5.LabelCapacityType).Has(v1alpha5.CapacityTypeSpot) {
-		return lifecycleCommand{action: deprovisionActionNotPossible}, nil
+		return DeprovisioningCommand{action: deprovisioningActionNotPossible}, nil
 	}
 
 	// We are consolidating a node from OD -> [OD,Spot] but have filtered the instance types by cost based on the
@@ -567,73 +602,73 @@ func (c *Controller) computeNodeConsolidationOption(ctx context.Context, node ca
 		newNodes[0].Requirements.Add(scheduling.NewRequirement(v1alpha5.LabelCapacityType, v1.NodeSelectorOpIn, v1alpha5.CapacityTypeSpot))
 	}
 
-	return lifecycleCommand{
+	return DeprovisioningCommand{
 		nodesToRemove:   []*v1.Node{node.Node},
-		action:          deprovisionActionReplace,
+		action:          deprovisioningActionReplaceConsolidation,
 		replacementNode: newNodes[0],
 		created:         c.clock.Now(),
 	}, nil
 }
 
-func (c *Controller) simulateScheduling(ctx context.Context, nodesToDelete ...candidateNode) (newNodes []*pscheduling.Node, allPodsScheduled bool, err error) {
-	var stateNodes []*state.Node
-	var markedForDeletionNodes []*state.Node
-	candidateNodeIsDeleting := false
-	candidateNodeNames := sets.NewString(lo.Map(nodesToDelete, func(t candidateNode, i int) string { return t.Name })...)
-	c.cluster.ForEachNode(func(n *state.Node) bool {
-		// not a candidate node
-		if _, ok := candidateNodeNames[n.Node.Name]; !ok {
-			if !n.MarkedForDeletion {
-				stateNodes = append(stateNodes, n.DeepCopy())
-			} else {
-				markedForDeletionNodes = append(markedForDeletionNodes, n.DeepCopy())
-			}
-		} else if n.MarkedForDeletion {
-			// candidate node and marked for deletion
-			candidateNodeIsDeleting = true
-		}
-		return true
-	})
-	// We do one final check to ensure that the node that we are attempting to consolidate isn't
-	// already handled for deletion by some other controller. This could happen if the node was markedForDeletion
-	// between returning the candidateNodes and getting the stateNodes above
-	if candidateNodeIsDeleting {
-		return nil, false, errCandidateNodeDeleting
-	}
+// func (c *Controller) simulateScheduling(ctx context.Context, nodesToDelete ...candidateNode) (newNodes []*pscheduling.Node, allPodsScheduled bool, err error) {
+// 	var stateNodes []*state.Node
+// 	var markedForDeletionNodes []*state.Node
+// 	candidateNodeIsDeleting := false
+// 	candidateNodeNames := sets.NewString(lo.Map(nodesToDelete, func(t candidateNode, i int) string { return t.Name })...)
+// 	c.cluster.ForEachNode(func(n *state.Node) bool {
+// 		// not a candidate node
+// 		if _, ok := candidateNodeNames[n.Node.Name]; !ok {
+// 			if !n.MarkedForDeletion {
+// 				stateNodes = append(stateNodes, n.DeepCopy())
+// 			} else {
+// 				markedForDeletionNodes = append(markedForDeletionNodes, n.DeepCopy())
+// 			}
+// 		} else if n.MarkedForDeletion {
+// 			// candidate node and marked for deletion
+// 			candidateNodeIsDeleting = true
+// 		}
+// 		return true
+// 	})
+// 	// We do one final check to ensure that the node that we are attempting to consolidate isn't
+// 	// already handled for deletion by some other controller. This could happen if the node was markedForDeletion
+// 	// between returning the candidateNodes and getting the stateNodes above
+// 	if candidateNodeIsDeleting {
+// 		return nil, false, errCandidateNodeDeleting
+// 	}
 
-	// We get the pods that are on nodes that are deleting
-	deletingNodePods, err := nodeutils.GetNodePods(ctx, c.kubeClient, lo.Map(markedForDeletionNodes, func(n *state.Node, _ int) *v1.Node { return n.Node })...)
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
-	}
-	var pods []*v1.Pod
-	for _, n := range nodesToDelete {
-		pods = append(pods, n.pods...)
-	}
-	pods = append(pods, deletingNodePods...)
-	scheduler, err := c.provisioner.NewScheduler(ctx, pods, stateNodes, pscheduling.SchedulerOptions{
-		SimulationMode: true,
-	})
+// 	// We get the pods that are on nodes that are deleting
+// 	deletingNodePods, err := nodeutils.GetNodePods(ctx, c.kubeClient, lo.Map(markedForDeletionNodes, func(n *state.Node, _ int) *v1.Node { return n.Node })...)
+// 	if err != nil {
+// 		return nil, false, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
+// 	}
+// 	var pods []*v1.Pod
+// 	for _, n := range nodesToDelete {
+// 		pods = append(pods, n.pods...)
+// 	}
+// 	pods = append(pods, deletingNodePods...)
+// 	scheduler, err := c.provisioner.NewScheduler(ctx, pods, stateNodes, pscheduling.SchedulerOptions{
+// 		SimulationMode: true,
+// 	})
 
-	if err != nil {
-		return nil, false, fmt.Errorf("creating scheduler, %w", err)
-	}
+// 	if err != nil {
+// 		return nil, false, fmt.Errorf("creating scheduler, %w", err)
+// 	}
 
-	newNodes, ifn, err := scheduler.Solve(ctx, pods)
-	if err != nil {
-		return nil, false, fmt.Errorf("simulating scheduling, %w", err)
-	}
+// 	newNodes, ifn, err := scheduler.Solve(ctx, pods)
+// 	if err != nil {
+// 		return nil, false, fmt.Errorf("simulating scheduling, %w", err)
+// 	}
 
-	podsScheduled := 0
-	for _, n := range newNodes {
-		podsScheduled += len(n.Pods)
-	}
-	for _, n := range ifn {
-		podsScheduled += len(n.Pods)
-	}
+// 	podsScheduled := 0
+// 	for _, n := range newNodes {
+// 		podsScheduled += len(n.Pods)
+// 	}
+// 	for _, n := range ifn {
+// 		podsScheduled += len(n.Pods)
+// 	}
 
-	return newNodes, podsScheduled == len(pods), nil
-}
+// 	return newNodes, podsScheduled == len(pods), nil
+// }
 
 func (c *Controller) setNodeUnschedulable(ctx context.Context, nodeName string, isUnschedulable bool) error {
 	var node v1.Node
@@ -659,71 +694,9 @@ func (c *Controller) setNodeUnschedulable(ctx context.Context, nodeName string, 
 	return nil
 }
 
-// validateCommand is used to validate that a lifecycleCommand is still able to be performed by re-inspecting nodes and
-// re-simulating scheduling
-func (c *Controller) validateCommand(ctx context.Context, cmd lifecycleCommand) (bool, error) {
-	// verifyDelay is how long we wait before re-validating our lifecycle command
-	verifyDelay := 15 * time.Second
-	// figure out how long we need to delay for verification based on when the command was constructed
-	remainingDelay := verifyDelay - c.clock.Since(cmd.created)
-	if remainingDelay > 0 {
-		select {
-		case <-ctx.Done():
-			return false, fmt.Errorf("context canceled")
-		case <-c.clock.After(remainingDelay):
-		}
-	}
-
-	// we've waited and now need to get the new cluster state
-	nodes, err := c.mapNodes(ctx, cmd.nodesToRemove)
-	if err != nil {
-		return false, err
-	}
-
-	switch cmd.action {
-	case deprovisionActionDeleteEmpty:
-		// delete empty isn't quite a special case of replace as we only want to perform the action if the nodes are
-		// empty, not if they just won't create a new node if deleted
-		return c.validateDeleteEmpty(nodes)
-	case deprovisionActionDelete, deprovisionActionReplace:
-		// deletion is just a special case of replace where we don't launch a replacement node
-		return c.validateReplace(ctx, nodes, cmd.replacementNode)
-	default:
-		return false, fmt.Errorf("unsupported action %s", cmd.action)
-	}
-}
-
-// mapNodes maps from a list of *v1.Node to candidateNode
-func (c *Controller) mapNodes(ctx context.Context, nodes []*v1.Node) ([]candidateNode, error) {
-	verifyNodeNames := sets.NewString(lo.Map(nodes, func(t *v1.Node, i int) string { return t.Name })...)
-	candidateNodes, err := c.candidateNodes(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("determining candidate node, %w", err)
-	}
-	var ret []candidateNode
-	for _, c := range candidateNodes {
-		if verifyNodeNames.Has(c.Name) {
-			ret = append(ret, c)
-		}
-	}
-	return ret, nil
-}
-
-// validateDeleteEmpty validates that the given nodes are still empty
-func (c *Controller) validateDeleteEmpty(nodesToDelete []candidateNode) (bool, error) {
-	// the deletion of empty nodes is easy to validate, we just ensure that all the nodesToDelete are still empty and that
-	// the node isn't a target of a recent scheduling simulation
-	for _, n := range nodesToDelete {
-		if len(n.pods) != 0 && !c.cluster.IsNodeNominated(n.Name) {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
 // validateReplace validates that given the nodes to delete and the replacement node, the replacement is still valid
 func (c *Controller) validateReplace(ctx context.Context, nodesToDelete []candidateNode, replacementNode *pscheduling.Node) (bool, error) {
-	newNodes, allPodsScheduled, err := c.simulateScheduling(ctx, nodesToDelete...)
+	newNodes, allPodsScheduled, err := c.consolidation.simulateScheduling(ctx, nodesToDelete...)
 	if err != nil {
 		return false, fmt.Errorf("simluating scheduling, %w", err)
 	}
