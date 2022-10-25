@@ -16,6 +16,7 @@ package controller
 
 import (
 	"context"
+	"net/http"
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -23,10 +24,19 @@ import (
 
 // Controller defines a controller that can be registered with controller-runtime
 type Controller interface {
-	// Reconcile hands a hydrated kubernetes resource to the controller for
-	// reconciliation. Any changes made to the resource's status are persisted
-	// after Reconcile returns, even if it returns an error.
-	Reconcile(context.Context, reconcile.Request) (reconcile.Result, error)
-	// Register will register the controller with the manager
-	Register(context.Context, manager.Manager) error
+	reconcile.Reconciler
+
+	// Builder returns a Builder registered with the manager that can be wrapped
+	// with other Builders and completed later to complete registration to the manager
+	Builder(context.Context, manager.Manager) Builder
+
+	// LivenessProbe surfaces a health check to run on the controller
+	LivenessProbe(req *http.Request) error
+}
+
+// Builder is a struct, that when complete, registers the passed reconciler with the manager stored
+// insider of the builder. For reference implementations, see controllerruntime.Builder
+type Builder interface {
+	// Complete builds a builder by registering the Reconciler with the manager
+	Complete(reconcile.Reconciler) error
 }

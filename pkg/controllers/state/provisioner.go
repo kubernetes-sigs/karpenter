@@ -16,6 +16,7 @@ package state
 
 import (
 	"context"
+	"net/http"
 
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -26,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
+	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
 const provisionerControllerName = "provisioner-state"
@@ -49,13 +51,16 @@ func (c *ProvisionerController) Reconcile(ctx context.Context, req reconcile.Req
 	return reconcile.Result{}, nil
 }
 
-func (c *ProvisionerController) Register(ctx context.Context, m manager.Manager) error {
+func (c *ProvisionerController) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
 	return controllerruntime.
 		NewControllerManagedBy(m).
 		Named(provisionerControllerName).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		WithEventFilter(predicate.Funcs{DeleteFunc: func(event event.DeleteEvent) bool { return false }}).
-		For(&v1alpha5.Provisioner{}).
-		Complete(c)
+		For(&v1alpha5.Provisioner{})
+}
+
+func (c *ProvisionerController) LivenessProbe(_ *http.Request) error {
+	return nil
 }

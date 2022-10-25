@@ -17,12 +17,12 @@ package termination
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
-	"k8s.io/utils/clock"
-
 	"golang.org/x/time/rate"
+	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 
 	v1 "k8s.io/api/core/v1"
@@ -41,6 +41,7 @@ import (
 	"github.com/samber/lo"
 
 	provisioning "github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
+	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -143,7 +144,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return reconcile.Result{}, nil
 }
 
-func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
 	return controllerruntime.
 		NewControllerManagedBy(m).
 		Named(controllerName).
@@ -157,6 +158,9 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 				),
 				MaxConcurrentReconciles: 10,
 			},
-		).
-		Complete(c)
+		)
+}
+
+func (c *Controller) LivenessProbe(_ *http.Request) error {
+	return nil
 }

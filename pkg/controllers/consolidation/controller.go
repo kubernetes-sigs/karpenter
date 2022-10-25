@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"sync"
 	"time"
@@ -37,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
+	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -88,24 +90,12 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 	}
 }
 
-func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("consolidation"))
-	go func() {
-		select {
-		case <-ctx.Done():
-			return
-		case <-m.Elected():
-			for {
-				select {
-				case <-ctx.Done():
-					logging.FromContext(ctx).Infof("Shutting down")
-					return
-				case <-c.clock.After(pollingPeriod):
-					_, _ = c.Reconcile(ctx, reconcile.Request{})
-				}
-			}
-		}
-	}()
+func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+	return operatorcontroller.NewSingletonManagedBy(m).
+		Named("consolidation")
+}
+
+func (c *Controller) LivenessProbe(_ *http.Request) error {
 	return nil
 }
 
@@ -113,18 +103,17 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	// the last cluster consolidation wasn't able to improve things and nothing has changed regarding
 	// the cluster that makes us think we would be successful now
 	if c.lastConsolidationState == c.cluster.ClusterConsolidationState() {
-		return reconcile.Result{}, nil
+		return reconcile.Result{RequeueAfter: pollingPeriod}, nil
 	}
 
 	clusterState := c.cluster.ClusterConsolidationState()
 	result, err := c.ProcessCluster(ctx)
 	if err != nil {
-		logging.FromContext(ctx).Errorf("consolidating cluster, %s", err)
+		return reconcile.Result{}, fmt.Errorf("consolidating cluster, %w", err)
 	} else if result == DeprovisioningResultNothingToDo {
 		c.lastConsolidationState = clusterState
 	}
-
-	return reconcile.Result{}, nil
+	return reconcile.Result{RequeueAfter: pollingPeriod}, nil
 }
 
 // candidateNode is a node that we are considering for consolidation along with extra information to be used in

@@ -17,6 +17,7 @@ package node
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
@@ -36,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
+	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -123,7 +125,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return result.Min(results...), nil
 }
 
-func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
+func (c *Controller) Builder(ctx context.Context, m manager.Manager) operatorcontroller.Builder {
 	// Enqueues a reconcile request when nominated node expiration is triggered
 	ch := make(chan event.GenericEvent, 300)
 	c.cluster.AddNominatedNodeEvictionObserver(func(nodeName string) {
@@ -162,6 +164,9 @@ func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 			}),
 		).
 		Watches(&source.Channel{Source: ch}, &handler.EnqueueRequestForObject{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
-		Complete(c)
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10})
+}
+
+func (c *Controller) LivenessProbe(_ *http.Request) error {
+	return nil
 }

@@ -1544,7 +1544,7 @@ var _ = Describe("Parallelization", func() {
 		}, time.Second*10).Should(Succeed())
 
 		// Add a new pending pod that should schedule while node is not yet deleted
-		pods := ExpectProvisionedNoBinding(ctx, env.Client, provisioningController, test.UnschedulablePod())
+		pods := ExpectProvisionedNoBinding(ctx, env.Client, provisioningController, provisioner, test.UnschedulablePod())
 		nodes := &v1.NodeList{}
 		Expect(env.Client.List(ctx, nodes)).To(Succeed())
 		Expect(len(nodes.Items)).To(Equal(3))
@@ -1590,7 +1590,7 @@ var _ = Describe("Parallelization", func() {
 			pods = append(pods, pod)
 		}
 		ExpectApplied(ctx, env.Client, rs, prov)
-		ExpectProvisioned(ctx, env.Client, provisioningController, pods...)
+		ExpectProvisioned(ctx, env.Client, provisioningController, provisioner, lo.Map(pods, func(p *v1.Pod, _ int) *v1.Pod { return p.DeepCopy() })...)
 
 		nodeList := &v1.NodeList{}
 		Expect(env.Client.List(ctx, nodeList)).To(Succeed())
@@ -1605,7 +1605,8 @@ var _ = Describe("Parallelization", func() {
 		// Mark the node for deletion and re-trigger reconciliation
 		oldNodeName := nodeList.Items[0].Name
 		cluster.MarkForDeletion(nodeList.Items[0].Name)
-		ExpectProvisionedNoBinding(ctx, env.Client, provisioningController)
+
+		ExpectProvisionedNoBinding(ctx, env.Client, provisioningController, provisioner)
 
 		// Make sure that the cluster state is aware of the current node state
 		Expect(env.Client.List(ctx, nodeList)).To(Succeed())

@@ -53,9 +53,9 @@ func NewControllers(
 ) []controller.Controller {
 	provisioner := provisioning.NewProvisioner(ctx, kubeClient, kubernetesInterface.CoreV1(), eventRecorder, cloudProvider, cluster, settingsStore)
 
-	metricsstate.StartMetricScraper(ctx, cluster)
-
 	return []controller.Controller{
+		provisioner,
+		metricsstate.NewController(cluster),
 		provisioning.NewController(kubeClient, provisioner, eventRecorder),
 		state.NewNodeController(kubeClient, cluster),
 		state.NewPodController(kubeClient, cluster),

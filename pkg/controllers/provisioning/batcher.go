@@ -35,7 +35,7 @@ type Batcher struct {
 func NewBatcher(running context.Context) *Batcher {
 	return &Batcher{
 		running:   running,
-		trigger:   make(chan struct{}), // triggering shouldn't block
+		trigger:   make(chan struct{}, 100), // triggering shouldn't block
 		immediate: make(chan struct{}),
 	}
 }

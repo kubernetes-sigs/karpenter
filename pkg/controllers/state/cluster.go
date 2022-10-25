@@ -586,7 +586,7 @@ func (c *Cluster) recordConsolidationChange() {
 	atomic.StoreInt64(&c.consolidationState, c.clock.Now().UnixMilli())
 }
 
-func (c *Cluster) LivenessProbe(req *http.Request) error {
+func (c *Cluster) LivenessProbe(_ *http.Request) error {
 	c.mu.Lock()
 	//nolint: staticcheck
 	c.mu.Unlock()
