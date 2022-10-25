@@ -17,6 +17,7 @@ package pod
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 
@@ -35,6 +36,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/metrics"
+	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
 const (
@@ -151,12 +153,11 @@ func (c *Controller) record(ctx context.Context, pod *v1.Pod) {
 	}
 }
 
-func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
+func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
 	return controllerruntime.
 		NewControllerManagedBy(m).
 		Named("podmetrics").
-		For(&v1.Pod{}).
-		Complete(c)
+		For(&v1.Pod{})
 }
 
 // labels creates the labels using the current state of the pod
@@ -202,4 +203,8 @@ func (c *Controller) labels(ctx context.Context, pod *v1.Pod) prometheus.Labels 
 		}
 	}
 	return metricLabels
+}
+
+func (c *Controller) LivenessProbe(_ *http.Request) error {
+	return nil
 }

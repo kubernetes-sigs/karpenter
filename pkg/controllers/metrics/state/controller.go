@@ -16,6 +16,7 @@ package metrics
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -23,7 +24,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/controllers/metrics/state/scraper"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/operator/controller"
+	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
 const pollingPeriod = 5 * time.Second
@@ -40,10 +41,13 @@ func NewController(cluster *state.Cluster) *Controller {
 	}
 }
 
-func (c *Controller) Register(_ context.Context, mgr manager.Manager) error {
-	return controller.NewSingletonManagedBy(mgr).
-		Named("metric-scraper").
-		Complete(c)
+func (c *Controller) Builder(_ context.Context, mgr manager.Manager) operatorcontroller.Builder {
+	return operatorcontroller.NewSingletonManagedBy(mgr).
+		Named("metric-scraper")
+}
+
+func (c *Controller) LivenessProbe(_ *http.Request) error {
+	return nil
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {

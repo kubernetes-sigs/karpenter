@@ -16,6 +16,7 @@ package controller
 
 import (
 	"context"
+	"net/http"
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -43,6 +44,10 @@ func (sd *injectSettingsDecorator) Reconcile(ctx context.Context, req reconcile.
 	return sd.controller.Reconcile(ctx, req)
 }
 
-func (sd *injectSettingsDecorator) Register(ctx context.Context, mgr manager.Manager) error {
-	return sd.controller.Register(ctx, mgr)
+func (sd *injectSettingsDecorator) Builder(ctx context.Context, mgr manager.Manager) Builder {
+	return sd.controller.Builder(ctx, mgr)
+}
+
+func (sd *injectSettingsDecorator) LivenessProbe(req *http.Request) error {
+	return sd.controller.LivenessProbe(req)
 }

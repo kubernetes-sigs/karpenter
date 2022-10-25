@@ -16,9 +16,11 @@ package provisioning
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	"github.com/aws/karpenter-core/pkg/events"
+	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
 
 	v1 "k8s.io/api/core/v1"
@@ -70,11 +72,14 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
-func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
 	return controllerruntime.
 		NewControllerManagedBy(m).
 		Named(controllerName).
 		For(&v1.Pod{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
-		Complete(c)
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10})
+}
+
+func (c *Controller) LivenessProbe(_ *http.Request) error {
+	return nil
 }

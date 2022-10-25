@@ -31,29 +31,29 @@ type Options struct {
 	DisableWaitOnError bool
 }
 
-type Builder struct {
+type SingletonBuilder struct {
 	mgr     manager.Manager
 	name    string
 	options Options
 }
 
-func NewSingletonManagedBy(m manager.Manager) Builder {
-	return Builder{
+func NewSingletonManagedBy(m manager.Manager) SingletonBuilder {
+	return SingletonBuilder{
 		mgr: m,
 	}
 }
 
-func (b Builder) Named(n string) Builder {
+func (b SingletonBuilder) Named(n string) SingletonBuilder {
 	b.name = n
 	return b
 }
 
-func (b Builder) WithOptions(o Options) Builder {
+func (b SingletonBuilder) WithOptions(o Options) SingletonBuilder {
 	b.options = o
 	return b
 }
 
-func (b Builder) Complete(r reconcile.Reconciler) error {
+func (b SingletonBuilder) Complete(r reconcile.Reconciler) error {
 	return b.mgr.Add(newSingleton(r, b.name, b.options))
 }
 

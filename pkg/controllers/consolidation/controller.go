@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"sync"
 	"time"
@@ -37,7 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/operator/controller"
+	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -89,10 +90,13 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 	}
 }
 
-func (c *Controller) Register(_ context.Context, m manager.Manager) error {
-	return controller.NewSingletonManagedBy(m).
-		Named("consolidation").
-		Complete(c)
+func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+	return operatorcontroller.NewSingletonManagedBy(m).
+		Named("consolidation")
+}
+
+func (c *Controller) LivenessProbe(_ *http.Request) error {
+	return nil
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {

@@ -17,11 +17,13 @@ package counter
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -109,8 +111,7 @@ func (c *Controller) resourceCountsFor(provisionerName string) v1.ResourceList {
 	return result
 }
 
-// Register the controller to the manager
-func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
+func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
 	return controllerruntime.
 		NewControllerManagedBy(m).
 		Named("counter").
@@ -124,8 +125,11 @@ func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 				return nil
 			}),
 		).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
-		Complete(c)
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10})
+}
+
+func (c *Controller) LivenessProbe(_ *http.Request) error {
+	return nil
 }
 
 // nodesSynced returns true if the cluster state is synced with the current list cache state with respect to the nodes

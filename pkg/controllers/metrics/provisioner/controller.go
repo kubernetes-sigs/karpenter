@@ -17,6 +17,7 @@ package provisioner
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
+	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
 const (
@@ -119,12 +121,11 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
-func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
+func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
 	return controllerruntime.
 		NewControllerManagedBy(m).
 		Named("provisionermetrics").
-		For(&v1alpha5.Provisioner{}).
-		Complete(c)
+		For(&v1alpha5.Provisioner{})
 }
 
 func (c *Controller) cleanup(provisionerName types.NamespacedName) {
@@ -196,5 +197,9 @@ func (c *Controller) set(resourceList v1.ResourceList, provisioner *v1alpha5.Pro
 			gauge.Set(float64(quantity.Value()))
 		}
 	}
+	return nil
+}
+
+func (c *Controller) LivenessProbe(_ *http.Request) error {
 	return nil
 }

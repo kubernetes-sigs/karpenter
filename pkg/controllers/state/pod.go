@@ -16,6 +16,7 @@ package state
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -26,6 +27,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
 var stateRetryPeriod = 1 * time.Minute
@@ -63,11 +66,14 @@ func (c *PodController) Reconcile(ctx context.Context, req reconcile.Request) (r
 	return reconcile.Result{Requeue: true, RequeueAfter: stateRetryPeriod}, nil
 }
 
-func (c *PodController) Register(ctx context.Context, m manager.Manager) error {
+func (c *PodController) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
 	return controllerruntime.
 		NewControllerManagedBy(m).
 		Named(podControllerName).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
-		For(&v1.Pod{}).
-		Complete(c)
+		For(&v1.Pod{})
+}
+
+func (c *PodController) LivenessProbe(_ *http.Request) error {
+	return nil
 }

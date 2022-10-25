@@ -147,10 +147,11 @@ func NewOperator() (context.Context, *Operator) {
 
 func (o *Operator) WithControllers(ctx context.Context, controllers ...operatorcontroller.Controller) *Operator {
 	for _, c := range controllers {
-		lo.Must0(operatorcontroller.InjectSettings(c, o.SettingsStore).Register(ctx, o.Manager), "failed to register controller")
-		if lp, ok := c.(operatorcontroller.HealthCheck); ok {
-			lo.Must0(o.AddHealthzCheck(fmt.Sprintf("%T", c), lp.LivenessProbe), "failed to setup liveness probe")
-		}
+		// Wrap the controllers with any decorators
+		c = operatorcontroller.InjectSettings(c, o.SettingsStore)
+
+		lo.Must0(c.Builder(ctx, o.Manager).Complete(c), "failed to register controller")
+		lo.Must0(o.AddHealthzCheck(fmt.Sprintf("%T", c), c.LivenessProbe), "failed to setup liveness probe")
 	}
 	lo.Must0(o.AddHealthzCheck("healthz", healthz.Ping), "failed to setup liveness probe")
 	lo.Must0(o.AddReadyzCheck("readyz", healthz.Ping), "failed to setup readiness probe")
