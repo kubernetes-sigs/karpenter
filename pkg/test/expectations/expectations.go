@@ -212,7 +212,6 @@ func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c cli
 	}
 
 	// TODO: Check the error on the provisioner reconcile
-	go provisioner.TriggerImmediate()
 	_, _ = provisioner.Reconcile(ctx, reconcile.Request{})
 
 	// Update objects after reconciling
