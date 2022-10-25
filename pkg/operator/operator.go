@@ -39,7 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	"github.com/aws/karpenter-core/pkg/apis/config/settings"
+	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/events"
 	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
@@ -95,7 +95,7 @@ func NewOperator() (context.Context, *Operator) {
 	configMapWatcher := informer.NewInformedWatcher(kubernetesInterface, system.Namespace())
 
 	// Settings
-	settingsStore := settingsstore.WatchSettingsOrDie(ctx, kubernetesInterface, configMapWatcher, settings.Registration)
+	settingsStore := settingsstore.WatchSettingsOrDie(ctx, kubernetesInterface, configMapWatcher, apis.Settings.List()...)
 	ctx = settingsStore.InjectSettings(ctx)
 
 	// Logging
