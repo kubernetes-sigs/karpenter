@@ -37,13 +37,16 @@ var Registration = &config.Registration{
 }
 
 var defaultSettings = Settings{
-	BatchMaxDuration:  metav1.Duration{Duration: time.Second * 10},
-	BatchIdleDuration: metav1.Duration{Duration: time.Second * 1},
+	BatchMaxDuration:           metav1.Duration{Duration: time.Second * 10},
+	BatchIdleDuration:          metav1.Duration{Duration: time.Second * 1},
+	EnableInterruptionHandling: false,
 }
 
 type Settings struct {
 	BatchMaxDuration  metav1.Duration `json:"batchMaxDuration"`
 	BatchIdleDuration metav1.Duration `json:"batchIdleDuration"`
+
+	EnableInterruptionHandling bool `json:"enableInterruptionHandling,string"`
 }
 
 func (s Settings) Data() (map[string]string, error) {
@@ -62,6 +65,7 @@ func NewSettingsFromConfigMap(cm *v1.ConfigMap) (Settings, error) {
 	if err := configmap.Parse(cm.Data,
 		AsPositiveMetaDuration("batchMaxDuration", &s.BatchMaxDuration),
 		AsPositiveMetaDuration("batchIdleDuration", &s.BatchIdleDuration),
+		configmap.AsBool("enableInterruptionHandling", &s.EnableInterruptionHandling),
 	); err != nil {
 		// Failing to parse means that there is some error in the Settings, so we should crash
 		panic(fmt.Sprintf("parsing config data, %v", err))
