@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
+	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
 )
 
 // Batcher separates a stream of Trigger() calls into windowed slices. The
@@ -27,16 +28,18 @@ import (
 type Batcher struct {
 	running context.Context
 
-	trigger   chan struct{}
-	immediate chan struct{}
+	trigger       chan struct{}
+	immediate     chan struct{}
+	settingsStore settingsstore.Store
 }
 
 // NewBatcher is a constructor for the Batcher
-func NewBatcher(running context.Context) *Batcher {
+func NewBatcher(running context.Context, settingsStore settingsstore.Store) *Batcher {
 	return &Batcher{
-		running:   running,
-		trigger:   make(chan struct{}, 100), // triggering shouldn't block
-		immediate: make(chan struct{}),
+		running:       running,
+		trigger:       make(chan struct{}), // triggering shouldn't block
+		immediate:     make(chan struct{}),
+		settingsStore: settingsStore,
 	}
 }
 
@@ -71,6 +74,7 @@ func (b *Batcher) Wait(ctx context.Context) {
 		return
 	}
 
+	ctx = b.settingsStore.InjectSettings(ctx)
 	timeout := time.NewTimer(settings.FromContext(ctx).BatchMaxDuration.Duration)
 	idle := time.NewTimer(settings.FromContext(ctx).BatchIdleDuration.Duration)
 	for {

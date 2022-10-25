@@ -81,7 +81,7 @@ func NewProvisioner(ctx context.Context, kubeClient client.Client, coreV1Client 
 	running, stop := context.WithCancel(ctx)
 	p := &Provisioner{
 		Stop:           stop,
-		batcher:        NewBatcher(running),
+		batcher:        NewBatcher(running, settingsStore),
 		cloudProvider:  cloudProvider,
 		kubeClient:     kubeClient,
 		coreV1Client:   coreV1Client,
@@ -126,6 +126,10 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (recon
 			break
 		}
 	}
+
+	// Inject settings after all the wait calls; otherwise, we could have a long
+	// delay in setting propagation
+	ctx = p.settingsStore.InjectSettings(ctx)
 
 	// We collect the nodes with their used capacities before we get the list of pending pods. This ensures that
 	// the node capacities we schedule against are always >= what the actual capacity is at any given instance. This
