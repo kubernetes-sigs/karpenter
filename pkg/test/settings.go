@@ -23,10 +23,14 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 )
 
-type SettingsStore struct{}
+// SettingsStore is a map from ContextKey to settings/config data
+type SettingsStore map[interface{}]interface{}
 
 func (ss SettingsStore) InjectSettings(ctx context.Context) context.Context {
-	return settings.ToContext(ctx, Settings())
+	for k, v := range ss {
+		ctx = context.WithValue(ctx, k, v)
+	}
+	return ctx
 }
 
 func Settings() settings.Settings {
