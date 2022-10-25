@@ -24,6 +24,7 @@ import (
 
 	clock "k8s.io/utils/clock/testing"
 
+	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -61,7 +62,6 @@ var cluster *state.Cluster
 var nodeStateController *state.NodeController
 var podStateController *state.PodController
 var recorder *test.EventRecorder
-var cfg *test.Config
 
 func TestScheduling(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -71,18 +71,17 @@ func TestScheduling(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(ctx, func(e *test.Environment) {
+		ctx = settings.ToContext(ctx, test.Settings())
 		cloudProv = &fake.CloudProvider{}
-		cfg = test.NewConfig()
 		instanceTypes, _ := cloudProv.GetInstanceTypes(ctx, nil)
 		// set these on the cloud provider so we can manipulate them if needed
 		cloudProv.InstanceTypes = instanceTypes
 		fakeClock = clock.NewFakeClock(time.Now())
-		cluster = state.NewCluster(fakeClock, cfg, e.Client, cloudProv)
+		cluster = state.NewCluster(ctx, fakeClock, e.Client, cloudProv)
 		nodeStateController = state.NewNodeController(e.Client, cluster)
 		podStateController = state.NewPodController(e.Client, cluster)
 		recorder = test.NewEventRecorder()
-		cfg = test.NewConfig()
-		prov = provisioning.NewProvisioner(ctx, cfg, e.Client, corev1.NewForConfigOrDie(e.Config), recorder, cloudProv, cluster)
+		prov = provisioning.NewProvisioner(ctx, e.Client, corev1.NewForConfigOrDie(e.Config), recorder, cloudProv, cluster, test.SettingsStore{})
 		controller = provisioning.NewController(e.Client, prov, recorder)
 	})
 	Expect(env.Start()).To(Succeed(), "Failed to start environment")

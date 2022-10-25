@@ -111,12 +111,13 @@ func TestSchedulingProfile(t *testing.T) {
 func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	// disable logging
 	ctx := logging.WithLogger(context.Background(), zap.NewNop().Sugar())
+	ctx = settings.ToContext(ctx, test.Settings())
 	provisioner := test.Provisioner(test.ProvisionerOptions{Limits: map[v1.ResourceName]resource.Quantity{}})
 
 	instanceTypes := fake.InstanceTypes(instanceCount)
 	cloudProv := &fake.CloudProvider{InstanceTypes: instanceTypes}
 	scheduler := pscheduling.NewScheduler(ctx, nil, []*scheduling.NodeTemplate{scheduling.NewNodeTemplate(provisioner)},
-		nil, state.NewCluster(&clock.RealClock{}, test.NewConfig(), nil, cloudProv), nil, &pscheduling.Topology{},
+		nil, state.NewCluster(ctx, &clock.RealClock{}, nil, cloudProv), nil, &pscheduling.Topology{},
 		map[string][]cloudprovider.InstanceType{provisioner.Name: instanceTypes}, map[*scheduling.NodeTemplate]v1.ResourceList{},
 		test.NewEventRecorder(),
 		pscheduling.SchedulerOptions{})

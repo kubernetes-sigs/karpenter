@@ -25,6 +25,7 @@ import (
 	clock "k8s.io/utils/clock/testing"
 	"knative.dev/pkg/ptr"
 
+	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
@@ -47,7 +48,6 @@ import (
 )
 
 var ctx context.Context
-var cfg *test.Config
 var env *test.Environment
 var fakeClock *clock.FakeClock
 var cluster *state.Cluster
@@ -65,7 +65,6 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(ctx, func(e *test.Environment) {})
-	cfg = test.NewConfig()
 	Expect(env.Start()).To(Succeed(), "Failed to start environment")
 })
 
@@ -74,10 +73,10 @@ var _ = AfterSuite(func() {
 })
 
 var _ = BeforeEach(func() {
+	ctx = settings.ToContext(ctx, test.Settings())
 	cloudProvider = &fake.CloudProvider{InstanceTypes: fake.InstanceTypesAssorted()}
 	fakeClock = clock.NewFakeClock(time.Now())
-	cfg = &test.Config{}
-	cluster = state.NewCluster(fakeClock, cfg, env.Client, cloudProvider)
+	cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
 	nodeController = state.NewNodeController(env.Client, cluster)
 	podController = state.NewPodController(env.Client, cluster)
 	provisionerController = state.NewProvisionerController(env.Client, cluster)
@@ -532,8 +531,10 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectNodeDeletionMarked(node)
 	})
 	It("should trigger node nomination eviction observers", func() {
-		cfg.SetBatchMaxDuration(time.Second) // shorten the batch duration to shorten the nomination window
-		cluster = state.NewCluster(fakeClock, cfg, env.Client, cloudProvider)
+		// Reduce the nomination timeframe for a quicker test
+		ctx = settings.ToContext(ctx, settings.Settings{BatchMaxDuration: metav1.Duration{Duration: time.Second}, BatchIdleDuration: metav1.Duration{Duration: time.Second}})
+		cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
+
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{

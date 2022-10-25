@@ -35,10 +35,10 @@ import (
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/config"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	atomicutils "github.com/aws/karpenter-core/pkg/utils/atomic"
 	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
@@ -72,11 +72,11 @@ type Cluster struct {
 	lastNodeCreationTime int64
 }
 
-func NewCluster(clk clock.Clock, cfg config.Config, client client.Client, cp cloudprovider.CloudProvider) *Cluster {
+func NewCluster(ctx context.Context, clk clock.Clock, client client.Client, cp cloudprovider.CloudProvider) *Cluster {
 	// The nominationPeriod is how long we consider a node as 'likely to be used' after a pending pod was
 	// nominated for it. This time can very depending on the batching window size + time spent scheduling
 	// so we try to adjust based off the window size.
-	nominationPeriod := time.Duration(2*cfg.BatchMaxDuration().Seconds()) * time.Second
+	nominationPeriod := 2 * settings.FromContext(ctx).BatchMaxDuration.Duration
 	if nominationPeriod < 10*time.Second {
 		nominationPeriod = 10 * time.Second
 	}

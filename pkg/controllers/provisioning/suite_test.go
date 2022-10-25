@@ -29,6 +29,7 @@ import (
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	clock "k8s.io/utils/clock/testing"
 
+	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -54,7 +55,6 @@ var prov *provisioning.Provisioner
 var controller *provisioning.Controller
 var env *test.Environment
 var recorder *test.EventRecorder
-var cfg *test.Config
 var instanceTypeMap map[string]cloudprovider.InstanceType
 
 func TestAPIs(t *testing.T) {
@@ -65,13 +65,13 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(ctx, func(e *test.Environment) {
+		ctx = settings.ToContext(ctx, test.Settings())
 		cloudProvider = &fake.CloudProvider{}
-		cfg = test.NewConfig()
 		recorder = test.NewEventRecorder()
 		fakeClock = clock.NewFakeClock(time.Now())
-		cluster = state.NewCluster(fakeClock, cfg, e.Client, cloudProvider)
+		cluster = state.NewCluster(ctx, fakeClock, e.Client, cloudProvider)
 		nodeController = state.NewNodeController(e.Client, cluster)
-		prov = provisioning.NewProvisioner(ctx, cfg, e.Client, corev1.NewForConfigOrDie(e.Config), recorder, cloudProvider, cluster)
+		prov = provisioning.NewProvisioner(ctx, e.Client, corev1.NewForConfigOrDie(e.Config), recorder, cloudProvider, cluster, test.SettingsStore{})
 		controller = provisioning.NewController(e.Client, prov, recorder)
 		instanceTypes, _ := cloudProvider.GetInstanceTypes(context.Background(), nil)
 		instanceTypeMap = map[string]cloudprovider.InstanceType{}
@@ -83,8 +83,9 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = BeforeEach(func() {
+	ctx = settings.ToContext(ctx, test.Settings())
 	recorder.Reset()
-	cluster = state.NewCluster(fakeClock, cfg, env.Client, cloudProvider)
+	cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
 })
 
 var _ = AfterSuite(func() {
