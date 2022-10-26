@@ -18,41 +18,41 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
-	"github.com/aws/karpenter/pkg/metrics"
+	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(consolidationDurationHistogram)
-	crmetrics.Registry.MustRegister(consolidationReplacementNodeInitializedHistogram)
-	crmetrics.Registry.MustRegister(consolidationActionsPerformedCounter)
+	crmetrics.Registry.MustRegister(deprovisioningDurationHistogram)
+	crmetrics.Registry.MustRegister(deprovisioningReplacementNodeInitializedHistogram)
+	crmetrics.Registry.MustRegister(deprovisioningActionsPerformedCounter)
 }
 
-var consolidationDurationHistogram = prometheus.NewHistogramVec(
+var deprovisioningDurationHistogram = prometheus.NewHistogramVec(
 	prometheus.HistogramOpts{
 		Namespace: metrics.Namespace,
-		Subsystem: "consolidation",
-		Name:      "evaluation_duration_seconds",
+		Subsystem: "deprovisioning",
+		Name:      "consolidation_evaluation_duration_seconds",
 		Help:      "Duration of the consolidation evaluation process in seconds.",
 		Buckets:   metrics.DurationBuckets(),
 	},
 	[]string{"method"},
 )
 
-var consolidationReplacementNodeInitializedHistogram = prometheus.NewHistogram(
+var deprovisioningReplacementNodeInitializedHistogram = prometheus.NewHistogram(
 	prometheus.HistogramOpts{
 		Namespace: metrics.Namespace,
-		Subsystem: "consolidation",
+		Subsystem: "deprovisioning",
 		Name:      "replacement_node_initialized_seconds",
 		Help:      "Amount of time required for a replacement node to become initialized.",
 		Buckets:   metrics.DurationBuckets(),
 	})
 
-var consolidationActionsPerformedCounter = prometheus.NewCounterVec(
+var deprovisioningActionsPerformedCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Namespace: metrics.Namespace,
-		Subsystem: "consolidation",
+		Subsystem: "deprovisioning",
 		Name:      "actions_performed",
-		Help:      "Number of consolidation actions performed. Labeled by action.",
+		Help:      "Number of deprovisioning actions performed. Labeled by action.",
 	},
 	[]string{"action"},
 )

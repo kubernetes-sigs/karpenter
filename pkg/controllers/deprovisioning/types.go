@@ -26,6 +26,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/metrics"
 
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
+	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 )
 
@@ -60,12 +61,13 @@ func (r DeprovisioningResult) String() string {
 }
 
 type deprovisioner interface {
-	sortCandidates([]candidateNode) []candidateNode
 	shouldNotBeDeprovisioned(context.Context, *state.Node, *v1alpha5.Provisioner, []*v1.Pod) bool
-	computeCommand([]candidateNode) (DeprovisioningCommand, error)
-	executeCommand(context.Context, DeprovisioningCommand) (DeprovisioningResult, error)
-	validateCommand(DeprovisioningCommand) (bool, error)
-	isExecutableAction(deprovisioningAction) bool
+	sortCandidates([]candidateNode) []candidateNode
+	computeCommand(context.Context, ...candidateNode) (DeprovisioningCommand, error)
+	isExecutableCommand(DeprovisioningCommand) bool
+	validateCommand(context.Context, []candidateNode, *pscheduling.Node) (bool, error)
+	// deprovisionIncrementally is true if a deprovisioner should only consider one node at a time
+	deprovisionIncrementally() bool
 	string() string
 	getTTL() time.Duration
 }
@@ -78,8 +80,6 @@ const (
 	deprovisioningActionDeleteConsolidation
 	deprovisioningActionReplaceConsolidation
 	deprovisioningActionDeleteEmpty
-	deprovisioningActionDeleteExpiration
-	deprovisioningActionReplaceExpiration
 	deprovisioningActionDoNothing
 	deprovisioningActionFailed
 )
@@ -87,16 +87,12 @@ const (
 func (a deprovisioningAction) isExecutable() bool {
 	return a == deprovisioningActionDeleteConsolidation ||
 		a == deprovisioningActionReplaceConsolidation ||
-		a == deprovisioningActionDeleteEmpty ||
-		a == deprovisioningActionDeleteExpiration ||
-		a == deprovisioningActionReplaceExpiration
+		a == deprovisioningActionDeleteEmpty
 }
 
 func (a deprovisioningAction) getMetricsReasonName() string {
 	if a == deprovisioningActionDeleteConsolidation || a == deprovisioningActionReplaceConsolidation {
 		return metrics.ConsolidationReason
-	} else if a == deprovisioningActionDeleteExpiration || a == deprovisioningActionReplaceExpiration {
-		return metrics.ExpirationReason
 	} else if a == deprovisioningActionDeleteEmpty {
 		return metrics.EmptinessReason
 	}
@@ -104,8 +100,7 @@ func (a deprovisioningAction) getMetricsReasonName() string {
 }
 
 func (a deprovisioningAction) needsReplacement() bool {
-	return a == deprovisioningActionReplaceConsolidation ||
-		a == deprovisioningActionReplaceExpiration
+	return a == deprovisioningActionReplaceConsolidation
 }
 
 func (a deprovisioningAction) String() string {
@@ -120,10 +115,6 @@ func (a deprovisioningAction) String() string {
 		return "Delete (Emptiness)"
 	case deprovisioningActionReplaceConsolidation:
 		return "Replace (Consolidation)"
-	case deprovisioningActionDeleteExpiration:
-		return "Delete (Expiration)"
-	case deprovisioningActionReplaceExpiration:
-		return "Replace (Expiraiton)"
 	case deprovisioningActionDoNothing:
 		return "NoAction"
 	case deprovisioningActionFailed:

@@ -27,9 +27,11 @@ import (
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/samber/lo"
+
+	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
+	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
+	"github.com/aws/karpenter-core/pkg/controllers/state"
 )
 
 // Emptiness is a subreconciler that deletes nodes that are empty after a ttl
@@ -41,7 +43,7 @@ type Emptiness struct {
 
 const emptinessName = "emptiness"
 
-func (e *Emptiness) shouldNotBeDeprovisioned(ctx context.Context, n state.Node, provisioner *v1alpha5.Provisioner, pods []*v1.Pod) bool {
+func (e *Emptiness) shouldNotBeDeprovisioned(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, pods []*v1.Pod) bool {
 	if provisioner == nil || provisioner.Spec.TTLSecondsAfterEmpty == nil {
 		return true
 	}
@@ -59,35 +61,34 @@ func (e *Emptiness) shouldNotBeDeprovisioned(ctx context.Context, n state.Node, 
 }
 
 // Any empty node is equally prioritized since disruption cost is the same
-func (e *Emptiness) sortCandidates(nodes []candidateNode) []candidateNode{
+func (e *Emptiness) sortCandidates(nodes []candidateNode) []candidateNode {
 	return nodes
 }
 
 // computeCommand will always return deprovisioningActionDeleteEmpty as it is the only possible command for emptiness
-func (e *Emptiness) computeCommand(nodes []candidateNode) (DeprovisioningCommand, error) {
+func (e *Emptiness) computeCommand(_ context.Context, nodes ...candidateNode) (DeprovisioningCommand, error) {
+	emptyNodes := lo.Filter(nodes, func(n candidateNode, _ int) bool { return len(n.pods) == 0})
+	if len(emptyNodes) == 0 {
+		return DeprovisioningCommand{action: deprovisioningActionDoNothing}, nil
+	}
 	return DeprovisioningCommand{
-		nodesToRemove: lo.Map(nodes, func(n candidateNode, _ int) *v1.Node { return n.Node }),
+		nodesToRemove: lo.Map(emptyNodes, func(n candidateNode, _ int) *v1.Node { return n.Node }),
 		action:        deprovisioningActionDeleteEmpty,
 		created:       e.clock.Now(),
 	}, nil
 }
 
-func (e *Emptiness) isExecutableAction(action deprovisioningAction) bool {
-	return action == deprovisioningActionDeleteEmpty
+func (e *Emptiness) isExecutableCommand(cmd DeprovisioningCommand) bool {
+	return len(cmd.nodesToRemove) > 0 && cmd.action == deprovisioningActionDeleteEmpty
 }
 
-func (e *Emptiness) validateCommand(ctx context.Context, cmd DeprovisioningCommand, candidateNodes []candidateNode) (bool, error) {
-	if cmd.replacementNode != nil {
+func (e *Emptiness) validateCommand(_ context.Context, candidateNodes []candidateNode, replacementNode *pscheduling.Node) (bool, error) {
+	if replacementNode != nil {
 		return false, fmt.Errorf("expected no replacement node for emptiness")
-	}
-	// we've waited and now need to get the new cluster state
-	nodes, err := e.mapNodes(cmd.nodesToRemove, candidateNodes)
-	if err != nil {
-		return false, err
 	}
 	// the deletion of empty nodes is easy to validate, we just ensure that all the nodesToDelete are still empty and that
 	// the node isn't a target of a recent scheduling simulation
-	for _, n := range nodes {
+	for _, n := range candidateNodes {
 		if len(n.pods) != 0 && !e.cluster.IsNodeNominated(n.Name) {
 			return false, nil
 		}
@@ -116,29 +117,6 @@ func (e *Emptiness) getTTL() time.Duration {
 	return 0 * time.Second
 }
 
-
-// func (e *Emptiness) executeCommand(ctx context.Context, command DeprovisioningCommand) (DeprovisioningResult, error) {
-// 	for _, oldNode := range command.nodesToRemove {
-// 		c.recorder.TerminatingNodeForConsolidation(oldNode, e.string())
-// 		if err := c.kubeClient.Delete(ctx, oldNode); err != nil {
-// 			logging.FromContext(ctx).Errorf("Deleting node, %s", err)
-// 		} else {
-// 			metrics.NodesTerminatedCounter.WithLabelValues(metrics.ConsolidationReason).Inc()
-// 		}
-// 	}
-
-// 	// We wait for nodes to delete to ensure we don't start another round of consolidation until this node is fully
-// 	// deleted.
-// 	for _, oldnode := range action.nodesToRemove {
-// 		c.waitForDeletion(ctx, oldnode)
-// 	}
-
-// 	logging.FromContext(ctx).Infof("Triggering termination after %s for empty node", ttl)
-// 	if err := e.kubeClient.Delete(ctx, n); err != nil {
-// 		return reconcile.Result{}, fmt.Errorf("deleting node, %w", err)
-// 	}
-// 	metrics.NodesTerminatedCounter.WithLabelValues(metrics.EmptinessReason).Inc()
-// }
-
-// computeAction([]candidateNode) (deprovisioningAction, error)
-// 	executeAction(deprovisioningAction) (DeprovisioningResult, error)
+func (e *Emptiness) deprovisionIncrementally() bool {
+	return false
+}
