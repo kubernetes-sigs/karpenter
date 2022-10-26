@@ -50,10 +50,6 @@ func NewController(kubeClient client.Client, provisioner *Provisioner, recorder 
 	}
 }
 
-func (c *Controller) Recorder() events.Recorder {
-	return c.recorder
-}
-
 // Reconcile the resource
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	p := &v1.Pod{}

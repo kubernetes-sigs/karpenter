@@ -143,7 +143,7 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 	// Report failures and nominations
 	for _, pod := range failedToSchedule {
 		logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(pod)).Errorf("Could not schedule pod, %s", errors[pod])
-		s.recorder.PodFailedToSchedule(pod, errors[pod])
+		s.recorder.Publish(events.PodFailedToSchedule(pod, errors[pod]))
 	}
 
 	for _, node := range s.existingNodes {
@@ -151,7 +151,7 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 			s.cluster.NominateNodeForPod(node.Node.Name)
 		}
 		for _, pod := range node.Pods {
-			s.recorder.NominatePod(pod, node.Node)
+			s.recorder.Publish(events.NominatePod(pod, node.Node))
 		}
 	}
 

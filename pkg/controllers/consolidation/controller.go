@@ -42,6 +42,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/scheduling"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	consolidationevents "github.com/aws/karpenter-core/pkg/controllers/consolidation/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -360,7 +361,7 @@ func (c *Controller) executeCommand(ctx context.Context, action lifecycleCommand
 	}
 
 	for _, oldNode := range action.nodesToRemove {
-		c.recorder.TerminatingNodeForConsolidation(oldNode, action.String())
+		c.recorder.Publish(consolidationevents.TerminatingNode(oldNode, action.String()))
 		if err := c.kubeClient.Delete(ctx, oldNode); err != nil {
 			logging.FromContext(ctx).Errorf("Deleting node, %s", err)
 		} else {
@@ -387,7 +388,7 @@ func (c *Controller) waitForDeletion(ctx context.Context, node *v1.Node) {
 			return nil
 		}
 		// make the user aware of why consolidation is paused
-		c.recorder.WaitingOnDeletionForConsolidation(node)
+		c.recorder.Publish(consolidationevents.WaitingOnDeletion(node))
 		if nerr != nil {
 			return fmt.Errorf("expected node to be not found, %w", nerr)
 		}
@@ -446,12 +447,12 @@ func (c *Controller) launchReplacementNode(ctx context.Context, action lifecycle
 			return fmt.Errorf("getting node, %w", err)
 		}
 		once.Do(func() {
-			c.recorder.LaunchingNodeForConsolidation(&k8Node, action.String())
+			c.recorder.Publish(consolidationevents.LaunchingNode(&k8Node, action.String()))
 		})
 
 		if _, ok := k8Node.Labels[v1alpha5.LabelNodeInitialized]; !ok {
 			// make the user aware of why consolidation is paused
-			c.recorder.WaitingOnReadinessForConsolidation(&k8Node)
+			c.recorder.Publish(consolidationevents.WaitingOnReadiness(&k8Node))
 			return fmt.Errorf("node is not initialized")
 		}
 		return nil

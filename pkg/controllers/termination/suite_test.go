@@ -27,7 +27,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/termination"
 	"github.com/aws/karpenter-core/pkg/test"
@@ -63,8 +62,8 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(ctx, func(e *test.Environment) {
 		cloudProvider := &fake.CloudProvider{}
 		coreV1Client := corev1.NewForConfigOrDie(e.Config)
-		recorder := test.NewEventRecorder()
-		evictionQueue = termination.NewEvictionQueue(ctx, coreV1Client, recorder)
+		eventRecorder := test.NewEventRecorder()
+		evictionQueue = termination.NewEvictionQueue(ctx, coreV1Client, eventRecorder)
 		controller = &termination.Controller{
 			KubeClient: e.Client,
 			Terminator: &termination.Terminator{
@@ -74,7 +73,7 @@ var _ = BeforeSuite(func() {
 				EvictionQueue: evictionQueue,
 				Clock:         fakeClock,
 			},
-			Recorder:          recorder,
+			Recorder:          eventRecorder,
 			TerminationRecord: sets.NewString(),
 		}
 	})

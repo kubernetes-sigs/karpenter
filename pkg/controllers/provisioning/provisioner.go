@@ -358,7 +358,7 @@ func (p *Provisioner) launch(ctx context.Context, opts LaunchOptions, node *sche
 	p.cluster.NominateNodeForPod(k8sNode.Name)
 	if opts.RecordPodNomination {
 		for _, pod := range node.Pods {
-			p.recorder.NominatePod(pod, k8sNode)
+			p.recorder.Publish(events.NominatePod(pod, k8sNode))
 		}
 	}
 	return k8sNode.Name, nil

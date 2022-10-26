@@ -76,6 +76,7 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 			VolumeSource: v1.VolumeSource{PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{ClaimName: pvc}},
 		})
 	}
+
 	p := &v1.Pod{
 		ObjectMeta: ObjectMeta(options.ObjectMeta),
 		Spec: v1.PodSpec{

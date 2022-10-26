@@ -24,7 +24,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
-	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/configmap/informer"
@@ -58,14 +57,13 @@ type Operator struct {
 
 	KubernetesInterface kubernetes.Interface
 	SettingsStore       settingsstore.Store
-	EventRecorder       record.EventRecorder
-	Recorder            events.Recorder // Deprecate me in favor of EventRecorder
+	EventRecorder       events.Recorder
 	Clock               clock.Clock
 
 	webhooks []knativeinjection.ControllerConstructor
 }
 
-// NewManagerOrDie instantiates a controller manager or panics
+// NewOperator instantiates a controller manager or panics
 func NewOperator() (context.Context, *Operator) {
 	// Root Context
 	ctx := signals.NewContext()
@@ -129,18 +127,11 @@ func NewOperator() (context.Context, *Operator) {
 		return []string{o.(*v1.Pod).Spec.NodeName}
 	}), "failed to setup pod indexer")
 
-	// Event Recorder
-	eventRecorder := manager.GetEventRecorderFor(appName)
-	recorder := events.NewRecorder(eventRecorder)
-	recorder = events.NewLoadSheddingRecorder(recorder)
-	recorder = events.NewDedupeRecorder(recorder)
-
 	return ctx, &Operator{
 		Manager:             manager,
 		KubernetesInterface: kubernetesInterface,
 		SettingsStore:       settingsStore,
-		Recorder:            recorder,
-		EventRecorder:       eventRecorder,
+		EventRecorder:       events.NewRecorder(manager.GetEventRecorderFor(appName)),
 		Clock:               clock.RealClock{},
 	}
 }
