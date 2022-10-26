@@ -29,6 +29,9 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/node"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
+	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
+	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 
 	v1 "k8s.io/api/core/v1"

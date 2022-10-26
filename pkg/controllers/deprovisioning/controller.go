@@ -145,7 +145,6 @@ func (c *Controller) ProcessCluster(ctx context.Context) (Result, error) {
 	for _, d := range []Deprovisioner{
 		// Emptiness and Consolidation are mutually exclusive, so this loop only executes one deprovisioner
 		c.emptiness,
-		c.expiration,
 		c.consolidation,
 	} {
 		var result Result
