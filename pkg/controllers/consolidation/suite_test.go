@@ -40,7 +40,6 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/consolidation"
@@ -1590,7 +1589,7 @@ var _ = Describe("Parallelization", func() {
 			pods = append(pods, pod)
 		}
 		ExpectApplied(ctx, env.Client, rs, prov)
-		ExpectProvisioned(ctx, env.Client, provisioningController, provisioner, lo.Map(pods, func(p *v1.Pod, _ int) *v1.Pod { return p.DeepCopy() })...)
+		ExpectProvisioned(ctx, env.Client, recorder, provisioningController, provisioner, lo.Map(pods, func(p *v1.Pod, _ int) *v1.Pod { return p.DeepCopy() })...)
 
 		nodeList := &v1.NodeList{}
 		Expect(env.Client.List(ctx, nodeList)).To(Succeed())

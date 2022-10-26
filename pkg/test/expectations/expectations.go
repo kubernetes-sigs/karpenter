@@ -175,14 +175,15 @@ func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objects ...cl
 	}
 }
 
-func ExpectProvisioned(ctx context.Context, c client.Client, controller *provisioning.Controller, provisioner *provisioning.Provisioner, pods ...*v1.Pod) (result []*v1.Pod) {
+func ExpectProvisioned(ctx context.Context, c client.Client, recorder *test.EventRecorder, controller *provisioning.Controller,
+	provisioner *provisioning.Provisioner, pods ...*v1.Pod) (result []*v1.Pod) {
+
 	ExpectProvisionedNoBindingWithOffset(1, ctx, c, controller, provisioner, pods...)
 
-	recorder := controller.Recorder().(*test.EventRecorder)
 	recorder.ForEachBinding(func(pod *v1.Pod, node *v1.Node) {
 		ExpectManualBindingWithOffset(1, ctx, c, pod, node)
 	})
-	// reset bindings so we don't try to bind these same pods again if a new provisioning is performed in the same test
+	// reset bindings, so we don't try to bind these same pods again if a new provisioning is performed in the same test
 	recorder.ResetBindings()
 
 	// Update objects after reconciling

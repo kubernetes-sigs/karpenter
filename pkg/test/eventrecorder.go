@@ -15,9 +15,13 @@ limitations under the License.
 package test
 
 import (
+	"regexp"
 	"sync"
 
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 
 	"github.com/aws/karpenter-core/pkg/events"
 )
@@ -28,48 +32,101 @@ type Binding struct {
 	Node *v1.Node
 }
 
-// EventRecorder is a mock event recorder that is used to facilitate testing.
-type EventRecorder struct {
-	mu       sync.Mutex
-	bindings []Binding
-}
-
 var _ events.Recorder = (*EventRecorder)(nil)
 
+// EventRecorder is a mock event recorder that is used to facilitate testing.
+type EventRecorder struct {
+	mu       sync.RWMutex
+	bindings []Binding
+	calls    map[string]int
+}
+
 func NewEventRecorder() *EventRecorder {
-	return &EventRecorder{}
+	return &EventRecorder{
+		calls: map[string]int{},
+	}
 }
 
-func (r *EventRecorder) WaitingOnReadinessForConsolidation(v *v1.Node)                {}
-func (r *EventRecorder) TerminatingNodeForConsolidation(node *v1.Node, reason string) {}
-func (r *EventRecorder) LaunchingNodeForConsolidation(node *v1.Node, reason string)   {}
-func (r *EventRecorder) WaitingOnDeletionForConsolidation(node *v1.Node)              {}
+func (e *EventRecorder) Publish(evt events.Event) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 
-func (r *EventRecorder) NominatePod(pod *v1.Pod, node *v1.Node) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.bindings = append(r.bindings, Binding{pod, node})
+	fakeNode := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "fake"}}
+	fakePod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "fake"}}
+	switch evt.Reason {
+	case events.NominatePod(fakePod, fakeNode).Reason:
+		var nodeName string
+		r := regexp.MustCompile(`Pod should schedule on (?P<NodeName>.*)`)
+		matches := r.FindStringSubmatch(evt.Message)
+		if len(matches) == 0 {
+			return
+		}
+		for i, name := range r.SubexpNames() {
+			if name == "NodeName" {
+				nodeName = matches[i]
+				break
+			}
+		}
+
+		pod := evt.InvolvedObject.(*v1.Pod)
+		node := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}} // This is all we need for the binding
+		e.bindings = append(e.bindings, Binding{pod, node})
+	}
+	e.calls[evt.Reason]++
 }
 
-func (r *EventRecorder) EvictPod(pod *v1.Pod) {}
-
-func (r *EventRecorder) PodFailedToSchedule(pod *v1.Pod, err error) {}
-
-func (r *EventRecorder) NodeFailedToDrain(node *v1.Node, err error) {}
-
-func (r *EventRecorder) Reset() {
-	r.ResetBindings()
+func (e *EventRecorder) Calls(reason string) int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.calls[reason]
 }
 
-func (r *EventRecorder) ResetBindings() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.bindings = nil
+func (e *EventRecorder) Reset() {
+	e.ResetBindings()
 }
-func (r *EventRecorder) ForEachBinding(f func(pod *v1.Pod, node *v1.Node)) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, b := range r.bindings {
+
+func (e *EventRecorder) ResetBindings() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.bindings = nil
+}
+func (e *EventRecorder) ForEachBinding(f func(pod *v1.Pod, node *v1.Node)) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	for _, b := range e.bindings {
 		f(b.Pod, b.Node)
 	}
+}
+
+var _ record.EventRecorder = (*InternalRecorder)(nil)
+
+type InternalRecorder struct {
+	mu    sync.RWMutex
+	calls map[string]int
+}
+
+func NewInternalRecorder() *InternalRecorder {
+	return &InternalRecorder{
+		calls: map[string]int{},
+	}
+}
+
+func (i *InternalRecorder) Event(_ runtime.Object, _, reason, _ string) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.calls[reason]++
+}
+
+func (i *InternalRecorder) Eventf(object runtime.Object, eventtype, reason, messageFmt string, _ ...interface{}) {
+	i.Event(object, eventtype, reason, messageFmt)
+}
+
+func (i *InternalRecorder) AnnotatedEventf(object runtime.Object, _ map[string]string, eventtype, reason, messageFmt string, _ ...interface{}) {
+	i.Event(object, eventtype, reason, messageFmt)
+}
+
+func (i *InternalRecorder) Calls(reason string) int {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.calls[reason]
 }

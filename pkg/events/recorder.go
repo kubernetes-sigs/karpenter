@@ -15,70 +15,65 @@ limitations under the License.
 package events
 
 import (
-	v1 "k8s.io/api/core/v1"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/patrickmn/go-cache"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/flowcontrol"
 )
 
-// Recorder is used to record events that occur about pods so they can be viewed by looking at the pod's events so our
-// actions are more observable without requiring log inspection
+type Event struct {
+	InvolvedObject runtime.Object
+	Type           string
+	Reason         string
+	Message        string
+	DedupeValues   []string
+	RateLimiter    flowcontrol.RateLimiter
+}
+
+func (e Event) dedupeKey() string {
+	return fmt.Sprintf("%s-%s",
+		strings.ToLower(e.Reason),
+		strings.Join(e.DedupeValues, "-"),
+	)
+}
+
 type Recorder interface {
-	// NominatePod is called when we have determined that a pod should schedule against an existing node and don't
-	// currently need to provision new capacity for the pod.
-	NominatePod(*v1.Pod, *v1.Node)
-	// EvictPod is called when a pod is evicted
-	EvictPod(*v1.Pod)
-	// PodFailedToSchedule is called when a pod has failed to schedule entirely.
-	PodFailedToSchedule(*v1.Pod, error)
-	// NodeFailedToDrain is called when a pod causes a node draining to fail
-	NodeFailedToDrain(*v1.Node, error)
-	// TerminatingNodeForConsolidation is called just before terminating the node due to consolidation with a user
-	// presentable string describing the consolidation operation
-	TerminatingNodeForConsolidation(node *v1.Node, reason string)
-	// LaunchingNodeForConsolidation is called with the new node that was just created due to a consolidation operation.
-	LaunchingNodeForConsolidation(v *v1.Node, reason string)
-	// WaitingOnReadinessForConsolidation is called when consolidation is waiting on a node to become ready prior to
-	// continuing consolidation
-	WaitingOnReadinessForConsolidation(v *v1.Node)
-	// WaitingOnDeletionForConsolidation is called when consolidation is waiting on a node to be deleted prior to
-	// continuing consolidation
-	WaitingOnDeletionForConsolidation(oldnode *v1.Node)
+	Publish(Event)
 }
 
 type recorder struct {
-	rec record.EventRecorder
+	rec   record.EventRecorder
+	cache *cache.Cache
 }
 
-func NewRecorder(rec record.EventRecorder) Recorder {
-	return &recorder{rec: rec}
+func NewRecorder(r record.EventRecorder) Recorder {
+	return &recorder{
+		rec:   r,
+		cache: cache.New(120*time.Second, 10*time.Second),
+	}
 }
 
-func (r recorder) WaitingOnDeletionForConsolidation(node *v1.Node) {
-	r.rec.Eventf(node, "Normal", "ConsolidateWaiting", "Waiting on deletion to continue consolidation")
-}
-func (r recorder) WaitingOnReadinessForConsolidation(node *v1.Node) {
-	r.rec.Eventf(node, "Normal", "ConsolidateWaiting", "Waiting on readiness to continue consolidation")
-}
-
-func (r recorder) TerminatingNodeForConsolidation(node *v1.Node, reason string) {
-	r.rec.Eventf(node, "Normal", "ConsolidateTerminateNode", "Consolidating node via %s", reason)
-}
-
-func (r recorder) LaunchingNodeForConsolidation(node *v1.Node, reason string) {
-	r.rec.Eventf(node, "Normal", "ConsolidateLaunchNode", "Launching node for %s", reason)
+// Publish creates a Kubernetes event using the passed event struct
+func (r *recorder) Publish(evt Event) {
+	// Dedupe same events that involve the same object and are close together
+	if len(evt.DedupeValues) > 0 && !r.shouldCreateEvent(evt.dedupeKey()) {
+		return
+	}
+	// If the event is rate-limited, then validate we should create the event
+	if evt.RateLimiter != nil && !evt.RateLimiter.TryAccept() {
+		return
+	}
+	r.rec.Event(evt.InvolvedObject, evt.Type, evt.Reason, evt.Message)
 }
 
-func (r recorder) NominatePod(pod *v1.Pod, node *v1.Node) {
-	r.rec.Eventf(pod, "Normal", "Nominate", "Pod should schedule on %s", node.Name)
-}
-
-func (r recorder) EvictPod(pod *v1.Pod) {
-	r.rec.Eventf(pod, "Normal", "Evict", "Evicted pod")
-}
-
-func (r recorder) PodFailedToSchedule(pod *v1.Pod, err error) {
-	r.rec.Eventf(pod, "Warning", "FailedProvisioning", "Failed to provision new node, %s", err)
-}
-
-func (r recorder) NodeFailedToDrain(node *v1.Node, err error) {
-	r.rec.Eventf(node, "Warning", "FailedDraining", "Failed to drain node, %s", err)
+func (r *recorder) shouldCreateEvent(key string) bool {
+	if _, exists := r.cache.Get(key); exists {
+		return false
+	}
+	r.cache.SetDefault(key, nil)
+	return true
 }

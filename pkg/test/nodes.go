@@ -43,6 +43,7 @@ func Node(overrides ...NodeOptions) *v1.Node {
 	if options.ReadyStatus == "" {
 		options.ReadyStatus = v1.ConditionTrue
 	}
+
 	return &v1.Node{
 		ObjectMeta: ObjectMeta(options.ObjectMeta),
 		Spec: v1.NodeSpec{

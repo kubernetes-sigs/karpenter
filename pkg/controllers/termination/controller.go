@@ -123,7 +123,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		if !IsNodeDrainErr(err) {
 			return reconcile.Result{}, err
 		}
-		c.Recorder.NodeFailedToDrain(node, err)
+		c.Recorder.Publish(events.NodeFailedToDrain(node, err))
 	}
 	if !drained {
 		return reconcile.Result{Requeue: true}, nil
