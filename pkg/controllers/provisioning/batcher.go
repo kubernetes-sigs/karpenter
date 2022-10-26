@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
+	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
 )
 
 // Batcher separates a stream of Trigger() calls into windowed slices. The
@@ -27,16 +28,18 @@ import (
 type Batcher struct {
 	running context.Context
 
-	trigger   chan struct{}
-	immediate chan struct{}
+	trigger       chan struct{}
+	immediate     chan struct{}
+	settingsStore settingsstore.Store
 }
 
 // NewBatcher is a constructor for the Batcher
-func NewBatcher(running context.Context) *Batcher {
+func NewBatcher(running context.Context, settingsStore settingsstore.Store) *Batcher {
 	return &Batcher{
-		running:   running,
-		trigger:   make(chan struct{}, 100), // triggering shouldn't block
-		immediate: make(chan struct{}),
+		running:       running,
+		trigger:       make(chan struct{}), // triggering shouldn't block
+		immediate:     make(chan struct{}),
+		settingsStore: settingsStore,
 	}
 }
 
@@ -59,11 +62,9 @@ func (b *Batcher) TriggerImmediate() {
 // Wait starts a batching window and continues waiting as long as it continues receiving triggers within
 // the idleDuration, up to the maxDuration
 func (b *Batcher) Wait(ctx context.Context) {
-	var start time.Time
 	select {
 	case <-b.trigger:
 		// start the batching window after the first item is received
-		start = time.Now()
 	case <-b.immediate:
 		// but for immediate triggering and context cancellations, end the batching window
 		return
@@ -71,14 +72,14 @@ func (b *Batcher) Wait(ctx context.Context) {
 		return
 	}
 
+	// Settings are injected here so that we ensure we have the latest
+	// timeout/idle values after a potentially long wait
+	ctx = b.settingsStore.InjectSettings(ctx)
 	timeout := time.NewTimer(settings.FromContext(ctx).BatchMaxDuration.Duration)
 	idle := time.NewTimer(settings.FromContext(ctx).BatchIdleDuration.Duration)
 	for {
 		select {
 		case <-b.trigger:
-			if start.IsZero() {
-				start = time.Now()
-			}
 			// correct way to reset an active timer per docs
 			if !idle.Stop() {
 				<-idle.C

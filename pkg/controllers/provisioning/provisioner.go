@@ -81,7 +81,7 @@ func NewProvisioner(ctx context.Context, kubeClient client.Client, coreV1Client 
 	running, stop := context.WithCancel(ctx)
 	p := &Provisioner{
 		Stop:           stop,
-		batcher:        NewBatcher(running),
+		batcher:        NewBatcher(running, settingsStore),
 		cloudProvider:  cloudProvider,
 		kubeClient:     kubeClient,
 		coreV1Client:   coreV1Client,
@@ -104,6 +104,20 @@ func (p *Provisioner) TriggerImmediate() {
 func (p *Provisioner) Builder(_ context.Context, mgr manager.Manager) operatorcontroller.Builder {
 	return operatorcontroller.NewSingletonManagedBy(mgr).
 		Named("provisioning").
+		WaitUntil(func(ctx context.Context) {
+			// Batch pods
+			p.batcher.Wait(ctx)
+
+			// wait to ensure that our cluster state is synced with the current known nodes to prevent over-provisioning
+			for WaitForClusterSync {
+				if err := p.cluster.Synchronized(ctx); err != nil {
+					logging.FromContext(ctx).Infof("waiting for cluster state to catch up, %s", err)
+					time.Sleep(1 * time.Second)
+				} else {
+					break
+				}
+			}
+		}).
 		WithOptions(operatorcontroller.Options{
 			DisableWaitOnError: true,
 		})
@@ -114,19 +128,6 @@ func (p *Provisioner) LivenessProbe(_ *http.Request) error {
 }
 
 func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
-	// Batch pods
-	p.batcher.Wait(ctx)
-
-	// wait to ensure that our cluster state is synced with the current known nodes to prevent over-provisioning
-	for WaitForClusterSync {
-		if err := p.cluster.Synchronized(ctx); err != nil {
-			logging.FromContext(ctx).Infof("waiting for cluster state to catch up, %s", err)
-			time.Sleep(1 * time.Second)
-		} else {
-			break
-		}
-	}
-
 	// We collect the nodes with their used capacities before we get the list of pending pods. This ensures that
 	// the node capacities we schedule against are always >= what the actual capacity is at any given instance. This
 	// prevents over-provisioning at the cost of potentially under-provisioning which will self-heal during the next
