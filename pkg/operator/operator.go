@@ -96,13 +96,14 @@ func NewOperator() (context.Context, *Operator) {
 
 	// Settings
 	settingsStore := settingsstore.WatchSettingsOrDie(ctx, kubernetesInterface, configMapWatcher, apis.Settings.List()...)
-	ctx = settingsStore.InjectSettings(ctx)
 
 	// Logging
 	logger := NewLogger(ctx, component, config, configMapWatcher)
 	ctx = logging.WithLogger(ctx, logger)
 
+	// Inject settings after starting the ConfigMapWatcher
 	lo.Must0(configMapWatcher.Start(ctx.Done()))
+	ctx = settingsStore.InjectSettings(ctx)
 
 	// Manager
 	manager, err := controllerruntime.NewManager(config, controllerruntime.Options{
