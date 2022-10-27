@@ -20,6 +20,7 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -32,6 +33,7 @@ import (
 type Context struct {
 	context.Context
 
+	RESTConfig          *rest.Config
 	KubernetesInterface kubernetes.Interface
 	KubeClient          client.Client
 	EventRecorder       events.Recorder
