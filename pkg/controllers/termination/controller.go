@@ -113,10 +113,12 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if node.DeletionTimestamp.IsZero() || !lo.Contains(node.Finalizers, provisioning.TerminationFinalizer) {
 		return reconcile.Result{}, nil
 	}
+
 	// 3. Cordon node
 	if err := c.Terminator.cordon(ctx, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("cordoning node %s, %w", node.Name, err)
 	}
+
 	// 4. Drain node
 	drained, err := c.Terminator.drain(ctx, node)
 	if err != nil {
@@ -125,16 +127,17 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 		c.Recorder.Publish(events.NodeFailedToDrain(node, err))
 	}
-	if !drained {
+	if !drained && !c.IsDrainTimedOut(node) {
 		return reconcile.Result{Requeue: true}, nil
 	}
+
 	// 5. If fully drained, terminate the node
 	if err := c.Terminator.terminate(ctx, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("terminating node %s, %w", node.Name, err)
 	}
 
-	c.mu.Lock()
 	// 6. Record termination duration (time between deletion timestamp and finalizer removal)
+	c.mu.Lock()
 	if !c.TerminationRecord.Has(req.String()) {
 		c.TerminationRecord.Insert(req.String())
 		terminationSummary.Observe(time.Since(node.DeletionTimestamp.Time).Seconds())
@@ -142,6 +145,19 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	c.mu.Unlock()
 
 	return reconcile.Result{}, nil
+}
+
+// IsDrainTimedOut executes node drain when timeout
+func (c *Controller) IsDrainTimedOut(node *v1.Node) bool {
+	durationString := node.Labels["karpenter-drain-timeout"]
+	if durationString == "" {
+		return false
+	}
+	timeout, err := time.ParseDuration(durationString)
+	if err != nil {
+		return false
+	}
+	return time.Now().Sub(node.DeletionTimestamp.Time) >= timeout
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {

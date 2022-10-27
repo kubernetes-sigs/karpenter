@@ -605,6 +605,35 @@ var _ = Describe("Termination", func() {
 			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node))
 			ExpectNotFound(ctx, env.Client, node)
 		})
+		Context("node that could not be drained", func() {
+			var SetDrainTimeOut = func(timeout string) {
+				node.Labels = map[string]string{"karpenter-drain-timeout": timeout}
+				ExpectApplied(ctx, env.Client, node)
+			}
+
+			BeforeEach(func() {
+				podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
+				ExpectApplied(ctx, env.Client, node, podEvict)
+				Expect(env.Client.Delete(ctx, node)).To(Succeed())
+				node = ExpectNodeExists(ctx, env.Client, node.Name)
+			})
+
+			It("should delete nodes that have timed out drain", func() {
+				SetDrainTimeOut((0 * time.Second).String())
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node))
+				ExpectNotFound(ctx, env.Client, node)
+			})
+			It("should not delete nodes that have not timed out drain", func() {
+				SetDrainTimeOut((1 * time.Second).String())
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node))
+				ExpectNodeExists(ctx, env.Client, node.Name)
+			})
+			It("should not delete nodes with invalid timeout config", func() {
+				SetDrainTimeOut("oops")
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node))
+				ExpectNodeExists(ctx, env.Client, node.Name)
+			})
+		})
 	})
 })
 
