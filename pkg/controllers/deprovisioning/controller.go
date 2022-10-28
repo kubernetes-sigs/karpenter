@@ -17,7 +17,6 @@ package deprovisioning
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"sync"
 	"time"
 
@@ -104,10 +103,6 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 func (c *Controller) Builder(_ context.Context, m manager.Manager) controller.Builder {
 	return controller.NewSingletonManagedBy(m).
 		Named("deprovisioning")
-}
-
-func (c *Controller) LivenessProbe(_ *http.Request) error {
-	return nil
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
