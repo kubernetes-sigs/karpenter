@@ -23,6 +23,7 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/utils/clock"
@@ -55,6 +56,7 @@ const (
 type Operator struct {
 	manager.Manager
 
+	RESTConfig          *rest.Config
 	KubernetesInterface kubernetes.Interface
 	SettingsStore       settingsstore.Store
 	EventRecorder       events.Recorder
@@ -129,6 +131,7 @@ func NewOperator() (context.Context, *Operator) {
 
 	return ctx, &Operator{
 		Manager:             manager,
+		RESTConfig:          config,
 		KubernetesInterface: kubernetesInterface,
 		SettingsStore:       settingsStore,
 		EventRecorder:       events.NewRecorder(manager.GetEventRecorderFor(appName)),
