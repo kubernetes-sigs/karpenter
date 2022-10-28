@@ -73,7 +73,7 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: "karpenter",
 			Subsystem: "nodes",
-			Name:      "total_daemon_limits",
+			Name:      "total_daemon_requests",
 			Help:      "Node total daemon requests are the resource requested by DaemonSet pods bound to nodes.",
 		},
 		nodeLabelNames(),
@@ -83,7 +83,7 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: "karpenter",
 			Subsystem: "nodes",
-			Name:      "total_daemon_requests",
+			Name:      "total_daemon_limits",
 			Help:      "Node total daemon limits are the resources specified by DaemonSet pod limits.",
 		},
 		nodeLabelNames(),
