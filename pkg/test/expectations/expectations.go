@@ -290,6 +290,12 @@ func ExpectSkew(ctx context.Context, c client.Client, namespace string, constrai
 	return ExpectWithOffset(1, skew)
 }
 
+// ExpectPanic is a function that should be deferred at the beginning of a test like "defer ExpectPanic()"
+// It asserts that the test should panic
+func ExpectPanic() {
+	ExpectWithOffset(1, recover()).ToNot(BeNil())
+}
+
 type gomegaKeyType struct{}
 
 var gomegaKey = gomegaKeyType{}
