@@ -42,6 +42,7 @@ type Emptiness struct {
 
 const emptinessName = "emptiness"
 
+// shouldNotBeDeprovisioned is a predicate used to filter deprovisionable nodes
 func (e *Emptiness) shouldNotBeDeprovisioned(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, nodePods []*v1.Pod) bool {
 	if provisioner == nil || provisioner.Spec.TTLSecondsAfterEmpty == nil {
 		return true
@@ -65,7 +66,12 @@ func (e *Emptiness) shouldNotBeDeprovisioned(ctx context.Context, n *state.Node,
 	return len(nodePods) != 0
 }
 
-// computeCommand will always return deprovisioningActionDeleteEmpty as it is the only possible command for emptiness
+// sortCandidates orders deprovisionable nodes by the disruptionCost
+func (e *Emptiness) sortCandidates(nodes []candidateNode) []candidateNode {
+	return nodes
+}
+
+// computeCommand generates a deprovisioning command given deprovisionable nodes
 func (e *Emptiness) computeCommand(_ context.Context, _ int, nodes ...candidateNode) (deprovisioningCommand, error) {
 	emptyNodes := lo.Filter(nodes, func(n candidateNode, _ int) bool { return len(n.pods) == 0 })
 	if len(emptyNodes) == 0 {
@@ -78,15 +84,7 @@ func (e *Emptiness) computeCommand(_ context.Context, _ int, nodes ...candidateN
 	}, nil
 }
 
-// Any empty node is equally prioritized since disruption cost is the same
-func (e *Emptiness) sortCandidates(nodes []candidateNode) []candidateNode {
-	return nodes
-}
-
-func (e *Emptiness) isExecutableCommand(cmd deprovisioningCommand) bool {
-	return len(cmd.nodesToRemove) > 0 && cmd.action == actionDeleteEmpty
-}
-
+// validateCommand validates a command for a deprovisioner
 func (e *Emptiness) validateCommand(_ context.Context, candidateNodes []candidateNode, cmd deprovisioningCommand) (bool, error) {
 	if cmd.replacementNode != nil {
 		return false, fmt.Errorf("expected no replacement node for emptiness")
@@ -101,15 +99,18 @@ func (e *Emptiness) validateCommand(_ context.Context, candidateNodes []candidat
 	return true, nil
 }
 
-func (e *Emptiness) string() string {
-	return emptinessName
+// isExecutableCommand checks that a command can be executed by the deprovisioner
+func (e *Emptiness) isExecutableCommand(cmd deprovisioningCommand) bool {
+	return len(cmd.nodesToRemove) > 0 && cmd.action == actionDeleteEmpty
 }
 
+// getTTL returns the time to wait for a deprovisioner's validation
 // Don't wait since the action has already been TTL'd with the provisioner's `TTLSecondsAfterEmpty`
 func (e *Emptiness) getTTL() time.Duration {
 	return 0 * time.Second
 }
 
-func (e *Emptiness) deprovisionIncrementally() bool {
-	return false
+// string is the string representation of the deprovisioner
+func (e *Emptiness) string() string {
+	return emptinessName
 }

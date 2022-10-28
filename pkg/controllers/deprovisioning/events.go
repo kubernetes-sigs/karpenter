@@ -46,7 +46,7 @@ func WaitingOnReadiness(node *v1.Node) events.Event {
 	return events.Event{
 		InvolvedObject: node,
 		Type:           v1.EventTypeNormal,
-		Reason:         "DeprovisioningWaiting",
+		Reason:         "DeprovisioningWaitingReadiness",
 		Message:        "Waiting on readiness to continue deprovisioning",
 		DedupeValues:   []string{node.Name},
 	}
@@ -56,7 +56,7 @@ func WaitingOnDeletion(node *v1.Node) events.Event {
 	return events.Event{
 		InvolvedObject: node,
 		Type:           v1.EventTypeNormal,
-		Reason:         "DeprovisioningWaiting",
+		Reason:         "DeprovisioningWaitingDeletion",
 		Message:        "Waiting on deletion to continue deprovisioning",
 		DedupeValues:   []string{node.Name},
 	}

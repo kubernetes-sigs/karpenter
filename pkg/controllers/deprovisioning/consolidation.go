@@ -39,8 +39,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
-// Controller is the consolidation controller.  It is not a standard controller-runtime controller in that it doesn't
-// have a reconcile method.
+// Consolidation is the consolidation controller.
 type Consolidation struct {
 	kubeClient    client.Client
 	cluster       *state.Cluster
@@ -49,8 +48,6 @@ type Consolidation struct {
 	clock         clock.Clock
 	cloudProvider cloudprovider.CloudProvider
 }
-
-const consolidationName = "consolidation"
 
 func NewConsolidation(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
 	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster) *Consolidation {
@@ -64,13 +61,13 @@ func NewConsolidation(clk clock.Clock, kubeClient client.Client, provisioner *pr
 	}
 }
 
-// Skip nodes with consolidation disabled or are annotated as do-not-consolidate
+// shouldNotBeDeprovisioned is a predicate used to filter deprovisionable nodes
 func (c *Consolidation) shouldNotBeDeprovisioned(_ context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, _ []*v1.Pod) bool {
 	return provisioner == nil || provisioner.Spec.Consolidation == nil || !ptr.BoolValue(provisioner.Spec.Consolidation.Enabled) ||
 		n.Node.Annotations[v1alpha5.DoNotConsolidateNodeAnnotationKey] == "true"
 }
 
-// Sorts candidateNodes by disruption cost
+// sortCandidates orders deprovisionable nodes by the disruptionCost
 func (c *Consolidation) sortCandidates(nodes []candidateNode) []candidateNode {
 	sort.Slice(nodes, func(i int, j int) bool {
 		return nodes[i].disruptionCost < nodes[j].disruptionCost
@@ -78,8 +75,11 @@ func (c *Consolidation) sortCandidates(nodes []candidateNode) []candidateNode {
 	return nodes
 }
 
+// computeCommand generates a deprovisioning command given deprovisionable nodes
+//
 //nolint:gocyclo
 func (c *Consolidation) computeCommand(ctx context.Context, attempt int, candidates ...candidateNode) (deprovisioningCommand, error) {
+	// First delete any empty nodes we see
 	if attempt == 0 {
 		emptyNodes := lo.Filter(candidates, func(n candidateNode, _ int) bool { return len(n.pods) == 0 })
 		if len(emptyNodes) != 0 {
@@ -175,6 +175,7 @@ func (c *Consolidation) computeCommand(ctx context.Context, attempt int, candida
 	}, nil
 }
 
+// validateCommand validates a command for a deprovisioner
 func (c *Consolidation) validateCommand(ctx context.Context, nodesToDelete []candidateNode, cmd deprovisioningCommand) (bool, error) {
 	if cmd.action == actionDeleteEmpty {
 		return c.validateDeleteEmpty(nodesToDelete)
@@ -234,21 +235,20 @@ func (c *Consolidation) validateCommand(ctx context.Context, nodesToDelete []can
 	return true, nil
 }
 
+// isExecutableCommand checks that a command can be executed by the deprovisioner
 func (c *Consolidation) isExecutableCommand(cmd deprovisioningCommand) bool {
 	return len(cmd.nodesToRemove) > 0 && (cmd.action == actionDeleteConsolidation ||
 		cmd.action == actionReplaceConsolidation || cmd.action == actionDeleteEmpty)
 }
 
-func (c *Consolidation) string() string {
-	return consolidationName
-}
-
+// getTTL returns the time to wait for a deprovisioner's validation
 func (c *Consolidation) getTTL() time.Duration {
 	return 15 * time.Second
 }
 
-func (c *Consolidation) deprovisionIncrementally() bool {
-	return true
+// string is the string representation of the deprovisioner
+func (c *Consolidation) string() string {
+	return metrics.ConsolidationReason
 }
 
 func canBeTerminated(node candidateNode, pdbs *PDBLimits) error {

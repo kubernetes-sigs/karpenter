@@ -60,12 +60,10 @@ type deprovisioner interface {
 	shouldNotBeDeprovisioned(context.Context, *state.Node, *v1alpha5.Provisioner, []*v1.Pod) bool
 	// sortCandidates orders deprovisionable nodes by the deprovisioner's pre-determined priority
 	sortCandidates([]candidateNode) []candidateNode
-	// computeCommand generates a deprovisioning command for a list of deprovisionable nodes
+	// computeCommand generates a deprovisioning command given deprovisionable nodes
 	computeCommand(context.Context, int, ...candidateNode) (deprovisioningCommand, error)
-	// validateCommand waits a deprovisioner's TTL and ensures command is valid
+	// validateCommand validates a command for a deprovisioner
 	validateCommand(context.Context, []candidateNode, deprovisioningCommand) (bool, error)
-	// deprovisionIncrementally is true if a deprovisioner should only consider one node at a time
-	deprovisionIncrementally() bool
 	// isExecutableCommand checks that a command can be executed by the deprovisioner
 	isExecutableCommand(deprovisioningCommand) bool
 	// getTTL returns the time to wait for a deprovisioner's validation
@@ -74,10 +72,10 @@ type deprovisioner interface {
 	string() string
 }
 
-type deprovisioningAction byte
+type action byte
 
 const (
-	actionUnknown deprovisioningAction = iota
+	actionUnknown action = iota
 	actionNotPossible
 	actionDeleteConsolidation
 	actionReplaceConsolidation
@@ -86,7 +84,7 @@ const (
 	actionFailed
 )
 
-func (a deprovisioningAction) getMetricsReasonName() string {
+func (a action) getMetricsReasonName() string {
 	if a == actionDeleteConsolidation || a == actionReplaceConsolidation {
 		return metrics.ConsolidationReason
 	} else if a == actionDeleteEmpty {
@@ -95,11 +93,11 @@ func (a deprovisioningAction) getMetricsReasonName() string {
 	return ""
 }
 
-func (a deprovisioningAction) needsReplacement() bool {
+func (a action) needsReplacement() bool {
 	return a == actionReplaceConsolidation
 }
 
-func (a deprovisioningAction) String() string {
+func (a action) String() string {
 	switch a {
 	case actionUnknown:
 		return "Unknown"
@@ -122,7 +120,7 @@ func (a deprovisioningAction) String() string {
 
 type deprovisioningCommand struct {
 	nodesToRemove   []*v1.Node
-	action          deprovisioningAction
+	action          action
 	replacementNode *scheduling.Node
 	created         time.Time
 }

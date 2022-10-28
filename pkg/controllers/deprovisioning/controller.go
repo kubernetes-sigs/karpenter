@@ -17,7 +17,6 @@ package deprovisioning
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"sync"
 	"time"
 
@@ -26,7 +25,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
@@ -35,7 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
@@ -87,13 +86,9 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 	}
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.NewSingletonManagedBy(m).
+func (c *Controller) Builder(_ context.Context, m manager.Manager) controller.Builder {
+	return controller.NewSingletonManagedBy(m).
 		Named("deprovisioning")
-}
-
-func (c *Controller) LivenessProbe(_ *http.Request) error {
-	return nil
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
@@ -184,14 +179,11 @@ func (c *Controller) executeDeprovisioning(ctx context.Context, d deprovisioner,
 		if err != nil {
 			return ResultFailed, err
 		}
-		logging.FromContext(ctx).Debugf("This is the time of command creation, %s for deprovisioner %s", cmd.created, d.string())
-		logging.FromContext(ctx).Debugf("This is the time before validation, %s", c.clock.Now())
 		// Validate the command with a TTL
 		ok, err := c.validateCommand(ctx, cmd, d)
 		if err != nil {
 			return ResultFailed, fmt.Errorf("validating command, %w", err)
 		}
-		logging.FromContext(ctx).Debugf("This is the time after validation, %s", c.clock.Now())
 		// If validation succeeds, execute the command. Otherwise, we need to compute another command and
 		// try the rest of the candidate nodes. If any of the remaining candidateNodes are still valid
 		// for an action, continue with deprovisioning, even though we might not be taking the most optimal decision.
@@ -395,7 +387,7 @@ func (c *Controller) waitForDeletion(ctx context.Context, node *v1.Node) {
 		var n v1.Node
 		nerr := c.kubeClient.Get(ctx, client.ObjectKey{Name: node.Name}, &n)
 		// We expect the not node found error, at which point we know the node is deleted.
-		if apierrors.IsNotFound(nerr) {
+		if errors.IsNotFound(nerr) {
 			return nil
 		}
 		// make the user aware of why deprovisioning is paused
