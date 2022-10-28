@@ -19,7 +19,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"knative.dev/pkg/webhook/resourcesemantics"
 
-	"github.com/aws/karpenter-core/pkg/apis/config"
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/utils/sets"
@@ -36,7 +35,5 @@ var (
 	Resources = map[schema.GroupVersionKind]resourcesemantics.GenericCRD{
 		v1alpha5.SchemeGroupVersion.WithKind("Provisioner"): &v1alpha5.Provisioner{},
 	}
-	Settings = sets.New[*config.Registration](
-		settings.Registration,
-	)
+	Settings = sets.New(settings.Registration)
 )

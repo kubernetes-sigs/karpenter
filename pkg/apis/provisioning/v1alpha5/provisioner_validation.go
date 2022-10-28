@@ -66,7 +66,6 @@ func (p *Provisioner) Validate(ctx context.Context) (errs *apis.FieldError) {
 	return errs.Also(
 		apis.ValidateObjectMetadata(p).ViaField("metadata"),
 		p.Spec.validate(ctx).ViaField("spec"),
-		ValidateHook(ctx, p),
 	)
 }
 

@@ -40,8 +40,8 @@ func NewWebhooks() []knativeinjection.ControllerConstructor {
 
 func NewCRDDefaultingWebhook(ctx context.Context, w configmap.Watcher) *controller.Impl {
 	return defaulting.NewAdmissionController(ctx,
-		"defaulting.webhook.provisioners.karpenter.sh",
-		"/default-resource",
+		"defaulting.webhook.karpenter.sh",
+		"/default/karpenter.sh",
 		apis.Resources,
 		InjectContext,
 		true,
@@ -50,8 +50,8 @@ func NewCRDDefaultingWebhook(ctx context.Context, w configmap.Watcher) *controll
 
 func NewCRDValidationWebhook(ctx context.Context, w configmap.Watcher) *controller.Impl {
 	return validation.NewAdmissionController(ctx,
-		"validation.webhook.provisioners.karpenter.sh",
-		"/validate-resource",
+		"validation.webhook.karpenter.sh",
+		"/validate/karpenter.sh",
 		apis.Resources,
 		InjectContext,
 		true,
@@ -61,7 +61,7 @@ func NewCRDValidationWebhook(ctx context.Context, w configmap.Watcher) *controll
 func NewConfigValidationWebhook(ctx context.Context, cmw configmap.Watcher) *controller.Impl {
 	return configmaps.NewAdmissionController(ctx,
 		"validation.webhook.config.karpenter.sh",
-		"/config-validation",
+		"/validate/config.karpenter.sh",
 		configmap.Constructors{
 			logging.ConfigMapName(): logging.NewConfigFromConfigMap,
 		},

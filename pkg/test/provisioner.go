@@ -15,7 +15,6 @@ limitations under the License.
 package test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 
@@ -63,16 +62,6 @@ func Provisioner(overrides ...ProvisionerOptions) *v1alpha5.Provisioner {
 	if options.Limits == nil {
 		options.Limits = v1.ResourceList{v1.ResourceCPU: resource.MustParse("2000")}
 	}
-
-	// Default to on-demand capacity-type if not specified, rather than spot & OD
-	if len(lo.Filter(options.Requirements, func(req v1.NodeSelectorRequirement, _ int) bool { return req.Key == v1alpha5.LabelCapacityType })) == 0 {
-		options.Requirements = append(options.Requirements, v1.NodeSelectorRequirement{
-			Key:      v1alpha5.LabelCapacityType,
-			Operator: v1.NodeSelectorOpIn,
-			Values:   []string{v1alpha5.CapacityTypeOnDemand},
-		})
-	}
-
 	raw := &runtime.RawExtension{}
 	ExpectWithOffset(1, raw.UnmarshalJSON(lo.Must(json.Marshal(options.Provider)))).To(Succeed())
 
@@ -105,6 +94,5 @@ func Provisioner(overrides ...ProvisionerOptions) *v1alpha5.Provisioner {
 		}
 		provisioner.Spec.Provider = &runtime.RawExtension{Raw: provider}
 	}
-	provisioner.SetDefaults(context.Background())
 	return provisioner
 }
