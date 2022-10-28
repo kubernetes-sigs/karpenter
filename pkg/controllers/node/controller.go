@@ -52,6 +52,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 		cluster:        cluster,
 		emptiness:      &Emptiness{kubeClient: kubeClient, clock: clk, cluster: cluster},
 		initialization: &Initialization{kubeClient: kubeClient, cloudProvider: cloudProvider},
+		expiration:     &Expiration{kubeClient: kubeClient, clock: clk},
 	}
 }
 
@@ -63,6 +64,7 @@ type Controller struct {
 	initialization *Initialization
 	finalizer      *Finalizer
 	emptiness      *Emptiness
+	expiration     *Expiration
 }
 
 // Reconcile executes a reallocation control loop for the resource
@@ -95,6 +97,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}{
 		c.initialization,
 		c.emptiness,
+		c.expiration,
 		c.finalizer,
 	} {
 		res, err := reconciler.Reconcile(ctx, provisioner, node)

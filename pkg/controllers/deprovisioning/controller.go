@@ -23,9 +23,11 @@ import (
 
 	"github.com/avast/retry-go"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -504,4 +506,16 @@ func (c *Controller) setNodeUnschedulable(ctx context.Context, nodeName string, 
 		return fmt.Errorf("patching node %s, %w", node.Name, err)
 	}
 	return nil
+}
+
+// mapNodes maps from a list of *v1.Node to candidateNode
+func (c *Controller) mapNodes(nodes []*v1.Node, candidateNodes []candidateNode) []candidateNode {
+	verifyNodeNames := sets.NewString(lo.Map(nodes, func(t *v1.Node, i int) string { return t.Name })...)
+	var ret []candidateNode
+	for _, c := range candidateNodes {
+		if verifyNodeNames.Has(c.Name) {
+			ret = append(ret, c)
+		}
+	}
+	return ret
 }

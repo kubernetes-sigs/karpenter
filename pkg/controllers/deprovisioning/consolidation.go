@@ -273,3 +273,43 @@ func (c *Consolidation) validateDeleteEmpty(nodesToDelete []CandidateNode) bool 
 	}
 	return true
 }
+
+func canBeTerminated(node candidateNode, pdbs *PDBLimits) error {
+	if !node.DeletionTimestamp.IsZero() {
+		return fmt.Errorf("already being deleted")
+	}
+	if !pdbs.CanEvictPods(node.pods) {
+		return fmt.Errorf("not eligible for termination due to PDBs")
+	}
+	return podsPreventEviction(node)
+}
+
+func podsPreventEviction(node candidateNode) error {
+	for _, p := range node.pods {
+		// don't care about pods that are finishing, finished or owned by the node
+		if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
+			continue
+		}
+
+		if pod.HasDoNotEvict(p) {
+			return fmt.Errorf("found do-not-evict pod")
+		}
+
+		if pod.IsNotOwned(p) {
+			return fmt.Errorf("found pod with no controller")
+		}
+	}
+	return nil
+}
+
+// validateDeleteEmpty validates that the given nodes are still empty
+func (c *Consolidation) validateDeleteEmpty(nodesToDelete []candidateNode) (bool, error) {
+	// the deletion of empty nodes is easy to validate, we just ensure that all the nodesToDelete are still empty and that
+	// the node isn't a target of a recent scheduling simulation
+	for _, n := range nodesToDelete {
+		if len(n.pods) != 0 && !c.cluster.IsNodeNominated(n.Name) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
