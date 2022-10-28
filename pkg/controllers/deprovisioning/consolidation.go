@@ -23,7 +23,6 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -95,6 +94,7 @@ func (c *Consolidation) computeCommand(ctx context.Context, attempt int, candida
 	if attempt >= len(candidates) {
 		return deprovisioningCommand{action: actionDoNothing}, nil
 	}
+
 	node := candidates[attempt]
 
 	pdbs, err := NewPDBLimits(ctx, c.kubeClient)
@@ -103,8 +103,7 @@ func (c *Consolidation) computeCommand(ctx context.Context, attempt int, candida
 	}
 	// is this a node that we can terminate?  This check is meant to be fast so we can save the expense of simulated
 	// scheduling unless its really needed
-	if err = canBeTerminated(node, pdbs); err != nil {
-		logging.FromContext(ctx).Debugf("cannot deprovision node %w", err)
+	if !canBeTerminated(node, pdbs) {
 		return deprovisioningCommand{action: actionNotPossible}, nil
 	}
 
@@ -251,17 +250,12 @@ func (c *Consolidation) string() string {
 	return metrics.ConsolidationReason
 }
 
-func canBeTerminated(node candidateNode, pdbs *PDBLimits) error {
-	if !node.DeletionTimestamp.IsZero() {
-		return fmt.Errorf("already being deleted")
-	}
-	if !pdbs.CanEvictPods(node.pods) {
-		return fmt.Errorf("not eligible for termination due to PDBs")
-	}
-	return podsPreventEviction(node)
+func canBeTerminated(node candidateNode, pdbs *PDBLimits) bool {
+	return node.DeletionTimestamp.IsZero() && pdbs.CanEvictPods(node.pods) && !podsPreventEviction(node)
 }
 
-func podsPreventEviction(node candidateNode) error {
+// podsPreventEviction returns true if there are pods that would prevent eviction
+func podsPreventEviction(node candidateNode) bool {
 	for _, p := range node.pods {
 		// don't care about pods that are finishing, finished or owned by the node
 		if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
@@ -269,14 +263,14 @@ func podsPreventEviction(node candidateNode) error {
 		}
 
 		if pod.HasDoNotEvict(p) {
-			return fmt.Errorf("found do-not-evict pod")
+			return true
 		}
 
 		if pod.IsNotOwned(p) {
-			return fmt.Errorf("found pod with no controller")
+			return true
 		}
 	}
-	return nil
+	return false
 }
 
 // validateDeleteEmpty validates that the given nodes are still empty

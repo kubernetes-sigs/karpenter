@@ -830,7 +830,7 @@ var _ = Describe("Delete Node", func() {
 
 		// we don't need a new node
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
-		// but we expect to delete the nmode with more pods (node1) as the pod on node2 has a PDB preventing
+		// but we expect to delete the node with more pods (node1) as the pod on node2 has a PDB preventing
 		// eviction
 		ExpectNotFound(ctx, env.Client, node1)
 	})

@@ -30,6 +30,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
 // Emptiness is a subreconciler that deletes empty nodes.
@@ -40,30 +41,22 @@ type Emptiness struct {
 	cluster    *state.Cluster
 }
 
-const emptinessName = "emptiness"
-
 // shouldNotBeDeprovisioned is a predicate used to filter deprovisionable nodes
 func (e *Emptiness) shouldNotBeDeprovisioned(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, nodePods []*v1.Pod) bool {
 	if provisioner == nil || provisioner.Spec.TTLSecondsAfterEmpty == nil {
 		return true
 	}
 
-	// If TTLSecondsAfterEmpty is used, we know the node will have an emptiness timestamp
-	if provisioner.Spec.TTLSecondsAfterEmpty != nil {
-		emptinessTimestamp, hasEmptinessTimestamp := n.Node.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
-		ttl := time.Duration(ptr.Int64Value(provisioner.Spec.TTLSecondsAfterEmpty)) * time.Second
+	emptinessTimestamp, hasEmptinessTimestamp := n.Node.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
+	ttl := time.Duration(ptr.Int64Value(provisioner.Spec.TTLSecondsAfterEmpty)) * time.Second
 
-		emptinessTime, err := time.Parse(time.RFC3339, emptinessTimestamp)
-		if err != nil {
-			logging.FromContext(ctx).Debugf("Unable to parse emptiness timestamp, %s for node %s", emptinessTimestamp, n.Node.Name)
-			return true
-		}
-		// Don't deprovision if node is not empty, does not have the emptiness timestamp, or is before the emptiness TTL
-		return len(nodePods) != 0 || !hasEmptinessTimestamp || !e.clock.Now().After(emptinessTime.Add(ttl))
+	emptinessTime, err := time.Parse(time.RFC3339, emptinessTimestamp)
+	if err != nil {
+		logging.FromContext(ctx).Debugf("Unable to parse emptiness timestamp, %s for node %s", emptinessTimestamp, n.Node.Name)
+		return true
 	}
-
-	// For Consolidation, all we care about is if the node is empty
-	return len(nodePods) != 0
+	// Don't deprovision if node is not empty, does not have the emptiness timestamp, or is before the emptiness TTL
+	return len(nodePods) != 0 || !hasEmptinessTimestamp || !e.clock.Now().After(emptinessTime.Add(ttl))
 }
 
 // sortCandidates orders deprovisionable nodes by the disruptionCost
@@ -112,5 +105,5 @@ func (e *Emptiness) getTTL() time.Duration {
 
 // string is the string representation of the deprovisioner
 func (e *Emptiness) string() string {
-	return emptinessName
+	return metrics.EmptinessReason
 }

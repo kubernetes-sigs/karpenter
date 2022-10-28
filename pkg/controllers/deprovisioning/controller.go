@@ -17,6 +17,7 @@ package deprovisioning
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -91,6 +92,10 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) controller.Bu
 		Named("deprovisioning")
 }
 
+func (c *Controller) LivenessProbe(_ *http.Request) error {
+	return nil
+}
+
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
 	// the last cluster consolidation wasn't able to improve things and nothing has changed regarding
 	// the cluster that makes us think we would be successful now
@@ -144,7 +149,6 @@ func (c *Controller) ProcessCluster(ctx context.Context) (Result, error) {
 		}
 		// Sort candidates by each deprovisioner's priority, and deprovision the first one possible
 		candidates = d.sortCandidates(candidates)
-
 		result, err = c.executeDeprovisioning(ctx, d, candidates...)
 		if err != nil {
 			logging.FromContext(ctx).Errorf("deprovisioning nodes, %s", err)
@@ -240,6 +244,36 @@ func (c *Controller) validateCommand(ctx context.Context, cmd deprovisioningComm
 		return false, nil
 	}
 	return true, nil
+}
+
+func (c *Controller) executeCommand(ctx context.Context, command deprovisioningCommand) (Result, error) {
+	deprovisioningActionsPerformedCounter.With(prometheus.Labels{"action": command.action.String()}).Add(1)
+	// action's stringer
+	logging.FromContext(ctx).Infof("Deprovisioning via %s", command.action.String())
+
+	if command.action.needsReplacement() {
+		if err := c.launchReplacementNode(ctx, command); err != nil {
+			// If we failed to launch the replacement, don't deprovision.  If this is some permanent failure,
+			// we don't want to disrupt workloads with no way to provision new nodes for them.
+			return ResultFailed, fmt.Errorf("launching replacement node, %w", err)
+		}
+	}
+
+	for _, oldNode := range command.nodesToRemove {
+		c.recorder.Publish(TerminatingNode(oldNode, command.String()))
+		if err := c.kubeClient.Delete(ctx, oldNode); err != nil {
+			logging.FromContext(ctx).Errorf("Deleting node, %s", err)
+		} else {
+			metrics.NodesTerminatedCounter.WithLabelValues(command.action.getMetricsReasonName()).Inc()
+		}
+	}
+
+	// We wait for nodes to delete to ensure we don't start another round of deprovisioning until this node is fully
+	// deleted.
+	for _, oldnode := range command.nodesToRemove {
+		c.waitForDeletion(ctx, oldnode)
+	}
+	return ResultSuccess, nil
 }
 
 // candidateNodes returns nodes that appear to be currently deprovisionable based off of their provisioner
@@ -347,36 +381,6 @@ func (c *Controller) buildProvisionerMap(ctx context.Context) (map[string]*v1alp
 		}
 	}
 	return provisioners, instanceTypesByProvisioner, nil
-}
-
-func (c *Controller) executeCommand(ctx context.Context, command deprovisioningCommand) (Result, error) {
-	deprovisioningActionsPerformedCounter.With(prometheus.Labels{"action": command.action.String()}).Add(1)
-	// action's stringer
-	logging.FromContext(ctx).Infof("Deprovisioning via %s", command.action.String())
-
-	if command.action.needsReplacement() {
-		if err := c.launchReplacementNode(ctx, command); err != nil {
-			// If we failed to launch the replacement, don't deprovision.  If this is some permanent failure,
-			// we don't want to disrupt workloads with no way to provision new nodes for them.
-			return ResultFailed, fmt.Errorf("launching replacement node, %w", err)
-		}
-	}
-
-	for _, oldNode := range command.nodesToRemove {
-		c.recorder.Publish(TerminatingNode(oldNode, command.String()))
-		if err := c.kubeClient.Delete(ctx, oldNode); err != nil {
-			logging.FromContext(ctx).Errorf("Deleting node, %s", err)
-		} else {
-			metrics.NodesTerminatedCounter.WithLabelValues(command.action.getMetricsReasonName()).Inc()
-		}
-	}
-
-	// We wait for nodes to delete to ensure we don't start another round of deprovisioning until this node is fully
-	// deleted.
-	for _, oldnode := range command.nodesToRemove {
-		c.waitForDeletion(ctx, oldnode)
-	}
-	return ResultSuccess, nil
 }
 
 // waitForDeletion waits for the specified node to be removed from the API server. This deletion can take some period
