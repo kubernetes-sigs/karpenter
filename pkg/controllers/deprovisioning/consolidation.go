@@ -284,7 +284,8 @@ func canBeTerminated(node candidateNode, pdbs *PDBLimits) error {
 	return podsPreventEviction(node)
 }
 
-func podsPreventEviction(node candidateNode) error {
+// podsPreventEviction returns true if there are pods that would prevent eviction
+func podsPreventEviction(node candidateNode) bool {
 	for _, p := range node.pods {
 		// don't care about pods that are finishing, finished or owned by the node
 		if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
@@ -292,14 +293,14 @@ func podsPreventEviction(node candidateNode) error {
 		}
 
 		if pod.HasDoNotEvict(p) {
-			return fmt.Errorf("found do-not-evict pod")
+			return true
 		}
 
 		if pod.IsNotOwned(p) {
-			return fmt.Errorf("found pod with no controller")
+			return true
 		}
 	}
-	return nil
+	return false
 }
 
 // validateDeleteEmpty validates that the given nodes are still empty
