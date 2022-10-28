@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"time"
 
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 
 	v1 "k8s.io/api/core/v1"
@@ -30,11 +29,11 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 )
 
-// Emptiness is a subreconciler that deletes nodes that are empty after a ttl
+// Emptiness is a subreconciler that deletes empty nodes.
+// Emptiness will respect TTLSecondsAfterEmpty
 type Emptiness struct {
 	kubeClient client.Client
 	clock      clock.Clock
@@ -43,21 +42,40 @@ type Emptiness struct {
 
 const emptinessName = "emptiness"
 
-func (e *Emptiness) shouldNotBeDeprovisioned(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, pods []*v1.Pod) bool {
+func (e *Emptiness) shouldNotBeDeprovisioned(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, nodePods []*v1.Pod) bool {
 	if provisioner == nil || provisioner.Spec.TTLSecondsAfterEmpty == nil {
 		return true
 	}
 
-	emptinessTimestamp, hasEmptinessTimestamp := n.Node.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
-	ttl := time.Duration(ptr.Int64Value(provisioner.Spec.TTLSecondsAfterEmpty)) * time.Second
+	// If TTLSecondsAfterEmpty is used, we know the node will have an emptiness timestamp
+	if provisioner.Spec.TTLSecondsAfterEmpty != nil {
+		emptinessTimestamp, hasEmptinessTimestamp := n.Node.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
+		ttl := time.Duration(ptr.Int64Value(provisioner.Spec.TTLSecondsAfterEmpty)) * time.Second
 
-	emptinessTime, err := time.Parse(time.RFC3339, emptinessTimestamp)
-	if err != nil {
-		logging.FromContext(ctx).Debugf("Unable to parse emptiness timestamp, %s for node %s", emptinessTimestamp, n.Node.Name)
-		return true
+		emptinessTime, err := time.Parse(time.RFC3339, emptinessTimestamp)
+		if err != nil {
+			logging.FromContext(ctx).Debugf("Unable to parse emptiness timestamp, %s for node %s", emptinessTimestamp, n.Node.Name)
+			return true
+		}
+		// Don't deprovision if node is not empty, does not have the emptiness timestamp, or is before the emptiness TTL
+		return len(nodePods) != 0 || !hasEmptinessTimestamp || !e.clock.Now().After(emptinessTime.Add(ttl))
 	}
-	// node is not empty, does not have the emptiness timestamp, or is before the emptiness TTL
-	return len(pods) != 0 || !hasEmptinessTimestamp || !e.clock.Now().After(emptinessTime.Add(ttl))
+
+	// For Consolidation, all we care about is if the node is empty
+	return len(nodePods) != 0
+}
+
+// computeCommand will always return deprovisioningActionDeleteEmpty as it is the only possible command for emptiness
+func (e *Emptiness) computeCommand(_ context.Context, _ int, nodes ...candidateNode) (deprovisioningCommand, error) {
+	emptyNodes := lo.Filter(nodes, func(n candidateNode, _ int) bool { return len(n.pods) == 0 })
+	if len(emptyNodes) == 0 {
+		return deprovisioningCommand{action: actionDoNothing}, nil
+	}
+	return deprovisioningCommand{
+		nodesToRemove: lo.Map(emptyNodes, func(n candidateNode, _ int) *v1.Node { return n.Node }),
+		action:        actionDeleteEmpty,
+		created:       e.clock.Now(),
+	}, nil
 }
 
 // Any empty node is equally prioritized since disruption cost is the same
@@ -65,25 +83,12 @@ func (e *Emptiness) sortCandidates(nodes []candidateNode) []candidateNode {
 	return nodes
 }
 
-// computeCommand will always return deprovisioningActionDeleteEmpty as it is the only possible command for emptiness
-func (e *Emptiness) computeCommand(_ context.Context, nodes ...candidateNode) (DeprovisioningCommand, error) {
-	emptyNodes := lo.Filter(nodes, func(n candidateNode, _ int) bool { return len(n.pods) == 0})
-	if len(emptyNodes) == 0 {
-		return DeprovisioningCommand{action: deprovisioningActionDoNothing}, nil
-	}
-	return DeprovisioningCommand{
-		nodesToRemove: lo.Map(emptyNodes, func(n candidateNode, _ int) *v1.Node { return n.Node }),
-		action:        deprovisioningActionDeleteEmpty,
-		created:       e.clock.Now(),
-	}, nil
+func (e *Emptiness) isExecutableCommand(cmd deprovisioningCommand) bool {
+	return len(cmd.nodesToRemove) > 0 && cmd.action == actionDeleteEmpty
 }
 
-func (e *Emptiness) isExecutableCommand(cmd DeprovisioningCommand) bool {
-	return len(cmd.nodesToRemove) > 0 && cmd.action == deprovisioningActionDeleteEmpty
-}
-
-func (e *Emptiness) validateCommand(_ context.Context, candidateNodes []candidateNode, replacementNode *pscheduling.Node) (bool, error) {
-	if replacementNode != nil {
+func (e *Emptiness) validateCommand(_ context.Context, candidateNodes []candidateNode, cmd deprovisioningCommand) (bool, error) {
+	if cmd.replacementNode != nil {
 		return false, fmt.Errorf("expected no replacement node for emptiness")
 	}
 	// the deletion of empty nodes is easy to validate, we just ensure that all the nodesToDelete are still empty and that
@@ -94,18 +99,6 @@ func (e *Emptiness) validateCommand(_ context.Context, candidateNodes []candidat
 		}
 	}
 	return true, nil
-}
-
-// mapNodes maps from a list of *v1.Node to candidateNode
-func (e *Emptiness) mapNodes(nodes []*v1.Node, candidateNodes []candidateNode) ([]candidateNode, error) {
-	verifyNodeNames := sets.NewString(lo.Map(nodes, func(t *v1.Node, i int) string { return t.Name })...)
-	var ret []candidateNode
-	for _, c := range candidateNodes {
-		if verifyNodeNames.Has(c.Name) {
-			ret = append(ret, c)
-		}
-	}
-	return ret, nil
 }
 
 func (e *Emptiness) string() string {

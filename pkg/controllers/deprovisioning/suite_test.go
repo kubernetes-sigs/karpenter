@@ -218,8 +218,7 @@ var _ = Describe("Replace Nodes", func() {
 				}}})
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -287,8 +286,7 @@ var _ = Describe("Replace Nodes", func() {
 		})
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		node1 := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -465,8 +463,7 @@ var _ = Describe("Replace Nodes", func() {
 				}}})
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -561,8 +558,7 @@ var _ = Describe("Replace Nodes", func() {
 
 		// provisioner should require on-demand instance for this test case
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 			Requirements: []v1.NodeSelectorRequirement{
 				{
 					Key:      v1alpha5.LabelCapacityType,
@@ -617,8 +613,7 @@ var _ = Describe("Replace Nodes", func() {
 				}}})
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -695,8 +690,7 @@ var _ = Describe("Delete Node", func() {
 				}}})
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		node1 := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -787,8 +781,7 @@ var _ = Describe("Delete Node", func() {
 		})
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		node1 := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -866,8 +859,7 @@ var _ = Describe("Delete Node", func() {
 		}
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		node1 := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -942,8 +934,7 @@ var _ = Describe("Delete Node", func() {
 		pods[2].OwnerReferences = nil
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		node1 := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1023,7 +1014,6 @@ var _ = Describe("Node Lifetime Consideration", func() {
 
 		prov := test.Provisioner(test.ProvisionerOptions{
 			Consolidation:          &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty:   ptr.Int64(0),
 			TTLSecondsUntilExpired: ptr.Int64(3),
 		})
 		node1 := test.Node(test.NodeOptions{
@@ -1119,8 +1109,7 @@ var _ = Describe("Topology Consideration", func() {
 		testZone3Instance := leastExpensiveInstanceWithZone("test-zone-3")
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		zone1Node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1225,8 +1214,7 @@ var _ = Describe("Topology Consideration", func() {
 		testZone3Instance := leastExpensiveInstanceWithZone("test-zone-3")
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		zone1Node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1502,8 +1490,7 @@ var _ = Describe("Parallelization", func() {
 				}}})
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 
 		// Add a finalizer to the node so that it sticks around for the scheduling loop
@@ -1559,8 +1546,7 @@ var _ = Describe("Parallelization", func() {
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		podOpts := test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1634,7 +1620,7 @@ var _ = Describe("Parallelization", func() {
 		fakeClock.Step(10 * time.Minute)
 		result, err := controller.ProcessCluster(env.Ctx)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(result).To(Equal(consolidation.DeprovisioningResultNothingToDo))
+		Expect(result).To(Equal(deprovisioning.ResultNothingToDo))
 	})
 })
 

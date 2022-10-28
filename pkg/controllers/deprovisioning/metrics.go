@@ -31,7 +31,7 @@ var deprovisioningDurationHistogram = prometheus.NewHistogramVec(
 	prometheus.HistogramOpts{
 		Namespace: metrics.Namespace,
 		Subsystem: "deprovisioning",
-		Name:      "consolidation_evaluation_duration_seconds",
+		Name:      "deprovisioning_evaluation_duration_seconds",
 		Help:      "Duration of the consolidation evaluation process in seconds.",
 		Buckets:   metrics.DurationBuckets(),
 	},

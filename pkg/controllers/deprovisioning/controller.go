@@ -38,25 +38,24 @@ import (
 	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	consolidationevents "github.com/aws/karpenter-core/pkg/controllers/consolidation/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
-	"github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
 // Controller is the deprovisioning controller.
 type Controller struct {
-	kubeClient    client.Client
-	cluster       *state.Cluster
-	provisioner   *provisioning.Provisioner
-	recorder      events.Recorder
-	clock         clock.Clock
-	cloudProvider cloudprovider.CloudProvider
-	emptiness     *Emptiness
-	consolidation *Consolidation
+	kubeClient             client.Client
+	cluster                *state.Cluster
+	provisioner            *provisioning.Provisioner
+	recorder               events.Recorder
+	clock                  clock.Clock
+	cloudProvider          cloudprovider.CloudProvider
+	emptiness              *Emptiness
+	consolidation          *Consolidation
+	lastConsolidationState int64
 }
 
 // pollingPeriod that we inspect cluster to look for opportunities to deprovision
@@ -98,11 +97,19 @@ func (c *Controller) LivenessProbe(_ *http.Request) error {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
+	// the last cluster consolidation wasn't able to improve things and nothing has changed regarding
+	// the cluster that makes us think we would be successful now
+	if c.lastConsolidationState == c.cluster.ClusterConsolidationState() {
+		return reconcile.Result{RequeueAfter: pollingPeriod}, nil
+	}
+
 	result, err := c.ProcessCluster(ctx)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("deprovisioning cluster, %w", err)
-	} else if result == DeprovisioningResultRetry {
+	} else if result == ResultRetry {
 		return reconcile.Result{Requeue: true}, nil
+	} else if result == ResultNothingToDo {
+		c.lastConsolidationState = c.cluster.ClusterConsolidationState()
 	}
 	return reconcile.Result{RequeueAfter: pollingPeriod}, nil
 }
@@ -120,18 +127,21 @@ type candidateNode struct {
 }
 
 // ProcessCluster is exposed for unit testing purposes
-func (c *Controller) ProcessCluster(ctx context.Context) (DeprovisioningResult, error) {
+// ProcessCluster loops through implemented deprovisioners
+// nolint:gocyclo
+func (c *Controller) ProcessCluster(ctx context.Context) (Result, error) {
 	// range over the different deprovisioning methods. We'll only let one method perform an action
 	for _, d := range []deprovisioner{
+		// Emptiness and Consolidation are mutually exclusive, so this loop only executes one deprovisioner
 		c.emptiness,
 		c.consolidation,
 	} {
-		var result DeprovisioningResult
+		var result Result
 		var err error
 		// Capture new cluster state before each attempt
 		candidates, err := c.candidateNodes(ctx, d.shouldNotBeDeprovisioned)
 		if err != nil {
-			return DeprovisioningResultFailed, fmt.Errorf("determining candidate nodes, %w", err)
+			return ResultFailed, fmt.Errorf("determining candidate nodes, %w", err)
 		}
 		// If there are no candidate nodes, move to the next deprovisioner
 		if len(candidates) == 0 {
@@ -140,58 +150,71 @@ func (c *Controller) ProcessCluster(ctx context.Context) (DeprovisioningResult, 
 		// Sort candidates by each deprovisioner's priority, and deprovision the first one possible
 		candidates = d.sortCandidates(candidates)
 
-		if !d.deprovisionIncrementally() {
-			result, err = c.executeDeprovisioning(ctx, d, candidates...)
-			if err != nil {
-				return result, err
-			}
-		} else {
-			for _, node := range candidates {
-				result, err = c.executeDeprovisioning(ctx, d, node)
-				if err != nil {
-					logging.FromContext(ctx).Errorf("deprovisioning nodes, %s", err)
-					continue
-				}
-				// Return if success, continue to other nodes otherwise.
-				if result == DeprovisioningResultSuccess {
-					return result, nil
-				}
-			}
+		result, err = c.executeDeprovisioning(ctx, d, candidates...)
+		if err != nil {
+			logging.FromContext(ctx).Errorf("deprovisioning nodes, %s", err)
+			continue
+		}
+		if result == ResultRetry {
+			return ResultRetry, nil
+		}
+		// Return if success, continue to other nodes otherwise.
+		if result == ResultSuccess {
+			return result, nil
 		}
 		// Continue to next deprovisioner if nothing was done
-		if result == DeprovisioningResultNothingToDo {
+		if result == ResultNothingToDo {
 			continue
 		}
 		return result, nil
 	}
 	// All deprovisioners did nothing, so return nothing to do
-	return DeprovisioningResultNothingToDo, nil
+	return ResultNothingToDo, nil
 }
 
-func (c *Controller) executeDeprovisioning(ctx context.Context, d deprovisioner, nodes ...candidateNode) (DeprovisioningResult, error) {
+func (c *Controller) executeDeprovisioning(ctx context.Context, d deprovisioner, nodes ...candidateNode) (Result, error) {
 	// Given candidate nodes, compute best deprovisioning action
-	cmd, err := d.computeCommand(ctx, nodes...)
-	if err != nil {
-		return DeprovisioningResultFailed, err
+	attempts := 0
+	var cmd deprovisioningCommand
+	var err error
+	success := false
+	// Each attempt will try at least one node, limit to that many attempts.
+	for attempts < len(nodes) {
+		cmd, err = d.computeCommand(ctx, attempts, nodes...)
+		if err != nil {
+			return ResultFailed, err
+		}
+		logging.FromContext(ctx).Debugf("This is the time of command creation, %s for deprovisioner %s", cmd.created, d.string())
+		logging.FromContext(ctx).Debugf("This is the time before validation, %s", c.clock.Now())
+		// Validate the command with a TTL
+		ok, err := c.validateCommand(ctx, cmd, d)
+		if err != nil {
+			return ResultFailed, fmt.Errorf("validating command, %w", err)
+		}
+		logging.FromContext(ctx).Debugf("This is the time after validation, %s", c.clock.Now())
+		// If validation succeeds, execute the command. Otherwise, we need to compute another command and
+		// try the rest of the candidate nodes. If any of the remaining candidateNodes are still valid
+		// for an action, continue with deprovisioning, even though we might not be taking the most optimal decision.
+		// This is meant to stop an issue if another controller in the cluster coincidentally creates churn at the same interval.
+		if ok {
+			success = true
+			break
+		}
+		attempts++
 	}
-	// Validate the command with a TTL
-	ok, err := c.validateCommand(ctx, cmd, d)
-	if err != nil {
-		return DeprovisioningResultFailed, fmt.Errorf("validating command, %w", err)
-	}
-	// Retry when validation fails
-	if !ok {
-		return DeprovisioningResultRetry, nil
+	// Validation for all candidateNodes failed, so nothing can be done for this deprovisioner.
+	if !success {
+		return ResultNothingToDo, nil
 	}
 	// Execute the command
 	result, err := c.executeCommand(ctx, cmd)
 	if err != nil {
-		return DeprovisioningResultFailed, err
+		return ResultFailed, err
 	}
 	return result, nil
 }
 
-func (c *Controller) validateCommand(ctx context.Context, cmd DeprovisioningCommand, d deprovisioner) (bool, error) {
+func (c *Controller) validateCommand(ctx context.Context, cmd deprovisioningCommand, d deprovisioner) (bool, error) {
 	// Only continue with the rest of the logic if the command has an executable action for the deprovisioner
 	if !d.isExecutableCommand(cmd) {
 		return false, nil
@@ -206,25 +229,18 @@ func (c *Controller) validateCommand(ctx context.Context, cmd DeprovisioningComm
 		}
 	}
 
-	// Capture cluster state again to validate deprovisionable nodes
-	verifyNodeNames := sets.NewString(lo.Map(cmd.nodesToRemove, func(t *v1.Node, i int) string { return t.Name })...)
 	candidateNodes, err := c.candidateNodes(ctx, d.shouldNotBeDeprovisioned)
 	if err != nil {
 		return false, fmt.Errorf("determining candidate node, %w", err)
 	}
-	var nodes []candidateNode
-	for _, c := range candidateNodes {
-		if verifyNodeNames.Has(c.Name) {
-			nodes = append(nodes, c)
-		}
-	}
+	nodes := c.mapNodes(cmd.nodesToRemove, candidateNodes)
 
 	// None of the chosen candidate nodes are valid for execution, so retry
 	if len(nodes) == 0 {
 		return false, nil
 	}
 
-	ok, err := d.validateCommand(ctx, nodes, cmd.replacementNode)
+	ok, err := d.validateCommand(ctx, nodes, cmd)
 	if err != nil {
 		return false, fmt.Errorf("determining candidate node, %w", err)
 	}
@@ -341,11 +357,7 @@ func (c *Controller) buildProvisionerMap(ctx context.Context) (map[string]*v1alp
 	return provisioners, instanceTypesByProvisioner, nil
 }
 
-func (c *Controller) executeCommand(ctx context.Context, command DeprovisioningCommand) (DeprovisioningResult, error) {
-	// Shouldn't happen, but check one more time to see if action is executable
-	if !command.action.isExecutable() {
-		return DeprovisioningResultNothingToDo, nil
-	}
+func (c *Controller) executeCommand(ctx context.Context, command deprovisioningCommand) (Result, error) {
 	deprovisioningActionsPerformedCounter.With(prometheus.Labels{"action": command.action.String()}).Add(1)
 	// action's stringer
 	logging.FromContext(ctx).Infof("Deprovisioning via %s", command.action.String())
@@ -354,12 +366,12 @@ func (c *Controller) executeCommand(ctx context.Context, command DeprovisioningC
 		if err := c.launchReplacementNode(ctx, command); err != nil {
 			// If we failed to launch the replacement, don't deprovision.  If this is some permanent failure,
 			// we don't want to disrupt workloads with no way to provision new nodes for them.
-			return DeprovisioningResultFailed, fmt.Errorf("launching replacement node, %s", err)
+			return ResultFailed, fmt.Errorf("launching replacement node, %w", err)
 		}
 	}
 
-	for _, oldNode := range action.nodesToRemove {
-		c.recorder.Publish(consolidationevents.TerminatingNode(oldNode, action.String()))
+	for _, oldNode := range command.nodesToRemove {
+		c.recorder.Publish(TerminatingNode(oldNode, command.String()))
 		if err := c.kubeClient.Delete(ctx, oldNode); err != nil {
 			logging.FromContext(ctx).Errorf("Deleting node, %s", err)
 		} else {
@@ -372,7 +384,7 @@ func (c *Controller) executeCommand(ctx context.Context, command DeprovisioningC
 	for _, oldnode := range command.nodesToRemove {
 		c.waitForDeletion(ctx, oldnode)
 	}
-	return DeprovisioningResultSuccess, nil
+	return ResultSuccess, nil
 }
 
 // waitForDeletion waits for the specified node to be removed from the API server. This deletion can take some period
@@ -386,8 +398,8 @@ func (c *Controller) waitForDeletion(ctx context.Context, node *v1.Node) {
 		if apierrors.IsNotFound(nerr) {
 			return nil
 		}
-		// make the user aware of why consolidation is paused
-		c.recorder.Publish(consolidationevents.WaitingOnDeletion(node))
+		// make the user aware of why deprovisioning is paused
+		c.recorder.Publish(WaitingOnDeletion(node))
 		if nerr != nil {
 			return fmt.Errorf("expected node to be not found, %w", nerr)
 		}
@@ -399,18 +411,8 @@ func (c *Controller) waitForDeletion(ctx context.Context, node *v1.Node) {
 	}
 }
 
-func byNodeDisruptionCost(nodes []candidateNode) func(i int, j int) bool {
-	return func(a, b int) bool {
-		if nodes[a].disruptionCost == nodes[b].disruptionCost {
-			// if costs are equal, choose the older node
-			return nodes[a].CreationTimestamp.Before(&nodes[b].CreationTimestamp)
-		}
-		return nodes[a].disruptionCost < nodes[b].disruptionCost
-	}
-}
-
 // launchReplacementNode launches a replacement node and blocks until it is ready
-func (c *Controller) launchReplacementNode(ctx context.Context, action DeprovisioningCommand) error {
+func (c *Controller) launchReplacementNode(ctx context.Context, action deprovisioningCommand) error {
 	defer metrics.Measure(deprovisioningReplacementNodeInitializedHistogram)()
 	if len(action.nodesToRemove) != 1 {
 		return fmt.Errorf("expected a single node to replace, found %d", len(action.nodesToRemove))
@@ -433,7 +435,7 @@ func (c *Controller) launchReplacementNode(ctx context.Context, action Deprovisi
 		return fmt.Errorf("expected a single node name, got %d", len(nodeNames))
 	}
 
-	metrics.NodesCreatedCounter.WithLabelValues(metrics.ConsolidationReason).Inc()
+	metrics.NodesCreatedCounter.WithLabelValues(metrics.DeprovisioningReason).Inc()
 
 	// We have the new node created at the API server so mark the old node for deletion
 	c.cluster.MarkForDeletion(oldNode.Name)
@@ -446,12 +448,12 @@ func (c *Controller) launchReplacementNode(ctx context.Context, action Deprovisi
 			return fmt.Errorf("getting node, %w", err)
 		}
 		once.Do(func() {
-			c.recorder.Publish(consolidationevents.LaunchingNode(&k8Node, action.String()))
+			c.recorder.Publish(LaunchingNode(&k8Node, action.String()))
 		})
 
 		if _, ok := k8Node.Labels[v1alpha5.LabelNodeInitialized]; !ok {
-			// make the user aware of why consolidation is paused
-			c.recorder.Publish(consolidationevents.WaitingOnReadiness(&k8Node))
+			// make the user aware of why deprovisioning is paused
+			c.recorder.Publish(WaitingOnReadiness(&k8Node))
 			return fmt.Errorf("node is not initialized")
 		}
 		return nil
@@ -460,34 +462,6 @@ func (c *Controller) launchReplacementNode(ctx context.Context, action Deprovisi
 		c.cluster.UnmarkForDeletion(oldNode.Name)
 		return multierr.Combine(c.setNodeUnschedulable(ctx, oldNode.Name, false),
 			fmt.Errorf("timed out checking node readiness, %w", err))
-	}
-	return nil
-}
-
-func (c *Controller) canBeTerminated(node candidateNode, pdbs *PDBLimits) error {
-	if !node.DeletionTimestamp.IsZero() {
-		return fmt.Errorf("already being deleted")
-	}
-	if !pdbs.CanEvictPods(node.pods) {
-		return fmt.Errorf("not eligible for termination due to PDBs")
-	}
-	return c.podsPreventEviction(node)
-}
-
-func (c *Controller) podsPreventEviction(node candidateNode) error {
-	for _, p := range node.pods {
-		// don't care about pods that are finishing, finished or owned by the node
-		if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
-			continue
-		}
-
-		if pod.HasDoNotEvict(p) {
-			return fmt.Errorf("found do-not-evict pod")
-		}
-
-		if pod.IsNotOwned(p) {
-			return fmt.Errorf("found pod with no controller")
-		}
 	}
 	return nil
 }
@@ -528,4 +502,16 @@ func (c *Controller) setNodeUnschedulable(ctx context.Context, nodeName string, 
 		return fmt.Errorf("patching node %s, %w", node.Name, err)
 	}
 	return nil
+}
+
+// mapNodes maps from a list of *v1.Node to candidateNode
+func (c *Controller) mapNodes(nodes []*v1.Node, candidateNodes []candidateNode) []candidateNode {
+	verifyNodeNames := sets.NewString(lo.Map(nodes, func(t *v1.Node, i int) string { return t.Name })...)
+	var ret []candidateNode
+	for _, c := range candidateNodes {
+		if verifyNodeNames.Has(c.Name) {
+			ret = append(ret, c)
+		}
+	}
+	return ret
 }

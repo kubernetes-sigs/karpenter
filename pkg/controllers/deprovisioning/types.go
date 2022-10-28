@@ -26,34 +26,29 @@ import (
 	"github.com/aws/karpenter-core/pkg/metrics"
 
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
-	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 )
 
-const (
-	deprovisioningTTL time.Duration = 15 * time.Second
-)
-
-// DeprovisioningResult is used to indicate the action of consolidating so we can optimize by not trying to consolidate if
+// Result is used to indicate the action of consolidating so we can optimize by not trying to consolidate if
 // we were unable to consolidate the cluster and it hasn't changed state with respect to pods/nodes.
-type DeprovisioningResult byte
+type Result byte
 
 const (
-	DeprovisioningResultNothingToDo DeprovisioningResult = iota // there are no actions that can be performed given the current cluster state
-	DeprovisioningResultRetry                                   // we attempted an action, but its validation failed so retry soon
-	DeprovisioningResultFailed                                  // the action failed entirely
-	DeprovisioningResultSuccess                                 // the action was successful
+	ResultNothingToDo Result = iota // there are no actions that can be performed given the current cluster state
+	ResultRetry                     // we attempted an action, but its validation failed so retry soon
+	ResultFailed                    // the action failed entirely
+	ResultSuccess                   // the action was successful
 )
 
-func (r DeprovisioningResult) String() string {
+func (r Result) String() string {
 	switch r {
-	case DeprovisioningResultNothingToDo:
+	case ResultNothingToDo:
 		return "Nothing to do"
-	case DeprovisioningResultRetry:
+	case ResultRetry:
 		return "Retry"
-	case DeprovisioningResultFailed:
+	case ResultFailed:
 		return "Failed"
-	case DeprovisioningResultSuccess:
+	case ResultSuccess:
 		return "Success"
 	default:
 		return fmt.Sprintf("Unknown (%d)", r)
@@ -61,77 +56,78 @@ func (r DeprovisioningResult) String() string {
 }
 
 type deprovisioner interface {
+	// shouldNotBeDeprovisioned is a predicate used to filter deprovisionable nodes
 	shouldNotBeDeprovisioned(context.Context, *state.Node, *v1alpha5.Provisioner, []*v1.Pod) bool
+	// sortCandidates orders deprovisionable nodes by the deprovisioner's pre-determined priority
 	sortCandidates([]candidateNode) []candidateNode
-	computeCommand(context.Context, ...candidateNode) (DeprovisioningCommand, error)
-	isExecutableCommand(DeprovisioningCommand) bool
-	validateCommand(context.Context, []candidateNode, *pscheduling.Node) (bool, error)
+	// computeCommand generates a deprovisioning command for a list of deprovisionable nodes
+	computeCommand(context.Context, int, ...candidateNode) (deprovisioningCommand, error)
+	// validateCommand waits a deprovisioner's TTL and ensures command is valid
+	validateCommand(context.Context, []candidateNode, deprovisioningCommand) (bool, error)
 	// deprovisionIncrementally is true if a deprovisioner should only consider one node at a time
 	deprovisionIncrementally() bool
-	string() string
+	// isExecutableCommand checks that a command can be executed by the deprovisioner
+	isExecutableCommand(deprovisioningCommand) bool
+	// getTTL returns the time to wait for a deprovisioner's validation
 	getTTL() time.Duration
+	// string is the string representation of the deprovisioner
+	string() string
 }
 
 type deprovisioningAction byte
 
 const (
-	deprovisioningActionUnknown deprovisioningAction = iota
-	deprovisioningActionNotPossible
-	deprovisioningActionDeleteConsolidation
-	deprovisioningActionReplaceConsolidation
-	deprovisioningActionDeleteEmpty
-	deprovisioningActionDoNothing
-	deprovisioningActionFailed
+	actionUnknown deprovisioningAction = iota
+	actionNotPossible
+	actionDeleteConsolidation
+	actionReplaceConsolidation
+	actionDeleteEmpty
+	actionDoNothing
+	actionFailed
 )
 
-func (a deprovisioningAction) isExecutable() bool {
-	return a == deprovisioningActionDeleteConsolidation ||
-		a == deprovisioningActionReplaceConsolidation ||
-		a == deprovisioningActionDeleteEmpty
-}
-
 func (a deprovisioningAction) getMetricsReasonName() string {
-	if a == deprovisioningActionDeleteConsolidation || a == deprovisioningActionReplaceConsolidation {
+	if a == actionDeleteConsolidation || a == actionReplaceConsolidation {
 		return metrics.ConsolidationReason
-	} else if a == deprovisioningActionDeleteEmpty {
+	} else if a == actionDeleteEmpty {
 		return metrics.EmptinessReason
 	}
 	return ""
 }
 
 func (a deprovisioningAction) needsReplacement() bool {
-	return a == deprovisioningActionReplaceConsolidation
+	return a == actionReplaceConsolidation
 }
 
 func (a deprovisioningAction) String() string {
 	switch a {
-	case deprovisioningActionUnknown:
+	case actionUnknown:
 		return "Unknown"
-	case deprovisioningActionNotPossible:
+	case actionNotPossible:
 		return "Not Possible"
-	case deprovisioningActionDeleteConsolidation:
+	case actionDeleteConsolidation:
 		return "Delete (Consolidation)"
-	case deprovisioningActionDeleteEmpty:
+	case actionDeleteEmpty:
 		return "Delete (Emptiness)"
-	case deprovisioningActionReplaceConsolidation:
+	case actionReplaceConsolidation:
 		return "Replace (Consolidation)"
-	case deprovisioningActionDoNothing:
+	case actionDoNothing:
 		return "NoAction"
-	case deprovisioningActionFailed:
+	case actionFailed:
 		return "Failed"
 	default:
 		return fmt.Sprintf("Unknown (%d)", a)
 	}
 }
 
-type DeprovisioningCommand struct {
+type deprovisioningCommand struct {
 	nodesToRemove   []*v1.Node
 	action          deprovisioningAction
 	replacementNode *scheduling.Node
 	created         time.Time
 }
 
-func (o DeprovisioningCommand) String() string {
+func (o deprovisioningCommand) String() string {
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, "%s, terminating %d nodes ", o.action, len(o.nodesToRemove))
 	for i, old := range o.nodesToRemove {
@@ -161,14 +157,4 @@ func (o DeprovisioningCommand) String() string {
 			scheduling.InstanceTypeList(o.replacementNode.InstanceTypeOptions))
 	}
 	return buf.String()
-}
-
-func clamp(min, val, max float64) float64 {
-	if val < min {
-		return min
-	}
-	if val > max {
-		return max
-	}
-	return val
 }

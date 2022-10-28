@@ -179,3 +179,13 @@ func worstLaunchPrice(ofs []cloudprovider.Offering, reqs scheduling.Requirements
 	}
 	return math.MaxFloat64
 }
+
+func clamp(min, val, max float64) float64 {
+	if val < min {
+		return min
+	}
+	if val > max {
+		return max
+	}
+	return val
+}
