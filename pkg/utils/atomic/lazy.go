@@ -18,7 +18,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/aws/karpenter-core/pkg/utils/ptr"
+	"github.com/samber/lo"
 )
 
 type Option func(Options) Options
@@ -71,7 +71,7 @@ func (c *Lazy[T]) TryGet(ctx context.Context, opts ...Option) (T, error) {
 	if err != nil {
 		return *new(T), err
 	}
-	c.value = ptr.To(ret) // copies the value so we don't keep the reference
+	c.value = lo.ToPtr(ret) // copies the value so we don't keep the reference
 	return ret, nil
 }
 

@@ -35,7 +35,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	podutil "github.com/aws/karpenter-core/pkg/utils/pod"
-	"github.com/aws/karpenter-core/pkg/utils/ptr"
 )
 
 type Terminator struct {
@@ -134,14 +133,14 @@ func (t *Terminator) getPods(ctx context.Context, node *v1.Node) ([]*v1.Pod, err
 	var pods []*v1.Pod
 	for _, p := range podList.Items {
 		// Ignore if the pod is complete and doesn't need to be evicted
-		if podutil.IsTerminal(ptr.Pod(p)) {
+		if podutil.IsTerminal(lo.ToPtr(p)) {
 			continue
 		}
 		// Ignore if kubelet is partitioned and pods are beyond graceful termination window
-		if t.isStuckTerminating(ptr.Pod(p)) {
+		if t.isStuckTerminating(lo.ToPtr(p)) {
 			continue
 		}
-		pods = append(pods, ptr.Pod(p))
+		pods = append(pods, lo.ToPtr(p))
 	}
 	return pods, nil
 }
