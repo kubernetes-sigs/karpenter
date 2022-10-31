@@ -18,13 +18,17 @@ import (
 	"context"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	"k8s.io/client-go/util/workqueue"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/ratelimiter"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
 type WaitUntilFunc func(context.Context)
@@ -70,20 +74,52 @@ func (b SingletonBuilder) Complete(r reconcile.Reconciler) error {
 type Singleton struct {
 	reconcile.Reconciler
 
+	metrics *singletonMetrics
+
 	name        string
 	waitUntil   WaitUntilFunc
 	options     Options
 	rateLimiter ratelimiter.RateLimiter
 }
 
+type singletonMetrics struct {
+	reconcileDuration prometheus.Histogram
+	reconcileErrors   prometheus.Counter
+}
+
 func newSingleton(r reconcile.Reconciler, name string, waitUntil WaitUntilFunc, opts Options) *Singleton {
 	return &Singleton{
 		Reconciler:  r,
+		metrics:     newSingletonMetrics(name),
 		name:        name,
 		waitUntil:   waitUntil,
 		options:     opts,
 		rateLimiter: workqueue.DefaultItemBasedRateLimiter(),
 	}
+}
+
+func newSingletonMetrics(name string) *singletonMetrics {
+	metrics := &singletonMetrics{
+		reconcileDuration: prometheus.NewHistogram(
+			prometheus.HistogramOpts{
+				Namespace: metrics.Namespace,
+				Subsystem: name,
+				Name:      "reconcile_time_seconds",
+				Help:      "Length of time per reconcile.",
+				Buckets:   metrics.DurationBuckets(),
+			},
+		),
+		reconcileErrors: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: metrics.Namespace,
+				Subsystem: name,
+				Name:      "reconcile_errors_total",
+				Help:      "Total number of reconcile errors.",
+			},
+		),
+	}
+	crmetrics.Registry.MustRegister(metrics.reconcileDuration, metrics.reconcileErrors)
+	return metrics
 }
 
 var singletonRequest = reconcile.Request{}
@@ -102,11 +138,14 @@ func (s *Singleton) Start(ctx context.Context) error {
 			case <-withDoneChan(func() { s.waitUntil(ctx) }):
 			}
 		}
+		measureDuration := metrics.Measure(s.metrics.reconcileDuration)
 		res, errs := s.Reconcile(ctx, singletonRequest)
+		measureDuration() // Observe the length of time between the function creation and now
 
 		var waitDuration time.Duration
 		switch {
 		case errs != nil:
+			s.metrics.reconcileErrors.Inc()
 			for _, err := range multierr.Errors(errs) {
 				logging.FromContext(ctx).Error(err)
 			}
