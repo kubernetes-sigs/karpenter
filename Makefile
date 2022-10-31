@@ -6,8 +6,9 @@ help: ## Display help
 presubmit: verify test ## Run all steps required for code to be checked in
 
 test: ## Run tests
-	go test -v -run=${TEST_FILTER} ./... \
+	go test -v ./... \
 		-race \
+		--ginkgo.focus="${FOCUS}" \
 		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
 
 verify: codegen ## Verify code. Includes dependencies, linting, formatting, etc
