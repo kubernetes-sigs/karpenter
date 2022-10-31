@@ -43,7 +43,7 @@ func NewController(cluster *state.Cluster) *Controller {
 
 func (c *Controller) Builder(_ context.Context, mgr manager.Manager) operatorcontroller.Builder {
 	return operatorcontroller.NewSingletonManagedBy(mgr).
-		Named("metric-scraper")
+		Named("metric_scraper")
 }
 
 func (c *Controller) LivenessProbe(_ *http.Request) error {
