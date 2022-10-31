@@ -41,10 +41,10 @@ type Emptiness struct {
 	cluster    *state.Cluster
 }
 
-// shouldNotBeDeprovisioned is a predicate used to filter deprovisionable nodes
-func (e *Emptiness) shouldNotBeDeprovisioned(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, nodePods []*v1.Pod) bool {
+// shouldDeprovision is a predicate used to filter deprovisionable nodes
+func (e *Emptiness) shouldDeprovision(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, nodePods []*v1.Pod) bool {
 	if provisioner == nil || provisioner.Spec.TTLSecondsAfterEmpty == nil {
-		return true
+		return false
 	}
 
 	emptinessTimestamp, hasEmptinessTimestamp := n.Node.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
@@ -56,7 +56,7 @@ func (e *Emptiness) shouldNotBeDeprovisioned(ctx context.Context, n *state.Node,
 		return true
 	}
 	// Don't deprovision if node is not empty, does not have the emptiness timestamp, or is before the emptiness TTL
-	return len(nodePods) != 0 || !hasEmptinessTimestamp || !e.clock.Now().After(emptinessTime.Add(ttl))
+	return len(nodePods) == 0 && hasEmptinessTimestamp && e.clock.Now().After(emptinessTime.Add(ttl))
 }
 
 // sortCandidates orders deprovisionable nodes by the disruptionCost
@@ -72,7 +72,7 @@ func (e *Emptiness) computeCommand(_ context.Context, _ int, nodes ...candidateN
 	}
 	return deprovisioningCommand{
 		nodesToRemove: lo.Map(emptyNodes, func(n candidateNode, _ int) *v1.Node { return n.Node }),
-		action:        actionDeleteEmpty,
+		action:        actionDelete,
 		created:       e.clock.Now(),
 	}, nil
 }
@@ -92,18 +92,13 @@ func (e *Emptiness) validateCommand(_ context.Context, candidateNodes []candidat
 	return true, nil
 }
 
-// isExecutableCommand checks that a command can be executed by the deprovisioner
-func (e *Emptiness) isExecutableCommand(cmd deprovisioningCommand) bool {
-	return len(cmd.nodesToRemove) > 0 && cmd.action == actionDeleteEmpty
-}
-
 // getTTL returns the time to wait for a deprovisioner's validation
 // Don't wait since the action has already been TTL'd with the provisioner's `TTLSecondsAfterEmpty`
-func (e *Emptiness) getTTL() time.Duration {
+func (e *Emptiness) TTL() time.Duration {
 	return 0 * time.Second
 }
 
 // string is the string representation of the deprovisioner
-func (e *Emptiness) string() string {
+func (e *Emptiness) String() string {
 	return metrics.EmptinessReason
 }

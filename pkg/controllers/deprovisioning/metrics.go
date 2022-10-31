@@ -27,12 +27,14 @@ func init() {
 	crmetrics.Registry.MustRegister(deprovisioningActionsPerformedCounter)
 }
 
+const deprovisioningSubsystem = "deprovisioning"
+
 var deprovisioningDurationHistogram = prometheus.NewHistogramVec(
 	prometheus.HistogramOpts{
 		Namespace: metrics.Namespace,
-		Subsystem: "deprovisioning",
-		Name:      "deprovisioning_evaluation_duration_seconds",
-		Help:      "Duration of the consolidation evaluation process in seconds.",
+		Subsystem: deprovisioningSubsystem,
+		Name:      "evaluation_duration_seconds",
+		Help:      "Duration of the deprovisioning evaluation process in seconds.",
 		Buckets:   metrics.DurationBuckets(),
 	},
 	[]string{"method"},
@@ -41,7 +43,7 @@ var deprovisioningDurationHistogram = prometheus.NewHistogramVec(
 var deprovisioningReplacementNodeInitializedHistogram = prometheus.NewHistogram(
 	prometheus.HistogramOpts{
 		Namespace: metrics.Namespace,
-		Subsystem: "deprovisioning",
+		Subsystem: deprovisioningSubsystem,
 		Name:      "replacement_node_initialized_seconds",
 		Help:      "Amount of time required for a replacement node to become initialized.",
 		Buckets:   metrics.DurationBuckets(),
@@ -50,7 +52,7 @@ var deprovisioningReplacementNodeInitializedHistogram = prometheus.NewHistogram(
 var deprovisioningActionsPerformedCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Namespace: metrics.Namespace,
-		Subsystem: "deprovisioning",
+		Subsystem: deprovisioningSubsystem,
 		Name:      "actions_performed",
 		Help:      "Number of deprovisioning actions performed. Labeled by action.",
 	},

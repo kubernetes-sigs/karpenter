@@ -23,12 +23,12 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
-
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/utils/node"
+
+	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 
 	v1 "k8s.io/api/core/v1"
@@ -65,7 +65,7 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	}
 
 	// We get the pods that are on nodes that are deleting
-	deletingNodePods, err := nodeutils.GetNodePods(ctx, kubeClient, lo.Map(markedForDeletionNodes, func(n *state.Node, _ int) *v1.Node { return n.Node })...)
+	deletingNodePods, err := node.GetNodePods(ctx, kubeClient, lo.Map(markedForDeletionNodes, func(n *state.Node, _ int) *v1.Node { return n.Node })...)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
 	}
@@ -188,4 +188,16 @@ func clamp(min, val, max float64) float64 {
 		return max
 	}
 	return val
+}
+
+// mapNodes maps from a list of *v1.Node to candidateNode
+func mapNodes(nodes []*v1.Node, candidateNodes []candidateNode) []candidateNode {
+	verifyNodeNames := sets.NewString(lo.Map(nodes, func(t *v1.Node, i int) string { return t.Name })...)
+	var ret []candidateNode
+	for _, c := range candidateNodes {
+		if verifyNodeNames.Has(c.Name) {
+			ret = append(ret, c)
+		}
+	}
+	return ret
 }

@@ -48,22 +48,12 @@ type Consolidation struct {
 	cloudProvider cloudprovider.CloudProvider
 }
 
-func NewConsolidation(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster) *Consolidation {
-	return &Consolidation{
-		clock:         clk,
-		kubeClient:    kubeClient,
-		cluster:       cluster,
-		provisioner:   provisioner,
-		recorder:      recorder,
-		cloudProvider: cp,
+// shouldDeprovision is a predicate used to filter deprovisionable nodes
+func (c *Consolidation) shouldDeprovision(_ context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, _ []*v1.Pod) bool {
+	if val, ok := n.Node.Annotations[v1alpha5.DoNotConsolidateNodeAnnotationKey]; ok {
+		return val != "true"
 	}
-}
-
-// shouldNotBeDeprovisioned is a predicate used to filter deprovisionable nodes
-func (c *Consolidation) shouldNotBeDeprovisioned(_ context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, _ []*v1.Pod) bool {
-	return provisioner == nil || provisioner.Spec.Consolidation == nil || !ptr.BoolValue(provisioner.Spec.Consolidation.Enabled) ||
-		n.Node.Annotations[v1alpha5.DoNotConsolidateNodeAnnotationKey] == "true"
+	return provisioner != nil && provisioner.Spec.Consolidation != nil && ptr.BoolValue(provisioner.Spec.Consolidation.Enabled)
 }
 
 // sortCandidates orders deprovisionable nodes by the disruptionCost
@@ -75,27 +65,13 @@ func (c *Consolidation) sortCandidates(nodes []candidateNode) []candidateNode {
 }
 
 // computeCommand generates a deprovisioning command given deprovisionable nodes
-//
-//nolint:gocyclo
 func (c *Consolidation) computeCommand(ctx context.Context, attempt int, candidates ...candidateNode) (deprovisioningCommand, error) {
 	// First delete any empty nodes we see
 	if attempt == 0 {
-		emptyNodes := lo.Filter(candidates, func(n candidateNode, _ int) bool { return len(n.pods) == 0 })
-		if len(emptyNodes) != 0 {
-			return deprovisioningCommand{
-				nodesToRemove: lo.Map(emptyNodes, func(n candidateNode, _ int) *v1.Node { return n.Node }),
-				action:        actionDeleteEmpty,
-				created:       c.clock.Now(),
-			}, nil
+		if cmd := c.deleteEmpty(ctx, candidates...); cmd.action == actionDelete {
+			return cmd, nil
 		}
 	}
-
-	// If we get here, return nothingToDo as no candidateNodes are valid.
-	if attempt >= len(candidates) {
-		return deprovisioningCommand{action: actionDoNothing}, nil
-	}
-
-	node := candidates[attempt]
 
 	pdbs, err := NewPDBLimits(ctx, c.kubeClient)
 	if err != nil {
@@ -103,10 +79,30 @@ func (c *Consolidation) computeCommand(ctx context.Context, attempt int, candida
 	}
 	// is this a node that we can terminate?  This check is meant to be fast so we can save the expense of simulated
 	// scheduling unless its really needed
-	if !canBeTerminated(node, pdbs) {
+	if !canBeTerminated(candidates[attempt], pdbs) {
 		return deprovisioningCommand{action: actionNotPossible}, nil
 	}
 
+	return c.computeConsolidation(ctx, candidates[attempt])
+}
+
+// deleteEmpty returns a deprovisioningCommmand if there are empty nodes.
+func (c *Consolidation) deleteEmpty(_ context.Context, candidates ...candidateNode) deprovisioningCommand {
+	emptyNodes := lo.Filter(candidates, func(n candidateNode, _ int) bool { return len(n.pods) == 0 })
+	if len(emptyNodes) != 0 {
+		return deprovisioningCommand{
+			nodesToRemove: lo.Map(emptyNodes, func(n candidateNode, _ int) *v1.Node { return n.Node }),
+			action:        actionDelete,
+			created:       c.clock.Now(),
+		}
+	}
+	return deprovisioningCommand{action: actionDoNothing}
+}
+
+// computeConsolidation computes a consolidation action to take
+//
+// nolint:gocyclo
+func (c *Consolidation) computeConsolidation(ctx context.Context, node candidateNode) (deprovisioningCommand, error) {
 	defer metrics.Measure(deprovisioningDurationHistogram.WithLabelValues("Replace/Delete"))()
 	// Run scheduling simulation to compute consolidation option
 	newNodes, allPodsScheduled, err := simulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, node)
@@ -127,7 +123,7 @@ func (c *Consolidation) computeCommand(ctx context.Context, attempt int, candida
 	if len(newNodes) == 0 {
 		return deprovisioningCommand{
 			nodesToRemove: []*v1.Node{node.Node},
-			action:        actionDeleteConsolidation,
+			action:        actionDelete,
 			created:       c.clock.Now(),
 		}, nil
 	}
@@ -168,7 +164,7 @@ func (c *Consolidation) computeCommand(ctx context.Context, attempt int, candida
 
 	return deprovisioningCommand{
 		nodesToRemove:   []*v1.Node{node.Node},
-		action:          actionReplaceConsolidation,
+		action:          actionReplace,
 		replacementNode: newNodes[0],
 		created:         c.clock.Now(),
 	}, nil
@@ -176,7 +172,7 @@ func (c *Consolidation) computeCommand(ctx context.Context, attempt int, candida
 
 // validateCommand validates a command for a deprovisioner
 func (c *Consolidation) validateCommand(ctx context.Context, nodesToDelete []candidateNode, cmd deprovisioningCommand) (bool, error) {
-	if cmd.action == actionDeleteEmpty {
+	if cmd.action == actionDelete {
 		return c.validateDeleteEmpty(nodesToDelete)
 	}
 	newNodes, allPodsScheduled, err := simulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, nodesToDelete...)
@@ -234,19 +230,13 @@ func (c *Consolidation) validateCommand(ctx context.Context, nodesToDelete []can
 	return true, nil
 }
 
-// isExecutableCommand checks that a command can be executed by the deprovisioner
-func (c *Consolidation) isExecutableCommand(cmd deprovisioningCommand) bool {
-	return len(cmd.nodesToRemove) > 0 && (cmd.action == actionDeleteConsolidation ||
-		cmd.action == actionReplaceConsolidation || cmd.action == actionDeleteEmpty)
-}
-
 // getTTL returns the time to wait for a deprovisioner's validation
-func (c *Consolidation) getTTL() time.Duration {
+func (c *Consolidation) TTL() time.Duration {
 	return 15 * time.Second
 }
 
 // string is the string representation of the deprovisioner
-func (c *Consolidation) string() string {
+func (c *Consolidation) String() string {
 	return metrics.ConsolidationReason
 }
 

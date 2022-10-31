@@ -23,7 +23,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/metrics"
 
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -56,20 +55,18 @@ func (r Result) String() string {
 }
 
 type deprovisioner interface {
-	// shouldNotBeDeprovisioned is a predicate used to filter deprovisionable nodes
-	shouldNotBeDeprovisioned(context.Context, *state.Node, *v1alpha5.Provisioner, []*v1.Pod) bool
+	// shouldDeprovision is a predicate used to filter deprovisionable nodes
+	shouldDeprovision(context.Context, *state.Node, *v1alpha5.Provisioner, []*v1.Pod) bool
 	// sortCandidates orders deprovisionable nodes by the deprovisioner's pre-determined priority
 	sortCandidates([]candidateNode) []candidateNode
 	// computeCommand generates a deprovisioning command given deprovisionable nodes
 	computeCommand(context.Context, int, ...candidateNode) (deprovisioningCommand, error)
 	// validateCommand validates a command for a deprovisioner
 	validateCommand(context.Context, []candidateNode, deprovisioningCommand) (bool, error)
-	// isExecutableCommand checks that a command can be executed by the deprovisioner
-	isExecutableCommand(deprovisioningCommand) bool
-	// getTTL returns the time to wait for a deprovisioner's validation
-	getTTL() time.Duration
-	// string is the string representation of the deprovisioner
-	string() string
+	// TTL returns the time to wait for a deprovisioner's validation
+	TTL() time.Duration
+	// String is the String representation of the deprovisioner
+	String() string
 }
 
 type action byte
@@ -77,44 +74,28 @@ type action byte
 const (
 	actionUnknown action = iota
 	actionNotPossible
-	actionDeleteConsolidation
-	actionReplaceConsolidation
-	actionDeleteEmpty
+	actionDelete
+	actionReplace
 	actionDoNothing
 	actionFailed
 )
 
-func (a action) getMetricsReasonName() string {
-	if a == actionDeleteConsolidation || a == actionReplaceConsolidation {
-		return metrics.ConsolidationReason
-	} else if a == actionDeleteEmpty {
-		return metrics.EmptinessReason
-	}
-	return ""
-}
-
-func (a action) needsReplacement() bool {
-	return a == actionReplaceConsolidation
-}
-
 func (a action) String() string {
 	switch a {
 	case actionUnknown:
-		return "Unknown"
+		return "unknown"
 	case actionNotPossible:
-		return "Not Possible"
-	case actionDeleteConsolidation:
-		return "Delete (Consolidation)"
-	case actionDeleteEmpty:
-		return "Delete (Emptiness)"
-	case actionReplaceConsolidation:
-		return "Replace (Consolidation)"
+		return "not-possible"
+	case actionDelete:
+		return "delete"
+	case actionReplace:
+		return "replace"
 	case actionDoNothing:
-		return "NoAction"
+		return "no-action"
 	case actionFailed:
-		return "Failed"
+		return "failed"
 	default:
-		return fmt.Sprintf("Unknown (%d)", a)
+		return fmt.Sprintf("unknown (%d)", a)
 	}
 }
 
