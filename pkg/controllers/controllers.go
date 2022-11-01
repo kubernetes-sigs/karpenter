@@ -22,8 +22,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/controllers/consolidation"
 	"github.com/aws/karpenter-core/pkg/controllers/counter"
+	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
 	metricspod "github.com/aws/karpenter-core/pkg/controllers/metrics/pod"
 	metricsprovisioner "github.com/aws/karpenter-core/pkg/controllers/metrics/provisioner"
 	metricsstate "github.com/aws/karpenter-core/pkg/controllers/metrics/state"
@@ -65,6 +65,6 @@ func NewControllers(
 		metricspod.NewController(kubeClient),
 		metricsprovisioner.NewController(kubeClient),
 		counter.NewController(kubeClient, cluster),
-		consolidation.NewController(clock, kubeClient, provisioner, cloudProvider, eventRecorder, cluster),
+		deprovisioning.NewController(clock, kubeClient, provisioner, cloudProvider, eventRecorder, cluster),
 	}
 }

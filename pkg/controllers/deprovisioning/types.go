@@ -12,10 +12,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package consolidation
+package deprovisioning
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"time"
 
@@ -24,75 +25,88 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
+	"github.com/aws/karpenter-core/pkg/controllers/state"
 )
 
-// DeprovisioningResult is used to indicate the action of consolidating so we can optimize by not trying to consolidate if
+// Result is used to indicate the action of consolidating so we can optimize by not trying to consolidate if
 // we were unable to consolidate the cluster and it hasn't changed state with respect to pods/nodes.
-type DeprovisioningResult byte
+type Result byte
 
 const (
-	DeprovisioningResultNothingToDo DeprovisioningResult = iota // there are no actions that can be performed given the current cluster state
-	DeprovisioningResultRetry                                   // we attempted an action, but its validation failed so retry soon
-	DeprovisioningResultFailed                                  // the action failed entirely
-	DeprovisioningResultSuccess                                 // the action was successful
+	ResultNothingToDo Result = iota // there are no actions that can be performed given the current cluster state
+	ResultRetry                     // we attempted an action, but its validation failed so retry soon
+	ResultFailed                    // the action failed entirely
+	ResultSuccess                   // the action was successful
 )
 
-func (r DeprovisioningResult) String() string {
+func (r Result) String() string {
 	switch r {
-	case DeprovisioningResultNothingToDo:
+	case ResultNothingToDo:
 		return "Nothing to do"
-	case DeprovisioningResultRetry:
+	case ResultRetry:
 		return "Retry"
-	case DeprovisioningResultFailed:
+	case ResultFailed:
 		return "Failed"
-	case DeprovisioningResultSuccess:
+	case ResultSuccess:
 		return "Success"
 	default:
 		return fmt.Sprintf("Unknown (%d)", r)
 	}
 }
 
-type deprovisionAction byte
+type Deprovisioner interface {
+	// ShouldDeprovision is a predicate used to filter deprovisionable nodes
+	ShouldDeprovision(context.Context, *state.Node, *v1alpha5.Provisioner, []*v1.Pod) bool
+	// sortCandidates orders deprovisionable nodes by the deprovisioner's pre-determined priority
+	SortCandidates([]CandidateNode) []CandidateNode
+	// computeCommand generates a deprovisioning command given deprovisionable nodes
+	ComputeCommand(context.Context, int, ...CandidateNode) (Command, error)
+	// validateCommand validates a command for a deprovisioner
+	ValidateCommand(context.Context, []CandidateNode, Command) (bool, error)
+	// TTL returns the time to wait for a deprovisioner's validation
+	TTL() time.Duration
+	// String is the String representation of the deprovisioner
+	String() string
+}
+
+type action byte
 
 const (
-	deprovisionActionUnknown deprovisionAction = iota
-	deprovisionActionNotPossible
-	deprovisionActionDelete
-	deprovisionActionDeleteEmpty
-	deprovisionActionReplace
-	deprovisionActionDoNothing
-	deprovisionActionFailed
+	actionUnknown action = iota
+	actionNotPossible
+	actionDelete
+	actionReplace
+	actionDoNothing
+	actionFailed
 )
 
-func (a deprovisionAction) String() string {
+func (a action) String() string {
 	switch a {
-	case deprovisionActionUnknown:
-		return "Unknown"
-	case deprovisionActionNotPossible:
-		return "Not Possible"
-	case deprovisionActionDelete:
-		return "Delete"
-	case deprovisionActionDeleteEmpty:
-		return "Delete (empty node)"
-	case deprovisionActionReplace:
-		return "Replace"
-	case deprovisionActionDoNothing:
-		return "NoAction"
-	case deprovisionActionFailed:
-		return "Failed"
+	case actionUnknown:
+		return "unknown"
+	case actionNotPossible:
+		return "not-possible"
+	case actionDelete:
+		return "delete"
+	case actionReplace:
+		return "replace"
+	case actionDoNothing:
+		return "no-action"
+	case actionFailed:
+		return "failed"
 	default:
-		return fmt.Sprintf("Unknown (%d)", a)
+		return fmt.Sprintf("unknown (%d)", a)
 	}
 }
 
-type lifecycleCommand struct {
+type Command struct {
 	nodesToRemove   []*v1.Node
-	action          deprovisionAction
+	action          action
 	replacementNode *scheduling.Node
 	created         time.Time
 }
 
-func (o lifecycleCommand) String() string {
+func (o Command) String() string {
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, "%s, terminating %d nodes ", o.action, len(o.nodesToRemove))
 	for i, old := range o.nodesToRemove {
@@ -122,14 +136,4 @@ func (o lifecycleCommand) String() string {
 			scheduling.InstanceTypeList(o.replacementNode.InstanceTypeOptions))
 	}
 	return buf.String()
-}
-
-func clamp(min, val, max float64) float64 {
-	if val < min {
-		return min
-	}
-	if val > max {
-		return max
-	}
-	return val
 }

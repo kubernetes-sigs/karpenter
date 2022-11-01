@@ -12,24 +12,98 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package consolidation
+package deprovisioning
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"strconv"
 
 	"github.com/samber/lo"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
+	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
+	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/utils/node"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
+	nodesToDelete ...CandidateNode) (newNodes []*pscheduling.Node, allPodsScheduled bool, err error) {
+	var stateNodes []*state.Node
+	var markedForDeletionNodes []*state.Node
+	candidateNodeIsDeleting := false
+	candidateNodeNames := sets.NewString(lo.Map(nodesToDelete, func(t CandidateNode, i int) string { return t.Name })...)
+	cluster.ForEachNode(func(n *state.Node) bool {
+		// not a candidate node
+		if _, ok := candidateNodeNames[n.Node.Name]; !ok {
+			if !n.MarkedForDeletion {
+				stateNodes = append(stateNodes, n.DeepCopy())
+			} else {
+				markedForDeletionNodes = append(markedForDeletionNodes, n.DeepCopy())
+			}
+		} else if n.MarkedForDeletion {
+			// candidate node and marked for deletion
+			candidateNodeIsDeleting = true
+		}
+		return true
+	})
+	// We do one final check to ensure that the node that we are attempting to consolidate isn't
+	// already handled for deletion by some other controller. This could happen if the node was markedForDeletion
+	// between returning the candidateNodes and getting the stateNodes above
+	if candidateNodeIsDeleting {
+		return nil, false, errCandidateNodeDeleting
+	}
+
+	// We get the pods that are on nodes that are deleting
+	deletingNodePods, err := node.GetNodePods(ctx, kubeClient, lo.Map(markedForDeletionNodes, func(n *state.Node, _ int) *v1.Node { return n.Node })...)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
+	}
+	var pods []*v1.Pod
+	for _, n := range nodesToDelete {
+		pods = append(pods, n.pods...)
+	}
+	pods = append(pods, deletingNodePods...)
+	scheduler, err := provisioner.NewScheduler(ctx, pods, stateNodes, pscheduling.SchedulerOptions{
+		SimulationMode: true,
+	})
+
+	if err != nil {
+		return nil, false, fmt.Errorf("creating scheduler, %w", err)
+	}
+
+	newNodes, ifn, err := scheduler.Solve(ctx, pods)
+	if err != nil {
+		return nil, false, fmt.Errorf("simulating scheduling, %w", err)
+	}
+
+	podsScheduled := 0
+	for _, n := range newNodes {
+		podsScheduled += len(n.Pods)
+	}
+	for _, n := range ifn {
+		podsScheduled += len(n.Pods)
+	}
+
+	return newNodes, podsScheduled == len(pods), nil
+}
+
+// instanceTypesAreSubset returns true if the lhs slice of instance types are a subset of the rhs.
+func instanceTypesAreSubset(lhs []cloudprovider.InstanceType, rhs []cloudprovider.InstanceType) bool {
+	rhsNames := sets.NewString(lo.Map(rhs, func(t cloudprovider.InstanceType, i int) string { return t.Name() })...)
+	lhsNames := sets.NewString(lo.Map(lhs, func(t cloudprovider.InstanceType, i int) string { return t.Name() })...)
+	return len(rhsNames.Intersection(lhsNames)) == len(lhsNames)
+}
 
 // GetPodEvictionCost returns the disruption cost computed for evicting the given pod.
 func GetPodEvictionCost(ctx context.Context, p *v1.Pod) float64 {
@@ -100,4 +174,26 @@ func worstLaunchPrice(ofs []cloudprovider.Offering, reqs scheduling.Requirements
 		}
 	}
 	return math.MaxFloat64
+}
+
+func clamp(min, val, max float64) float64 {
+	if val < min {
+		return min
+	}
+	if val > max {
+		return max
+	}
+	return val
+}
+
+// mapNodes maps from a list of *v1.Node to candidateNode
+func mapNodes(nodes []*v1.Node, candidateNodes []CandidateNode) []CandidateNode {
+	verifyNodeNames := sets.NewString(lo.Map(nodes, func(t *v1.Node, i int) string { return t.Name })...)
+	var ret []CandidateNode
+	for _, c := range candidateNodes {
+		if verifyNodeNames.Has(c.Name) {
+			ret = append(ret, c)
+		}
+	}
+	return ret
 }

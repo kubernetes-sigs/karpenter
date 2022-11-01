@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package consolidation
+package deprovisioning
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
@@ -22,37 +22,39 @@ import (
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(consolidationDurationHistogram)
-	crmetrics.Registry.MustRegister(consolidationReplacementNodeInitializedHistogram)
-	crmetrics.Registry.MustRegister(consolidationActionsPerformedCounter)
+	crmetrics.Registry.MustRegister(deprovisioningDurationHistogram)
+	crmetrics.Registry.MustRegister(deprovisioningReplacementNodeInitializedHistogram)
+	crmetrics.Registry.MustRegister(deprovisioningActionsPerformedCounter)
 }
 
-var consolidationDurationHistogram = prometheus.NewHistogramVec(
+const deprovisioningSubsystem = "deprovisioning"
+
+var deprovisioningDurationHistogram = prometheus.NewHistogramVec(
 	prometheus.HistogramOpts{
 		Namespace: metrics.Namespace,
-		Subsystem: "consolidation",
+		Subsystem: deprovisioningSubsystem,
 		Name:      "evaluation_duration_seconds",
-		Help:      "Duration of the consolidation evaluation process in seconds.",
+		Help:      "Duration of the deprovisioning evaluation process in seconds.",
 		Buckets:   metrics.DurationBuckets(),
 	},
 	[]string{"method"},
 )
 
-var consolidationReplacementNodeInitializedHistogram = prometheus.NewHistogram(
+var deprovisioningReplacementNodeInitializedHistogram = prometheus.NewHistogram(
 	prometheus.HistogramOpts{
 		Namespace: metrics.Namespace,
-		Subsystem: "consolidation",
+		Subsystem: deprovisioningSubsystem,
 		Name:      "replacement_node_initialized_seconds",
 		Help:      "Amount of time required for a replacement node to become initialized.",
 		Buckets:   metrics.DurationBuckets(),
 	})
 
-var consolidationActionsPerformedCounter = prometheus.NewCounterVec(
+var deprovisioningActionsPerformedCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Namespace: metrics.Namespace,
-		Subsystem: "consolidation",
+		Subsystem: deprovisioningSubsystem,
 		Name:      "actions_performed",
-		Help:      "Number of consolidation actions performed. Labeled by action.",
+		Help:      "Number of deprovisioning actions performed. Labeled by action.",
 	},
 	[]string{"action"},
 )

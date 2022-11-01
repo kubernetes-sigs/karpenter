@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package consolidation_test
+package deprovisioning_test
 
 import (
 	"context"
@@ -42,7 +42,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
-	"github.com/aws/karpenter-core/pkg/controllers/consolidation"
+	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/test"
@@ -52,7 +52,7 @@ import (
 var ctx context.Context
 var env *test.Environment
 var cluster *state.Cluster
-var controller *consolidation.Controller
+var controller *deprovisioning.Controller
 var provisioningController *provisioning.Controller
 var provisioner *provisioning.Provisioner
 var cloudProvider *fake.CloudProvider
@@ -69,7 +69,7 @@ var leastExpensiveOffering cloudprovider.Offering
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Consolidation")
+	RunSpecs(t, "Deprovisioning")
 }
 
 var _ = BeforeSuite(func() {
@@ -123,7 +123,7 @@ var _ = BeforeEach(func() {
 
 	recorder.Reset()
 	fakeClock.SetTime(time.Now())
-	controller = consolidation.NewController(fakeClock, env.Client, provisioner, cloudProvider, recorder, cluster)
+	controller = deprovisioning.NewController(fakeClock, env.Client, provisioner, cloudProvider, recorder, cluster)
 })
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
@@ -142,11 +142,11 @@ var _ = AfterEach(func() {
 var _ = Describe("Pod Eviction Cost", func() {
 	const standardPodCost = 1.0
 	It("should have a standard disruptionCost for a pod with no priority or disruptionCost specified", func() {
-		cost := consolidation.GetPodEvictionCost(ctx, &v1.Pod{})
+		cost := deprovisioning.GetPodEvictionCost(ctx, &v1.Pod{})
 		Expect(cost).To(BeNumerically("==", standardPodCost))
 	})
 	It("should have a higher disruptionCost for a pod with a positive deletion disruptionCost", func() {
-		cost := consolidation.GetPodEvictionCost(ctx, &v1.Pod{
+		cost := deprovisioning.GetPodEvictionCost(ctx, &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.PodDeletionCost: "100",
 			}},
@@ -154,7 +154,7 @@ var _ = Describe("Pod Eviction Cost", func() {
 		Expect(cost).To(BeNumerically(">", standardPodCost))
 	})
 	It("should have a lower disruptionCost for a pod with a positive deletion disruptionCost", func() {
-		cost := consolidation.GetPodEvictionCost(ctx, &v1.Pod{
+		cost := deprovisioning.GetPodEvictionCost(ctx, &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.PodDeletionCost: "-100",
 			}},
@@ -162,17 +162,17 @@ var _ = Describe("Pod Eviction Cost", func() {
 		Expect(cost).To(BeNumerically("<", standardPodCost))
 	})
 	It("should have higher costs for higher deletion costs", func() {
-		cost1 := consolidation.GetPodEvictionCost(ctx, &v1.Pod{
+		cost1 := deprovisioning.GetPodEvictionCost(ctx, &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.PodDeletionCost: "101",
 			}},
 		})
-		cost2 := consolidation.GetPodEvictionCost(ctx, &v1.Pod{
+		cost2 := deprovisioning.GetPodEvictionCost(ctx, &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.PodDeletionCost: "100",
 			}},
 		})
-		cost3 := consolidation.GetPodEvictionCost(ctx, &v1.Pod{
+		cost3 := deprovisioning.GetPodEvictionCost(ctx, &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.PodDeletionCost: "99",
 			}},
@@ -181,13 +181,13 @@ var _ = Describe("Pod Eviction Cost", func() {
 		Expect(cost2).To(BeNumerically(">", cost3))
 	})
 	It("should have a higher disruptionCost for a pod with a higher priority", func() {
-		cost := consolidation.GetPodEvictionCost(ctx, &v1.Pod{
+		cost := deprovisioning.GetPodEvictionCost(ctx, &v1.Pod{
 			Spec: v1.PodSpec{Priority: ptr.Int32(1)},
 		})
 		Expect(cost).To(BeNumerically(">", standardPodCost))
 	})
 	It("should have a lower disruptionCost for a pod with a lower priority", func() {
-		cost := consolidation.GetPodEvictionCost(ctx, &v1.Pod{
+		cost := deprovisioning.GetPodEvictionCost(ctx, &v1.Pod{
 			Spec: v1.PodSpec{Priority: ptr.Int32(-1)},
 		})
 		Expect(cost).To(BeNumerically("<", standardPodCost))
@@ -218,8 +218,7 @@ var _ = Describe("Replace Nodes", func() {
 				}}})
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -287,8 +286,7 @@ var _ = Describe("Replace Nodes", func() {
 		})
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		node1 := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -465,8 +463,7 @@ var _ = Describe("Replace Nodes", func() {
 				}}})
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -561,8 +558,7 @@ var _ = Describe("Replace Nodes", func() {
 
 		// provisioner should require on-demand instance for this test case
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 			Requirements: []v1.NodeSelectorRequirement{
 				{
 					Key:      v1alpha5.LabelCapacityType,
@@ -617,8 +613,7 @@ var _ = Describe("Replace Nodes", func() {
 				}}})
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -695,8 +690,7 @@ var _ = Describe("Delete Node", func() {
 				}}})
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		node1 := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -787,8 +781,7 @@ var _ = Describe("Delete Node", func() {
 		})
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		node1 := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -837,7 +830,7 @@ var _ = Describe("Delete Node", func() {
 
 		// we don't need a new node
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
-		// but we expect to delete the nmode with more pods (node1) as the pod on node2 has a PDB preventing
+		// but we expect to delete the node with more pods (node1) as the pod on node2 has a PDB preventing
 		// eviction
 		ExpectNotFound(ctx, env.Client, node1)
 	})
@@ -866,8 +859,7 @@ var _ = Describe("Delete Node", func() {
 		}
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		node1 := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -942,8 +934,7 @@ var _ = Describe("Delete Node", func() {
 		pods[2].OwnerReferences = nil
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		node1 := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1023,7 +1014,6 @@ var _ = Describe("Node Lifetime Consideration", func() {
 
 		prov := test.Provisioner(test.ProvisionerOptions{
 			Consolidation:          &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty:   ptr.Int64(0),
 			TTLSecondsUntilExpired: ptr.Int64(3),
 		})
 		node1 := test.Node(test.NodeOptions{
@@ -1119,8 +1109,7 @@ var _ = Describe("Topology Consideration", func() {
 		testZone3Instance := leastExpensiveInstanceWithZone("test-zone-3")
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		zone1Node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1225,8 +1214,7 @@ var _ = Describe("Topology Consideration", func() {
 		testZone3Instance := leastExpensiveInstanceWithZone("test-zone-3")
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		zone1Node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1502,8 +1490,7 @@ var _ = Describe("Parallelization", func() {
 				}}})
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 
 		// Add a finalizer to the node so that it sticks around for the scheduling loop
@@ -1559,8 +1546,7 @@ var _ = Describe("Parallelization", func() {
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
 
 		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation:        &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-			TTLSecondsAfterEmpty: ptr.Int64(0),
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		podOpts := test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1634,7 +1620,7 @@ var _ = Describe("Parallelization", func() {
 		fakeClock.Step(10 * time.Minute)
 		result, err := controller.ProcessCluster(env.Ctx)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(result).To(Equal(consolidation.DeprovisioningResultNothingToDo))
+		Expect(result).To(Equal(deprovisioning.ResultNothingToDo))
 	})
 })
 
