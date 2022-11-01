@@ -38,11 +38,11 @@ import (
 )
 
 func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
-	nodesToDelete ...candidateNode) (newNodes []*pscheduling.Node, allPodsScheduled bool, err error) {
+	nodesToDelete ...CandidateNode) (newNodes []*pscheduling.Node, allPodsScheduled bool, err error) {
 	var stateNodes []*state.Node
 	var markedForDeletionNodes []*state.Node
 	candidateNodeIsDeleting := false
-	candidateNodeNames := sets.NewString(lo.Map(nodesToDelete, func(t candidateNode, i int) string { return t.Name })...)
+	candidateNodeNames := sets.NewString(lo.Map(nodesToDelete, func(t CandidateNode, i int) string { return t.Name })...)
 	cluster.ForEachNode(func(n *state.Node) bool {
 		// not a candidate node
 		if _, ok := candidateNodeNames[n.Node.Name]; !ok {
@@ -101,12 +101,8 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 // instanceTypesAreSubset returns true if the lhs slice of instance types are a subset of the rhs.
 func instanceTypesAreSubset(lhs []cloudprovider.InstanceType, rhs []cloudprovider.InstanceType) bool {
 	rhsNames := sets.NewString(lo.Map(rhs, func(t cloudprovider.InstanceType, i int) string { return t.Name() })...)
-	for _, l := range lhs {
-		if _, ok := rhsNames[l.Name()]; !ok {
-			return false
-		}
-	}
-	return true
+	lhsNames := sets.NewString(lo.Map(lhs, func(t cloudprovider.InstanceType, i int) string { return t.Name() })...)
+	return len(rhsNames.Intersection(lhsNames)) == len(lhsNames)
 }
 
 // GetPodEvictionCost returns the disruption cost computed for evicting the given pod.
@@ -191,9 +187,9 @@ func clamp(min, val, max float64) float64 {
 }
 
 // mapNodes maps from a list of *v1.Node to candidateNode
-func mapNodes(nodes []*v1.Node, candidateNodes []candidateNode) []candidateNode {
+func mapNodes(nodes []*v1.Node, candidateNodes []CandidateNode) []CandidateNode {
 	verifyNodeNames := sets.NewString(lo.Map(nodes, func(t *v1.Node, i int) string { return t.Name })...)
-	var ret []candidateNode
+	var ret []CandidateNode
 	for _, c := range candidateNodes {
 		if verifyNodeNames.Has(c.Name) {
 			ret = append(ret, c)

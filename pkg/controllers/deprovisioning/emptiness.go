@@ -42,7 +42,7 @@ type Emptiness struct {
 }
 
 // shouldDeprovision is a predicate used to filter deprovisionable nodes
-func (e *Emptiness) shouldDeprovision(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, nodePods []*v1.Pod) bool {
+func (e *Emptiness) ShouldDeprovision(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, nodePods []*v1.Pod) bool {
 	if provisioner == nil || provisioner.Spec.TTLSecondsAfterEmpty == nil {
 		return false
 	}
@@ -60,25 +60,25 @@ func (e *Emptiness) shouldDeprovision(ctx context.Context, n *state.Node, provis
 }
 
 // sortCandidates orders deprovisionable nodes by the disruptionCost
-func (e *Emptiness) sortCandidates(nodes []candidateNode) []candidateNode {
+func (e *Emptiness) SortCandidates(nodes []CandidateNode) []CandidateNode {
 	return nodes
 }
 
 // computeCommand generates a deprovisioning command given deprovisionable nodes
-func (e *Emptiness) computeCommand(_ context.Context, _ int, nodes ...candidateNode) (deprovisioningCommand, error) {
-	emptyNodes := lo.Filter(nodes, func(n candidateNode, _ int) bool { return len(n.pods) == 0 })
+func (e *Emptiness) ComputeCommand(_ context.Context, _ int, nodes ...CandidateNode) (Command, error) {
+	emptyNodes := lo.Filter(nodes, func(n CandidateNode, _ int) bool { return len(n.pods) == 0 })
 	if len(emptyNodes) == 0 {
-		return deprovisioningCommand{action: actionDoNothing}, nil
+		return Command{action: actionDoNothing}, nil
 	}
-	return deprovisioningCommand{
-		nodesToRemove: lo.Map(emptyNodes, func(n candidateNode, _ int) *v1.Node { return n.Node }),
+	return Command{
+		nodesToRemove: lo.Map(emptyNodes, func(n CandidateNode, _ int) *v1.Node { return n.Node }),
 		action:        actionDelete,
 		created:       e.clock.Now(),
 	}, nil
 }
 
 // validateCommand validates a command for a deprovisioner
-func (e *Emptiness) validateCommand(_ context.Context, candidateNodes []candidateNode, cmd deprovisioningCommand) (bool, error) {
+func (e *Emptiness) ValidateCommand(_ context.Context, candidateNodes []CandidateNode, cmd Command) (bool, error) {
 	if cmd.replacementNode != nil {
 		return false, fmt.Errorf("expected no replacement node for emptiness")
 	}

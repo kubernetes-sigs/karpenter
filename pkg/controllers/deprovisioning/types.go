@@ -54,15 +54,15 @@ func (r Result) String() string {
 	}
 }
 
-type deprovisioner interface {
-	// shouldDeprovision is a predicate used to filter deprovisionable nodes
-	shouldDeprovision(context.Context, *state.Node, *v1alpha5.Provisioner, []*v1.Pod) bool
+type Deprovisioner interface {
+	// ShouldDeprovision is a predicate used to filter deprovisionable nodes
+	ShouldDeprovision(context.Context, *state.Node, *v1alpha5.Provisioner, []*v1.Pod) bool
 	// sortCandidates orders deprovisionable nodes by the deprovisioner's pre-determined priority
-	sortCandidates([]candidateNode) []candidateNode
+	SortCandidates([]CandidateNode) []CandidateNode
 	// computeCommand generates a deprovisioning command given deprovisionable nodes
-	computeCommand(context.Context, int, ...candidateNode) (deprovisioningCommand, error)
+	ComputeCommand(context.Context, int, ...CandidateNode) (Command, error)
 	// validateCommand validates a command for a deprovisioner
-	validateCommand(context.Context, []candidateNode, deprovisioningCommand) (bool, error)
+	ValidateCommand(context.Context, []CandidateNode, Command) (bool, error)
 	// TTL returns the time to wait for a deprovisioner's validation
 	TTL() time.Duration
 	// String is the String representation of the deprovisioner
@@ -99,14 +99,14 @@ func (a action) String() string {
 	}
 }
 
-type deprovisioningCommand struct {
+type Command struct {
 	nodesToRemove   []*v1.Node
 	action          action
 	replacementNode *scheduling.Node
 	created         time.Time
 }
 
-func (o deprovisioningCommand) String() string {
+func (o Command) String() string {
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, "%s, terminating %d nodes ", o.action, len(o.nodesToRemove))
 	for i, old := range o.nodesToRemove {
