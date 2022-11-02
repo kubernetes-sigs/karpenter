@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
 var stateRetryPeriod = 1 * time.Minute
@@ -66,7 +66,7 @@ func (c *PodController) Reconcile(ctx context.Context, req reconcile.Request) (r
 	return reconcile.Result{Requeue: true, RequeueAfter: stateRetryPeriod}, nil
 }
 
-func (c *PodController) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+func (c *PodController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return controllerruntime.
 		NewControllerManagedBy(m).
 		Named(podControllerName).

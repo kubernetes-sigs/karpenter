@@ -22,7 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/aws/karpenter-core/pkg/controllers/state"
-	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -45,21 +45,15 @@ type Controller struct {
 }
 
 // NewController is a constructor
-func NewController(kubeClient client.Client, cluster *state.Cluster) *Controller {
-	return &Controller{
+func NewController(kubeClient client.Client, cluster *state.Cluster) corecontroller.Controller {
+	return corecontroller.NewTyped[*v1alpha5.Provisioner](kubeClient, &Controller{
 		kubeClient: kubeClient,
 		cluster:    cluster,
-	}
+	})
 }
 
 // Reconcile a control loop for the resource
-func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	provisioner := &v1alpha5.Provisioner{}
-	if err := c.kubeClient.Get(ctx, req.NamespacedName, provisioner); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(err)
-	}
-	persisted := provisioner.DeepCopy()
-
+func (c *Controller) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner) (reconcile.Result, error) {
 	nodes := v1.NodeList{}
 	if err := c.kubeClient.List(ctx, &nodes, client.MatchingLabels{v1alpha5.ProvisionerNameLabelKey: provisioner.Name}); err != nil {
 		return reconcile.Result{}, err
@@ -73,9 +67,6 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Determine resource usage and update provisioner.status.resources
 	resourceCounts := c.resourceCountsFor(provisioner.Name)
 	provisioner.Status.Resources = resourceCounts
-	if err := c.kubeClient.Status().Patch(ctx, provisioner, client.MergeFrom(persisted)); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(err)
-	}
 	return reconcile.Result{}, nil
 }
 
@@ -102,11 +93,10 @@ func (c *Controller) resourceCountsFor(provisionerName string) v1.ResourceList {
 	return result
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+func (c *Controller) Builder(_ context.Context, m manager.Manager) *controllerruntime.Builder {
 	return controllerruntime.
 		NewControllerManagedBy(m).
 		Named("counter").
-		For(&v1alpha5.Provisioner{}).
 		Watches(
 			&source.Kind{Type: &v1.Node{}},
 			handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {

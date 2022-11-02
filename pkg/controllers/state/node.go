@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
 const nodeControllerName = "node-state"
@@ -69,7 +69,7 @@ func (c *NodeController) LivenessProbe(req *http.Request) error {
 	return c.cluster.LivenessProbe(req)
 }
 
-func (c *NodeController) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+func (c *NodeController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return controllerruntime.
 		NewControllerManagedBy(m).
 		Named(nodeControllerName).

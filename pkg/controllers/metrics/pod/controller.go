@@ -35,7 +35,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/metrics"
-	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
 const (
@@ -149,7 +149,7 @@ func (c *Controller) record(ctx context.Context, pod *v1.Pod) {
 	}
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return controllerruntime.
 		NewControllerManagedBy(m).
 		Named("podmetrics").

@@ -41,7 +41,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
 
@@ -101,8 +101,8 @@ func (p *Provisioner) TriggerImmediate() {
 	p.batcher.TriggerImmediate()
 }
 
-func (p *Provisioner) Builder(_ context.Context, mgr manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.NewSingletonManagedBy(mgr).
+func (p *Provisioner) Builder(_ context.Context, mgr manager.Manager) corecontroller.Builder {
+	return corecontroller.NewSingletonManagedBy(mgr).
 		Named("provisioning").
 		WaitUntil(func(ctx context.Context) {
 			// Batch pods
@@ -118,7 +118,7 @@ func (p *Provisioner) Builder(_ context.Context, mgr manager.Manager) operatorco
 				}
 			}
 		}).
-		WithOptions(operatorcontroller.Options{
+		WithOptions(corecontroller.Options{
 			DisableWaitOnError: true,
 		})
 }

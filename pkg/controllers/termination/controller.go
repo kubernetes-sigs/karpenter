@@ -41,7 +41,7 @@ import (
 	"github.com/samber/lo"
 
 	provisioning "github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -144,7 +144,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return reconcile.Result{}, nil
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return controllerruntime.
 		NewControllerManagedBy(m).
 		Named(controllerName).

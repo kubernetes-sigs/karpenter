@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
 const provisionerControllerName = "provisioner-state"
@@ -51,7 +51,7 @@ func (c *ProvisionerController) Reconcile(ctx context.Context, req reconcile.Req
 	return reconcile.Result{}, nil
 }
 
-func (c *ProvisionerController) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+func (c *ProvisionerController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return controllerruntime.
 		NewControllerManagedBy(m).
 		Named(provisionerControllerName).

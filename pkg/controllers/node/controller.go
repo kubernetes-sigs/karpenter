@@ -36,7 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -115,7 +115,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return result.Min(results...), nil
 }
 
-func (c *Controller) Builder(ctx context.Context, m manager.Manager) operatorcontroller.Builder {
+func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontroller.Builder {
 	// Enqueues a reconcile request when nominated node expiration is triggered
 	ch := make(chan event.GenericEvent, 300)
 	c.cluster.AddNominatedNodeEvictionObserver(func(nodeName string) {

@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/aws/karpenter-core/pkg/events"
-	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
 
 	v1 "k8s.io/api/core/v1"
@@ -64,7 +64,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return controllerruntime.
 		NewControllerManagedBy(m).
 		Named(controllerName).
