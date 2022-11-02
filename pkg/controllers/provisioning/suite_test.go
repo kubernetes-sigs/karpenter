@@ -127,7 +127,7 @@ var _ = Describe("Provisioning", func() {
 			// Constrained by architecture
 			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelArchStable: "arm64"}}),
 			// Constrained by operatingSystem
-			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelOSStable: "linux"}}),
+			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelOSStable: string(v1.Linux)}}),
 		}
 		unschedulable := []*v1.Pod{
 			// Ignored, matches another provisioner
