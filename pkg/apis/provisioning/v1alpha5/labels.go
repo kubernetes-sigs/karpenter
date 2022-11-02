@@ -55,6 +55,7 @@ var (
 	LabelDomainExceptions = sets.NewString(
 		"kops.k8s.io",
 		v1.LabelNamespaceSuffixNode,
+		TestingGroup,
 	)
 
 	// WellKnownLabels are labels that belong to the RestrictedLabelDomains but allowed.

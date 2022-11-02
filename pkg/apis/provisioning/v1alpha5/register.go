@@ -21,9 +21,13 @@ import (
 	"knative.dev/pkg/apis"
 )
 
+const (
+	Group           = "karpenter.sh"
+	ExtensionsGroup = "extensions." + Group
+	TestingGroup    = "testing." + Group // Exclusively used for labeling/discovery in testing
+)
+
 var (
-	Group              = "karpenter.sh"
-	ExtensionsGroup    = "extensions." + Group
 	SchemeGroupVersion = schema.GroupVersion{Group: Group, Version: "v1alpha5"}
 	SchemeBuilder      = runtime.NewSchemeBuilder(func(scheme *runtime.Scheme) error {
 		scheme.AddKnownTypes(SchemeGroupVersion,
