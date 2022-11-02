@@ -16,6 +16,8 @@ package functional
 
 import (
 	"strings"
+
+	"k8s.io/apimachinery/pkg/util/yaml"
 )
 
 type Pair[A, B any] struct {
@@ -41,4 +43,12 @@ func SplitCommaSeparatedString(value string) []string {
 		result = append(result, strings.TrimSpace(value))
 	}
 	return result
+}
+
+func Unmarshal[T any](raw []byte) (*T, error) {
+	t := *new(T)
+	if err := yaml.Unmarshal(raw, &t); err != nil {
+		return nil, err
+	}
+	return &t, nil
 }

@@ -6,13 +6,15 @@ help: ## Display help
 presubmit: verify test ## Run all steps required for code to be checked in
 
 test: ## Run tests
-	go test -v ./... \
+	go test ./... \
 		-race \
 		--ginkgo.focus="${FOCUS}" \
 		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
 
-verify: codegen ## Verify code. Includes dependencies, linting, formatting, etc
+verify: ## Verify code. Includes codegen, dependencies, linting, formatting, etc
 	go mod tidy
+	go generate ./...
+	hack/boilerplate.sh
 	go vet ./...
 	golangci-lint run
 	@git diff --quiet ||\
@@ -21,15 +23,7 @@ verify: codegen ## Verify code. Includes dependencies, linting, formatting, etc
 			exit 1;\
 		fi;}
 
-codegen: ## Generate code. Must be run if changes are made to ./pkg/apis/...
-	controller-gen \
-		object:headerFile="hack/boilerplate.go.txt" \
-		crd \
-		paths="./pkg/..." \
-		output:crd:artifacts:config=chart/crds
-	hack/boilerplate.sh
-
 toolchain: ## Install developer toolchain
 	./hack/toolchain.sh
 
-.PHONY: help presubmit dev test verify codegen toolchain
+.PHONY: help presubmit dev test verify toolchain

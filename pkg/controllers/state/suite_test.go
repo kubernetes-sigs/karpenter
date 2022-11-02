@@ -25,8 +25,10 @@ import (
 	clock "k8s.io/utils/clock/testing"
 	"knative.dev/pkg/ptr"
 
+	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/operator/scheme"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 
@@ -64,8 +66,7 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(ctx, func(e *test.Environment) {})
-	Expect(env.Start()).To(Succeed(), "Failed to start environment")
+	env = test.NewEnvironment(scheme.Scheme, apis.CRDs...)
 })
 
 var _ = AfterSuite(func() {

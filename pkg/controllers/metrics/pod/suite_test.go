@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/controllers/metrics/pod"
+	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
@@ -41,10 +42,8 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(ctx, func(e *test.Environment) {
-		controller = pod.NewController(env.Client)
-	})
-	Expect(env.Start()).To(Succeed(), "Failed to start environment")
+	env = test.NewEnvironment(scheme.Scheme)
+	controller = pod.NewController(env.Client)
 })
 
 var _ = AfterSuite(func() {

@@ -26,9 +26,11 @@ import (
 	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/termination"
+	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -37,7 +39,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
-	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	. "knative.dev/pkg/logging/testing"
 	"knative.dev/pkg/ptr"
 
@@ -59,25 +60,23 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
-	env = test.NewEnvironment(ctx, func(e *test.Environment) {
-		cloudProvider := &fake.CloudProvider{}
-		coreV1Client := corev1.NewForConfigOrDie(e.Config)
-		eventRecorder := test.NewEventRecorder()
-		evictionQueue = termination.NewEvictionQueue(ctx, coreV1Client, eventRecorder)
-		controller = &termination.Controller{
-			KubeClient: e.Client,
-			Terminator: &termination.Terminator{
-				KubeClient:    e.Client,
-				CoreV1Client:  coreV1Client,
-				CloudProvider: cloudProvider,
-				EvictionQueue: evictionQueue,
-				Clock:         fakeClock,
-			},
-			Recorder:          eventRecorder,
-			TerminationRecord: sets.NewString(),
-		}
-	})
-	Expect(env.Start()).To(Succeed(), "Failed to start environment")
+	env = test.NewEnvironment(scheme.Scheme, apis.CRDs...)
+
+	cloudProvider := &fake.CloudProvider{}
+	eventRecorder := test.NewEventRecorder()
+	evictionQueue = termination.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), eventRecorder)
+	controller = &termination.Controller{
+		KubeClient: env.Client,
+		Terminator: &termination.Terminator{
+			KubeClient:    env.Client,
+			CoreV1Client:  env.KubernetesInterface.CoreV1(),
+			CloudProvider: cloudProvider,
+			EvictionQueue: evictionQueue,
+			Clock:         fakeClock,
+		},
+		Recorder:          eventRecorder,
+		TerminationRecord: sets.NewString(),
+	}
 })
 
 var _ = AfterSuite(func() {

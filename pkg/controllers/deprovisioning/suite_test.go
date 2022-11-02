@@ -32,12 +32,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/kubernetes"
 	clock "k8s.io/utils/clock/testing"
 	. "knative.dev/pkg/logging/testing"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -45,6 +45,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
@@ -56,7 +57,6 @@ var controller *deprovisioning.Controller
 var provisioningController *provisioning.Controller
 var provisioner *provisioning.Provisioner
 var cloudProvider *fake.CloudProvider
-var kubernetesInterface kubernetes.Interface
 var recorder *test.EventRecorder
 var nodeStateController *state.NodeController
 var fakeClock *clock.FakeClock
@@ -73,18 +73,16 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(ctx, func(e *test.Environment) {
-		ctx = settings.ToContext(ctx, test.Settings())
-		cloudProvider = &fake.CloudProvider{}
-		fakeClock = clock.NewFakeClock(time.Now())
-		cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
-		nodeStateController = state.NewNodeController(env.Client, cluster)
-		kubernetesInterface = kubernetes.NewForConfigOrDie(e.Config)
-		recorder = test.NewEventRecorder()
-		provisioner = provisioning.NewProvisioner(ctx, env.Client, kubernetesInterface.CoreV1(), recorder, cloudProvider, cluster, test.SettingsStore{})
-		provisioningController = provisioning.NewController(env.Client, provisioner, recorder)
-	})
-	Expect(env.Start()).To(Succeed(), "Failed to start environment")
+	env = test.NewEnvironment(scheme.Scheme, apis.CRDs...)
+	ctx = settings.ToContext(ctx, test.Settings())
+	cloudProvider = &fake.CloudProvider{}
+	fakeClock = clock.NewFakeClock(time.Now())
+	cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
+	nodeStateController = state.NewNodeController(env.Client, cluster)
+	recorder = test.NewEventRecorder()
+	provisioner = provisioning.NewProvisioner(ctx, env.Client, env.KubernetesInterface.CoreV1(), recorder, cloudProvider, cluster, test.SettingsStore{})
+	provisioningController = provisioning.NewController(env.Client, provisioner, recorder)
+	provisioning.WaitForClusterSync = false
 })
 
 var _ = AfterSuite(func() {
@@ -1518,7 +1516,7 @@ var _ = Describe("Parallelization", func() {
 		// Run the processing loop in parallel in the background with environment context
 		go triggerVerifyAction()
 		go func() {
-			_, err := controller.ProcessCluster(env.Ctx)
+			_, err := controller.ProcessCluster(ctx)
 			Expect(err).ToNot(HaveOccurred())
 		}()
 
@@ -1618,7 +1616,7 @@ var _ = Describe("Parallelization", func() {
 		// Trigger a reconciliation run which should take into account the deleting node
 		// Consolidation shouldn't trigger additional actions
 		fakeClock.Step(10 * time.Minute)
-		result, err := controller.ProcessCluster(env.Ctx)
+		result, err := controller.ProcessCluster(ctx)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(Equal(deprovisioning.ResultNothingToDo))
 	})
