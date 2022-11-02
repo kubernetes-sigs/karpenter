@@ -73,7 +73,7 @@ func Provisioner(overrides ...ProvisionerOptions) *v1alpha5.Provisioner {
 			ProviderRef:            options.ProviderRef,
 			Taints:                 options.Taints,
 			StartupTaints:          options.StartupTaints,
-			Labels:                 options.Labels,
+			Labels:                 lo.Assign(options.Labels, map[string]string{DiscoveryLabel: "unspecified"}), // For node cleanup discovery
 			Limits:                 &v1alpha5.Limits{Resources: options.Limits},
 			TTLSecondsAfterEmpty:   options.TTLSecondsAfterEmpty,
 			TTLSecondsUntilExpired: options.TTLSecondsUntilExpired,
