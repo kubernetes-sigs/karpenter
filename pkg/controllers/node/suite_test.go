@@ -24,7 +24,6 @@ import (
 	clock "k8s.io/utils/clock/testing"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -193,51 +192,6 @@ var _ = Describe("Controller", func() {
 
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			Expect(node.Annotations).ToNot(HaveKey(v1alpha5.EmptinessTimestampAnnotationKey))
-		})
-		It("should delete empty nodes past their TTL", func() {
-			provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(30)
-			node := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
-				Finalizers: []string{v1alpha5.TerminationFinalizer},
-				Labels:     map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name},
-				Annotations: map[string]string{
-					v1alpha5.EmptinessTimestampAnnotationKey: time.Now().Add(-100 * time.Second).Format(time.RFC3339),
-				}},
-			})
-			ExpectApplied(ctx, env.Client, provisioner, node)
-
-			// make the node more than 5 minutes old
-			fakeClock.Step(320 * time.Second)
-			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node))
-
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Expect(node.DeletionTimestamp.IsZero()).To(BeFalse())
-		})
-		It("should requeue reconcile if node is empty, but not past emptiness TTL", func() {
-			provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(30)
-			node := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
-				Finalizers: []string{v1alpha5.TerminationFinalizer},
-				Labels:     map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name},
-			}})
-
-			ExpectApplied(ctx, env.Client, provisioner, node)
-
-			// make the node eligible to be expired
-			fakeClock.Step(320 * time.Second)
-
-			emptinessTime := fakeClock.Now().Add(-10 * time.Second)
-			node.Annotations = map[string]string{
-				v1alpha5.EmptinessTimestampAnnotationKey: emptinessTime.Format(time.RFC3339),
-			}
-			ExpectApplied(ctx, env.Client, node)
-			// Emptiness timestamps are first formatted to a string friendly (time.RFC3339) (to put it in the node object)
-			// and then eventually parsed back into time.Time when comparing ttls. Repeating that logic in the test.
-			emptinessTimestamp, _ := time.Parse(time.RFC3339, emptinessTime.Format(time.RFC3339))
-			expectedRequeueTime := emptinessTimestamp.Add(30 * time.Second).Sub(fakeClock.Now()) // we should requeue in ~20 seconds.
-
-			result := ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node))
-			Expect(result).To(Equal(reconcile.Result{Requeue: true, RequeueAfter: expectedRequeueTime}))
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Expect(node.DeletionTimestamp.IsZero()).To(BeTrue())
 		})
 	})
 	Context("Finalizer", func() {
