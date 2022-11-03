@@ -78,7 +78,7 @@ func NewInstanceType(options InstanceTypeOptions) *InstanceType {
 		options.Architecture = "amd64"
 	}
 	if options.OperatingSystems.Len() == 0 {
-		options.OperatingSystems = utilsets.NewString("linux", "windows", "darwin")
+		options.OperatingSystems = utilsets.NewString(string(v1.Linux), string(v1.Windows), "darwin")
 	}
 
 	return &InstanceType{
@@ -100,7 +100,7 @@ func InstanceTypesAssorted() []cloudprovider.InstanceType {
 		for _, mem := range []int{1, 2, 4, 8, 16, 32, 64, 128} {
 			for _, zone := range []string{"test-zone-1", "test-zone-2", "test-zone-3"} {
 				for _, ct := range []string{v1alpha5.CapacityTypeSpot, v1alpha5.CapacityTypeOnDemand} {
-					for _, os := range []utilsets.String{utilsets.NewString("linux"), utilsets.NewString("windows")} {
+					for _, os := range []utilsets.String{utilsets.NewString(string(v1.Linux)), utilsets.NewString(string(v1.Windows))} {
 						for _, arch := range []string{v1alpha5.ArchitectureAmd64, v1alpha5.ArchitectureArm64} {
 							opts := InstanceTypeOptions{
 								Name:             fmt.Sprintf("%d-cpu-%d-mem-%s-%s-%s-%s", cpu, mem, arch, strings.Join(os.List(), ","), zone, ct),

@@ -406,7 +406,7 @@ var _ = Describe("Custom Constraints", func() {
 				// Constrained by architecture
 				test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelArchStable: "arm64"}}),
 				// Constrained by operatingSystem
-				test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelOSStable: "linux"}}),
+				test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelOSStable: string(v1.Linux)}}),
 				// Constrained by capacity type
 				test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1alpha5.LabelCapacityType: "spot"}}),
 			}
@@ -2990,10 +2990,10 @@ var _ = Describe("Instance Type Compatibility", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
 		for _, pod := range ExpectProvisioned(ctx, env.Client, recorder, controller, prov,
 			test.UnschedulablePod(test.PodOptions{
-				NodeSelector: map[string]string{v1.LabelOSStable: "linux"},
+				NodeSelector: map[string]string{v1.LabelOSStable: string(v1.Linux)},
 			}),
 			test.UnschedulablePod(test.PodOptions{
-				NodeSelector: map[string]string{v1.LabelOSStable: "windows"},
+				NodeSelector: map[string]string{v1.LabelOSStable: string(v1.Windows)},
 			})) {
 			node := ExpectScheduled(ctx, env.Client, pod)
 			nodeNames.Insert(node.Name)
