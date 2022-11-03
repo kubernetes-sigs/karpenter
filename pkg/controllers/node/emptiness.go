@@ -23,7 +23,6 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	"knative.dev/pkg/logging"
-	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -43,7 +42,7 @@ type Emptiness struct {
 
 // Reconcile reconciles the node
 func (r *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner, n *v1.Node) (reconcile.Result, error) {
-	// 1. Ignore node if not applicable
+	// Ignore node if not applicable
 	if provisioner.Spec.TTLSecondsAfterEmpty == nil {
 		return reconcile.Result{}, nil
 	}
@@ -53,7 +52,6 @@ func (r *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 		return reconcile.Result{}, nil
 	}
 
-	// 2. Remove ttl if not empty
 	empty, err := r.isEmpty(ctx, n)
 	if err != nil {
 		return reconcile.Result{}, err
@@ -65,21 +63,16 @@ func (r *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 	}
 
 	_, hasEmptinessTimestamp := n.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
-	if !empty {
-		if hasEmptinessTimestamp {
-			delete(n.Annotations, v1alpha5.EmptinessTimestampAnnotationKey)
-			logging.FromContext(ctx).Infof("Removed emptiness TTL from node")
-		}
-		return reconcile.Result{}, nil
-	}
-	// 3. Set TTL if not set
-	n.Annotations = lo.Assign(n.Annotations)
-	ttl := time.Duration(ptr.Int64Value(provisioner.Spec.TTLSecondsAfterEmpty)) * time.Second
-	if !hasEmptinessTimestamp {
-		n.Annotations[v1alpha5.EmptinessTimestampAnnotationKey] = r.clock.Now().Format(time.RFC3339)
+	if !empty && hasEmptinessTimestamp {
+		delete(n.Annotations, v1alpha5.EmptinessTimestampAnnotationKey)
+		logging.FromContext(ctx).Infof("Removed emptiness TTL from node")
+	} else if empty && !hasEmptinessTimestamp {
+		n.Annotations = lo.Assign(n.Annotations, map[string]string{
+			v1alpha5.EmptinessTimestampAnnotationKey: r.clock.Now().Format(time.RFC3339),
+		})
 		logging.FromContext(ctx).Infof("Added TTL to empty node")
-		return reconcile.Result{RequeueAfter: ttl}, nil
 	}
+
 	return reconcile.Result{}, nil
 }
 
