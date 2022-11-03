@@ -31,7 +31,6 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
@@ -65,7 +64,7 @@ func (r *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 		return reconcile.Result{}, nil
 	}
 
-	emptinessTimestamp, hasEmptinessTimestamp := n.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
+	_, hasEmptinessTimestamp := n.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
 	if !empty {
 		if hasEmptinessTimestamp {
 			delete(n.Annotations, v1alpha5.EmptinessTimestampAnnotationKey)
@@ -81,19 +80,7 @@ func (r *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 		logging.FromContext(ctx).Infof("Added TTL to empty node")
 		return reconcile.Result{RequeueAfter: ttl}, nil
 	}
-	// 4. Delete node if beyond TTL
-	emptinessTime, err := time.Parse(time.RFC3339, emptinessTimestamp)
-	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("parsing emptiness timestamp, %s", emptinessTimestamp)
-	}
-	if r.clock.Now().After(emptinessTime.Add(ttl)) {
-		logging.FromContext(ctx).Infof("Triggering termination after %s for empty node", ttl)
-		if err := r.kubeClient.Delete(ctx, n); err != nil {
-			return reconcile.Result{}, fmt.Errorf("deleting node, %w", err)
-		}
-		metrics.NodesTerminatedCounter.WithLabelValues(metrics.EmptinessReason).Inc()
-	}
-	return reconcile.Result{RequeueAfter: emptinessTime.Add(ttl).Sub(r.clock.Now())}, nil
+	return reconcile.Result{}, nil
 }
 
 func (r *Emptiness) isEmpty(ctx context.Context, n *v1.Node) (bool, error) {

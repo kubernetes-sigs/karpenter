@@ -1276,7 +1276,7 @@ var _ = Describe("Topology Consideration", func() {
 })
 
 var _ = Describe("Empty Nodes", func() {
-	It("can delete empty nodes", func() {
+	It("can delete empty nodes with Consolidation", func() {
 		prov := test.Provisioner(test.ProvisionerOptions{Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)}})
 
 		node1 := test.Node(test.NodeOptions{
@@ -1308,7 +1308,7 @@ var _ = Describe("Empty Nodes", func() {
 		// and should delete the empty one
 		ExpectNotFound(ctx, env.Client, node1)
 	})
-	It("can delete multiple empty nodes", func() {
+	It("can delete multiple empty nodes with Consolidation", func() {
 		prov := test.Provisioner(test.ProvisionerOptions{Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)}})
 
 		node1 := test.Node(test.NodeOptions{
@@ -1352,6 +1352,39 @@ var _ = Describe("Empty Nodes", func() {
 		// and should delete both empty ones
 		ExpectNotFound(ctx, env.Client, node1)
 		ExpectNotFound(ctx, env.Client, node2)
+	})
+	It("can delete empty nodes with TTLSecondsAfterEmpty with the emptiness timestamp", func() {
+		prov := test.Provisioner(test.ProvisionerOptions{TTLSecondsAfterEmpty: ptr.Int64(10)})
+
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				},
+				Annotations: map[string]string{
+					v1alpha5.EmptinessTimestampAnnotationKey: fakeClock.Now().Format(time.RFC3339),
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+		ExpectApplied(ctx, env.Client, prov, node)
+		ExpectMakeNodesReady(ctx, env.Client, node)
+
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+		fakeClock.Step(10 * time.Minute)
+		go triggerVerifyAction()
+		_, err := controller.ProcessCluster(ctx)
+		Expect(err).ToNot(HaveOccurred())
+
+		// we don't need any new nodes
+		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
+		// and should delete both empty ones
+		ExpectNotFound(ctx, env.Client, node)
 	})
 })
 
