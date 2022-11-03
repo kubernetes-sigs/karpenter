@@ -29,13 +29,14 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/operator/scheme"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 
@@ -70,21 +71,20 @@ func TestScheduling(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(ctx, func(e *test.Environment) {
-		ctx = settings.ToContext(ctx, test.Settings())
-		cloudProv = &fake.CloudProvider{}
-		instanceTypes, _ := cloudProv.GetInstanceTypes(ctx, nil)
-		// set these on the cloud provider so we can manipulate them if needed
-		cloudProv.InstanceTypes = instanceTypes
-		fakeClock = clock.NewFakeClock(time.Now())
-		cluster = state.NewCluster(ctx, fakeClock, e.Client, cloudProv)
-		nodeStateController = state.NewNodeController(e.Client, cluster)
-		podStateController = state.NewPodController(e.Client, cluster)
-		recorder = test.NewEventRecorder()
-		prov = provisioning.NewProvisioner(ctx, e.Client, corev1.NewForConfigOrDie(e.Config), recorder, cloudProv, cluster, test.SettingsStore{})
-		controller = provisioning.NewController(e.Client, prov, recorder)
-	})
-	Expect(env.Start()).To(Succeed(), "Failed to start environment")
+	env = test.NewEnvironment(scheme.Scheme, apis.CRDs...)
+	ctx = settings.ToContext(ctx, test.Settings())
+	cloudProv = &fake.CloudProvider{}
+	instanceTypes, _ := cloudProv.GetInstanceTypes(ctx, nil)
+	// set these on the cloud provider so we can manipulate them if needed
+	cloudProv.InstanceTypes = instanceTypes
+	fakeClock = clock.NewFakeClock(time.Now())
+	cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProv)
+	nodeStateController = state.NewNodeController(env.Client, cluster)
+	podStateController = state.NewPodController(env.Client, cluster)
+	recorder = test.NewEventRecorder()
+	prov = provisioning.NewProvisioner(ctx, env.Client, env.KubernetesInterface.CoreV1(), recorder, cloudProv, cluster, test.SettingsStore{})
+	controller = provisioning.NewController(env.Client, prov, recorder)
+	provisioning.WaitForClusterSync = false
 })
 
 var _ = AfterSuite(func() {
@@ -2769,7 +2769,7 @@ var _ = Describe("Topology", func() {
 			Expect(n1.Name).To(Equal(n2.Name))
 		})
 		It("should filter pod affinity topologies by namespace, empty namespace selector", func() {
-			if env.K8sVer.Minor() < 21 {
+			if env.Version.Minor() < 21 {
 				Skip("namespace selector is only supported on K8s >= 1.21.x")
 			}
 			topology := []v1.TopologySpreadConstraint{{

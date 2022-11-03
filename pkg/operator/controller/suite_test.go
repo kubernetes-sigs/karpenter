@@ -22,7 +22,6 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 	"knative.dev/pkg/configmap/informer"
 	"knative.dev/pkg/system"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -30,6 +29,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
 	"github.com/aws/karpenter-core/pkg/test"
 
@@ -52,27 +52,29 @@ func TestAPIs(t *testing.T) {
 	RunSpecs(t, "Controller")
 }
 
-var _ = BeforeEach(func() {
-	env = test.NewEnvironment(ctx, func(e *test.Environment) {
-		kubernetesInterface := kubernetes.NewForConfigOrDie(e.Config)
-		cmw = informer.NewInformedWatcher(kubernetesInterface, system.Namespace())
-		ss = settingsstore.WatchSettingsOrDie(e.Ctx, kubernetesInterface, cmw, settings.Registration)
+var _ = BeforeSuite(func() {
+	env = test.NewEnvironment(scheme.Scheme)
+	cmw = informer.NewInformedWatcher(env.KubernetesInterface, system.Namespace())
+	ss = settingsstore.WatchSettingsOrDie(ctx, env.KubernetesInterface, cmw, settings.Registration)
+	Expect(cmw.Start(env.Done))
+})
 
-		defaultConfigMap = &v1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "karpenter-global-settings",
-				Namespace: system.Namespace(),
-			},
-		}
-		ExpectApplied(ctx, e.Client, defaultConfigMap)
-		Expect(cmw.Start(e.Ctx.Done())).To(Succeed())
-	})
-	Expect(env.Start()).To(Succeed())
+var _ = AfterSuite(func() {
+	Expect(env.Stop()).To(Succeed())
+})
+
+var _ = BeforeEach(func() {
+	defaultConfigMap = &v1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "karpenter-global-settings",
+			Namespace: system.Namespace(),
+		},
+	}
+	ExpectApplied(ctx, env.Client, defaultConfigMap)
 })
 
 var _ = AfterEach(func() {
 	Expect(env.Client.Delete(ctx, defaultConfigMap.DeepCopy())).To(Succeed())
-	Expect(env.Stop()).To(Succeed())
 })
 
 var _ = Describe("Core Settings", func() {
@@ -90,7 +92,7 @@ var _ = Describe("Core Settings", func() {
 		}
 		c := controller.InjectSettings(fakeController, ss)
 		Eventually(func(g Gomega) {
-			innerCtx := GomegaWithContext(env.Ctx, g)
+			innerCtx := GomegaWithContext(ctx, g)
 			_, err := c.Reconcile(innerCtx, reconcile.Request{})
 			g.Expect(err).To(Succeed())
 		}).Should(Succeed())
@@ -114,7 +116,7 @@ var _ = Describe("Core Settings", func() {
 		}
 		c := controller.InjectSettings(fakeController, ss)
 		Eventually(func(g Gomega) {
-			innerCtx := GomegaWithContext(env.Ctx, g)
+			innerCtx := GomegaWithContext(ctx, g)
 			_, err := c.Reconcile(innerCtx, reconcile.Request{})
 			g.Expect(err).To(Succeed())
 		}).Should(Succeed())

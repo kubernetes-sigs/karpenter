@@ -29,12 +29,14 @@ import (
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	clock "k8s.io/utils/clock/testing"
 
+	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -62,22 +64,21 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(ctx, func(e *test.Environment) {
-		ctx = settings.ToContext(ctx, test.Settings())
-		cloudProvider = &fake.CloudProvider{}
-		recorder = test.NewEventRecorder()
-		fakeClock = clock.NewFakeClock(time.Now())
-		cluster = state.NewCluster(ctx, fakeClock, e.Client, cloudProvider)
-		nodeController = state.NewNodeController(e.Client, cluster)
-		prov = provisioning.NewProvisioner(ctx, e.Client, corev1.NewForConfigOrDie(e.Config), recorder, cloudProvider, cluster, test.SettingsStore{})
-		controller = provisioning.NewController(e.Client, prov, recorder)
-		instanceTypes, _ := cloudProvider.GetInstanceTypes(context.Background(), nil)
-		instanceTypeMap = map[string]cloudprovider.InstanceType{}
-		for _, it := range instanceTypes {
-			instanceTypeMap[it.Name()] = it
-		}
-	})
-	Expect(env.Start()).To(Succeed(), "Failed to start environment")
+	env = test.NewEnvironment(scheme.Scheme, apis.CRDs...)
+	ctx = settings.ToContext(ctx, test.Settings())
+	cloudProvider = &fake.CloudProvider{}
+	recorder = test.NewEventRecorder()
+	fakeClock = clock.NewFakeClock(time.Now())
+	cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
+	nodeController = state.NewNodeController(env.Client, cluster)
+	prov = provisioning.NewProvisioner(ctx, env.Client, corev1.NewForConfigOrDie(env.Config), recorder, cloudProvider, cluster, test.SettingsStore{})
+	controller = provisioning.NewController(env.Client, prov, recorder)
+	instanceTypes, _ := cloudProvider.GetInstanceTypes(context.Background(), nil)
+	instanceTypeMap = map[string]cloudprovider.InstanceType{}
+	for _, it := range instanceTypes {
+		instanceTypeMap[it.Name()] = it
+	}
+	provisioning.WaitForClusterSync = false
 })
 
 var _ = BeforeEach(func() {
