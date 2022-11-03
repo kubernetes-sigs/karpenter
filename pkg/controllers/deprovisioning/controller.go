@@ -54,6 +54,7 @@ type Controller struct {
 	cloudProvider          cloudprovider.CloudProvider
 	emptiness              *Emptiness
 	consolidation          *Consolidation
+	drift                  *Drift
 	lastConsolidationState int64
 }
 
@@ -82,6 +83,11 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 		recorder:      recorder,
 		cloudProvider: cp,
 		emptiness: &Emptiness{
+			kubeClient: kubeClient,
+			clock:      clk,
+			cluster:    cluster,
+		},
+		drift: &Drift{
 			kubeClient: kubeClient,
 			clock:      clk,
 			cluster:    cluster,
@@ -144,6 +150,7 @@ func (c *Controller) ProcessCluster(ctx context.Context) (Result, error) {
 		// Emptiness and Consolidation are mutually exclusive, so this loop only executes one deprovisioner
 		c.emptiness,
 		c.consolidation,
+		c.drift,
 	} {
 		var result Result
 		var err error
