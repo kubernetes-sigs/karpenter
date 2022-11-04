@@ -9,6 +9,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sort"
 	"time"
 )
 
@@ -19,7 +20,7 @@ type Drift struct {
 	cluster    *state.Cluster
 }
 
-func (d *Drift) ShouldDeprovision(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, pods []*v1.Pod) bool {
+func (d *Drift) ShouldDeprovision(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, _ []*v1.Pod) bool {
 	if provisioner == nil {
 		return false
 	}
@@ -28,10 +29,13 @@ func (d *Drift) ShouldDeprovision(ctx context.Context, n *state.Node, provisione
 }
 
 func (d *Drift) SortCandidates(nodes []CandidateNode) []CandidateNode {
+	sort.Slice(nodes, func(i int, j int) bool {
+		return nodes[i].disruptionCost < nodes[j].disruptionCost
+	})
 	return nodes
 }
 
-func (d *Drift) ComputeCommand(ctx context.Context, i int, nodes ...CandidateNode) (Command, error) {
+func (d *Drift) ComputeCommand(ctx context.Context, _ int, nodes ...CandidateNode) (Command, error) {
 	driftedNodes := lo.Filter(nodes, func(n CandidateNode, _ int) bool {
 		_, hasDrifted := n.Node.Annotations[v1alpha5.DriftedAnnotationKey]
 		return hasDrifted
@@ -41,17 +45,18 @@ func (d *Drift) ComputeCommand(ctx context.Context, i int, nodes ...CandidateNod
 	}
 	return Command{
 		nodesToRemove: lo.Map(driftedNodes, func(n CandidateNode, _ int) *v1.Node { return n.Node }),
-		action:        actionDelete,
+		action:        actionReplace,
 		created:       d.clock.Now(),
 	}, nil
 }
 
-func (d *Drift) ValidateCommand(ctx context.Context, nodes []CandidateNode, command Command) (bool, error) {
+func (d *Drift) ValidateCommand(ctx context.Context, nodes []CandidateNode, cmd Command) (bool, error) {
+	//Check the replacement node
 	return false, nil
 }
 
 func (d *Drift) TTL() time.Duration {
-	return 5 * time.Second
+	return 15 * time.Second
 }
 
 func (d *Drift) String() string {
