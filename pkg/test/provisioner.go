@@ -64,7 +64,6 @@ func Provisioner(overrides ...ProvisionerOptions) *v1alpha5.Provisioner {
 	}
 	raw := &runtime.RawExtension{}
 	ExpectWithOffset(1, raw.UnmarshalJSON(lo.Must(json.Marshal(options.Provider)))).To(Succeed())
-
 	provisioner := &v1alpha5.Provisioner{
 		ObjectMeta: ObjectMeta(options.ObjectMeta),
 		Spec: v1alpha5.ProvisionerSpec{
