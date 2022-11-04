@@ -22,7 +22,6 @@ import (
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
@@ -74,10 +73,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// 1. Retrieve Node, ignore if not provisioned or terminating
 	stored := &v1.Node{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, stored); err != nil {
-		if errors.IsNotFound(err) {
-			return reconcile.Result{}, nil
-		}
-		return reconcile.Result{}, err
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	if _, ok := stored.Labels[v1alpha5.ProvisionerNameLabelKey]; !ok {
 		return reconcile.Result{}, nil
@@ -89,10 +85,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// 2. Retrieve Provisioner
 	provisioner := &v1alpha5.Provisioner{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: stored.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
-		if errors.IsNotFound(err) {
-			return reconcile.Result{}, nil
-		}
-		return reconcile.Result{}, err
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
 	// 3. Execute reconcilers
