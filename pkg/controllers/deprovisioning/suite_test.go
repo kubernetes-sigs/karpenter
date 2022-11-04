@@ -1422,7 +1422,7 @@ var _ = Describe("Consolidation TTL", func() {
 		}()
 
 		// wait for the controller to block on the validation timeout
-		Eventually(fakeClock.HasWaiters).Should(BeTrue())
+		Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
 		// controller should be blocking during the timeout
 		Expect(finished.Load()).To(BeFalse())
 		// and the node should not be deleted yet
@@ -1475,7 +1475,7 @@ var _ = Describe("Consolidation TTL", func() {
 		}()
 
 		// wait for the controller to block on the validation timeout
-		Eventually(fakeClock.HasWaiters).Should(BeTrue())
+		Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
 		// controller should be blocking during the timeout
 		Expect(finished.Load()).To(BeFalse())
 		// and the node should not be deleted yet

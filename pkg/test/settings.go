@@ -21,7 +21,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
+	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
 )
+
+var _ settingsstore.Store = SettingsStore{}
 
 // SettingsStore is a map from ContextKey to settings/config data
 type SettingsStore map[interface{}]interface{}

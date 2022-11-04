@@ -55,7 +55,14 @@ func TestAPIs(t *testing.T) {
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme)
 	cmw = informer.NewInformedWatcher(env.KubernetesInterface, system.Namespace())
-	ss = settingsstore.WatchSettingsOrDie(ctx, env.KubernetesInterface, cmw, settings.Registration)
+	defaultConfigMap = &v1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "karpenter-global-settings",
+			Namespace: system.Namespace(),
+		},
+	}
+	ExpectApplied(ctx, env.Client, defaultConfigMap)
+	ss = settingsstore.NewWatcherOrDie(ctx, env.KubernetesInterface, cmw, settings.Registration)
 	Expect(cmw.Start(env.Done))
 })
 

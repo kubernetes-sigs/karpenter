@@ -21,7 +21,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	. "knative.dev/pkg/logging/testing"
 
@@ -75,17 +74,5 @@ var _ = Describe("Validation", func() {
 			},
 		}
 		_, _ = settings.NewSettingsFromConfigMap(cm)
-	})
-})
-
-var _ = Describe("Unmarshalling", func() {
-	It("should succeed to unmarshal default data", func() {
-		data := lo.Assign(settings.Registration.DefaultData)
-		cm := &v1.ConfigMap{
-			Data: data,
-		}
-		s, _ := settings.NewSettingsFromConfigMap(cm)
-		Expect(s.BatchMaxDuration.Duration).To(Equal(time.Second * 10))
-		Expect(s.BatchIdleDuration.Duration).To(Equal(time.Second))
 	})
 })
