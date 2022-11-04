@@ -23,7 +23,6 @@ import (
 	"k8s.io/utils/clock"
 
 	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -115,10 +114,7 @@ func (t *Terminator) terminate(ctx context.Context, node *v1.Node) error {
 	persisted := node.DeepCopy()
 	node.Finalizers = lo.Without(node.Finalizers, v1alpha5.TerminationFinalizer)
 	if err := t.KubeClient.Patch(ctx, node, client.MergeFrom(persisted)); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		return fmt.Errorf("removing finalizer from node, %w", err)
+		return client.IgnoreNotFound(err)
 	}
 	logging.FromContext(ctx).Infof("Deleted node")
 	return nil
