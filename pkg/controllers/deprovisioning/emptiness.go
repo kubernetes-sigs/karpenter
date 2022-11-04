@@ -43,11 +43,14 @@ type Emptiness struct {
 
 // shouldDeprovision is a predicate used to filter deprovisionable nodes
 func (e *Emptiness) ShouldDeprovision(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, nodePods []*v1.Pod) bool {
-	if provisioner == nil || provisioner.Spec.TTLSecondsAfterEmpty == nil {
+	if provisioner == nil || provisioner.Spec.TTLSecondsAfterEmpty == nil || len(nodePods) != 0 {
 		return false
 	}
 
 	emptinessTimestamp, hasEmptinessTimestamp := n.Node.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
+	if !hasEmptinessTimestamp {
+		return false
+	}
 	ttl := time.Duration(ptr.Int64Value(provisioner.Spec.TTLSecondsAfterEmpty)) * time.Second
 
 	emptinessTime, err := time.Parse(time.RFC3339, emptinessTimestamp)
@@ -55,8 +58,8 @@ func (e *Emptiness) ShouldDeprovision(ctx context.Context, n *state.Node, provis
 		logging.FromContext(ctx).Debugf("Unable to parse emptiness timestamp, %s for node %s", emptinessTimestamp, n.Node.Name)
 		return true
 	}
-	// Don't deprovision if node is not empty, does not have the emptiness timestamp, or is before the emptiness TTL
-	return len(nodePods) == 0 && hasEmptinessTimestamp && e.clock.Now().After(emptinessTime.Add(ttl))
+	// Don't deprovision if node's emptiness timestamp is before the emptiness TTL
+	return e.clock.Now().After(emptinessTime.Add(ttl))
 }
 
 // sortCandidates orders deprovisionable nodes by the disruptionCost
