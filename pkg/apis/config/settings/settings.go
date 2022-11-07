@@ -16,12 +16,10 @@ package settings
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,7 +33,6 @@ var ContextKey = Registration
 var Registration = &config.Registration{
 	ConfigMapName: "karpenter-global-settings",
 	Constructor:   NewSettingsFromConfigMap,
-	DefaultData:   lo.Must(defaultSettings.Data()),
 }
 
 var defaultSettings = Settings{
@@ -64,15 +61,6 @@ func NewSettingsFromConfigMap(cm *v1.ConfigMap) (Settings, error) {
 		panic(fmt.Sprintf("validating settings, %v", err))
 	}
 	return s, nil
-}
-
-func (s Settings) Data() (map[string]string, error) {
-	d := map[string]string{}
-
-	if err := json.Unmarshal(lo.Must(json.Marshal(defaultSettings)), &d); err != nil {
-		return d, fmt.Errorf("unmarshalling json data, %w", err)
-	}
-	return d, nil
 }
 
 // Validate leverages struct tags with go-playground/validator so you can define a struct with custom

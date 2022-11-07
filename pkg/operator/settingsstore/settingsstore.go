@@ -17,11 +17,12 @@ package settingsstore
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/configmap/informer"
@@ -41,7 +42,9 @@ type store struct {
 	stores map[*config.Registration]*configmap.UntypedStore
 }
 
-func WatchSettingsOrDie(ctx context.Context, kubernetesInterface kubernetes.Interface, cmw *informer.InformedWatcher, registrations ...*config.Registration) Store {
+// NewWatcherOrDie creates the settings store watchers to watch for configMap updates to any settings store in registrations
+// Before returning, it waits for all ConfigMaps passed through registration to be created
+func NewWatcherOrDie(ctx context.Context, kubernetesInterface kubernetes.Interface, cmw *informer.InformedWatcher, registrations ...*config.Registration) Store {
 	ss := &store{
 		registrations: registrations,
 		stores:        map[*config.Registration]*configmap.UntypedStore{},
@@ -50,7 +53,6 @@ func WatchSettingsOrDie(ctx context.Context, kubernetesInterface kubernetes.Inte
 		if err := registration.Validate(); err != nil {
 			panic(fmt.Sprintf("Validating settings registration, %v", err))
 		}
-
 		ss.stores[registration] = configmap.NewUntypedStore(
 			registration.ConfigMapName,
 			logging.FromContext(ctx),
@@ -58,29 +60,40 @@ func WatchSettingsOrDie(ctx context.Context, kubernetesInterface kubernetes.Inte
 				registration.ConfigMapName: registration.Constructor,
 			},
 		)
-
-		// TODO: Remove this Get once we don't rely on this settingsStore for initialization
-		// Attempt to get the ConfigMap since WatchWithDefault doesn't wait for Add event form API-server
-		cm, err := kubernetesInterface.CoreV1().ConfigMaps(cmw.Namespace).Get(ctx, registration.ConfigMapName, metav1.GetOptions{})
-		if err != nil {
-			if errors.IsNotFound(err) {
-				cm = &v1.ConfigMap{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      registration.ConfigMapName,
-						Namespace: cmw.Namespace,
-					},
-					Data: registration.DefaultData,
-				}
-			} else {
-				panic(fmt.Sprintf("Getting settings %v, %v", registration.ConfigMapName, err))
-			}
-		}
-
-		// TODO: Move this to ss.stores[registration].WatchConfigs(cmw) when the UntypedStores
-		// implements a default mechanism
-		cmw.WatchWithDefault(*cm, ss.stores[registration].OnConfigChanged)
+		ss.stores[registration].WatchConfigs(cmw)
 	}
+	// Waits for all the ConfigMaps to be created before we continue onto the
+	ss.waitForConfigMapsOrDie(ctx, kubernetesInterface, cmw)
 	return ss
+}
+
+// waitForConfigMapsOrDie waits until all registered configMaps in the settingsStore are created
+func (s *store) waitForConfigMapsOrDie(ctx context.Context, kubernetesInterface kubernetes.Interface, configMapWatcher *informer.InformedWatcher) {
+	logging.FromContext(ctx).Debugf("Waiting for settings ConfigMap(s) creation")
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	factory := informers.NewSharedInformerFactoryWithOptions(kubernetesInterface, time.Second*30, informers.WithNamespace(configMapWatcher.Namespace))
+	configMapInformer := factory.Core().V1().ConfigMaps().Informer()
+	factory.Start(ctx.Done())
+	expectedNames := sets.NewString(lo.Map(s.registrations, func(r *config.Registration, _ int) string {
+		return r.ConfigMapName
+	})...)
+	for {
+		got := configMapInformer.GetStore().List()
+		gotNames := sets.NewString(lo.Map(got, func(obj interface{}, _ int) string {
+			return obj.(*v1.ConfigMap).Name
+		})...)
+		if gotNames.IsSuperset(expectedNames) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			panic(fmt.Sprintf("Timed out waiting for ConfigMap(s) %v to be created", lo.Keys(expectedNames)))
+		case <-time.After(time.Millisecond * 500):
+		}
+	}
+	logging.FromContext(ctx).Debugf("Settings ConfigMap(s) exist")
 }
 
 func (s *store) InjectSettings(ctx context.Context) context.Context {

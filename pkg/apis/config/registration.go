@@ -28,7 +28,6 @@ type Constructor interface{}
 type Registration struct {
 	ConfigMapName string
 	Constructor   interface{}
-	DefaultData   map[string]string
 }
 
 func (r Registration) Validate() error {
@@ -37,9 +36,6 @@ func (r Registration) Validate() error {
 	}
 	if err := configmap.ValidateConstructor(r.Constructor); err != nil {
 		return fmt.Errorf("constructor validation failed in SettingsStore registration, %w", err)
-	}
-	if r.DefaultData == nil {
-		return fmt.Errorf("default value cannot be empty in SettingsStore registration")
 	}
 	return nil
 }

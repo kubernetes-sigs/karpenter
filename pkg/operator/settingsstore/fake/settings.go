@@ -29,7 +29,6 @@ import (
 var SettingsRegistration = &config.Registration{
 	ConfigMapName: "karpenter-global-settings",
 	Constructor:   NewFakeSettingsFromConfigMap,
-	DefaultData:   lo.Must(defaultSettings.Data()),
 }
 
 var defaultSettings = Settings{
