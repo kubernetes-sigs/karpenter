@@ -588,6 +588,60 @@ var _ = Describe("Replace Nodes", func() {
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
 		ExpectNodeExists(ctx, env.Client, node.Name)
 	})
+	It("can replace node for expiration", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}}})
+
+		prov := test.Provisioner(test.ProvisionerOptions{
+			TTLSecondsUntilExpired: ptr.Int64(30),
+		})
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+		})
+		ExpectApplied(ctx, env.Client, rs, pod, node, prov)
+		ExpectMakeNodesReady(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		ExpectManualBinding(ctx, env.Client, pod, node)
+		ExpectScheduled(ctx, env.Client, pod)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
+
+		// consolidation won't delete the old node until the new node is ready
+		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, node)
+		fakeClock.Step(10 * time.Minute)
+		go triggerVerifyAction()
+		_, err := controller.ProcessCluster(ctx)
+		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
+
+		Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+
+		ExpectNotFound(ctx, env.Client, node)
+	})
 	It("waits for node deletion to finish", func() {
 		labels := map[string]string{
 			"app": "test",
@@ -665,6 +719,34 @@ var _ = Describe("Replace Nodes", func() {
 })
 
 var _ = Describe("Delete Node", func() {
+	It("should ignore nodes without TTLSecondsUntilExpired", func() {
+		prov := test.Provisioner()
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")}})
+
+		ExpectApplied(ctx, env.Client, node, prov)
+		ExpectMakeNodesReady(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
+
+		// inform cluster state about the nodes
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		fakeClock.Step(10 * time.Minute)
+		_, err := controller.ProcessCluster(ctx)
+		Expect(err).ToNot(HaveOccurred())
+
+		// we don't need a new node
+		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
+		// and can't delete the node since expiry is not enabled
+		ExpectNodeExists(ctx, env.Client, node.Name)
+	})
 	It("can delete nodes", func() {
 		labels := map[string]string{
 			"app": "test",
@@ -738,6 +820,39 @@ var _ = Describe("Delete Node", func() {
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
 		// and delete the old one
 		ExpectNotFound(ctx, env.Client, node2)
+	})
+	It("can delete expired nodes", func() {
+		prov := test.Provisioner(test.ProvisionerOptions{
+			TTLSecondsUntilExpired: ptr.Int64(60),
+		})
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}},
+		)
+
+		ExpectApplied(ctx, env.Client, node, prov)
+		ExpectMakeNodesReady(ctx, env.Client, node)
+
+		// inform cluster state about the nodes
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		fakeClock.Step(10 * time.Minute)
+		go triggerVerifyAction()
+		_, err := controller.ProcessCluster(ctx)
+		Expect(err).ToNot(HaveOccurred())
+
+		// we don't need a new node, but we should evict everything off one of node2 which only has a single pod
+		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
+		// and delete the old one
+		ExpectNotFound(ctx, env.Client, node)
 	})
 	It("can delete nodes, considers PDB", func() {
 		var nl v1.NodeList

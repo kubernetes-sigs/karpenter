@@ -26,15 +26,17 @@ import (
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/samber/lo"
+
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
+	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
-	"github.com/samber/lo"
 )
 
 // Consolidation is the consolidation controller.
@@ -92,7 +94,7 @@ func (c *Consolidation) deleteEmpty(_ context.Context, candidates ...CandidateNo
 		return Command{
 			nodesToRemove: lo.Map(emptyNodes, func(n CandidateNode, _ int) *v1.Node { return n.Node }),
 			action:        actionDelete,
-			created:       c.clock.Now(),
+			createdAt:     c.clock.Now(),
 		}
 	}
 	return Command{action: actionDoNothing}
@@ -123,7 +125,7 @@ func (c *Consolidation) computeConsolidation(ctx context.Context, node Candidate
 		return Command{
 			nodesToRemove: []*v1.Node{node.Node},
 			action:        actionDelete,
-			created:       c.clock.Now(),
+			createdAt:     c.clock.Now(),
 		}, nil
 	}
 
@@ -162,17 +164,20 @@ func (c *Consolidation) computeConsolidation(ctx context.Context, node Candidate
 	}
 
 	return Command{
-		nodesToRemove:   []*v1.Node{node.Node},
-		action:          actionReplace,
-		replacementNode: newNodes[0],
-		created:         c.clock.Now(),
+		nodesToRemove:    []*v1.Node{node.Node},
+		action:           actionReplace,
+		replacementNodes: []*pscheduling.Node{newNodes[0]},
+		createdAt:        c.clock.Now(),
 	}, nil
 }
 
 // validateCommand validates a command for a deprovisioner
 func (c *Consolidation) ValidateCommand(ctx context.Context, nodesToDelete []CandidateNode, cmd Command) (bool, error) {
-	if cmd.action == actionDelete && c.validateDeleteEmpty(nodesToDelete) {
-		return true, nil
+	// If we're deleting and there are empty nodes, command is valid.
+	if cmd.action == actionDelete {
+		if c.validateDeleteEmpty(nodesToDelete) {
+			return true, nil
+		}
 	}
 	newNodes, allPodsScheduled, err := simulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, nodesToDelete...)
 	if err != nil {
@@ -189,7 +194,7 @@ func (c *Consolidation) ValidateCommand(ctx context.Context, nodesToDelete []Can
 	//                    be deleted without producing more than one node
 	// len(newNodes) == 1, as long as the node looks like what we were expecting, this is valid
 	if len(newNodes) == 0 {
-		if cmd.replacementNode == nil {
+		if len(cmd.replacementNodes) == 0 {
 			// scheduling produced zero new nodes and we weren't expecting any, so this is valid.
 			return true, nil
 		}
@@ -204,7 +209,7 @@ func (c *Consolidation) ValidateCommand(ctx context.Context, nodesToDelete []Can
 	}
 
 	// we now know that scheduling simulation wants to create one new node
-	if cmd.replacementNode == nil {
+	if len(cmd.replacementNodes) == 0 {
 		// but we weren't expecting any new nodes, so this is invalid
 		return false, nil
 	}
@@ -219,7 +224,7 @@ func (c *Consolidation) ValidateCommand(ctx context.Context, nodesToDelete []Can
 	// a 4xlarge and replace it with a 2xlarge. If things have changed and the scheduling simulation we just performed
 	// now says that we need to launch a 4xlarge. It's still launching the correct number of nodes, but it's just
 	// as expensive or possibly more so we shouldn't validate.
-	if !instanceTypesAreSubset(cmd.replacementNode.InstanceTypeOptions, newNodes[0].InstanceTypeOptions) {
+	if !instanceTypesAreSubset(cmd.replacementNodes[0].InstanceTypeOptions, newNodes[0].InstanceTypeOptions) {
 		return false, nil
 	}
 
@@ -272,45 +277,4 @@ func (c *Consolidation) validateDeleteEmpty(nodesToDelete []CandidateNode) bool 
 		}
 	}
 	return true
-}
-
-func canBeTerminated(node candidateNode, pdbs *PDBLimits) error {
-	if !node.DeletionTimestamp.IsZero() {
-		return fmt.Errorf("already being deleted")
-	}
-	if !pdbs.CanEvictPods(node.pods) {
-		return fmt.Errorf("not eligible for termination due to PDBs")
-	}
-	return podsPreventEviction(node)
-}
-
-// podsPreventEviction returns true if there are pods that would prevent eviction
-func podsPreventEviction(node candidateNode) bool {
-	for _, p := range node.pods {
-		// don't care about pods that are finishing, finished or owned by the node
-		if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
-			continue
-		}
-
-		if pod.HasDoNotEvict(p) {
-			return true
-		}
-
-		if pod.IsNotOwned(p) {
-			return true
-		}
-	}
-	return false
-}
-
-// validateDeleteEmpty validates that the given nodes are still empty
-func (c *Consolidation) validateDeleteEmpty(nodesToDelete []candidateNode) (bool, error) {
-	// the deletion of empty nodes is easy to validate, we just ensure that all the nodesToDelete are still empty and that
-	// the node isn't a target of a recent scheduling simulation
-	for _, n := range nodesToDelete {
-		if len(n.pods) != 0 && !c.cluster.IsNodeNominated(n.Name) {
-			return false, nil
-		}
-	}
-	return true, nil
 }

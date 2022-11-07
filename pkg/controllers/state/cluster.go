@@ -209,20 +209,24 @@ func (c *Cluster) onNominatedNodeEviction(key string, _ interface{}) {
 }
 
 // UnmarkForDeletion removes the marking on the node as a node the controller intends to delete
-func (c *Cluster) UnmarkForDeletion(nodeName string) {
+func (c *Cluster) UnmarkForDeletion(nodeNames ...string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if _, ok := c.nodes[nodeName]; ok {
-		c.nodes[nodeName].MarkedForDeletion = false
+	for _, nodeName := range nodeNames {
+		if _, ok := c.nodes[nodeName]; ok {
+			c.nodes[nodeName].MarkedForDeletion = false
+		}
 	}
 }
 
 // MarkForDeletion marks the node as pending deletion in the internal cluster state
-func (c *Cluster) MarkForDeletion(nodeName string) {
+func (c *Cluster) MarkForDeletion(nodeNames ...string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if _, ok := c.nodes[nodeName]; ok {
-		c.nodes[nodeName].MarkedForDeletion = true
+	for _, nodeName := range nodeNames {
+		if _, ok := c.nodes[nodeName]; ok {
+			c.nodes[nodeName].MarkedForDeletion = true
+		}
 	}
 }
 

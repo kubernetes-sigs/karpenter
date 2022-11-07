@@ -100,10 +100,10 @@ func (a action) String() string {
 }
 
 type Command struct {
-	nodesToRemove   []*v1.Node
-	action          action
-	replacementNode *scheduling.Node
-	created         time.Time
+	nodesToRemove    []*v1.Node
+	action           action
+	replacementNodes []*scheduling.Node
+	createdAt        time.Time
 }
 
 func (o Command) String() string {
@@ -121,19 +121,34 @@ func (o Command) String() string {
 			fmt.Fprintf(&buf, "/%s", capacityType)
 		}
 	}
-	if o.replacementNode != nil {
-		ct := o.replacementNode.Requirements.Get(v1alpha5.LabelCapacityType)
-		nodeDesc := "node"
-		// if there is a single capacity type value, we know what will launch. This makes it more clear
-		// in logs why we replaced a node with one that at first glance appears more expensive when doing an OD->spot
-		// replacement
-		if ct.Len() == 1 {
-			nodeDesc = fmt.Sprintf("%s node", ct.Any())
-		}
-
-		fmt.Fprintf(&buf, " and replacing with %s from types %s",
-			nodeDesc,
-			scheduling.InstanceTypeList(o.replacementNode.InstanceTypeOptions))
+	if len(o.replacementNodes) == 0 {
+		return buf.String()
 	}
+	odNodes := 0
+	spotNodes := 0
+	for _, node := range o.replacementNodes {
+		ct := node.Requirements.Get(v1alpha5.LabelCapacityType)
+		if ct.Has(v1alpha5.CapacityTypeOnDemand) {
+			odNodes++
+		}
+		if ct.Has(v1alpha5.CapacityTypeSpot) {
+			spotNodes++
+		}
+	}
+	// Print list of instance types for the first replacementNode.
+	if len(o.replacementNodes) > 1 {
+		fmt.Fprintf(&buf, " and replacing with %d spot and %d on-demand nodes from types %s",
+			spotNodes, odNodes,
+			scheduling.InstanceTypeList(o.replacementNodes[0].InstanceTypeOptions))
+		return buf.String()
+	}
+	ct := o.replacementNodes[0].Requirements.Get(v1alpha5.LabelCapacityType)
+	nodeDesc := "node"
+	if ct.Len() == 1 {
+		nodeDesc = fmt.Sprintf("%s node", ct.Any())
+	}
+	fmt.Fprintf(&buf, " and replacing with %s from types %s",
+		nodeDesc,
+		scheduling.InstanceTypeList(o.replacementNodes[0].InstanceTypeOptions))
 	return buf.String()
 }
