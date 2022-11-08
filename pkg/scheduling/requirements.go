@@ -120,10 +120,63 @@ func (r Requirements) Compatible(requirements Requirements) (errs error) {
 		if operator := requirements.Get(key).Operator(); r.Has(key) || operator == v1.NodeSelectorOpNotIn || operator == v1.NodeSelectorOpDoesNotExist {
 			continue
 		}
-		errs = multierr.Append(errs, fmt.Errorf("key %s does not have known values", key))
+		errs = multierr.Append(errs, fmt.Errorf("label %q does not have known values%s", key, labelHint(r, key)))
 	}
 	// Well Known Labels must intersect, but if not defined, are allowed.
 	return multierr.Append(errs, r.Intersects(requirements))
+}
+
+// editDistance is an implementation of edit distance from Algorithms/DPV
+func editDistance(s, t string) int {
+	min := func(a, b, c int) int {
+		m := a
+		if b < m {
+			m = b
+		}
+		if c < m {
+			m = c
+		}
+		return m
+	}
+
+	m := len(s)
+	n := len(t)
+	if m == 0 {
+		return n
+	}
+	if n == 0 {
+		return m
+	}
+	prevRow := make([]int, n)
+	curRow := make([]int, n)
+	for j := 1; j < n; j++ {
+		prevRow[j] = j
+	}
+	for i := 1; i < m; i++ {
+		for j := 1; j < n; j++ {
+			diff := 0
+			if s[i] != t[j] {
+				diff = 1
+			}
+			curRow[j] = min(prevRow[j]+1, curRow[j-1]+1, prevRow[j-1]+diff)
+		}
+		prevRow, curRow = curRow, prevRow
+	}
+	return prevRow[n-1]
+}
+
+func labelHint(r Requirements, key string) string {
+	for wellKnown := range v1alpha5.WellKnownLabels {
+		if strings.Contains(wellKnown, key) || editDistance(key, wellKnown) < len(wellKnown)/5 {
+			return fmt.Sprintf(" (typo of %q?)", wellKnown)
+		}
+	}
+	for existing := range r {
+		if strings.Contains(existing, key) || editDistance(key, existing) < len(existing)/5 {
+			return fmt.Sprintf(" (typo of %q?)", existing)
+		}
+	}
+	return ""
 }
 
 // Intersects returns errors if the requirements don't have overlapping values, undefined keys are allowed
