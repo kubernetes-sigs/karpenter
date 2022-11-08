@@ -15,6 +15,8 @@ limitations under the License.
 package scheduling
 
 import (
+	"testing"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
@@ -287,4 +289,80 @@ var _ = Describe("Requirements", func() {
 			Expect(lessThan9.Compatible(lessThan9)).To(Succeed())
 		})
 	})
+	Context("Error Messages", func() {
+		It("should detect well known label truncations", func() {
+			unconstrained := NewRequirements()
+			for _, tc := range []struct {
+				badLabel      string
+				expectedError string
+			}{
+				{
+					badLabel:      "zone",
+					expectedError: `label "zone" does not have known values (typo of "topology.kubernetes.io/zone"?)`,
+				},
+				{
+					badLabel:      "region",
+					expectedError: `label "region" does not have known values (typo of "topology.kubernetes.io/region"?)`,
+				},
+				{
+					badLabel:      "provisioner-name",
+					expectedError: `label "provisioner-name" does not have known values (typo of "karpenter.sh/provisioner-name"?)`,
+				},
+				{
+					badLabel:      "instance-type",
+					expectedError: `label "instance-type" does not have known values (typo of "node.kubernetes.io/instance-type"?)`,
+				},
+				{
+					badLabel:      "arch",
+					expectedError: `label "arch" does not have known values (typo of "kubernetes.io/arch"?)`,
+				},
+				{
+					badLabel:      "capacity-type",
+					expectedError: `label "capacity-type" does not have known values (typo of "karpenter.sh/capacity-type"?)`,
+				},
+			} {
+				provisionerRequirement := NewRequirements(NewRequirement(tc.badLabel, v1.NodeSelectorOpExists))
+				Expect(unconstrained.Compatible(provisionerRequirement).Error()).To(Equal(tc.expectedError))
+			}
+		})
+		It("should detect well known label typos", func() {
+			unconstrained := NewRequirements()
+			for _, tc := range []struct {
+				badLabel      string
+				expectedError string
+			}{
+				{
+					badLabel:      "topology.kubernetesio/zone",
+					expectedError: `label "topology.kubernetesio/zone" does not have known values (typo of "topology.kubernetes.io/zone"?)`,
+				},
+				{
+					badLabel:      "topology.kubernetes.io/regio",
+					expectedError: `label "topology.kubernetes.io/regio" does not have known values (typo of "topology.kubernetes.io/region"?)`,
+				},
+				{
+					badLabel:      "karpenterprovisioner-name",
+					expectedError: `label "karpenterprovisioner-name" does not have known values (typo of "karpenter.sh/provisioner-name"?)`,
+				},
+			} {
+				provisionerRequirement := NewRequirements(NewRequirement(tc.badLabel, v1.NodeSelectorOpExists))
+				Expect(unconstrained.Compatible(provisionerRequirement).Error()).To(Equal(tc.expectedError))
+			}
+		})
+		It("should display an error message for unknown labels", func() {
+			unconstrained := NewRequirements()
+			provisionerRequirement := NewRequirements(NewRequirement("deployment", v1.NodeSelectorOpExists))
+			Expect(unconstrained.Compatible(provisionerRequirement).Error()).To(Equal(`label "deployment" does not have known values`))
+		})
+	})
 })
+
+// Keeping this in case we need it, I ran for 1m+ samples and had no issues
+// fuzz: elapsed: 2m27s, execs: 1002748 (6130/sec), new interesting: 30 (total: 33)
+func FuzzEditDistance(f *testing.F) {
+	f.Add("foo", "bar")
+	f.Add("foo", "")
+	f.Add("", "foo")
+	f.Fuzz(func(t *testing.T, lhs, rhs string) {
+		editDistance(lhs, rhs)
+	})
+}
