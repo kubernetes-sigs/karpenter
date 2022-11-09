@@ -115,7 +115,8 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	provisioner := test.Provisioner(test.ProvisionerOptions{Limits: map[v1.ResourceName]resource.Quantity{}})
 
 	instanceTypes := fake.InstanceTypes(instanceCount)
-	cloudProv := &fake.CloudProvider{InstanceTypes: instanceTypes}
+	cloudProv := fake.NewCloudProvider()
+	cloudProv.InstanceTypes = instanceTypes
 	scheduler := pscheduling.NewScheduler(ctx, nil, []*scheduling.NodeTemplate{scheduling.NewNodeTemplate(provisioner)},
 		nil, state.NewCluster(ctx, &clock.RealClock{}, nil, cloudProv), nil, &pscheduling.Topology{},
 		map[string][]cloudprovider.InstanceType{provisioner.Name: instanceTypes}, map[*scheduling.NodeTemplate]v1.ResourceList{},

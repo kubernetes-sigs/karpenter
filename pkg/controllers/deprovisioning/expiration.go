@@ -71,14 +71,17 @@ func (e *Expiration) ComputeCommand(ctx context.Context, attempt int, candidates
 	// Only expire one node at a time.
 	node := candidates[attempt]
 	// Check if we need to create any nodes.
-	// Ignore if all pods cannot schedule. Node is expired and we're just calculating if we need to spin up a new node.
-	newNodes, _, err := simulateScheduling(ctx, e.kubeClient, e.cluster, e.provisioner, node)
+	newNodes, allPodsScheduled, err := simulateScheduling(ctx, e.kubeClient, e.cluster, e.provisioner, node)
 	if err != nil {
 		// if a candidate node is now deleting, just retry
 		if errors.Is(err, errCandidateNodeDeleting) {
 			return Command{action: actionDoNothing}, nil
 		}
 		return Command{}, err
+	}
+	// Log when all pods can't schedule, as the command will get executed immediately.
+	if !allPodsScheduled {
+		logging.FromContext(ctx).Infof("continuing to expire node %s after scheduling simulation failed to schedule all pods", node.Name)
 	}
 
 	// were we able to schedule all the pods on the inflight nodes?
@@ -100,27 +103,11 @@ func (e *Expiration) ComputeCommand(ctx context.Context, attempt int, candidates
 
 // ValidateCommand validates a command for a deprovisioner
 // We don't need to do another scheduling simulation since TTL is 0 seconds.
+// TODO @njtran remove from interface and use only for Consolidation
 func (e *Expiration) ValidateCommand(ctx context.Context, candidates []CandidateNode, cmd Command) (bool, error) {
-	// Only expire one node at a time
-	if len(candidates) != 1 {
-		return false, nil
-	}
-
-	node := candidates[0]
-	if !e.clock.Now().After(getExpirationTime(node.Node, node.provisioner)) {
-		return false, nil
-	}
-
-	if cmd.action == actionDelete && len(cmd.nodesToRemove) == 0 {
-		return false, nil
-	}
-	if cmd.action == actionReplace && len(cmd.replacementNodes) == 0 {
-		return false, nil
-	}
-
 	// Once validation passes, log the deprovisioning result.
 	logging.FromContext(ctx).Infof("Triggering termination for expired node after %s (+%s)",
-		ptr.Int64Value(node.provisioner.Spec.TTLSecondsUntilExpired), time.Since(getExpirationTime(node.Node, node.provisioner)))
+		time.Duration(ptr.Int64Value(candidates[0].provisioner.Spec.TTLSecondsUntilExpired))*time.Second, time.Since(getExpirationTime(candidates[0].Node, candidates[0].provisioner)))
 	return true, nil
 }
 

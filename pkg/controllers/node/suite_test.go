@@ -57,7 +57,7 @@ var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
 	env = test.NewEnvironment(scheme.Scheme, apis.CRDs...)
 	ctx = settings.ToContext(ctx, test.Settings())
-	cp := &fake.CloudProvider{}
+	cp := fake.NewCloudProvider()
 	cluster := state.NewCluster(ctx, fakeClock, env.Client, cp)
 	controller = node.NewController(fakeClock, env.Client, cp, cluster)
 })

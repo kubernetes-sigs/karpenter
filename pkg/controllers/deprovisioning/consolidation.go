@@ -41,12 +41,13 @@ import (
 
 // Consolidation is the consolidation controller.
 type Consolidation struct {
-	kubeClient    client.Client
-	cluster       *state.Cluster
-	provisioner   *provisioning.Provisioner
-	recorder      events.Recorder
-	clock         clock.Clock
-	cloudProvider cloudprovider.CloudProvider
+	kubeClient             client.Client
+	cluster                *state.Cluster
+	provisioner            *provisioning.Provisioner
+	recorder               events.Recorder
+	clock                  clock.Clock
+	cloudProvider          cloudprovider.CloudProvider
+	lastConsolidationState int64
 }
 
 // shouldDeprovision is a predicate used to filter deprovisionable nodes
@@ -67,6 +68,11 @@ func (c *Consolidation) SortCandidates(nodes []CandidateNode) []CandidateNode {
 
 // computeCommand generates a deprovisioning command given deprovisionable nodes
 func (c *Consolidation) ComputeCommand(ctx context.Context, attempt int, candidates ...CandidateNode) (Command, error) {
+	// the last cluster consolidation wasn't able to improve things and nothing has changed regarding
+	// the cluster that makes us think we would be successful now
+	if c.lastConsolidationState == c.cluster.ClusterConsolidationState() {
+		return Command{action: actionDoNothing}, nil
+	}
 	// First delete any empty nodes we see
 	if attempt == 0 {
 		if cmd := c.deleteEmpty(ctx, candidates...); cmd.action == actionDelete {

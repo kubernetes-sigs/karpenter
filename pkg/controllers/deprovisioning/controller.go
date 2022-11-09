@@ -48,16 +48,15 @@ import (
 
 // Controller is the deprovisioning controller.
 type Controller struct {
-	kubeClient             client.Client
-	cluster                *state.Cluster
-	provisioner            *provisioning.Provisioner
-	recorder               events.Recorder
-	clock                  clock.Clock
-	cloudProvider          cloudprovider.CloudProvider
-	emptiness              *Emptiness
-	expiration             *Expiration
-	consolidation          *Consolidation
-	lastConsolidationState int64
+	kubeClient    client.Client
+	cluster       *state.Cluster
+	provisioner   *provisioning.Provisioner
+	recorder      events.Recorder
+	clock         clock.Clock
+	cloudProvider cloudprovider.CloudProvider
+	emptiness     *Emptiness
+	expiration    *Expiration
+	consolidation *Consolidation
 }
 
 // pollingPeriod that we inspect cluster to look for opportunities to deprovision
@@ -116,19 +115,13 @@ func (c *Controller) LivenessProbe(_ *http.Request) error {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
-	// the last cluster consolidation wasn't able to improve things and nothing has changed regarding
-	// the cluster that makes us think we would be successful now
-	if c.lastConsolidationState == c.cluster.ClusterConsolidationState() {
-		return reconcile.Result{RequeueAfter: pollingPeriod}, nil
-	}
-
 	result, err := c.ProcessCluster(ctx)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("deprovisioning cluster, %w", err)
 	} else if result == ResultRetry {
 		return reconcile.Result{Requeue: true}, nil
 	} else if result == ResultNothingToDo {
-		c.lastConsolidationState = c.cluster.ClusterConsolidationState()
+		c.consolidation.lastConsolidationState = c.cluster.ClusterConsolidationState()
 	}
 	return reconcile.Result{RequeueAfter: pollingPeriod}, nil
 }
@@ -171,7 +164,7 @@ func (c *Controller) ProcessCluster(ctx context.Context) (Result, error) {
 		result, err = c.executeDeprovisioning(ctx, d, candidates...)
 		if err != nil {
 			logging.FromContext(ctx).Errorf("deprovisioning nodes, %s", err)
-			continue
+			return ResultFailed, err
 		}
 		if result == ResultRetry || result == ResultSuccess {
 			return result, nil
@@ -448,7 +441,6 @@ func (c *Controller) launchReplacementNodes(ctx context.Context, action Command)
 	c.cluster.MarkForDeletion(nodeNamesToRemove...)
 	// Wait for nodes to be ready
 	// TODO @njtran: Allow to bypass this check for certain deprovisioners
-
 	errs := make([]error, len(nodeNames))
 	workqueue.ParallelizeUntil(ctx, len(nodeNames), len(nodeNames), func(i int) {
 		var k8Node v1.Node
@@ -477,7 +469,7 @@ func (c *Controller) launchReplacementNodes(ctx context.Context, action Command)
 	if multiErr != nil {
 		c.cluster.UnmarkForDeletion(nodeNamesToRemove...)
 		return multierr.Combine(c.setNodesUnschedulable(ctx, false, nodeNamesToRemove...),
-			fmt.Errorf("timed out checking node readiness, %w", err), multiErr)
+			fmt.Errorf("timed out checking node readiness, %w", multiErr))
 	}
 	return nil
 }
