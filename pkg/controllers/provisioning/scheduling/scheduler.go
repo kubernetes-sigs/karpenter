@@ -68,6 +68,7 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, nodeTemplates [
 		opts:               opts,
 		preferences:        &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
 		remainingResources: map[string]v1.ResourceList{},
+		minCpu:             map[string]*int32{},
 	}
 
 	namedNodeTemplates := lo.KeyBy(s.nodeTemplates, func(nodeTemplate *scheduling.NodeTemplate) string {
@@ -77,6 +78,9 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, nodeTemplates [
 	for _, provisioner := range provisioners {
 		if provisioner.Spec.Limits != nil {
 			s.remainingResources[provisioner.Name] = provisioner.Spec.Limits.Resources
+		}
+		if provisioner.Spec.MinCpu != nil {
+			s.minCpu[provisioner.Name] = provisioner.Spec.MinCpu
 		}
 	}
 
@@ -90,6 +94,7 @@ type Scheduler struct {
 	existingNodes      []*ExistingNode
 	nodeTemplates      []*scheduling.NodeTemplate
 	remainingResources map[string]v1.ResourceList // provisioner name -> remaining resources for that provisioner
+	minCpu             map[string]*int32          // provisioner name -> min cpu to provision
 	instanceTypes      map[string][]cloudprovider.InstanceType
 	daemonOverhead     map[*scheduling.NodeTemplate]v1.ResourceList
 	preferences        *Preferences
@@ -127,6 +132,31 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) ([]*Node, []*Exis
 			if err := s.topology.Update(ctx, pod); err != nil {
 				logging.FromContext(ctx).Errorf("updating topology, %s", err)
 			}
+		}
+	}
+
+	// sum cpu we used already + plan to use
+	usedCpu := map[string]int32{}
+	for _, node := range s.existingNodes {
+		name, ok := node.Node.Labels[v1alpha5.ProvisionerNameLabelKey]
+		if !ok {
+			// ignoring this node as it wasn't launched by us
+			continue
+		}
+		usedCpu[name] += 1 // TODO: get node.Node.Cpu
+	}
+	for _, node := range s.nodes {
+		name, ok := node.Labels[v1alpha5.ProvisionerNameLabelKey]
+		if !ok {
+			// ignoring this node as it wasn't launched by us
+			continue
+		}
+		usedCpu[name] += 1 // TODO: get node.Node.Cpu
+	}
+	for n, cpu := range usedCpu {
+		if *s.minCpu[n] < cpu {
+			// TODO: add fake pods ... ideally 10 * 1cpu pod so we can spawn multiple nodes
+			// s.add(ctx, fakePod)
 		}
 	}
 

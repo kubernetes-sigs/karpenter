@@ -81,6 +81,8 @@ type ProvisionerSpec struct {
 	// +kubebuilder:validation:Maximum:=100
 	// +optional
 	Weight *int32 `json:"weight,omitempty"`
+	// MinCpu defines how many cpus should at least be provisioned
+	MinCpu *int32 `json:"minCpu,omitempty"`
 	// Consolidation are the consolidation parameters
 	// +optional
 	Consolidation *Consolidation `json:"consolidation,omitempty"`
