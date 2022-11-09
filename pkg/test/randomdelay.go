@@ -63,24 +63,24 @@ func (g *gomegaWrapper) ExpectWithOffset(offset int, actual interface{}, extra .
 	return g.inner.ExpectWithOffset(offset, actual, extra...)
 }
 
-func (g *gomegaWrapper) Eventually(actual interface{}, intervals ...interface{}) types.AsyncAssertion {
+func (g *gomegaWrapper) Eventually(args ...interface{}) types.AsyncAssertion {
 	g.randomDelay()
-	return g.inner.Eventually(actual, intervals...)
+	return g.inner.Eventually(args...)
 }
 
-func (g *gomegaWrapper) EventuallyWithOffset(offset int, actual interface{}, intervals ...interface{}) types.AsyncAssertion {
+func (g *gomegaWrapper) EventuallyWithOffset(offset int, args ...interface{}) types.AsyncAssertion {
 	g.randomDelay()
-	return g.inner.EventuallyWithOffset(offset, actual, intervals...)
+	return g.inner.EventuallyWithOffset(offset, args...)
 }
 
-func (g *gomegaWrapper) Consistently(actual interface{}, intervals ...interface{}) types.AsyncAssertion {
+func (g *gomegaWrapper) Consistently(args ...interface{}) types.AsyncAssertion {
 	g.randomDelay()
-	return g.inner.Consistently(actual, intervals...)
+	return g.inner.Consistently(args...)
 }
 
-func (g *gomegaWrapper) ConsistentlyWithOffset(offset int, actual interface{}, intervals ...interface{}) types.AsyncAssertion {
+func (g *gomegaWrapper) ConsistentlyWithOffset(offset int, args ...interface{}) types.AsyncAssertion {
 	g.randomDelay()
-	return g.inner.ConsistentlyWithOffset(offset, actual, intervals...)
+	return g.inner.ConsistentlyWithOffset(offset, args...)
 }
 
 func (g *gomegaWrapper) SetDefaultEventuallyTimeout(duration time.Duration) {

@@ -32,12 +32,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/kubernetes"
 	clock "k8s.io/utils/clock/testing"
 	. "knative.dev/pkg/logging/testing"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -45,6 +45,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
@@ -56,7 +57,6 @@ var controller *deprovisioning.Controller
 var provisioningController *provisioning.Controller
 var provisioner *provisioning.Provisioner
 var cloudProvider *fake.CloudProvider
-var kubernetesInterface kubernetes.Interface
 var recorder *test.EventRecorder
 var nodeStateController *state.NodeController
 var fakeClock *clock.FakeClock
@@ -73,18 +73,16 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(ctx, func(e *test.Environment) {
-		ctx = settings.ToContext(ctx, test.Settings())
-		cloudProvider = &fake.CloudProvider{}
-		fakeClock = clock.NewFakeClock(time.Now())
-		cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
-		nodeStateController = state.NewNodeController(env.Client, cluster)
-		kubernetesInterface = kubernetes.NewForConfigOrDie(e.Config)
-		recorder = test.NewEventRecorder()
-		provisioner = provisioning.NewProvisioner(ctx, env.Client, kubernetesInterface.CoreV1(), recorder, cloudProvider, cluster, test.SettingsStore{})
-		provisioningController = provisioning.NewController(env.Client, provisioner, recorder)
-	})
-	Expect(env.Start()).To(Succeed(), "Failed to start environment")
+	env = test.NewEnvironment(scheme.Scheme, apis.CRDs...)
+	ctx = settings.ToContext(ctx, test.Settings())
+	cloudProvider = &fake.CloudProvider{}
+	fakeClock = clock.NewFakeClock(time.Now())
+	cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
+	nodeStateController = state.NewNodeController(env.Client, cluster)
+	recorder = test.NewEventRecorder()
+	provisioner = provisioning.NewProvisioner(ctx, env.Client, env.KubernetesInterface.CoreV1(), recorder, cloudProvider, cluster, test.SettingsStore{})
+	provisioningController = provisioning.NewController(env.Client, provisioner, recorder)
+	provisioning.WaitForClusterSync = false
 })
 
 var _ = AfterSuite(func() {
@@ -1276,7 +1274,7 @@ var _ = Describe("Topology Consideration", func() {
 })
 
 var _ = Describe("Empty Nodes", func() {
-	It("can delete empty nodes", func() {
+	It("can delete empty nodes with Consolidation", func() {
 		prov := test.Provisioner(test.ProvisionerOptions{Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)}})
 
 		node1 := test.Node(test.NodeOptions{
@@ -1308,7 +1306,7 @@ var _ = Describe("Empty Nodes", func() {
 		// and should delete the empty one
 		ExpectNotFound(ctx, env.Client, node1)
 	})
-	It("can delete multiple empty nodes", func() {
+	It("can delete multiple empty nodes with Consolidation", func() {
 		prov := test.Provisioner(test.ProvisionerOptions{Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)}})
 
 		node1 := test.Node(test.NodeOptions{
@@ -1353,6 +1351,39 @@ var _ = Describe("Empty Nodes", func() {
 		ExpectNotFound(ctx, env.Client, node1)
 		ExpectNotFound(ctx, env.Client, node2)
 	})
+	It("can delete empty nodes with TTLSecondsAfterEmpty with the emptiness timestamp", func() {
+		prov := test.Provisioner(test.ProvisionerOptions{TTLSecondsAfterEmpty: ptr.Int64(10)})
+
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				},
+				Annotations: map[string]string{
+					v1alpha5.EmptinessTimestampAnnotationKey: fakeClock.Now().Format(time.RFC3339),
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+		ExpectApplied(ctx, env.Client, prov, node)
+		ExpectMakeNodesReady(ctx, env.Client, node)
+
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+		fakeClock.Step(10 * time.Minute)
+		go triggerVerifyAction()
+		_, err := controller.ProcessCluster(ctx)
+		Expect(err).ToNot(HaveOccurred())
+
+		// we don't need any new nodes
+		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
+		// and should delete both empty ones
+		ExpectNotFound(ctx, env.Client, node)
+	})
 })
 
 var _ = Describe("Consolidation TTL", func() {
@@ -1391,7 +1422,7 @@ var _ = Describe("Consolidation TTL", func() {
 		}()
 
 		// wait for the controller to block on the validation timeout
-		Eventually(fakeClock.HasWaiters).Should(BeTrue())
+		Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
 		// controller should be blocking during the timeout
 		Expect(finished.Load()).To(BeFalse())
 		// and the node should not be deleted yet
@@ -1444,7 +1475,7 @@ var _ = Describe("Consolidation TTL", func() {
 		}()
 
 		// wait for the controller to block on the validation timeout
-		Eventually(fakeClock.HasWaiters).Should(BeTrue())
+		Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
 		// controller should be blocking during the timeout
 		Expect(finished.Load()).To(BeFalse())
 		// and the node should not be deleted yet
@@ -1518,7 +1549,7 @@ var _ = Describe("Parallelization", func() {
 		// Run the processing loop in parallel in the background with environment context
 		go triggerVerifyAction()
 		go func() {
-			_, err := controller.ProcessCluster(env.Ctx)
+			_, err := controller.ProcessCluster(ctx)
 			Expect(err).ToNot(HaveOccurred())
 		}()
 
@@ -1618,7 +1649,7 @@ var _ = Describe("Parallelization", func() {
 		// Trigger a reconciliation run which should take into account the deleting node
 		// Consolidation shouldn't trigger additional actions
 		fakeClock.Step(10 * time.Minute)
-		result, err := controller.ProcessCluster(env.Ctx)
+		result, err := controller.ProcessCluster(ctx)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(Equal(deprovisioning.ResultNothingToDo))
 	})

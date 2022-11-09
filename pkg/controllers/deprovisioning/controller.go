@@ -228,7 +228,6 @@ func (c *Controller) validateCommand(ctx context.Context, cmd Command, d Deprovi
 		return false, nil
 	}
 	remainingDelay := d.TTL() - c.clock.Since(cmd.created)
-	logging.FromContext(ctx).Debugf("This is the remainingDelay, %s", remainingDelay)
 	// deprovisioningTTL is how long we wait before re-validating our lifecycle command
 	if remainingDelay > 0 {
 		select {

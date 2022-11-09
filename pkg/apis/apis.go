@@ -15,12 +15,18 @@ limitations under the License.
 package apis
 
 import (
+	_ "embed"
+
+	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"knative.dev/pkg/webhook/resourcesemantics"
 
+	"github.com/samber/lo"
+
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/utils/functional"
 	"github.com/aws/karpenter-core/pkg/utils/sets"
 )
 
@@ -36,4 +42,13 @@ var (
 		v1alpha5.SchemeGroupVersion.WithKind("Provisioner"): &v1alpha5.Provisioner{},
 	}
 	Settings = sets.New(settings.Registration)
+)
+
+//go:generate controller-gen crd paths="./..." output:crd:artifacts:config=crds
+var (
+	//go:embed crds/karpenter.sh_provisioners.yaml
+	ProvisionerCRD []byte
+	CRDs           = []*v1.CustomResourceDefinition{
+		lo.Must(functional.Unmarshal[v1.CustomResourceDefinition](ProvisionerCRD)),
+	}
 )

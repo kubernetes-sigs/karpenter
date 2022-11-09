@@ -23,7 +23,6 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	"knative.dev/pkg/logging"
-	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -31,7 +30,6 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
@@ -44,7 +42,7 @@ type Emptiness struct {
 
 // Reconcile reconciles the node
 func (r *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner, n *v1.Node) (reconcile.Result, error) {
-	// 1. Ignore node if not applicable
+	// Ignore node if not applicable
 	if provisioner.Spec.TTLSecondsAfterEmpty == nil {
 		return reconcile.Result{}, nil
 	}
@@ -54,7 +52,6 @@ func (r *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 		return reconcile.Result{}, nil
 	}
 
-	// 2. Remove ttl if not empty
 	empty, err := r.isEmpty(ctx, n)
 	if err != nil {
 		return reconcile.Result{}, err
@@ -65,35 +62,18 @@ func (r *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 		return reconcile.Result{}, nil
 	}
 
-	emptinessTimestamp, hasEmptinessTimestamp := n.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
-	if !empty {
-		if hasEmptinessTimestamp {
-			delete(n.Annotations, v1alpha5.EmptinessTimestampAnnotationKey)
-			logging.FromContext(ctx).Infof("Removed emptiness TTL from node")
-		}
-		return reconcile.Result{}, nil
-	}
-	// 3. Set TTL if not set
-	n.Annotations = lo.Assign(n.Annotations)
-	ttl := time.Duration(ptr.Int64Value(provisioner.Spec.TTLSecondsAfterEmpty)) * time.Second
-	if !hasEmptinessTimestamp {
-		n.Annotations[v1alpha5.EmptinessTimestampAnnotationKey] = r.clock.Now().Format(time.RFC3339)
+	_, hasEmptinessTimestamp := n.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
+	if !empty && hasEmptinessTimestamp {
+		delete(n.Annotations, v1alpha5.EmptinessTimestampAnnotationKey)
+		logging.FromContext(ctx).Infof("Removed emptiness TTL from node")
+	} else if empty && !hasEmptinessTimestamp {
+		n.Annotations = lo.Assign(n.Annotations, map[string]string{
+			v1alpha5.EmptinessTimestampAnnotationKey: r.clock.Now().Format(time.RFC3339),
+		})
 		logging.FromContext(ctx).Infof("Added TTL to empty node")
-		return reconcile.Result{RequeueAfter: ttl}, nil
 	}
-	// 4. Delete node if beyond TTL
-	emptinessTime, err := time.Parse(time.RFC3339, emptinessTimestamp)
-	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("parsing emptiness timestamp, %s", emptinessTimestamp)
-	}
-	if r.clock.Now().After(emptinessTime.Add(ttl)) {
-		logging.FromContext(ctx).Infof("Triggering termination after %s for empty node", ttl)
-		if err := r.kubeClient.Delete(ctx, n); err != nil {
-			return reconcile.Result{}, fmt.Errorf("deleting node, %w", err)
-		}
-		metrics.NodesTerminatedCounter.WithLabelValues(metrics.EmptinessReason).Inc()
-	}
-	return reconcile.Result{RequeueAfter: emptinessTime.Add(ttl).Sub(r.clock.Now())}, nil
+
+	return reconcile.Result{}, nil
 }
 
 func (r *Emptiness) isEmpty(ctx context.Context, n *v1.Node) (bool, error) {

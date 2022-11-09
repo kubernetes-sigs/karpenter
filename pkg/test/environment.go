@@ -15,110 +15,51 @@ limitations under the License.
 package test
 
 import (
-	"context"
-	"fmt"
 	"os"
 	"strings"
-	"sync"
 
+	"github.com/samber/lo"
+	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/version"
+	"k8s.io/client-go/kubernetes"
 	"knative.dev/pkg/system"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
-	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
-	"github.com/aws/karpenter-core/pkg/operator/scheme"
-	"github.com/aws/karpenter-core/pkg/utils/project"
+	"github.com/aws/karpenter-core/pkg/utils/env"
 )
 
-/*
-Environment is for e2e local testing. It stands up an API Server, ETCD,
-and a controller-runtime manager. It's possible to run multiple environments
-simultaneously, as the ports are randomized. A common use case for this is
-parallel tests using ginkgo's parallelization functionality. The environment is
-typically instantiated once in a test file and re-used between different test
-cases. Resources for each test should be isolated into its own namespace.
-
-	env := new Local(func(local *Local) {
-		// Register test controller with manager
-		controllerruntime.NewControllerManagedBy(local.Manager).For(...)
-		return nil
-	})
-
-BeforeSuite(func() { env.Start() })
-AfterSuite(func() { env.Stop() })
-*/
 type Environment struct {
 	envtest.Environment
-	Client client.Client
-	Ctx    context.Context
-	K8sVer *version.Version
-
-	options []EnvironmentOption
-	stop    context.CancelFunc
-	cleanup *sync.WaitGroup
+	Client              client.Client
+	KubernetesInterface kubernetes.Interface
+	Version             *version.Version
+	Done                chan struct{}
 }
 
-// EnvironmentOption passes the local environment to an option function. This is
-// useful for registering controllers with the controller-runtime manager or for
-// customizing Client, Scheme, or other variables.
-type EnvironmentOption func(env *Environment)
-
-func NewEnvironment(ctx context.Context, options ...EnvironmentOption) *Environment {
-	provisioning.WaitForClusterSync = false
-
-	ctx, stop := context.WithCancel(ctx)
+func NewEnvironment(scheme *runtime.Scheme, crds ...*v1.CustomResourceDefinition) *Environment {
 	os.Setenv(system.NamespaceEnvKey, "default")
-	return &Environment{
-		Environment: envtest.Environment{
-			CRDDirectoryPaths: []string{
-				project.RelativeToRoot("chart/crds"),
-			},
-		},
-		Ctx:     ctx,
-		stop:    stop,
-		options: options,
-		cleanup: &sync.WaitGroup{},
-	}
-}
-
-func (e *Environment) Start() (err error) {
-	k8sVerStr := "1.21.x"
-	if envVer := os.Getenv("K8S_VERSION"); envVer != "" {
-		k8sVerStr = envVer
-	}
-	// turn it into a valid semver
-	k8sVerStr = strings.Replace(k8sVerStr, ".x", ".0", -1)
-
-	e.K8sVer = version.MustParseSemantic(k8sVerStr)
-	if e.K8sVer.Minor() >= 21 {
+	version := version.MustParseSemantic(strings.Replace(env.WithDefaultString("K8S_VERSION", "1.21.x"), ".x", ".0", -1))
+	environment := envtest.Environment{Scheme: scheme, CRDs: crds}
+	if version.Minor() >= 21 {
 		// PodAffinityNamespaceSelector is used for label selectors in pod affinities.  If the feature-gate is turned off,
 		// the api-server just clears out the label selector so we never see it.  If we turn it on, the label selectors
 		// are passed to us and we handle them. This feature is alpha in v1.21, beta in v1.22 and will be GA in 1.24. See
 		// https://github.com/kubernetes/enhancements/issues/2249 for more info.
-		e.Environment.ControlPlane.GetAPIServer().Configure().Set("feature-gates", "PodAffinityNamespaceSelector=true")
+		environment.ControlPlane.GetAPIServer().Configure().Set("feature-gates", "PodAffinityNamespaceSelector=true")
 	}
-
-	// Environment
-	if _, err = e.Environment.Start(); err != nil {
-		return fmt.Errorf("starting environment, %w", err)
+	_ = lo.Must(environment.Start())
+	return &Environment{
+		Environment:         environment,
+		Client:              lo.Must(client.New(environment.Config, client.Options{Scheme: environment.Scheme})),
+		KubernetesInterface: kubernetes.NewForConfigOrDie(environment.Config),
+		Version:             version,
+		Done:                make(chan struct{}),
 	}
-
-	// Client
-	e.Client, err = client.New(e.Config, client.Options{Scheme: scheme.Scheme})
-	if err != nil {
-		return err
-	}
-
-	// options
-	for _, option := range e.options {
-		option(e)
-	}
-	return nil
 }
 
 func (e *Environment) Stop() error {
-	e.stop()
-	e.cleanup.Wait()
+	close(e.Done)
 	return e.Environment.Stop()
 }

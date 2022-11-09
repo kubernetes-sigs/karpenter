@@ -16,7 +16,6 @@ package counter
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -26,7 +25,6 @@ import (
 	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -58,10 +56,7 @@ func NewController(kubeClient client.Client, cluster *state.Cluster) *Controller
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	provisioner := &v1alpha5.Provisioner{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, provisioner); err != nil {
-		if !errors.IsNotFound(err) {
-			return reconcile.Result{}, err
-		}
-		return reconcile.Result{}, nil
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	persisted := provisioner.DeepCopy()
 
@@ -79,11 +74,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	resourceCounts := c.resourceCountsFor(provisioner.Name)
 	provisioner.Status.Resources = resourceCounts
 	if err := c.kubeClient.Status().Patch(ctx, provisioner, client.MergeFrom(persisted)); err != nil {
-		// provisioner was deleted
-		if errors.IsNotFound(err) {
-			return reconcile.Result{}, nil
-		}
-		return reconcile.Result{}, fmt.Errorf("patching provisioner, %w", err)
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	return reconcile.Result{}, nil
 }

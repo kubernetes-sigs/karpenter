@@ -24,7 +24,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/pod"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -54,10 +53,7 @@ func NewController(kubeClient client.Client, provisioner *Provisioner, recorder 
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	p := &v1.Pod{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, p); err != nil {
-		if errors.IsNotFound(err) {
-			return reconcile.Result{}, nil
-		}
-		return reconcile.Result{}, err
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	// Ensure the pod can be provisioned
 	if !pod.IsProvisionable(p) {

@@ -26,7 +26,6 @@ var (
 	// Well known labels and resources
 	ArchitectureAmd64    = "amd64"
 	ArchitectureArm64    = "arm64"
-	OperatingSystemLinux = "linux"
 	CapacityTypeSpot     = "spot"
 	CapacityTypeOnDemand = "on-demand"
 
@@ -56,6 +55,7 @@ var (
 	LabelDomainExceptions = sets.NewString(
 		"kops.k8s.io",
 		v1.LabelNamespaceSuffixNode,
+		TestingGroup,
 	)
 
 	// WellKnownLabels are labels that belong to the RestrictedLabelDomains but allowed.

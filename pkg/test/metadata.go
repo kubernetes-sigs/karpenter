@@ -24,9 +24,11 @@ import (
 	"github.com/Pallinder/go-randomdata"
 	"github.com/imdario/mergo"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 )
 
-const DiscoveryLabel = "testing.karpenter.sh/test-id"
+const DiscoveryLabel = v1alpha5.TestingGroup + "/test-id"
 
 var (
 	sequentialNumber     = 0
