@@ -84,6 +84,8 @@ type ProvisionerSpec struct {
 	// Consolidation are the consolidation parameters
 	// +optional
 	Consolidation *Consolidation `json:"consolidation,omitempty"`
+	// Disable the provisioner: no new nodes will be added
+	Disabled *bool `json:"disabled,omitempty"`
 }
 
 type Consolidation struct {
