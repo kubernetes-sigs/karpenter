@@ -1046,9 +1046,9 @@ var _ = Describe("Delete Node", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
@@ -1059,9 +1059,9 @@ var _ = Describe("Delete Node", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
@@ -1137,9 +1137,9 @@ var _ = Describe("Delete Node", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
@@ -1215,9 +1215,9 @@ var _ = Describe("Delete Node", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
@@ -1290,9 +1290,9 @@ var _ = Describe("Delete Node", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
@@ -1370,9 +1370,9 @@ var _ = Describe("Node Lifetime Consideration", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
@@ -1383,9 +1383,9 @@ var _ = Describe("Node Lifetime Consideration", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
@@ -1626,7 +1626,7 @@ var _ = Describe("Topology Consideration", func() {
 })
 
 var _ = Describe("Empty Nodes", func() {
-	It("can delete empty nodes with Consolidation", func() {
+	It("can delete empty nodes with consolidation", func() {
 		prov := test.Provisioner(test.ProvisionerOptions{Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)}})
 
 		node1 := test.Node(test.NodeOptions{
@@ -1658,7 +1658,7 @@ var _ = Describe("Empty Nodes", func() {
 		// and should delete the empty one
 		ExpectNotFound(ctx, env.Client, node1)
 	})
-	It("can delete multiple empty nodes with Consolidation", func() {
+	It("can delete multiple empty nodes with consolidation", func() {
 		prov := test.Provisioner(test.ProvisionerOptions{Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)}})
 
 		node1 := test.Node(test.NodeOptions{
@@ -1787,7 +1787,7 @@ var _ = Describe("Empty Nodes", func() {
 	})
 })
 
-var _ = Describe("Consolidation TTL", func() {
+var _ = Describe("consolidation TTL", func() {
 	It("should wait for the node TTL for empty nodes before consolidating", func() {
 		prov := test.Provisioner(test.ProvisionerOptions{
 			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
@@ -1869,9 +1869,9 @@ var _ = Describe("Consolidation TTL", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
@@ -1882,9 +1882,9 @@ var _ = Describe("Consolidation TTL", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
@@ -2046,13 +2046,14 @@ var _ = Describe("Parallelization", func() {
 			Expect(err).ToNot(HaveOccurred())
 		}()
 
+		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, node)
 		Eventually(func(g Gomega) {
 			// should create a new node as there is a cheaper one that can hold the pod
 			nodes := &v1.NodeList{}
 			g.Expect(env.Client.List(ctx, nodes)).To(Succeed())
 			g.Expect(len(nodes.Items)).To(Equal(2))
 		}, time.Second*10).Should(Succeed())
-
+		wg.Wait()
 		// Add a new pending pod that should schedule while node is not yet deleted
 		pods := ExpectProvisionedNoBinding(ctx, env.Client, provisioningController, provisioner, test.UnschedulablePod())
 		nodes := &v1.NodeList{}
@@ -2140,11 +2141,273 @@ var _ = Describe("Parallelization", func() {
 		}
 
 		// Trigger a reconciliation run which should take into account the deleting node
-		// Consolidation shouldn't trigger additional actions
+		// cnsolidation shouldn't trigger additional actions
 		fakeClock.Step(10 * time.Minute)
 		result, err := controller.ProcessCluster(ctx)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(Equal(deprovisioning.ResultNothingToDo))
+	})
+})
+
+var _ = Describe("Multi-Node Consolidation", func() {
+	It("can merge 3 nodes into 1", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+		pods := test.Pods(3, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}}})
+
+		prov := test.Provisioner(test.ProvisionerOptions{Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)}})
+		node1 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		node2 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		node3 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], node1, node2, node3, prov)
+		ExpectMakeNodesReady(ctx, env.Client, node1, node2, node3)
+
+		ExpectManualBinding(ctx, env.Client, pods[0], node1)
+		ExpectManualBinding(ctx, env.Client, pods[1], node2)
+		ExpectManualBinding(ctx, env.Client, pods[2], node3)
+		ExpectScheduled(ctx, env.Client, pods[0])
+		ExpectScheduled(ctx, env.Client, pods[1])
+		ExpectScheduled(ctx, env.Client, pods[2])
+		// inform cluster state about the nodes
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node3))
+		fakeClock.Step(10 * time.Minute)
+		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, node1, node2, node3)
+		go triggerVerifyAction()
+		_, err := controller.ProcessCluster(ctx)
+		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
+
+		// should create one new node
+		Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+		// and delete the three old ones
+		ExpectNotFound(ctx, env.Client, node1)
+		ExpectNotFound(ctx, env.Client, node2)
+		ExpectNotFound(ctx, env.Client, node3)
+	})
+	It("won't merge 2 nodes into 1 of the same type", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+		pods := test.Pods(3, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}}})
+
+		prov := test.Provisioner(test.ProvisionerOptions{Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)}})
+		node1 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		node2 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], node1, node2, prov)
+		ExpectMakeNodesReady(ctx, env.Client, node1, node2)
+
+		ExpectManualBinding(ctx, env.Client, pods[0], node1)
+		ExpectManualBinding(ctx, env.Client, pods[1], node2)
+		ExpectManualBinding(ctx, env.Client, pods[2], node2)
+		ExpectScheduled(ctx, env.Client, pods[0])
+		ExpectScheduled(ctx, env.Client, pods[1])
+		ExpectScheduled(ctx, env.Client, pods[2])
+		// inform cluster state about the nodes
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
+		fakeClock.Step(10 * time.Minute)
+		go triggerVerifyAction()
+		_, err := controller.ProcessCluster(ctx)
+		Expect(err).ToNot(HaveOccurred())
+
+		// We have [cheap-node, cheap-node] which multi-node consolidation could consolidate via
+		// [delete cheap-node, delete cheap-node, launch cheap-node]. This isn't the best method though
+		// as we should instead just delete one of the nodes instead of deleting both and launching a single
+		// identical replacement. This test verifies the filterOutSameType function from multi-node consolidation
+		// works to ensure we perform the least-disruptive action.
+		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
+		// should have just deleted the node with the fewest pods
+		ExpectNotFound(ctx, env.Client, node1)
+		// and left the other node alone
+		ExpectNodeExists(ctx, env.Client, node2.Name)
+	})
+	It("should wait for the node TTL for non-empty nodes before consolidating (multi-node)", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+		pods := test.Pods(3, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}}})
+
+		prov := test.Provisioner(test.ProvisionerOptions{
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
+		})
+		node1 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		node2 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], node1, node2, prov)
+		ExpectMakeNodesReady(ctx, env.Client, node1, node2)
+
+		ExpectManualBinding(ctx, env.Client, pods[0], node1)
+		ExpectManualBinding(ctx, env.Client, pods[1], node1)
+		ExpectManualBinding(ctx, env.Client, pods[2], node2)
+		ExpectScheduled(ctx, env.Client, pods[0])
+		ExpectScheduled(ctx, env.Client, pods[1])
+		ExpectScheduled(ctx, env.Client, pods[2])
+
+		// inform cluster state about the nodes
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
+		ExpectMakeNewNodesReady(ctx, env.Client, 1, node1, node2)
+		var wg sync.WaitGroup
+		wg.Add(1)
+		finished := atomic.Bool{}
+		go func() {
+			defer wg.Done()
+			defer finished.Store(true)
+			_, err := controller.ProcessCluster(ctx)
+			Expect(err).ToNot(HaveOccurred())
+		}()
+
+		// wait for the controller to block on the validation timeout
+		Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
+		// controller should be blocking during the timeout
+		Expect(finished.Load()).To(BeFalse())
+		// and the node should not be deleted yet
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node1), node1)).To(Succeed())
+
+		// advance the clock so that the timeout expires
+		fakeClock.Step(31 * time.Second)
+		// controller should finish
+		Eventually(finished.Load, 10*time.Second).Should(BeTrue())
+		wg.Wait()
+
+		// should launch a single smaller replacement node
+		Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+		// and delete the two lage ones
+		ExpectNotFound(ctx, env.Client, node1, node2)
 	})
 })
 

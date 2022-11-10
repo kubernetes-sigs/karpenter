@@ -47,15 +47,17 @@ import (
 
 // Controller is the deprovisioning controller.
 type Controller struct {
-	kubeClient    client.Client
-	cluster       *state.Cluster
-	provisioner   *provisioning.Provisioner
-	recorder      events.Recorder
-	clock         clock.Clock
-	cloudProvider cloudprovider.CloudProvider
-	emptiness     *Emptiness
-	expiration    *Expiration
-	consolidation *Consolidation
+	kubeClient              client.Client
+	cluster                 *state.Cluster
+	provisioner             *provisioning.Provisioner
+	recorder                events.Recorder
+	clock                   clock.Clock
+	cloudProvider           cloudprovider.CloudProvider
+	emptiness               *Emptiness
+	expiration              *Expiration
+	singleNodeConsolidation *SingleNodeConsolidation
+	multiNodeConsolidation  *MultiNodeConsolidation
+	emptyNodeConsolidation  *EmptyNodeConsolidation
 }
 
 // pollingPeriod that we inspect cluster to look for opportunities to deprovision
@@ -76,15 +78,17 @@ var waitRetryOptions = []retry.Option{
 func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
 	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster) *Controller {
 	return &Controller{
-		clock:         clk,
-		kubeClient:    kubeClient,
-		cluster:       cluster,
-		provisioner:   provisioner,
-		recorder:      recorder,
-		cloudProvider: cp,
-		expiration:    NewExpiration(clk, kubeClient, cluster, provisioner),
-		emptiness:     NewEmptiness(clk, kubeClient, cluster),
-		consolidation: NewConsolidation(clk, kubeClient, provisioner, cp, recorder, cluster),
+		clock:                   clk,
+		kubeClient:              kubeClient,
+		cluster:                 cluster,
+		provisioner:             provisioner,
+		recorder:                recorder,
+		cloudProvider:           cp,
+		expiration:              NewExpiration(clk, kubeClient, cluster, provisioner),
+		emptiness:               NewEmptiness(clk, kubeClient, cluster),
+		emptyNodeConsolidation:  NewEmptyNodeConsolidation(clk, cluster, kubeClient, provisioner, cp),
+		multiNodeConsolidation:  NewMultiNodeConsolidation(clk, cluster, kubeClient, provisioner, cp),
+		singleNodeConsolidation: NewSingleNodeConsolidation(clk, cluster, kubeClient, provisioner, cp),
 	}
 }
 
@@ -97,15 +101,23 @@ func (c *Controller) LivenessProbe(_ *http.Request) error {
 	return nil
 }
 
-func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, r reconcile.Request) (reconcile.Result, error) {
+	// capture the state of the cluster before we do any analysis
+	currentState := c.cluster.ClusterConsolidationState()
 	result, err := c.ProcessCluster(ctx)
+
 	switch result {
 	case ResultFailed:
 		return reconcile.Result{}, fmt.Errorf("processing cluster, %w", err)
 	case ResultRetry:
 		return reconcile.Result{Requeue: true}, nil
 	case ResultNothingToDo:
-		c.consolidation.lastConsolidationState = c.cluster.ClusterConsolidationState()
+		// we record the cluster state for consolidation methods as they are expensive to compute and this allows
+		// them to defer calculations until something about the cluster has changed that may allow them to
+		// succeed
+		c.emptyNodeConsolidation.RecordLastState(currentState)
+		c.singleNodeConsolidation.RecordLastState(currentState)
+		c.multiNodeConsolidation.RecordLastState(currentState)
 	}
 	return reconcile.Result{RequeueAfter: pollingPeriod}, nil
 }
@@ -127,13 +139,21 @@ type CandidateNode struct {
 func (c *Controller) ProcessCluster(ctx context.Context) (Result, error) {
 	// range over the different deprovisioning methods. We'll only let one method perform an action
 	for _, d := range []Deprovisioner{
-		c.emptiness,
+		// Expire any nodes that must be deleted, allowing their pods to potentially land on currently
+		// empty nodes
 		c.expiration,
-		c.consolidation,
+
+		// Delete any remaining empty nodes as there is zero cost in terms of dirsuption.  Emptiness and
+		// emptyNodeConsolidation are mutually exclusive, only one of these will operate
+		c.emptiness,
+		c.emptyNodeConsolidation,
+
+		// Attempt to identify multiple nodes that we can consolidate simultaneously to reduce pod churn
+		c.multiNodeConsolidation,
+
+		// And finally fall back our single node consolidation to further reduce cluster cost.
+		c.singleNodeConsolidation,
 	} {
-		var result Result
-		var err error
-		// Capture new cluster state before each attempt
 		candidates, err := candidateNodes(ctx, c.cluster, c.kubeClient, c.clock, c.cloudProvider, d.ShouldDeprovision)
 		if err != nil {
 			return ResultFailed, fmt.Errorf("determining candidate nodes, %w", err)
@@ -142,21 +162,26 @@ func (c *Controller) ProcessCluster(ctx context.Context) (Result, error) {
 		if len(candidates) == 0 {
 			continue
 		}
-		result, err = c.executeDeprovisioning(ctx, d, candidates...)
+
+		result, err := c.executeDeprovisioning(ctx, d, candidates...)
 		if err != nil {
 			return ResultFailed, fmt.Errorf("deprovisioning nodes, %w", err)
 		}
 
 		switch result {
 		case ResultFailed:
-			return result, err
+			return ResultFailed, err
 		case ResultRetry, ResultSuccess:
+			// the controller wants to retry, or was successful in deprovisioning
 			return result, nil
 		case ResultNothingToDo:
+			// found nothing to do, so try the next deprovisioner
 			continue
+		default:
+			logging.FromContext(ctx).Errorf("unexpected result %s", result)
 		}
-		return result, nil
 	}
+
 	// All deprovisioners did nothing, so return nothing to do
 	return ResultNothingToDo, nil
 }
@@ -176,8 +201,6 @@ func (c *Controller) executeDeprovisioning(ctx context.Context, d Deprovisioner,
 		return ResultNothingToDo, nil
 	case actionRetry:
 		return ResultRetry, nil
-	case actionUnknown:
-		return ResultFailed, fmt.Errorf("unknown deprovisioning action")
 	}
 	// If delete or replace, execute command
 	result, err := c.executeCommand(ctx, cmd, d)

@@ -38,7 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// nolint: gocyclo
+//nolint:gocyclo
 func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
 	nodesToDelete ...CandidateNode) (newNodes []*pscheduling.Node, allPodsScheduled bool, err error) {
 	var stateNodes []*state.Node
@@ -101,6 +101,15 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	}
 	for _, n := range ifn {
 		podsScheduled += len(n.Pods)
+	}
+
+	// check if the scheduling relied on an existing node that isn't ready yet, if so we fail
+	// to schedule since we want to assume that we can delete a node and its pods will immediately
+	// move to an existing node which won't occur if that node isn't ready.
+	for _, n := range ifn {
+		if n.Node.Labels[v1alpha5.LabelNodeInitialized] != "true" {
+			return nil, false, nil
+		}
 	}
 	return newNodes, podsScheduled == len(pods), nil
 }
