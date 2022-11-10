@@ -251,22 +251,32 @@ func (c *Consolidation) String() string {
 }
 
 func canBeTerminated(node CandidateNode, pdbs *PDBLimits) bool {
-	return node.DeletionTimestamp.IsZero() && pdbs.CanEvictPods(node.pods) && !podsPreventEviction(node)
+	if !node.DeletionTimestamp.IsZero() {
+		return false
+	}
+	if _, ok := pdbs.CanEvictPods(node.pods); !ok {
+		return false
+	}
+
+	if _, ok := PodsPreventEviction(node.pods); ok {
+		return false
+	}
+	return true
 }
 
-// podsPreventEviction returns true if there are pods that would prevent eviction
-func podsPreventEviction(node CandidateNode) bool {
-	for _, p := range node.pods {
+// PodsPreventEviction returns true if there are pods that would prevent eviction
+func PodsPreventEviction(pods []*v1.Pod) (string, bool) {
+	for _, p := range pods {
 		// don't care about pods that are finishing, finished or owned by the node
 		if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
 			continue
 		}
 
 		if pod.HasDoNotEvict(p) {
-			return true
+			return fmt.Sprintf("po d%s/%s has do not evict annotation", p.Namespace, p.Name), true
 		}
 	}
-	return false
+	return "", false
 }
 
 // validateDeleteEmpty validates that the given nodes are still empty

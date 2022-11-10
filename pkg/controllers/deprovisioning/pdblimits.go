@@ -54,17 +54,17 @@ func NewPDBLimits(ctx context.Context, kubeClient client.Client) (*PDBLimits, er
 
 // CanEvictPods returns true if every pod in the list is evictable. They may not all be evictable simultaneously, but
 // for every PDB that controls the pods at least one pod can be evicted.
-func (s *PDBLimits) CanEvictPods(pods []*v1.Pod) bool {
+func (s *PDBLimits) CanEvictPods(pods []*v1.Pod) (client.ObjectKey, bool) {
 	for _, pod := range pods {
 		for _, pdb := range s.pdbs {
 			if pdb.selector.Matches(labels.Set(pod.Labels)) {
 				if pdb.disruptionsAllowed == 0 {
-					return false
+					return pdb.name, false
 				}
 			}
 		}
 	}
-	return true
+	return client.ObjectKey{}, true
 }
 
 type pdbItem struct {
