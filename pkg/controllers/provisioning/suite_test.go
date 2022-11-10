@@ -227,6 +227,19 @@ var _ = Describe("Provisioning", func() {
 			Expect(n.Name).ToNot(Equal(node.Name))
 		})
 	})
+	FIt("should not provision from disabled provisioner", func() {
+		x := test.Provisioner()
+		y := true
+		x.Spec.Disabled = &y
+		ExpectApplied(ctx, env.Client, x)
+		pods := ExpectProvisioned(ctx, env.Client, recorder, controller, prov, test.UnschedulablePod())
+		nodes := &v1.NodeList{}
+		Expect(env.Client.List(ctx, nodes)).To(Succeed())
+		Expect(len(nodes.Items)).To(Equal(0))
+		for _, pod := range pods {
+			ExpectNotScheduled(ctx, env.Client, pod)
+		}
+	})
 	Context("Resource Limits", func() {
 		It("should not schedule when limits are exceeded", func() {
 			ExpectApplied(ctx, env.Client, test.Provisioner(test.ProvisionerOptions{

@@ -50,7 +50,7 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, nodeTemplates [
 	toleratePreferNoSchedule := false
 	for _, prov := range provisioners {
 		for _, taint := range prov.Spec.Taints {
-			if !*prov.Spec.Disabled && taint.Effect == v1.TaintEffectPreferNoSchedule {
+			if (prov.Spec.Disabled == nil || !*prov.Spec.Disabled) && taint.Effect == v1.TaintEffectPreferNoSchedule {
 				toleratePreferNoSchedule = true
 			}
 		}

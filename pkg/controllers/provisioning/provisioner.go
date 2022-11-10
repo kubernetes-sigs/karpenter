@@ -252,7 +252,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 
 	for i := range provisionerList.Items {
 		provisioner := &provisionerList.Items[i]
-		if *provisioner.Spec.Disabled {
+		if provisioner.Spec.Disabled != nil && *provisioner.Spec.Disabled {
 			continue
 		}
 		if !provisioner.DeletionTimestamp.IsZero() {
