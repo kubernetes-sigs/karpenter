@@ -165,10 +165,12 @@ func (o *Operator) Start(ctx context.Context) {
 		defer wg.Done()
 		lo.Must0(o.Manager.Start(ctx))
 	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		sharedmain.MainWithConfig(ctx, "webhook", o.GetConfig(), o.webhooks...)
-	}()
+	if !injection.GetOptions(ctx).DisableWebhook {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sharedmain.MainWithConfig(ctx, "webhook", o.GetConfig(), o.webhooks...)
+		}()
+	}
 	wg.Wait()
 }
