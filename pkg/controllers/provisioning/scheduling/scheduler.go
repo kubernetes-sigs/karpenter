@@ -163,7 +163,7 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 	if newCount == 0 {
 		return
 	}
-	logging.FromContext(ctx).Infof("Found %d provisionable pod(s)", len(pods))
+	logging.FromContext(ctx).With("numberOfPods", len(pods)).Infof("Found provisionable pod(s)")
 	logging.FromContext(ctx).Infof("Computed %d new node(s) will fit %d pod(s)", len(s.nodes), newCount)
 
 	// Report in flight nodes, or exit to avoid log spam

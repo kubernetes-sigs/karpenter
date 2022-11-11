@@ -111,7 +111,8 @@ func (p *Provisioner) Builder(_ context.Context, mgr manager.Manager) operatorco
 			// wait to ensure that our cluster state is synced with the current known nodes to prevent over-provisioning
 			for WaitForClusterSync {
 				if err := p.cluster.Synchronized(ctx); err != nil {
-					logging.FromContext(ctx).Infof("waiting for cluster state to catch up, %s", err)
+					ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("clusterState", err))
+					logging.FromContext(ctx).Infof("waiting for cluster state to catch up")
 					time.Sleep(1 * time.Second)
 				} else {
 					break
@@ -328,7 +329,7 @@ func (p *Provisioner) launch(ctx context.Context, opts LaunchOptions, node *sche
 		return cheapestOfferingPrice(iOfferings, node.Requirements) < cheapestOfferingPrice(jOfferings, node.Requirements)
 	})
 
-	logging.FromContext(ctx).Infof("Launching %s", node)
+	logging.FromContext(ctx).With("node", node).Infof("Launching Node")
 	k8sNode, err := p.cloudProvider.Create(
 		logging.WithLogger(ctx, logging.FromContext(ctx).Named("cloudprovider")),
 		&cloudprovider.NodeRequest{InstanceTypeOptions: node.InstanceTypeOptions, Template: &node.NodeTemplate},

@@ -81,7 +81,8 @@ func (e *Expiration) ComputeCommand(ctx context.Context, attempt int, candidates
 	}
 	// Log when all pods can't schedule, as the command will get executed immediately.
 	if !allPodsScheduled {
-		logging.FromContext(ctx).Infof("continuing to expire node %s after scheduling simulation failed to schedule all pods", node.Name)
+		ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("nodeName", node.Name))
+		logging.FromContext(ctx).Infof("continuing to expire node after scheduling simulation failed to schedule all pods")
 	}
 
 	// were we able to schedule all the pods on the inflight nodes?
