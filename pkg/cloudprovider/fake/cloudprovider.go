@@ -17,6 +17,7 @@ package fake
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -38,17 +39,29 @@ type CloudProvider struct {
 	InstanceTypes []cloudprovider.InstanceType
 
 	// CreateCalls contains the arguments for every create call that was made since it was cleared
-	mu          sync.Mutex
-	CreateCalls []*cloudprovider.NodeRequest
+	mu                 sync.Mutex
+	CreateCalls        []*cloudprovider.NodeRequest
+	AllowedCreateCalls int
 }
 
 var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)
 var _ cloudprovider.InstanceType = (*InstanceType)(nil)
 
+func NewCloudProvider() *CloudProvider {
+	return &CloudProvider{
+		AllowedCreateCalls: math.MaxInt,
+	}
+}
+
 func (c *CloudProvider) Create(ctx context.Context, nodeRequest *cloudprovider.NodeRequest) (*v1.Node, error) {
 	c.mu.Lock()
 	c.CreateCalls = append(c.CreateCalls, nodeRequest)
+	if len(c.CreateCalls) > c.AllowedCreateCalls {
+		c.mu.Unlock()
+		return &v1.Node{}, fmt.Errorf("erroring as number of AllowedCreateCalls has been exceeded")
+	}
 	c.mu.Unlock()
+
 	name := test.RandomName()
 	instanceType := nodeRequest.InstanceTypeOptions[0]
 	// Labels

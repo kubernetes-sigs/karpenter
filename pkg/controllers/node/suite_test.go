@@ -57,7 +57,7 @@ var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
 	env = test.NewEnvironment(scheme.Scheme, apis.CRDs...)
 	ctx = settings.ToContext(ctx, test.Settings())
-	cp := &fake.CloudProvider{}
+	cp := fake.NewCloudProvider()
 	cluster := state.NewCluster(ctx, fakeClock, env.Client, cp)
 	controller = node.NewController(fakeClock, env.Client, cp, cluster)
 })
@@ -78,55 +78,6 @@ var _ = Describe("Controller", func() {
 	AfterEach(func() {
 		fakeClock.SetTime(time.Now())
 		ExpectCleanedUp(ctx, env.Client)
-	})
-
-	Context("Expiration", func() {
-		It("should ignore nodes without TTLSecondsUntilExpired", func() {
-			n := test.Node(test.NodeOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Finalizers: []string{v1alpha5.TerminationFinalizer},
-					Labels: map[string]string{
-						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-					},
-				},
-			})
-			ExpectApplied(ctx, env.Client, provisioner, n)
-			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(n))
-
-			n = ExpectNodeExists(ctx, env.Client, n.Name)
-			Expect(n.DeletionTimestamp.IsZero()).To(BeTrue())
-		})
-		It("should ignore nodes without a provisioner", func() {
-			n := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1alpha5.TerminationFinalizer}}})
-			ExpectApplied(ctx, env.Client, provisioner, n)
-			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(n))
-
-			n = ExpectNodeExists(ctx, env.Client, n.Name)
-			Expect(n.DeletionTimestamp.IsZero()).To(BeTrue())
-		})
-		It("should delete nodes after expiry", func() {
-			provisioner.Spec.TTLSecondsUntilExpired = ptr.Int64(30)
-			n := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
-				Finalizers: []string{v1alpha5.TerminationFinalizer},
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-				},
-			}})
-			ExpectApplied(ctx, env.Client, provisioner, n)
-			fakeClock.SetTime(time.Now())
-
-			// Should still exist
-			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(n))
-			n = ExpectNodeExists(ctx, env.Client, n.Name)
-			Expect(n.DeletionTimestamp.IsZero()).To(BeTrue())
-
-			// Simulate time passing
-			fakeClock.Step(time.Duration(*provisioner.Spec.TTLSecondsUntilExpired) * time.Second)
-
-			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(n))
-			n = ExpectNodeExists(ctx, env.Client, n.Name)
-			Expect(n.DeletionTimestamp.IsZero()).To(BeFalse())
-		})
 	})
 
 	Describe("Emptiness", func() {

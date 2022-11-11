@@ -76,13 +76,13 @@ func (e *Emptiness) ComputeCommand(_ context.Context, _ int, nodes ...CandidateN
 	return Command{
 		nodesToRemove: lo.Map(emptyNodes, func(n CandidateNode, _ int) *v1.Node { return n.Node }),
 		action:        actionDelete,
-		created:       e.clock.Now(),
+		createdAt:     e.clock.Now(),
 	}, nil
 }
 
 // validateCommand validates a command for a deprovisioner
 func (e *Emptiness) ValidateCommand(_ context.Context, candidateNodes []CandidateNode, cmd Command) (bool, error) {
-	if cmd.replacementNode != nil {
+	if len(cmd.replacementNodes) != 0 {
 		return false, fmt.Errorf("expected no replacement node for emptiness")
 	}
 	// the deletion of empty nodes is easy to validate, we just ensure that all the nodesToDelete are still empty and that

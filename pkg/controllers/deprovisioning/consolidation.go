@@ -31,6 +31,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
+	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
@@ -40,12 +41,13 @@ import (
 
 // Consolidation is the consolidation controller.
 type Consolidation struct {
-	kubeClient    client.Client
-	cluster       *state.Cluster
-	provisioner   *provisioning.Provisioner
-	recorder      events.Recorder
-	clock         clock.Clock
-	cloudProvider cloudprovider.CloudProvider
+	kubeClient             client.Client
+	cluster                *state.Cluster
+	provisioner            *provisioning.Provisioner
+	recorder               events.Recorder
+	clock                  clock.Clock
+	cloudProvider          cloudprovider.CloudProvider
+	lastConsolidationState int64
 }
 
 // shouldDeprovision is a predicate used to filter deprovisionable nodes
@@ -66,6 +68,11 @@ func (c *Consolidation) SortCandidates(nodes []CandidateNode) []CandidateNode {
 
 // computeCommand generates a deprovisioning command given deprovisionable nodes
 func (c *Consolidation) ComputeCommand(ctx context.Context, attempt int, candidates ...CandidateNode) (Command, error) {
+	// the last cluster consolidation wasn't able to improve things and nothing has changed regarding
+	// the cluster that makes us think we would be successful now
+	if c.lastConsolidationState == c.cluster.ClusterConsolidationState() {
+		return Command{action: actionDoNothing}, nil
+	}
 	// First delete any empty nodes we see
 	if attempt == 0 {
 		if cmd := c.deleteEmpty(ctx, candidates...); cmd.action == actionDelete {
@@ -93,7 +100,7 @@ func (c *Consolidation) deleteEmpty(_ context.Context, candidates ...CandidateNo
 		return Command{
 			nodesToRemove: lo.Map(emptyNodes, func(n CandidateNode, _ int) *v1.Node { return n.Node }),
 			action:        actionDelete,
-			created:       c.clock.Now(),
+			createdAt:     c.clock.Now(),
 		}
 	}
 	return Command{action: actionDoNothing}
@@ -124,7 +131,7 @@ func (c *Consolidation) computeConsolidation(ctx context.Context, node Candidate
 		return Command{
 			nodesToRemove: []*v1.Node{node.Node},
 			action:        actionDelete,
-			created:       c.clock.Now(),
+			createdAt:     c.clock.Now(),
 		}, nil
 	}
 
@@ -163,17 +170,20 @@ func (c *Consolidation) computeConsolidation(ctx context.Context, node Candidate
 	}
 
 	return Command{
-		nodesToRemove:   []*v1.Node{node.Node},
-		action:          actionReplace,
-		replacementNode: newNodes[0],
-		created:         c.clock.Now(),
+		nodesToRemove:    []*v1.Node{node.Node},
+		action:           actionReplace,
+		replacementNodes: []*pscheduling.Node{newNodes[0]},
+		createdAt:        c.clock.Now(),
 	}, nil
 }
 
 // validateCommand validates a command for a deprovisioner
 func (c *Consolidation) ValidateCommand(ctx context.Context, nodesToDelete []CandidateNode, cmd Command) (bool, error) {
-	if cmd.action == actionDelete && c.validateDeleteEmpty(nodesToDelete) {
-		return true, nil
+	// If we're deleting and there are empty nodes, command is valid.
+	if cmd.action == actionDelete {
+		if c.validateDeleteEmpty(nodesToDelete) {
+			return true, nil
+		}
 	}
 	newNodes, allPodsScheduled, err := simulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, nodesToDelete...)
 	if err != nil {
@@ -190,7 +200,7 @@ func (c *Consolidation) ValidateCommand(ctx context.Context, nodesToDelete []Can
 	//                    be deleted without producing more than one node
 	// len(newNodes) == 1, as long as the node looks like what we were expecting, this is valid
 	if len(newNodes) == 0 {
-		if cmd.replacementNode == nil {
+		if len(cmd.replacementNodes) == 0 {
 			// scheduling produced zero new nodes and we weren't expecting any, so this is valid.
 			return true, nil
 		}
@@ -205,7 +215,7 @@ func (c *Consolidation) ValidateCommand(ctx context.Context, nodesToDelete []Can
 	}
 
 	// we now know that scheduling simulation wants to create one new node
-	if cmd.replacementNode == nil {
+	if len(cmd.replacementNodes) == 0 {
 		// but we weren't expecting any new nodes, so this is invalid
 		return false, nil
 	}
@@ -220,7 +230,7 @@ func (c *Consolidation) ValidateCommand(ctx context.Context, nodesToDelete []Can
 	// a 4xlarge and replace it with a 2xlarge. If things have changed and the scheduling simulation we just performed
 	// now says that we need to launch a 4xlarge. It's still launching the correct number of nodes, but it's just
 	// as expensive or possibly more so we shouldn't validate.
-	if !instanceTypesAreSubset(cmd.replacementNode.InstanceTypeOptions, newNodes[0].InstanceTypeOptions) {
+	if !instanceTypesAreSubset(cmd.replacementNodes[0].InstanceTypeOptions, newNodes[0].InstanceTypeOptions) {
 		return false, nil
 	}
 

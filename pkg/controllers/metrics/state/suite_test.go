@@ -65,7 +65,8 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, apis.CRDs...)
 
 	ctx = settings.ToContext(ctx, test.Settings())
-	cloudProvider = &fake.CloudProvider{InstanceTypes: fake.InstanceTypesAssorted()}
+	cloudProvider = fake.NewCloudProvider()
+	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
 	provisioner = test.Provisioner(test.ProvisionerOptions{ObjectMeta: metav1.ObjectMeta{Name: "default"}})

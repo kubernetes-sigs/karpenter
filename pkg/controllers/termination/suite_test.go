@@ -62,7 +62,7 @@ var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
 	env = test.NewEnvironment(scheme.Scheme, apis.CRDs...)
 
-	cloudProvider := &fake.CloudProvider{}
+	cloudProvider := fake.NewCloudProvider()
 	eventRecorder := test.NewEventRecorder()
 	evictionQueue = termination.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), eventRecorder)
 	controller = &termination.Controller{

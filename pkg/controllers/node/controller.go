@@ -52,7 +52,6 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 		cluster:        cluster,
 		initialization: &Initialization{kubeClient: kubeClient, cloudProvider: cloudProvider},
 		emptiness:      &Emptiness{kubeClient: kubeClient, clock: clk, cluster: cluster},
-		expiration:     &Expiration{kubeClient: kubeClient, clock: clk},
 	}
 }
 
@@ -63,7 +62,6 @@ type Controller struct {
 	cluster        *state.Cluster
 	initialization *Initialization
 	emptiness      *Emptiness
-	expiration     *Expiration
 	finalizer      *Finalizer
 }
 
@@ -96,7 +94,6 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		Reconcile(context.Context, *v1alpha5.Provisioner, *v1.Node) (reconcile.Result, error)
 	}{
 		c.initialization,
-		c.expiration,
 		c.emptiness,
 		c.finalizer,
 	} {

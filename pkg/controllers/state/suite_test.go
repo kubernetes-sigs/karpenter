@@ -75,7 +75,8 @@ var _ = AfterSuite(func() {
 
 var _ = BeforeEach(func() {
 	ctx = settings.ToContext(ctx, test.Settings())
-	cloudProvider = &fake.CloudProvider{InstanceTypes: fake.InstanceTypesAssorted()}
+	cloudProvider = fake.NewCloudProvider()
+	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
 	nodeController = state.NewNodeController(env.Client, cluster)
