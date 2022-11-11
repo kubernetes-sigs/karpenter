@@ -99,7 +99,12 @@ func NewOperator() (context.Context, *Operator) {
 	ctx = logging.WithLogger(ctx, logger)
 
 	// Create the settingsStore for settings injection
-	settingsStore := settingsstore.NewWatcherOrDie(ctx, kubernetesInterface, configMapWatcher, apis.Settings.List()...)
+	var settingsStore settingsstore.Store
+	if opts.SettingsFile != "" {
+		settingsStore = settingsstore.NewLocalStoreOrDie(ctx, apis.Settings.List()...)
+	} else {
+		settingsStore = settingsstore.NewWatcherOrDie(ctx, kubernetesInterface, configMapWatcher, apis.Settings.List()...)
+	}
 
 	// Inject settings after starting the ConfigMapWatcher
 	lo.Must0(configMapWatcher.Start(ctx.Done()))

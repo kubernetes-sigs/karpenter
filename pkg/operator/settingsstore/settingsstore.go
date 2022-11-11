@@ -17,11 +17,13 @@ package settingsstore
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"knative.dev/pkg/configmap"
@@ -29,6 +31,7 @@ import (
 	"knative.dev/pkg/logging"
 
 	"github.com/aws/karpenter-core/pkg/apis/config"
+	"github.com/aws/karpenter-core/pkg/operator/injection"
 )
 
 type Store interface {
@@ -51,7 +54,7 @@ func NewWatcherOrDie(ctx context.Context, kubernetesInterface kubernetes.Interfa
 	}
 	for _, registration := range registrations {
 		if err := registration.Validate(); err != nil {
-			panic(fmt.Sprintf("Validating settings registration, %v", err))
+			panic(fmt.Sprintf("validating settings registration, %v", err))
 		}
 		ss.stores[registration] = configmap.NewUntypedStore(
 			registration.ConfigMapName,
@@ -62,14 +65,14 @@ func NewWatcherOrDie(ctx context.Context, kubernetesInterface kubernetes.Interfa
 		)
 		ss.stores[registration].WatchConfigs(cmw)
 	}
-	// Waits for all the ConfigMaps to be created before we continue onto the
+	// Waits for all the ConfigMaps to be created before we continue
 	ss.waitForConfigMapsOrDie(ctx, kubernetesInterface, cmw)
 	return ss
 }
 
 // waitForConfigMapsOrDie waits until all registered configMaps in the settingsStore are created
 func (s *store) waitForConfigMapsOrDie(ctx context.Context, kubernetesInterface kubernetes.Interface, configMapWatcher *informer.InformedWatcher) {
-	logging.FromContext(ctx).Debugf("Waiting for settings ConfigMap(s) creation")
+	logging.FromContext(ctx).Debugf("waiting for settings ConfigMap(s) creation")
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -89,15 +92,49 @@ func (s *store) waitForConfigMapsOrDie(ctx context.Context, kubernetesInterface 
 		}
 		select {
 		case <-ctx.Done():
-			panic(fmt.Sprintf("Timed out waiting for ConfigMap(s) %v to be created", lo.Keys(expectedNames)))
+			panic(fmt.Sprintf("timed out waiting for ConfigMap(s) %v to be created", lo.Keys(expectedNames)))
 		case <-time.After(time.Millisecond * 500):
 		}
 	}
-	logging.FromContext(ctx).Debugf("Settings ConfigMap(s) exist")
+	logging.FromContext(ctx).Debugf("settings ConfigMap(s) exist")
 }
 
 func (s *store) InjectSettings(ctx context.Context) context.Context {
 	return lo.Reduce(s.registrations, func(c context.Context, registration *config.Registration, _ int) context.Context {
 		return context.WithValue(c, registration, s.stores[registration].UntypedLoad(registration.ConfigMapName))
+	}, ctx)
+}
+
+type localStore struct {
+	registrations []*config.Registration
+	data          map[string]string
+}
+
+func NewLocalStoreOrDie(ctx context.Context, registrations ...*config.Registration) Store {
+	raw, err := os.ReadFile(injection.GetOptions(ctx).SettingsFile)
+	if err != nil {
+		panic(fmt.Sprintf("reading from settings file, %v", err))
+	}
+	data := map[string]string{}
+	if err = yaml.Unmarshal(raw, &data); err != nil {
+		panic(fmt.Sprintf("parsing settings file as yaml, %v", err))
+	}
+	for _, registration := range registrations {
+		if err = registration.Validate(); err != nil {
+			panic(fmt.Sprintf("validating settings registration, %v", err))
+		}
+	}
+	return &localStore{
+		registrations: registrations,
+		data:          data,
+	}
+}
+
+func (s *localStore) InjectSettings(ctx context.Context) context.Context {
+	cm := &v1.ConfigMap{
+		Data: s.data,
+	}
+	return lo.Reduce(s.registrations, func(ctx context.Context, registration *config.Registration, _ int) context.Context {
+		return context.WithValue(ctx, registration, lo.Must(registration.Constructor(cm)))
 	}, ctx)
 }

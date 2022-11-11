@@ -17,25 +17,22 @@ package config
 import (
 	"fmt"
 
-	"knative.dev/pkg/configmap"
+	v1 "k8s.io/api/core/v1"
 )
-
-// Constructor should take the form func(*v1.ConfigMap) (T, error)
-type Constructor interface{}
 
 // Registration defines a ConfigMap registration to be watched by the settingsstore.Watcher
 // and to be injected into the Reconcile() contexts of controllers
 type Registration struct {
 	ConfigMapName string
-	Constructor   interface{}
+	Constructor   func(*v1.ConfigMap) (interface{}, error)
 }
 
 func (r Registration) Validate() error {
 	if r.ConfigMapName == "" {
-		return fmt.Errorf("configMap cannot be empty in SettingsStore registration")
+		return fmt.Errorf("configMapName cannot be empty in SettingsStore registration")
 	}
-	if err := configmap.ValidateConstructor(r.Constructor); err != nil {
-		return fmt.Errorf("constructor validation failed in SettingsStore registration, %w", err)
+	if r.Constructor == nil {
+		return fmt.Errorf("constructor cannot be nil")
 	}
 	return nil
 }

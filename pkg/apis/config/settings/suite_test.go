@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	. "knative.dev/pkg/logging/testing"
 
@@ -37,12 +38,12 @@ func TestSettings(t *testing.T) {
 	RunSpecs(t, "Settings")
 }
 
-var _ = Describe("Validation", func() {
+var _ = Describe("Settings", func() {
 	It("should succeed to set defaults", func() {
 		cm := &v1.ConfigMap{
 			Data: map[string]string{},
 		}
-		s, _ := settings.NewSettingsFromConfigMap(cm)
+		s := lo.Must(settings.NewSettingsFromConfigMap(cm)).(settings.Settings)
 		Expect(s.BatchMaxDuration.Duration).To(Equal(time.Second * 10))
 		Expect(s.BatchIdleDuration.Duration).To(Equal(time.Second))
 	})
@@ -53,7 +54,7 @@ var _ = Describe("Validation", func() {
 				"batchIdleDuration": "5s",
 			},
 		}
-		s, _ := settings.NewSettingsFromConfigMap(cm)
+		s := lo.Must(settings.NewSettingsFromConfigMap(cm)).(settings.Settings)
 		Expect(s.BatchMaxDuration.Duration).To(Equal(time.Second * 30))
 		Expect(s.BatchIdleDuration.Duration).To(Equal(time.Second * 5))
 	})

@@ -16,10 +16,8 @@ package fake
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
-	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"knative.dev/pkg/configmap"
 
@@ -39,16 +37,7 @@ type Settings struct {
 	TestArg string `json:"testArg"`
 }
 
-func (s Settings) Data() (map[string]string, error) {
-	d := map[string]string{}
-
-	if err := json.Unmarshal(lo.Must(json.Marshal(defaultSettings)), &d); err != nil {
-		return d, err
-	}
-	return d, nil
-}
-
-func NewFakeSettingsFromConfigMap(cm *v1.ConfigMap) (Settings, error) {
+func NewFakeSettingsFromConfigMap(cm *v1.ConfigMap) (interface{}, error) {
 	s := defaultSettings
 
 	if err := configmap.Parse(cm.Data,

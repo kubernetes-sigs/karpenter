@@ -44,6 +44,7 @@ type Options struct {
 	EnableProfiling      bool
 	EnableLeaderElection bool
 	MemoryLimit          int64
+	SettingsFile         string
 }
 
 // New creates an Options struct and registers CLI flags and environment variables to fill-in the Options struct fields
@@ -63,6 +64,7 @@ func New() *Options {
 	f.BoolVar(&opts.EnableProfiling, "enable-profiling", env.WithDefaultBool("ENABLE_PROFILING", false), "Enable the profiling on the metric endpoint")
 	f.BoolVar(&opts.EnableLeaderElection, "leader-elect", env.WithDefaultBool("LEADER_ELECT", true), "Start leader election client and gain leadership before executing the main loop. Enable this when running replicated components for high availability.")
 	f.Int64Var(&opts.MemoryLimit, "memory-limit", env.WithDefaultInt64("MEMORY_LIMIT", -1), "Memory limit on the container running the controller. The GC soft memory limit is set to 90% of this value.")
+	f.StringVar(&opts.SettingsFile, "settings-file", env.WithDefaultString("SETTINGS_FILE", ""), "The filepath to a local settings file. If set, settings will come from this style instead of a ConfigMap")
 
 	if opts.MemoryLimit > 0 {
 		newLimit := int64(float64(opts.MemoryLimit) * 0.9)

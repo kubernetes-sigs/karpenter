@@ -1,0 +1,2 @@
+batchMaxDuration: 15s
+batchIdleDuration: 2s

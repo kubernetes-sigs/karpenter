@@ -41,12 +41,12 @@ var defaultSettings = Settings{
 }
 
 type Settings struct {
-	BatchMaxDuration  metav1.Duration `json:"batchMaxDuration"`
-	BatchIdleDuration metav1.Duration `json:"batchIdleDuration"`
+	BatchMaxDuration  metav1.Duration
+	BatchIdleDuration metav1.Duration
 }
 
 // NewSettingsFromConfigMap creates a Settings from the supplied ConfigMap
-func NewSettingsFromConfigMap(cm *v1.ConfigMap) (Settings, error) {
+func NewSettingsFromConfigMap(cm *v1.ConfigMap) (interface{}, error) {
 	s := defaultSettings
 
 	if err := configmap.Parse(cm.Data,

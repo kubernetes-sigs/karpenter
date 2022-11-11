@@ -25,6 +25,8 @@ import (
 	"knative.dev/pkg/system"
 
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
+	"github.com/aws/karpenter-core/pkg/operator/injection"
+	"github.com/aws/karpenter-core/pkg/operator/options"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
 	"github.com/aws/karpenter-core/pkg/operator/settingsstore/fake"
@@ -67,77 +69,99 @@ var _ = AfterSuite(func() {
 	Expect(env.Stop()).To(Succeed())
 })
 
-var _ = BeforeEach(func() {
-	defaultConfigMap = &v1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "karpenter-global-settings",
-			Namespace: system.Namespace(),
-		},
-	}
-	ExpectApplied(ctx, env.Client, defaultConfigMap)
-})
-
-var _ = AfterEach(func() {
-	ExpectDeleted(ctx, env.Client, defaultConfigMap.DeepCopy())
-})
-
 var _ = Describe("SettingsStore", func() {
-	Context("Operator Settings", func() {
-		It("should have default values", func() {
-			Eventually(func(g Gomega) {
-				testCtx := ss.InjectSettings(ctx)
-				s := settings.FromContext(testCtx)
-				g.Expect(s.BatchIdleDuration.Duration).To(Equal(1 * time.Second))
-				g.Expect(s.BatchMaxDuration.Duration).To(Equal(10 * time.Second))
-			}).Should(Succeed())
-		})
-		It("should update if values are changed", func() {
-			Eventually(func(g Gomega) {
-				testCtx := ss.InjectSettings(ctx)
-				s := settings.FromContext(testCtx)
-				g.Expect(s.BatchIdleDuration.Duration).To(Equal(1 * time.Second))
-				g.Expect(s.BatchMaxDuration.Duration).To(Equal(10 * time.Second))
-			})
-			cm := defaultConfigMap.DeepCopy()
-			cm.Data = map[string]string{
-				"batchIdleDuration": "2s",
-				"batchMaxDuration":  "15s",
+	Context("ConfigMap", func() {
+		BeforeEach(func() {
+			defaultConfigMap = &v1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "karpenter-global-settings",
+					Namespace: system.Namespace(),
+				},
 			}
-			ExpectApplied(ctx, env.Client, cm)
+			ExpectApplied(ctx, env.Client, defaultConfigMap)
+		})
+		AfterEach(func() {
+			ExpectDeleted(ctx, env.Client, defaultConfigMap.DeepCopy())
+		})
+		Context("Operator Settings", func() {
+			It("should have default values", func() {
+				Eventually(func(g Gomega) {
+					testCtx := ss.InjectSettings(ctx)
+					s := settings.FromContext(testCtx)
+					g.Expect(s.BatchIdleDuration.Duration).To(Equal(1 * time.Second))
+					g.Expect(s.BatchMaxDuration.Duration).To(Equal(10 * time.Second))
+				}).Should(Succeed())
+			})
+			It("should update if values are changed", func() {
+				Eventually(func(g Gomega) {
+					testCtx := ss.InjectSettings(ctx)
+					s := settings.FromContext(testCtx)
+					g.Expect(s.BatchIdleDuration.Duration).To(Equal(1 * time.Second))
+					g.Expect(s.BatchMaxDuration.Duration).To(Equal(10 * time.Second))
+				})
+				cm := defaultConfigMap.DeepCopy()
+				cm.Data = map[string]string{
+					"batchIdleDuration": "2s",
+					"batchMaxDuration":  "15s",
+				}
+				ExpectApplied(ctx, env.Client, cm)
 
-			Eventually(func(g Gomega) {
-				testCtx := ss.InjectSettings(ctx)
-				s := settings.FromContext(testCtx)
-				g.Expect(s.BatchIdleDuration.Duration).To(Equal(2 * time.Second))
-				g.Expect(s.BatchMaxDuration.Duration).To(Equal(15 * time.Second))
-			}).Should(Succeed())
+				Eventually(func(g Gomega) {
+					testCtx := ss.InjectSettings(ctx)
+					s := settings.FromContext(testCtx)
+					g.Expect(s.BatchIdleDuration.Duration).To(Equal(2 * time.Second))
+					g.Expect(s.BatchMaxDuration.Duration).To(Equal(15 * time.Second))
+				}).Should(Succeed())
+			})
+		})
+		Context("Multiple Settings", func() {
+			It("should get operator settings and features from same configMap", func() {
+				Eventually(func(g Gomega) {
+					testCtx := ss.InjectSettings(ctx)
+					s := fake.SettingsFromContext(testCtx)
+					g.Expect(s.TestArg).To(Equal("default"))
+				}).Should(Succeed())
+			})
+			It("should get operator settings and features from same configMap", func() {
+				cm := defaultConfigMap.DeepCopy()
+				cm.Data = map[string]string{
+					"batchIdleDuration": "2s",
+					"batchMaxDuration":  "15s",
+					"testArg":           "my-value",
+				}
+				ExpectApplied(ctx, env.Client, cm)
+
+				Eventually(func(g Gomega) {
+					testCtx := ss.InjectSettings(ctx)
+					s := settings.FromContext(testCtx)
+					fs := fake.SettingsFromContext(testCtx)
+					g.Expect(s.BatchIdleDuration.Duration).To(Equal(2 * time.Second))
+					g.Expect(s.BatchMaxDuration.Duration).To(Equal(15 * time.Second))
+					g.Expect(fs.TestArg).To(Equal("my-value"))
+				}).Should(Succeed())
+			})
 		})
 	})
-	Context("Multiple Settings", func() {
-		It("should get operator settings and features from same configMap", func() {
-			Eventually(func(g Gomega) {
-				testCtx := ss.InjectSettings(ctx)
-				s := fake.SettingsFromContext(testCtx)
-				g.Expect(s.TestArg).To(Equal("default"))
-			}).Should(Succeed())
+	Context("Local", func() {
+		It("should parse local settings file", func() {
+			ctx = injection.WithOptions(ctx, options.Options{
+				SettingsFile: "./testdata/testsettings.yaml",
+			})
+			ss := settingsstore.NewLocalStoreOrDie(ctx, settings.Registration)
+			testCtx := ss.InjectSettings(ctx)
+			s := settings.FromContext(testCtx)
+			Expect(s.BatchIdleDuration.Duration).To(Equal(2 * time.Second))
+			Expect(s.BatchMaxDuration.Duration).To(Equal(15 * time.Second))
 		})
-		It("should get operator settings and features from same configMap", func() {
-			cm := defaultConfigMap.DeepCopy()
-			cm.Data = map[string]string{
-				"batchIdleDuration": "2s",
-				"batchMaxDuration":  "15s",
-				"testArg":           "my-value",
-			}
-			ExpectApplied(ctx, env.Client, cm)
-
-			Eventually(func(g Gomega) {
-				testCtx := ss.InjectSettings(ctx)
-				s := settings.FromContext(testCtx)
-				fs := fake.SettingsFromContext(testCtx)
-				g.Expect(s.BatchIdleDuration.Duration).To(Equal(2 * time.Second))
-				g.Expect(s.BatchMaxDuration.Duration).To(Equal(15 * time.Second))
-				g.Expect(fs.TestArg).To(Equal("my-value"))
-			}).Should(Succeed())
+		It("should parse local settings file with defaults", func() {
+			ctx = injection.WithOptions(ctx, options.Options{
+				SettingsFile: "./testdata/testdefaults.yaml",
+			})
+			ss := settingsstore.NewLocalStoreOrDie(ctx, settings.Registration)
+			testCtx := ss.InjectSettings(ctx)
+			s := settings.FromContext(testCtx)
+			Expect(s.BatchIdleDuration.Duration).To(Equal(1 * time.Second))
+			Expect(s.BatchMaxDuration.Duration).To(Equal(10 * time.Second))
 		})
 	})
 })
