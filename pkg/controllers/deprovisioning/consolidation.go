@@ -265,10 +265,6 @@ func podsPreventEviction(node CandidateNode) bool {
 		if pod.HasDoNotEvict(p) {
 			return true
 		}
-
-		if pod.IsNotOwned(p) {
-			return true
-		}
 	}
 	return false
 }
