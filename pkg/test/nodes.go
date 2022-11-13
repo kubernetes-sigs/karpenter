@@ -31,6 +31,7 @@ type NodeOptions struct {
 	ProviderID    string
 	Taints        []v1.Taint
 	Allocatable   v1.ResourceList
+	Capacity      v1.ResourceList
 }
 
 func Node(overrides ...NodeOptions) *v1.Node {
@@ -43,6 +44,9 @@ func Node(overrides ...NodeOptions) *v1.Node {
 	if options.ReadyStatus == "" {
 		options.ReadyStatus = v1.ConditionTrue
 	}
+	if options.Capacity == nil {
+		options.Capacity = options.Allocatable
+	}
 
 	return &v1.Node{
 		ObjectMeta: ObjectMeta(options.ObjectMeta),
@@ -53,7 +57,7 @@ func Node(overrides ...NodeOptions) *v1.Node {
 		},
 		Status: v1.NodeStatus{
 			Allocatable: options.Allocatable,
-			Capacity:    options.Allocatable,
+			Capacity:    options.Capacity,
 			Conditions:  []v1.NodeCondition{{Type: v1.NodeReady, Status: options.ReadyStatus, Reason: options.ReadyReason}},
 		},
 	}
