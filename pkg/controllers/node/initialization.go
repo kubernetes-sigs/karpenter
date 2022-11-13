@@ -104,9 +104,13 @@ func isExtendedResourceRegistered(node *v1.Node, instanceType cloudprovider.Inst
 		// kubelet will zero out both the capacity and allocatable for an extended resource on startup, so if our
 		// annotation says the resource should be there, but it's zero'd in both then the device plugin hasn't
 		// registered it yet
-		if resources.IsZero(node.Status.Capacity[resourceName]) &&
-			resources.IsZero(node.Status.Allocatable[resourceName]) &&
-			!quantity.IsZero() {
+		if quantity.IsZero() {
+			continue
+		}
+		if resources.IsZero(node.Status.Capacity[resourceName]) {
+			return false
+		}
+		if resources.IsZero(node.Status.Allocatable[resourceName]) {
 			return false
 		}
 	}
