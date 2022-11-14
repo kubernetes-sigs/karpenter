@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/scheduling"
 )
 
 func IsProvisionable(pod *v1.Pod) bool {
@@ -67,10 +68,6 @@ func IsOwnedByNode(pod *v1.Pod) bool {
 	})
 }
 
-func IsNotOwned(pod *v1.Pod) bool {
-	return len(pod.ObjectMeta.OwnerReferences) == 0
-}
-
 func IsOwnedBy(pod *v1.Pod, gvks []schema.GroupVersionKind) bool {
 	for _, ignoredOwner := range gvks {
 		for _, owner := range pod.ObjectMeta.OwnerReferences {
@@ -87,6 +84,11 @@ func HasDoNotEvict(pod *v1.Pod) bool {
 		return false
 	}
 	return pod.Annotations[v1alpha5.DoNotEvictPodAnnotationKey] == "true"
+}
+
+// HasUnschedulableToleration returns true if the pod tolerates node.kubernetes.io/unschedulable taint
+func ToleratesUnschedulableTaint(pod *v1.Pod) bool {
+	return (scheduling.Taints{{Key: v1.TaintNodeUnschedulable, Effect: v1.TaintEffectNoSchedule}}).Tolerates(pod) == nil
 }
 
 // HasRequiredPodAntiAffinity returns true if a non-empty PodAntiAffinity/RequiredDuringSchedulingIgnoredDuringExecution
