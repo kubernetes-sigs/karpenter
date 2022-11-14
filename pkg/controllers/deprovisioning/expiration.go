@@ -70,6 +70,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, attempt int, candidates
 
 	// Only expire one node at a time.
 	node := candidates[attempt]
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
 	// Check if we need to create any nodes.
 	newNodes, allPodsScheduled, err := simulateScheduling(ctx, e.kubeClient, e.cluster, e.provisioner, node)
 	if err != nil {
@@ -81,7 +82,6 @@ func (e *Expiration) ComputeCommand(ctx context.Context, attempt int, candidates
 	}
 	// Log when all pods can't schedule, as the command will get executed immediately.
 	if !allPodsScheduled {
-		ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("nodeName", node.Name))
 		logging.FromContext(ctx).Infof("continuing to expire node after scheduling simulation failed to schedule all pods")
 	}
 

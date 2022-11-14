@@ -54,10 +54,10 @@ func (e *Emptiness) ShouldDeprovision(ctx context.Context, n *state.Node, provis
 	ttl := time.Duration(ptr.Int64Value(provisioner.Spec.TTLSecondsAfterEmpty)) * time.Second
 
 	emptinessTime, err := time.Parse(time.RFC3339, emptinessTimestamp)
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With(
+		"emptinessTimestamp", emptinessTimestamp,
+		"node", n.Node.Name))
 	if err != nil {
-		ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With(
-			"potimestampd", emptinessTimestamp,
-			"nodeName", n.Node.Name))
 		logging.FromContext(ctx).Debugf("Unable to parse emptiness timestamp")
 		return true
 	}

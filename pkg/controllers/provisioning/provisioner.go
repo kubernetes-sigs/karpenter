@@ -111,8 +111,7 @@ func (p *Provisioner) Builder(_ context.Context, mgr manager.Manager) operatorco
 			// wait to ensure that our cluster state is synced with the current known nodes to prevent over-provisioning
 			for WaitForClusterSync {
 				if err := p.cluster.Synchronized(ctx); err != nil {
-					ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("clusterState", err))
-					logging.FromContext(ctx).Infof("waiting for cluster state to catch up")
+					logging.FromContext(ctx).Infof("waiting for cluster state to catch up, %s", err)
 					time.Sleep(1 * time.Second)
 				} else {
 					break
@@ -329,11 +328,13 @@ func (p *Provisioner) launch(ctx context.Context, opts LaunchOptions, node *sche
 		return cheapestOfferingPrice(iOfferings, node.Requirements) < cheapestOfferingPrice(jOfferings, node.Requirements)
 	})
 
-	logging.FromContext(ctx).With("node", node).Infof("Launching Node")
+	logging.FromContext(ctx).Infof("Launching %s", node)
 	k8sNode, err := p.cloudProvider.Create(
 		logging.WithLogger(ctx, logging.FromContext(ctx).Named("cloudprovider")),
 		&cloudprovider.NodeRequest{InstanceTypeOptions: node.InstanceTypeOptions, Template: &node.NodeTemplate},
 	)
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With(
+		"node", k8sNode.Name))
 	if err != nil {
 		return "", fmt.Errorf("creating cloud provider instance, %w", err)
 	}
@@ -351,8 +352,6 @@ func (p *Provisioner) launch(ctx context.Context, opts LaunchOptions, node *sche
 	// before the node is fully Ready.
 	if _, err := p.coreV1Client.Nodes().Create(ctx, k8sNode, metav1.CreateOptions{}); err != nil {
 		if errors.IsAlreadyExists(err) {
-			ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With(
-				"nodeName", k8sNode.Name))
 			logging.FromContext(ctx).Debugf("node already registered")
 		} else {
 			return "", fmt.Errorf("creating node %s, %w", k8sNode.Name, err)
