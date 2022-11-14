@@ -22,9 +22,7 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/utils/clock"
 	"knative.dev/pkg/ptr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/samber/lo"
 
@@ -41,13 +39,23 @@ import (
 
 // Consolidation is the consolidation controller.
 type Consolidation struct {
-	kubeClient             client.Client
-	cluster                *state.Cluster
-	provisioner            *provisioning.Provisioner
-	recorder               events.Recorder
-	clock                  clock.Clock
-	cloudProvider          cloudprovider.CloudProvider
-	lastConsolidationState int64
+	deprovisioner
+	provisioner   *provisioning.Provisioner
+	recorder      events.Recorder
+	cloudProvider cloudprovider.CloudProvider
+}
+
+func (c *Consolidation) NewConsolidation(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder,  cluster *state.Cluster) *Consolidation {
+	return &Consolidation{
+		deprovisioner: deprovisioner{
+			clock:         clk,
+			kubeClient:    kubeClient,
+			cluster:       cluster,
+		},
+		provisioner:   provisioner,
+		recorder:      recorder,
+		cloudProvider: cp,
+	},
 }
 
 // shouldDeprovision is a predicate used to filter deprovisionable nodes
@@ -74,21 +82,59 @@ func (c *Consolidation) ComputeCommand(ctx context.Context, attempt int, candida
 		return Command{action: actionDoNothing}, nil
 	}
 	// First delete any empty nodes we see
-	if attempt == 0 {
-		if cmd := c.deleteEmpty(ctx, candidates...); cmd.action == actionDelete {
-			return cmd, nil
-		}
+	if cmd := c.deleteEmpty(ctx, candidates...); cmd.action == actionDelete {
+		return cmd, nil
 	}
 
 	pdbs, err := NewPDBLimits(ctx, c.kubeClient)
 	if err != nil {
 		return Command{action: actionFailed}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
-	// is this a node that we can terminate?  This check is meant to be fast so we can save the expense of simulated
-	// scheduling unless its really needed
-	if !canBeTerminated(candidates[attempt], pdbs) {
-		return Command{action: actionNotPossible}, nil
+
+	for _, candidate := range candidates {
+		// is this a node that we can terminate?  This check is meant to be fast so we can save the expense of simulated
+		// scheduling unless its really needed
+		if !canBeTerminated(candidates[attempt], pdbs) {
+			return Command{action: actionNotPossible}, nil
+		}
+		cmd, err := c.computeConsolidation(ctx, candidate)
+		if err != nil {
+			return Command{action: actionFailed}, err
+		}
+
+		remainingDelay := c.TTL() - c.clock.Since(cmd.created)
+		// deprovisioningTTL is how long we wait before re-validating our lifecycle command
+		if remainingDelay > 0 {
+			select {
+			case <-ctx.Done():
+				return Command{action: actionFailed}, fmt.Errorf("context canceled during %s validation", c.String())
+			case <-c.clock.After(remainingDelay):
+			}
+		}
+
+		candidateNodes, err := candidateNodes(ctx, c.kubeClient, c.cluster, c.cloudProvider, c.clock, c.ShouldDeprovision)
+		if err != nil {
+			return false, fmt.Errorf("determining candidate node, %w", err)
+		}
+		nodes := mapNodes(cmd.nodesToRemove, candidateNodes)
+
+		// None of the chosen candidate nodes are valid for execution, so retry
+		if len(nodes) == 0 {
+			return false, nil
+		}
+
+		ok, err := d.ValidateCommand(ctx, nodes, cmd)
+		if err != nil {
+			return false, fmt.Errorf("determining candidate node, %w", err)
+		}
+		if !ok {
+			return false, nil
+		}
+		return true, nil
+		ok, err := c.ValidateCommand()
+
 	}
+
 
 	return c.computeConsolidation(ctx, candidates[attempt])
 }

@@ -43,7 +43,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
-	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
 )
 
 // Controller is the deprovisioning controller.
@@ -94,14 +93,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 			clock:      clk,
 			cluster:    cluster,
 		},
-		consolidation: &Consolidation{
-			clock:         clk,
-			kubeClient:    kubeClient,
-			cluster:       cluster,
-			provisioner:   provisioner,
-			recorder:      recorder,
-			cloudProvider: cp,
-		},
+		consolidation: NewConsolidation(clk, kubeClient, provisioner, cp, recorder, cluster),
 	}
 }
 
@@ -282,114 +274,6 @@ func (c *Controller) executeCommand(ctx context.Context, command Command, d Depr
 		c.waitForDeletion(ctx, oldnode)
 	}
 	return ResultSuccess, nil
-}
-
-// candidateNodes returns nodes that appear to be currently deprovisionable based off of their provisioner
-// nolint:gocyclo
-func (c *Controller) candidateNodes(ctx context.Context, shouldDeprovision func(context.Context, *state.Node, *v1alpha5.Provisioner, []*v1.Pod) bool) ([]CandidateNode, error) {
-	provisioners, instanceTypesByProvisioner, err := c.buildProvisionerMap(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	var nodes []CandidateNode
-	c.cluster.ForEachNode(func(n *state.Node) bool {
-		ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", n.Node.Name))
-		var provisioner *v1alpha5.Provisioner
-		var instanceTypeMap map[string]cloudprovider.InstanceType
-		if provName, ok := n.Node.Labels[v1alpha5.ProvisionerNameLabelKey]; ok {
-			provisioner = provisioners[provName]
-			instanceTypeMap = instanceTypesByProvisioner[provName]
-		}
-		// skip any nodes that are already marked for deletion and being handled
-		if n.MarkedForDeletion {
-			return true
-		}
-		// skip any nodes where we can't determine the provisioner
-		if provisioner == nil || instanceTypeMap == nil {
-			return true
-		}
-
-		instanceType := instanceTypeMap[n.Node.Labels[v1.LabelInstanceTypeStable]]
-		// skip any nodes that we can't determine the instance of
-		if instanceType == nil {
-			return true
-		}
-
-		// skip any nodes that we can't determine the capacity type or the topology zone for
-		ct, ok := n.Node.Labels[v1alpha5.LabelCapacityType]
-		if !ok {
-			return true
-		}
-		az, ok := n.Node.Labels[v1.LabelTopologyZone]
-		if !ok {
-			return true
-		}
-
-		// Skip nodes that aren't initialized
-		if n.Node.Labels[v1alpha5.LabelNodeInitialized] != "true" {
-			return true
-		}
-
-		// Skip the node if it is nominated by a recent provisioning pass to be the target of a pending pod.
-		if c.cluster.IsNodeNominated(n.Node.Name) {
-			return true
-		}
-
-		pods, err := nodeutils.GetNodePods(ctx, c.kubeClient, n.Node)
-		if err != nil {
-			logging.FromContext(ctx).Errorf("Determining node pods, %s", err)
-			return true
-		}
-
-		if !shouldDeprovision(ctx, n, provisioner, pods) {
-			return true
-		}
-
-		cn := CandidateNode{
-			Node:           n.Node,
-			instanceType:   instanceType,
-			capacityType:   ct,
-			zone:           az,
-			provisioner:    provisioner,
-			pods:           pods,
-			disruptionCost: disruptionCost(ctx, pods),
-		}
-		// lifetimeRemaining is the fraction of node lifetime remaining in the range [0.0, 1.0].  If the TTLSecondsUntilExpired
-		// is non-zero, we use it to scale down the disruption costs of nodes that are going to expire.  Just after creation, the
-		// disruption cost is highest and it approaches zero as the node ages towards its expiration time.
-		lifetimeRemaining := c.calculateLifetimeRemaining(cn)
-		cn.disruptionCost *= lifetimeRemaining
-
-		nodes = append(nodes, cn)
-		return true
-	})
-
-	return nodes, nil
-}
-
-// buildProvisionerMap builds a provName -> provisioner map and a provName -> instanceName -> instance type map
-func (c *Controller) buildProvisionerMap(ctx context.Context) (map[string]*v1alpha5.Provisioner, map[string]map[string]cloudprovider.InstanceType, error) {
-	provisioners := map[string]*v1alpha5.Provisioner{}
-	var provList v1alpha5.ProvisionerList
-	if err := c.kubeClient.List(ctx, &provList); err != nil {
-		return nil, nil, fmt.Errorf("listing provisioners, %w", err)
-	}
-	instanceTypesByProvisioner := map[string]map[string]cloudprovider.InstanceType{}
-	for i := range provList.Items {
-		p := &provList.Items[i]
-		provisioners[p.Name] = p
-
-		provInstanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, p)
-		if err != nil {
-			return nil, nil, fmt.Errorf("listing instance types for %s, %w", p.Name, err)
-		}
-		instanceTypesByProvisioner[p.Name] = map[string]cloudprovider.InstanceType{}
-		for _, it := range provInstanceTypes {
-			instanceTypesByProvisioner[p.Name][it.Name()] = it
-		}
-	}
-	return provisioners, instanceTypesByProvisioner, nil
 }
 
 // waitForDeletion waits for the specified node to be removed from the API server. This deletion can take some period

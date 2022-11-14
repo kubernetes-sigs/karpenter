@@ -21,6 +21,8 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/utils/clock"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 
@@ -52,6 +54,11 @@ func (r Result) String() string {
 	default:
 		return fmt.Sprintf("Unknown (%d)", r)
 	}
+}
+type deprovisioner struct {
+	kubeClient    client.Client
+	cluster       *state.Cluster
+	clock         clock.Clock
 }
 
 type Deprovisioner interface {
