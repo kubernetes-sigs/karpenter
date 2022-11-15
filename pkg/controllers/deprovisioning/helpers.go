@@ -322,7 +322,17 @@ func mapNodes(nodes []*v1.Node, candidateNodes []CandidateNode) []CandidateNode 
 }
 
 func canBeTerminated(node CandidateNode, pdbs *PDBLimits) bool {
-	return node.DeletionTimestamp.IsZero() && pdbs.CanEvictPods(node.pods) && !podsPreventEviction(node)
+	if !node.DeletionTimestamp.IsZero() {
+		return false
+	}
+	if _, ok := pdbs.CanEvictPods(node.pods); !ok {
+		return false
+	}
+
+	if _, ok := PodsPreventEviction(node.pods); ok {
+		return false
+	}
+	return true
 }
 
 // PodsPreventEviction returns true if there are pods that would prevent eviction
@@ -334,7 +344,7 @@ func PodsPreventEviction(pods []*v1.Pod) (string, bool) {
 		}
 
 		if pod.HasDoNotEvict(p) {
-			return fmt.Sprintf("po d%s/%s has do not evict annotation", p.Namespace, p.Name), true
+			return fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name), true
 		}
 	}
 	return "", false
