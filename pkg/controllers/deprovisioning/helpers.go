@@ -28,7 +28,8 @@ import (
 	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/scheduling"
-	"github.com/aws/karpenter-core/pkg/utils/node"
+	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
+	"github.com/aws/karpenter-core/pkg/utils/pod"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -65,7 +66,7 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	}
 
 	// We get the pods that are on nodes that are deleting
-	deletingNodePods, err := node.GetNodePods(ctx, kubeClient, lo.Map(markedForDeletionNodes, func(n *state.Node, _ int) *v1.Node { return n.Node })...)
+	deletingNodePods, err := nodeutils.GetNodePods(ctx, kubeClient, lo.Map(markedForDeletionNodes, func(n *state.Node, _ int) *v1.Node { return n.Node })...)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
 	}
@@ -150,15 +151,15 @@ func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
 
 // candidateNodes returns nodes that appear to be currently deprovisionable based off of their provisioner
 // nolint:gocyclo
-func candidateNodes(ctx context.Context, d deprovisioner, cloudProvider cloudprovider.CloudProvider,
+func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, clk clock.Clock, cloudProvider cloudprovider.CloudProvider,
 	shouldDeprovision func(context.Context, *state.Node, *v1alpha5.Provisioner, []*v1.Pod) bool) ([]CandidateNode, error) {
-	provisioners, instanceTypesByProvisioner, err := buildProvisionerMap(ctx, d.kubeClient, cloudProvider)
+	provisioners, instanceTypesByProvisioner, err := buildProvisionerMap(ctx, kubeClient, cloudProvider)
 	if err != nil {
 		return nil, err
 	}
 
 	var nodes []CandidateNode
-	d.cluster.ForEachNode(func(n *state.Node) bool {
+	cluster.ForEachNode(func(n *state.Node) bool {
 		var provisioner *v1alpha5.Provisioner
 		var instanceTypeMap map[string]cloudprovider.InstanceType
 		if provName, ok := n.Node.Labels[v1alpha5.ProvisionerNameLabelKey]; ok {
@@ -196,11 +197,11 @@ func candidateNodes(ctx context.Context, d deprovisioner, cloudProvider cloudpro
 		}
 
 		// Skip the node if it is nominated by a recent provisioning pass to be the target of a pending pod.
-		if d.cluster.IsNodeNominated(n.Node.Name) {
+		if cluster.IsNodeNominated(n.Node.Name) {
 			return true
 		}
 
-		pods, err := nodeutils.GetNodePods(ctx, d.kubeClient, n.Node)
+		pods, err := nodeutils.GetNodePods(ctx, kubeClient, n.Node)
 		if err != nil {
 			logging.FromContext(ctx).Errorf("Determining node pods, %s", err)
 			return true
@@ -222,7 +223,7 @@ func candidateNodes(ctx context.Context, d deprovisioner, cloudProvider cloudpro
 		// lifetimeRemaining is the fraction of node lifetime remaining in the range [0.0, 1.0].  If the TTLSecondsUntilExpired
 		// is non-zero, we use it to scale down the disruption costs of nodes that are going to expire.  Just after creation, the
 		// disruption cost is highest and it approaches zero as the node ages towards its expiration time.
-		lifetimeRemaining := calculateLifetimeRemaining(cn, d.clock)
+		lifetimeRemaining := calculateLifetimeRemaining(cn, clk)
 		cn.disruptionCost *= lifetimeRemaining
 
 		nodes = append(nodes, cn)
@@ -318,4 +319,23 @@ func mapNodes(nodes []*v1.Node, candidateNodes []CandidateNode) []CandidateNode 
 		}
 	}
 	return ret
+}
+
+func canBeTerminated(node CandidateNode, pdbs *PDBLimits) bool {
+	return node.DeletionTimestamp.IsZero() && pdbs.CanEvictPods(node.pods) && !podsPreventEviction(node)
+}
+
+// PodsPreventEviction returns true if there are pods that would prevent eviction
+func PodsPreventEviction(pods []*v1.Pod) (string, bool) {
+	for _, p := range pods {
+		// don't care about pods that are finishing, finished or owned by the node
+		if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
+			continue
+		}
+
+		if pod.HasDoNotEvict(p) {
+			return fmt.Sprintf("po d%s/%s has do not evict annotation", p.Namespace, p.Name), true
+		}
+	}
+	return "", false
 }

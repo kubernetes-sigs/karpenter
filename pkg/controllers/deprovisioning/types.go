@@ -18,11 +18,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/utils/clock"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 
@@ -55,24 +52,10 @@ func (r Result) String() string {
 		return fmt.Sprintf("Unknown (%d)", r)
 	}
 }
-type deprovisioner struct {
-	kubeClient    client.Client
-	cluster       *state.Cluster
-	clock         clock.Clock
-}
 
 type Deprovisioner interface {
-	// ShouldDeprovision is a predicate used to filter deprovisionable nodes
 	ShouldDeprovision(context.Context, *state.Node, *v1alpha5.Provisioner, []*v1.Pod) bool
-	// sortCandidates orders deprovisionable nodes by the deprovisioner's pre-determined priority
-	SortCandidates([]CandidateNode) []CandidateNode
-	// computeCommand generates a deprovisioning command given deprovisionable nodes
-	ComputeCommand(context.Context, int, ...CandidateNode) (Command, error)
-	// validateCommand validates a command for a deprovisioner
-	ValidateCommand(context.Context, []CandidateNode, Command) (bool, error)
-	// TTL returns the time to wait for a deprovisioner's validation
-	TTL() time.Duration
-	// String is the String representation of the deprovisioner
+	ComputeCommand(context.Context, ...CandidateNode) (Command, error)
 	String() string
 }
 
@@ -80,7 +63,7 @@ type action byte
 
 const (
 	actionUnknown action = iota
-	actionNotPossible
+	actionRetry
 	actionDelete
 	actionReplace
 	actionDoNothing
@@ -89,16 +72,22 @@ const (
 
 func (a action) String() string {
 	switch a {
+	// Deprovisioning action is unknown: should never happen
 	case actionUnknown:
 		return "unknown"
-	case actionNotPossible:
-		return "not-possible"
+	// Deprovisioning validation failed, so retry
+	case actionRetry:
+		return "retry"
+	// Deprovisioning action with no replacement nodes
 	case actionDelete:
 		return "delete"
+	// Deprovisioning action with replacement nodes
 	case actionReplace:
 		return "replace"
+	// Deprovisioning action not needed
 	case actionDoNothing:
 		return "no-action"
+	// Deprovisioning computation unsuccessful
 	case actionFailed:
 		return "failed"
 	default:
@@ -110,7 +99,6 @@ type Command struct {
 	nodesToRemove    []*v1.Node
 	action           action
 	replacementNodes []*scheduling.Node
-	createdAt        time.Time
 }
 
 func (o Command) String() string {
