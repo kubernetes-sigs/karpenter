@@ -37,7 +37,6 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	atomicutils "github.com/aws/karpenter-core/pkg/utils/atomic"
@@ -283,16 +282,18 @@ func (c *Cluster) populateCapacity(ctx context.Context, node *v1.Node, n *Node) 
 	if !ok {
 		return fmt.Errorf("instance type '%s' not found", node.Labels[v1.LabelInstanceTypeStable])
 	}
-	n.Capacity = instanceType.Resources()
 
-	for k, v := range node.Status.Allocatable {
-		n.Allocatable[k] = v
-	}
+	n.Capacity = lo.Assign(node.Status.Capacity) // ensure map not nil
+	// Use instance type resource value if resource isn't currently registered in .Status.Capacity
 	for resourceName, quantity := range instanceType.Resources() {
-		// kubelet will zero out both the capacity and allocatable for an extended resource on startup
-		if resources.IsZero(node.Status.Capacity[resourceName]) &&
-			resources.IsZero(node.Status.Allocatable[resourceName]) &&
-			!quantity.IsZero() {
+		if resources.IsZero(node.Status.Capacity[resourceName]) {
+			n.Capacity[resourceName] = quantity
+		}
+	}
+	n.Allocatable = lo.Assign(node.Status.Allocatable) // ensure map not nil
+	// Use instance type resource value if resource isn't currently registered in .Status.Allocatable
+	for resourceName, quantity := range instanceType.Resources() {
+		if resources.IsZero(node.Status.Allocatable[resourceName]) {
 			n.Allocatable[resourceName] = quantity
 		}
 	}

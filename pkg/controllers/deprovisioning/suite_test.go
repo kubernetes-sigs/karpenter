@@ -572,7 +572,8 @@ var _ = Describe("Replace Nodes", func() {
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")}})
+			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+		})
 
 		ExpectApplied(ctx, env.Client, rs, pod, node, prov)
 		ExpectMakeNodesReady(ctx, env.Client, node)
@@ -643,7 +644,8 @@ var _ = Describe("Replace Nodes", func() {
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
 				v1.ResourcePods: resource.MustParse("100"),
-			}})
+			},
+		})
 
 		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], node1, prov, pdb)
 		ExpectApplied(ctx, env.Client, node1)
@@ -704,7 +706,8 @@ var _ = Describe("Replace Nodes", func() {
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
 				v1.ResourcePods: resource.MustParse("100"),
-			}})
+			},
+		})
 
 		annotatedNode := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -720,7 +723,8 @@ var _ = Describe("Replace Nodes", func() {
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
 				v1.ResourcePods: resource.MustParse("100"),
-			}})
+			},
+		})
 
 		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], prov)
 		ExpectApplied(ctx, env.Client, regularNode, annotatedNode)
