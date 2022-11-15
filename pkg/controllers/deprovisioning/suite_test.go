@@ -1255,7 +1255,7 @@ var _ = Describe("Delete Node", func() {
 		// but we expect to delete the node with more pods (node1) as the pod on node2 has a do-not-evict annotation
 		ExpectNotFound(ctx, env.Client, node1)
 	})
-	It("can delete nodes, doesn't evict standalone pods", func() {
+	It("can delete nodes, evicts pods without an ownerRef", func() {
 		// create our RS so we can link a pod to it
 		rs := test.ReplicaSet()
 		ExpectApplied(ctx, env.Client, rs)
@@ -1327,9 +1327,9 @@ var _ = Describe("Delete Node", func() {
 
 		// we don't need a new node
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
-		// but we expect to delete the node with more pods (node1) as the pod on node2 doesn't have a controller to
-		// recreate it
-		ExpectNotFound(ctx, env.Client, node1)
+		// but we expect to delete the node with the fewest pods (node 2) even though the pod has no ownerRefs
+		// and will not be recreated
+		ExpectNotFound(ctx, env.Client, node2)
 	})
 })
 

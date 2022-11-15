@@ -312,12 +312,49 @@ var _ = Describe("Termination", func() {
 			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node))
 			ExpectNotFound(ctx, env.Client, node)
 		})
-		It("should not delete nodes that have pods without an owner ref", func() {
-			podEvict := test.Pod(test.PodOptions{
-				NodeName:   node.Name,
-				ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
+		It("should delete nodes that have pods without an ownerRef", func() {
+			pod := test.Pod(test.PodOptions{
+				NodeName: node.Name,
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: nil,
+				},
 			})
-			podNoEvict := test.Pod(test.PodOptions{NodeName: node.Name})
+
+			ExpectApplied(ctx, env.Client, node, pod)
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node))
+
+			// Expect pod with no owner ref to be enqueued for eviction
+			ExpectEvicted(env.Client, pod)
+
+			// Expect node to exist and be draining
+			ExpectNodeDraining(env.Client, node.Name)
+
+			// Delete no owner refs pod to simulate successful eviction
+			ExpectDeleted(ctx, env.Client, pod)
+
+			// Reconcile node to evict pod
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node))
+
+			// Reconcile to delete node
+			ExpectNotFound(ctx, env.Client, node)
+		})
+		It("should not delete nodes that have a do-not-delete pod without an ownerRef", func() {
+			podEvict := test.Pod(test.PodOptions{
+				NodeName: node.Name,
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: nil,
+				},
+			})
+			podNoEvict := test.Pod(test.PodOptions{
+				NodeName: node.Name,
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations:     map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"},
+					OwnerReferences: nil,
+				},
+			})
 
 			ExpectApplied(ctx, env.Client, node, podEvict, podNoEvict)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
@@ -330,7 +367,7 @@ var _ = Describe("Termination", func() {
 			// Expect node to exist and be draining
 			ExpectNodeDraining(env.Client, node.Name)
 
-			// Delete no owner refs pod
+			// Delete do-not-evict pod
 			ExpectDeleted(ctx, env.Client, podNoEvict)
 
 			// Reconcile node to evict pod
