@@ -43,6 +43,7 @@ type Emptiness struct {
 
 // shouldDeprovision is a predicate used to filter deprovisionable nodes
 func (e *Emptiness) ShouldDeprovision(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, nodePods []*v1.Pod) bool {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", n.Node.Name))
 	if provisioner == nil || provisioner.Spec.TTLSecondsAfterEmpty == nil || len(nodePods) != 0 {
 		return false
 	}
@@ -54,11 +55,8 @@ func (e *Emptiness) ShouldDeprovision(ctx context.Context, n *state.Node, provis
 	ttl := time.Duration(ptr.Int64Value(provisioner.Spec.TTLSecondsAfterEmpty)) * time.Second
 
 	emptinessTime, err := time.Parse(time.RFC3339, emptinessTimestamp)
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With(
-		"emptinessTimestamp", emptinessTimestamp,
-		"node", n.Node.Name))
 	if err != nil {
-		logging.FromContext(ctx).Debugf("Unable to parse emptiness timestamp")
+		logging.FromContext(ctx).With("emptinessTimestamp", emptinessTimestamp).Debugf("Unable to parse emptiness timestamp")
 		return true
 	}
 	// Don't deprovision if node's emptiness timestamp is before the emptiness TTL
