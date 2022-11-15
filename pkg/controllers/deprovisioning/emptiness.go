@@ -43,7 +43,6 @@ type Emptiness struct {
 
 // shouldDeprovision is a predicate used to filter deprovisionable nodes
 func (e *Emptiness) ShouldDeprovision(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, nodePods []*v1.Pod) bool {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", n.Node.Name))
 	if provisioner == nil || provisioner.Spec.TTLSecondsAfterEmpty == nil || len(nodePods) != 0 {
 		return false
 	}

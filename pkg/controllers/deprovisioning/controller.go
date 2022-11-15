@@ -294,6 +294,7 @@ func (c *Controller) candidateNodes(ctx context.Context, shouldDeprovision func(
 
 	var nodes []CandidateNode
 	c.cluster.ForEachNode(func(n *state.Node) bool {
+		ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", n.Node.Name))
 		var provisioner *v1alpha5.Provisioner
 		var instanceTypeMap map[string]cloudprovider.InstanceType
 		if provName, ok := n.Node.Labels[v1alpha5.ProvisionerNameLabelKey]; ok {
