@@ -73,32 +73,41 @@ func (r *Initialization) getInstanceType(ctx context.Context, provisioner *v1alp
 // This method handles both nil provisioners and nodes without extended resources gracefully.
 func (r *Initialization) isInitialized(n *v1.Node, provisioner *v1alpha5.Provisioner, instanceType cloudprovider.InstanceType) bool {
 	// fast checks first
-	return node.GetCondition(n, v1.NodeReady).Status == v1.ConditionTrue &&
-		isStartupTaintRemoved(n, provisioner) && isExtendedResourceRegistered(n, instanceType)
+	if node.GetCondition(n, v1.NodeReady).Status != v1.ConditionTrue {
+		return false
+	}
+	if _, ok := IsStartupTaintRemoved(n, provisioner); !ok {
+		return false
+	}
+
+	if _, ok := IsExtendedResourceRegistered(n, instanceType); !ok {
+		return false
+	}
+	return true
 }
 
-// isStartupTaintRemoved returns true if there are no startup taints registered for the provisioner, or if all startup
+// IsStartupTaintRemoved returns true if there are no startup taints registered for the provisioner, or if all startup
 // taints have been removed from the node
-func isStartupTaintRemoved(node *v1.Node, provisioner *v1alpha5.Provisioner) bool {
+func IsStartupTaintRemoved(node *v1.Node, provisioner *v1alpha5.Provisioner) (*v1.Taint, bool) {
 	if provisioner != nil {
 		for _, startupTaint := range provisioner.Spec.StartupTaints {
 			for i := 0; i < len(node.Spec.Taints); i++ {
 				// if the node still has a startup taint applied, it's not ready
 				if startupTaint.MatchTaint(&node.Spec.Taints[i]) {
-					return false
+					return &node.Spec.Taints[i], false
 				}
 			}
 		}
 	}
-	return true
+	return nil, true
 }
 
-// isExtendedResourceRegistered returns true if there are no extended resources on the node, or they have all been
+// IsExtendedResourceRegistered returns true if there are no extended resources on the node, or they have all been
 // registered by device plugins
-func isExtendedResourceRegistered(node *v1.Node, instanceType cloudprovider.InstanceType) bool {
+func IsExtendedResourceRegistered(node *v1.Node, instanceType cloudprovider.InstanceType) (v1.ResourceName, bool) {
 	if instanceType == nil {
 		// no way to know, so assume they're registered
-		return true
+		return "", true
 	}
 	for resourceName, quantity := range instanceType.Resources() {
 		if quantity.IsZero() {
@@ -109,8 +118,8 @@ func isExtendedResourceRegistered(node *v1.Node, instanceType cloudprovider.Inst
 		// registered it yet.
 		// We wait on allocatable since this is the value that is used in scheduling
 		if resources.IsZero(node.Status.Allocatable[resourceName]) {
-			return false
+			return resourceName, false
 		}
 	}
-	return true
+	return "", true
 }
