@@ -149,10 +149,11 @@ func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
 	return cost
 }
 
+type CandidateFilter func(context.Context, *state.Node, *v1alpha5.Provisioner, []*v1.Pod) bool
+
 // candidateNodes returns nodes that appear to be currently deprovisionable based off of their provisioner
 // nolint:gocyclo
-func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, clk clock.Clock, cloudProvider cloudprovider.CloudProvider,
-	shouldDeprovision func(context.Context, *state.Node, *v1alpha5.Provisioner, []*v1.Pod) bool) ([]CandidateNode, error) {
+func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, clk clock.Clock, cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter) ([]CandidateNode, error) {
 	provisioners, instanceTypesByProvisioner, err := buildProvisionerMap(ctx, kubeClient, cloudProvider)
 	if err != nil {
 		return nil, err

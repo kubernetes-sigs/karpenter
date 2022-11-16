@@ -147,6 +147,7 @@ func (c *Controller) ProcessCluster(ctx context.Context) (Result, error) {
 		if err != nil {
 			return ResultFailed, fmt.Errorf("deprovisioning nodes, %w", err)
 		}
+
 		switch result {
 		case ResultFailed:
 			return result, err
