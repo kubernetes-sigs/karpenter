@@ -34,6 +34,7 @@ type Preferences struct {
 }
 
 func (p *Preferences) Relax(ctx context.Context, pod *v1.Pod) bool {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(pod)))
 	relaxations := []func(*v1.Pod) *string{
 		p.removeRequiredNodeAffinityTerm,
 		p.removePreferredPodAffinityTerm,
@@ -48,9 +49,7 @@ func (p *Preferences) Relax(ctx context.Context, pod *v1.Pod) bool {
 	for _, relaxFunc := range relaxations {
 		if reason := relaxFunc(pod); reason != nil {
 
-			logging.FromContext(ctx).
-				With("pod", client.ObjectKeyFromObject(pod)).
-				Debugf("Relaxing soft constraints for pod since it previously failed to schedule, %s", ptr.StringValue(reason))
+			logging.FromContext(ctx).Debugf("Relaxing soft constraints for pod since it previously failed to schedule, %s", ptr.StringValue(reason))
 			return true
 		}
 	}
