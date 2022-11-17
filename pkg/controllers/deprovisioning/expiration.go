@@ -106,7 +106,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, attempt int, candidates
 // TODO @njtran remove from interface and use only for Consolidation
 func (e *Expiration) ValidateCommand(ctx context.Context, candidates []CandidateNode, cmd Command) (bool, error) {
 	// Once validation passes, log the deprovisioning result.
-	logging.FromContext(ctx).Infof("Triggering termination for expired node after %s (+%s)",
+	logging.FromContext(ctx).Infof("triggering termination for expired node after %s (+%s)",
 		time.Duration(ptr.Int64Value(candidates[0].provisioner.Spec.TTLSecondsUntilExpired))*time.Second, time.Since(getExpirationTime(candidates[0].Node, candidates[0].provisioner)))
 	return true, nil
 }

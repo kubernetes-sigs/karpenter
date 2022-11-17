@@ -163,8 +163,8 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 	if newCount == 0 {
 		return
 	}
-	logging.FromContext(ctx).Infof("Found %d provisionable pod(s)", len(pods))
-	logging.FromContext(ctx).Infof("Computed %d new node(s) will fit %d pod(s)", len(s.nodes), newCount)
+	logging.FromContext(ctx).Infof("found %d provisionable pod(s)", len(pods))
+	logging.FromContext(ctx).Infof("computed %d new node(s) will fit %d pod(s)", len(s.nodes), newCount)
 
 	// Report in flight nodes, or exit to avoid log spam
 	inflightCount := 0
@@ -176,7 +176,7 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 	if existingCount == 0 {
 		return
 	}
-	logging.FromContext(ctx).Infof("Computed %d unready node(s) will fit %d pod(s)", inflightCount, existingCount)
+	logging.FromContext(ctx).Infof("computed %d unready node(s) will fit %d pod(s)", inflightCount, existingCount)
 }
 
 func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {

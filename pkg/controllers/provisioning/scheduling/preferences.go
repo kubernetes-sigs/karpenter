@@ -50,7 +50,7 @@ func (p *Preferences) Relax(ctx context.Context, pod *v1.Pod) bool {
 
 			logging.FromContext(ctx).
 				With("pod", client.ObjectKeyFromObject(pod)).
-				Debugf("Relaxing soft constraints for pod since it previously failed to schedule, %s", ptr.StringValue(reason))
+				Debugf("relaxing soft constraints for pod since it previously failed to schedule, %s", ptr.StringValue(reason))
 			return true
 		}
 	}

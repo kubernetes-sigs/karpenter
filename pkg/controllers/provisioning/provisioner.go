@@ -226,7 +226,7 @@ func (p *Provisioner) getPendingPods(ctx context.Context) ([]*v1.Pod, error) {
 			continue
 		}
 		if err := p.Validate(ctx, &po); err != nil {
-			logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(&po)).Debugf("Ignoring pod, %s", err)
+			logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(&po)).Debugf("ignoring pod, %s", err)
 			continue
 		}
 		pods = append(pods, &po)
@@ -328,7 +328,7 @@ func (p *Provisioner) launch(ctx context.Context, opts LaunchOptions, node *sche
 		return cheapestOfferingPrice(iOfferings, node.Requirements) < cheapestOfferingPrice(jOfferings, node.Requirements)
 	})
 
-	logging.FromContext(ctx).Infof("Launching %s", node)
+	logging.FromContext(ctx).Infof("launching %s", node)
 	k8sNode, err := p.cloudProvider.Create(
 		logging.WithLogger(ctx, logging.FromContext(ctx).Named("cloudprovider")),
 		&cloudprovider.NodeRequest{InstanceTypeOptions: node.InstanceTypeOptions, Template: &node.NodeTemplate},

@@ -68,7 +68,7 @@ func (t *Terminator) cordon(ctx context.Context, node *v1.Node) error {
 	if err := t.KubeClient.Patch(ctx, node, client.MergeFrom(persisted)); err != nil {
 		return fmt.Errorf("patching node %s, %w", node.Name, err)
 	}
-	logging.FromContext(ctx).Infof("Cordoned node")
+	logging.FromContext(ctx).Infof("cordoned node")
 	return nil
 }
 
@@ -116,7 +116,7 @@ func (t *Terminator) terminate(ctx context.Context, node *v1.Node) error {
 	if err := t.KubeClient.Patch(ctx, node, client.MergeFrom(persisted)); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	logging.FromContext(ctx).Infof("Deleted node")
+	logging.FromContext(ctx).Infof("deleted node")
 	return nil
 }
 

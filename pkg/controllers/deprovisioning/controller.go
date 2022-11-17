@@ -257,7 +257,7 @@ func (c *Controller) validateCommand(ctx context.Context, cmd Command, d Deprovi
 
 func (c *Controller) executeCommand(ctx context.Context, command Command, d Deprovisioner) (Result, error) {
 	deprovisioningActionsPerformedCounter.With(prometheus.Labels{"action": fmt.Sprintf("%s/%s", d, command.action)}).Add(1)
-	logging.FromContext(ctx).Infof("Deprovisioning via %s/%s", d, command.action)
+	logging.FromContext(ctx).Infof("deprovisioning via %s/%s", d, command.action)
 
 	if command.action == actionReplace {
 		if err := c.launchReplacementNodes(ctx, command); err != nil {
