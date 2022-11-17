@@ -37,10 +37,19 @@ import (
 // Expiration is a subreconciler that deletes empty nodes.
 // Expiration will respect TTLSecondsAfterEmpty
 type Expiration struct {
-	kubeClient  client.Client
 	clock       clock.Clock
+	kubeClient  client.Client
 	cluster     *state.Cluster
 	provisioner *provisioning.Provisioner
+}
+
+func NewExpiration(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner) *Expiration {
+	return &Expiration{
+		clock:       clk,
+		kubeClient:  kubeClient,
+		cluster:     cluster,
+		provisioner: provisioner,
+	}
 }
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes
@@ -57,65 +66,48 @@ func (e *Expiration) SortCandidates(nodes []CandidateNode) []CandidateNode {
 }
 
 // ComputeCommand generates a deprovisioning command given deprovisionable nodes
-func (e *Expiration) ComputeCommand(ctx context.Context, attempt int, candidates ...CandidateNode) (Command, error) {
+func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...CandidateNode) (Command, error) {
+	candidates = e.SortCandidates(candidates)
 	pdbs, err := NewPDBLimits(ctx, e.kubeClient)
 	if err != nil {
 		return Command{action: actionFailed}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
-	// is this a node that we can terminate?  This check is meant to be fast so we can save the expense of simulated
-	// scheduling unless its really needed
-	if !canBeTerminated(candidates[attempt], pdbs) {
-		return Command{action: actionNotPossible}, nil
-	}
-
-	// Only expire one node at a time.
-	node := candidates[attempt]
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
-	// Check if we need to create any nodes.
-	newNodes, allPodsScheduled, err := simulateScheduling(ctx, e.kubeClient, e.cluster, e.provisioner, node)
-	if err != nil {
-		// if a candidate node is now deleting, just retry
-		if errors.Is(err, errCandidateNodeDeleting) {
-			return Command{action: actionDoNothing}, nil
+	for _, candidate := range candidates {
+		// is this a node that we can terminate?  This check is meant to be fast so we can save the expense of simulated
+		// scheduling unless its really needed
+		if !canBeTerminated(candidate, pdbs) {
+			continue
 		}
-		return Command{}, err
-	}
-	// Log when all pods can't schedule, as the command will get executed immediately.
-	if !allPodsScheduled {
-		logging.FromContext(ctx).Infof("continuing to expire node after scheduling simulation failed to schedule all pods")
-	}
 
-	// were we able to schedule all the pods on the inflight nodes?
-	if len(newNodes) == 0 {
+		// Check if we need to create any nodes.
+		newNodes, allPodsScheduled, err := simulateScheduling(ctx, e.kubeClient, e.cluster, e.provisioner, candidate)
+		if err != nil {
+			// if a candidate node is now deleting, just retry
+			if errors.Is(err, errCandidateNodeDeleting) {
+				continue
+			}
+			return Command{action: actionFailed}, err
+		}
+		// Log when all pods can't schedule, as the command will get executed immediately.
+		if !allPodsScheduled {
+			logging.FromContext(ctx).Infof("Continuing to expire node %s after scheduling simulation failed to schedule all pods", candidate.Name)
+		}
+		logging.FromContext(ctx).Infof("Triggering termination for expired node after %s (+%s)",
+			time.Duration(ptr.Int64Value(candidates[0].provisioner.Spec.TTLSecondsUntilExpired))*time.Second, time.Since(getExpirationTime(candidates[0].Node, candidates[0].provisioner)))
+		// were we able to schedule all the pods on the inflight nodes?
+		if len(newNodes) == 0 {
+			return Command{
+				nodesToRemove: []*v1.Node{candidate.Node},
+				action:        actionDelete,
+			}, nil
+		}
 		return Command{
-			nodesToRemove: []*v1.Node{node.Node},
-			action:        actionDelete,
-			createdAt:     e.clock.Now(),
+			nodesToRemove:    []*v1.Node{candidate.Node},
+			action:           actionReplace,
+			replacementNodes: newNodes,
 		}, nil
 	}
-
-	return Command{
-		nodesToRemove:    []*v1.Node{node.Node},
-		action:           actionReplace,
-		replacementNodes: newNodes,
-		createdAt:        e.clock.Now(),
-	}, nil
-}
-
-// ValidateCommand validates a command for a deprovisioner
-// We don't need to do another scheduling simulation since TTL is 0 seconds.
-// TODO @njtran remove from interface and use only for Consolidation
-func (e *Expiration) ValidateCommand(ctx context.Context, candidates []CandidateNode, cmd Command) (bool, error) {
-	// Once validation passes, log the deprovisioning result.
-	logging.FromContext(ctx).Infof("Triggering termination for expired node after %s (+%s)",
-		time.Duration(ptr.Int64Value(candidates[0].provisioner.Spec.TTLSecondsUntilExpired))*time.Second, time.Since(getExpirationTime(candidates[0].Node, candidates[0].provisioner)))
-	return true, nil
-}
-
-// TTL returns the time to wait for a deprovisioner's validation
-// Don't wait since the action has already been TTL'd with the provisioner's `TTLSecondsUntilExpired`
-func (e *Expiration) TTL() time.Duration {
-	return 0 * time.Second
+	return Command{action: actionDoNothing}, nil
 }
 
 // String is the string representation of the deprovisioner
