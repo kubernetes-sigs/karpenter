@@ -831,6 +831,7 @@ var _ = Describe("Replace Nodes", func() {
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
 
 		fakeClock.Step(10 * time.Minute)
+		go triggerVerifyAction()
 		_, err := controller.ProcessCluster(ctx)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
@@ -933,6 +934,7 @@ var _ = Describe("Replace Nodes", func() {
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
 
 		fakeClock.Step(10 * time.Minute)
+		go triggerVerifyAction()
 		_, err := controller.ProcessCluster(ctx)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
@@ -1737,7 +1739,7 @@ var _ = Describe("Empty Nodes", func() {
 })
 
 var _ = Describe("Consolidation TTL", func() {
-	It("should wait for the node TTL before consolidating", func() {
+	It("should wait for the node TTL for empty nodes before consolidating", func() {
 		prov := test.Provisioner(test.ProvisionerOptions{
 			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
@@ -1788,6 +1790,98 @@ var _ = Describe("Consolidation TTL", func() {
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
 		// and should delete the empty one
 		ExpectNotFound(ctx, env.Client, node1)
+	})
+	It("should wait for the node TTL for non-empty nodes before consolidating", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+		pods := test.Pods(3, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}}})
+
+		prov := test.Provisioner(test.ProvisionerOptions{
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
+		})
+		node1 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		node2 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], node1, node2, prov)
+		ExpectMakeNodesReady(ctx, env.Client, node1, node2)
+
+		ExpectManualBinding(ctx, env.Client, pods[0], node1)
+		ExpectManualBinding(ctx, env.Client, pods[1], node1)
+		ExpectManualBinding(ctx, env.Client, pods[2], node2)
+		ExpectScheduled(ctx, env.Client, pods[0])
+		ExpectScheduled(ctx, env.Client, pods[1])
+		ExpectScheduled(ctx, env.Client, pods[2])
+
+		// inform cluster state about the nodes
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
+		var wg sync.WaitGroup
+		wg.Add(1)
+		finished := atomic.Bool{}
+		go func() {
+			defer wg.Done()
+			defer finished.Store(true)
+			_, err := controller.ProcessCluster(ctx)
+			Expect(err).ToNot(HaveOccurred())
+		}()
+
+		// wait for the controller to block on the validation timeout
+		Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
+		// controller should be blocking during the timeout
+		Expect(finished.Load()).To(BeFalse())
+		// and the node should not be deleted yet
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node1), node1)).To(Succeed())
+
+		// advance the clock so that the timeout expires
+		fakeClock.Step(31 * time.Second)
+		// controller should finish
+		Eventually(finished.Load, 10*time.Second).Should(BeTrue())
+		wg.Wait()
+
+		// we don't need any new nodes
+		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
+		// and should delete the empty one
+		ExpectNotFound(ctx, env.Client, node2)
 	})
 	It("should not consolidate if the action becomes invalid during the node TTL wait", func() {
 		prov := test.Provisioner(test.ProvisionerOptions{

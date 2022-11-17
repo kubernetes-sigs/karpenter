@@ -36,7 +36,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
-	"github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
 // Consolidation is the consolidation controller.
@@ -50,6 +49,20 @@ type Consolidation struct {
 	lastConsolidationState int64
 }
 
+const consolidationTTL = 15 * time.Second
+
+func NewConsolidation(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
+	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster) *Consolidation {
+	return &Consolidation{
+		clock:         clk,
+		kubeClient:    kubeClient,
+		cluster:       cluster,
+		provisioner:   provisioner,
+		recorder:      recorder,
+		cloudProvider: cp,
+	}
+}
+
 // shouldDeprovision is a predicate used to filter deprovisionable nodes
 func (c *Consolidation) ShouldDeprovision(_ context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, _ []*v1.Pod) bool {
 	if val, ok := n.Node.Annotations[v1alpha5.DoNotConsolidateNodeAnnotationKey]; ok {
@@ -58,52 +71,100 @@ func (c *Consolidation) ShouldDeprovision(_ context.Context, n *state.Node, prov
 	return provisioner != nil && provisioner.Spec.Consolidation != nil && ptr.BoolValue(provisioner.Spec.Consolidation.Enabled)
 }
 
-// sortCandidates orders deprovisionable nodes by the disruptionCost
-func (c *Consolidation) SortCandidates(nodes []CandidateNode) []CandidateNode {
-	sort.Slice(nodes, func(i int, j int) bool {
-		return nodes[i].disruptionCost < nodes[j].disruptionCost
-	})
-	return nodes
-}
-
 // computeCommand generates a deprovisioning command given deprovisionable nodes
-func (c *Consolidation) ComputeCommand(ctx context.Context, attempt int, candidates ...CandidateNode) (Command, error) {
+func (c *Consolidation) ComputeCommand(ctx context.Context, candidates ...CandidateNode) (Command, error) {
 	// the last cluster consolidation wasn't able to improve things and nothing has changed regarding
 	// the cluster that makes us think we would be successful now
 	if c.lastConsolidationState == c.cluster.ClusterConsolidationState() {
 		return Command{action: actionDoNothing}, nil
 	}
-	// First delete any empty nodes we see
-	if attempt == 0 {
-		if cmd := c.deleteEmpty(ctx, candidates...); cmd.action == actionDelete {
+	// First sort the candidate nodes by disruption cost.
+	sort.Slice(candidates, func(i int, j int) bool {
+		return candidates[i].disruptionCost < candidates[j].disruptionCost
+	})
+
+	// Timestamp when we begin consolidating so that we only consider Consolidation TTL once.
+	validationTimestamp := c.clock.Now()
+	for _, fn := range []func(context.Context, time.Time, ...CandidateNode) (Command, error){
+		c.deleteEmptyConsolidation,
+		c.consolidateNodes,
+	} {
+		cmd, err := fn(ctx, validationTimestamp, candidates...)
+		if err != nil {
+			return Command{action: actionFailed}, fmt.Errorf("consolidating nodes, %w", err)
+		}
+
+		switch cmd.action {
+		case actionDelete, actionReplace:
 			return cmd, nil
+		case actionDoNothing:
+			continue
+		case actionUnknown:
+			return cmd, fmt.Errorf("action unknown for consolidating nodes, %w", err)
 		}
 	}
+	// If none of the candidates were able to be deprovisioned, return nothingToDo
+	return Command{action: actionDoNothing}, nil
+}
 
+// deleteEmptyConsolidation returns a executable empty command if possible.
+func (c *Consolidation) deleteEmptyConsolidation(ctx context.Context, validationTimestamp time.Time, candidates ...CandidateNode) (Command, error) {
+	emptyNodes := lo.Filter(candidates, func(n CandidateNode, _ int) bool { return len(n.pods) == 0 })
+	if len(emptyNodes) == 0 {
+		return Command{action: actionDoNothing}, nil
+	}
+
+	cmd := Command{
+		nodesToRemove: lo.Map(emptyNodes, func(n CandidateNode, _ int) *v1.Node { return n.Node }),
+		action:        actionDelete,
+	}
+
+	if err := c.waitForTTL(ctx, validationTimestamp); err != nil {
+		return Command{action: actionFailed}, fmt.Errorf("context canceled during consolidationTTL, %w", err)
+	}
+
+	ok, err := c.validateDeleteEmpty(ctx, cmd)
+	if err != nil {
+		return Command{action: actionFailed}, err
+	}
+	if !ok {
+		return Command{action: actionDoNothing}, nil
+	}
+	return cmd, nil
+}
+
+// consolidateNodes returns an executable single node consolidation command if possible.
+func (c *Consolidation) consolidateNodes(ctx context.Context, validationTimestamp time.Time, candidates ...CandidateNode) (Command, error) {
 	pdbs, err := NewPDBLimits(ctx, c.kubeClient)
 	if err != nil {
 		return Command{action: actionFailed}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
-	// is this a node that we can terminate?  This check is meant to be fast so we can save the expense of simulated
-	// scheduling unless its really needed
-	if !canBeTerminated(candidates[attempt], pdbs) {
-		return Command{action: actionNotPossible}, nil
-	}
-
-	return c.computeConsolidation(ctx, candidates[attempt])
-}
-
-// deleteEmpty returns a deprovisioningCommmand if there are empty nodes.
-func (c *Consolidation) deleteEmpty(_ context.Context, candidates ...CandidateNode) Command {
-	emptyNodes := lo.Filter(candidates, func(n CandidateNode, _ int) bool { return len(n.pods) == 0 })
-	if len(emptyNodes) != 0 {
-		return Command{
-			nodesToRemove: lo.Map(emptyNodes, func(n CandidateNode, _ int) *v1.Node { return n.Node }),
-			action:        actionDelete,
-			createdAt:     c.clock.Now(),
+	for _, candidate := range candidates {
+		// is this a node that we can terminate?  This check is meant to be fast so we can save the expense of simulated
+		// scheduling unless its really needed
+		if !canBeTerminated(candidate, pdbs) {
+			continue
 		}
+		// do a simulated scheduling loop to check if Consolidation is possible
+		cmd, err := c.computeConsolidation(ctx, candidate)
+		if err != nil {
+			return Command{action: actionFailed}, err
+		}
+
+		if err := c.waitForTTL(ctx, validationTimestamp); err != nil {
+			return Command{action: actionFailed}, fmt.Errorf("context canceled during consolidation TTL")
+		}
+
+		ok, err := c.validateConsolidation(ctx, cmd)
+		if err != nil {
+			return Command{action: actionFailed}, fmt.Errorf("determining candidate node, %w", err)
+		}
+		if !ok {
+			continue
+		}
+		return cmd, nil
 	}
-	return Command{action: actionDoNothing}
+	return Command{action: actionDoNothing}, nil
 }
 
 // computeConsolidation computes a consolidation action to take
@@ -123,7 +184,7 @@ func (c *Consolidation) computeConsolidation(ctx context.Context, node Candidate
 
 	// if not all of the pods were scheduled, we can't do anything
 	if !allPodsScheduled {
-		return Command{action: actionNotPossible}, nil
+		return Command{action: actionDoNothing}, nil
 	}
 
 	// were we able to schedule all the pods on the inflight nodes?
@@ -131,13 +192,12 @@ func (c *Consolidation) computeConsolidation(ctx context.Context, node Candidate
 		return Command{
 			nodesToRemove: []*v1.Node{node.Node},
 			action:        actionDelete,
-			createdAt:     c.clock.Now(),
 		}, nil
 	}
 
 	// we're not going to turn a single node into multiple nodes
 	if len(newNodes) != 1 {
-		return Command{action: actionNotPossible}, nil
+		return Command{action: actionDoNothing}, nil
 	}
 
 	// get the current node price based on the offering
@@ -149,7 +209,7 @@ func (c *Consolidation) computeConsolidation(ctx context.Context, node Candidate
 	newNodes[0].InstanceTypeOptions = filterByPrice(newNodes[0].InstanceTypeOptions, newNodes[0].Requirements, offering.Price)
 	if len(newNodes[0].InstanceTypeOptions) == 0 {
 		// no instance types remain after filtering by price
-		return Command{action: actionNotPossible}, nil
+		return Command{action: actionDoNothing}, nil
 	}
 
 	// If the existing node is spot and the replacement is spot, we don't consolidate.  We don't have a reliable
@@ -157,7 +217,7 @@ func (c *Consolidation) computeConsolidation(ctx context.Context, node Candidate
 	// a spot node with one that is less available and more likely to be reclaimed).
 	if node.capacityType == v1alpha5.CapacityTypeSpot &&
 		newNodes[0].Requirements.Get(v1alpha5.LabelCapacityType).Has(v1alpha5.CapacityTypeSpot) {
-		return Command{action: actionNotPossible}, nil
+		return Command{action: actionDoNothing}, nil
 	}
 
 	// We are consolidating a node from OD -> [OD,Spot] but have filtered the instance types by cost based on the
@@ -173,19 +233,35 @@ func (c *Consolidation) computeConsolidation(ctx context.Context, node Candidate
 		nodesToRemove:    []*v1.Node{node.Node},
 		action:           actionReplace,
 		replacementNodes: []*pscheduling.Node{newNodes[0]},
-		createdAt:        c.clock.Now(),
 	}, nil
 }
 
-// validateCommand validates a command for a deprovisioner
-func (c *Consolidation) ValidateCommand(ctx context.Context, nodesToDelete []CandidateNode, cmd Command) (bool, error) {
-	// If we're deleting and there are empty nodes, command is valid.
-	if cmd.action == actionDelete {
-		if c.validateDeleteEmpty(nodesToDelete) {
-			return true, nil
+// waitForTTL is used to wait a consolidationTTL given the initial timestamp of the deprovisioning loop
+func (c *Consolidation) waitForTTL(ctx context.Context, validationTimestamp time.Time) error {
+	remainingDelay := consolidationTTL - c.clock.Since(validationTimestamp)
+	if remainingDelay > 0 {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("context canceled during consolidation TTL")
+		case <-c.clock.After(remainingDelay):
 		}
 	}
-	newNodes, allPodsScheduled, err := simulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, nodesToDelete...)
+	return nil
+}
+
+// validateCommand validates a command for a deprovisioner
+func (c *Consolidation) validateConsolidation(ctx context.Context, cmd Command) (bool, error) {
+	candidateNodes, err := candidateNodes(ctx, c.cluster, c.kubeClient, c.clock, c.cloudProvider, c.ShouldDeprovision)
+	if err != nil {
+		return false, fmt.Errorf("determining candidate node, %w", err)
+	}
+	nodes := mapNodes(cmd.nodesToRemove, candidateNodes)
+	// None of the chosen candidate nodes are valid for execution, so retry
+	if len(nodes) == 0 {
+		return false, nil
+	}
+
+	newNodes, allPodsScheduled, err := simulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, nodes...)
 	if err != nil {
 		return false, fmt.Errorf("simluating scheduling, %w", err)
 	}
@@ -240,53 +316,24 @@ func (c *Consolidation) ValidateCommand(ctx context.Context, nodesToDelete []Can
 	return true, nil
 }
 
-// TTL returns the time to wait for a deprovisioner's validation
-func (c *Consolidation) TTL() time.Duration {
-	return 15 * time.Second
+// validateDeleteEmpty validates that the given nodes are still empty
+func (c *Consolidation) validateDeleteEmpty(ctx context.Context, cmd Command) (bool, error) {
+	candidateNodes, err := candidateNodes(ctx, c.cluster, c.kubeClient, c.clock, c.cloudProvider, c.ShouldDeprovision)
+	if err != nil {
+		return false, fmt.Errorf("determining candidate node, %w", err)
+	}
+	nodes := mapNodes(cmd.nodesToRemove, candidateNodes)
+	// the deletion of empty nodes is easy to validate, we just ensure that all the nodesToDelete are still empty and that
+	// the node isn't a target of a recent scheduling simulation
+	for _, n := range nodes {
+		if len(n.pods) != 0 && !c.cluster.IsNodeNominated(n.Name) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // string is the string representation of the deprovisioner
 func (c *Consolidation) String() string {
 	return metrics.ConsolidationReason
-}
-
-func canBeTerminated(node CandidateNode, pdbs *PDBLimits) bool {
-	if !node.DeletionTimestamp.IsZero() {
-		return false
-	}
-	if _, ok := pdbs.CanEvictPods(node.pods); !ok {
-		return false
-	}
-
-	if _, ok := PodsPreventEviction(node.pods); ok {
-		return false
-	}
-	return true
-}
-
-// PodsPreventEviction returns true if there are pods that would prevent eviction
-func PodsPreventEviction(pods []*v1.Pod) (string, bool) {
-	for _, p := range pods {
-		// don't care about pods that are finishing, finished or owned by the node
-		if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
-			continue
-		}
-
-		if pod.HasDoNotEvict(p) {
-			return fmt.Sprintf("po d%s/%s has do not evict annotation", p.Namespace, p.Name), true
-		}
-	}
-	return "", false
-}
-
-// validateDeleteEmpty validates that the given nodes are still empty
-func (c *Consolidation) validateDeleteEmpty(nodesToDelete []CandidateNode) bool {
-	// the deletion of empty nodes is easy to validate, we just ensure that all the nodesToDelete are still empty and that
-	// the node isn't a target of a recent scheduling simulation
-	for _, n := range nodesToDelete {
-		if len(n.pods) != 0 && !c.cluster.IsNodeNominated(n.Name) {
-			return false
-		}
-	}
-	return true
 }

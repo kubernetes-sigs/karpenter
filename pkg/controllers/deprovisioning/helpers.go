@@ -28,10 +28,12 @@ import (
 	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/scheduling"
-	"github.com/aws/karpenter-core/pkg/utils/node"
+	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
+	"github.com/aws/karpenter-core/pkg/utils/pod"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -64,7 +66,7 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	}
 
 	// We get the pods that are on nodes that are deleting
-	deletingNodePods, err := node.GetNodePods(ctx, kubeClient, lo.Map(markedForDeletionNodes, func(n *state.Node, _ int) *v1.Node { return n.Node })...)
+	deletingNodePods, err := nodeutils.GetNodePods(ctx, kubeClient, lo.Map(markedForDeletionNodes, func(n *state.Node, _ int) *v1.Node { return n.Node })...)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
 	}
@@ -147,6 +149,129 @@ func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
 	return cost
 }
 
+type CandidateFilter func(context.Context, *state.Node, *v1alpha5.Provisioner, []*v1.Pod) bool
+
+// candidateNodes returns nodes that appear to be currently deprovisionable based off of their provisioner
+// nolint:gocyclo
+func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, clk clock.Clock, cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter) ([]CandidateNode, error) {
+	provisioners, instanceTypesByProvisioner, err := buildProvisionerMap(ctx, kubeClient, cloudProvider)
+	if err != nil {
+		return nil, err
+	}
+
+	var nodes []CandidateNode
+	cluster.ForEachNode(func(n *state.Node) bool {
+		var provisioner *v1alpha5.Provisioner
+		var instanceTypeMap map[string]cloudprovider.InstanceType
+		if provName, ok := n.Node.Labels[v1alpha5.ProvisionerNameLabelKey]; ok {
+			provisioner = provisioners[provName]
+			instanceTypeMap = instanceTypesByProvisioner[provName]
+		}
+		// skip any nodes that are already marked for deletion and being handled
+		if n.MarkedForDeletion {
+			return true
+		}
+		// skip any nodes where we can't determine the provisioner
+		if provisioner == nil || instanceTypeMap == nil {
+			return true
+		}
+
+		instanceType := instanceTypeMap[n.Node.Labels[v1.LabelInstanceTypeStable]]
+		// skip any nodes that we can't determine the instance of
+		if instanceType == nil {
+			return true
+		}
+
+		// skip any nodes that we can't determine the capacity type or the topology zone for
+		ct, ok := n.Node.Labels[v1alpha5.LabelCapacityType]
+		if !ok {
+			return true
+		}
+		az, ok := n.Node.Labels[v1.LabelTopologyZone]
+		if !ok {
+			return true
+		}
+
+		// Skip nodes that aren't initialized
+		if n.Node.Labels[v1alpha5.LabelNodeInitialized] != "true" {
+			return true
+		}
+
+		// Skip the node if it is nominated by a recent provisioning pass to be the target of a pending pod.
+		if cluster.IsNodeNominated(n.Node.Name) {
+			return true
+		}
+
+		pods, err := nodeutils.GetNodePods(ctx, kubeClient, n.Node)
+		if err != nil {
+			logging.FromContext(ctx).Errorf("Determining node pods, %s", err)
+			return true
+		}
+
+		if !shouldDeprovision(ctx, n, provisioner, pods) {
+			return true
+		}
+
+		cn := CandidateNode{
+			Node:           n.Node,
+			instanceType:   instanceType,
+			capacityType:   ct,
+			zone:           az,
+			provisioner:    provisioner,
+			pods:           pods,
+			disruptionCost: disruptionCost(ctx, pods),
+		}
+		// lifetimeRemaining is the fraction of node lifetime remaining in the range [0.0, 1.0].  If the TTLSecondsUntilExpired
+		// is non-zero, we use it to scale down the disruption costs of nodes that are going to expire.  Just after creation, the
+		// disruption cost is highest and it approaches zero as the node ages towards its expiration time.
+		lifetimeRemaining := calculateLifetimeRemaining(cn, clk)
+		cn.disruptionCost *= lifetimeRemaining
+
+		nodes = append(nodes, cn)
+		return true
+	})
+
+	return nodes, nil
+}
+
+// buildProvisionerMap builds a provName -> provisioner map and a provName -> instanceName -> instance type map
+func buildProvisionerMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[string]*v1alpha5.Provisioner, map[string]map[string]cloudprovider.InstanceType, error) {
+	provisioners := map[string]*v1alpha5.Provisioner{}
+	var provList v1alpha5.ProvisionerList
+	if err := kubeClient.List(ctx, &provList); err != nil {
+		return nil, nil, fmt.Errorf("listing provisioners, %w", err)
+	}
+	instanceTypesByProvisioner := map[string]map[string]cloudprovider.InstanceType{}
+	for i := range provList.Items {
+		p := &provList.Items[i]
+		provisioners[p.Name] = p
+
+		provInstanceTypes, err := cloudProvider.GetInstanceTypes(ctx, p)
+		if err != nil {
+			return nil, nil, fmt.Errorf("listing instance types for %s, %w", p.Name, err)
+		}
+		instanceTypesByProvisioner[p.Name] = map[string]cloudprovider.InstanceType{}
+		for _, it := range provInstanceTypes {
+			instanceTypesByProvisioner[p.Name][it.Name()] = it
+		}
+	}
+	return provisioners, instanceTypesByProvisioner, nil
+}
+
+// calculateLifetimeRemaining calculates the fraction of node lifetime remaining in the range [0.0, 1.0].  If the TTLSecondsUntilExpired
+// is non-zero, we use it to scale down the disruption costs of nodes that are going to expire.  Just after creation, the
+// disruption cost is highest and it approaches zero as the node ages towards its expiration time.
+func calculateLifetimeRemaining(node CandidateNode, clock clock.Clock) float64 {
+	remaining := 1.0
+	if node.provisioner.Spec.TTLSecondsUntilExpired != nil {
+		ageInSeconds := clock.Since(node.CreationTimestamp.Time).Seconds()
+		totalLifetimeSeconds := float64(*node.provisioner.Spec.TTLSecondsUntilExpired)
+		lifetimeRemainingSeconds := totalLifetimeSeconds - ageInSeconds
+		remaining = clamp(0.0, lifetimeRemainingSeconds/totalLifetimeSeconds, 1.0)
+	}
+	return remaining
+}
+
 // worstLaunchPrice gets the worst-case launch price from the offerings that are offered
 // on an instance type. If the instance type has a spot offering available, then it uses the spot offering
 // to get the launch price; else, it uses the on-demand launch price
@@ -195,4 +320,33 @@ func mapNodes(nodes []*v1.Node, candidateNodes []CandidateNode) []CandidateNode 
 		}
 	}
 	return ret
+}
+
+func canBeTerminated(node CandidateNode, pdbs *PDBLimits) bool {
+	if !node.DeletionTimestamp.IsZero() {
+		return false
+	}
+	if _, ok := pdbs.CanEvictPods(node.pods); !ok {
+		return false
+	}
+
+	if _, ok := PodsPreventEviction(node.pods); ok {
+		return false
+	}
+	return true
+}
+
+// PodsPreventEviction returns true if there are pods that would prevent eviction
+func PodsPreventEviction(pods []*v1.Pod) (string, bool) {
+	for _, p := range pods {
+		// don't care about pods that are finishing, finished or owned by the node
+		if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
+			continue
+		}
+
+		if pod.HasDoNotEvict(p) {
+			return fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name), true
+		}
+	}
+	return "", false
 }
