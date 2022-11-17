@@ -20,6 +20,7 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clock "k8s.io/utils/clock/testing"
 	"knative.dev/pkg/ptr"
@@ -80,7 +81,191 @@ var _ = Describe("Controller", func() {
 		ExpectCleanedUp(ctx, env.Client)
 	})
 
-	Describe("Emptiness", func() {
+	Context("Initialization", func() {
+		It("should initialize the node when ready", func() {
+			node := test.Node(test.NodeOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					},
+				},
+				ReadyStatus: v1.ConditionTrue,
+			})
+			ExpectApplied(ctx, env.Client, provisioner, node)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node))
+
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			Expect(node.Labels).To(HaveKey(v1alpha5.LabelNodeInitialized))
+		})
+		It("should not initialize the node when not ready", func() {
+			node := test.Node(test.NodeOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					},
+				},
+				ReadyStatus: v1.ConditionFalse,
+			})
+			ExpectApplied(ctx, env.Client, provisioner, node)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node))
+
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			Expect(node.Labels).ToNot(HaveKey(v1alpha5.LabelNodeInitialized))
+		})
+		It("should initialize the node when extended resources are registered", func() {
+			node := test.Node(test.NodeOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       "gpu-vendor-instance-type",
+					},
+				},
+				ReadyStatus: v1.ConditionTrue,
+				Allocatable: v1.ResourceList{
+					v1.ResourceCPU:          resource.MustParse("4"),
+					v1.ResourceMemory:       resource.MustParse("4Gi"),
+					v1.ResourcePods:         resource.MustParse("5"),
+					fake.ResourceGPUVendorA: resource.MustParse("2"),
+				},
+				Capacity: v1.ResourceList{
+					v1.ResourceCPU:          resource.MustParse("4"),
+					v1.ResourceMemory:       resource.MustParse("4Gi"),
+					v1.ResourcePods:         resource.MustParse("5"),
+					fake.ResourceGPUVendorA: resource.MustParse("2"),
+				},
+			})
+			ExpectApplied(ctx, env.Client, provisioner, node)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node))
+
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			Expect(node.Labels).To(HaveKey(v1alpha5.LabelNodeInitialized))
+		})
+		It("should not initialize the node when extended resource isn't registered", func() {
+			node := test.Node(test.NodeOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       "gpu-vendor-instance-type",
+					},
+				},
+				ReadyStatus: v1.ConditionTrue,
+				Allocatable: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("4"),
+					v1.ResourceMemory: resource.MustParse("4Gi"),
+					v1.ResourcePods:   resource.MustParse("5"),
+				},
+				Capacity: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("4"),
+					v1.ResourceMemory: resource.MustParse("4Gi"),
+					v1.ResourcePods:   resource.MustParse("5"),
+				},
+			})
+			ExpectApplied(ctx, env.Client, provisioner, node)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node))
+
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			Expect(node.Labels).ToNot(HaveKey(v1alpha5.LabelNodeInitialized))
+		})
+		It("should not initialize the node when capacity is filled but allocatable isn't set", func() {
+			node := test.Node(test.NodeOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       "gpu-vendor-instance-type",
+					},
+				},
+				ReadyStatus: v1.ConditionTrue,
+				Allocatable: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("4"),
+					v1.ResourceMemory: resource.MustParse("4Gi"),
+					v1.ResourcePods:   resource.MustParse("5"),
+				},
+				Capacity: v1.ResourceList{
+					v1.ResourceCPU:          resource.MustParse("4"),
+					v1.ResourceMemory:       resource.MustParse("4Gi"),
+					v1.ResourcePods:         resource.MustParse("5"),
+					fake.ResourceGPUVendorA: resource.MustParse("2"),
+				},
+			})
+			ExpectApplied(ctx, env.Client, provisioner, node)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node))
+
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			Expect(node.Labels).ToNot(HaveKey(v1alpha5.LabelNodeInitialized))
+		})
+		It("should initialize the node when startup taints are removed", func() {
+			provisioner.Spec.StartupTaints = []v1.Taint{
+				{
+					Key:    "example.com/startup-taint1",
+					Value:  "true",
+					Effect: v1.TaintEffectNoExecute,
+				},
+				{
+					Key:    "example.com/startup-taint1",
+					Value:  "true",
+					Effect: v1.TaintEffectNoSchedule,
+				},
+				{
+					Key:    "example.com/startup-taint2",
+					Value:  "true",
+					Effect: v1.TaintEffectNoExecute,
+				},
+			}
+			node := test.Node(test.NodeOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					},
+				},
+				ReadyStatus: v1.ConditionTrue,
+			})
+			ExpectApplied(ctx, env.Client, provisioner, node)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node))
+
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			Expect(node.Labels).To(HaveKey(v1alpha5.LabelNodeInitialized))
+		})
+		It("should not initialize the node when startup taints aren't removed", func() {
+			provisioner.Spec.StartupTaints = []v1.Taint{
+				{
+					Key:    "example.com/startup-taint1",
+					Value:  "true",
+					Effect: v1.TaintEffectNoExecute,
+				},
+				{
+					Key:    "example.com/startup-taint1",
+					Value:  "true",
+					Effect: v1.TaintEffectNoSchedule,
+				},
+				{
+					Key:    "example.com/startup-taint2",
+					Value:  "true",
+					Effect: v1.TaintEffectNoExecute,
+				},
+			}
+			node := test.Node(test.NodeOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					},
+				},
+				Taints: []v1.Taint{
+					{
+						Key:    "example.com/startup-taint1",
+						Value:  "true",
+						Effect: v1.TaintEffectNoExecute,
+					},
+				},
+				ReadyStatus: v1.ConditionTrue,
+			})
+			ExpectApplied(ctx, env.Client, provisioner, node)
+			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node))
+
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			Expect(node.Labels).ToNot(HaveKey(v1alpha5.LabelNodeInitialized))
+		})
+	})
+	Context("Emptiness", func() {
 		It("should not TTL nodes that have ready status unknown", func() {
 			provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(30)
 			node := test.Node(test.NodeOptions{

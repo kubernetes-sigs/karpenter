@@ -333,6 +333,7 @@ func (p *Provisioner) launch(ctx context.Context, opts LaunchOptions, node *sche
 		logging.WithLogger(ctx, logging.FromContext(ctx).Named("cloudprovider")),
 		&cloudprovider.NodeRequest{InstanceTypeOptions: node.InstanceTypeOptions, Template: &node.NodeTemplate},
 	)
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", k8sNode.Name))
 	if err != nil {
 		return "", fmt.Errorf("creating cloud provider instance, %w", err)
 	}
@@ -350,7 +351,7 @@ func (p *Provisioner) launch(ctx context.Context, opts LaunchOptions, node *sche
 	// before the node is fully Ready.
 	if _, err := p.coreV1Client.Nodes().Create(ctx, k8sNode, metav1.CreateOptions{}); err != nil {
 		if errors.IsAlreadyExists(err) {
-			logging.FromContext(ctx).Debugf("node %s already registered", k8sNode.Name)
+			logging.FromContext(ctx).Debugf("node already registered")
 		} else {
 			return "", fmt.Errorf("creating node %s, %w", k8sNode.Name, err)
 		}

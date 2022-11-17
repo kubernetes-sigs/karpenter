@@ -572,7 +572,8 @@ var _ = Describe("Replace Nodes", func() {
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")}})
+			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+		})
 
 		ExpectApplied(ctx, env.Client, rs, pod, node, prov)
 		ExpectMakeNodesReady(ctx, env.Client, node)
@@ -643,7 +644,8 @@ var _ = Describe("Replace Nodes", func() {
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
 				v1.ResourcePods: resource.MustParse("100"),
-			}})
+			},
+		})
 
 		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], node1, prov, pdb)
 		ExpectApplied(ctx, env.Client, node1)
@@ -704,7 +706,8 @@ var _ = Describe("Replace Nodes", func() {
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
 				v1.ResourcePods: resource.MustParse("100"),
-			}})
+			},
+		})
 
 		annotatedNode := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -720,7 +723,8 @@ var _ = Describe("Replace Nodes", func() {
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
 				v1.ResourcePods: resource.MustParse("100"),
-			}})
+			},
+		})
 
 		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], prov)
 		ExpectApplied(ctx, env.Client, regularNode, annotatedNode)
@@ -1255,7 +1259,7 @@ var _ = Describe("Delete Node", func() {
 		// but we expect to delete the node with more pods (node1) as the pod on node2 has a do-not-evict annotation
 		ExpectNotFound(ctx, env.Client, node1)
 	})
-	It("can delete nodes, doesn't evict standalone pods", func() {
+	It("can delete nodes, evicts pods without an ownerRef", func() {
 		// create our RS so we can link a pod to it
 		rs := test.ReplicaSet()
 		ExpectApplied(ctx, env.Client, rs)
@@ -1327,9 +1331,9 @@ var _ = Describe("Delete Node", func() {
 
 		// we don't need a new node
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
-		// but we expect to delete the node with more pods (node1) as the pod on node2 doesn't have a controller to
-		// recreate it
-		ExpectNotFound(ctx, env.Client, node1)
+		// but we expect to delete the node with the fewest pods (node 2) even though the pod has no ownerRefs
+		// and will not be recreated
+		ExpectNotFound(ctx, env.Client, node2)
 	})
 })
 

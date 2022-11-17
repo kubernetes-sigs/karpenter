@@ -64,3 +64,13 @@ func NodeFailedToDrain(node *v1.Node, err error) Event {
 		DedupeValues:   []string{node.Name},
 	}
 }
+
+func NodeInflightCheck(node *v1.Node, message string) Event {
+	return Event{
+		InvolvedObject: node,
+		Type:           v1.EventTypeWarning,
+		Reason:         "FailedInflightCheck",
+		Message:        message,
+		DedupeValues:   []string{node.Name, message},
+	}
+}

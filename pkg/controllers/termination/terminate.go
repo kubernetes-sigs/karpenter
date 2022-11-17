@@ -32,7 +32,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/scheduling"
 	podutil "github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
@@ -83,14 +82,11 @@ func (t *Terminator) drain(ctx context.Context, node *v1.Node) (bool, error) {
 	var podsToEvict []*v1.Pod
 	// Skip node due to pods that are not able to be evicted
 	for _, p := range pods {
-		// if a pod doesn't have owner references then we can't expect a controller to manage its lifecycle
-		if len(p.ObjectMeta.OwnerReferences) == 0 {
-			return false, NodeDrainErr(fmt.Errorf("pod %s/%s does not have any owner references", p.Namespace, p.Name))
-		} else if podutil.HasDoNotEvict(p) {
+		if podutil.HasDoNotEvict(p) {
 			return false, NodeDrainErr(fmt.Errorf("pod %s/%s has do-not-evict annotation", p.Namespace, p.Name))
 		}
 		// Ignore if unschedulable is tolerated, since they will reschedule
-		if (scheduling.Taints{{Key: v1.TaintNodeUnschedulable, Effect: v1.TaintEffectNoSchedule}}).Tolerates(p) == nil {
+		if podutil.ToleratesUnschedulableTaint(p) {
 			continue
 		}
 		// Ignore static mirror pods
