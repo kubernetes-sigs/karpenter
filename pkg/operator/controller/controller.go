@@ -18,6 +18,8 @@ import (
 	"context"
 	"net/http"
 
+	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
@@ -29,7 +31,6 @@ type Controller interface {
 	// Builder returns a Builder registered with the manager that can be wrapped
 	// with other Builders and completed later to complete registration to the manager
 	Builder(context.Context, manager.Manager) Builder
-
 	// LivenessProbe surfaces a health check to run on the controller
 	LivenessProbe(req *http.Request) error
 }
@@ -39,4 +40,30 @@ type Controller interface {
 type Builder interface {
 	// Complete builds a builder by registering the Reconciler with the manager
 	Complete(reconcile.Reconciler) error
+}
+
+type TypedBuilder interface {
+	Builder
+
+	// For updates the builder to watch the client.Object passed in
+	For(client.Object) TypedBuilder
+}
+
+type TypedBuilderAdapter struct {
+	builder *controllerruntime.Builder
+}
+
+func NewTypedBuilderAdapter(builder *controllerruntime.Builder) *TypedBuilderAdapter {
+	return &TypedBuilderAdapter{
+		builder: builder,
+	}
+}
+
+func (t *TypedBuilderAdapter) For(obj client.Object) TypedBuilder {
+	t.builder = t.builder.For(obj)
+	return t
+}
+
+func (t *TypedBuilderAdapter) Complete(r reconcile.Reconciler) error {
+	return t.builder.Complete(r)
 }

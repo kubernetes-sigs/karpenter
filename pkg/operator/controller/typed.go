@@ -17,58 +17,67 @@ package controller
 import (
 	"context"
 	"net/http"
+	"reflect"
 
-	"k8s.io/apimachinery/pkg/api/errors"
-	"knative.dev/pkg/webhook/resourcesemantics"
-	controllerruntime "sigs.k8s.io/controller-runtime"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
-type Object interface {
-	client.Object
-	resourcesemantics.GenericCRD
+type TypedReconciler[T client.Object] interface {
+	Reconcile(context.Context, T) (reconcile.Result, error)
 }
 
-type TypedController[T Object] interface {
-	Reconcile(context.Context, T) (reconcile.Result, error)
-	Builder(context.Context, manager.Manager) *controllerruntime.Builder
+type TypedController[T client.Object] interface {
+	TypedReconciler[T]
+
+	Finalize(context.Context, T) (reconcile.Result, error)
+	Builder(context.Context, manager.Manager) TypedBuilder
 	LivenessProbe(*http.Request) error
 }
 
-type typedControllerDecorator[T Object] struct {
-	typedController TypedController[T]
+type typedControllerDecorator[T client.Object] struct {
 	kubeClient      client.Client
+	typedController TypedController[T]
 }
 
-func NewTyped[T Object](kubeClient client.Client, typedController TypedController[T]) Controller {
+func NewTyped[T client.Object](kubeClient client.Client, typedController TypedController[T]) Controller {
 	return &typedControllerDecorator[T]{
-		typedController: typedController,
 		kubeClient:      kubeClient,
+		typedController: typedController,
 	}
 }
 
-func (t *typedControllerDecorator[T]) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	obj := *new(T)
+func (t *typedControllerDecorator[T]) Reconcile(ctx context.Context, req reconcile.Request) (result reconcile.Result, err error) {
+	obj := reflect.New(reflect.TypeOf(*new(T)).Elem()).Interface().(T) // Create a new pointer to a client.Object
 
 	// Read
-	if err := t.kubeClient.Get(ctx, req.NamespacedName, obj); err != nil {
-		if errors.IsNotFound(err) {
-			return reconcile.Result{}, nil
-		}
-		return reconcile.Result{}, err
+	if err = t.kubeClient.Get(ctx, req.NamespacedName, obj); err != nil {
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	mergeFrom := client.MergeFrom(obj.DeepCopyObject().(client.Object))
+	stored := obj.DeepCopyObject().(client.Object)
+	mergeFrom := client.MergeFrom(stored)
 
-	// Reconcile
-	result, err := t.typedController.Reconcile(ctx, obj)
-	if err != nil {
-		return reconcile.Result{}, err
+	if !obj.GetDeletionTimestamp().IsZero() {
+		// Finalize
+		result, err = t.typedController.Finalize(ctx, obj)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+	} else {
+		// Reconcile
+		result, err = t.typedController.Reconcile(ctx, obj)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
 	}
-	// Patch Status
-	if err = t.kubeClient.Status().Patch(ctx, obj, mergeFrom); err != nil {
-		return reconcile.Result{}, err
+
+	// Patch Status if changed
+	if !equality.Semantic.DeepEqual(obj, stored) {
+		if err = t.kubeClient.Status().Patch(ctx, obj, mergeFrom); err != nil {
+			return reconcile.Result{}, err
+		}
 	}
 	return result, nil
 }

@@ -45,11 +45,11 @@ type Controller struct {
 }
 
 // NewController is a constructor
-func NewController(kubeClient client.Client, cluster *state.Cluster) corecontroller.Controller {
-	return corecontroller.NewTyped[*v1alpha5.Provisioner](kubeClient, &Controller{
+func NewController(kubeClient client.Client, cluster *state.Cluster) *Controller {
+	return &Controller{
 		kubeClient: kubeClient,
 		cluster:    cluster,
-	})
+	}
 }
 
 // Reconcile a control loop for the resource
@@ -58,15 +58,17 @@ func (c *Controller) Reconcile(ctx context.Context, provisioner *v1alpha5.Provis
 	if err := c.kubeClient.List(ctx, &nodes, client.MatchingLabels{v1alpha5.ProvisionerNameLabelKey: provisioner.Name}); err != nil {
 		return reconcile.Result{}, err
 	}
-
 	// Nodes aren't synced yet, so return an error which will cause retry with backoff.
 	if !c.nodesSynced(nodes.Items, provisioner.Name) {
 		return reconcile.Result{RequeueAfter: 250 * time.Millisecond}, nil
 	}
-
 	// Determine resource usage and update provisioner.status.resources
 	resourceCounts := c.resourceCountsFor(provisioner.Name)
 	provisioner.Status.Resources = resourceCounts
+	return reconcile.Result{}, nil
+}
+
+func (c *Controller) Finalize(_ context.Context, _ *v1alpha5.Provisioner) (reconcile.Result, error) {
 	return reconcile.Result{}, nil
 }
 
@@ -93,8 +95,8 @@ func (c *Controller) resourceCountsFor(provisionerName string) v1.ResourceList {
 	return result
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) *controllerruntime.Builder {
-	return controllerruntime.
+func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {
+	return corecontroller.NewTypedBuilderAdapter(controllerruntime.
 		NewControllerManagedBy(m).
 		Named("counter").
 		Watches(
@@ -106,7 +108,7 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) *controllerru
 				return nil
 			}),
 		).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10})
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))
 }
 
 func (c *Controller) LivenessProbe(_ *http.Request) error {

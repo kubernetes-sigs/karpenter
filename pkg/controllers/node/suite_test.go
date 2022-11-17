@@ -33,6 +33,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 
@@ -44,7 +45,7 @@ import (
 )
 
 var ctx context.Context
-var controller *node.Controller
+var controller corecontroller.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
 
@@ -60,7 +61,7 @@ var _ = BeforeSuite(func() {
 	ctx = settings.ToContext(ctx, test.Settings())
 	cp := fake.NewCloudProvider()
 	cluster := state.NewCluster(ctx, fakeClock, env.Client, cp)
-	controller = node.NewController(fakeClock, env.Client, cp, cluster)
+	controller = corecontroller.NewTyped[*v1.Node](env.Client, node.NewController(fakeClock, env.Client, cp, cluster))
 })
 
 var _ = AfterSuite(func() {

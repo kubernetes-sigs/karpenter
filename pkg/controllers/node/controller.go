@@ -16,12 +16,10 @@ package node
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
@@ -66,28 +64,22 @@ type Controller struct {
 }
 
 // Reconcile executes a reallocation control loop for the resource
-func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(controllerName).With("node", req.Name))
-	// 1. Retrieve Node, ignore if not provisioned or terminating
-	stored := &v1.Node{}
-	if err := c.kubeClient.Get(ctx, req.NamespacedName, stored); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(err)
-	}
-	if _, ok := stored.Labels[v1alpha5.ProvisionerNameLabelKey]; !ok {
+func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(controllerName).With("node", node.Name))
+	if _, ok := node.Labels[v1alpha5.ProvisionerNameLabelKey]; !ok {
 		return reconcile.Result{}, nil
 	}
-	if !stored.DeletionTimestamp.IsZero() {
+	if !node.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, nil
 	}
 
 	// 2. Retrieve Provisioner
 	provisioner := &v1alpha5.Provisioner{}
-	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: stored.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
 	// 3. Execute reconcilers
-	node := stored.DeepCopy()
 	var results []reconcile.Result
 	var errs error
 	for _, reconciler := range []interface {
@@ -101,21 +93,14 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		errs = multierr.Append(errs, err)
 		results = append(results, res)
 	}
-
-	// 4. Patch any changes, regardless of errors
-	if !equality.Semantic.DeepEqual(node, stored) {
-		if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
-			return reconcile.Result{}, fmt.Errorf("patching node, %w", err)
-		}
-	}
-	// 5. Requeue if error or if retryAfter is set
-	if errs != nil {
-		return reconcile.Result{}, errs
-	}
-	return result.Min(results...), nil
+	return result.Min(results...), errs
 }
 
-func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontroller.Builder {
+func (c *Controller) Finalize(_ context.Context, _ *v1.Node) (reconcile.Result, error) {
+	return reconcile.Result{}, nil
+}
+
+func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontroller.TypedBuilder {
 	// Enqueues a reconcile request when nominated node expiration is triggered
 	ch := make(chan event.GenericEvent, 300)
 	c.cluster.AddNominatedNodeEvictionObserver(func(nodeName string) {
@@ -124,10 +109,9 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 		}}
 	})
 
-	return controllerruntime.
+	return corecontroller.NewTypedBuilderAdapter(controllerruntime.
 		NewControllerManagedBy(m).
 		Named(controllerName).
-		For(&v1.Node{}).
 		Watches(
 			// Reconcile all nodes related to a provisioner when it changes.
 			&source.Kind{Type: &v1alpha5.Provisioner{}},
@@ -154,7 +138,7 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 			}),
 		).
 		Watches(&source.Channel{Source: ch}, &handler.EnqueueRequestForObject{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10})
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))
 }
 
 func (c *Controller) LivenessProbe(_ *http.Request) error {

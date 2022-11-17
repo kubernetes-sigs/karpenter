@@ -36,13 +36,14 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/inflightchecks"
 	"github.com/aws/karpenter-core/pkg/events"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
 var ctx context.Context
-var controller *inflightchecks.Controller
+var controller corecontroller.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
 var cp *fake.CloudProvider
@@ -60,7 +61,7 @@ var _ = BeforeSuite(func() {
 	ctx = settings.ToContext(ctx, test.Settings())
 	cp = &fake.CloudProvider{}
 	recorder = test.NewEventRecorder()
-	controller = inflightchecks.NewController(fakeClock, env.Client, recorder, cp, nil)
+	controller = corecontroller.NewTyped[*v1.Node](env.Client, inflightchecks.NewController(fakeClock, env.Client, recorder, cp))
 })
 
 var _ = AfterSuite(func() {
