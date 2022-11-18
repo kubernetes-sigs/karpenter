@@ -1736,6 +1736,55 @@ var _ = Describe("Empty Nodes", func() {
 		// and should delete both empty ones
 		ExpectNotFound(ctx, env.Client, node)
 	})
+	It("considers pending pods when consolidating", func() {
+		prov := test.Provisioner(test.ProvisionerOptions{Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)}})
+
+		node1 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("128"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		// there is a pending pod that should land on the node
+		pod := test.UnschedulablePod(test.PodOptions{
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU: resource.MustParse("1"),
+				},
+			},
+		})
+		unsched := test.UnschedulablePod(test.PodOptions{
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU: resource.MustParse("125"),
+				},
+			},
+		})
+
+		ExpectApplied(ctx, env.Client, node1, pod, unsched, prov)
+		ExpectMakeNodesReady(ctx, env.Client, node1)
+		ExpectManualBinding(ctx, env.Client, pod, node1)
+
+		// inform cluster state about the nodes
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+
+		fakeClock.Step(10 * time.Minute)
+		go triggerVerifyAction()
+		_, err := controller.ProcessCluster(ctx)
+		Expect(err).ToNot(HaveOccurred())
+
+		// we don't need any new nodes and consolidation should notice the huge pending pod that needs the large
+		// node to schedule, which prevents the large expensive node from being replaced
+		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
+		ExpectNodeExists(ctx, env.Client, node1.Name)
+	})
 })
 
 var _ = Describe("Consolidation TTL", func() {

@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// nolint: gocyclo
 func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
 	nodesToDelete ...CandidateNode) (newNodes []*pscheduling.Node, allPodsScheduled bool, err error) {
 	var stateNodes []*state.Node
@@ -70,7 +71,13 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
 	}
-	var pods []*v1.Pod
+
+	// start by getting all pending pods
+	pods, err := provisioner.GetPendingPods(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("determining pending pods, %w", err)
+	}
+
 	for _, n := range nodesToDelete {
 		pods = append(pods, n.pods...)
 	}
@@ -95,7 +102,6 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	for _, n := range ifn {
 		podsScheduled += len(n.Pods)
 	}
-
 	return newNodes, podsScheduled == len(pods), nil
 }
 
