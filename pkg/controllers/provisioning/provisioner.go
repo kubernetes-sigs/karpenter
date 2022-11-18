@@ -148,7 +148,7 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (recon
 	})
 
 	// Get pods, exit if nothing to do
-	pendingPods, err := p.getPendingPods(ctx)
+	pendingPods, err := p.GetPendingPods(ctx)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
@@ -212,7 +212,7 @@ func (p *Provisioner) LaunchNodes(ctx context.Context, opts LaunchOptions, nodes
 	return nodeNames, nil
 }
 
-func (p *Provisioner) getPendingPods(ctx context.Context) ([]*v1.Pod, error) {
+func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*v1.Pod, error) {
 	var podList v1.PodList
 	if err := p.kubeClient.List(ctx, &podList, client.MatchingFields{"spec.nodeName": ""}); err != nil {
 		return nil, fmt.Errorf("listing pods, %w", err)
