@@ -126,8 +126,8 @@ var singletonRequest = reconcile.Request{}
 
 func (s *Singleton) Start(ctx context.Context) error {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(s.name))
-	logging.FromContext(ctx).Infof("Starting Controller")
-	defer logging.FromContext(ctx).Infof("Stopping Controller")
+	logging.FromContext(ctx).Infof("starting Controller")
+	defer logging.FromContext(ctx).Infof("stopping Controller")
 	for {
 		// This waits until the waitUntil is completed or the context is closed
 		// to avoid hanging on the wait when the context gets closed in the middle of the wait

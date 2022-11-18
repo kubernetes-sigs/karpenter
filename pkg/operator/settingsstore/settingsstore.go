@@ -93,7 +93,7 @@ func (s *store) waitForConfigMapsOrDie(ctx context.Context, kubernetesInterface 
 		case <-time.After(time.Millisecond * 500):
 		}
 	}
-	logging.FromContext(ctx).Debugf("Settings ConfigMap(s) exist")
+	logging.FromContext(ctx).Debugf("settings ConfigMap(s) exist")
 }
 
 func (s *store) InjectSettings(ctx context.Context) context.Context {
