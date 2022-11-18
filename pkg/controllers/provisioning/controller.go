@@ -19,16 +19,17 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/aws/karpenter-core/pkg/events"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/utils/pod"
-
 	v1 "k8s.io/api/core/v1"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/aws/karpenter-core/pkg/events"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
 const controllerName = "provisioning"
@@ -41,35 +42,30 @@ type Controller struct {
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client, provisioner *Provisioner, recorder events.Recorder) *Controller {
-	return &Controller{
+func NewController(kubeClient client.Client, provisioner *Provisioner, recorder events.Recorder) corecontroller.Controller {
+	return corecontroller.For[*v1.Pod](kubeClient, &Controller{
 		kubeClient:  kubeClient,
 		provisioner: provisioner,
 		recorder:    recorder,
-	}
+	})
 }
 
 // Reconcile the resource
-func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	p := &v1.Pod{}
-	if err := c.kubeClient.Get(ctx, req.NamespacedName, p); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(err)
-	}
-	// Ensure the pod can be provisioned
-	if !pod.IsProvisionable(p) {
-		return reconcile.Result{}, nil
-	}
+func (c *Controller) Reconcile(_ context.Context, p *v1.Pod) (*v1.Pod, reconcile.Result, error) {
 	c.provisioner.Trigger()
 	// TODO: This is only necessary due to a bug in the batcher. Ideally we should retrigger on provisioning error instead
-	return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
+	return p, reconcile.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return controllerruntime.
+func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {
+	return corecontroller.NewTypedBuilderAdapter(controllerruntime.
 		NewControllerManagedBy(m).
 		Named(controllerName).
-		For(&v1.Pod{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10})
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+			// Ensure the pod can be provisioned
+			return pod.IsProvisionable(obj.(*v1.Pod))
+		})))
 }
 
 func (c *Controller) LivenessProbe(_ *http.Request) error {

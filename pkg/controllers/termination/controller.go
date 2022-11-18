@@ -24,11 +24,10 @@ import (
 	"golang.org/x/time/rate"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
-	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/util/workqueue"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,9 +37,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/samber/lo"
 
-	provisioning "github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 
@@ -77,78 +75,71 @@ type Controller struct {
 }
 
 // NewController constructs a controller instance
-func NewController(ctx context.Context, clk clock.Clock, kubeClient client.Client, coreV1Client corev1.CoreV1Interface, recorder events.Recorder, cloudProvider cloudprovider.CloudProvider) *Controller {
-	return &Controller{
+func NewController(clk clock.Clock, kubeClient client.Client, evictionQueue *EvictionQueue,
+	recorder events.Recorder, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
+
+	return corecontroller.For[*v1.Node](kubeClient, &Controller{
 		KubeClient: kubeClient,
 		Terminator: &Terminator{
 			KubeClient:    kubeClient,
-			CoreV1Client:  coreV1Client,
 			CloudProvider: cloudProvider,
-			EvictionQueue: NewEvictionQueue(ctx, coreV1Client, recorder),
+			EvictionQueue: evictionQueue,
 			Clock:         clk,
 		},
 		Recorder:          recorder,
 		TerminationRecord: sets.NewString(),
-	}
+	})
 }
 
 // Reconcile executes a termination control loop for the resource
-func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(controllerName).With("node", req.Name))
+func (c *Controller) Reconcile(_ context.Context, node *v1.Node) (*v1.Node, reconcile.Result, error) {
+	return node, reconcile.Result{}, nil
+}
+
+func (c *Controller) OnFinalize(ctx context.Context, node *v1.Node) (*v1.Node, reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(controllerName).With("node", node.Name))
 	ctx = injection.WithControllerName(ctx, controllerName)
 
-	// 1. Retrieve node from reconcile request
-	node := &v1.Node{}
-	if err := c.KubeClient.Get(ctx, req.NamespacedName, node); err != nil {
-		if errors.IsNotFound(err) {
-			c.mu.Lock()
-			c.TerminationRecord.Delete(req.String())
-			c.mu.Unlock()
-			return reconcile.Result{}, nil
-		}
-		return reconcile.Result{}, err
-	}
-
-	// 2. Check if node is terminable
-	if node.DeletionTimestamp.IsZero() || !lo.Contains(node.Finalizers, provisioning.TerminationFinalizer) {
-		return reconcile.Result{}, nil
-	}
-	// 3. Cordon node
-	if err := c.Terminator.cordon(ctx, node); err != nil {
-		return reconcile.Result{}, fmt.Errorf("cordoning node %s, %w", node.Name, err)
-	}
-	// 4. Drain node
+	// 1. Cordon node
+	node = c.Terminator.cordon(ctx, node)
+	// 2. Drain node
 	drained, err := c.Terminator.drain(ctx, node)
 	if err != nil {
 		if !IsNodeDrainErr(err) {
-			return reconcile.Result{}, err
+			return node, reconcile.Result{}, err
 		}
 		c.Recorder.Publish(events.NodeFailedToDrain(node, err))
 	}
 	if !drained {
-		return reconcile.Result{Requeue: true}, nil
+		return node, reconcile.Result{Requeue: true}, nil
 	}
-	// 5. If fully drained, terminate the node
-	if err := c.Terminator.terminate(ctx, node); err != nil {
-		return reconcile.Result{}, fmt.Errorf("terminating node %s, %w", node.Name, err)
+	// 3. If fully drained, terminate the node
+	if err = c.Terminator.terminate(ctx, node); err != nil {
+		return node, reconcile.Result{}, fmt.Errorf("terminating node %s, %w", node.Name, err)
 	}
+	controllerutil.RemoveFinalizer(node, v1alpha5.TerminationFinalizer)
 
 	c.mu.Lock()
 	// 6. Record termination duration (time between deletion timestamp and finalizer removal)
-	if !c.TerminationRecord.Has(req.String()) {
-		c.TerminationRecord.Insert(req.String())
+	if !c.TerminationRecord.Has(client.ObjectKeyFromObject(node).String()) {
+		c.TerminationRecord.Insert(client.ObjectKeyFromObject(node).String())
 		terminationSummary.Observe(time.Since(node.DeletionTimestamp.Time).Seconds())
 	}
 	c.mu.Unlock()
+	return node, reconcile.Result{}, nil
+}
 
+func (c *Controller) OnNotFound(_ context.Context, req reconcile.Request) (reconcile.Result, error) {
+	c.mu.Lock()
+	c.TerminationRecord.Delete(req.String())
+	c.mu.Unlock()
 	return reconcile.Result{}, nil
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return controllerruntime.
+func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {
+	return corecontroller.NewTypedBuilderAdapter(controllerruntime.
 		NewControllerManagedBy(m).
 		Named(controllerName).
-		For(&v1.Node{}).
 		WithOptions(
 			controller.Options{
 				RateLimiter: workqueue.NewMaxOfRateLimiter(
@@ -158,7 +149,7 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontrolle
 				),
 				MaxConcurrentReconciles: 10,
 			},
-		)
+		))
 }
 
 func (c *Controller) LivenessProbe(_ *http.Request) error {

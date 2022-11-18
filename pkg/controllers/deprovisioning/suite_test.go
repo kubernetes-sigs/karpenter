@@ -45,6 +45,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
@@ -54,11 +55,11 @@ var ctx context.Context
 var env *test.Environment
 var cluster *state.Cluster
 var controller *deprovisioning.Controller
-var provisioningController *provisioning.Controller
+var provisioningController corecontroller.Controller
 var provisioner *provisioning.Provisioner
 var cloudProvider *fake.CloudProvider
 var recorder *test.EventRecorder
-var nodeStateController *state.NodeController
+var nodeStateController corecontroller.Controller
 var fakeClock *clock.FakeClock
 var onDemandInstances []*cloudprovider.InstanceType
 var mostExpensiveInstance *cloudprovider.InstanceType

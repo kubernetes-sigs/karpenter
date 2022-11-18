@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
@@ -44,13 +45,13 @@ import (
 const controllerName = "node"
 
 // NewController constructs a controller instance
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Controller {
-	return &Controller{
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) corecontroller.Controller {
+	return corecontroller.For[*v1.Node](kubeClient, &Controller{
 		kubeClient:     kubeClient,
 		cluster:        cluster,
 		initialization: &Initialization{kubeClient: kubeClient, cloudProvider: cloudProvider},
 		emptiness:      &Emptiness{kubeClient: kubeClient, clock: clk, cluster: cluster},
-	}
+	})
 }
 
 // Controller manages a set of properties on karpenter provisioned nodes, such as
@@ -64,22 +65,14 @@ type Controller struct {
 }
 
 // Reconcile executes a reallocation control loop for the resource
-func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (*v1.Node, reconcile.Result, error) {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(controllerName).With("node", node.Name))
-	if _, ok := node.Labels[v1alpha5.ProvisionerNameLabelKey]; !ok {
-		return reconcile.Result{}, nil
-	}
-	if !node.DeletionTimestamp.IsZero() {
-		return reconcile.Result{}, nil
-	}
-
-	// 2. Retrieve Provisioner
 	provisioner := &v1alpha5.Provisioner{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(err)
+		return nil, reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// 3. Execute reconcilers
+	// Execute Reconcilers
 	var results []reconcile.Result
 	var errs error
 	for _, reconciler := range []interface {
@@ -93,11 +86,7 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Re
 		errs = multierr.Append(errs, err)
 		results = append(results, res)
 	}
-	return result.Min(results...), errs
-}
-
-func (c *Controller) Finalize(_ context.Context, _ *v1.Node) (reconcile.Result, error) {
-	return reconcile.Result{}, nil
+	return node, result.Min(results...), errs
 }
 
 func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontroller.TypedBuilder {
@@ -112,6 +101,7 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 	return corecontroller.NewTypedBuilderAdapter(controllerruntime.
 		NewControllerManagedBy(m).
 		Named(controllerName).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Watches(
 			// Reconcile all nodes related to a provisioner when it changes.
 			&source.Kind{Type: &v1alpha5.Provisioner{}},
@@ -138,7 +128,13 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 			}),
 		).
 		Watches(&source.Channel{Source: ch}, &handler.EnqueueRequestForObject{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))
+		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+			_, ok := obj.GetLabels()[v1alpha5.ProvisionerNameLabelKey]
+			return ok
+		})).
+		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+			return obj.GetDeletionTimestamp().IsZero()
+		})))
 }
 
 func (c *Controller) LivenessProbe(_ *http.Request) error {

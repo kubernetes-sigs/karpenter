@@ -93,35 +93,27 @@ type Controller struct {
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client) *Controller {
-	return &Controller{
+func NewController(kubeClient client.Client) corecontroller.Controller {
+	return corecontroller.For[*v1alpha5.Provisioner](kubeClient, &Controller{
 		kubeClient: kubeClient,
-	}
+	})
 }
 
 // Reconcile executes a termination control loop for the resource
-func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("provisionermetrics").With("provisioner", req.Name))
+func (c *Controller) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner) (*v1alpha5.Provisioner, reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("provisionermetrics").With("provisioner", provisioner.Name))
 
 	// Remove the previous gauge after provisioner labels are updated
-	c.cleanup(req.NamespacedName)
-
-	// Retrieve provisioner from reconcile request
-	provisioner := &v1alpha5.Provisioner{}
-	if err := c.kubeClient.Get(ctx, req.NamespacedName, provisioner); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(err)
-	}
-
+	c.cleanup(client.ObjectKeyFromObject(provisioner))
 	c.record(ctx, provisioner)
 	// periodically update our metrics per provisioner even if nothing has changed
-	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+	return nil, reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return controllerruntime.
+func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {
+	return corecontroller.NewTypedBuilderAdapter(controllerruntime.
 		NewControllerManagedBy(m).
-		Named("provisionermetrics").
-		For(&v1alpha5.Provisioner{})
+		Named("provisionermetrics"))
 }
 
 func (c *Controller) cleanup(provisionerName types.NamespacedName) {

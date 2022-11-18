@@ -19,7 +19,6 @@ import (
 	"net/http"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -39,29 +38,26 @@ type NodeController struct {
 }
 
 // NewNodeController constructs a controller instance
-func NewNodeController(kubeClient client.Client, cluster *Cluster) *NodeController {
-	return &NodeController{
+func NewNodeController(kubeClient client.Client, cluster *Cluster) corecontroller.Controller {
+	return corecontroller.For[*v1.Node](kubeClient, &NodeController{
 		kubeClient: kubeClient,
 		cluster:    cluster,
-	}
+	})
 }
 
-func (c *NodeController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(nodeControllerName).With("node", req.Name))
-	node := &v1.Node{}
-	if err := c.kubeClient.Get(ctx, req.NamespacedName, node); err != nil {
-		if errors.IsNotFound(err) {
-			// notify cluster state of the node deletion
-			c.cluster.deleteNode(req.Name)
-			return reconcile.Result{}, nil
-		}
-		return reconcile.Result{}, err
-	}
+func (c *NodeController) Reconcile(ctx context.Context, node *v1.Node) (*v1.Node, reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(nodeControllerName).With("node", node.Name))
 	if err := c.cluster.updateNode(ctx, node); err != nil {
-		return reconcile.Result{}, err
+		return nil, reconcile.Result{}, err
 	}
 	// ensure it's aware of any nodes we discover, this is a no-op if the node is already known to our cluster state
-	return reconcile.Result{Requeue: true, RequeueAfter: stateRetryPeriod}, nil
+	return nil, reconcile.Result{Requeue: true, RequeueAfter: stateRetryPeriod}, nil
+}
+
+func (c *NodeController) OnNotFound(_ context.Context, req reconcile.Request) (reconcile.Result, error) {
+	// notify cluster state of the node deletion
+	c.cluster.deleteNode(req.Name)
+	return reconcile.Result{}, nil
 }
 
 func (c *NodeController) LivenessProbe(req *http.Request) error {
@@ -69,10 +65,9 @@ func (c *NodeController) LivenessProbe(req *http.Request) error {
 	return c.cluster.LivenessProbe(req)
 }
 
-func (c *NodeController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return controllerruntime.
+func (c *NodeController) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {
+	return corecontroller.NewTypedBuilderAdapter(controllerruntime.
 		NewControllerManagedBy(m).
 		Named(nodeControllerName).
-		For(&v1.Node{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10})
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))
 }

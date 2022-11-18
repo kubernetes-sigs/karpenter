@@ -34,6 +34,9 @@ type Finalizer struct{}
 
 // Reconcile reconciles the node
 func (r *Finalizer) Reconcile(_ context.Context, provisioner *v1alpha5.Provisioner, node *v1.Node) (reconcile.Result, error) {
+	if !node.DeletionTimestamp.IsZero() {
+		return reconcile.Result{}, nil
+	}
 	node.OwnerReferences = []metav1.OwnerReference{{
 		APIVersion:         v1alpha5.SchemeGroupVersion.String(),
 		Kind:               "Provisioner",

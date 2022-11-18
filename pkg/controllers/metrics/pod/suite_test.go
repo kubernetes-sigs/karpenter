@@ -26,12 +26,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/controllers/metrics/pod"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
-var controller *pod.Controller
+var controller corecontroller.Controller
 var ctx context.Context
 var env *test.Environment
 

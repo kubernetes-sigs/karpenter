@@ -17,12 +17,10 @@ package controllers
 import (
 	"context"
 
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/counter"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
@@ -59,16 +57,16 @@ func NewControllers(
 	return []controller.Controller{
 		provisioner,
 		metricsstate.NewController(cluster),
+		deprovisioning.NewController(clock, kubeClient, provisioner, cloudProvider, eventRecorder, cluster),
 		provisioning.NewController(kubeClient, provisioner, eventRecorder),
 		state.NewNodeController(kubeClient, cluster),
 		state.NewPodController(kubeClient, cluster),
 		state.NewProvisionerController(kubeClient, cluster),
-		controller.NewTyped[*v1.Node](kubeClient, node.NewController(clock, kubeClient, cloudProvider, cluster)),
-		termination.NewController(ctx, clock, kubeClient, kubernetesInterface.CoreV1(), eventRecorder, cloudProvider),
+		node.NewController(clock, kubeClient, cloudProvider, cluster),
+		termination.NewController(clock, kubeClient, termination.NewEvictionQueue(ctx, kubernetesInterface.CoreV1(), eventRecorder), eventRecorder, cloudProvider),
 		metricspod.NewController(kubeClient),
 		metricsprovisioner.NewController(kubeClient),
-		controller.NewTyped[*v1alpha5.Provisioner](kubeClient, counter.NewController(kubeClient, cluster)),
-		deprovisioning.NewController(clock, kubeClient, provisioner, cloudProvider, eventRecorder, cluster),
-		controller.NewTyped[*v1.Node](kubeClient, inflightchecks.NewController(clock, kubeClient, eventRecorder, cloudProvider)),
+		counter.NewController(kubeClient, cluster),
+		inflightchecks.NewController(clock, kubeClient, eventRecorder, cloudProvider),
 	}
 }

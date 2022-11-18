@@ -36,6 +36,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
@@ -55,13 +56,13 @@ import (
 var ctx context.Context
 var provisioner *v1alpha5.Provisioner
 var prov *provisioning.Provisioner
-var controller *provisioning.Controller
+var controller corecontroller.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
 var cloudProv *fake.CloudProvider
 var cluster *state.Cluster
-var nodeStateController *state.NodeController
-var podStateController *state.PodController
+var nodeStateController corecontroller.Controller
+var podStateController corecontroller.Controller
 var recorder *test.EventRecorder
 
 func TestScheduling(t *testing.T) {

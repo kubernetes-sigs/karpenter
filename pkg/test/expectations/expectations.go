@@ -40,6 +40,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/test"
 )
 
@@ -175,7 +176,7 @@ func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objects ...cl
 	}
 }
 
-func ExpectProvisioned(ctx context.Context, c client.Client, recorder *test.EventRecorder, controller *provisioning.Controller,
+func ExpectProvisioned(ctx context.Context, c client.Client, recorder *test.EventRecorder, controller corecontroller.Controller,
 	provisioner *provisioning.Provisioner, pods ...*v1.Pod) (result []*v1.Pod) {
 
 	ExpectProvisionedNoBindingWithOffset(1, ctx, c, controller, provisioner, pods...)
@@ -193,11 +194,11 @@ func ExpectProvisioned(ctx context.Context, c client.Client, recorder *test.Even
 	return
 }
 
-func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, controller *provisioning.Controller, provisioner *provisioning.Provisioner, pods ...*v1.Pod) (result []*v1.Pod) {
+func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, controller corecontroller.Controller, provisioner *provisioning.Provisioner, pods ...*v1.Pod) (result []*v1.Pod) {
 	return ExpectProvisionedNoBindingWithOffset(1, ctx, c, controller, provisioner, pods...)
 }
 
-func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c client.Client, controller *provisioning.Controller, provisioner *provisioning.Provisioner, pods ...*v1.Pod) (result []*v1.Pod) {
+func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c client.Client, controller corecontroller.Controller, provisioner *provisioning.Provisioner, pods ...*v1.Pod) (result []*v1.Pod) {
 	// Persist objects
 	for _, pod := range pods {
 		ExpectAppliedWithOffset(offset+1, ctx, c, pod)

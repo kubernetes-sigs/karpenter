@@ -30,6 +30,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/termination"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
 
@@ -38,7 +39,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/apimachinery/pkg/util/sets"
 	. "knative.dev/pkg/logging/testing"
 	"knative.dev/pkg/ptr"
 
@@ -46,7 +46,7 @@ import (
 )
 
 var ctx context.Context
-var controller *termination.Controller
+var controller corecontroller.Controller
 var evictionQueue *termination.EvictionQueue
 var env *test.Environment
 var defaultOwnerRefs = []metav1.OwnerReference{{Kind: "ReplicaSet", APIVersion: "appsv1", Name: "rs", UID: "1234567890"}}
@@ -65,18 +65,7 @@ var _ = BeforeSuite(func() {
 	cloudProvider := fake.NewCloudProvider()
 	eventRecorder := test.NewEventRecorder()
 	evictionQueue = termination.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), eventRecorder)
-	controller = &termination.Controller{
-		KubeClient: env.Client,
-		Terminator: &termination.Terminator{
-			KubeClient:    env.Client,
-			CoreV1Client:  env.KubernetesInterface.CoreV1(),
-			CloudProvider: cloudProvider,
-			EvictionQueue: evictionQueue,
-			Clock:         fakeClock,
-		},
-		Recorder:          eventRecorder,
-		TerminationRecord: sets.NewString(),
-	}
+	controller = termination.NewController(fakeClock, env.Client, evictionQueue, eventRecorder, cloudProvider)
 })
 
 var _ = AfterSuite(func() {

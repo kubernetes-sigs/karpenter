@@ -22,8 +22,10 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	clock "k8s.io/utils/clock/testing"
 	"knative.dev/pkg/ptr"
+	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -61,7 +63,7 @@ var _ = BeforeSuite(func() {
 	ctx = settings.ToContext(ctx, test.Settings())
 	cp := fake.NewCloudProvider()
 	cluster := state.NewCluster(ctx, fakeClock, env.Client, cp)
-	controller = corecontroller.NewTyped[*v1.Node](env.Client, node.NewController(fakeClock, env.Client, cp, cluster))
+	controller = node.NewController(fakeClock, env.Client, cp, cluster)
 })
 
 var _ = AfterSuite(func() {
@@ -366,16 +368,6 @@ var _ = Describe("Controller", func() {
 			n = ExpectNodeExists(ctx, env.Client, n.Name)
 			Expect(n.Finalizers).To(Equal(n.Finalizers))
 		})
-		It("should do nothing if the not owned by a provisioner", func() {
-			n := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
-				Finalizers: []string{"fake.com/finalizer"},
-			}})
-			ExpectApplied(ctx, env.Client, provisioner, n)
-			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(n))
-
-			n = ExpectNodeExists(ctx, env.Client, n.Name)
-			Expect(n.Finalizers).To(Equal(n.Finalizers))
-		})
 		It("should add an owner reference to the node", func() {
 			n := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name},
@@ -390,6 +382,55 @@ var _ = Describe("Controller", func() {
 				UID:                provisioner.UID,
 				BlockOwnerDeletion: ptr.Bool(true),
 			}}))
+		})
+	})
+	Context("Filters", func() {
+		BeforeEach(func() {
+			innerCtx, cancel := context.WithCancel(ctx)
+			DeferCleanup(func() {
+				cancel()
+			})
+			mgr, err := controllerruntime.NewManager(env.Config, controllerruntime.Options{
+				Scheme:             env.Scheme,
+				MetricsBindAddress: "0",
+			})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(controller.Builder(innerCtx, mgr).Complete(controller)).To(Succeed())
+			go func() {
+				defer GinkgoRecover()
+				Expect(mgr.Start(innerCtx)).To(Succeed())
+			}()
+		})
+		It("should do nothing if the not owned by a provisioner", func() {
+			n := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
+				Finalizers: []string{"fake.com/finalizer"},
+			}})
+			ExpectApplied(ctx, env.Client, provisioner, n)
+
+			// Node shouldn't reconcile anything onto it
+			Consistently(func(g Gomega) {
+				g.Expect(env.Client.Get(ctx, types.NamespacedName{Name: n.Name}, &v1.Node{})).To(Succeed())
+				g.Expect(n.Finalizers).To(Equal(n.Finalizers))
+			})
+		})
+		It("should do nothing if deletion timestamp is set", func() {
+			n := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
+				Finalizers: []string{"fake.com/finalizer"},
+			}})
+			ExpectApplied(ctx, env.Client, provisioner, n)
+			Expect(env.Client.Delete(ctx, n)).To(Succeed())
+
+			// Update the node to be provisioned by the provisioner through labels
+			n.Labels = map[string]string{
+				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+			}
+			ExpectApplied(ctx, env.Client, n)
+
+			// Node shouldn't reconcile anything onto it
+			Consistently(func(g Gomega) {
+				g.Expect(env.Client.Get(ctx, types.NamespacedName{Name: n.Name}, &v1.Node{})).To(Succeed())
+				g.Expect(n.Finalizers).To(Equal(n.Finalizers))
+			})
 		})
 	})
 })

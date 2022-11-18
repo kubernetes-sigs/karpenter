@@ -62,20 +62,22 @@ type Issue struct {
 // scanPeriod is how often we inspect and report issues that are found.
 const scanPeriod = 10 * time.Minute
 
-func NewController(clk clock.Clock, kubeclient client.Client, recorder events.Recorder, provider cloudprovider.CloudProvider) *Controller {
-	return &Controller{
+func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Recorder,
+	provider cloudprovider.CloudProvider) corecontroller.Controller {
+
+	return corecontroller.For[*v1.Node](kubeClient, &Controller{
 		clock:       clk,
-		kubeClient:  kubeclient,
+		kubeClient:  kubeClient,
 		recorder:    recorder,
 		lastScanned: cache.New(scanPeriod, 1*time.Minute),
 		checks: []Check{
 			NewFailedInit(clk, provider),
-			NewTermination(kubeclient),
+			NewTermination(kubeClient),
 			NewNodeShape(provider),
-		}}
+		}})
 }
 
-func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (*v1.Node, reconcile.Result, error) {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(controllerName).With("node", node.Name))
 	ctx = injection.WithControllerName(ctx, controllerName)
 
@@ -83,22 +85,22 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Re
 	if lastTime, ok := c.lastScanned.Get(client.ObjectKeyFromObject(node).String()); ok {
 		if lastTime, ok := lastTime.(time.Time); ok {
 			remaining := scanPeriod - c.clock.Since(lastTime)
-			return reconcile.Result{RequeueAfter: remaining}, nil
+			return nil, reconcile.Result{RequeueAfter: remaining}, nil
 		}
 		// the above should always succeed
-		return reconcile.Result{RequeueAfter: scanPeriod}, nil
+		return nil, reconcile.Result{RequeueAfter: scanPeriod}, nil
 	}
 	c.lastScanned.SetDefault(client.ObjectKeyFromObject(node).String(), c.clock.Now())
 
 	provisioner := &v1alpha5.Provisioner{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
 		// provisioner is missing, node should be removed soon
-		return reconcile.Result{}, client.IgnoreNotFound(err)
+		return nil, reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
 	pdbs, err := deprovisioning.NewPDBLimits(ctx, c.kubeClient)
 	if err != nil {
-		return reconcile.Result{}, err
+		return nil, reconcile.Result{}, err
 	}
 	uniqueIssues := map[string]Issue{}
 	for _, check := range c.checks {
@@ -114,11 +116,7 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Re
 		logging.FromContext(ctx).Infof("Inflight check failed for node, %s", iss.message)
 		c.recorder.Publish(events.NodeInflightCheck(iss.node, iss.message))
 	}
-	return reconcile.Result{RequeueAfter: scanPeriod}, nil
-}
-
-func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Result, error) {
-	return c.Reconcile(ctx, node)
+	return nil, reconcile.Result{RequeueAfter: scanPeriod}, nil
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {

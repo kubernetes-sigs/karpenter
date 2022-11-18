@@ -45,31 +45,27 @@ type Controller struct {
 }
 
 // NewController is a constructor
-func NewController(kubeClient client.Client, cluster *state.Cluster) *Controller {
-	return &Controller{
+func NewController(kubeClient client.Client, cluster *state.Cluster) corecontroller.Controller {
+	return corecontroller.For[*v1alpha5.Provisioner](kubeClient, &Controller{
 		kubeClient: kubeClient,
 		cluster:    cluster,
-	}
+	})
 }
 
 // Reconcile a control loop for the resource
-func (c *Controller) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner) (*v1alpha5.Provisioner, reconcile.Result, error) {
 	nodes := v1.NodeList{}
 	if err := c.kubeClient.List(ctx, &nodes, client.MatchingLabels{v1alpha5.ProvisionerNameLabelKey: provisioner.Name}); err != nil {
-		return reconcile.Result{}, err
+		return nil, reconcile.Result{}, err
 	}
 	// Nodes aren't synced yet, so return an error which will cause retry with backoff.
 	if !c.nodesSynced(nodes.Items, provisioner.Name) {
-		return reconcile.Result{RequeueAfter: 250 * time.Millisecond}, nil
+		return nil, reconcile.Result{RequeueAfter: 250 * time.Millisecond}, nil
 	}
 	// Determine resource usage and update provisioner.status.resources
 	resourceCounts := c.resourceCountsFor(provisioner.Name)
 	provisioner.Status.Resources = resourceCounts
-	return reconcile.Result{}, nil
-}
-
-func (c *Controller) Finalize(_ context.Context, _ *v1alpha5.Provisioner) (reconcile.Result, error) {
-	return reconcile.Result{}, nil
+	return provisioner, reconcile.Result{}, nil
 }
 
 func (c *Controller) resourceCountsFor(provisionerName string) v1.ResourceList {

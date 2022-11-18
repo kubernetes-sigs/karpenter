@@ -38,27 +38,26 @@ type ProvisionerController struct {
 	cluster    *Cluster
 }
 
-func NewProvisionerController(kubeClient client.Client, cluster *Cluster) *ProvisionerController {
-	return &ProvisionerController{
+func NewProvisionerController(kubeClient client.Client, cluster *Cluster) corecontroller.Controller {
+	return corecontroller.For[*v1alpha5.Provisioner](kubeClient, &ProvisionerController{
 		kubeClient: kubeClient,
 		cluster:    cluster,
-	}
+	})
 }
 
-func (c *ProvisionerController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+func (c *ProvisionerController) Reconcile(_ context.Context, provisioner *v1alpha5.Provisioner) (*v1alpha5.Provisioner, reconcile.Result, error) {
 	// Something changed in the provisioner so we should re-consider consolidation
 	c.cluster.recordConsolidationChange()
-	return reconcile.Result{}, nil
+	return nil, reconcile.Result{}, nil
 }
 
-func (c *ProvisionerController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return controllerruntime.
+func (c *ProvisionerController) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {
+	return corecontroller.NewTypedBuilderAdapter(controllerruntime.
 		NewControllerManagedBy(m).
 		Named(provisionerControllerName).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
-		WithEventFilter(predicate.Funcs{DeleteFunc: func(event event.DeleteEvent) bool { return false }}).
-		For(&v1alpha5.Provisioner{})
+		WithEventFilter(predicate.Funcs{DeleteFunc: func(event event.DeleteEvent) bool { return false }}))
 }
 
 func (c *ProvisionerController) LivenessProbe(_ *http.Request) error {
