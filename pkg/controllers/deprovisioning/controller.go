@@ -101,7 +101,6 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	result, err := c.ProcessCluster(ctx)
 	switch result {
 	case ResultFailed:
-		logging.FromContext(ctx).Errorf("processing cluster, %w", err)
 		return reconcile.Result{}, fmt.Errorf("processing cluster, %w", err)
 	case ResultRetry:
 		return reconcile.Result{Requeue: true}, nil
