@@ -333,10 +333,10 @@ func (p *Provisioner) launch(ctx context.Context, opts LaunchOptions, node *sche
 		logging.WithLogger(ctx, logging.FromContext(ctx).Named("cloudprovider")),
 		&cloudprovider.NodeRequest{InstanceTypeOptions: node.InstanceTypeOptions, Template: &node.NodeTemplate},
 	)
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", k8sNode.Name))
 	if err != nil {
 		return "", fmt.Errorf("creating cloud provider instance, %w", err)
 	}
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", k8sNode.Name))
 
 	if err := mergo.Merge(k8sNode, node.ToNode()); err != nil {
 		return "", fmt.Errorf("merging cloud provider node, %w", err)
