@@ -31,6 +31,8 @@ import (
 
 const nodeControllerName = "node-state"
 
+var _ corecontroller.TypedControllerWithDeletion[*v1.Node] = (*NodeController)(nil)
+
 // NodeController reconciles nodes for the purpose of maintaining state regarding nodes that is expensive to compute.
 type NodeController struct {
 	kubeClient client.Client
@@ -54,7 +56,7 @@ func (c *NodeController) Reconcile(ctx context.Context, node *v1.Node) (*v1.Node
 	return nil, reconcile.Result{Requeue: true, RequeueAfter: stateRetryPeriod}, nil
 }
 
-func (c *NodeController) OnNotFound(_ context.Context, req reconcile.Request) (reconcile.Result, error) {
+func (c *NodeController) OnDeleted(_ context.Context, req reconcile.Request) (reconcile.Result, error) {
 	// notify cluster state of the node deletion
 	c.cluster.deleteNode(req.Name)
 	return reconcile.Result{}, nil

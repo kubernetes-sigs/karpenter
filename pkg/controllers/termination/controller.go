@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -27,7 +26,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -65,16 +63,16 @@ func init() {
 	crmetrics.Registry.MustRegister(terminationSummary)
 }
 
+var _ corecontroller.TypedControllerWithFinalizer[*v1.Node] = (*Controller)(nil)
+
 // Controller for the resource
 type Controller struct {
-	Terminator        *Terminator
-	KubeClient        client.Client
-	Recorder          events.Recorder
-	mu                sync.Mutex
-	TerminationRecord sets.String
+	Terminator *Terminator
+	KubeClient client.Client
+	Recorder   events.Recorder
 }
 
-// NewController constructs a controller instance
+// NewController constructs a terminationController instance
 func NewController(clk clock.Clock, kubeClient client.Client, evictionQueue *EvictionQueue,
 	recorder events.Recorder, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
 
@@ -86,8 +84,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, evictionQueue *Evi
 			EvictionQueue: evictionQueue,
 			Clock:         clk,
 		},
-		Recorder:          recorder,
-		TerminationRecord: sets.NewString(),
+		Recorder: recorder,
 	})
 }
 
@@ -96,7 +93,7 @@ func (c *Controller) Reconcile(_ context.Context, node *v1.Node) (*v1.Node, reco
 	return node, reconcile.Result{}, nil
 }
 
-func (c *Controller) OnFinalize(ctx context.Context, node *v1.Node) (*v1.Node, reconcile.Result, error) {
+func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (*v1.Node, reconcile.Result, error) {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(controllerName).With("node", node.Name))
 	ctx = injection.WithControllerName(ctx, controllerName)
 
@@ -118,22 +115,13 @@ func (c *Controller) OnFinalize(ctx context.Context, node *v1.Node) (*v1.Node, r
 		return node, reconcile.Result{}, fmt.Errorf("terminating node %s, %w", node.Name, err)
 	}
 	controllerutil.RemoveFinalizer(node, v1alpha5.TerminationFinalizer)
-
-	c.mu.Lock()
-	// 6. Record termination duration (time between deletion timestamp and finalizer removal)
-	if !c.TerminationRecord.Has(client.ObjectKeyFromObject(node).String()) {
-		c.TerminationRecord.Insert(client.ObjectKeyFromObject(node).String())
-		terminationSummary.Observe(time.Since(node.DeletionTimestamp.Time).Seconds())
-	}
-	c.mu.Unlock()
 	return node, reconcile.Result{}, nil
 }
 
-func (c *Controller) OnNotFound(_ context.Context, req reconcile.Request) (reconcile.Result, error) {
-	c.mu.Lock()
-	c.TerminationRecord.Delete(req.String())
-	c.mu.Unlock()
-	return reconcile.Result{}, nil
+func (c *Controller) OnFinalizerRemoved(ctx context.Context, node *v1.Node) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(controllerName).With("node", node.Name))
+	logging.FromContext(ctx).Infof("deleted node")
+	terminationSummary.Observe(time.Since(node.DeletionTimestamp.Time).Seconds())
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {

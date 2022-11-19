@@ -20,6 +20,7 @@ import (
 	"reflect"
 
 	"github.com/samber/lo"
+	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -39,12 +40,17 @@ type TypedController[T client.Object] interface {
 	LivenessProbe(*http.Request) error
 }
 
-type NotFoundHandler[T client.Object] interface {
-	OnNotFound(context.Context, reconcile.Request) (reconcile.Result, error)
+type TypedControllerWithDeletion[T client.Object] interface {
+	TypedController[T]
+
+	OnDeleted(context.Context, reconcile.Request) (reconcile.Result, error) // Called when the object has been deleted
 }
 
-type FinalizerHandler[T client.Object] interface {
-	OnFinalize(context.Context, T) (T, reconcile.Result, error)
+type TypedControllerWithFinalizer[T client.Object] interface {
+	TypedController[T]
+
+	Finalize(context.Context, T) (T, reconcile.Result, error) // Called when the deletion timestamp has been set
+	OnFinalizerRemoved(context.Context, T)                    // Allows a callback for logging when the finalizer is fully removed
 }
 
 type typedControllerDecorator[T client.Object] struct {
@@ -66,8 +72,8 @@ func (t *typedControllerDecorator[T]) Reconcile(ctx context.Context, req reconci
 	// Read
 	if err := t.kubeClient.Get(ctx, req.NamespacedName, obj); err != nil {
 		if errors.IsNotFound(err) {
-			if notFoundHandler, ok := t.typedController.(NotFoundHandler[T]); ok {
-				return notFoundHandler.OnNotFound(ctx, req)
+			if deleteHandler, ok := t.typedController.(TypedControllerWithDeletion[T]); ok {
+				return deleteHandler.OnDeleted(ctx, req)
 			}
 		}
 		return reconcile.Result{}, err
@@ -76,37 +82,25 @@ func (t *typedControllerDecorator[T]) Reconcile(ctx context.Context, req reconci
 	var result reconcile.Result
 	var err error
 
-	finalizingHandler, ok := t.typedController.(FinalizerHandler[T])
+	// Finalize if the controller implements the finalizing interface
+	finalizingHandler, ok := t.typedController.(TypedControllerWithFinalizer[T])
 	if !obj.GetDeletionTimestamp().IsZero() && ok {
-		// Finalize if the controller implements the finalizing interface
-		updated, result, err = finalizingHandler.OnFinalize(ctx, obj.DeepCopyObject().(T))
-		if err != nil {
-			return reconcile.Result{}, err
+		updated, result, err = finalizingHandler.Finalize(ctx, obj.DeepCopyObject().(T))
+		if e := t.patch(ctx, obj, updated); e != nil {
+			return reconcile.Result{}, multierr.Combine(e, err)
 		}
-	} else {
-		// Reconcile
-		updated, result, err = t.typedController.Reconcile(ctx, obj.DeepCopyObject().(T))
 		if err != nil {
-			return reconcile.Result{}, err
+			return result, err
 		}
-	}
-	// If an updated value returns as nil from the Reconcile function, this means we shouldn't update the object
-	if reflect.ValueOf(updated).IsNil() {
+		finalizingHandler.OnFinalizerRemoved(ctx, updated)
 		return result, nil
 	}
-	// Patch Body if changed
-	if !bodyEqual(obj, updated) {
-		if err = t.kubeClient.Patch(ctx, updated, client.MergeFrom(obj)); err != nil {
-			return reconcile.Result{}, err
-		}
+	// Reconcile
+	updated, result, err = t.typedController.Reconcile(ctx, obj.DeepCopyObject().(T))
+	if e := t.patch(ctx, obj, updated); e != nil {
+		return reconcile.Result{}, multierr.Combine(e, err)
 	}
-	// Patch Status if changed
-	if !statusEqual(obj, updated) {
-		if err = t.kubeClient.Status().Patch(ctx, updated, client.MergeFrom(obj)); err != nil {
-			return reconcile.Result{}, err
-		}
-	}
-	return result, nil
+	return result, err
 }
 
 func (t *typedControllerDecorator[T]) Builder(ctx context.Context, mgr manager.Manager) Builder {
@@ -116,6 +110,26 @@ func (t *typedControllerDecorator[T]) Builder(ctx context.Context, mgr manager.M
 
 func (t *typedControllerDecorator[T]) LivenessProbe(req *http.Request) error {
 	return t.typedController.LivenessProbe(req)
+}
+
+func (t *typedControllerDecorator[T]) patch(ctx context.Context, obj, updated client.Object) error {
+	// If an updated value returns as nil from the Reconcile function, this means we shouldn't update the object
+	if reflect.ValueOf(updated).IsNil() {
+		return nil
+	}
+	// Patch Body if changed
+	if !bodyEqual(obj, updated) {
+		if err := t.kubeClient.Patch(ctx, updated, client.MergeFrom(obj)); err != nil {
+			return err
+		}
+	}
+	// Patch Status if changed
+	if !statusEqual(obj, updated) {
+		if err := t.kubeClient.Status().Patch(ctx, updated, client.MergeFrom(obj)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // bodyEqual compares two objects, ignoring their status and determines if they are deeply-equal

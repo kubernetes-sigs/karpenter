@@ -32,7 +32,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	statemetrics "github.com/aws/karpenter-core/pkg/controllers/metrics/state/scraper"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
@@ -50,8 +50,8 @@ var ctx context.Context
 var fakeClock *clock.FakeClock
 var env *test.Environment
 var cluster *state.Cluster
-var nodeController corecontroller.Controller
-var podController corecontroller.Controller
+var nodeController controller.Controller
+var podController controller.Controller
 var cloudProvider *fake.CloudProvider
 var provisioner *v1alpha5.Provisioner
 var nodeScraper *statemetrics.NodeScraper

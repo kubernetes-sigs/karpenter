@@ -34,6 +34,8 @@ import (
 
 const controllerName = "provisioning"
 
+var _ corecontroller.TypedController[*v1.Pod] = (*Controller)(nil)
+
 // Controller for the resource
 type Controller struct {
 	kubeClient  client.Client

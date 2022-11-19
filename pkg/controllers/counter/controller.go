@@ -38,6 +38,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
+var _ corecontroller.TypedController[*v1alpha5.Provisioner] = (*Controller)(nil)
+
 // Controller for the resource
 type Controller struct {
 	kubeClient client.Client

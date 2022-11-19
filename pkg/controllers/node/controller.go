@@ -44,7 +44,9 @@ import (
 
 const controllerName = "node"
 
-// NewController constructs a controller instance
+var _ corecontroller.TypedController[*v1.Node] = (*Controller)(nil)
+
+// NewController constructs a nodeController instance
 func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) corecontroller.Controller {
 	return corecontroller.For[*v1.Node](kubeClient, &Controller{
 		kubeClient:     kubeClient,

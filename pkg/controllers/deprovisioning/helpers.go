@@ -60,7 +60,7 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return true
 	})
 	// We do one final check to ensure that the node that we are attempting to consolidate isn't
-	// already handled for deletion by some other controller. This could happen if the node was markedForDeletion
+	// already handled for deletion by some other deprovisioningController. This could happen if the node was markedForDeletion
 	// between returning the candidateNodes and getting the stateNodes above
 	if candidateNodeIsDeleting {
 		return nil, false, errCandidateNodeDeleting

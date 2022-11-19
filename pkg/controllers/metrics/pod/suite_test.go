@@ -26,13 +26,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/controllers/metrics/pod"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
-var controller corecontroller.Controller
+var podController controller.Controller
 var ctx context.Context
 var env *test.Environment
 
@@ -44,7 +44,7 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme)
-	controller = pod.NewController(env.Client)
+	podController = pod.NewController(env.Client)
 })
 
 var _ = AfterSuite(func() {
@@ -55,7 +55,7 @@ var _ = Describe("Pod Metrics", func() {
 	It("should update the pod state metrics", func() {
 		p := test.Pod()
 		ExpectApplied(ctx, env.Client, p)
-		ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(p))
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
 
 		podState := ExpectMetric("karpenter_pods_state")
 		ExpectMetricLabel(podState, "name", p.GetName())

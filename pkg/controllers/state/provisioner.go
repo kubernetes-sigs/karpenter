@@ -32,6 +32,8 @@ import (
 
 const provisionerControllerName = "provisioner-state"
 
+var _ corecontroller.TypedController[*v1alpha5.Provisioner] = (*ProvisionerController)(nil)
+
 // ProvisionerController reconciles provisioners to re-trigger consolidation on change.
 type ProvisionerController struct {
 	kubeClient client.Client
@@ -45,7 +47,7 @@ func NewProvisionerController(kubeClient client.Client, cluster *Cluster) coreco
 	})
 }
 
-func (c *ProvisionerController) Reconcile(_ context.Context, provisioner *v1alpha5.Provisioner) (*v1alpha5.Provisioner, reconcile.Result, error) {
+func (c *ProvisionerController) Reconcile(_ context.Context, _ *v1alpha5.Provisioner) (*v1alpha5.Provisioner, reconcile.Result, error) {
 	// Something changed in the provisioner so we should re-consider consolidation
 	c.cluster.recordConsolidationChange()
 	return nil, reconcile.Result{}, nil

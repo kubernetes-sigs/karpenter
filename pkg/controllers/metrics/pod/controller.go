@@ -75,6 +75,8 @@ var (
 	)
 )
 
+var _ corecontroller.TypedController[*v1.Pod] = (*Controller)(nil)
+
 // Controller for the resource
 type Controller struct {
 	kubeClient  client.Client
@@ -102,7 +104,7 @@ func labelNames() []string {
 	}
 }
 
-// NewController constructs a controller instance
+// NewController constructs a podController instance
 func NewController(kubeClient client.Client) corecontroller.Controller {
 	return corecontroller.For[*v1.Pod](kubeClient, &Controller{
 		kubeClient:  kubeClient,

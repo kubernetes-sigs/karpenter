@@ -87,6 +87,8 @@ func labelNames() []string {
 	}
 }
 
+var _ corecontroller.TypedController[*v1alpha5.Provisioner] = (*Controller)(nil)
+
 type Controller struct {
 	kubeClient      client.Client
 	labelCollection sync.Map

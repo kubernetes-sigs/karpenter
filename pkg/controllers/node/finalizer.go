@@ -29,7 +29,7 @@ import (
 // Finalizer is a subreconciler that ensures nodes have the termination
 // finalizer. This protects against instances that launch when Karpenter fails
 // to create the node object. In this case, the node will come online without
-// the termination finalizer. This controller will update the node accordingly.
+// the termination finalizer. This nodeController will update the node accordingly.
 type Finalizer struct{}
 
 // Reconcile reconciles the node

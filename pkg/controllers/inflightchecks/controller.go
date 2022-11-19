@@ -40,6 +40,8 @@ import (
 
 const controllerName = "inflightchecks"
 
+var _ corecontroller.TypedController[*v1.Node] = (*Controller)(nil)
+
 type Controller struct {
 	clock       clock.Clock
 	kubeClient  client.Client

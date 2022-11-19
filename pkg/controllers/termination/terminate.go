@@ -87,11 +87,10 @@ func (t *Terminator) drain(ctx context.Context, node *v1.Node) (bool, error) {
 
 // terminate calls cloud provider delete then removes the finalizer to delete the node
 func (t *Terminator) terminate(ctx context.Context, node *v1.Node) error {
-	// 1. Delete the instance associated with node
+	// Delete the instance associated with node
 	if err := t.CloudProvider.Delete(ctx, node); err != nil {
 		return fmt.Errorf("terminating cloudprovider instance, %w", err)
 	}
-	logging.FromContext(ctx).Infof("deleted node")
 	return nil
 }
 
