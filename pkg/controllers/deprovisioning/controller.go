@@ -44,7 +44,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
-// Controller is the deprovisioning deprovisioningController.
+// Controller is the deprovisioning controller.
 type Controller struct {
 	kubeClient              client.Client
 	cluster                 *state.Cluster

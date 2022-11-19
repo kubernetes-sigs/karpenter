@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"reflect"
 	"sync"
 	"time"
 
@@ -49,14 +50,22 @@ const (
 	RequestInterval           = 1 * time.Second
 )
 
+func ExpectExists[T client.Object](ctx context.Context, c client.Client, obj T) T {
+	return ExpectExistsWithOffset(1, ctx, c, obj)
+}
+
+func ExpectExistsWithOffset[T client.Object](offset int, ctx context.Context, c client.Client, obj T) T {
+	resp := reflect.New(reflect.TypeOf(*new(T)).Elem()).Interface().(T)
+	ExpectWithOffset(offset+1, c.Get(ctx, client.ObjectKeyFromObject(obj), resp)).To(Succeed())
+	return resp
+}
+
 func ExpectPodExists(ctx context.Context, c client.Client, name string, namespace string) *v1.Pod {
 	return ExpectPodExistsWithOffset(1, ctx, c, name, namespace)
 }
 
 func ExpectPodExistsWithOffset(offset int, ctx context.Context, c client.Client, name string, namespace string) *v1.Pod {
-	pod := &v1.Pod{}
-	ExpectWithOffset(offset+1, c.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, pod)).To(Succeed())
-	return pod
+	return ExpectExistsWithOffset(offset+1, ctx, c, &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}})
 }
 
 func ExpectNodeExists(ctx context.Context, c client.Client, name string) *v1.Node {
@@ -64,9 +73,7 @@ func ExpectNodeExists(ctx context.Context, c client.Client, name string) *v1.Nod
 }
 
 func ExpectNodeExistsWithOffset(offset int, ctx context.Context, c client.Client, name string) *v1.Node {
-	node := &v1.Node{}
-	ExpectWithOffset(offset+1, c.Get(ctx, client.ObjectKey{Name: name}, node)).To(Succeed())
-	return node
+	return ExpectExistsWithOffset(offset+1, ctx, c, &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}})
 }
 
 func ExpectNotFound(ctx context.Context, c client.Client, objects ...client.Object) {

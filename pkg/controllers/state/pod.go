@@ -34,7 +34,6 @@ var stateRetryPeriod = 1 * time.Minute
 const podControllerName = "pod-state"
 
 var _ corecontroller.TypedControllerWithDeletion[*v1.Node] = (*NodeController)(nil)
-var _ corecontroller.TypedControllerWithHealthCheck[*v1.Node] = (*NodeController)(nil)
 
 // PodController reconciles pods for the purpose of maintaining state regarding pods that is expensive to compute.
 type PodController struct {
@@ -57,13 +56,12 @@ func (c *PodController) Reconcile(ctx context.Context, pod *v1.Pod) (*v1.Pod, re
 	return nil, reconcile.Result{Requeue: true, RequeueAfter: stateRetryPeriod}, nil
 }
 
-func (c *PodController) OnDeleted(_ context.Context, req reconcile.Request) (reconcile.Result, error) {
+func (c *PodController) OnDeleted(_ context.Context, req reconcile.Request) {
 	c.cluster.deletePod(req.NamespacedName)
-	return reconcile.Result{}, nil
 }
 
 func (c *PodController) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {
-	return corecontroller.NewTypedBuilderAdapter(controllerruntime.
+	return corecontroller.NewTypedBuilderControllerRuntimeAdapter(controllerruntime.
 		NewControllerManagedBy(m).
 		Named(podControllerName).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))

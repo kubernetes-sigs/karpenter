@@ -58,17 +58,17 @@ func (t *Terminator) cordon(ctx context.Context, node *v1.Node) *v1.Node {
 
 // drain evicts pods from the node and returns true when all pods are evicted
 // https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
-func (t *Terminator) drain(ctx context.Context, node *v1.Node) (bool, error) {
+func (t *Terminator) drain(ctx context.Context, node *v1.Node) error {
 	// Get evictable pods
 	pods, err := t.getPods(ctx, node)
 	if err != nil {
-		return false, fmt.Errorf("listing pods for node, %w", err)
+		return fmt.Errorf("listing pods for node, %w", err)
 	}
 	var podsToEvict []*v1.Pod
 	// Skip node due to pods that are not able to be evicted
 	for _, p := range pods {
 		if podutil.HasDoNotEvict(p) {
-			return false, NodeDrainErr(fmt.Errorf("pod %s/%s has do-not-evict annotation", p.Namespace, p.Name))
+			return NodeDrainErr(fmt.Errorf("pod %s/%s has do-not-evict annotation", p.Namespace, p.Name))
 		}
 		// Ignore if unschedulable is tolerated, since they will reschedule
 		if podutil.ToleratesUnschedulableTaint(p) {
@@ -82,7 +82,7 @@ func (t *Terminator) drain(ctx context.Context, node *v1.Node) (bool, error) {
 	}
 	// Enqueue for eviction
 	t.evict(podsToEvict)
-	return len(podsToEvict) == 0, nil
+	return lo.Ternary(len(podsToEvict) > 0, NodeDrainErr(fmt.Errorf("%d pods are waiting to be evicted", len(podsToEvict))), nil)
 }
 
 // terminate calls cloud provider delete then removes the finalizer to delete the node

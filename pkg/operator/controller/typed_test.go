@@ -1,0 +1,241 @@
+/*
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package controller_test
+
+import (
+	"context"
+
+	"github.com/samber/lo"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/test"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	. "github.com/aws/karpenter-core/pkg/test/expectations"
+)
+
+var _ = Describe("Typed", func() {
+	AfterEach(func() {
+		ExpectCleanedUp(ctx, env.Client)
+	})
+
+	It("should pass in expected node into reconcile", func() {
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: "default",
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, node)
+		fakeController := &FakeTypedController[*v1.Node]{
+			ReconcileAssertions: []TypedReconcileAssertion[*v1.Node]{
+				func(ctx context.Context, n *v1.Node) {
+					Expect(n.Name).To(Equal(node.Name))
+					Expect(n.Labels).To(HaveKeyWithValue(v1alpha5.ProvisionerNameLabelKey, "default"))
+				},
+			},
+		}
+		typedController := controller.For[*v1.Node](env.Client, fakeController)
+		ExpectReconcileSucceeded(ctx, typedController, client.ObjectKeyFromObject(node))
+	})
+	It("should modify the node when updated in the reconcile", func() {
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: "default",
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, node)
+		fakeController := &FakeTypedController[*v1.Node]{
+			ReconcileModifiers: []TypedReconcileModifier[*v1.Node]{
+				func(ctx context.Context, n *v1.Node) *v1.Node {
+					n.Labels = lo.Assign(n.Labels, map[string]string{
+						"custom-key": "custom-value",
+					})
+					return n
+				},
+			},
+		}
+		typedController := controller.For[*v1.Node](env.Client, fakeController)
+		ExpectReconcileSucceeded(ctx, typedController, client.ObjectKeyFromObject(node))
+		node = ExpectNodeExists(ctx, env.Client, node.Name)
+		Expect(node.Labels).To(HaveKeyWithValue("custom-key", "custom-value"))
+	})
+	It("should remove the finalizer when finalizing", func() {
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: "default",
+				},
+				Finalizers: []string{
+					v1alpha5.TestingGroup + "/finalizer",
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, node)
+		Expect(env.Client.Delete(ctx, node)).To(Succeed())
+		fakeController := &FakeTypedController[*v1.Node]{
+			FinalizerKey: v1alpha5.TestingGroup + "/finalizer",
+		}
+		typedController := controller.For[*v1.Node](env.Client, fakeController)
+		ExpectExists(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, typedController, client.ObjectKeyFromObject(node))
+		ExpectNotFound(ctx, env.Client, node)
+	})
+	It("should call the OnFinalize func when object with finalizer is deleting", func() {
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: "default",
+				},
+				Finalizers: []string{
+					v1alpha5.TestingGroup + "/finalizer",
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, node)
+		Expect(env.Client.Delete(ctx, node)).To(Succeed())
+
+		called := false
+		fakeController := &FakeTypedController[*v1.Node]{
+			FinalizerKey: v1alpha5.TestingGroup + "/finalizer",
+			OnFinalizeAssertions: []TypedReconcileAssertion[*v1.Node]{
+				func(ctx context.Context, n *v1.Node) {
+					called = true
+				},
+			},
+		}
+		typedController := controller.For[*v1.Node](env.Client, fakeController)
+		ExpectReconcileSucceeded(ctx, typedController, client.ObjectKeyFromObject(node))
+		Expect(called).To(BeTrue())
+	})
+	It("should call the OnFinalizerRemoved func on finalizer completion", func() {
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: "default",
+				},
+				Finalizers: []string{
+					v1alpha5.TestingGroup + "/finalizer",
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, node)
+		Expect(env.Client.Delete(ctx, node)).To(Succeed())
+
+		called := false
+		fakeController := &FakeTypedController[*v1.Node]{
+			FinalizerKey: v1alpha5.TestingGroup + "/finalizer",
+			OnFinalizerRemovedAssertion: []TypedReconcileAssertion[*v1.Node]{
+				func(ctx context.Context, n *v1.Node) {
+					called = true
+				},
+			},
+		}
+		typedController := controller.For[*v1.Node](env.Client, fakeController)
+		ExpectReconcileSucceeded(ctx, typedController, client.ObjectKeyFromObject(node))
+		Expect(called).To(BeTrue())
+	})
+	It("should call the OnDeleted func on deletion", func() {
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: "default",
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, node)
+		Expect(env.Client.Delete(ctx, node)).To(Succeed())
+
+		called := false
+		fakeController := &FakeTypedController[*v1.Node]{
+			FinalizerKey: v1alpha5.TestingGroup + "/finalizer",
+			OnDeletedAssertion: []func(context.Context, reconcile.Request){
+				func(ctx context.Context, req reconcile.Request) {
+					called = true
+				},
+			},
+		}
+		typedController := controller.For[*v1.Node](env.Client, fakeController)
+		ExpectReconcileSucceeded(ctx, typedController, client.ObjectKeyFromObject(node))
+		Expect(called).To(BeTrue())
+	})
+})
+
+type TypedReconcileAssertion[T client.Object] func(context.Context, T)
+type TypedReconcileModifier[T client.Object] func(context.Context, T) T
+
+type FakeTypedController[T client.Object] struct {
+	ReconcileAssertions []TypedReconcileAssertion[T]
+	ReconcileModifiers  []TypedReconcileModifier[T]
+
+	FinalizerKey         string
+	OnFinalizeAssertions []TypedReconcileAssertion[T]
+	OnFinalizeModifiers  []TypedReconcileModifier[T]
+
+	OnFinalizerRemovedAssertion []TypedReconcileAssertion[T]
+	OnDeletedAssertion          []func(context.Context, reconcile.Request)
+}
+
+func (c *FakeTypedController[T]) Reconcile(ctx context.Context, obj T) (T, reconcile.Result, error) {
+	for _, elem := range c.ReconcileAssertions {
+		elem(ctx, obj)
+	}
+	obj = lo.Reduce(c.ReconcileModifiers, func(t T, f TypedReconcileModifier[T], _ int) T {
+		return f(ctx, t.DeepCopyObject().(T))
+	}, obj)
+	return obj, reconcile.Result{}, nil
+}
+
+func (c *FakeTypedController[T]) Finalizer() string {
+	return c.FinalizerKey
+}
+
+func (c *FakeTypedController[T]) OnFinalize(ctx context.Context, obj T) (T, reconcile.Result, error) {
+	for _, elem := range c.OnFinalizeAssertions {
+		elem(ctx, obj)
+	}
+	obj = lo.Reduce(c.OnFinalizeModifiers, func(t T, f TypedReconcileModifier[T], _ int) T {
+		return f(ctx, t.DeepCopyObject().(T))
+	}, obj)
+	return obj, reconcile.Result{}, nil
+}
+
+func (c *FakeTypedController[T]) OnFinalizeDone(ctx context.Context, obj T) {
+	for _, elem := range c.OnFinalizerRemovedAssertion {
+		elem(ctx, obj)
+	}
+}
+
+func (c *FakeTypedController[T]) OnDeleted(ctx context.Context, req reconcile.Request) {
+	for _, elem := range c.OnDeletedAssertion {
+		elem(ctx, req)
+	}
+}
+
+func (c *FakeTypedController[T]) Builder(_ context.Context, _ manager.Manager) controller.TypedBuilder {
+	return nil
+}

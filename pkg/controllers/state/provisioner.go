@@ -53,7 +53,7 @@ func (c *ProvisionerController) Reconcile(_ context.Context, _ *v1alpha5.Provisi
 }
 
 func (c *ProvisionerController) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {
-	return corecontroller.NewTypedBuilderAdapter(controllerruntime.
+	return corecontroller.NewTypedBuilderControllerRuntimeAdapter(controllerruntime.
 		NewControllerManagedBy(m).
 		Named(provisionerControllerName).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).

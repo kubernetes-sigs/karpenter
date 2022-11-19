@@ -16,7 +16,6 @@ package controller
 
 import (
 	"context"
-	"net/http"
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -29,13 +28,6 @@ type Controller interface {
 	// Builder returns a Builder registered with the manager that can be wrapped
 	// with other Builders and completed later to complete registration to the manager
 	Builder(context.Context, manager.Manager) Builder
-}
-
-// HealthCheck defines a controller that contains a custom LivenessProbe
-type HealthCheck interface {
-	Controller
-
-	LivenessProbe(req *http.Request) error
 }
 
 // Builder is a struct, that when complete, registers the passed reconciler with the manager stored

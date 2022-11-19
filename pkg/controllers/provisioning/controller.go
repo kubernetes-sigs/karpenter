@@ -59,7 +59,7 @@ func (c *Controller) Reconcile(_ context.Context, p *v1.Pod) (*v1.Pod, reconcile
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {
-	return corecontroller.NewTypedBuilderAdapter(controllerruntime.
+	return corecontroller.NewTypedBuilderControllerRuntimeAdapter(controllerruntime.
 		NewControllerManagedBy(m).
 		Named(controllerName).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).

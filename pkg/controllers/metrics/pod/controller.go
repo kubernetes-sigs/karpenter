@@ -146,7 +146,7 @@ func (c *Controller) record(ctx context.Context, pod *v1.Pod) {
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {
-	return corecontroller.NewTypedBuilderAdapter(controllerruntime.
+	return corecontroller.NewTypedBuilderControllerRuntimeAdapter(controllerruntime.
 		NewControllerManagedBy(m).
 		Named("podmetrics"))
 }

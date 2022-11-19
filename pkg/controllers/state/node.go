@@ -16,7 +16,6 @@ package state
 
 import (
 	"context"
-	"net/http"
 
 	v1 "k8s.io/api/core/v1"
 	"knative.dev/pkg/logging"
@@ -32,7 +31,6 @@ import (
 const nodeControllerName = "node-state"
 
 var _ corecontroller.TypedControllerWithDeletion[*v1.Node] = (*NodeController)(nil)
-var _ corecontroller.TypedControllerWithHealthCheck[*v1.Node] = (*NodeController)(nil)
 
 // NodeController reconciles nodes for the purpose of maintaining state regarding nodes that is expensive to compute.
 type NodeController struct {
@@ -57,19 +55,13 @@ func (c *NodeController) Reconcile(ctx context.Context, node *v1.Node) (*v1.Node
 	return nil, reconcile.Result{Requeue: true, RequeueAfter: stateRetryPeriod}, nil
 }
 
-func (c *NodeController) OnDeleted(_ context.Context, req reconcile.Request) (reconcile.Result, error) {
+func (c *NodeController) OnDeleted(_ context.Context, req reconcile.Request) {
 	// notify cluster state of the node deletion
 	c.cluster.deleteNode(req.Name)
-	return reconcile.Result{}, nil
-}
-
-func (c *NodeController) LivenessProbe(req *http.Request) error {
-	// node state controller can't really fail, but we use it to check on the cluster state
-	return c.cluster.LivenessProbe(req)
 }
 
 func (c *NodeController) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {
-	return corecontroller.NewTypedBuilderAdapter(controllerruntime.
+	return corecontroller.NewTypedBuilderControllerRuntimeAdapter(controllerruntime.
 		NewControllerManagedBy(m).
 		Named(nodeControllerName).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))

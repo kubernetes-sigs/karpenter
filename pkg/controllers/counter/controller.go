@@ -93,7 +93,7 @@ func (c *Controller) resourceCountsFor(provisionerName string) v1.ResourceList {
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {
-	return corecontroller.NewTypedBuilderAdapter(controllerruntime.
+	return corecontroller.NewTypedBuilderControllerRuntimeAdapter(controllerruntime.
 		NewControllerManagedBy(m).
 		Named("counter").
 		Watches(

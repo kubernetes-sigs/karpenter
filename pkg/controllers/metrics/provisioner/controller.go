@@ -112,7 +112,7 @@ func (c *Controller) Reconcile(ctx context.Context, provisioner *v1alpha5.Provis
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {
-	return corecontroller.NewTypedBuilderAdapter(controllerruntime.
+	return corecontroller.NewTypedBuilderControllerRuntimeAdapter(controllerruntime.
 		NewControllerManagedBy(m).
 		Named("provisionermetrics"))
 }

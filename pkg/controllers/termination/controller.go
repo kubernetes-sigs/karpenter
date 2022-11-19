@@ -20,12 +20,10 @@ import (
 	"time"
 
 	"golang.org/x/time/rate"
-	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/utils/clock"
+	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -92,49 +90,51 @@ func (c *Controller) Reconcile(_ context.Context, node *v1.Node) (*v1.Node, reco
 	return node, reconcile.Result{}, nil
 }
 
-func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (*v1.Node, reconcile.Result, error) {
+func (c *Controller) Finalizer() string {
+	return v1alpha5.TerminationFinalizer
+}
+
+func (c *Controller) OnFinalize(ctx context.Context, node *v1.Node) (*v1.Node, reconcile.Result, error) {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(controllerName).With("node", node.Name))
 	ctx = injection.WithControllerName(ctx, controllerName)
 
 	// 1. Cordon node
 	node = c.Terminator.cordon(ctx, node)
 	// 2. Drain node
-	drained, err := c.Terminator.drain(ctx, node)
-	if err != nil {
-		if !IsNodeDrainErr(err) {
-			return node, reconcile.Result{}, err
+	if err := c.Terminator.drain(ctx, node); err != nil {
+		if IsNodeDrainErr(err) {
+			c.Recorder.Publish(events.NodeFailedToDrain(node, err))
+			return node, reconcile.Result{Requeue: true}, nil
 		}
-		c.Recorder.Publish(events.NodeFailedToDrain(node, err))
-	}
-	if !drained {
-		return node, reconcile.Result{Requeue: true}, nil
+		return node, reconcile.Result{}, nil
 	}
 	// 3. If fully drained, terminate the node
-	if err = c.Terminator.terminate(ctx, node); err != nil {
+	if err := c.Terminator.terminate(ctx, node); err != nil {
 		return node, reconcile.Result{}, fmt.Errorf("terminating node %s, %w", node.Name, err)
 	}
-	controllerutil.RemoveFinalizer(node, v1alpha5.TerminationFinalizer)
 	return node, reconcile.Result{}, nil
 }
 
-func (c *Controller) OnFinalizerRemoved(ctx context.Context, node *v1.Node) {
+func (c *Controller) OnFinalizeDone(ctx context.Context, node *v1.Node) {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(controllerName).With("node", node.Name))
 	logging.FromContext(ctx).Infof("deleted node")
 	terminationSummary.Observe(time.Since(node.DeletionTimestamp.Time).Seconds())
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {
-	return corecontroller.NewTypedBuilderAdapter(controllerruntime.
-		NewControllerManagedBy(m).
-		Named(controllerName).
-		WithOptions(
-			controller.Options{
-				RateLimiter: workqueue.NewMaxOfRateLimiter(
-					workqueue.NewItemExponentialFailureRateLimiter(100*time.Millisecond, 10*time.Second),
-					// 10 qps, 100 bucket size
-					&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
-				),
-				MaxConcurrentReconciles: 10,
-			},
-		))
+	return corecontroller.NewTypedBuilderControllerRuntimeAdapter(
+		controllerruntime.
+			NewControllerManagedBy(m).
+			Named(controllerName).
+			WithOptions(
+				controller.Options{
+					RateLimiter: workqueue.NewMaxOfRateLimiter(
+						workqueue.NewItemExponentialFailureRateLimiter(100*time.Millisecond, 10*time.Second),
+						// 10 qps, 100 bucket size
+						&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
+					),
+					MaxConcurrentReconciles: 10,
+				},
+			),
+	)
 }

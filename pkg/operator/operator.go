@@ -146,9 +146,6 @@ func (o *Operator) WithControllers(ctx context.Context, controllers ...corecontr
 		c = corecontroller.InjectSettings(c, o.SettingsStore)
 
 		lo.Must0(c.Builder(ctx, o.Manager).Complete(c), "failed to register controller")
-		if healthCheck, ok := c.(corecontroller.HealthCheck); ok {
-			lo.Must0(o.AddHealthzCheck(fmt.Sprintf("%T", c), healthCheck.LivenessProbe), "failed to setup liveness probe")
-		}
 	}
 	lo.Must0(o.AddHealthzCheck("healthz", healthz.Ping), "failed to setup liveness probe")
 	lo.Must0(o.AddReadyzCheck("readyz", healthz.Ping), "failed to setup readiness probe")

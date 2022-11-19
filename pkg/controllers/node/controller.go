@@ -99,7 +99,7 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 		}}
 	})
 
-	return corecontroller.NewTypedBuilderAdapter(controllerruntime.
+	return corecontroller.NewTypedBuilderControllerRuntimeAdapter(controllerruntime.
 		NewControllerManagedBy(m).
 		Named(controllerName).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
