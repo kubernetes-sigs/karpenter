@@ -16,7 +16,6 @@ package controller_test
 
 import (
 	"context"
-	"net/http"
 	"testing"
 	"time"
 
@@ -156,9 +155,5 @@ func (c *FakeController) Reconcile(ctx context.Context, req reconcile.Request) (
 }
 
 func (c *FakeController) Builder(_ context.Context, _ manager.Manager) controller.Builder {
-	return nil
-}
-
-func (c *FakeController) LivenessProbe(_ *http.Request) error {
 	return nil
 }

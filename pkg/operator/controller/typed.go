@@ -24,10 +24,37 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
+
+type TypedBuilder interface {
+	Builder
+
+	// For updates the builder to watch the client.Object passed in
+	For(client.Object) TypedBuilder
+}
+
+type TypedBuilderAdapter struct {
+	builder *controllerruntime.Builder
+}
+
+func NewTypedBuilderAdapter(builder *controllerruntime.Builder) *TypedBuilderAdapter {
+	return &TypedBuilderAdapter{
+		builder: builder,
+	}
+}
+
+func (t *TypedBuilderAdapter) For(obj client.Object) TypedBuilder {
+	t.builder = t.builder.For(obj)
+	return t
+}
+
+func (t *TypedBuilderAdapter) Complete(r reconcile.Reconciler) error {
+	return t.builder.Complete(r)
+}
 
 type TypedReconciler[T client.Object] interface {
 	Reconcile(context.Context, T) (T, reconcile.Result, error)
@@ -37,7 +64,12 @@ type TypedController[T client.Object] interface {
 	TypedReconciler[T]
 
 	Builder(context.Context, manager.Manager) TypedBuilder
-	LivenessProbe(*http.Request) error
+}
+
+type TypedControllerWithHealthCheck[T client.Object] interface {
+	TypedController[T]
+
+	LivenessProbe(req *http.Request) error
 }
 
 type TypedControllerWithDeletion[T client.Object] interface {
@@ -92,6 +124,7 @@ func (t *typedControllerDecorator[T]) Reconcile(ctx context.Context, req reconci
 		if err != nil {
 			return result, err
 		}
+		// Finalizing has succeeded with no error, so we consider the finalization process completed
 		finalizingHandler.OnFinalizerRemoved(ctx, updated)
 		return result, nil
 	}
@@ -109,7 +142,10 @@ func (t *typedControllerDecorator[T]) Builder(ctx context.Context, mgr manager.M
 }
 
 func (t *typedControllerDecorator[T]) LivenessProbe(req *http.Request) error {
-	return t.typedController.LivenessProbe(req)
+	if healthCheck, ok := t.typedController.(TypedControllerWithHealthCheck[T]); ok {
+		return healthCheck.LivenessProbe(req)
+	}
+	return nil
 }
 
 func (t *typedControllerDecorator[T]) patch(ctx context.Context, obj, updated client.Object) error {

@@ -16,7 +16,6 @@ package counter
 
 import (
 	"context"
-	"net/http"
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -107,10 +106,6 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontrolle
 			}),
 		).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))
-}
-
-func (c *Controller) LivenessProbe(_ *http.Request) error {
-	return nil
 }
 
 // nodesSynced returns true if the cluster state is synced with the current list cache state with respect to the nodes

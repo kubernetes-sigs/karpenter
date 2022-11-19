@@ -17,7 +17,6 @@ package deprovisioning
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"sync"
 	"time"
 
@@ -97,11 +96,7 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) controller.Bu
 		Named("deprovisioning")
 }
 
-func (c *Controller) LivenessProbe(_ *http.Request) error {
-	return nil
-}
-
-func (c *Controller) Reconcile(ctx context.Context, r reconcile.Request) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
 	// capture the state of the cluster before we do any analysis
 	currentState := c.cluster.ClusterConsolidationState()
 	result, err := c.ProcessCluster(ctx)

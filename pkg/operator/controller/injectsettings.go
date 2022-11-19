@@ -49,5 +49,8 @@ func (sd *injectSettingsDecorator) Builder(ctx context.Context, mgr manager.Mana
 }
 
 func (sd *injectSettingsDecorator) LivenessProbe(req *http.Request) error {
-	return sd.controller.LivenessProbe(req)
+	if healthCheck, ok := sd.controller.(HealthCheck); ok {
+		return healthCheck.LivenessProbe(req)
+	}
+	return nil
 }

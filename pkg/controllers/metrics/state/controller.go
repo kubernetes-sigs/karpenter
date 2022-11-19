@@ -16,7 +16,6 @@ package metrics
 
 import (
 	"context"
-	"net/http"
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -44,10 +43,6 @@ func NewController(cluster *state.Cluster) *Controller {
 func (c *Controller) Builder(_ context.Context, mgr manager.Manager) corecontroller.Builder {
 	return corecontroller.NewSingletonManagedBy(mgr).
 		Named("metric_scraper")
-}
-
-func (c *Controller) LivenessProbe(_ *http.Request) error {
-	return nil
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {

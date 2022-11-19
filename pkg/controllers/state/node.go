@@ -32,6 +32,7 @@ import (
 const nodeControllerName = "node-state"
 
 var _ corecontroller.TypedControllerWithDeletion[*v1.Node] = (*NodeController)(nil)
+var _ corecontroller.TypedControllerWithHealthCheck[*v1.Node] = (*NodeController)(nil)
 
 // NodeController reconciles nodes for the purpose of maintaining state regarding nodes that is expensive to compute.
 type NodeController struct {

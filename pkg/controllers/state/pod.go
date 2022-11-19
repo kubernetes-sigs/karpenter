@@ -16,7 +16,6 @@ package state
 
 import (
 	"context"
-	"net/http"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -35,6 +34,7 @@ var stateRetryPeriod = 1 * time.Minute
 const podControllerName = "pod-state"
 
 var _ corecontroller.TypedControllerWithDeletion[*v1.Node] = (*NodeController)(nil)
+var _ corecontroller.TypedControllerWithHealthCheck[*v1.Node] = (*NodeController)(nil)
 
 // PodController reconciles pods for the purpose of maintaining state regarding pods that is expensive to compute.
 type PodController struct {
@@ -67,8 +67,4 @@ func (c *PodController) Builder(_ context.Context, m manager.Manager) corecontro
 		NewControllerManagedBy(m).
 		Named(podControllerName).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))
-}
-
-func (c *PodController) LivenessProbe(_ *http.Request) error {
-	return nil
 }

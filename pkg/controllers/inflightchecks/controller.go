@@ -16,7 +16,6 @@ package inflightchecks
 
 import (
 	"context"
-	"net/http"
 	"time"
 
 	"github.com/patrickmn/go-cache"
@@ -126,8 +125,4 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontrolle
 		NewControllerManagedBy(m).
 		Named(controllerName).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))
-}
-
-func (c *Controller) LivenessProbe(_ *http.Request) error {
-	return nil
 }

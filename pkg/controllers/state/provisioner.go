@@ -16,7 +16,6 @@ package state
 
 import (
 	"context"
-	"net/http"
 
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -60,8 +59,4 @@ func (c *ProvisionerController) Builder(_ context.Context, m manager.Manager) co
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		WithEventFilter(predicate.Funcs{DeleteFunc: func(event event.DeleteEvent) bool { return false }}))
-}
-
-func (c *ProvisionerController) LivenessProbe(_ *http.Request) error {
-	return nil
 }

@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"net/http"
 	"sort"
 	"time"
 
@@ -121,10 +120,6 @@ func (p *Provisioner) Builder(_ context.Context, mgr manager.Manager) corecontro
 		WithOptions(corecontroller.Options{
 			DisableWaitOnError: true,
 		})
-}
-
-func (p *Provisioner) LivenessProbe(_ *http.Request) error {
-	return nil
 }
 
 func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {

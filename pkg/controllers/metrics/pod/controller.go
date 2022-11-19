@@ -17,7 +17,6 @@ package pod
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strings"
 	"sync"
 
@@ -195,8 +194,4 @@ func (c *Controller) labels(ctx context.Context, pod *v1.Pod) prometheus.Labels 
 		}
 	}
 	return metricLabels
-}
-
-func (c *Controller) LivenessProbe(_ *http.Request) error {
-	return nil
 }

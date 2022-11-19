@@ -17,7 +17,6 @@ package termination
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -138,8 +137,4 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontrolle
 				MaxConcurrentReconciles: 10,
 			},
 		))
-}
-
-func (c *Controller) LivenessProbe(_ *http.Request) error {
-	return nil
 }

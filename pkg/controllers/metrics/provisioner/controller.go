@@ -17,7 +17,6 @@ package provisioner
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -187,9 +186,5 @@ func (c *Controller) set(resourceList v1.ResourceList, provisioner *v1alpha5.Pro
 			gauge.Set(float64(quantity.Value()))
 		}
 	}
-	return nil
-}
-
-func (c *Controller) LivenessProbe(_ *http.Request) error {
 	return nil
 }

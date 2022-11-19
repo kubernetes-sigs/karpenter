@@ -16,7 +16,6 @@ package provisioning
 
 import (
 	"context"
-	"net/http"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -68,8 +67,4 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontrolle
 			// Ensure the pod can be provisioned
 			return pod.IsProvisionable(obj.(*v1.Pod))
 		})))
-}
-
-func (c *Controller) LivenessProbe(_ *http.Request) error {
-	return nil
 }

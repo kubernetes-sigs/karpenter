@@ -16,7 +16,6 @@ package node
 
 import (
 	"context"
-	"net/http"
 
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
@@ -137,8 +136,4 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
 			return obj.GetDeletionTimestamp().IsZero()
 		})))
-}
-
-func (c *Controller) LivenessProbe(_ *http.Request) error {
-	return nil
 }
