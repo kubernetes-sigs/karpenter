@@ -70,7 +70,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...Candidate
 	candidates = e.SortCandidates(candidates)
 	pdbs, err := NewPDBLimits(ctx, e.kubeClient)
 	if err != nil {
-		return Command{action: actionFailed}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
+		return Command{}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
 	for _, candidate := range candidates {
 		// is this a node that we can terminate?  This check is meant to be fast so we can save the expense of simulated
@@ -86,7 +86,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...Candidate
 			if errors.Is(err, errCandidateNodeDeleting) {
 				continue
 			}
-			return Command{action: actionFailed}, err
+			return Command{}, err
 		}
 		// Log when all pods can't schedule, as the command will get executed immediately.
 		if !allPodsScheduled {

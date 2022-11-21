@@ -48,7 +48,7 @@ func NewEmptiness(clk clock.Clock, kubeClient client.Client, cluster *state.Clus
 	}
 }
 
-// shouldDeprovision is a predicate used to filter deprovisionable nodes
+// ShouldDeprovision is a predicate used to filter deprovisionable nodes
 func (e *Emptiness) ShouldDeprovision(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, nodePods []*v1.Pod) bool {
 	if provisioner == nil || provisioner.Spec.TTLSecondsAfterEmpty == nil || len(nodePods) != 0 {
 		return false

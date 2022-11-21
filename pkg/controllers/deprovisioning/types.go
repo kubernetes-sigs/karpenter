@@ -62,34 +62,29 @@ type Deprovisioner interface {
 type action byte
 
 const (
-	actionUnknown action = iota
-	actionRetry
+	actionFailed action = iota
 	actionDelete
 	actionReplace
+	actionRetry
 	actionDoNothing
-	actionFailed
 )
 
 func (a action) String() string {
 	switch a {
-	// Deprovisioning action is unknown: should never happen
-	case actionUnknown:
-		return "unknown"
-	// Deprovisioning validation failed, so retry
-	case actionRetry:
-		return "retry"
 	// Deprovisioning action with no replacement nodes
 	case actionDelete:
 		return "delete"
 	// Deprovisioning action with replacement nodes
 	case actionReplace:
 		return "replace"
-	// Deprovisioning action not needed
-	case actionDoNothing:
-		return "no-action"
+	// Deprovisioning failed for a retryable reason
+	case actionRetry:
+		return "retry"
 	// Deprovisioning computation unsuccessful
 	case actionFailed:
 		return "failed"
+	case actionDoNothing:
+		return "do nothing"
 	default:
 		return fmt.Sprintf("unknown (%d)", a)
 	}
