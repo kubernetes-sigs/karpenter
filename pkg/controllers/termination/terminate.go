@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"k8s.io/utils/clock"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	v1 "k8s.io/api/core/v1"
 	"knative.dev/pkg/logging"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/samber/lo"
 
+	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	podutil "github.com/aws/karpenter-core/pkg/utils/pod"
 )
@@ -47,13 +49,17 @@ func IsNodeDrainErr(err error) bool {
 }
 
 // cordon cordons a node
-func (t *Terminator) cordon(ctx context.Context, node *v1.Node) *v1.Node {
+func (t *Terminator) cordon(ctx context.Context, node *v1.Node) error {
+	mergeFrom := client.MergeFrom(node.DeepCopy())
 	node.Spec.Unschedulable = true
 	node.Labels = lo.Assign(node.Labels, map[string]string{
 		v1.LabelNodeExcludeBalancers: "karpenter",
 	})
+	if err := t.KubeClient.Patch(ctx, node, mergeFrom); err != nil {
+		return fmt.Errorf("patching node labels, %w", err)
+	}
 	logging.FromContext(ctx).Infof("cordoned node")
-	return node
+	return nil
 }
 
 // drain evicts pods from the node and returns true when all pods are evicted
@@ -91,6 +97,12 @@ func (t *Terminator) terminate(ctx context.Context, node *v1.Node) error {
 	if err := t.CloudProvider.Delete(ctx, node); err != nil {
 		return fmt.Errorf("terminating cloudprovider instance, %w", err)
 	}
+	mergeFrom := client.MergeFrom(node.DeepCopy())
+	controllerutil.RemoveFinalizer(node, v1alpha5.TerminationFinalizer)
+	if err := t.KubeClient.Patch(ctx, node, mergeFrom); err != nil {
+		return fmt.Errorf("removing node finalizer, %w", err)
+	}
+	logging.FromContext(ctx).Infof("deleted node")
 	return nil
 }
 

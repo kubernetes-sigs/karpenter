@@ -52,10 +52,10 @@ func NewController(kubeClient client.Client, provisioner *Provisioner, recorder 
 }
 
 // Reconcile the resource
-func (c *Controller) Reconcile(_ context.Context, p *v1.Pod) (*v1.Pod, reconcile.Result, error) {
+func (c *Controller) Reconcile(_ context.Context, _ *v1.Pod) (*v1.Pod, reconcile.Result, error) {
 	c.provisioner.Trigger()
 	// TODO: This is only necessary due to a bug in the batcher. Ideally we should retrigger on provisioning error instead
-	return p, reconcile.Result{RequeueAfter: 5 * time.Second}, nil
+	return nil, reconcile.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {

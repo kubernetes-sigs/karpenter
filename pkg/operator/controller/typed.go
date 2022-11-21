@@ -25,7 +25,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
@@ -56,28 +55,15 @@ func (t *TypedBuilderControllerRuntimeAdapter) Complete(r reconcile.Reconciler) 
 	return t.builder.Complete(r)
 }
 
-type TypedReconciler[T client.Object] interface {
-	Reconcile(context.Context, T) (T, reconcile.Result, error)
-}
-
 type TypedController[T client.Object] interface {
-	TypedReconciler[T]
-
+	Reconcile(context.Context, T) (T, reconcile.Result, error)
 	Builder(context.Context, manager.Manager) TypedBuilder
 }
 
-type TypedControllerWithDeletion[T client.Object] interface {
+type FinalizingTypedController[T client.Object] interface {
 	TypedController[T]
 
-	OnDeleted(context.Context, reconcile.Request) // Called when the object has been deleted
-}
-
-type TypedControllerWithFinalizer[T client.Object] interface {
-	TypedController[T]
-
-	Finalizer() string                                          // Returns the finalizer this controller manages
-	OnFinalize(context.Context, T) (T, reconcile.Result, error) // Called when the deletion timestamp has been set
-	OnFinalizeDone(context.Context, T)                          // Allows a callback for logging when the finalize loop is done
+	Finalize(context.Context, T) (T, reconcile.Result, error)
 }
 
 type typedControllerDecorator[T client.Object] struct {
@@ -98,25 +84,23 @@ func (t *typedControllerDecorator[T]) Reconcile(ctx context.Context, req reconci
 	// Read
 	if err := t.kubeClient.Get(ctx, req.NamespacedName, obj); err != nil {
 		if errors.IsNotFound(err) {
-			if deleteHandler, ok := t.typedController.(TypedControllerWithDeletion[T]); ok {
-				deleteHandler.OnDeleted(ctx, req)
-			}
 			return reconcile.Result{}, nil
 		}
 		return reconcile.Result{}, err
 	}
 
-	// Finalize if the controller implements the finalizing interface
-	finalizingHandler, ok := t.typedController.(TypedControllerWithFinalizer[T])
+	var updated client.Object
+	var result reconcile.Result
+	var err error
+
+	finalizingTypedController, ok := t.typedController.(FinalizingTypedController[T])
 	if !obj.GetDeletionTimestamp().IsZero() && ok {
-		// Only handle finalization when the object still contains the finalizer
-		if lo.Contains(obj.GetFinalizers(), finalizingHandler.Finalizer()) {
-			return t.handleFinalizer(ctx, obj)
-		}
-		return reconcile.Result{}, nil
+		updated, result, err = finalizingTypedController.Finalize(ctx, obj.DeepCopyObject().(T))
+	} else {
+		// Reconcile
+		updated, result, err = t.typedController.Reconcile(ctx, obj.DeepCopyObject().(T))
 	}
-	// Reconcile
-	updated, result, err := t.typedController.Reconcile(ctx, obj.DeepCopyObject().(T))
+
 	if e := t.patch(ctx, obj, updated); e != nil {
 		return reconcile.Result{}, multierr.Combine(e, err)
 	}
@@ -126,30 +110,6 @@ func (t *typedControllerDecorator[T]) Reconcile(ctx context.Context, req reconci
 func (t *typedControllerDecorator[T]) Builder(ctx context.Context, mgr manager.Manager) Builder {
 	return t.typedController.Builder(ctx, mgr).
 		For(reflect.New(reflect.TypeOf(*new(T)).Elem()).Interface().(T)) // Create a new pointer to a client.Object
-}
-
-func (t *typedControllerDecorator[T]) handleFinalizer(ctx context.Context, obj client.Object) (reconcile.Result, error) {
-	finalizingHandler := t.typedController.(TypedControllerWithFinalizer[T])
-	updated, result, err := finalizingHandler.OnFinalize(ctx, obj.DeepCopyObject().(T))
-	switch {
-	case err != nil:
-		if e := t.patch(ctx, obj, updated); e != nil {
-			return reconcile.Result{}, multierr.Combine(e, err)
-		}
-		return reconcile.Result{}, err
-	case result.Requeue || result.RequeueAfter > 0:
-		if e := t.patch(ctx, obj, updated); e != nil {
-			return reconcile.Result{}, e
-		}
-		return result, nil
-	default:
-		controllerutil.RemoveFinalizer(updated, finalizingHandler.Finalizer())
-		if e := t.patch(ctx, obj, updated); e != nil {
-			return reconcile.Result{}, e
-		}
-		finalizingHandler.OnFinalizeDone(ctx, updated)
-		return reconcile.Result{}, nil
-	}
 }
 
 func (t *typedControllerDecorator[T]) patch(ctx context.Context, obj, updated client.Object) error {

@@ -29,11 +29,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 
@@ -60,8 +60,6 @@ func init() {
 	crmetrics.Registry.MustRegister(terminationSummary)
 }
 
-var _ corecontroller.TypedControllerWithFinalizer[*v1.Node] = (*Controller)(nil)
-
 // Controller for the resource
 type Controller struct {
 	Terminator *Terminator
@@ -73,7 +71,7 @@ type Controller struct {
 func NewController(clk clock.Clock, kubeClient client.Client, evictionQueue *EvictionQueue,
 	recorder events.Recorder, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
 
-	return corecontroller.For[*v1.Node](kubeClient, &Controller{
+	return &Controller{
 		KubeClient: kubeClient,
 		Terminator: &Terminator{
 			KubeClient:    kubeClient,
@@ -82,59 +80,52 @@ func NewController(clk clock.Clock, kubeClient client.Client, evictionQueue *Evi
 			Clock:         clk,
 		},
 		Recorder: recorder,
-	})
+	}
 }
 
-// Reconcile executes a termination control loop for the resource
-func (c *Controller) Reconcile(_ context.Context, node *v1.Node) (*v1.Node, reconcile.Result, error) {
-	return node, reconcile.Result{}, nil
-}
-
-func (c *Controller) Finalizer() string {
-	return v1alpha5.TerminationFinalizer
-}
-
-func (c *Controller) OnFinalize(ctx context.Context, node *v1.Node) (*v1.Node, reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(controllerName).With("node", node.Name))
+func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(controllerName).With("node", req.NamespacedName.Name))
 	ctx = injection.WithControllerName(ctx, controllerName)
 
+	node := &v1.Node{}
+	if err := c.KubeClient.Get(ctx, req.NamespacedName, node); err != nil {
+		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
 	// 1. Cordon node
-	node = c.Terminator.cordon(ctx, node)
+	if err := c.Terminator.cordon(ctx, node); err != nil {
+		return reconcile.Result{}, fmt.Errorf("cordoning node, %w", err)
+	}
 	// 2. Drain node
 	if err := c.Terminator.drain(ctx, node); err != nil {
 		if IsNodeDrainErr(err) {
 			c.Recorder.Publish(events.NodeFailedToDrain(node, err))
-			return node, reconcile.Result{Requeue: true}, nil
+			return reconcile.Result{Requeue: true}, nil
 		}
-		return node, reconcile.Result{}, nil
+		return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 	}
 	// 3. If fully drained, terminate the node
 	if err := c.Terminator.terminate(ctx, node); err != nil {
-		return node, reconcile.Result{}, fmt.Errorf("terminating node %s, %w", node.Name, err)
+		return reconcile.Result{}, fmt.Errorf("terminating node, %w", err)
 	}
-	return node, reconcile.Result{}, nil
-}
-
-func (c *Controller) OnFinalizeDone(ctx context.Context, node *v1.Node) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(controllerName).With("node", node.Name))
-	logging.FromContext(ctx).Infof("deleted node")
 	terminationSummary.Observe(time.Since(node.DeletionTimestamp.Time).Seconds())
+	return reconcile.Result{}, nil
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {
-	return corecontroller.NewTypedBuilderControllerRuntimeAdapter(
-		controllerruntime.
-			NewControllerManagedBy(m).
-			Named(controllerName).
-			WithOptions(
-				controller.Options{
-					RateLimiter: workqueue.NewMaxOfRateLimiter(
-						workqueue.NewItemExponentialFailureRateLimiter(100*time.Millisecond, 10*time.Second),
-						// 10 qps, 100 bucket size
-						&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
-					),
-					MaxConcurrentReconciles: 10,
-				},
-			),
-	)
+func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
+	return controllerruntime.
+		NewControllerManagedBy(m).
+		Named(controllerName).
+		WithOptions(
+			controller.Options{
+				RateLimiter: workqueue.NewMaxOfRateLimiter(
+					workqueue.NewItemExponentialFailureRateLimiter(100*time.Millisecond, 10*time.Second),
+					// 10 qps, 100 bucket size
+					&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
+				),
+				MaxConcurrentReconciles: 10,
+			},
+		).
+		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+			return !obj.GetDeletionTimestamp().IsZero()
+		}))
 }
