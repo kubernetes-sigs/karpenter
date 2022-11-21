@@ -44,7 +44,7 @@ var (
 	Settings = sets.New(settings.Registration)
 )
 
-//go:generate controller-gen crd paths="./..." output:crd:artifacts:config=crds
+//go:generate controller-gen crd object:headerFile="../../hack/boilerplate.go.txt" paths="./..." output:crd:artifacts:config=crds
 var (
 	//go:embed crds/karpenter.sh_provisioners.yaml
 	ProvisionerCRD []byte
