@@ -335,12 +335,10 @@ spec:
                     type: object
                 type: object
               underutilizationTTL:
-                description: "TTLSecondsAfterEmpty is the number of seconds the controller
+                description: "UnderutilizationTTL is the number of seconds the controller
                   will wait before attempting to delete a node, measured from when
-                  the node is detected to be empty. A Node is considered to be empty
-                  when it does not have pods scheduled to it, excluding daemonsets.
-                  \n Termination due to no utilization is disabled if this field is
-                  not set."
+                  the node is detected to be underutilized. \n Termination due to
+                  underutilization is disabled if this field is not set."
                 format: int64
                 type: integer
               weight:

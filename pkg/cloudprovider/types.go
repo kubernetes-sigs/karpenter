@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha6"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 )
@@ -45,13 +46,15 @@ type Context struct {
 
 // CloudProvider interface is implemented by cloud providers to support provisioning.
 type CloudProvider interface {
-	// Create a node given constraints and instance type options. This API uses a
-	// callback pattern to enable cloudproviders to batch capacity creation
-	// requests. The callback must be called with a theoretical node object that
-	// is fulfilled by the cloud providers capacity creation request.
-	Create(context.Context, *NodeRequest) (*v1.Node, error)
+	// Get returns the machine's status. If not found, must return an error that
+	// returns true for errors.IsNotFound(err)
+	Get(context.Context, *v1alpha6.Machine) (*v1alpha6.MachineStatus, error)
+	// Create a machine that will register to the Kubernetes API as a Node.
+	// `machine.name` should be treated as an idempotency key such that
+	// subsequent calls to Create will not result in multiple nodes.
+	Create(context.Context, *v1alpha6.Machine) (*v1alpha6.MachineStatus, error)
 	// Delete node in cloudprovider
-	Delete(context.Context, *v1.Node) error
+	Delete(context.Context, *v1alpha6.Machine) error
 	// GetInstanceTypes returns instance types supported by the cloudprovider.
 	// Availability of types or zone may vary by provisioner or over time.  Regardless of
 	// availability, the GetInstanceTypes method should always return all instance types,

@@ -21,18 +21,30 @@ import (
 
 // ProvisionerStatus defines the observed state of Provisioner
 type MachineStatus struct {
-	// Conditions is the set of conditions required for this provisioner to scale
-	// its target, and indicates whether or not those conditions are met.
+	// ProviderID of the corresponding node object
+	ProviderID string `json:"providerID,omitempty"`
+	// Allocatable is the resources available to use for scheduling
+	Allocatable v1.ResourceList `json:"allocatable,omitempty"`
+	// Properties of the node that may be used for scheduling
+	Labels map[string]string `json:"labels,omitempty`
+	// Conditions contains signals for health and readiness
 	// +optional
 	Conditions apis.Conditions `json:"conditions,omitempty"`
-
-	// Resources is the list of resources that have been provisioned.
-	Resources v1.ResourceList `json:"resources,omitempty"`
 }
 
 func (m *Machine) StatusConditions() apis.ConditionManager {
-	return apis.NewLivingConditionSet().Manage(m)
+	return apis.NewLivingConditionSet(
+		MachineCreated,
+		MachineInitialized,
+		MachineHealthy,
+	).Manage(m)
 }
+
+var (
+	MachineCreated     apis.ConditionType
+	MachineInitialized apis.ConditionType
+	MachineHealthy apis.ConditionType
+)
 
 func (m *Machine) GetConditions() apis.Conditions {
 	return m.Status.Conditions

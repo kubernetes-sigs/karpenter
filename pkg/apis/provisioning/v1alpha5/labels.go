@@ -31,6 +31,7 @@ var (
 
 	// Karpenter specific domains and labels
 	ProvisionerNameLabelKey           = Group + "/provisioner-name"
+	MachineNameLabelKey               = Group + "/machine-name"
 	DoNotEvictPodAnnotationKey        = Group + "/do-not-evict"
 	DoNotConsolidateNodeAnnotationKey = Group + "/do-not-consolidate"
 	EmptinessTimestampAnnotationKey   = Group + "/emptiness-timestamp"

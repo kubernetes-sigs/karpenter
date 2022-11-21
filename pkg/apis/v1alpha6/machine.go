@@ -33,6 +33,10 @@ type MachineSpec struct {
 	StartupTaints []v1.Taint `json:"startupTaints,omitempty"`
 	// Requirements are layered with Labels and applied to every node.
 	Requirements []v1.NodeSelectorRequirement `json:"requirements,omitempty"`
+	// Resources is an optional list of resources to be dynamically attached to the machine.
+	// For example, you can define `ephermeral-storage`, which will be fulfilled by the cloudprovider
+	//+optional
+	Resources v1.ResourceList `json:"resources,omitempty"`
 	// Kubelet are options passed to the kubelet when provisioning nodes
 	//+optional
 	Kubelet Kubelet `json:"kubelet,omitempty"`
