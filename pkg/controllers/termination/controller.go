@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/workqueue"
@@ -34,6 +35,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 
@@ -111,6 +113,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return controllerruntime.
 		NewControllerManagedBy(m).
+		For(&v1.Node{}).
 		Named(controllerName).
 		WithOptions(
 			controller.Options{
@@ -124,5 +127,8 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontrolle
 		).
 		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
 			return !obj.GetDeletionTimestamp().IsZero()
+		})).
+		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+			return lo.Contains(obj.GetFinalizers(), v1alpha5.TerminationFinalizer)
 		}))
 }

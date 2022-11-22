@@ -48,19 +48,20 @@ func NewController(kubeClient client.Client, provisioner *Provisioner, recorder 
 		kubeClient:  kubeClient,
 		provisioner: provisioner,
 		recorder:    recorder,
-	})
+	}).Named(controllerName)
 }
 
 // Reconcile the resource
-func (c *Controller) Reconcile(_ context.Context, _ *v1.Pod) (*v1.Pod, reconcile.Result, error) {
+func (c *Controller) Reconcile(_ context.Context, _ *v1.Pod) (reconcile.Result, error) {
 	c.provisioner.Trigger()
 	// TODO: This is only necessary due to a bug in the batcher. Ideally we should retrigger on provisioning error instead
-	return nil, reconcile.Result{RequeueAfter: 5 * time.Second}, nil
+	return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {
-	return corecontroller.NewTypedBuilderControllerRuntimeAdapter(controllerruntime.
+func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
+	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
+		For(&v1.Pod{}).
 		Named(controllerName).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {

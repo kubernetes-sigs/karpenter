@@ -37,6 +37,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
+const controllerName = "counter"
+
 var _ corecontroller.TypedController[*v1alpha5.Provisioner] = (*Controller)(nil)
 
 // Controller for the resource
@@ -50,23 +52,23 @@ func NewController(kubeClient client.Client, cluster *state.Cluster) corecontrol
 	return corecontroller.For[*v1alpha5.Provisioner](kubeClient, &Controller{
 		kubeClient: kubeClient,
 		cluster:    cluster,
-	})
+	}).Named(controllerName)
 }
 
 // Reconcile a control loop for the resource
-func (c *Controller) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner) (*v1alpha5.Provisioner, reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner) (reconcile.Result, error) {
 	nodes := v1.NodeList{}
 	if err := c.kubeClient.List(ctx, &nodes, client.MatchingLabels{v1alpha5.ProvisionerNameLabelKey: provisioner.Name}); err != nil {
-		return nil, reconcile.Result{}, err
+		return reconcile.Result{}, err
 	}
 	// Nodes aren't synced yet, so return an error which will cause retry with backoff.
 	if !c.nodesSynced(nodes.Items, provisioner.Name) {
-		return nil, reconcile.Result{RequeueAfter: 250 * time.Millisecond}, nil
+		return reconcile.Result{RequeueAfter: 250 * time.Millisecond}, nil
 	}
 	// Determine resource usage and update provisioner.status.resources
 	resourceCounts := c.resourceCountsFor(provisioner.Name)
 	provisioner.Status.Resources = resourceCounts
-	return provisioner, reconcile.Result{}, nil
+	return reconcile.Result{}, nil
 }
 
 func (c *Controller) resourceCountsFor(provisionerName string) v1.ResourceList {
@@ -92,10 +94,11 @@ func (c *Controller) resourceCountsFor(provisionerName string) v1.ResourceList {
 	return result
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {
-	return corecontroller.NewTypedBuilderControllerRuntimeAdapter(controllerruntime.
+func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
+	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
-		Named("counter").
+		For(&v1alpha5.Provisioner{}).
+		Named(controllerName).
 		Watches(
 			&source.Kind{Type: &v1.Node{}},
 			handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {

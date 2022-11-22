@@ -65,7 +65,7 @@ func (c *NodeController) Reconcile(ctx context.Context, req reconcile.Request) (
 func (c *NodeController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return controllerruntime.
 		NewControllerManagedBy(m).
-		Named(nodeControllerName).
 		For(&v1.Node{}).
+		Named(nodeControllerName).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10})
 }

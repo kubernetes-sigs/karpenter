@@ -74,6 +74,8 @@ var (
 	)
 )
 
+const controllerName = "podmetrics"
+
 var _ controller.TypedController[*v1.Pod] = (*Controller)(nil)
 
 // Controller for the resource
@@ -108,18 +110,18 @@ func NewController(kubeClient client.Client) controller.Controller {
 	return controller.For[*v1.Pod](kubeClient, &Controller{
 		kubeClient:  kubeClient,
 		pendingPods: sets.NewString(),
-	})
+	}).Named(controllerName)
 }
 
 // Reconcile executes a termination control loop for the resource
-func (c *Controller) Reconcile(ctx context.Context, pod *v1.Pod) (*v1.Pod, reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("podmetrics").With("pod", pod.Name))
+func (c *Controller) Reconcile(ctx context.Context, pod *v1.Pod) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("pod", pod.Name))
 	// Remove the previous gauge after pod labels are updated
 	if labels, ok := c.labelsMap.Load(client.ObjectKeyFromObject(pod)); ok {
 		podGaugeVec.Delete(labels.(prometheus.Labels))
 	}
 	c.record(ctx, pod)
-	return nil, reconcile.Result{}, nil
+	return reconcile.Result{}, nil
 }
 
 func (c *Controller) record(ctx context.Context, pod *v1.Pod) {
@@ -145,10 +147,13 @@ func (c *Controller) record(ctx context.Context, pod *v1.Pod) {
 	}
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) controller.TypedBuilder {
-	return controller.NewTypedBuilderControllerRuntimeAdapter(controllerruntime.
-		NewControllerManagedBy(m).
-		Named("podmetrics"))
+func (c *Controller) Builder(_ context.Context, m manager.Manager) controller.Builder {
+	return controller.Adapt(
+		controllerruntime.
+			NewControllerManagedBy(m).
+			For(&v1.Pod{}).
+			Named(controllerName),
+	)
 }
 
 // labels creates the labels using the current state of the pod

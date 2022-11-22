@@ -66,7 +66,7 @@ func (c *PodController) Reconcile(ctx context.Context, req reconcile.Request) (r
 func (c *PodController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return controllerruntime.
 		NewControllerManagedBy(m).
-		Named(podControllerName).
 		For(&v1.Pod{}).
+		Named(podControllerName).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10})
 }

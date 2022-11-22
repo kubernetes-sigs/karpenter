@@ -42,7 +42,7 @@ func NewController(cluster *state.Cluster) *Controller {
 
 func (c *Controller) Builder(_ context.Context, mgr manager.Manager) corecontroller.Builder {
 	return corecontroller.NewSingletonManagedBy(mgr).
-		Named("metric_scraper")
+		Named("metricscraper")
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {

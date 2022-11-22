@@ -71,12 +71,11 @@ var _ = Describe("Typed", func() {
 		})
 		ExpectApplied(ctx, env.Client, node)
 		fakeController := &FakeTypedController[*v1.Node]{
-			ReconcileModifiers: []TypedReconcileModifier[*v1.Node]{
-				func(ctx context.Context, n *v1.Node) *v1.Node {
+			ReconcileAssertions: []TypedReconcileAssertion[*v1.Node]{
+				func(ctx context.Context, n *v1.Node) {
 					n.Labels = lo.Assign(n.Labels, map[string]string{
 						"custom-key": "custom-value",
 					})
-					return n
 				},
 			},
 		}
@@ -125,10 +124,9 @@ var _ = Describe("Typed", func() {
 		ExpectApplied(ctx, env.Client, node)
 		Expect(env.Client.Delete(ctx, node)).To(Succeed())
 		fakeController := &FakeTypedController[*v1.Node]{
-			FinalizeModifiers: []TypedReconcileModifier[*v1.Node]{
-				func(ctx context.Context, node *v1.Node) *v1.Node {
+			FinalizeAssertions: []TypedReconcileAssertion[*v1.Node]{
+				func(ctx context.Context, node *v1.Node) {
 					controllerutil.RemoveFinalizer(node, v1alpha5.TestingGroup+"/finalizer")
-					return node
 				},
 			},
 		}
@@ -140,36 +138,27 @@ var _ = Describe("Typed", func() {
 })
 
 type TypedReconcileAssertion[T client.Object] func(context.Context, T)
-type TypedReconcileModifier[T client.Object] func(context.Context, T) T
 
 type FakeTypedController[T client.Object] struct {
 	ReconcileAssertions []TypedReconcileAssertion[T]
-	ReconcileModifiers  []TypedReconcileModifier[T]
 
 	FinalizeAssertions []TypedReconcileAssertion[T]
-	FinalizeModifiers  []TypedReconcileModifier[T]
 }
 
-func (c *FakeTypedController[T]) Reconcile(ctx context.Context, obj T) (T, reconcile.Result, error) {
+func (c *FakeTypedController[T]) Reconcile(ctx context.Context, obj T) (reconcile.Result, error) {
 	for _, elem := range c.ReconcileAssertions {
 		elem(ctx, obj)
 	}
-	obj = lo.Reduce(c.ReconcileModifiers, func(t T, f TypedReconcileModifier[T], _ int) T {
-		return f(ctx, t.DeepCopyObject().(T))
-	}, obj)
-	return obj, reconcile.Result{}, nil
+	return reconcile.Result{}, nil
 }
 
-func (c *FakeTypedController[T]) Finalize(ctx context.Context, obj T) (T, reconcile.Result, error) {
+func (c *FakeTypedController[T]) Finalize(ctx context.Context, obj T) (reconcile.Result, error) {
 	for _, elem := range c.FinalizeAssertions {
 		elem(ctx, obj)
 	}
-	obj = lo.Reduce(c.FinalizeModifiers, func(t T, f TypedReconcileModifier[T], _ int) T {
-		return f(ctx, t.DeepCopyObject().(T))
-	}, obj)
-	return obj, reconcile.Result{}, nil
+	return reconcile.Result{}, nil
 }
 
-func (c *FakeTypedController[T]) Builder(_ context.Context, _ manager.Manager) controller.TypedBuilder {
+func (c *FakeTypedController[T]) Builder(_ context.Context, _ manager.Manager) controller.Builder {
 	return nil
 }

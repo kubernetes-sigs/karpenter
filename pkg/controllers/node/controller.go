@@ -52,7 +52,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 		cluster:        cluster,
 		initialization: &Initialization{kubeClient: kubeClient, cloudProvider: cloudProvider},
 		emptiness:      &Emptiness{kubeClient: kubeClient, clock: clk, cluster: cluster},
-	})
+	}).Named(controllerName)
 }
 
 // Controller manages a set of properties on karpenter provisioned nodes, such as
@@ -66,11 +66,11 @@ type Controller struct {
 }
 
 // Reconcile executes a reallocation control loop for the resource
-func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (*v1.Node, reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(controllerName).With("node", node.Name))
+func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
 	provisioner := &v1alpha5.Provisioner{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
-		return nil, reconcile.Result{}, client.IgnoreNotFound(err)
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
 	// Execute Reconcilers
@@ -87,10 +87,10 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (*v1.Node, re
 		errs = multierr.Append(errs, err)
 		results = append(results, res)
 	}
-	return node, result.Min(results...), errs
+	return result.Min(results...), errs
 }
 
-func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontroller.TypedBuilder {
+func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontroller.Builder {
 	// Enqueues a reconcile request when nominated node expiration is triggered
 	ch := make(chan event.GenericEvent, 300)
 	c.cluster.AddNominatedNodeEvictionObserver(func(nodeName string) {
@@ -99,8 +99,9 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 		}}
 	})
 
-	return corecontroller.NewTypedBuilderControllerRuntimeAdapter(controllerruntime.
+	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
+		For(&v1.Node{}).
 		Named(controllerName).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Watches(

@@ -34,7 +34,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
 	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/operator/injection"
 )
 
 const controllerName = "inflightchecks"
@@ -75,33 +74,33 @@ func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Re
 			NewFailedInit(clk, provider),
 			NewTermination(kubeClient),
 			NewNodeShape(provider),
-		}})
+		}},
+	).Named(controllerName)
 }
 
-func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (*v1.Node, reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(controllerName).With("node", node.Name))
-	ctx = injection.WithControllerName(ctx, controllerName)
+func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
 
 	// If we get an event before we should check for inflight checks, we ignore and wait
 	if lastTime, ok := c.lastScanned.Get(client.ObjectKeyFromObject(node).String()); ok {
 		if lastTime, ok := lastTime.(time.Time); ok {
 			remaining := scanPeriod - c.clock.Since(lastTime)
-			return nil, reconcile.Result{RequeueAfter: remaining}, nil
+			return reconcile.Result{RequeueAfter: remaining}, nil
 		}
 		// the above should always succeed
-		return nil, reconcile.Result{RequeueAfter: scanPeriod}, nil
+		return reconcile.Result{RequeueAfter: scanPeriod}, nil
 	}
 	c.lastScanned.SetDefault(client.ObjectKeyFromObject(node).String(), c.clock.Now())
 
 	provisioner := &v1alpha5.Provisioner{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
 		// provisioner is missing, node should be removed soon
-		return nil, reconcile.Result{}, client.IgnoreNotFound(err)
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
 	pdbs, err := deprovisioning.NewPDBLimits(ctx, c.kubeClient)
 	if err != nil {
-		return nil, reconcile.Result{}, err
+		return reconcile.Result{}, err
 	}
 	uniqueIssues := map[string]Issue{}
 	for _, check := range c.checks {
@@ -117,12 +116,14 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (*v1.Node, re
 		logging.FromContext(ctx).Infof("Inflight check failed for node, %s", iss.message)
 		c.recorder.Publish(events.NodeInflightCheck(iss.node, iss.message))
 	}
-	return nil, reconcile.Result{RequeueAfter: scanPeriod}, nil
+	return reconcile.Result{RequeueAfter: scanPeriod}, nil
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {
-	return corecontroller.NewTypedBuilderControllerRuntimeAdapter(controllerruntime.
+func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
+	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
+		For(&v1.Node{}).
 		Named(controllerName).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
+	)
 }

@@ -17,6 +17,7 @@ package controller
 import (
 	"context"
 
+	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
@@ -35,4 +36,18 @@ type Controller interface {
 type Builder interface {
 	// Complete builds a builder by registering the Reconciler with the manager
 	Complete(reconcile.Reconciler) error
+}
+
+type Adapter struct {
+	builder *controllerruntime.Builder
+}
+
+func Adapt(builder *controllerruntime.Builder) Builder {
+	return &Adapter{
+		builder: builder,
+	}
+}
+
+func (a *Adapter) Complete(r reconcile.Reconciler) error {
+	return a.builder.Complete(r)
 }

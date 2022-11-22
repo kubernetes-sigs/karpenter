@@ -29,7 +29,7 @@ import (
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
-const provisionerControllerName = "provisioner-state"
+const controllerName = "provisionerstate"
 
 var _ corecontroller.TypedController[*v1alpha5.Provisioner] = (*ProvisionerController)(nil)
 
@@ -43,20 +43,22 @@ func NewProvisionerController(kubeClient client.Client, cluster *Cluster) coreco
 	return corecontroller.For[*v1alpha5.Provisioner](kubeClient, &ProvisionerController{
 		kubeClient: kubeClient,
 		cluster:    cluster,
-	})
+	}).Named(controllerName)
 }
 
-func (c *ProvisionerController) Reconcile(_ context.Context, _ *v1alpha5.Provisioner) (*v1alpha5.Provisioner, reconcile.Result, error) {
+func (c *ProvisionerController) Reconcile(_ context.Context, _ *v1alpha5.Provisioner) (reconcile.Result, error) {
 	// Something changed in the provisioner so we should re-consider consolidation
 	c.cluster.recordConsolidationChange()
-	return nil, reconcile.Result{}, nil
+	return reconcile.Result{}, nil
 }
 
-func (c *ProvisionerController) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {
-	return corecontroller.NewTypedBuilderControllerRuntimeAdapter(controllerruntime.
+func (c *ProvisionerController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
+	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
-		Named(provisionerControllerName).
+		For(&v1alpha5.Provisioner{}).
+		Named(controllerName).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
-		WithEventFilter(predicate.Funcs{DeleteFunc: func(event event.DeleteEvent) bool { return false }}))
+		WithEventFilter(predicate.Funcs{DeleteFunc: func(event event.DeleteEvent) bool { return false }}),
+	)
 }

@@ -21,97 +21,77 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
-	controllerruntime "sigs.k8s.io/controller-runtime"
+	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/aws/karpenter-core/pkg/operator/injection"
 )
 
-type TypedBuilder interface {
-	Builder
-
-	// For updates the builder to watch the client.Object passed in
-	For(client.Object) TypedBuilder
-}
-
-type TypedBuilderControllerRuntimeAdapter struct {
-	builder *controllerruntime.Builder
-}
-
-func NewTypedBuilderControllerRuntimeAdapter(builder *controllerruntime.Builder) *TypedBuilderControllerRuntimeAdapter {
-	return &TypedBuilderControllerRuntimeAdapter{
-		builder: builder,
-	}
-}
-
-func (t *TypedBuilderControllerRuntimeAdapter) For(obj client.Object) TypedBuilder {
-	t.builder = t.builder.For(obj)
-	return t
-}
-
-func (t *TypedBuilderControllerRuntimeAdapter) Complete(r reconcile.Reconciler) error {
-	return t.builder.Complete(r)
-}
-
 type TypedController[T client.Object] interface {
-	Reconcile(context.Context, T) (T, reconcile.Result, error)
-	Builder(context.Context, manager.Manager) TypedBuilder
+	Reconcile(context.Context, T) (reconcile.Result, error)
+	Builder(context.Context, manager.Manager) Builder
 }
 
 type FinalizingTypedController[T client.Object] interface {
 	TypedController[T]
 
-	Finalize(context.Context, T) (T, reconcile.Result, error)
+	Finalize(context.Context, T) (reconcile.Result, error)
 }
 
-type typedControllerDecorator[T client.Object] struct {
+type TypedControllerImpl[T client.Object] struct {
 	kubeClient      client.Client
 	typedController TypedController[T]
+	name            string
 }
 
-func For[T client.Object](kubeClient client.Client, typedController TypedController[T]) Controller {
-	return &typedControllerDecorator[T]{
+func For[T client.Object](kubeClient client.Client, typedReconciler TypedController[T]) *TypedControllerImpl[T] {
+	return &TypedControllerImpl[T]{
 		kubeClient:      kubeClient,
-		typedController: typedController,
+		typedController: typedReconciler,
 	}
 }
 
-func (t *typedControllerDecorator[T]) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	obj := reflect.New(reflect.TypeOf(*new(T)).Elem()).Interface().(T) // Create a new pointer to a client.Object
+func (t *TypedControllerImpl[T]) Named(name string) *TypedControllerImpl[T] {
+	t.name = name
+	return t
+}
 
-	// Read
-	if err := t.kubeClient.Get(ctx, req.NamespacedName, obj); err != nil {
-		if errors.IsNotFound(err) {
-			return reconcile.Result{}, nil
-		}
-		return reconcile.Result{}, err
+func (t *TypedControllerImpl[T]) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+	if t.name != "" {
+		ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(t.name))
+		ctx = injection.WithControllerName(ctx, t.name)
 	}
 
-	var updated client.Object
+	obj := reflect.New(reflect.TypeOf(*new(T)).Elem()).Interface().(T) // Create a new pointer to a client.Object
+	if err := t.kubeClient.Get(ctx, req.NamespacedName, obj); err != nil {
+		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
+	stored := obj.DeepCopyObject().(client.Object)
+
 	var result reconcile.Result
 	var err error
 
 	finalizingTypedController, ok := t.typedController.(FinalizingTypedController[T])
 	if !obj.GetDeletionTimestamp().IsZero() && ok {
-		updated, result, err = finalizingTypedController.Finalize(ctx, obj.DeepCopyObject().(T))
+		result, err = finalizingTypedController.Finalize(ctx, obj)
 	} else {
-		updated, result, err = t.typedController.Reconcile(ctx, obj.DeepCopyObject().(T))
+		result, err = t.typedController.Reconcile(ctx, obj)
 	}
 
-	if e := t.patch(ctx, obj, updated); e != nil {
+	if e := t.patch(ctx, stored, obj); e != nil {
 		return reconcile.Result{}, multierr.Combine(e, err)
 	}
 	return result, err
 }
 
-func (t *typedControllerDecorator[T]) Builder(ctx context.Context, mgr manager.Manager) Builder {
-	return t.typedController.Builder(ctx, mgr).
-		For(reflect.New(reflect.TypeOf(*new(T)).Elem()).Interface().(T)) // Create a new pointer to a client.Object
+func (t *TypedControllerImpl[T]) Builder(ctx context.Context, m manager.Manager) Builder {
+	return t.typedController.Builder(ctx, m)
 }
 
-func (t *typedControllerDecorator[T]) patch(ctx context.Context, obj, updated client.Object) error {
+func (t *TypedControllerImpl[T]) patch(ctx context.Context, obj, updated client.Object) error {
 	// If an updated value returns as nil from the Reconcile function, this means we shouldn't update the object
 	if reflect.ValueOf(updated).IsNil() {
 		return nil
