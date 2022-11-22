@@ -34,7 +34,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/metrics"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
 const (
@@ -74,7 +74,7 @@ var (
 	)
 )
 
-var _ corecontroller.TypedController[*v1.Pod] = (*Controller)(nil)
+var _ controller.TypedController[*v1.Pod] = (*Controller)(nil)
 
 // Controller for the resource
 type Controller struct {
@@ -104,8 +104,8 @@ func labelNames() []string {
 }
 
 // NewController constructs a podController instance
-func NewController(kubeClient client.Client) corecontroller.Controller {
-	return corecontroller.For[*v1.Pod](kubeClient, &Controller{
+func NewController(kubeClient client.Client) controller.Controller {
+	return controller.For[*v1.Pod](kubeClient, &Controller{
 		kubeClient:  kubeClient,
 		pendingPods: sets.NewString(),
 	})
@@ -145,8 +145,8 @@ func (c *Controller) record(ctx context.Context, pod *v1.Pod) {
 	}
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.TypedBuilder {
-	return corecontroller.NewTypedBuilderControllerRuntimeAdapter(controllerruntime.
+func (c *Controller) Builder(_ context.Context, m manager.Manager) controller.TypedBuilder {
+	return controller.NewTypedBuilderControllerRuntimeAdapter(controllerruntime.
 		NewControllerManagedBy(m).
 		Named("podmetrics"))
 }

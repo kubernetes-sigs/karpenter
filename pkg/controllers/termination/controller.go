@@ -84,18 +84,16 @@ func NewController(clk clock.Clock, kubeClient client.Client, evictionQueue *Evi
 }
 
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(controllerName).With("node", req.NamespacedName.Name))
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(controllerName).With("node", req.Name))
 	ctx = injection.WithControllerName(ctx, controllerName)
 
 	node := &v1.Node{}
 	if err := c.KubeClient.Get(ctx, req.NamespacedName, node); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	// 1. Cordon node
 	if err := c.Terminator.cordon(ctx, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("cordoning node, %w", err)
 	}
-	// 2. Drain node
 	if err := c.Terminator.drain(ctx, node); err != nil {
 		if IsNodeDrainErr(err) {
 			c.Recorder.Publish(events.NodeFailedToDrain(node, err))
@@ -103,7 +101,6 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 		return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 	}
-	// 3. If fully drained, terminate the node
 	if err := c.Terminator.terminate(ctx, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("terminating node, %w", err)
 	}

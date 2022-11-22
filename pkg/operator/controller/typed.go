@@ -97,7 +97,6 @@ func (t *typedControllerDecorator[T]) Reconcile(ctx context.Context, req reconci
 	if !obj.GetDeletionTimestamp().IsZero() && ok {
 		updated, result, err = finalizingTypedController.Finalize(ctx, obj.DeepCopyObject().(T))
 	} else {
-		// Reconcile
 		updated, result, err = t.typedController.Reconcile(ctx, obj.DeepCopyObject().(T))
 	}
 
