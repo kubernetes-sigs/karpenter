@@ -398,7 +398,7 @@ var _ = Describe("Instance Type Selection", func() {
 	It("should not schedule if no instance type matches selector (pod arch = arm)", func() {
 		// remove all Arm instance types
 		cloudProv.InstanceTypes = filterInstanceTypes(cloudProv.InstanceTypes, func(i cloudprovider.InstanceType) bool {
-			return i.Requirements().Get(v1.LabelArchStable).Has(v1alpha5.ArchitectureAmd64)
+			return i.Requirements.Get(v1.LabelArchStable).Has(v1alpha5.ArchitectureAmd64)
 		})
 
 		Expect(len(cloudProv.InstanceTypes)).To(BeNumerically(">", 0))
@@ -417,9 +417,9 @@ var _ = Describe("Instance Type Selection", func() {
 	It("should not schedule if no instance type matches selector (pod arch = arm zone=test-zone-2)", func() {
 		// remove all Arm instance types in zone-2
 		cloudProv.InstanceTypes = filterInstanceTypes(cloudProv.InstanceTypes, func(i cloudprovider.InstanceType) bool {
-			for _, off := range i.Offerings() {
+			for _, off := range i.Offerings {
 				if off.Zone == "test-zone-2" {
-					return i.Requirements().Get(v1.LabelArchStable).Has(v1alpha5.ArchitectureAmd64)
+					return i.Requirements.Get(v1.LabelArchStable).Has(v1alpha5.ArchitectureAmd64)
 				}
 			}
 			return true
@@ -445,9 +445,9 @@ var _ = Describe("Instance Type Selection", func() {
 	It("should not schedule if no instance type matches selector (prov arch = arm / pod zone=test-zone-2)", func() {
 		// remove all Arm instance types in zone-2
 		cloudProv.InstanceTypes = filterInstanceTypes(cloudProv.InstanceTypes, func(i cloudprovider.InstanceType) bool {
-			for _, off := range i.Offerings() {
+			for _, off := range i.Offerings {
 				if off.Zone == "test-zone-2" {
-					return i.Requirements().Get(v1.LabelArchStable).Has(v1alpha5.ArchitectureAmd64)
+					return i.Requirements.Get(v1.LabelArchStable).Has(v1alpha5.ArchitectureAmd64)
 				}
 			}
 			return true
@@ -481,9 +481,9 @@ var _ = Describe("Instance Type Selection", func() {
 		overheadHashes := map[string]uint64{}
 		for _, it := range cloudProv.InstanceTypes {
 			var err error
-			resourceHashes[it.Name()], err = hashstructure.Hash(it.Resources(), hashstructure.FormatV2, nil)
+			resourceHashes[it.Name], err = hashstructure.Hash(it.Capacity, hashstructure.FormatV2, nil)
 			Expect(err).To(BeNil())
-			overheadHashes[it.Name()], err = hashstructure.Hash(it.Overhead(), hashstructure.FormatV2, nil)
+			overheadHashes[it.Name], err = hashstructure.Hash(resources.Merge(it.Overhead.SystemReserved, it.Overhead.KubeReserved), hashstructure.FormatV2, nil)
 			Expect(err).To(BeNil())
 		}
 		ExpectApplied(ctx, env.Client, provisioner)
@@ -507,21 +507,21 @@ var _ = Describe("Instance Type Selection", func() {
 				Expect(nodeNames).To(HaveLen(1))
 				totalPodResources := resources.RequestsForPods(pods...)
 				for _, it := range cloudProv.CreateCalls[0].InstanceTypeOptions {
-					totalReserved := resources.Merge(totalPodResources, it.Overhead())
+					totalReserved := resources.Merge(totalPodResources, it.Overhead.KubeReserved, it.Overhead.SystemReserved)
 					// the total pod resources in CPU and memory + instance overhead should always be less than the
 					// resources available on every viable instance has
-					Expect(totalReserved.Cpu().Cmp(it.Resources()[v1.ResourceCPU])).To(Equal(-1))
-					Expect(totalReserved.Memory().Cmp(it.Resources()[v1.ResourceMemory])).To(Equal(-1))
+					Expect(totalReserved.Cpu().Cmp(it.Capacity[v1.ResourceCPU])).To(Equal(-1))
+					Expect(totalReserved.Memory().Cmp(it.Capacity[v1.ResourceMemory])).To(Equal(-1))
 				}
 			}
 		}
 		for _, it := range cloudProv.InstanceTypes {
-			resourceHash, err := hashstructure.Hash(it.Resources(), hashstructure.FormatV2, nil)
+			resourceHash, err := hashstructure.Hash(it.Capacity, hashstructure.FormatV2, nil)
 			Expect(err).To(BeNil())
-			overheadHash, err := hashstructure.Hash(it.Overhead(), hashstructure.FormatV2, nil)
+			overheadHash, err := hashstructure.Hash(resources.Merge(it.Overhead.SystemReserved, it.Overhead.KubeReserved), hashstructure.FormatV2, nil)
 			Expect(err).To(BeNil())
-			Expect(resourceHash).To(Equal(resourceHashes[it.Name()]), fmt.Sprintf("expected %s Resources() to not be modified by scheduling", it.Name()))
-			Expect(overheadHash).To(Equal(overheadHashes[it.Name()]), fmt.Sprintf("expected %s Overhead() to not be modified by scheduling", it.Name()))
+			Expect(resourceHash).To(Equal(resourceHashes[it.Name]), fmt.Sprintf("expected %s Resources() to not be modified by scheduling", it.Name))
+			Expect(overheadHash).To(Equal(overheadHashes[it.Name]), fmt.Sprintf("expected %s Overhead() to not be modified by scheduling", it.Name))
 		}
 	})
 	It("should schedule on cheaper on-demand instance even when spot price ordering would place other instance types first", func() {
@@ -570,14 +570,14 @@ var _ = Describe("Instance Type Selection", func() {
 
 func getInstanceTypeMap(its []cloudprovider.InstanceType) map[string]cloudprovider.InstanceType {
 	return lo.SliceToMap(its, func(it cloudprovider.InstanceType) (string, cloudprovider.InstanceType) {
-		return it.Name(), it
+		return it.Name, it
 	})
 }
 
 func getMinPrice(its []cloudprovider.InstanceType) float64 {
 	minPrice := math.MaxFloat64
 	for _, it := range its {
-		for _, of := range it.Offerings() {
+		for _, of := range it.Offerings {
 			minPrice = math.Min(minPrice, of.Price)
 		}
 	}
@@ -597,7 +597,7 @@ func filterInstanceTypes(types []cloudprovider.InstanceType, pred func(i cloudpr
 func ExpectInstancesWithOffering(instanceTypes []cloudprovider.InstanceType, capacityType string, zone string) {
 	for _, it := range instanceTypes {
 		matched := false
-		for _, offering := range it.Offerings() {
+		for _, offering := range it.Offerings {
 			if offering.CapacityType == capacityType && offering.Zone == zone {
 				matched = true
 			}
@@ -610,13 +610,13 @@ func ExpectInstancesWithLabel(instanceTypes []cloudprovider.InstanceType, label 
 	for _, it := range instanceTypes {
 		switch label {
 		case v1.LabelArchStable:
-			Expect(it.Requirements().Get(v1.LabelArchStable).Has(value)).To(BeTrue(), fmt.Sprintf("expected to find an arch of %s", value))
+			Expect(it.Requirements.Get(v1.LabelArchStable).Has(value)).To(BeTrue(), fmt.Sprintf("expected to find an arch of %s", value))
 		case v1.LabelOSStable:
-			Expect(it.Requirements().Get(v1.LabelOSStable).Has(value)).To(BeTrue(), fmt.Sprintf("expected to find an OS of %s", value))
+			Expect(it.Requirements.Get(v1.LabelOSStable).Has(value)).To(BeTrue(), fmt.Sprintf("expected to find an OS of %s", value))
 		case v1.LabelTopologyZone:
 			{
 				matched := false
-				for _, offering := range it.Offerings() {
+				for _, offering := range it.Offerings {
 					if offering.Zone == value {
 						matched = true
 						break
@@ -627,7 +627,7 @@ func ExpectInstancesWithLabel(instanceTypes []cloudprovider.InstanceType, label 
 		case v1alpha5.LabelCapacityType:
 			{
 				matched := false
-				for _, offering := range it.Offerings() {
+				for _, offering := range it.Offerings {
 					if offering.CapacityType == value {
 						matched = true
 						break

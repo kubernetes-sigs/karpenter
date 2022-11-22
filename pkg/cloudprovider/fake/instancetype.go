@@ -46,15 +46,9 @@ func init() {
 	)
 }
 
-func NewInstanceType(options InstanceTypeOptions) *InstanceType {
+func NewInstanceType(options InstanceTypeOptions) cloudprovider.InstanceType {
 	if options.Resources == nil {
 		options.Resources = map[v1.ResourceName]resource.Quantity{}
-	}
-	if options.Overhead == nil {
-		options.Overhead = v1.ResourceList{
-			v1.ResourceCPU:    resource.MustParse("100m"),
-			v1.ResourceMemory: resource.MustParse("10Mi"),
-		}
 	}
 	if r := options.Resources[v1.ResourceCPU]; r.IsZero() {
 		options.Resources[v1.ResourceCPU] = resource.MustParse("4")
@@ -80,17 +74,38 @@ func NewInstanceType(options InstanceTypeOptions) *InstanceType {
 	if options.OperatingSystems.Len() == 0 {
 		options.OperatingSystems = utilsets.NewString(string(v1.Linux), string(v1.Windows), "darwin")
 	}
-
-	return &InstanceType{
-		options: InstanceTypeOptions{
-			Name:             options.Name,
-			Offerings:        options.Offerings,
-			Architecture:     options.Architecture,
-			OperatingSystems: options.OperatingSystems,
-			Resources:        options.Resources,
-			Overhead:         options.Overhead,
+	i := cloudprovider.InstanceType{
+		Name:      options.Name,
+		Offerings: options.Offerings,
+		Capacity:  options.Resources,
+		Overhead: cloudprovider.InstanceTypeOverhead{
+			KubeReserved: v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse("100m"),
+				v1.ResourceMemory: resource.MustParse("10Mi"),
+			},
 		},
 	}
+
+	requirements := scheduling.NewRequirements(
+		scheduling.NewRequirement(v1.LabelInstanceTypeStable, v1.NodeSelectorOpIn, options.Name),
+		scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, options.Architecture),
+		scheduling.NewRequirement(v1.LabelOSStable, v1.NodeSelectorOpIn, options.OperatingSystems.List()...),
+		scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, lo.Map(cloudprovider.AvailableOfferings(i), func(o cloudprovider.Offering, _ int) string { return o.Zone })...),
+		scheduling.NewRequirement(v1alpha5.LabelCapacityType, v1.NodeSelectorOpIn, lo.Map(cloudprovider.AvailableOfferings(i), func(o cloudprovider.Offering, _ int) string { return o.CapacityType })...),
+		scheduling.NewRequirement(LabelInstanceSize, v1.NodeSelectorOpDoesNotExist),
+		scheduling.NewRequirement(ExoticInstanceLabelKey, v1.NodeSelectorOpDoesNotExist),
+		scheduling.NewRequirement(IntegerInstanceLabelKey, v1.NodeSelectorOpIn, fmt.Sprint(options.Resources.Cpu().Value())),
+	)
+	if options.Resources.Cpu().Cmp(resource.MustParse("4")) > 0 &&
+		options.Resources.Memory().Cmp(resource.MustParse("8Gi")) > 0 {
+		requirements.Get(LabelInstanceSize).Insert("large")
+		requirements.Get(ExoticInstanceLabelKey).Insert("optional")
+	} else {
+		requirements.Get(LabelInstanceSize).Insert("small")
+	}
+	i.Requirements = requirements
+
+	return i
 }
 
 // InstanceTypesAssorted create many unique instance types with varying CPU/memory/architecture/OS/zone/capacity type.
@@ -156,16 +171,7 @@ type InstanceTypeOptions struct {
 	Offerings        []cloudprovider.Offering
 	Architecture     string
 	OperatingSystems utilsets.String
-	Overhead         v1.ResourceList
 	Resources        v1.ResourceList
-}
-
-type InstanceType struct {
-	options InstanceTypeOptions
-}
-
-func (i *InstanceType) Name() string {
-	return i.options.Name
 }
 
 func priceFromResources(resources v1.ResourceList) float64 {
@@ -181,37 +187,4 @@ func priceFromResources(resources v1.ResourceList) float64 {
 		}
 	}
 	return price
-}
-
-func (i *InstanceType) Resources() v1.ResourceList {
-	return i.options.Resources
-}
-
-func (i *InstanceType) Offerings() []cloudprovider.Offering {
-	return i.options.Offerings
-}
-
-func (i *InstanceType) Overhead() v1.ResourceList {
-	return i.options.Overhead
-}
-
-func (i *InstanceType) Requirements() scheduling.Requirements {
-	requirements := scheduling.NewRequirements(
-		scheduling.NewRequirement(v1.LabelInstanceTypeStable, v1.NodeSelectorOpIn, i.options.Name),
-		scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, i.options.Architecture),
-		scheduling.NewRequirement(v1.LabelOSStable, v1.NodeSelectorOpIn, i.options.OperatingSystems.List()...),
-		scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, lo.Map(cloudprovider.AvailableOfferings(i), func(o cloudprovider.Offering, _ int) string { return o.Zone })...),
-		scheduling.NewRequirement(v1alpha5.LabelCapacityType, v1.NodeSelectorOpIn, lo.Map(cloudprovider.AvailableOfferings(i), func(o cloudprovider.Offering, _ int) string { return o.CapacityType })...),
-		scheduling.NewRequirement(LabelInstanceSize, v1.NodeSelectorOpDoesNotExist),
-		scheduling.NewRequirement(ExoticInstanceLabelKey, v1.NodeSelectorOpDoesNotExist),
-		scheduling.NewRequirement(IntegerInstanceLabelKey, v1.NodeSelectorOpIn, fmt.Sprint(i.options.Resources.Cpu().Value())),
-	)
-	if i.options.Resources.Cpu().Cmp(resource.MustParse("4")) > 0 &&
-		i.options.Resources.Memory().Cmp(resource.MustParse("8Gi")) > 0 {
-		requirements.Get(LabelInstanceSize).Insert("large")
-		requirements.Get(ExoticInstanceLabelKey).Insert("optional")
-	} else {
-		requirements.Get(LabelInstanceSize).Insert("small")
-	}
-	return requirements
 }

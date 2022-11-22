@@ -52,7 +52,7 @@ func (n *NodeShape) Check(ctx context.Context, node *v1.Node, provisioner *v1alp
 		return nil, err
 	}
 
-	instanceType, ok := lo.Find(instanceTypes, func(it cloudprovider.InstanceType) bool { return it.Name() == node.Labels[v1.LabelInstanceType] })
+	instanceType, ok := lo.Find(instanceTypes, func(it cloudprovider.InstanceType) bool { return it.Name == node.Labels[v1.LabelInstanceType] })
 	if !ok {
 		return []Issue{{
 			node:    node,
@@ -60,7 +60,7 @@ func (n *NodeShape) Check(ctx context.Context, node *v1.Node, provisioner *v1alp
 		}}, nil
 	}
 	var issues []Issue
-	for resourceName, expectedQuantity := range instanceType.Resources() {
+	for resourceName, expectedQuantity := range instanceType.Capacity {
 		nodeQuantity, ok := node.Status.Capacity[resourceName]
 		if !ok && !expectedQuantity.IsZero() {
 			issues = append(issues, Issue{

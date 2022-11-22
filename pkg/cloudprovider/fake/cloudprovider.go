@@ -45,7 +45,6 @@ type CloudProvider struct {
 }
 
 var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)
-var _ cloudprovider.InstanceType = (*InstanceType)(nil)
 
 func NewCloudProvider() *CloudProvider {
 	return &CloudProvider{
@@ -66,7 +65,7 @@ func (c *CloudProvider) Create(ctx context.Context, nodeRequest *cloudprovider.N
 	instanceType := nodeRequest.InstanceTypeOptions[0]
 	// Labels
 	labels := map[string]string{}
-	for key, requirement := range instanceType.Requirements() {
+	for key, requirement := range instanceType.Requirements {
 		if requirement.Len() == 1 {
 			labels[key] = requirement.Values()[0]
 		}

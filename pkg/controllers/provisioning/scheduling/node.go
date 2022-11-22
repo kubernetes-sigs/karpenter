@@ -131,7 +131,7 @@ func InstanceTypeList(instanceTypeOptions []cloudprovider.InstanceType) string {
 		} else if i > 0 {
 			fmt.Fprint(&itSb, ", ")
 		}
-		fmt.Fprint(&itSb, it.Name())
+		fmt.Fprint(&itSb, it.Name)
 	}
 	return itSb.String()
 }
@@ -143,11 +143,11 @@ func filterInstanceTypesByRequirements(instanceTypes []cloudprovider.InstanceTyp
 }
 
 func compatible(instanceType cloudprovider.InstanceType, requirements scheduling.Requirements) bool {
-	return instanceType.Requirements().Intersects(requirements) == nil
+	return instanceType.Requirements.Intersects(requirements) == nil
 }
 
 func fits(instanceType cloudprovider.InstanceType, requests v1.ResourceList) bool {
-	return resources.Fits(resources.Merge(requests, instanceType.Overhead()), instanceType.Resources())
+	return resources.Fits(resources.Merge(requests, instanceType.Overhead.SystemReserved, instanceType.Overhead.KubeReserved), instanceType.Capacity)
 }
 
 func hasOffering(instanceType cloudprovider.InstanceType, requirements scheduling.Requirements) bool {

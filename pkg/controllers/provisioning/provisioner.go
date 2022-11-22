@@ -266,7 +266,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 
 		// Construct Topology Domains
 		for _, instanceType := range instanceTypeOptions {
-			for key, requirement := range instanceType.Requirements() {
+			for key, requirement := range instanceType.Requirements {
 				domains[key] = domains[key].Union(sets.NewString(requirement.Values()...))
 			}
 		}

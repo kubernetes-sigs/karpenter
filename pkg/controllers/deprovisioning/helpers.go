@@ -116,8 +116,8 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 
 // instanceTypesAreSubset returns true if the lhs slice of instance types are a subset of the rhs.
 func instanceTypesAreSubset(lhs []cloudprovider.InstanceType, rhs []cloudprovider.InstanceType) bool {
-	rhsNames := sets.NewString(lo.Map(rhs, func(t cloudprovider.InstanceType, i int) string { return t.Name() })...)
-	lhsNames := sets.NewString(lo.Map(lhs, func(t cloudprovider.InstanceType, i int) string { return t.Name() })...)
+	rhsNames := sets.NewString(lo.Map(rhs, func(t cloudprovider.InstanceType, i int) string { return t.Name })...)
+	lhsNames := sets.NewString(lo.Map(lhs, func(t cloudprovider.InstanceType, i int) string { return t.Name })...)
 	return len(rhsNames.Intersection(lhsNames)) == len(lhsNames)
 }
 
@@ -191,9 +191,9 @@ func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient clie
 			return true
 		}
 
-		instanceType := instanceTypeMap[n.Node.Labels[v1.LabelInstanceTypeStable]]
+		instanceType, ok := instanceTypeMap[n.Node.Labels[v1.LabelInstanceTypeStable]]
 		// skip any nodes that we can't determine the instance of
-		if instanceType == nil {
+		if !ok {
 			return true
 		}
 
@@ -267,7 +267,7 @@ func buildProvisionerMap(ctx context.Context, kubeClient client.Client, cloudPro
 		}
 		instanceTypesByProvisioner[p.Name] = map[string]cloudprovider.InstanceType{}
 		for _, it := range provInstanceTypes {
-			instanceTypesByProvisioner[p.Name][it.Name()] = it
+			instanceTypesByProvisioner[p.Name][it.Name] = it
 		}
 	}
 	return provisioners, instanceTypesByProvisioner, nil

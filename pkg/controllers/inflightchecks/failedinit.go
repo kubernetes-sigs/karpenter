@@ -61,7 +61,7 @@ func (f FailedInit) Check(ctx context.Context, n *v1.Node, provisioner *v1alpha5
 		return nil, err
 	}
 
-	instanceType, ok := lo.Find(instanceTypes, func(it cloudprovider.InstanceType) bool { return it.Name() == n.Labels[v1.LabelInstanceType] })
+	instanceType, ok := lo.Find(instanceTypes, func(it cloudprovider.InstanceType) bool { return it.Name == n.Labels[v1.LabelInstanceType] })
 	if !ok {
 		return []Issue{{
 			node:    n,

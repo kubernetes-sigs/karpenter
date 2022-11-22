@@ -106,7 +106,7 @@ var _ = Describe("Node Resource Level", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
 				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name(),
+				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
@@ -137,7 +137,7 @@ var _ = Describe("Node Resource Level", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
 				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name(),
+				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
@@ -175,7 +175,7 @@ var _ = Describe("Node Resource Level", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
 				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name(),
+				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
@@ -207,7 +207,7 @@ var _ = Describe("Node Resource Level", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
 				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name(),
+				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
@@ -253,7 +253,7 @@ var _ = Describe("Node Resource Level", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
 				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name(),
+				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
@@ -283,7 +283,7 @@ var _ = Describe("Node Resource Level", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
 				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name(),
+				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
@@ -325,7 +325,7 @@ var _ = Describe("Node Resource Level", func() {
 		node1 := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
 				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name(),
+				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
@@ -351,7 +351,7 @@ var _ = Describe("Node Resource Level", func() {
 		node2 := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
 				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name(),
+				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("8"),
@@ -401,7 +401,7 @@ var _ = Describe("Node Resource Level", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
 				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name(),
+				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("200"),
@@ -480,7 +480,7 @@ var _ = Describe("Node Resource Level", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
 				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name(),
+				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:    resource.MustParse("4"),
@@ -515,7 +515,7 @@ var _ = Describe("Node Resource Level", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-					v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name(),
+					v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
 				},
 				Finalizers: []string{v1alpha5.TerminationFinalizer},
 			},
@@ -541,7 +541,7 @@ var _ = Describe("Node Resource Level", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-					v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name(),
+					v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
 				},
 				Finalizers: []string{v1alpha5.TerminationFinalizer},
 			},
@@ -583,7 +583,7 @@ var _ = Describe("Pod Anti-Affinity", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
 				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name(),
+				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
@@ -625,7 +625,7 @@ var _ = Describe("Pod Anti-Affinity", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
 				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name(),
+				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
@@ -664,7 +664,7 @@ var _ = Describe("Pod Anti-Affinity", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
 				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name(),
+				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
@@ -713,7 +713,7 @@ var _ = Describe("Pod Anti-Affinity", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
 				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name(),
+				v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),

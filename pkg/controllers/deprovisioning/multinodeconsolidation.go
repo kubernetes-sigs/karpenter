@@ -142,17 +142,17 @@ func filterOutSameType(newNode *scheduling.Node, consolidate []CandidateNode) []
 
 	// get the price of the cheapest node that we currently are considering deleting indexed by instance type
 	for _, n := range consolidate {
-		existingInstanceTypes.Insert(n.instanceType.Name())
+		existingInstanceTypes.Insert(n.instanceType.Name)
 		of, ok := cloudprovider.GetOffering(n.instanceType, n.capacityType, n.zone)
 		if !ok {
 			continue
 		}
-		existingPrice, ok := nodePricesByInstanceType[n.instanceType.Name()]
+		existingPrice, ok := nodePricesByInstanceType[n.instanceType.Name]
 		if !ok {
 			existingPrice = math.MaxFloat64
 		}
 		if of.Price < existingPrice {
-			nodePricesByInstanceType[n.instanceType.Name()] = of.Price
+			nodePricesByInstanceType[n.instanceType.Name] = of.Price
 		}
 	}
 
@@ -161,9 +161,9 @@ func filterOutSameType(newNode *scheduling.Node, consolidate []CandidateNode) []
 		// we are considering replacing multiple nodes with a single node of one of the same types, so the replacement
 		// node must be cheaper than the price of the existing node, or we should just keep that one and do a
 		// deletion only to reduce cluster disruption (fewer pods will re-schedule).
-		if existingInstanceTypes.Has(it.Name()) {
-			if nodePricesByInstanceType[it.Name()] < maxPrice {
-				maxPrice = nodePricesByInstanceType[it.Name()]
+		if existingInstanceTypes.Has(it.Name) {
+			if nodePricesByInstanceType[it.Name] < maxPrice {
+				maxPrice = nodePricesByInstanceType[it.Name]
 			}
 		}
 	}

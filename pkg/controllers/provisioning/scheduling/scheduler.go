@@ -258,7 +258,7 @@ func subtractMax(remaining v1.ResourceList, instanceTypes []cloudprovider.Instan
 	}
 	var allInstanceResources []v1.ResourceList
 	for _, it := range instanceTypes {
-		allInstanceResources = append(allInstanceResources, it.Resources())
+		allInstanceResources = append(allInstanceResources, it.Capacity)
 	}
 	result := v1.ResourceList{}
 	itResources := resources.MaxResources(allInstanceResources...)
@@ -274,7 +274,7 @@ func subtractMax(remaining v1.ResourceList, instanceTypes []cloudprovider.Instan
 func filterByRemainingResources(instanceTypes []cloudprovider.InstanceType, remaining v1.ResourceList) []cloudprovider.InstanceType {
 	var filtered []cloudprovider.InstanceType
 	for _, it := range instanceTypes {
-		itResources := it.Resources()
+		itResources := it.Capacity
 		viableInstance := true
 		for resourceName, remainingQuantity := range remaining {
 			// if the instance capacity is greater than the remaining quantity for this resource

@@ -68,19 +68,28 @@ type NodeRequest struct {
 
 // InstanceType describes the properties of a potential node (either concrete attributes of an instance of this type
 // or supported options in the case of arrays)
-type InstanceType interface {
+type InstanceType struct {
 	// Name of the instance type, must correspond to v1.LabelInstanceTypeStable
-	Name() string
+	Name string
 	// Requirements returns a flexible set of properties that may be selected
 	// for scheduling. Must be defined for every well known label, even if empty.
-	Requirements() scheduling.Requirements
+	Requirements scheduling.Requirements
 	// Note that though this is an array it is expected that all the Offerings are unique from one another
-	Offerings() []Offering
-	// Resources are the full allocatable resource capacities for this instance type
-	Resources() v1.ResourceList
+	Offerings []Offering
+	// Resources are the full resource capacities for this instance type
+	Capacity v1.ResourceList
 	// Overhead is the amount of resource overhead expected to be used by kubelet and any other system daemons outside
 	// of Kubernetes.
-	Overhead() v1.ResourceList
+	Overhead InstanceTypeOverhead
+}
+
+type InstanceTypeOverhead struct {
+	// KubeReserved returns the default resources allocated to kubernetes system daemons by default
+	KubeReserved v1.ResourceList
+	// SystemReserved returns the default resources allocated to the OS system daemons by default
+	SystemReserved v1.ResourceList
+	// EvictionThreshold returns the resources used to maintain a hard eviction threshold
+	EvictionThreshold v1.ResourceList
 }
 
 // An Offering describes where an InstanceType is available to be used, with the expectation that its properties
@@ -97,7 +106,7 @@ type Offering struct {
 // AvailableOfferings filters the offerings on the passed instance type
 // and returns the offerings marked as available
 func AvailableOfferings(it InstanceType) []Offering {
-	return lo.Filter(it.Offerings(), func(o Offering, _ int) bool {
+	return lo.Filter(it.Offerings, func(o Offering, _ int) bool {
 		return o.Available
 	})
 }
@@ -105,7 +114,7 @@ func AvailableOfferings(it InstanceType) []Offering {
 // GetOffering gets the offering from passed instance type that matches the
 // passed zone and capacity type
 func GetOffering(it InstanceType, ct, zone string) (Offering, bool) {
-	return lo.Find(it.Offerings(), func(of Offering) bool {
+	return lo.Find(it.Offerings, func(of Offering) bool {
 		return of.CapacityType == ct && of.Zone == zone
 	})
 }

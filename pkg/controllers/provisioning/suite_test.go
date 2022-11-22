@@ -76,7 +76,7 @@ var _ = BeforeSuite(func() {
 	instanceTypes, _ := cloudProvider.GetInstanceTypes(context.Background(), nil)
 	instanceTypeMap = map[string]cloudprovider.InstanceType{}
 	for _, it := range instanceTypes {
-		instanceTypeMap[it.Name()] = it
+		instanceTypeMap[it.Name] = it
 	}
 	provisioning.WaitForClusterSync = false
 })
@@ -196,7 +196,7 @@ var _ = Describe("Provisioning", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-					v1.LabelInstanceTypeStable:       its[0].Name(),
+					v1.LabelInstanceTypeStable:       its[0].Name,
 				},
 				Finalizers: []string{v1alpha5.TerminationFinalizer},
 			}},
@@ -339,7 +339,7 @@ var _ = Describe("Provisioning", func() {
 			))[0]
 			node := ExpectScheduled(ctx, env.Client, pod)
 
-			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Resources()
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
 		})
@@ -360,7 +360,7 @@ var _ = Describe("Provisioning", func() {
 			))[0]
 			node := ExpectScheduled(ctx, env.Client, pod)
 
-			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Resources()
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
 		})
@@ -401,7 +401,7 @@ var _ = Describe("Provisioning", func() {
 			))
 			pod := ExpectProvisioned(ctx, env.Client, recorder, controller, prov, test.UnschedulablePod(test.PodOptions{}))[0]
 			node := ExpectScheduled(ctx, env.Client, pod)
-			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Resources()
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
 		})
@@ -456,7 +456,7 @@ var _ = Describe("Provisioning", func() {
 				},
 			))[0]
 			node := ExpectScheduled(ctx, env.Client, pod)
-			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Resources()
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("2")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("2Gi")))
 		})
@@ -473,7 +473,7 @@ var _ = Describe("Provisioning", func() {
 				},
 			))[0]
 			node := ExpectScheduled(ctx, env.Client, pod)
-			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Resources()
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("2")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("2Gi")))
 		})
@@ -491,7 +491,7 @@ var _ = Describe("Provisioning", func() {
 				},
 			))[0]
 			node := ExpectScheduled(ctx, env.Client, pod)
-			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Resources()
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
 		})
