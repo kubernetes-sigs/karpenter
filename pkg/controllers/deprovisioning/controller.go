@@ -126,7 +126,7 @@ func (c *Controller) Reconcile(ctx context.Context, r reconcile.Request) (reconc
 // making that determination
 type CandidateNode struct {
 	*v1.Node
-	instanceType   cloudprovider.InstanceType
+	instanceType   *cloudprovider.InstanceType
 	capacityType   string
 	zone           string
 	provisioner    *v1alpha5.Provisioner

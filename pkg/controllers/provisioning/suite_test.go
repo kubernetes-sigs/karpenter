@@ -55,7 +55,7 @@ var prov *provisioning.Provisioner
 var controller *provisioning.Controller
 var env *test.Environment
 var recorder *test.EventRecorder
-var instanceTypeMap map[string]cloudprovider.InstanceType
+var instanceTypeMap map[string]*cloudprovider.InstanceType
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -74,7 +74,7 @@ var _ = BeforeSuite(func() {
 	prov = provisioning.NewProvisioner(ctx, env.Client, corev1.NewForConfigOrDie(env.Config), recorder, cloudProvider, cluster, test.SettingsStore{})
 	controller = provisioning.NewController(env.Client, prov, recorder)
 	instanceTypes, _ := cloudProvider.GetInstanceTypes(context.Background(), nil)
-	instanceTypeMap = map[string]cloudprovider.InstanceType{}
+	instanceTypeMap = map[string]*cloudprovider.InstanceType{}
 	for _, it := range instanceTypes {
 		instanceTypeMap[it.Name] = it
 	}

@@ -56,14 +56,14 @@ type CloudProvider interface {
 	// Availability of types or zone may vary by provisioner or over time.  Regardless of
 	// availability, the GetInstanceTypes method should always return all instance types,
 	// even those with no offerings available.
-	GetInstanceTypes(context.Context, *v1alpha5.Provisioner) ([]InstanceType, error)
+	GetInstanceTypes(context.Context, *v1alpha5.Provisioner) ([]*InstanceType, error)
 	// Name returns the CloudProvider implementation name.
 	Name() string
 }
 
 type NodeRequest struct {
 	Template            *scheduling.NodeTemplate
-	InstanceTypeOptions []InstanceType
+	InstanceTypeOptions []*InstanceType
 }
 
 // InstanceType describes the properties of a potential node (either concrete attributes of an instance of this type
@@ -80,7 +80,7 @@ type InstanceType struct {
 	Capacity v1.ResourceList
 	// Overhead is the amount of resource overhead expected to be used by kubelet and any other system daemons outside
 	// of Kubernetes.
-	Overhead InstanceTypeOverhead
+	Overhead *InstanceTypeOverhead
 }
 
 type InstanceTypeOverhead struct {
@@ -105,7 +105,7 @@ type Offering struct {
 
 // AvailableOfferings filters the offerings on the passed instance type
 // and returns the offerings marked as available
-func AvailableOfferings(it InstanceType) []Offering {
+func AvailableOfferings(it *InstanceType) []Offering {
 	return lo.Filter(it.Offerings, func(o Offering, _ int) bool {
 		return o.Available
 	})
@@ -113,7 +113,7 @@ func AvailableOfferings(it InstanceType) []Offering {
 
 // GetOffering gets the offering from passed instance type that matches the
 // passed zone and capacity type
-func GetOffering(it InstanceType, ct, zone string) (Offering, bool) {
+func GetOffering(it *InstanceType, ct, zone string) (Offering, bool) {
 	return lo.Find(it.Offerings, func(of Offering) bool {
 		return of.CapacityType == ct && of.Zone == zone
 	})

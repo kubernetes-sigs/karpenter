@@ -46,7 +46,7 @@ func init() {
 	)
 }
 
-func NewInstanceType(options InstanceTypeOptions) cloudprovider.InstanceType {
+func NewInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 	if options.Resources == nil {
 		options.Resources = map[v1.ResourceName]resource.Quantity{}
 	}
@@ -74,11 +74,11 @@ func NewInstanceType(options InstanceTypeOptions) cloudprovider.InstanceType {
 	if options.OperatingSystems.Len() == 0 {
 		options.OperatingSystems = utilsets.NewString(string(v1.Linux), string(v1.Windows), "darwin")
 	}
-	i := cloudprovider.InstanceType{
+	i := &cloudprovider.InstanceType{
 		Name:      options.Name,
 		Offerings: options.Offerings,
 		Capacity:  options.Resources,
-		Overhead: cloudprovider.InstanceTypeOverhead{
+		Overhead: &cloudprovider.InstanceTypeOverhead{
 			KubeReserved: v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("100m"),
 				v1.ResourceMemory: resource.MustParse("10Mi"),
@@ -109,8 +109,8 @@ func NewInstanceType(options InstanceTypeOptions) cloudprovider.InstanceType {
 }
 
 // InstanceTypesAssorted create many unique instance types with varying CPU/memory/architecture/OS/zone/capacity type.
-func InstanceTypesAssorted() []cloudprovider.InstanceType {
-	var instanceTypes []cloudprovider.InstanceType
+func InstanceTypesAssorted() []*cloudprovider.InstanceType {
+	var instanceTypes []*cloudprovider.InstanceType
 	for _, cpu := range []int{1, 2, 4, 8, 16, 32, 64} {
 		for _, mem := range []int{1, 2, 4, 8, 16, 32, 64, 128} {
 			for _, zone := range []string{"test-zone-1", "test-zone-2", "test-zone-3"} {
@@ -151,8 +151,8 @@ func InstanceTypesAssorted() []cloudprovider.InstanceType {
 //
 //	2vcpu, 4Gi mem, 20 pods
 //	3vcpu, 6Gi mem, 30 pods
-func InstanceTypes(total int) []cloudprovider.InstanceType {
-	instanceTypes := []cloudprovider.InstanceType{}
+func InstanceTypes(total int) []*cloudprovider.InstanceType {
+	instanceTypes := []*cloudprovider.InstanceType{}
 	for i := 0; i < total; i++ {
 		instanceTypes = append(instanceTypes, NewInstanceType(InstanceTypeOptions{
 			Name: fmt.Sprintf("fake-it-%d", i),

@@ -38,7 +38,7 @@ import (
 
 var _ = Describe("Instance Type Selection", func() {
 	var minPrice float64
-	var instanceTypeMap map[string]cloudprovider.InstanceType
+	var instanceTypeMap map[string]*cloudprovider.InstanceType
 	nodePrice := func(n *v1.Node) float64 {
 		of, _ := cloudprovider.GetOffering(instanceTypeMap[n.Labels[v1.LabelInstanceTypeStable]], n.Labels[v1alpha5.LabelCapacityType], n.Labels[v1.LabelTopologyZone])
 		return of.Price
@@ -397,7 +397,7 @@ var _ = Describe("Instance Type Selection", func() {
 	})
 	It("should not schedule if no instance type matches selector (pod arch = arm)", func() {
 		// remove all Arm instance types
-		cloudProv.InstanceTypes = filterInstanceTypes(cloudProv.InstanceTypes, func(i cloudprovider.InstanceType) bool {
+		cloudProv.InstanceTypes = filterInstanceTypes(cloudProv.InstanceTypes, func(i *cloudprovider.InstanceType) bool {
 			return i.Requirements.Get(v1.LabelArchStable).Has(v1alpha5.ArchitectureAmd64)
 		})
 
@@ -416,7 +416,7 @@ var _ = Describe("Instance Type Selection", func() {
 	})
 	It("should not schedule if no instance type matches selector (pod arch = arm zone=test-zone-2)", func() {
 		// remove all Arm instance types in zone-2
-		cloudProv.InstanceTypes = filterInstanceTypes(cloudProv.InstanceTypes, func(i cloudprovider.InstanceType) bool {
+		cloudProv.InstanceTypes = filterInstanceTypes(cloudProv.InstanceTypes, func(i *cloudprovider.InstanceType) bool {
 			for _, off := range i.Offerings {
 				if off.Zone == "test-zone-2" {
 					return i.Requirements.Get(v1.LabelArchStable).Has(v1alpha5.ArchitectureAmd64)
@@ -444,7 +444,7 @@ var _ = Describe("Instance Type Selection", func() {
 	})
 	It("should not schedule if no instance type matches selector (prov arch = arm / pod zone=test-zone-2)", func() {
 		// remove all Arm instance types in zone-2
-		cloudProv.InstanceTypes = filterInstanceTypes(cloudProv.InstanceTypes, func(i cloudprovider.InstanceType) bool {
+		cloudProv.InstanceTypes = filterInstanceTypes(cloudProv.InstanceTypes, func(i *cloudprovider.InstanceType) bool {
 			for _, off := range i.Offerings {
 				if off.Zone == "test-zone-2" {
 					return i.Requirements.Get(v1.LabelArchStable).Has(v1alpha5.ArchitectureAmd64)
@@ -525,7 +525,7 @@ var _ = Describe("Instance Type Selection", func() {
 		}
 	})
 	It("should schedule on cheaper on-demand instance even when spot price ordering would place other instance types first", func() {
-		cloudProv.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProv.InstanceTypes = []*cloudprovider.InstanceType{
 			fake.NewInstanceType(fake.InstanceTypeOptions{
 				Name:             "test-instance1",
 				Architecture:     "amd64",
@@ -568,13 +568,13 @@ var _ = Describe("Instance Type Selection", func() {
 	})
 })
 
-func getInstanceTypeMap(its []cloudprovider.InstanceType) map[string]cloudprovider.InstanceType {
-	return lo.SliceToMap(its, func(it cloudprovider.InstanceType) (string, cloudprovider.InstanceType) {
+func getInstanceTypeMap(its []*cloudprovider.InstanceType) map[string]*cloudprovider.InstanceType {
+	return lo.SliceToMap(its, func(it *cloudprovider.InstanceType) (string, *cloudprovider.InstanceType) {
 		return it.Name, it
 	})
 }
 
-func getMinPrice(its []cloudprovider.InstanceType) float64 {
+func getMinPrice(its []*cloudprovider.InstanceType) float64 {
 	minPrice := math.MaxFloat64
 	for _, it := range its {
 		for _, of := range it.Offerings {
@@ -584,8 +584,8 @@ func getMinPrice(its []cloudprovider.InstanceType) float64 {
 	return minPrice
 }
 
-func filterInstanceTypes(types []cloudprovider.InstanceType, pred func(i cloudprovider.InstanceType) bool) []cloudprovider.InstanceType {
-	var ret []cloudprovider.InstanceType
+func filterInstanceTypes(types []*cloudprovider.InstanceType, pred func(i *cloudprovider.InstanceType) bool) []*cloudprovider.InstanceType {
+	var ret []*cloudprovider.InstanceType
 	for _, it := range types {
 		if pred(it) {
 			ret = append(ret, it)
@@ -594,7 +594,7 @@ func filterInstanceTypes(types []cloudprovider.InstanceType, pred func(i cloudpr
 	return ret
 }
 
-func ExpectInstancesWithOffering(instanceTypes []cloudprovider.InstanceType, capacityType string, zone string) {
+func ExpectInstancesWithOffering(instanceTypes []*cloudprovider.InstanceType, capacityType string, zone string) {
 	for _, it := range instanceTypes {
 		matched := false
 		for _, offering := range it.Offerings {
@@ -606,7 +606,7 @@ func ExpectInstancesWithOffering(instanceTypes []cloudprovider.InstanceType, cap
 	}
 }
 
-func ExpectInstancesWithLabel(instanceTypes []cloudprovider.InstanceType, label string, value string) {
+func ExpectInstancesWithLabel(instanceTypes []*cloudprovider.InstanceType, label string, value string) {
 	for _, it := range instanceTypes {
 		switch label {
 		case v1.LabelArchStable:

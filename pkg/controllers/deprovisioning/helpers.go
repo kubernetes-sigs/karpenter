@@ -115,9 +115,9 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 }
 
 // instanceTypesAreSubset returns true if the lhs slice of instance types are a subset of the rhs.
-func instanceTypesAreSubset(lhs []cloudprovider.InstanceType, rhs []cloudprovider.InstanceType) bool {
-	rhsNames := sets.NewString(lo.Map(rhs, func(t cloudprovider.InstanceType, i int) string { return t.Name })...)
-	lhsNames := sets.NewString(lo.Map(lhs, func(t cloudprovider.InstanceType, i int) string { return t.Name })...)
+func instanceTypesAreSubset(lhs []*cloudprovider.InstanceType, rhs []*cloudprovider.InstanceType) bool {
+	rhsNames := sets.NewString(lo.Map(rhs, func(t *cloudprovider.InstanceType, i int) string { return t.Name })...)
+	lhsNames := sets.NewString(lo.Map(lhs, func(t *cloudprovider.InstanceType, i int) string { return t.Name })...)
 	return len(rhsNames.Intersection(lhsNames)) == len(lhsNames)
 }
 
@@ -145,8 +145,8 @@ func GetPodEvictionCost(ctx context.Context, p *v1.Pod) float64 {
 	return clamp(-10.0, cost, 10.0)
 }
 
-func filterByPrice(options []cloudprovider.InstanceType, reqs scheduling.Requirements, price float64) []cloudprovider.InstanceType {
-	var result []cloudprovider.InstanceType
+func filterByPrice(options []*cloudprovider.InstanceType, reqs scheduling.Requirements, price float64) []*cloudprovider.InstanceType {
+	var result []*cloudprovider.InstanceType
 	for _, it := range options {
 		launchPrice := worstLaunchPrice(cloudprovider.AvailableOfferings(it), reqs)
 		if launchPrice < price {
@@ -177,7 +177,7 @@ func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient clie
 	var nodes []CandidateNode
 	cluster.ForEachNode(func(n *state.Node) bool {
 		var provisioner *v1alpha5.Provisioner
-		var instanceTypeMap map[string]cloudprovider.InstanceType
+		var instanceTypeMap map[string]*cloudprovider.InstanceType
 		if provName, ok := n.Node.Labels[v1alpha5.ProvisionerNameLabelKey]; ok {
 			provisioner = provisioners[provName]
 			instanceTypeMap = instanceTypesByProvisioner[provName]
@@ -250,13 +250,13 @@ func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient clie
 }
 
 // buildProvisionerMap builds a provName -> provisioner map and a provName -> instanceName -> instance type map
-func buildProvisionerMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[string]*v1alpha5.Provisioner, map[string]map[string]cloudprovider.InstanceType, error) {
+func buildProvisionerMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[string]*v1alpha5.Provisioner, map[string]map[string]*cloudprovider.InstanceType, error) {
 	provisioners := map[string]*v1alpha5.Provisioner{}
 	var provList v1alpha5.ProvisionerList
 	if err := kubeClient.List(ctx, &provList); err != nil {
 		return nil, nil, fmt.Errorf("listing provisioners, %w", err)
 	}
-	instanceTypesByProvisioner := map[string]map[string]cloudprovider.InstanceType{}
+	instanceTypesByProvisioner := map[string]map[string]*cloudprovider.InstanceType{}
 	for i := range provList.Items {
 		p := &provList.Items[i]
 		provisioners[p.Name] = p
@@ -265,7 +265,7 @@ func buildProvisionerMap(ctx context.Context, kubeClient client.Client, cloudPro
 		if err != nil {
 			return nil, nil, fmt.Errorf("listing instance types for %s, %w", p.Name, err)
 		}
-		instanceTypesByProvisioner[p.Name] = map[string]cloudprovider.InstanceType{}
+		instanceTypesByProvisioner[p.Name] = map[string]*cloudprovider.InstanceType{}
 		for _, it := range provInstanceTypes {
 			instanceTypesByProvisioner[p.Name][it.Name] = it
 		}

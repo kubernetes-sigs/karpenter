@@ -42,7 +42,7 @@ type SchedulerOptions struct {
 
 func NewScheduler(ctx context.Context, kubeClient client.Client, nodeTemplates []*scheduling.NodeTemplate,
 	provisioners []v1alpha5.Provisioner, cluster *state.Cluster, stateNodes []*state.Node, topology *Topology,
-	instanceTypes map[string][]cloudprovider.InstanceType, daemonOverhead map[*scheduling.NodeTemplate]v1.ResourceList,
+	instanceTypes map[string][]*cloudprovider.InstanceType, daemonOverhead map[*scheduling.NodeTemplate]v1.ResourceList,
 	recorder events.Recorder, opts SchedulerOptions) *Scheduler {
 
 	// if any of the provisioners add a taint with a prefer no schedule effect, we add a toleration for the taint
@@ -90,7 +90,7 @@ type Scheduler struct {
 	existingNodes      []*ExistingNode
 	nodeTemplates      []*scheduling.NodeTemplate
 	remainingResources map[string]v1.ResourceList // provisioner name -> remaining resources for that provisioner
-	instanceTypes      map[string][]cloudprovider.InstanceType
+	instanceTypes      map[string][]*cloudprovider.InstanceType
 	daemonOverhead     map[*scheduling.NodeTemplate]v1.ResourceList
 	preferences        *Preferences
 	topology           *Topology
@@ -251,7 +251,7 @@ func (s *Scheduler) calculateExistingNodes(namedNodeTemplates map[string]*schedu
 // overshooting out, we need to pessimistically assume that if e.g. we request a 2, 4 or 8 CPU instance type
 // that the 8 CPU instance type is all that will be available.  This could cause a batch of pods to take multiple rounds
 // to schedule.
-func subtractMax(remaining v1.ResourceList, instanceTypes []cloudprovider.InstanceType) v1.ResourceList {
+func subtractMax(remaining v1.ResourceList, instanceTypes []*cloudprovider.InstanceType) v1.ResourceList {
 	// shouldn't occur, but to be safe
 	if len(instanceTypes) == 0 {
 		return remaining
@@ -271,8 +271,8 @@ func subtractMax(remaining v1.ResourceList, instanceTypes []cloudprovider.Instan
 }
 
 // filterByRemainingResources is used to filter out instance types that if launched would exceed the provisioner limits
-func filterByRemainingResources(instanceTypes []cloudprovider.InstanceType, remaining v1.ResourceList) []cloudprovider.InstanceType {
-	var filtered []cloudprovider.InstanceType
+func filterByRemainingResources(instanceTypes []*cloudprovider.InstanceType, remaining v1.ResourceList) []*cloudprovider.InstanceType {
+	var filtered []*cloudprovider.InstanceType
 	for _, it := range instanceTypes {
 		itResources := it.Capacity
 		viableInstance := true

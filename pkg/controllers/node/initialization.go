@@ -56,14 +56,14 @@ func (r *Initialization) Reconcile(ctx context.Context, provisioner *v1alpha5.Pr
 	return reconcile.Result{}, nil
 }
 
-func (r *Initialization) getInstanceType(ctx context.Context, provisioner *v1alpha5.Provisioner, instanceTypeName string) (cloudprovider.InstanceType, error) {
+func (r *Initialization) getInstanceType(ctx context.Context, provisioner *v1alpha5.Provisioner, instanceTypeName string) (*cloudprovider.InstanceType, error) {
 	instanceTypes, err := r.cloudProvider.GetInstanceTypes(ctx, provisioner)
 	if err != nil {
-		return cloudprovider.InstanceType{}, err
+		return nil, err
 	}
 	// The instance type may not be found which can occur if the instance type label was removed/edited.  This shouldn't occur,
 	// but if it does we only lose the ability to check for extended resources.
-	return lo.FindOrElse(instanceTypes, cloudprovider.InstanceType{}, func(it cloudprovider.InstanceType) bool { return it.Name == instanceTypeName }), nil
+	return lo.FindOrElse(instanceTypes, nil, func(it *cloudprovider.InstanceType) bool { return it.Name == instanceTypeName }), nil
 }
 
 // isInitialized returns true if the node has:
@@ -71,7 +71,7 @@ func (r *Initialization) getInstanceType(ctx context.Context, provisioner *v1alp
 // b) all the startup taints have been removed from the node
 // c) all extended resources have been registered
 // This method handles both nil provisioners and nodes without extended resources gracefully.
-func (r *Initialization) isInitialized(n *v1.Node, provisioner *v1alpha5.Provisioner, instanceType cloudprovider.InstanceType) bool {
+func (r *Initialization) isInitialized(n *v1.Node, provisioner *v1alpha5.Provisioner, instanceType *cloudprovider.InstanceType) bool {
 	// fast checks first
 	if node.GetCondition(n, v1.NodeReady).Status != v1.ConditionTrue {
 		return false
@@ -104,7 +104,11 @@ func IsStartupTaintRemoved(node *v1.Node, provisioner *v1alpha5.Provisioner) (*v
 
 // IsExtendedResourceRegistered returns true if there are no extended resources on the node, or they have all been
 // registered by device plugins
-func IsExtendedResourceRegistered(node *v1.Node, instanceType cloudprovider.InstanceType) (v1.ResourceName, bool) {
+func IsExtendedResourceRegistered(node *v1.Node, instanceType *cloudprovider.InstanceType) (v1.ResourceName, bool) {
+	if instanceType == nil {
+		// no way to know, so assume they're registered
+		return "", true
+	}
 	for resourceName, quantity := range instanceType.Capacity {
 		if quantity.IsZero() {
 			continue

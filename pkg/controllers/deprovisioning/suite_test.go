@@ -60,10 +60,10 @@ var cloudProvider *fake.CloudProvider
 var recorder *test.EventRecorder
 var nodeStateController *state.NodeController
 var fakeClock *clock.FakeClock
-var onDemandInstances []cloudprovider.InstanceType
-var mostExpensiveInstance cloudprovider.InstanceType
+var onDemandInstances []*cloudprovider.InstanceType
+var mostExpensiveInstance *cloudprovider.InstanceType
 var mostExpensiveOffering cloudprovider.Offering
-var leastExpensiveInstance cloudprovider.InstanceType
+var leastExpensiveInstance *cloudprovider.InstanceType
 var leastExpensiveOffering cloudprovider.Offering
 
 func TestAPIs(t *testing.T) {
@@ -103,7 +103,7 @@ var _ = BeforeEach(func() {
 	cloudProvider.CreateCalls = nil
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 	cloudProvider.AllowedCreateCalls = math.MaxInt
-	onDemandInstances = lo.Filter(cloudProvider.InstanceTypes, func(i cloudprovider.InstanceType, _ int) bool {
+	onDemandInstances = lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
 		for _, o := range cloudprovider.AvailableOfferings(i) {
 			if o.CapacityType == v1alpha5.CapacityTypeOnDemand {
 				return true
@@ -323,7 +323,7 @@ var _ = Describe("Expiration", func() {
 			},
 			Resources: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("3")},
 		})
-		cloudProvider.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 			currentInstance,
 			replacementInstance,
 		}
@@ -414,7 +414,7 @@ var _ = Describe("Expiration", func() {
 			},
 			Resources: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("3")},
 		})
-		cloudProvider.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 			currentInstance,
 			replacementInstance,
 		}
@@ -784,7 +784,7 @@ var _ = Describe("Replace Nodes", func() {
 				},
 			},
 		})
-		cloudProvider.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 			currentInstance,
 			replacementInstance,
 		}
@@ -879,7 +879,7 @@ var _ = Describe("Replace Nodes", func() {
 			},
 		})
 
-		cloudProvider.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 			currentInstance,
 			replacementInstance,
 		}
@@ -2411,7 +2411,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 	})
 })
 
-func leastExpensiveInstanceWithZone(zone string) cloudprovider.InstanceType {
+func leastExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
 	for _, elem := range onDemandInstances {
 		if hasZone(elem.Offerings, zone) {
 			return elem
@@ -2420,7 +2420,7 @@ func leastExpensiveInstanceWithZone(zone string) cloudprovider.InstanceType {
 	return onDemandInstances[len(onDemandInstances)-1]
 }
 
-func mostExpensiveInstanceWithZone(zone string) cloudprovider.InstanceType {
+func mostExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
 	for i := len(onDemandInstances) - 1; i >= 0; i-- {
 		elem := onDemandInstances[i]
 		if hasZone(elem.Offerings, zone) {

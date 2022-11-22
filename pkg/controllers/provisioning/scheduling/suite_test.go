@@ -3498,7 +3498,7 @@ var _ = Describe("Binpacking", func() {
 	It("should select for valid instance types, regardless of price", func() {
 		// capacity sizes and prices don't correlate here, regardless we should filter and see that all three instance types
 		// are valid before preferring the cheapest one 'large'
-		cloudProv.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProv.InstanceTypes = []*cloudprovider.InstanceType{
 			fake.NewInstanceType(fake.InstanceTypeOptions{
 				Name: "medium",
 				Resources: v1.ResourceList{
@@ -4040,7 +4040,7 @@ var _ = Describe("In-Flight Nodes", func() {
 	})
 	// nolint:gosec
 	It("should pack in-flight nodes before launching new nodes", func() {
-		cloudProv.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProv.InstanceTypes = []*cloudprovider.InstanceType{
 			fake.NewInstanceType(fake.InstanceTypeOptions{
 				Name: "medium",
 				Resources: v1.ResourceList{
@@ -4211,7 +4211,7 @@ var _ = Describe("No Pre-Binding", func() {
 var _ = Describe("Volume Limits", func() {
 	It("should launch multiple nodes if required due to volume limits", func() {
 		const csiProvider = "fake.csi.provider"
-		cloudProv.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProv.InstanceTypes = []*cloudprovider.InstanceType{
 			fake.NewInstanceType(
 				fake.InstanceTypeOptions{
 					Name: "instance-type",
@@ -4274,7 +4274,7 @@ var _ = Describe("Volume Limits", func() {
 	})
 	It("should launch a single node if all pods use the same PVC", func() {
 		const csiProvider = "fake.csi.provider"
-		cloudProv.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProv.InstanceTypes = []*cloudprovider.InstanceType{
 			fake.NewInstanceType(
 				fake.InstanceTypeOptions{
 					Name: "instance-type",
@@ -4340,7 +4340,7 @@ var _ = Describe("Volume Limits", func() {
 	})
 	It("should not fail for non-dynamic PVCs", func() {
 		const csiProvider = "fake.csi.provider"
-		cloudProv.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProv.InstanceTypes = []*cloudprovider.InstanceType{
 			fake.NewInstanceType(
 				fake.InstanceTypeOptions{
 					Name: "instance-type",
@@ -4407,7 +4407,7 @@ var _ = Describe("Volume Limits", func() {
 		Expect(nodeList.Items).To(HaveLen(1))
 	})
 	It("should not fail for NFS volumes", func() {
-		cloudProv.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProv.InstanceTypes = []*cloudprovider.InstanceType{
 			fake.NewInstanceType(
 				fake.InstanceTypeOptions{
 					Name: "instance-type",

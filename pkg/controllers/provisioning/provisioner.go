@@ -239,7 +239,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	// Build node templates
 	var nodeTemplates []*scheduling.NodeTemplate
 	var provisionerList v1alpha5.ProvisionerList
-	instanceTypes := map[string][]cloudprovider.InstanceType{}
+	instanceTypes := map[string][]*cloudprovider.InstanceType{}
 	domains := map[string]sets.String{}
 	if err := p.kubeClient.List(ctx, &provisionerList); err != nil {
 		return nil, fmt.Errorf("listing provisioners, %w", err)

@@ -36,7 +36,7 @@ import (
 var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)
 
 type CloudProvider struct {
-	InstanceTypes []cloudprovider.InstanceType
+	InstanceTypes []*cloudprovider.InstanceType
 
 	// CreateCalls contains the arguments for every create call that was made since it was cleared
 	mu                 sync.Mutex
@@ -93,11 +93,11 @@ func (c *CloudProvider) Create(ctx context.Context, nodeRequest *cloudprovider.N
 	return n, nil
 }
 
-func (c *CloudProvider) GetInstanceTypes(_ context.Context, provisioner *v1alpha5.Provisioner) ([]cloudprovider.InstanceType, error) {
+func (c *CloudProvider) GetInstanceTypes(_ context.Context, provisioner *v1alpha5.Provisioner) ([]*cloudprovider.InstanceType, error) {
 	if c.InstanceTypes != nil {
 		return c.InstanceTypes, nil
 	}
-	return []cloudprovider.InstanceType{
+	return []*cloudprovider.InstanceType{
 		NewInstanceType(InstanceTypeOptions{
 			Name: "default-instance-type",
 		}),

@@ -278,7 +278,7 @@ func (c *Cluster) populateCapacity(ctx context.Context, node *v1.Node, n *Node) 
 	if err != nil {
 		return err
 	}
-	instanceType, ok := lo.Find(instanceTypes, func(it cloudprovider.InstanceType) bool { return it.Name == node.Labels[v1.LabelInstanceTypeStable] })
+	instanceType, ok := lo.Find(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.Name == node.Labels[v1.LabelInstanceTypeStable] })
 	if !ok {
 		return fmt.Errorf("instance type '%s' not found", node.Labels[v1.LabelInstanceTypeStable])
 	}

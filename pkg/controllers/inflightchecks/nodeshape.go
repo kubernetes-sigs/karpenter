@@ -52,7 +52,7 @@ func (n *NodeShape) Check(ctx context.Context, node *v1.Node, provisioner *v1alp
 		return nil, err
 	}
 
-	instanceType, ok := lo.Find(instanceTypes, func(it cloudprovider.InstanceType) bool { return it.Name == node.Labels[v1.LabelInstanceType] })
+	instanceType, ok := lo.Find(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.Name == node.Labels[v1.LabelInstanceType] })
 	if !ok {
 		return []Issue{{
 			node:    node,
