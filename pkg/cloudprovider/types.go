@@ -59,10 +59,6 @@ type CloudProvider interface {
 	GetInstanceTypes(context.Context, *v1alpha5.Provisioner) ([]InstanceType, error)
 	// Name returns the CloudProvider implementation name.
 	Name() string
-	// IsNodeDrifted return if a particular node has drifted from what
-	// provisioner or providerRef wants. For now this is just checking
-	// ami drift
-	//IsNodeDrifted(ctx context.Context, node *v1.Node, provisioner *v1alpha5.Provisioner) bool
 }
 
 type NodeRequest struct {
