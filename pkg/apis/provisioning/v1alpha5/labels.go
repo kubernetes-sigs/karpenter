@@ -37,7 +37,7 @@ var (
 	TerminationFinalizer              = Group + "/termination"
 	LabelNodeInitialized              = Group + "/initialized"
 	LabelCapacityType                 = Group + "/capacity-type"
-	DriftedAnnotationKey              =	Group + "/drifted-node"
+	DriftedLabelKey                   = Group + "/drifted-node"
 
 	// Tags for infrastructure resources deployed into cloudproviders' accounts
 	DiscoveryTagKey = Group + "/discovery"
