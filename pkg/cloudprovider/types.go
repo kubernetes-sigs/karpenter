@@ -27,6 +27,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/scheduling"
+	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
 // Context is injected into CloudProvider's factories
@@ -75,7 +76,7 @@ type InstanceType struct {
 	// for scheduling. Must be defined for every well known label, even if empty.
 	Requirements scheduling.Requirements
 	// Note that though this is an array it is expected that all the Offerings are unique from one another
-	Offerings []Offering
+	Offerings Offerings
 	// Resources are the full resource capacities for this instance type
 	Capacity v1.ResourceList
 	// Overhead is the amount of resource overhead expected to be used by kubelet and any other system daemons outside
@@ -92,29 +93,34 @@ type InstanceTypeOverhead struct {
 	EvictionThreshold v1.ResourceList
 }
 
+func (i InstanceTypeOverhead) Total() v1.ResourceList {
+	return resources.Merge(i.KubeReserved, i.SystemReserved, i.EvictionThreshold)
+}
+
 // An Offering describes where an InstanceType is available to be used, with the expectation that its properties
 // may be tightly coupled (e.g. the availability of an instance type in some zone is scoped to a capacity type)
 type Offering struct {
 	CapacityType string
 	Zone         string
 	Price        float64
-	// Available is added so that Offerings() can return all offerings that have ever existed for an instance type
+	// Available is added so that Offerings can return all offerings that have ever existed for an instance type,
 	// so we can get historical pricing data for calculating savings in consolidation
 	Available bool
 }
 
-// AvailableOfferings filters the offerings on the passed instance type
-// and returns the offerings marked as available
-func AvailableOfferings(it *InstanceType) []Offering {
-	return lo.Filter(it.Offerings, func(o Offering, _ int) bool {
-		return o.Available
+type Offerings []Offering
+
+// Get gets the offering from an offering slice that matches the
+// passed zone and capacity type
+func (ofs Offerings) Get(ct, zone string) (Offering, bool) {
+	return lo.Find(ofs, func(of Offering) bool {
+		return of.CapacityType == ct && of.Zone == zone
 	})
 }
 
-// GetOffering gets the offering from passed instance type that matches the
-// passed zone and capacity type
-func GetOffering(it *InstanceType, ct, zone string) (Offering, bool) {
-	return lo.Find(it.Offerings, func(of Offering) bool {
-		return of.CapacityType == ct && of.Zone == zone
+// Available filters the available offerings from the returned offerings
+func (ofs Offerings) Available() Offerings {
+	return lo.Filter(ofs, func(o Offering, _ int) bool {
+		return o.Available
 	})
 }

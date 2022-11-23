@@ -323,8 +323,8 @@ func (p *Provisioner) launch(ctx context.Context, opts LaunchOptions, node *sche
 
 	// Order instance types so that we get the cheapest instance types of the available offerings
 	sort.Slice(node.InstanceTypeOptions, func(i, j int) bool {
-		iOfferings := cloudprovider.AvailableOfferings(node.InstanceTypeOptions[i])
-		jOfferings := cloudprovider.AvailableOfferings(node.InstanceTypeOptions[j])
+		iOfferings := node.InstanceTypeOptions[i].Offerings.Available()
+		jOfferings := node.InstanceTypeOptions[j].Offerings.Available()
 		return cheapestOfferingPrice(iOfferings, node.Requirements) < cheapestOfferingPrice(jOfferings, node.Requirements)
 	})
 

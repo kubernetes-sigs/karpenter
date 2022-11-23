@@ -74,24 +74,12 @@ func NewInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 	if options.OperatingSystems.Len() == 0 {
 		options.OperatingSystems = utilsets.NewString(string(v1.Linux), string(v1.Windows), "darwin")
 	}
-	i := &cloudprovider.InstanceType{
-		Name:      options.Name,
-		Offerings: options.Offerings,
-		Capacity:  options.Resources,
-		Overhead: &cloudprovider.InstanceTypeOverhead{
-			KubeReserved: v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("100m"),
-				v1.ResourceMemory: resource.MustParse("10Mi"),
-			},
-		},
-	}
-
 	requirements := scheduling.NewRequirements(
 		scheduling.NewRequirement(v1.LabelInstanceTypeStable, v1.NodeSelectorOpIn, options.Name),
 		scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, options.Architecture),
 		scheduling.NewRequirement(v1.LabelOSStable, v1.NodeSelectorOpIn, options.OperatingSystems.List()...),
-		scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, lo.Map(cloudprovider.AvailableOfferings(i), func(o cloudprovider.Offering, _ int) string { return o.Zone })...),
-		scheduling.NewRequirement(v1alpha5.LabelCapacityType, v1.NodeSelectorOpIn, lo.Map(cloudprovider.AvailableOfferings(i), func(o cloudprovider.Offering, _ int) string { return o.CapacityType })...),
+		scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string { return o.Zone })...),
+		scheduling.NewRequirement(v1alpha5.LabelCapacityType, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string { return o.CapacityType })...),
 		scheduling.NewRequirement(LabelInstanceSize, v1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(ExoticInstanceLabelKey, v1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(IntegerInstanceLabelKey, v1.NodeSelectorOpIn, fmt.Sprint(options.Resources.Cpu().Value())),
@@ -103,9 +91,19 @@ func NewInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 	} else {
 		requirements.Get(LabelInstanceSize).Insert("small")
 	}
-	i.Requirements = requirements
 
-	return i
+	return &cloudprovider.InstanceType{
+		Name:         options.Name,
+		Requirements: requirements,
+		Offerings:    options.Offerings,
+		Capacity:     options.Resources,
+		Overhead: &cloudprovider.InstanceTypeOverhead{
+			KubeReserved: v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse("100m"),
+				v1.ResourceMemory: resource.MustParse("10Mi"),
+			},
+		},
+	}
 }
 
 // InstanceTypesAssorted create many unique instance types with varying CPU/memory/architecture/OS/zone/capacity type.
@@ -168,7 +166,7 @@ func InstanceTypes(total int) []*cloudprovider.InstanceType {
 
 type InstanceTypeOptions struct {
 	Name             string
-	Offerings        []cloudprovider.Offering
+	Offerings        cloudprovider.Offerings
 	Architecture     string
 	OperatingSystems utilsets.String
 	Resources        v1.ResourceList

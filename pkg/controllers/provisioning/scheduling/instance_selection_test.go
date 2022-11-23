@@ -40,7 +40,7 @@ var _ = Describe("Instance Type Selection", func() {
 	var minPrice float64
 	var instanceTypeMap map[string]*cloudprovider.InstanceType
 	nodePrice := func(n *v1.Node) float64 {
-		of, _ := cloudprovider.GetOffering(instanceTypeMap[n.Labels[v1.LabelInstanceTypeStable]], n.Labels[v1alpha5.LabelCapacityType], n.Labels[v1.LabelTopologyZone])
+		of, _ := instanceTypeMap[n.Labels[v1.LabelInstanceTypeStable]].Offerings.Get(n.Labels[v1alpha5.LabelCapacityType], n.Labels[v1.LabelTopologyZone])
 		return of.Price
 	}
 
@@ -483,7 +483,7 @@ var _ = Describe("Instance Type Selection", func() {
 			var err error
 			resourceHashes[it.Name], err = hashstructure.Hash(it.Capacity, hashstructure.FormatV2, nil)
 			Expect(err).To(BeNil())
-			overheadHashes[it.Name], err = hashstructure.Hash(resources.Merge(it.Overhead.SystemReserved, it.Overhead.KubeReserved), hashstructure.FormatV2, nil)
+			overheadHashes[it.Name], err = hashstructure.Hash(it.Overhead.Total(), hashstructure.FormatV2, nil)
 			Expect(err).To(BeNil())
 		}
 		ExpectApplied(ctx, env.Client, provisioner)
@@ -507,7 +507,7 @@ var _ = Describe("Instance Type Selection", func() {
 				Expect(nodeNames).To(HaveLen(1))
 				totalPodResources := resources.RequestsForPods(pods...)
 				for _, it := range cloudProv.CreateCalls[0].InstanceTypeOptions {
-					totalReserved := resources.Merge(totalPodResources, it.Overhead.KubeReserved, it.Overhead.SystemReserved)
+					totalReserved := resources.Merge(totalPodResources, it.Overhead.Total())
 					// the total pod resources in CPU and memory + instance overhead should always be less than the
 					// resources available on every viable instance has
 					Expect(totalReserved.Cpu().Cmp(it.Capacity[v1.ResourceCPU])).To(Equal(-1))
@@ -518,7 +518,7 @@ var _ = Describe("Instance Type Selection", func() {
 		for _, it := range cloudProv.InstanceTypes {
 			resourceHash, err := hashstructure.Hash(it.Capacity, hashstructure.FormatV2, nil)
 			Expect(err).To(BeNil())
-			overheadHash, err := hashstructure.Hash(resources.Merge(it.Overhead.SystemReserved, it.Overhead.KubeReserved), hashstructure.FormatV2, nil)
+			overheadHash, err := hashstructure.Hash(it.Overhead.Total(), hashstructure.FormatV2, nil)
 			Expect(err).To(BeNil())
 			Expect(resourceHash).To(Equal(resourceHashes[it.Name]), fmt.Sprintf("expected %s Resources() to not be modified by scheduling", it.Name))
 			Expect(overheadHash).To(Equal(overheadHashes[it.Name]), fmt.Sprintf("expected %s Overhead() to not be modified by scheduling", it.Name))

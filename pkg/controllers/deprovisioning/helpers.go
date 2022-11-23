@@ -148,7 +148,7 @@ func GetPodEvictionCost(ctx context.Context, p *v1.Pod) float64 {
 func filterByPrice(options []*cloudprovider.InstanceType, reqs scheduling.Requirements, price float64) []*cloudprovider.InstanceType {
 	var result []*cloudprovider.InstanceType
 	for _, it := range options {
-		launchPrice := worstLaunchPrice(cloudprovider.AvailableOfferings(it), reqs)
+		launchPrice := worstLaunchPrice(it.Offerings.Available(), reqs)
 		if launchPrice < price {
 			result = append(result, it)
 		}

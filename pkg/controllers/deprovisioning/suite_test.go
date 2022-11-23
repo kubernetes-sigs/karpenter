@@ -104,7 +104,7 @@ var _ = BeforeEach(func() {
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 	cloudProvider.AllowedCreateCalls = math.MaxInt
 	onDemandInstances = lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
-		for _, o := range cloudprovider.AvailableOfferings(i) {
+		for _, o := range i.Offerings.Available() {
 			if o.CapacityType == v1alpha5.CapacityTypeOnDemand {
 				return true
 			}

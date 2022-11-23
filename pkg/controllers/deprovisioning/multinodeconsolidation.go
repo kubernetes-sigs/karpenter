@@ -143,7 +143,7 @@ func filterOutSameType(newNode *scheduling.Node, consolidate []CandidateNode) []
 	// get the price of the cheapest node that we currently are considering deleting indexed by instance type
 	for _, n := range consolidate {
 		existingInstanceTypes.Insert(n.instanceType.Name)
-		of, ok := cloudprovider.GetOffering(n.instanceType, n.capacityType, n.zone)
+		of, ok := n.instanceType.Offerings.Get(n.capacityType, n.zone)
 		if !ok {
 			continue
 		}

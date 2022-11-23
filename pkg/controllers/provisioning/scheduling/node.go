@@ -148,11 +148,11 @@ func compatible(instanceType *cloudprovider.InstanceType, requirements schedulin
 }
 
 func fits(instanceType *cloudprovider.InstanceType, requests v1.ResourceList) bool {
-	return resources.Fits(resources.Merge(requests, instanceType.Overhead.SystemReserved, instanceType.Overhead.KubeReserved), instanceType.Capacity)
+	return resources.Fits(resources.Merge(requests, instanceType.Overhead.Total()), instanceType.Capacity)
 }
 
 func hasOffering(instanceType *cloudprovider.InstanceType, requirements scheduling.Requirements) bool {
-	for _, offering := range cloudprovider.AvailableOfferings(instanceType) {
+	for _, offering := range instanceType.Offerings.Available() {
 		if (!requirements.Has(v1.LabelTopologyZone) || requirements.Get(v1.LabelTopologyZone).Has(offering.Zone)) &&
 			(!requirements.Has(v1alpha5.LabelCapacityType) || requirements.Get(v1alpha5.LabelCapacityType).Has(offering.CapacityType)) {
 			return true
