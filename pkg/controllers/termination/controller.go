@@ -44,8 +44,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
-const controllerName = "termination"
-
 var (
 	terminationSummary = prometheus.NewSummary(
 		prometheus.SummaryOpts{
@@ -85,9 +83,13 @@ func NewController(clk clock.Clock, kubeClient client.Client, evictionQueue *Evi
 	}
 }
 
+func (c *Controller) Name() string {
+	return "termination"
+}
+
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(controllerName).With("node", req.Name))
-	ctx = injection.WithControllerName(ctx, controllerName)
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("node", req.Name))
+	ctx = injection.WithControllerName(ctx, c.Name())
 
 	node := &v1.Node{}
 	if err := c.KubeClient.Get(ctx, req.NamespacedName, node); err != nil {
@@ -111,10 +113,9 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return controllerruntime.
+	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1.Node{}).
-		Named(controllerName).
 		WithOptions(
 			controller.Options{
 				RateLimiter: workqueue.NewMaxOfRateLimiter(
@@ -130,5 +131,5 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontrolle
 		})).
 		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
 			return lo.Contains(obj.GetFinalizers(), v1alpha5.TerminationFinalizer)
-		}))
+		})))
 }

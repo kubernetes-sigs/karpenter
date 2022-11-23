@@ -36,8 +36,6 @@ import (
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
-const controllerName = "inflightchecks"
-
 var _ corecontroller.TypedController[*v1.Node] = (*Controller)(nil)
 
 type Controller struct {
@@ -65,7 +63,7 @@ const scanPeriod = 10 * time.Minute
 func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Recorder,
 	provider cloudprovider.CloudProvider) corecontroller.Controller {
 
-	return corecontroller.For[*v1.Node](kubeClient, &Controller{
+	return corecontroller.Typed[*v1.Node](kubeClient, &Controller{
 		clock:       clk,
 		kubeClient:  kubeClient,
 		recorder:    recorder,
@@ -75,7 +73,11 @@ func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Re
 			NewTermination(kubeClient),
 			NewNodeShape(provider),
 		}},
-	).Named(controllerName)
+	)
+}
+
+func (c *Controller) Name() string {
+	return "inflightchecks"
 }
 
 func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Result, error) {
@@ -123,7 +125,6 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontrolle
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1.Node{}).
-		Named(controllerName).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
 	)
 }

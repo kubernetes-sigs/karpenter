@@ -40,7 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
 
@@ -92,6 +92,10 @@ func NewProvisioner(ctx context.Context, kubeClient client.Client, coreV1Client 
 	return p
 }
 
+func (p *Provisioner) Name() string {
+	return "provisioner"
+}
+
 func (p *Provisioner) Trigger() {
 	p.batcher.Trigger()
 }
@@ -100,9 +104,8 @@ func (p *Provisioner) TriggerImmediate() {
 	p.batcher.TriggerImmediate()
 }
 
-func (p *Provisioner) Builder(_ context.Context, mgr manager.Manager) corecontroller.Builder {
-	return corecontroller.NewSingletonManagedBy(mgr).
-		Named("provisioning").
+func (p *Provisioner) Builder(_ context.Context, mgr manager.Manager) controller.Builder {
+	return controller.NewSingletonManagedBy(mgr).
 		WaitUntil(func(ctx context.Context) {
 			// Batch pods
 			p.batcher.Wait(ctx)
@@ -117,7 +120,7 @@ func (p *Provisioner) Builder(_ context.Context, mgr manager.Manager) corecontro
 				}
 			}
 		}).
-		WithOptions(corecontroller.Options{
+		WithOptions(controller.Options{
 			DisableWaitOnError: true,
 		})
 }

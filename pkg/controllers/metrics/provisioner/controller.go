@@ -86,8 +86,6 @@ func labelNames() []string {
 	}
 }
 
-const controllerName = "provisionermetrics"
-
 var _ corecontroller.TypedController[*v1alpha5.Provisioner] = (*Controller)(nil)
 
 type Controller struct {
@@ -97,9 +95,13 @@ type Controller struct {
 
 // NewController constructs a controller instance
 func NewController(kubeClient client.Client) corecontroller.Controller {
-	return corecontroller.For[*v1alpha5.Provisioner](kubeClient, &Controller{
+	return corecontroller.Typed[*v1alpha5.Provisioner](kubeClient, &Controller{
 		kubeClient: kubeClient,
-	}).Named(controllerName)
+	})
+}
+
+func (c *Controller) Name() string {
+	return "provisionermetrics"
 }
 
 // Reconcile executes a termination control loop for the resource
@@ -117,8 +119,7 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontrolle
 	return corecontroller.Adapt(
 		controllerruntime.
 			NewControllerManagedBy(m).
-			For(&v1alpha5.Provisioner{}).
-			Named(controllerName),
+			For(&v1alpha5.Provisioner{}),
 	)
 }
 

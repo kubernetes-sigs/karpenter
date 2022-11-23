@@ -31,8 +31,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
-const controllerName = "provisioning"
-
 var _ corecontroller.TypedController[*v1.Pod] = (*Controller)(nil)
 
 // Controller for the resource
@@ -44,11 +42,15 @@ type Controller struct {
 
 // NewController constructs a controller instance
 func NewController(kubeClient client.Client, provisioner *Provisioner, recorder events.Recorder) corecontroller.Controller {
-	return corecontroller.For[*v1.Pod](kubeClient, &Controller{
+	return corecontroller.Typed[*v1.Pod](kubeClient, &Controller{
 		kubeClient:  kubeClient,
 		provisioner: provisioner,
 		recorder:    recorder,
-	}).Named(controllerName)
+	})
+}
+
+func (c *Controller) Name() string {
+	return "provisioning"
 }
 
 // Reconcile the resource
@@ -62,7 +64,6 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontrolle
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1.Pod{}).
-		Named(controllerName).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
 			// Ensure the pod can be provisioned

@@ -37,8 +37,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
-const controllerName = "counter"
-
 var _ corecontroller.TypedController[*v1alpha5.Provisioner] = (*Controller)(nil)
 
 // Controller for the resource
@@ -49,10 +47,14 @@ type Controller struct {
 
 // NewController is a constructor
 func NewController(kubeClient client.Client, cluster *state.Cluster) corecontroller.Controller {
-	return corecontroller.For[*v1alpha5.Provisioner](kubeClient, &Controller{
+	return corecontroller.Typed[*v1alpha5.Provisioner](kubeClient, &Controller{
 		kubeClient: kubeClient,
 		cluster:    cluster,
-	}).Named(controllerName)
+	})
+}
+
+func (c *Controller) Name() string {
+	return "counter"
 }
 
 // Reconcile a control loop for the resource
@@ -98,7 +100,6 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontrolle
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1alpha5.Provisioner{}).
-		Named(controllerName).
 		Watches(
 			&source.Kind{Type: &v1.Node{}},
 			handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {

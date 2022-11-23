@@ -29,8 +29,6 @@ import (
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
-const controllerName = "provisionerstate"
-
 var _ corecontroller.TypedController[*v1alpha5.Provisioner] = (*ProvisionerController)(nil)
 
 // ProvisionerController reconciles provisioners to re-trigger consolidation on change.
@@ -40,10 +38,14 @@ type ProvisionerController struct {
 }
 
 func NewProvisionerController(kubeClient client.Client, cluster *Cluster) corecontroller.Controller {
-	return corecontroller.For[*v1alpha5.Provisioner](kubeClient, &ProvisionerController{
+	return corecontroller.Typed[*v1alpha5.Provisioner](kubeClient, &ProvisionerController{
 		kubeClient: kubeClient,
 		cluster:    cluster,
-	}).Named(controllerName)
+	})
+}
+
+func (c *ProvisionerController) Name() string {
+	return "provisionerstate"
 }
 
 func (c *ProvisionerController) Reconcile(_ context.Context, _ *v1alpha5.Provisioner) (reconcile.Result, error) {
@@ -56,7 +58,7 @@ func (c *ProvisionerController) Builder(_ context.Context, m manager.Manager) co
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1alpha5.Provisioner{}).
-		Named(controllerName).
+		Named(c.Name()).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		WithEventFilter(predicate.Funcs{DeleteFunc: func(event event.DeleteEvent) bool { return false }}),

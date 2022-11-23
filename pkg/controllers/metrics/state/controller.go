@@ -23,7 +23,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/controllers/metrics/state/scraper"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
 const pollingPeriod = 5 * time.Second
@@ -40,9 +40,12 @@ func NewController(cluster *state.Cluster) *Controller {
 	}
 }
 
-func (c *Controller) Builder(_ context.Context, mgr manager.Manager) corecontroller.Builder {
-	return corecontroller.NewSingletonManagedBy(mgr).
-		Named("metricscraper")
+func (c *Controller) Name() string {
+	return "metricscraper"
+}
+
+func (c *Controller) Builder(_ context.Context, mgr manager.Manager) controller.Builder {
+	return controller.NewSingletonManagedBy(mgr)
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {

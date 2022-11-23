@@ -39,7 +39,6 @@ type Options struct {
 
 type SingletonBuilder struct {
 	mgr       manager.Manager
-	name      string
 	waitUntil WaitUntilFunc
 	options   Options
 }
@@ -57,26 +56,20 @@ func (b SingletonBuilder) WaitUntil(waitUntil WaitUntilFunc) SingletonBuilder {
 	return b
 }
 
-func (b SingletonBuilder) Named(n string) SingletonBuilder {
-	b.name = n
-	return b
-}
-
 func (b SingletonBuilder) WithOptions(o Options) SingletonBuilder {
 	b.options = o
 	return b
 }
 
-func (b SingletonBuilder) Complete(r reconcile.Reconciler) error {
-	return b.mgr.Add(newSingleton(r, b.name, b.waitUntil, b.options))
+func (b SingletonBuilder) Complete(r Reconciler) error {
+	return b.mgr.Add(newSingleton(r, b.waitUntil, b.options))
 }
 
 type Singleton struct {
-	reconcile.Reconciler
+	Reconciler
 
 	metrics *singletonMetrics
 
-	name        string
 	waitUntil   WaitUntilFunc
 	options     Options
 	rateLimiter ratelimiter.RateLimiter
@@ -87,11 +80,10 @@ type singletonMetrics struct {
 	reconcileErrors   prometheus.Counter
 }
 
-func newSingleton(r reconcile.Reconciler, name string, waitUntil WaitUntilFunc, opts Options) *Singleton {
+func newSingleton(r Reconciler, waitUntil WaitUntilFunc, opts Options) *Singleton {
 	return &Singleton{
 		Reconciler:  r,
-		metrics:     newSingletonMetrics(name),
-		name:        name,
+		metrics:     newSingletonMetrics(r.Name()),
 		waitUntil:   waitUntil,
 		options:     opts,
 		rateLimiter: workqueue.DefaultItemBasedRateLimiter(),
@@ -125,7 +117,7 @@ func newSingletonMetrics(name string) *singletonMetrics {
 var singletonRequest = reconcile.Request{}
 
 func (s *Singleton) Start(ctx context.Context) error {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(s.name))
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(s.Name()))
 	logging.FromContext(ctx).Infof("starting Controller")
 	defer logging.FromContext(ctx).Infof("stopping Controller")
 	for {

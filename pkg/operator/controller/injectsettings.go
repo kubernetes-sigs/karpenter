@@ -38,6 +38,10 @@ func InjectSettings(controller Controller, ss settingsstore.Store) Controller {
 	}
 }
 
+func (sd *injectSettingsDecorator) Name() string {
+	return sd.controller.Name()
+}
+
 func (sd *injectSettingsDecorator) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	ctx = sd.settingsStore.InjectSettings(ctx)
 	return sd.controller.Reconcile(ctx, req)

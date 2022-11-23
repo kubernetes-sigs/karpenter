@@ -58,7 +58,7 @@ var _ = Describe("Typed", func() {
 				},
 			},
 		}
-		typedController := controller.For[*v1.Node](env.Client, fakeController)
+		typedController := controller.Typed[*v1.Node](env.Client, fakeController)
 		ExpectReconcileSucceeded(ctx, typedController, client.ObjectKeyFromObject(node))
 	})
 	It("should modify the node when updated in the reconcile", func() {
@@ -79,7 +79,7 @@ var _ = Describe("Typed", func() {
 				},
 			},
 		}
-		typedController := controller.For[*v1.Node](env.Client, fakeController)
+		typedController := controller.Typed[*v1.Node](env.Client, fakeController)
 		ExpectReconcileSucceeded(ctx, typedController, client.ObjectKeyFromObject(node))
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
 		Expect(node.Labels).To(HaveKeyWithValue("custom-key", "custom-value"))
@@ -106,7 +106,7 @@ var _ = Describe("Typed", func() {
 				},
 			},
 		}
-		typedController := controller.For[*v1.Node](env.Client, fakeController)
+		typedController := controller.Typed[*v1.Node](env.Client, fakeController)
 		ExpectReconcileSucceeded(ctx, typedController, client.ObjectKeyFromObject(node))
 		Expect(called).To(BeTrue())
 	})
@@ -130,7 +130,7 @@ var _ = Describe("Typed", func() {
 				},
 			},
 		}
-		typedController := controller.For[*v1.Node](env.Client, fakeController)
+		typedController := controller.Typed[*v1.Node](env.Client, fakeController)
 		ExpectExists(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, typedController, client.ObjectKeyFromObject(node))
 		ExpectNotFound(ctx, env.Client, node)
@@ -141,8 +141,11 @@ type TypedReconcileAssertion[T client.Object] func(context.Context, T)
 
 type FakeTypedController[T client.Object] struct {
 	ReconcileAssertions []TypedReconcileAssertion[T]
+	FinalizeAssertions  []TypedReconcileAssertion[T]
+}
 
-	FinalizeAssertions []TypedReconcileAssertion[T]
+func (c *FakeTypedController[T]) Name() string {
+	return ""
 }
 
 func (c *FakeTypedController[T]) Reconcile(ctx context.Context, obj T) (reconcile.Result, error) {

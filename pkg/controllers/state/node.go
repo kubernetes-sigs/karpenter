@@ -29,8 +29,6 @@ import (
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
-const nodeControllerName = "node-state"
-
 // NodeController reconciles nodes for the purpose of maintaining state regarding nodes that is expensive to compute.
 type NodeController struct {
 	kubeClient client.Client
@@ -45,8 +43,12 @@ func NewNodeController(kubeClient client.Client, cluster *Cluster) corecontrolle
 	}
 }
 
+func (c *NodeController) Name() string {
+	return "node-state"
+}
+
 func (c *NodeController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(nodeControllerName).With("node", req.NamespacedName.Name))
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("node", req.NamespacedName.Name))
 	node := &v1.Node{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, node); err != nil {
 		if errors.IsNotFound(err) {
@@ -63,9 +65,8 @@ func (c *NodeController) Reconcile(ctx context.Context, req reconcile.Request) (
 }
 
 func (c *NodeController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return controllerruntime.
+	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1.Node{}).
-		Named(nodeControllerName).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10})
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))
 }

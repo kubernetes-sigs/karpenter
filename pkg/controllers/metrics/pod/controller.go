@@ -74,8 +74,6 @@ var (
 	)
 )
 
-const controllerName = "podmetrics"
-
 var _ controller.TypedController[*v1.Pod] = (*Controller)(nil)
 
 // Controller for the resource
@@ -107,10 +105,14 @@ func labelNames() []string {
 
 // NewController constructs a podController instance
 func NewController(kubeClient client.Client) controller.Controller {
-	return controller.For[*v1.Pod](kubeClient, &Controller{
+	return controller.Typed[*v1.Pod](kubeClient, &Controller{
 		kubeClient:  kubeClient,
 		pendingPods: sets.NewString(),
-	}).Named(controllerName)
+	})
+}
+
+func (c *Controller) Name() string {
+	return "podmetrics"
 }
 
 // Reconcile executes a termination control loop for the resource
@@ -151,8 +153,7 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) controller.Bu
 	return controller.Adapt(
 		controllerruntime.
 			NewControllerManagedBy(m).
-			For(&v1.Pod{}).
-			Named(controllerName),
+			For(&v1.Pod{}),
 	)
 }
 

@@ -41,19 +41,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/result"
 )
 
-const controllerName = "node"
-
 var _ corecontroller.TypedController[*v1.Node] = (*Controller)(nil)
-
-// NewController constructs a nodeController instance
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) corecontroller.Controller {
-	return corecontroller.For[*v1.Node](kubeClient, &Controller{
-		kubeClient:     kubeClient,
-		cluster:        cluster,
-		initialization: &Initialization{kubeClient: kubeClient, cloudProvider: cloudProvider},
-		emptiness:      &Emptiness{kubeClient: kubeClient, clock: clk, cluster: cluster},
-	}).Named(controllerName)
-}
 
 // Controller manages a set of properties on karpenter provisioned nodes, such as
 // taints, labels, finalizers.
@@ -63,6 +51,20 @@ type Controller struct {
 	initialization *Initialization
 	emptiness      *Emptiness
 	finalizer      *Finalizer
+}
+
+// NewController constructs a nodeController instance
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) corecontroller.Controller {
+	return corecontroller.Typed[*v1.Node](kubeClient, &Controller{
+		kubeClient:     kubeClient,
+		cluster:        cluster,
+		initialization: &Initialization{kubeClient: kubeClient, cloudProvider: cloudProvider},
+		emptiness:      &Emptiness{kubeClient: kubeClient, clock: clk, cluster: cluster},
+	})
+}
+
+func (c *Controller) Name() string {
+	return "node"
 }
 
 // Reconcile executes a reallocation control loop for the resource
@@ -102,7 +104,6 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1.Node{}).
-		Named(controllerName).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Watches(
 			// Reconcile all nodes related to a provisioner when it changes.

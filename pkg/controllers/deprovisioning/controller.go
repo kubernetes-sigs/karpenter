@@ -91,9 +91,12 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 	}
 }
 
+func (c *Controller) Name() string {
+	return "deprovisioning"
+}
+
 func (c *Controller) Builder(_ context.Context, m manager.Manager) controller.Builder {
-	return controller.NewSingletonManagedBy(m).
-		Named("deprovisioning")
+	return controller.NewSingletonManagedBy(m)
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {

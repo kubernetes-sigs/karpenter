@@ -117,6 +117,10 @@ func (c *FakeController) Reconcile(ctx context.Context, req reconcile.Request) (
 	return reconcile.Result{}, nil
 }
 
+func (c *FakeController) Name() string {
+	return ""
+}
+
 func (c *FakeController) Builder(_ context.Context, _ manager.Manager) controller.Builder {
 	return nil
 }
