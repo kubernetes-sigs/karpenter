@@ -3044,8 +3044,8 @@ var _ = Describe("Instance Type Compatibility", func() {
 		cloudProv.InstanceTypes = fake.InstanceTypes(5)
 		const fakeGPU1 = "karpenter.sh/super-great-gpu"
 		const fakeGPU2 = "karpenter.sh/even-better-gpu"
-		cloudProv.InstanceTypes[0].Resources()[fakeGPU1] = resource.MustParse("25")
-		cloudProv.InstanceTypes[1].Resources()[fakeGPU2] = resource.MustParse("25")
+		cloudProv.InstanceTypes[0].Capacity[fakeGPU1] = resource.MustParse("25")
+		cloudProv.InstanceTypes[1].Capacity[fakeGPU2] = resource.MustParse("25")
 
 		nodeNames := sets.NewString()
 		ExpectApplied(ctx, env.Client, provisioner)
@@ -3070,8 +3070,8 @@ var _ = Describe("Instance Type Compatibility", func() {
 		cloudProv.InstanceTypes = fake.InstanceTypes(5)
 		const fakeGPU1 = "karpenter.sh/super-great-gpu"
 		const fakeGPU2 = "karpenter.sh/even-better-gpu"
-		cloudProv.InstanceTypes[0].Resources()[fakeGPU1] = resource.MustParse("25")
-		cloudProv.InstanceTypes[1].Resources()[fakeGPU2] = resource.MustParse("25")
+		cloudProv.InstanceTypes[0].Capacity[fakeGPU1] = resource.MustParse("25")
+		cloudProv.InstanceTypes[1].Capacity[fakeGPU2] = resource.MustParse("25")
 
 		ExpectApplied(ctx, env.Client, provisioner)
 		pods := ExpectProvisioned(ctx, env.Client, recorder, controller, prov,
@@ -3103,11 +3103,11 @@ var _ = Describe("Instance Type Compatibility", func() {
 			pods := ExpectProvisioned(ctx, env.Client, recorder, controller, prov,
 				test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{
 					fake.LabelInstanceSize:     "large",
-					v1.LabelInstanceTypeStable: cloudProv.InstanceTypes[0].Name(),
+					v1.LabelInstanceTypeStable: cloudProv.InstanceTypes[0].Name,
 				}}),
 				test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{
 					fake.LabelInstanceSize:     "small",
-					v1.LabelInstanceTypeStable: cloudProv.InstanceTypes[4].Name(),
+					v1.LabelInstanceTypeStable: cloudProv.InstanceTypes[4].Name,
 				}}),
 			)
 			ExpectNotScheduled(ctx, env.Client, pods[0])
@@ -3124,7 +3124,7 @@ var _ = Describe("Instance Type Compatibility", func() {
 			)
 			node := ExpectScheduled(ctx, env.Client, pods[0])
 			Expect(node.Labels).To(HaveKey(fake.ExoticInstanceLabelKey))
-			Expect(node.Labels).To(HaveKeyWithValue(v1.LabelInstanceTypeStable, cloudProv.InstanceTypes[4].Name()))
+			Expect(node.Labels).To(HaveKeyWithValue(v1.LabelInstanceTypeStable, cloudProv.InstanceTypes[4].Name))
 		})
 		It("should schedule without optional labels if disallowed", func() {
 			cloudProv.InstanceTypes = fake.InstanceTypes(5)
@@ -3498,7 +3498,7 @@ var _ = Describe("Binpacking", func() {
 	It("should select for valid instance types, regardless of price", func() {
 		// capacity sizes and prices don't correlate here, regardless we should filter and see that all three instance types
 		// are valid before preferring the cheapest one 'large'
-		cloudProv.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProv.InstanceTypes = []*cloudprovider.InstanceType{
 			fake.NewInstanceType(fake.InstanceTypeOptions{
 				Name: "medium",
 				Resources: v1.ResourceList{
@@ -3560,7 +3560,7 @@ var _ = Describe("Binpacking", func() {
 		// all three options should be passed to the cloud provider
 		possibleInstanceType := sets.NewString()
 		for _, it := range cloudProv.CreateCalls[0].InstanceTypeOptions {
-			possibleInstanceType.Insert(it.Name())
+			possibleInstanceType.Insert(it.Name)
 		}
 		Expect(possibleInstanceType).To(Equal(sets.NewString("small", "medium", "large")))
 	})
@@ -4040,7 +4040,7 @@ var _ = Describe("In-Flight Nodes", func() {
 	})
 	// nolint:gosec
 	It("should pack in-flight nodes before launching new nodes", func() {
-		cloudProv.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProv.InstanceTypes = []*cloudprovider.InstanceType{
 			fake.NewInstanceType(fake.InstanceTypeOptions{
 				Name: "medium",
 				Resources: v1.ResourceList{
@@ -4211,7 +4211,7 @@ var _ = Describe("No Pre-Binding", func() {
 var _ = Describe("Volume Limits", func() {
 	It("should launch multiple nodes if required due to volume limits", func() {
 		const csiProvider = "fake.csi.provider"
-		cloudProv.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProv.InstanceTypes = []*cloudprovider.InstanceType{
 			fake.NewInstanceType(
 				fake.InstanceTypeOptions{
 					Name: "instance-type",
@@ -4274,7 +4274,7 @@ var _ = Describe("Volume Limits", func() {
 	})
 	It("should launch a single node if all pods use the same PVC", func() {
 		const csiProvider = "fake.csi.provider"
-		cloudProv.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProv.InstanceTypes = []*cloudprovider.InstanceType{
 			fake.NewInstanceType(
 				fake.InstanceTypeOptions{
 					Name: "instance-type",
@@ -4340,7 +4340,7 @@ var _ = Describe("Volume Limits", func() {
 	})
 	It("should not fail for non-dynamic PVCs", func() {
 		const csiProvider = "fake.csi.provider"
-		cloudProv.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProv.InstanceTypes = []*cloudprovider.InstanceType{
 			fake.NewInstanceType(
 				fake.InstanceTypeOptions{
 					Name: "instance-type",
@@ -4407,7 +4407,7 @@ var _ = Describe("Volume Limits", func() {
 		Expect(nodeList.Items).To(HaveLen(1))
 	})
 	It("should not fail for NFS volumes", func() {
-		cloudProv.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProv.InstanceTypes = []*cloudprovider.InstanceType{
 			fake.NewInstanceType(
 				fake.InstanceTypeOptions{
 					Name: "instance-type",

@@ -278,21 +278,21 @@ func (c *Cluster) populateCapacity(ctx context.Context, node *v1.Node, n *Node) 
 	if err != nil {
 		return err
 	}
-	instanceType, ok := lo.Find(instanceTypes, func(it cloudprovider.InstanceType) bool { return it.Name() == node.Labels[v1.LabelInstanceTypeStable] })
+	instanceType, ok := lo.Find(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.Name == node.Labels[v1.LabelInstanceTypeStable] })
 	if !ok {
 		return fmt.Errorf("instance type '%s' not found", node.Labels[v1.LabelInstanceTypeStable])
 	}
 
 	n.Capacity = lo.Assign(node.Status.Capacity) // ensure map not nil
 	// Use instance type resource value if resource isn't currently registered in .Status.Capacity
-	for resourceName, quantity := range instanceType.Resources() {
+	for resourceName, quantity := range instanceType.Capacity {
 		if resources.IsZero(node.Status.Capacity[resourceName]) {
 			n.Capacity[resourceName] = quantity
 		}
 	}
 	n.Allocatable = lo.Assign(node.Status.Allocatable) // ensure map not nil
 	// Use instance type resource value if resource isn't currently registered in .Status.Allocatable
-	for resourceName, quantity := range instanceType.Resources() {
+	for resourceName, quantity := range instanceType.Capacity {
 		if resources.IsZero(node.Status.Allocatable[resourceName]) {
 			n.Allocatable[resourceName] = quantity
 		}

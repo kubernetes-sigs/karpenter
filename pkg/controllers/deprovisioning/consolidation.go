@@ -237,9 +237,9 @@ func (c *consolidation) computeConsolidation(ctx context.Context, nodes ...Candi
 func getNodePrices(nodes []CandidateNode) (float64, error) {
 	var price float64
 	for _, n := range nodes {
-		offering, ok := cloudprovider.GetOffering(n.instanceType, n.capacityType, n.zone)
+		offering, ok := n.instanceType.Offerings.Get(n.capacityType, n.zone)
 		if !ok {
-			return 0.0, fmt.Errorf("unable to determine offering for %s/%s/%s", n.instanceType.Name(), n.capacityType, n.zone)
+			return 0.0, fmt.Errorf("unable to determine offering for %s/%s/%s", n.instanceType.Name, n.capacityType, n.zone)
 		}
 		price += offering.Price
 	}

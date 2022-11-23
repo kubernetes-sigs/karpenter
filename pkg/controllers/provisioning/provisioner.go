@@ -239,7 +239,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	// Build node templates
 	var nodeTemplates []*scheduling.NodeTemplate
 	var provisionerList v1alpha5.ProvisionerList
-	instanceTypes := map[string][]cloudprovider.InstanceType{}
+	instanceTypes := map[string][]*cloudprovider.InstanceType{}
 	domains := map[string]sets.String{}
 	if err := p.kubeClient.List(ctx, &provisionerList); err != nil {
 		return nil, fmt.Errorf("listing provisioners, %w", err)
@@ -266,7 +266,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 
 		// Construct Topology Domains
 		for _, instanceType := range instanceTypeOptions {
-			for key, requirement := range instanceType.Requirements() {
+			for key, requirement := range instanceType.Requirements {
 				domains[key] = domains[key].Union(sets.NewString(requirement.Values()...))
 			}
 		}
@@ -323,8 +323,8 @@ func (p *Provisioner) launch(ctx context.Context, opts LaunchOptions, node *sche
 
 	// Order instance types so that we get the cheapest instance types of the available offerings
 	sort.Slice(node.InstanceTypeOptions, func(i, j int) bool {
-		iOfferings := cloudprovider.AvailableOfferings(node.InstanceTypeOptions[i])
-		jOfferings := cloudprovider.AvailableOfferings(node.InstanceTypeOptions[j])
+		iOfferings := node.InstanceTypeOptions[i].Offerings.Available()
+		jOfferings := node.InstanceTypeOptions[j].Offerings.Available()
 		return cheapestOfferingPrice(iOfferings, node.Requirements) < cheapestOfferingPrice(jOfferings, node.Requirements)
 	})
 

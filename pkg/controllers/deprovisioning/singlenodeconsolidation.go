@@ -131,7 +131,7 @@ func (c *SingleNodeConsolidation) computeConsolidation(ctx context.Context, node
 
 	// get the current node price based on the offering
 	// fallback if we can't find the specific zonal pricing data
-	offering, ok := cloudprovider.GetOffering(node.instanceType, node.capacityType, node.zone)
+	offering, ok := node.instanceType.Offerings.Get(node.capacityType, node.zone)
 	if !ok {
 		return Command{}, fmt.Errorf("getting offering price from candidate node, %w", err)
 	}

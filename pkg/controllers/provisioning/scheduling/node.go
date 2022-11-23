@@ -34,7 +34,7 @@ import (
 // will be turned into one or more actual node instances within the cluster after bin packing.
 type Node struct {
 	scheduling.NodeTemplate
-	InstanceTypeOptions []cloudprovider.InstanceType
+	InstanceTypeOptions []*cloudprovider.InstanceType
 	Pods                []*v1.Pod
 
 	topology      *Topology
@@ -44,7 +44,7 @@ type Node struct {
 
 var nodeID int64
 
-func NewNode(nodeTemplate *scheduling.NodeTemplate, topology *Topology, daemonResources v1.ResourceList, instanceTypes []cloudprovider.InstanceType) *Node {
+func NewNode(nodeTemplate *scheduling.NodeTemplate, topology *Topology, daemonResources v1.ResourceList, instanceTypes []*cloudprovider.InstanceType) *Node {
 	// Copy the template, and add hostname
 	hostname := fmt.Sprintf("hostname-placeholder-%04d", atomic.AddInt64(&nodeID, 1))
 	topology.Register(v1.LabelHostname, hostname)
@@ -122,7 +122,7 @@ func (n *Node) String() string {
 		InstanceTypeList(n.InstanceTypeOptions))
 }
 
-func InstanceTypeList(instanceTypeOptions []cloudprovider.InstanceType) string {
+func InstanceTypeList(instanceTypeOptions []*cloudprovider.InstanceType) string {
 	var itSb strings.Builder
 	for i, it := range instanceTypeOptions {
 		// print the first 5 instance types only (indices 0-4)
@@ -132,27 +132,27 @@ func InstanceTypeList(instanceTypeOptions []cloudprovider.InstanceType) string {
 		} else if i > 0 {
 			fmt.Fprint(&itSb, ", ")
 		}
-		fmt.Fprint(&itSb, it.Name())
+		fmt.Fprint(&itSb, it.Name)
 	}
 	return itSb.String()
 }
 
-func filterInstanceTypesByRequirements(instanceTypes []cloudprovider.InstanceType, requirements scheduling.Requirements, requests v1.ResourceList) []cloudprovider.InstanceType {
-	return lo.Filter(instanceTypes, func(instanceType cloudprovider.InstanceType, _ int) bool {
+func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, requests v1.ResourceList) []*cloudprovider.InstanceType {
+	return lo.Filter(instanceTypes, func(instanceType *cloudprovider.InstanceType, _ int) bool {
 		return compatible(instanceType, requirements) && fits(instanceType, requests) && hasOffering(instanceType, requirements)
 	})
 }
 
-func compatible(instanceType cloudprovider.InstanceType, requirements scheduling.Requirements) bool {
-	return instanceType.Requirements().Intersects(requirements) == nil
+func compatible(instanceType *cloudprovider.InstanceType, requirements scheduling.Requirements) bool {
+	return instanceType.Requirements.Intersects(requirements) == nil
 }
 
-func fits(instanceType cloudprovider.InstanceType, requests v1.ResourceList) bool {
-	return resources.Fits(resources.Merge(requests, instanceType.Overhead()), instanceType.Resources())
+func fits(instanceType *cloudprovider.InstanceType, requests v1.ResourceList) bool {
+	return resources.Fits(resources.Merge(requests, instanceType.Overhead.Total()), instanceType.Capacity)
 }
 
-func hasOffering(instanceType cloudprovider.InstanceType, requirements scheduling.Requirements) bool {
-	for _, offering := range cloudprovider.AvailableOfferings(instanceType) {
+func hasOffering(instanceType *cloudprovider.InstanceType, requirements scheduling.Requirements) bool {
+	for _, offering := range instanceType.Offerings.Available() {
 		if (!requirements.Has(v1.LabelTopologyZone) || requirements.Get(v1.LabelTopologyZone).Has(offering.Zone)) &&
 			(!requirements.Has(v1alpha5.LabelCapacityType) || requirements.Get(v1alpha5.LabelCapacityType).Has(offering.CapacityType)) {
 			return true

@@ -60,10 +60,10 @@ var cloudProvider *fake.CloudProvider
 var recorder *test.EventRecorder
 var nodeStateController *state.NodeController
 var fakeClock *clock.FakeClock
-var onDemandInstances []cloudprovider.InstanceType
-var mostExpensiveInstance cloudprovider.InstanceType
+var onDemandInstances []*cloudprovider.InstanceType
+var mostExpensiveInstance *cloudprovider.InstanceType
 var mostExpensiveOffering cloudprovider.Offering
-var leastExpensiveInstance cloudprovider.InstanceType
+var leastExpensiveInstance *cloudprovider.InstanceType
 var leastExpensiveOffering cloudprovider.Offering
 
 func TestAPIs(t *testing.T) {
@@ -103,8 +103,8 @@ var _ = BeforeEach(func() {
 	cloudProvider.CreateCalls = nil
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 	cloudProvider.AllowedCreateCalls = math.MaxInt
-	onDemandInstances = lo.Filter(cloudProvider.InstanceTypes, func(i cloudprovider.InstanceType, _ int) bool {
-		for _, o := range cloudprovider.AvailableOfferings(i) {
+	onDemandInstances = lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
+		for _, o := range i.Offerings.Available() {
 			if o.CapacityType == v1alpha5.CapacityTypeOnDemand {
 				return true
 			}
@@ -113,12 +113,12 @@ var _ = BeforeEach(func() {
 	})
 	// Sort the instances by pricing from low to high
 	sort.Slice(onDemandInstances, func(i, j int) bool {
-		return cheapestOffering(onDemandInstances[i].Offerings()).Price < cheapestOffering(onDemandInstances[j].Offerings()).Price
+		return cheapestOffering(onDemandInstances[i].Offerings).Price < cheapestOffering(onDemandInstances[j].Offerings).Price
 	})
 	leastExpensiveInstance = onDemandInstances[0]
-	leastExpensiveOffering = leastExpensiveInstance.Offerings()[0]
+	leastExpensiveOffering = leastExpensiveInstance.Offerings[0]
 	mostExpensiveInstance = onDemandInstances[len(onDemandInstances)-1]
-	mostExpensiveOffering = mostExpensiveInstance.Offerings()[0]
+	mostExpensiveOffering = mostExpensiveInstance.Offerings[0]
 
 	recorder.Reset()
 	fakeClock.SetTime(time.Now())
@@ -145,7 +145,7 @@ var _ = Describe("Expiration", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -176,7 +176,7 @@ var _ = Describe("Expiration", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -209,7 +209,7 @@ var _ = Describe("Expiration", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: expireProv.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -222,7 +222,7 @@ var _ = Describe("Expiration", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -274,7 +274,7 @@ var _ = Describe("Expiration", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -323,7 +323,7 @@ var _ = Describe("Expiration", func() {
 			},
 			Resources: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("3")},
 		})
-		cloudProvider.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 			currentInstance,
 			replacementInstance,
 		}
@@ -362,9 +362,9 @@ var _ = Describe("Expiration", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       currentInstance.Name(),
-					v1alpha5.LabelCapacityType:       currentInstance.Offerings()[0].CapacityType,
-					v1.LabelTopologyZone:             currentInstance.Offerings()[0].Zone,
+					v1.LabelInstanceTypeStable:       currentInstance.Name,
+					v1alpha5.LabelCapacityType:       currentInstance.Offerings[0].CapacityType,
+					v1.LabelTopologyZone:             currentInstance.Offerings[0].Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("7")},
 		})
@@ -414,7 +414,7 @@ var _ = Describe("Expiration", func() {
 			},
 			Resources: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("3")},
 		})
-		cloudProvider.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 			currentInstance,
 			replacementInstance,
 		}
@@ -452,9 +452,9 @@ var _ = Describe("Expiration", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       currentInstance.Name(),
-					v1alpha5.LabelCapacityType:       currentInstance.Offerings()[0].CapacityType,
-					v1.LabelTopologyZone:             currentInstance.Offerings()[0].Zone,
+					v1.LabelInstanceTypeStable:       currentInstance.Name,
+					v1alpha5.LabelCapacityType:       currentInstance.Offerings[0].CapacityType,
+					v1.LabelTopologyZone:             currentInstance.Offerings[0].Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("8")},
 		})
@@ -568,7 +568,7 @@ var _ = Describe("Replace Nodes", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -637,7 +637,7 @@ var _ = Describe("Replace Nodes", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -699,7 +699,7 @@ var _ = Describe("Replace Nodes", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -716,7 +716,7 @@ var _ = Describe("Replace Nodes", func() {
 				},
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -784,7 +784,7 @@ var _ = Describe("Replace Nodes", func() {
 				},
 			},
 		})
-		cloudProvider.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 			currentInstance,
 			replacementInstance,
 		}
@@ -817,9 +817,9 @@ var _ = Describe("Replace Nodes", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       currentInstance.Name(),
-					v1alpha5.LabelCapacityType:       currentInstance.Offerings()[0].CapacityType,
-					v1.LabelTopologyZone:             currentInstance.Offerings()[0].Zone,
+					v1.LabelInstanceTypeStable:       currentInstance.Name,
+					v1alpha5.LabelCapacityType:       currentInstance.Offerings[0].CapacityType,
+					v1.LabelTopologyZone:             currentInstance.Offerings[0].Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")}})
 
@@ -879,7 +879,7 @@ var _ = Describe("Replace Nodes", func() {
 			},
 		})
 
-		cloudProvider.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 			currentInstance,
 			replacementInstance,
 		}
@@ -920,9 +920,9 @@ var _ = Describe("Replace Nodes", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       currentInstance.Name(),
-					v1alpha5.LabelCapacityType:       currentInstance.Offerings()[0].CapacityType,
-					v1.LabelTopologyZone:             currentInstance.Offerings()[0].Zone,
+					v1.LabelInstanceTypeStable:       currentInstance.Name,
+					v1alpha5.LabelCapacityType:       currentInstance.Offerings[0].CapacityType,
+					v1.LabelTopologyZone:             currentInstance.Offerings[0].Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")}})
 
@@ -970,7 +970,7 @@ var _ = Describe("Replace Nodes", func() {
 				Finalizers: []string{"unit-test.com/block-deletion"},
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -1046,7 +1046,7 @@ var _ = Describe("Delete Node", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
@@ -1059,7 +1059,7 @@ var _ = Describe("Delete Node", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
@@ -1137,7 +1137,7 @@ var _ = Describe("Delete Node", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
@@ -1150,7 +1150,7 @@ var _ = Describe("Delete Node", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -1215,7 +1215,7 @@ var _ = Describe("Delete Node", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
@@ -1228,7 +1228,7 @@ var _ = Describe("Delete Node", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -1290,7 +1290,7 @@ var _ = Describe("Delete Node", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
@@ -1303,7 +1303,7 @@ var _ = Describe("Delete Node", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -1370,7 +1370,7 @@ var _ = Describe("Node Lifetime Consideration", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
@@ -1383,7 +1383,7 @@ var _ = Describe("Node Lifetime Consideration", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
@@ -1466,8 +1466,8 @@ var _ = Describe("Topology Consideration", func() {
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelTopologyZone:             "test-zone-1",
-					v1.LabelInstanceTypeStable:       testZone1Instance.Name(),
-					v1alpha5.LabelCapacityType:       testZone1Instance.Offerings()[0].CapacityType,
+					v1.LabelInstanceTypeStable:       testZone1Instance.Name,
+					v1alpha5.LabelCapacityType:       testZone1Instance.Offerings[0].CapacityType,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("1")}})
 
@@ -1476,8 +1476,8 @@ var _ = Describe("Topology Consideration", func() {
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelTopologyZone:             "test-zone-2",
-					v1.LabelInstanceTypeStable:       testZone2Instance.Name(),
-					v1alpha5.LabelCapacityType:       testZone2Instance.Offerings()[0].CapacityType,
+					v1.LabelInstanceTypeStable:       testZone2Instance.Name,
+					v1alpha5.LabelCapacityType:       testZone2Instance.Offerings[0].CapacityType,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("1")}})
 
@@ -1486,8 +1486,8 @@ var _ = Describe("Topology Consideration", func() {
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelTopologyZone:             "test-zone-3",
-					v1.LabelInstanceTypeStable:       testZone3Instance.Name(),
-					v1alpha5.LabelCapacityType:       testZone1Instance.Offerings()[0].CapacityType,
+					v1.LabelInstanceTypeStable:       testZone3Instance.Name,
+					v1alpha5.LabelCapacityType:       testZone1Instance.Offerings[0].CapacityType,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("1")}})
 
@@ -1571,8 +1571,8 @@ var _ = Describe("Topology Consideration", func() {
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelTopologyZone:             "test-zone-1",
-					v1.LabelInstanceTypeStable:       testZone1Instance.Name(),
-					v1alpha5.LabelCapacityType:       testZone1Instance.Offerings()[0].CapacityType,
+					v1.LabelInstanceTypeStable:       testZone1Instance.Name,
+					v1alpha5.LabelCapacityType:       testZone1Instance.Offerings[0].CapacityType,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("1")}})
 
@@ -1581,8 +1581,8 @@ var _ = Describe("Topology Consideration", func() {
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelTopologyZone:             "test-zone-2",
-					v1.LabelInstanceTypeStable:       testZone2Instance.Name(),
-					v1alpha5.LabelCapacityType:       testZone2Instance.Offerings()[0].CapacityType,
+					v1.LabelInstanceTypeStable:       testZone2Instance.Name,
+					v1alpha5.LabelCapacityType:       testZone2Instance.Offerings[0].CapacityType,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("1")}})
 
@@ -1591,8 +1591,8 @@ var _ = Describe("Topology Consideration", func() {
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelTopologyZone:             "test-zone-3",
-					v1.LabelInstanceTypeStable:       testZone3Instance.Name(),
-					v1alpha5.LabelCapacityType:       testZone3Instance.Offerings()[0].CapacityType,
+					v1.LabelInstanceTypeStable:       testZone3Instance.Name,
+					v1alpha5.LabelCapacityType:       testZone3Instance.Offerings[0].CapacityType,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("1")}})
 
@@ -1635,7 +1635,7 @@ var _ = Describe("Empty Nodes", func() {
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelNodeInitialized:    "true",
 				},
 			},
@@ -1665,7 +1665,7 @@ var _ = Describe("Empty Nodes", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -1677,7 +1677,7 @@ var _ = Describe("Empty Nodes", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -1710,7 +1710,7 @@ var _ = Describe("Empty Nodes", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				},
@@ -1743,7 +1743,7 @@ var _ = Describe("Empty Nodes", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -1799,7 +1799,7 @@ var _ = Describe("consolidation TTL", func() {
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelNodeInitialized:    "true",
 				},
 			},
@@ -1869,7 +1869,7 @@ var _ = Describe("consolidation TTL", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
@@ -1882,7 +1882,7 @@ var _ = Describe("consolidation TTL", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
@@ -1943,7 +1943,7 @@ var _ = Describe("consolidation TTL", func() {
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelNodeInitialized:    "true",
 				},
 			},
@@ -2022,7 +2022,7 @@ var _ = Describe("Parallelization", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				},
@@ -2177,7 +2177,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -2190,7 +2190,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -2203,7 +2203,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -2266,7 +2266,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
@@ -2279,7 +2279,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
@@ -2345,7 +2345,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -2358,7 +2358,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -2411,19 +2411,19 @@ var _ = Describe("Multi-Node Consolidation", func() {
 	})
 })
 
-func leastExpensiveInstanceWithZone(zone string) cloudprovider.InstanceType {
+func leastExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
 	for _, elem := range onDemandInstances {
-		if hasZone(elem.Offerings(), zone) {
+		if hasZone(elem.Offerings, zone) {
 			return elem
 		}
 	}
 	return onDemandInstances[len(onDemandInstances)-1]
 }
 
-func mostExpensiveInstanceWithZone(zone string) cloudprovider.InstanceType {
+func mostExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
 	for i := len(onDemandInstances) - 1; i >= 0; i-- {
 		elem := onDemandInstances[i]
-		if hasZone(elem.Offerings(), zone) {
+		if hasZone(elem.Offerings, zone) {
 			return elem
 		}
 	}

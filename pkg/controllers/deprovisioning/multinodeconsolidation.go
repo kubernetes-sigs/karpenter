@@ -136,23 +136,23 @@ func (m *MultiNodeConsolidation) firstNNodeConsolidationOption(ctx context.Conte
 // This code sees that t3a.small is the cheapest type in both lists and filters it and anything more expensive out
 // leaving the valid consolidation:
 // nodes=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.nano
-func filterOutSameType(newNode *scheduling.Node, consolidate []CandidateNode) []cloudprovider.InstanceType {
+func filterOutSameType(newNode *scheduling.Node, consolidate []CandidateNode) []*cloudprovider.InstanceType {
 	existingInstanceTypes := sets.NewString()
 	nodePricesByInstanceType := map[string]float64{}
 
 	// get the price of the cheapest node that we currently are considering deleting indexed by instance type
 	for _, n := range consolidate {
-		existingInstanceTypes.Insert(n.instanceType.Name())
-		of, ok := cloudprovider.GetOffering(n.instanceType, n.capacityType, n.zone)
+		existingInstanceTypes.Insert(n.instanceType.Name)
+		of, ok := n.instanceType.Offerings.Get(n.capacityType, n.zone)
 		if !ok {
 			continue
 		}
-		existingPrice, ok := nodePricesByInstanceType[n.instanceType.Name()]
+		existingPrice, ok := nodePricesByInstanceType[n.instanceType.Name]
 		if !ok {
 			existingPrice = math.MaxFloat64
 		}
 		if of.Price < existingPrice {
-			nodePricesByInstanceType[n.instanceType.Name()] = of.Price
+			nodePricesByInstanceType[n.instanceType.Name] = of.Price
 		}
 	}
 
@@ -161,9 +161,9 @@ func filterOutSameType(newNode *scheduling.Node, consolidate []CandidateNode) []
 		// we are considering replacing multiple nodes with a single node of one of the same types, so the replacement
 		// node must be cheaper than the price of the existing node, or we should just keep that one and do a
 		// deletion only to reduce cluster disruption (fewer pods will re-schedule).
-		if existingInstanceTypes.Has(it.Name()) {
-			if nodePricesByInstanceType[it.Name()] < maxPrice {
-				maxPrice = nodePricesByInstanceType[it.Name()]
+		if existingInstanceTypes.Has(it.Name) {
+			if nodePricesByInstanceType[it.Name] < maxPrice {
+				maxPrice = nodePricesByInstanceType[it.Name]
 			}
 		}
 	}
