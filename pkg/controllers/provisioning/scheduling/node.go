@@ -138,8 +138,9 @@ func InstanceTypeList(instanceTypeOptions []*cloudprovider.InstanceType) string 
 }
 
 func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, requests v1.ResourceList) []*cloudprovider.InstanceType {
-	return lo.Filter(instanceTypes, func(instanceType *cloudprovider.InstanceType, _ int) bool {
-		return compatible(instanceType, requirements) && fits(instanceType, requests) && hasOffering(instanceType, requirements)
+	return lo.FilterMap(instanceTypes, func(instanceType *cloudprovider.InstanceType, _ int) (*cloudprovider.InstanceType, bool) {
+		instanceType.Offerings = instanceType.Offerings.Filter(requirements)
+		return instanceType, compatible(instanceType, requirements) && fits(instanceType, requests) && hasOffering(instanceType, requirements)
 	})
 }
 

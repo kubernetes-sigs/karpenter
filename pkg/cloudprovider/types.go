@@ -118,6 +118,14 @@ func (ofs Offerings) Get(ct, zone string) (Offering, bool) {
 	})
 }
 
+// Filter filters the offerings based on the passed requirements
+func (ofs Offerings) Filter(requirements scheduling.Requirements) Offerings {
+	return lo.Filter(ofs, func(offering Offering, _ int) bool {
+		return requirements.Get(v1.LabelTopologyZone).Has(offering.Zone) &&
+			requirements.Get(v1alpha5.LabelCapacityType).Has(offering.CapacityType)
+	})
+}
+
 // Available filters the available offerings from the returned offerings
 func (ofs Offerings) Available() Offerings {
 	return lo.Filter(ofs, func(o Offering, _ int) bool {

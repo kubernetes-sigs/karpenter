@@ -27,7 +27,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/scheduling"
 	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
 
@@ -145,11 +144,14 @@ func GetPodEvictionCost(ctx context.Context, p *v1.Pod) float64 {
 	return clamp(-10.0, cost, 10.0)
 }
 
-func filterByPrice(options []*cloudprovider.InstanceType, reqs scheduling.Requirements, price float64) []*cloudprovider.InstanceType {
+func filterByPrice(options []*cloudprovider.InstanceType, price float64) []*cloudprovider.InstanceType {
 	var result []*cloudprovider.InstanceType
 	for _, it := range options {
-		launchPrice := worstLaunchPrice(it.Offerings.Available(), reqs)
-		if launchPrice < price {
+		// Only consider offerings that are cheaper than the current node's price
+		it.Offerings = lo.Filter(it.Offerings, func(o cloudprovider.Offering, _ int) bool {
+			return o.Price < price
+		})
+		if len(it.Offerings) > 0 {
 			result = append(result, it)
 		}
 	}
@@ -285,34 +287,6 @@ func calculateLifetimeRemaining(node CandidateNode, clock clock.Clock) float64 {
 		remaining = clamp(0.0, lifetimeRemainingSeconds/totalLifetimeSeconds, 1.0)
 	}
 	return remaining
-}
-
-// worstLaunchPrice gets the worst-case launch price from the offerings that are offered
-// on an instance type. If the instance type has a spot offering available, then it uses the spot offering
-// to get the launch price; else, it uses the on-demand launch price
-func worstLaunchPrice(ofs []cloudprovider.Offering, reqs scheduling.Requirements) float64 {
-	// We prefer to launch spot offerings, so we will get the worst price based on the node requirements
-	if reqs.Get(v1alpha5.LabelCapacityType).Has(v1alpha5.CapacityTypeSpot) {
-		spotOfferings := lo.Filter(ofs, func(of cloudprovider.Offering, _ int) bool {
-			return of.CapacityType == v1alpha5.CapacityTypeSpot && reqs.Get(v1.LabelTopologyZone).Has(of.Zone)
-		})
-		if len(spotOfferings) > 0 {
-			return lo.MaxBy(spotOfferings, func(of1, of2 cloudprovider.Offering) bool {
-				return of1.Price > of2.Price
-			}).Price
-		}
-	}
-	if reqs.Get(v1alpha5.LabelCapacityType).Has(v1alpha5.CapacityTypeOnDemand) {
-		onDemandOfferings := lo.Filter(ofs, func(of cloudprovider.Offering, _ int) bool {
-			return of.CapacityType == v1alpha5.CapacityTypeOnDemand && reqs.Get(v1.LabelTopologyZone).Has(of.Zone)
-		})
-		if len(onDemandOfferings) > 0 {
-			return lo.MaxBy(onDemandOfferings, func(of1, of2 cloudprovider.Offering) bool {
-				return of1.Price > of2.Price
-			}).Price
-		}
-	}
-	return math.MaxFloat64
 }
 
 func clamp(min, val, max float64) float64 {

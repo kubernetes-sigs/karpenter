@@ -135,7 +135,7 @@ func (c *SingleNodeConsolidation) computeConsolidation(ctx context.Context, node
 	if !ok {
 		return Command{}, fmt.Errorf("getting offering price from candidate node, %w", err)
 	}
-	newNodes[0].InstanceTypeOptions = filterByPrice(newNodes[0].InstanceTypeOptions, newNodes[0].Requirements, offering.Price)
+	newNodes[0].InstanceTypeOptions = filterByPrice(newNodes[0].InstanceTypeOptions, offering.Price)
 	if len(newNodes[0].InstanceTypeOptions) == 0 {
 		// no instance types remain after filtering by price
 		return Command{action: actionDoNothing}, nil

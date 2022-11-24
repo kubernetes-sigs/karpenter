@@ -167,6 +167,5 @@ func filterOutSameType(newNode *scheduling.Node, consolidate []CandidateNode) []
 			}
 		}
 	}
-
-	return filterByPrice(newNode.InstanceTypeOptions, newNode.Requirements, maxPrice)
+	return filterByPrice(newNode.InstanceTypeOptions, maxPrice)
 }
