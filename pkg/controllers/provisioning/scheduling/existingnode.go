@@ -75,7 +75,7 @@ func NewExistingNode(n *state.Node, topology *Topology, startupTaints []v1.Taint
 		ephemeralTaints = append(ephemeralTaints, startupTaints...)
 	}
 
-	// Filter out ignored taints
+	// Requirements out ignored taints
 	node.taints = lo.Reject(n.Node.Spec.Taints, func(taint v1.Taint, _ int) bool {
 		_, rejected := lo.Find(ephemeralTaints, func(t v1.Taint) bool {
 			return t.Key == taint.Key && t.Value == taint.Value && t.Effect == taint.Effect

@@ -145,17 +145,13 @@ func GetPodEvictionCost(ctx context.Context, p *v1.Pod) float64 {
 }
 
 func filterByPrice(options []*cloudprovider.InstanceType, price float64) []*cloudprovider.InstanceType {
-	var result []*cloudprovider.InstanceType
-	for _, it := range options {
-		// Only consider offerings that are cheaper than the current node's price
+	return lo.FilterMap(options, func(it *cloudprovider.InstanceType, _ int) (*cloudprovider.InstanceType, bool) {
 		it.Offerings = lo.Filter(it.Offerings, func(o cloudprovider.Offering, _ int) bool {
+			// Only consider offerings that are cheaper than the current node's price
 			return o.Price < price
 		})
-		if len(it.Offerings) > 0 {
-			result = append(result, it)
-		}
-	}
-	return result
+		return it, len(it.Offerings) > 0
+	})
 }
 
 func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {

@@ -23,8 +23,6 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 
-	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
@@ -34,7 +32,7 @@ import (
 // will be turned into one or more actual node instances within the cluster after bin packing.
 type Node struct {
 	scheduling.NodeTemplate
-	InstanceTypeOptions []*cloudprovider.InstanceType
+	InstanceTypeOptions cloudprovider.InstanceTypes
 	Pods                []*v1.Pod
 
 	topology      *Topology
@@ -44,7 +42,7 @@ type Node struct {
 
 var nodeID int64
 
-func NewNode(nodeTemplate *scheduling.NodeTemplate, topology *Topology, daemonResources v1.ResourceList, instanceTypes []*cloudprovider.InstanceType) *Node {
+func NewNode(nodeTemplate *scheduling.NodeTemplate, topology *Topology, daemonResources v1.ResourceList, instanceTypes cloudprovider.InstanceTypes) *Node {
 	// Copy the template, and add hostname
 	hostname := fmt.Sprintf("hostname-placeholder-%04d", atomic.AddInt64(&nodeID, 1))
 	topology.Register(v1.LabelHostname, hostname)
@@ -55,7 +53,7 @@ func NewNode(nodeTemplate *scheduling.NodeTemplate, topology *Topology, daemonRe
 
 	return &Node{
 		NodeTemplate:        template,
-		InstanceTypeOptions: instanceTypes,
+		InstanceTypeOptions: instanceTypes.DeepCopy(),
 		hostPortUsage:       scheduling.NewHostPortUsage(),
 		topology:            topology,
 		requests:            daemonResources,
@@ -138,9 +136,9 @@ func InstanceTypeList(instanceTypeOptions []*cloudprovider.InstanceType) string 
 }
 
 func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, requests v1.ResourceList) []*cloudprovider.InstanceType {
-	return lo.FilterMap(instanceTypes, func(instanceType *cloudprovider.InstanceType, _ int) (*cloudprovider.InstanceType, bool) {
-		instanceType.Offerings = instanceType.Offerings.Filter(requirements)
-		return instanceType, compatible(instanceType, requirements) && fits(instanceType, requests) && hasOffering(instanceType, requirements)
+	return lo.FilterMap(instanceTypes, func(it *cloudprovider.InstanceType, _ int) (*cloudprovider.InstanceType, bool) {
+		it.Offerings = it.Offerings.Available().Requirements(requirements)
+		return it, compatible(it, requirements) && fits(it, requests) && len(it.Offerings) > 0
 	})
 }
 
@@ -150,14 +148,4 @@ func compatible(instanceType *cloudprovider.InstanceType, requirements schedulin
 
 func fits(instanceType *cloudprovider.InstanceType, requests v1.ResourceList) bool {
 	return resources.Fits(resources.Merge(requests, instanceType.Overhead.Total()), instanceType.Capacity)
-}
-
-func hasOffering(instanceType *cloudprovider.InstanceType, requirements scheduling.Requirements) bool {
-	for _, offering := range instanceType.Offerings.Available() {
-		if (!requirements.Has(v1.LabelTopologyZone) || requirements.Get(v1.LabelTopologyZone).Has(offering.Zone)) &&
-			(!requirements.Has(v1alpha5.LabelCapacityType) || requirements.Get(v1alpha5.LabelCapacityType).Has(offering.CapacityType)) {
-			return true
-		}
-	}
-	return false
 }

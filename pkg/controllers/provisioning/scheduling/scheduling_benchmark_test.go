@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/clock"
 
+	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
@@ -119,7 +120,7 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	cloudProv.InstanceTypes = instanceTypes
 	scheduler := pscheduling.NewScheduler(ctx, nil, []*scheduling.NodeTemplate{scheduling.NewNodeTemplate(provisioner)},
 		nil, state.NewCluster(ctx, &clock.RealClock{}, nil, cloudProv), nil, &pscheduling.Topology{},
-		map[string][]cloudprovider.InstanceType{provisioner.Name: instanceTypes}, map[*scheduling.NodeTemplate]v1.ResourceList{},
+		map[string][]*cloudprovider.InstanceType{provisioner.Name: instanceTypes}, map[*scheduling.NodeTemplate]v1.ResourceList{},
 		test.NewEventRecorder(),
 		pscheduling.SchedulerOptions{})
 

@@ -12,6 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+//go:generate controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="./..."
 package scheduling
 
 import (
@@ -32,6 +33,7 @@ func init() {
 }
 
 // Requirement is an efficient represenatation of v1.NodeSelectorRequirement
+// +k8s:deepcopy-gen=true
 type Requirement struct {
 	Key         string
 	complement  bool

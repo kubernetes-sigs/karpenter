@@ -12,6 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+//go:generate controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="./..."
 package cloudprovider
 
 import (
@@ -57,18 +58,22 @@ type CloudProvider interface {
 	// Availability of types or zone may vary by provisioner or over time.  Regardless of
 	// availability, the GetInstanceTypes method should always return all instance types,
 	// even those with no offerings available.
-	GetInstanceTypes(context.Context, *v1alpha5.Provisioner) ([]*InstanceType, error)
+	GetInstanceTypes(context.Context, *v1alpha5.Provisioner) (InstanceTypes, error)
 	// Name returns the CloudProvider implementation name.
 	Name() string
 }
 
 type NodeRequest struct {
 	Template            *scheduling.NodeTemplate
-	InstanceTypeOptions []*InstanceType
+	InstanceTypeOptions InstanceTypes
 }
+
+// +k8s:deepcopy-gen=true
+type InstanceTypes []*InstanceType
 
 // InstanceType describes the properties of a potential node (either concrete attributes of an instance of this type
 // or supported options in the case of arrays)
+// +k8s:deepcopy-gen=true
 type InstanceType struct {
 	// Name of the instance type, must correspond to v1.LabelInstanceTypeStable
 	Name string
@@ -84,6 +89,7 @@ type InstanceType struct {
 	Overhead *InstanceTypeOverhead
 }
 
+// +k8s:deepcopy-gen=true
 type InstanceTypeOverhead struct {
 	// KubeReserved returns the default resources allocated to kubernetes system daemons by default
 	KubeReserved v1.ResourceList
@@ -99,6 +105,7 @@ func (i InstanceTypeOverhead) Total() v1.ResourceList {
 
 // An Offering describes where an InstanceType is available to be used, with the expectation that its properties
 // may be tightly coupled (e.g. the availability of an instance type in some zone is scoped to a capacity type)
+// +k8s:deepcopy-gen=true
 type Offering struct {
 	CapacityType string
 	Zone         string
@@ -108,6 +115,7 @@ type Offering struct {
 	Available bool
 }
 
+// +k8s:deepcopy-gen=true
 type Offerings []Offering
 
 // Get gets the offering from an offering slice that matches the
@@ -118,11 +126,11 @@ func (ofs Offerings) Get(ct, zone string) (Offering, bool) {
 	})
 }
 
-// Filter filters the offerings based on the passed requirements
-func (ofs Offerings) Filter(requirements scheduling.Requirements) Offerings {
+// Requirements filters the offerings based on the passed requirements
+func (ofs Offerings) Requirements(requirements scheduling.Requirements) Offerings {
 	return lo.Filter(ofs, func(offering Offering, _ int) bool {
-		return requirements.Get(v1.LabelTopologyZone).Has(offering.Zone) &&
-			requirements.Get(v1alpha5.LabelCapacityType).Has(offering.CapacityType)
+		return (!requirements.Has(v1.LabelTopologyZone) || requirements.Get(v1.LabelTopologyZone).Has(offering.Zone)) &&
+			(!requirements.Has(v1alpha5.LabelCapacityType) || requirements.Get(v1alpha5.LabelCapacityType).Has(offering.CapacityType))
 	})
 }
 
