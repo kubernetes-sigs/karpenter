@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"net/http"
 	"sort"
 	"time"
 
@@ -41,7 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
 
@@ -93,6 +92,10 @@ func NewProvisioner(ctx context.Context, kubeClient client.Client, coreV1Client 
 	return p
 }
 
+func (p *Provisioner) Name() string {
+	return "provisioner"
+}
+
 func (p *Provisioner) Trigger() {
 	p.batcher.Trigger()
 }
@@ -101,9 +104,8 @@ func (p *Provisioner) TriggerImmediate() {
 	p.batcher.TriggerImmediate()
 }
 
-func (p *Provisioner) Builder(_ context.Context, mgr manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.NewSingletonManagedBy(mgr).
-		Named("provisioning").
+func (p *Provisioner) Builder(_ context.Context, mgr manager.Manager) controller.Builder {
+	return controller.NewSingletonManagedBy(mgr).
 		WaitUntil(func(ctx context.Context) {
 			// Batch pods
 			p.batcher.Wait(ctx)
@@ -118,13 +120,9 @@ func (p *Provisioner) Builder(_ context.Context, mgr manager.Manager) operatorco
 				}
 			}
 		}).
-		WithOptions(operatorcontroller.Options{
+		WithOptions(controller.Options{
 			DisableWaitOnError: true,
 		})
-}
-
-func (p *Provisioner) LivenessProbe(_ *http.Request) error {
-	return nil
 }
 
 func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {

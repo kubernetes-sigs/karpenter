@@ -16,7 +16,6 @@ package inflightchecks
 
 import (
 	"context"
-	"net/http"
 	"time"
 
 	"github.com/patrickmn/go-cache"
@@ -33,13 +32,11 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
-	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/operator/injection"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
-const controllerName = "inflightchecks"
+var _ corecontroller.TypedController[*v1.Node] = (*Controller)(nil)
 
 type Controller struct {
 	clock       clock.Clock
@@ -48,6 +45,7 @@ type Controller struct {
 	recorder    events.Recorder
 	lastScanned *cache.Cache
 }
+
 type Check interface {
 	// Check performs the inflight check, this should return a list of slice discovered, or an empty
 	// slice if no issues were found
@@ -62,23 +60,31 @@ type Issue struct {
 // scanPeriod is how often we inspect and report issues that are found.
 const scanPeriod = 10 * time.Minute
 
-func NewController(clk clock.Clock, kubeclient client.Client, recorder events.Recorder, provider cloudprovider.CloudProvider, cluster *state.Cluster) *Controller {
-	return &Controller{
+func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Recorder,
+	provider cloudprovider.CloudProvider) corecontroller.Controller {
+
+	return corecontroller.Typed[*v1.Node](kubeClient, &Controller{
 		clock:       clk,
-		kubeClient:  kubeclient,
+		kubeClient:  kubeClient,
 		recorder:    recorder,
 		lastScanned: cache.New(scanPeriod, 1*time.Minute),
 		checks: []Check{
 			NewFailedInit(clk, provider),
-			NewTermination(kubeclient),
+			NewTermination(kubeClient),
 			NewNodeShape(provider),
-		}}
+		}},
+	)
 }
 
-func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	log := logging.FromContext(ctx).Named(controllerName).With("node", req.Name)
-	namespacedName := req.NamespacedName.String()
-	if lastTime, ok := c.lastScanned.Get(namespacedName); ok {
+func (c *Controller) Name() string {
+	return "inflightchecks"
+}
+
+func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
+
+	// If we get an event before we should check for inflight checks, we ignore and wait
+	if lastTime, ok := c.lastScanned.Get(client.ObjectKeyFromObject(node).String()); ok {
 		if lastTime, ok := lastTime.(time.Time); ok {
 			remaining := scanPeriod - c.clock.Since(lastTime)
 			return reconcile.Result{RequeueAfter: remaining}, nil
@@ -86,15 +92,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		// the above should always succeed
 		return reconcile.Result{RequeueAfter: scanPeriod}, nil
 	}
-	c.lastScanned.SetDefault(namespacedName, c.clock.Now())
-
-	ctx = logging.WithLogger(ctx, log)
-	ctx = injection.WithControllerName(ctx, controllerName)
-
-	node := &v1.Node{}
-	if err := c.kubeClient.Get(ctx, req.NamespacedName, node); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(err)
-	}
+	c.lastScanned.SetDefault(client.ObjectKeyFromObject(node).String(), c.clock.Now())
 
 	provisioner := &v1alpha5.Provisioner{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
@@ -110,28 +108,23 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	for _, check := range c.checks {
 		issues, err := check.Check(ctx, node, provisioner, pdbs)
 		if err != nil {
-			log.Errorf("checking node %s with %T, %s", node.Name, check, err)
+			logging.FromContext(ctx).Errorf("checking node with %T, %s", check, err)
 		}
 		for _, i := range issues {
 			uniqueIssues[i.node.Name+i.message] = i
 		}
 	}
-
 	for _, iss := range uniqueIssues {
-		log.Infof("Inflight check failed for node %s, %s", iss.node.Name, iss.message)
+		logging.FromContext(ctx).Infof("Inflight check failed for node, %s", iss.message)
 		c.recorder.Publish(events.NodeInflightCheck(iss.node, iss.message))
 	}
 	return reconcile.Result{RequeueAfter: scanPeriod}, nil
 }
 
-func (c *Controller) Builder(ctx context.Context, m manager.Manager) operatorcontroller.Builder {
-	return controllerruntime.
+func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
+	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
-		Named(controllerName).
 		For(&v1.Node{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10})
-}
-
-func (c *Controller) LivenessProbe(req *http.Request) error {
-	return nil
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
+	)
 }

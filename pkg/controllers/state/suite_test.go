@@ -28,6 +28,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
@@ -53,9 +54,9 @@ var ctx context.Context
 var env *test.Environment
 var fakeClock *clock.FakeClock
 var cluster *state.Cluster
-var nodeController *state.NodeController
-var podController *state.PodController
-var provisionerController *state.ProvisionerController
+var nodeController controller.Controller
+var podController controller.Controller
+var provisionerController controller.Controller
 var cloudProvider *fake.CloudProvider
 var provisioner *v1alpha5.Provisioner
 

@@ -17,7 +17,6 @@ package pod
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strings"
 	"sync"
 
@@ -35,7 +34,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/metrics"
-	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
 const (
@@ -75,6 +74,8 @@ var (
 	)
 )
 
+var _ controller.TypedController[*v1.Pod] = (*Controller)(nil)
+
 // Controller for the resource
 type Controller struct {
 	kubeClient  client.Client
@@ -102,25 +103,24 @@ func labelNames() []string {
 	}
 }
 
-// NewController constructs a controller instance
-func NewController(kubeClient client.Client) *Controller {
-	return &Controller{
+// NewController constructs a podController instance
+func NewController(kubeClient client.Client) controller.Controller {
+	return controller.Typed[*v1.Pod](kubeClient, &Controller{
 		kubeClient:  kubeClient,
 		pendingPods: sets.NewString(),
-	}
+	})
+}
+
+func (c *Controller) Name() string {
+	return "podmetrics"
 }
 
 // Reconcile executes a termination control loop for the resource
-func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("podmetrics").With("pod", req.Name))
+func (c *Controller) Reconcile(ctx context.Context, pod *v1.Pod) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("pod", pod.Name))
 	// Remove the previous gauge after pod labels are updated
-	if labels, ok := c.labelsMap.Load(req.NamespacedName); ok {
+	if labels, ok := c.labelsMap.Load(client.ObjectKeyFromObject(pod)); ok {
 		podGaugeVec.Delete(labels.(prometheus.Labels))
-	}
-	// Retrieve pod from reconcile request
-	pod := &v1.Pod{}
-	if err := c.kubeClient.Get(ctx, req.NamespacedName, pod); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	c.record(ctx, pod)
 	return reconcile.Result{}, nil
@@ -149,11 +149,12 @@ func (c *Controller) record(ctx context.Context, pod *v1.Pod) {
 	}
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return controllerruntime.
-		NewControllerManagedBy(m).
-		Named("podmetrics").
-		For(&v1.Pod{})
+func (c *Controller) Builder(_ context.Context, m manager.Manager) controller.Builder {
+	return controller.Adapt(
+		controllerruntime.
+			NewControllerManagedBy(m).
+			For(&v1.Pod{}),
+	)
 }
 
 // labels creates the labels using the current state of the pod
@@ -199,8 +200,4 @@ func (c *Controller) labels(ctx context.Context, pod *v1.Pod) prometheus.Labels 
 		}
 	}
 	return metricLabels
-}
-
-func (c *Controller) LivenessProbe(_ *http.Request) error {
-	return nil
 }

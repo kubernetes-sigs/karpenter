@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"reflect"
 	"sync"
 	"time"
 
@@ -40,6 +41,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/test"
 )
 
@@ -48,14 +50,22 @@ const (
 	RequestInterval           = 1 * time.Second
 )
 
+func ExpectExists[T client.Object](ctx context.Context, c client.Client, obj T) T {
+	return ExpectExistsWithOffset(1, ctx, c, obj)
+}
+
+func ExpectExistsWithOffset[T client.Object](offset int, ctx context.Context, c client.Client, obj T) T {
+	resp := reflect.New(reflect.TypeOf(*new(T)).Elem()).Interface().(T)
+	ExpectWithOffset(offset+1, c.Get(ctx, client.ObjectKeyFromObject(obj), resp)).To(Succeed())
+	return resp
+}
+
 func ExpectPodExists(ctx context.Context, c client.Client, name string, namespace string) *v1.Pod {
 	return ExpectPodExistsWithOffset(1, ctx, c, name, namespace)
 }
 
 func ExpectPodExistsWithOffset(offset int, ctx context.Context, c client.Client, name string, namespace string) *v1.Pod {
-	pod := &v1.Pod{}
-	ExpectWithOffset(offset+1, c.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, pod)).To(Succeed())
-	return pod
+	return ExpectExistsWithOffset(offset+1, ctx, c, &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}})
 }
 
 func ExpectNodeExists(ctx context.Context, c client.Client, name string) *v1.Node {
@@ -63,9 +73,7 @@ func ExpectNodeExists(ctx context.Context, c client.Client, name string) *v1.Nod
 }
 
 func ExpectNodeExistsWithOffset(offset int, ctx context.Context, c client.Client, name string) *v1.Node {
-	node := &v1.Node{}
-	ExpectWithOffset(offset+1, c.Get(ctx, client.ObjectKey{Name: name}, node)).To(Succeed())
-	return node
+	return ExpectExistsWithOffset(offset+1, ctx, c, &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}})
 }
 
 func ExpectNotFound(ctx context.Context, c client.Client, objects ...client.Object) {
@@ -175,7 +183,7 @@ func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objects ...cl
 	}
 }
 
-func ExpectProvisioned(ctx context.Context, c client.Client, recorder *test.EventRecorder, controller *provisioning.Controller,
+func ExpectProvisioned(ctx context.Context, c client.Client, recorder *test.EventRecorder, controller corecontroller.Controller,
 	provisioner *provisioning.Provisioner, pods ...*v1.Pod) (result []*v1.Pod) {
 
 	ExpectProvisionedNoBindingWithOffset(1, ctx, c, controller, provisioner, pods...)
@@ -193,11 +201,11 @@ func ExpectProvisioned(ctx context.Context, c client.Client, recorder *test.Even
 	return
 }
 
-func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, controller *provisioning.Controller, provisioner *provisioning.Provisioner, pods ...*v1.Pod) (result []*v1.Pod) {
+func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, controller corecontroller.Controller, provisioner *provisioning.Provisioner, pods ...*v1.Pod) (result []*v1.Pod) {
 	return ExpectProvisionedNoBindingWithOffset(1, ctx, c, controller, provisioner, pods...)
 }
 
-func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c client.Client, controller *provisioning.Controller, provisioner *provisioning.Provisioner, pods ...*v1.Pod) (result []*v1.Pod) {
+func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c client.Client, controller corecontroller.Controller, provisioner *provisioning.Provisioner, pods ...*v1.Pod) (result []*v1.Pod) {
 	// Persist objects
 	for _, pod := range pods {
 		ExpectAppliedWithOffset(offset+1, ctx, c, pod)

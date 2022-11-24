@@ -16,27 +16,46 @@ package controller
 
 import (
 	"context"
-	"net/http"
 
+	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
+type Reconciler interface {
+	reconcile.Reconciler
+	// Name is the name of the Reconciler for metrics and logging
+	Name() string
+}
+
 // Controller defines a controller that can be registered with controller-runtime
 type Controller interface {
-	reconcile.Reconciler
+	Reconciler
 
 	// Builder returns a Builder registered with the manager that can be wrapped
 	// with other Builders and completed later to complete registration to the manager
 	Builder(context.Context, manager.Manager) Builder
-
-	// LivenessProbe surfaces a health check to run on the controller
-	LivenessProbe(req *http.Request) error
 }
 
 // Builder is a struct, that when complete, registers the passed reconciler with the manager stored
-// insider of the builder. For reference implementations, see controllerruntime.Builder
+// insider of the builder. Typed reference implementations, see controllerruntime.Builder
 type Builder interface {
 	// Complete builds a builder by registering the Reconciler with the manager
-	Complete(reconcile.Reconciler) error
+	Complete(Reconciler) error
+}
+
+// Adapter adapts a controllerruntime.Builder into the Builder interface
+type Adapter struct {
+	builder *controllerruntime.Builder
+}
+
+func Adapt(builder *controllerruntime.Builder) Builder {
+	return &Adapter{
+		builder: builder,
+	}
+}
+
+func (a *Adapter) Complete(r Reconciler) error {
+	a.builder = a.builder.Named(r.Name())
+	return a.builder.Complete(r)
 }

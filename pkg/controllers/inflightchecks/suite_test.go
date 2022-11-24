@@ -36,13 +36,14 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/inflightchecks"
 	"github.com/aws/karpenter-core/pkg/events"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
 var ctx context.Context
-var controller *inflightchecks.Controller
+var inflightController controller.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
 var cp *fake.CloudProvider
@@ -60,7 +61,7 @@ var _ = BeforeSuite(func() {
 	ctx = settings.ToContext(ctx, test.Settings())
 	cp = &fake.CloudProvider{}
 	recorder = test.NewEventRecorder()
-	controller = inflightchecks.NewController(fakeClock, env.Client, recorder, cp, nil)
+	inflightController = inflightchecks.NewController(fakeClock, env.Client, recorder, cp)
 })
 
 var _ = AfterSuite(func() {
@@ -99,7 +100,7 @@ var _ = Describe("Controller", func() {
 			}
 			ExpectApplied(ctx, env.Client, provisioner, n)
 			fakeClock.Step(2 * time.Hour)
-			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(n))
+			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(n))
 			ExpectDetectedEvent("Expected resource \"fake.com/vendor-a\" didn't register on the node")
 		})
 		It("should detect issues with nodes that have a startup taint which isn't removed", func() {
@@ -124,7 +125,7 @@ var _ = Describe("Controller", func() {
 			}
 			ExpectApplied(ctx, env.Client, provisioner, n)
 			fakeClock.Step(2 * time.Hour)
-			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(n))
+			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(n))
 			ExpectDetectedEvent("Startup taint \"my.startup.taint:NoSchedule\" is still on the node")
 		})
 	})
@@ -154,7 +155,7 @@ var _ = Describe("Controller", func() {
 			ExpectApplied(ctx, env.Client, provisioner, n, p, pdb)
 			ExpectManualBinding(ctx, env.Client, p, n)
 			_ = env.Client.Delete(ctx, n)
-			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(n))
+			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(n))
 			ExpectDetectedEvent(fmt.Sprintf("Can't drain node, PDB %s/%s is blocking evictions", pdb.Namespace, pdb.Name))
 		})
 	})
@@ -176,7 +177,7 @@ var _ = Describe("Controller", func() {
 				v1.ResourcePods:   resource.MustParse("10"),
 			}
 			ExpectApplied(ctx, env.Client, provisioner, n)
-			ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(n))
+			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(n))
 			ExpectDetectedEvent("Expected 128Gi of resource memory, but found 64Gi (50.0% of expected)")
 		})
 	})

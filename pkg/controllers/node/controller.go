@@ -16,12 +16,9 @@ package node
 
 import (
 	"context"
-	"fmt"
-	"net/http"
 
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
@@ -32,28 +29,19 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/utils/result"
 )
 
-const controllerName = "node"
-
-// NewController constructs a controller instance
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Controller {
-	return &Controller{
-		kubeClient:     kubeClient,
-		cluster:        cluster,
-		initialization: &Initialization{kubeClient: kubeClient, cloudProvider: cloudProvider},
-		emptiness:      &Emptiness{kubeClient: kubeClient, clock: clk, cluster: cluster},
-	}
-}
+var _ corecontroller.TypedController[*v1.Node] = (*Controller)(nil)
 
 // Controller manages a set of properties on karpenter provisioned nodes, such as
 // taints, labels, finalizers.
@@ -65,29 +53,29 @@ type Controller struct {
 	finalizer      *Finalizer
 }
 
+// NewController constructs a nodeController instance
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) corecontroller.Controller {
+	return corecontroller.Typed[*v1.Node](kubeClient, &Controller{
+		kubeClient:     kubeClient,
+		cluster:        cluster,
+		initialization: &Initialization{kubeClient: kubeClient, cloudProvider: cloudProvider},
+		emptiness:      &Emptiness{kubeClient: kubeClient, clock: clk, cluster: cluster},
+	})
+}
+
+func (c *Controller) Name() string {
+	return "node"
+}
+
 // Reconcile executes a reallocation control loop for the resource
-func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(controllerName).With("node", req.Name))
-	// 1. Retrieve Node, ignore if not provisioned or terminating
-	stored := &v1.Node{}
-	if err := c.kubeClient.Get(ctx, req.NamespacedName, stored); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(err)
-	}
-	if _, ok := stored.Labels[v1alpha5.ProvisionerNameLabelKey]; !ok {
-		return reconcile.Result{}, nil
-	}
-	if !stored.DeletionTimestamp.IsZero() {
-		return reconcile.Result{}, nil
-	}
-
-	// 2. Retrieve Provisioner
+func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
 	provisioner := &v1alpha5.Provisioner{}
-	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: stored.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// 3. Execute reconcilers
-	node := stored.DeepCopy()
+	// Execute Reconcilers
 	var results []reconcile.Result
 	var errs error
 	for _, reconciler := range []interface {
@@ -101,21 +89,10 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		errs = multierr.Append(errs, err)
 		results = append(results, res)
 	}
-
-	// 4. Patch any changes, regardless of errors
-	if !equality.Semantic.DeepEqual(node, stored) {
-		if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
-			return reconcile.Result{}, fmt.Errorf("patching node, %w", err)
-		}
-	}
-	// 5. Requeue if error or if retryAfter is set
-	if errs != nil {
-		return reconcile.Result{}, errs
-	}
-	return result.Min(results...), nil
+	return result.Min(results...), errs
 }
 
-func (c *Controller) Builder(ctx context.Context, m manager.Manager) operatorcontroller.Builder {
+func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontroller.Builder {
 	// Enqueues a reconcile request when nominated node expiration is triggered
 	ch := make(chan event.GenericEvent, 300)
 	c.cluster.AddNominatedNodeEvictionObserver(func(nodeName string) {
@@ -124,10 +101,10 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) operatorcon
 		}}
 	})
 
-	return controllerruntime.
+	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
-		Named(controllerName).
 		For(&v1.Node{}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Watches(
 			// Reconcile all nodes related to a provisioner when it changes.
 			&source.Kind{Type: &v1alpha5.Provisioner{}},
@@ -154,9 +131,11 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) operatorcon
 			}),
 		).
 		Watches(&source.Channel{Source: ch}, &handler.EnqueueRequestForObject{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10})
-}
-
-func (c *Controller) LivenessProbe(_ *http.Request) error {
-	return nil
+		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+			_, ok := obj.GetLabels()[v1alpha5.ProvisionerNameLabelKey]
+			return ok
+		})).
+		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+			return obj.GetDeletionTimestamp().IsZero()
+		})))
 }

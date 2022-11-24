@@ -17,7 +17,6 @@ package deprovisioning
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"sync"
 	"time"
 
@@ -92,16 +91,15 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 	}
 }
 
+func (c *Controller) Name() string {
+	return "deprovisioning"
+}
+
 func (c *Controller) Builder(_ context.Context, m manager.Manager) controller.Builder {
-	return controller.NewSingletonManagedBy(m).
-		Named("deprovisioning")
+	return controller.NewSingletonManagedBy(m)
 }
 
-func (c *Controller) LivenessProbe(_ *http.Request) error {
-	return nil
-}
-
-func (c *Controller) Reconcile(ctx context.Context, r reconcile.Request) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
 	// capture the state of the cluster before we do any analysis
 	currentState := c.cluster.ClusterConsolidationState()
 	result, err := c.ProcessCluster(ctx)

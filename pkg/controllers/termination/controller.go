@@ -17,39 +17,32 @@ package termination
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"sync"
 	"time"
 
+	"github.com/samber/lo"
 	"golang.org/x/time/rate"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
-
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/util/sets"
-	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	"k8s.io/client-go/util/workqueue"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/samber/lo"
 
-	provisioning "github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 )
-
-const controllerName = "termination"
 
 var (
 	terminationSummary = prometheus.NewSummary(
@@ -69,85 +62,59 @@ func init() {
 
 // Controller for the resource
 type Controller struct {
-	Terminator        *Terminator
-	KubeClient        client.Client
-	Recorder          events.Recorder
-	mu                sync.Mutex
-	TerminationRecord sets.String
+	Terminator *Terminator
+	KubeClient client.Client
+	Recorder   events.Recorder
 }
 
-// NewController constructs a controller instance
-func NewController(ctx context.Context, clk clock.Clock, kubeClient client.Client, coreV1Client corev1.CoreV1Interface, recorder events.Recorder, cloudProvider cloudprovider.CloudProvider) *Controller {
+// NewController constructs a terminationController instance
+func NewController(clk clock.Clock, kubeClient client.Client, evictionQueue *EvictionQueue,
+	recorder events.Recorder, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
+
 	return &Controller{
 		KubeClient: kubeClient,
 		Terminator: &Terminator{
 			KubeClient:    kubeClient,
-			CoreV1Client:  coreV1Client,
 			CloudProvider: cloudProvider,
-			EvictionQueue: NewEvictionQueue(ctx, coreV1Client, recorder),
+			EvictionQueue: evictionQueue,
 			Clock:         clk,
 		},
-		Recorder:          recorder,
-		TerminationRecord: sets.NewString(),
+		Recorder: recorder,
 	}
 }
 
-// Reconcile executes a termination control loop for the resource
-func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(controllerName).With("node", req.Name))
-	ctx = injection.WithControllerName(ctx, controllerName)
+func (c *Controller) Name() string {
+	return "termination"
+}
 
-	// 1. Retrieve node from reconcile request
+func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("node", req.Name))
+	ctx = injection.WithControllerName(ctx, c.Name())
+
 	node := &v1.Node{}
 	if err := c.KubeClient.Get(ctx, req.NamespacedName, node); err != nil {
-		if errors.IsNotFound(err) {
-			c.mu.Lock()
-			c.TerminationRecord.Delete(req.String())
-			c.mu.Unlock()
-			return reconcile.Result{}, nil
-		}
-		return reconcile.Result{}, err
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-
-	// 2. Check if node is terminable
-	if node.DeletionTimestamp.IsZero() || !lo.Contains(node.Finalizers, provisioning.TerminationFinalizer) {
-		return reconcile.Result{}, nil
-	}
-	// 3. Cordon node
 	if err := c.Terminator.cordon(ctx, node); err != nil {
-		return reconcile.Result{}, fmt.Errorf("cordoning node %s, %w", node.Name, err)
+		return reconcile.Result{}, fmt.Errorf("cordoning node, %w", err)
 	}
-	// 4. Drain node
-	drained, err := c.Terminator.drain(ctx, node)
-	if err != nil {
-		if !IsNodeDrainErr(err) {
-			return reconcile.Result{}, err
+	if err := c.Terminator.drain(ctx, node); err != nil {
+		if IsNodeDrainErr(err) {
+			c.Recorder.Publish(events.NodeFailedToDrain(node, err))
+			return reconcile.Result{Requeue: true}, nil
 		}
-		c.Recorder.Publish(events.NodeFailedToDrain(node, err))
+		return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 	}
-	if !drained {
-		return reconcile.Result{Requeue: true}, nil
-	}
-	// 5. If fully drained, terminate the node
 	if err := c.Terminator.terminate(ctx, node); err != nil {
-		return reconcile.Result{}, fmt.Errorf("terminating node %s, %w", node.Name, err)
+		return reconcile.Result{}, fmt.Errorf("terminating node, %w", err)
 	}
-
-	c.mu.Lock()
-	// 6. Record termination duration (time between deletion timestamp and finalizer removal)
-	if !c.TerminationRecord.Has(req.String()) {
-		c.TerminationRecord.Insert(req.String())
-		terminationSummary.Observe(time.Since(node.DeletionTimestamp.Time).Seconds())
-	}
-	c.mu.Unlock()
-
+	terminationSummary.Observe(time.Since(node.DeletionTimestamp.Time).Seconds())
 	return reconcile.Result{}, nil
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return controllerruntime.
+func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
+	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
-		Named(controllerName).
 		For(&v1.Node{}).
 		WithOptions(
 			controller.Options{
@@ -158,9 +125,11 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontr
 				),
 				MaxConcurrentReconciles: 10,
 			},
-		)
-}
-
-func (c *Controller) LivenessProbe(_ *http.Request) error {
-	return nil
+		).
+		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+			return !obj.GetDeletionTimestamp().IsZero()
+		})).
+		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+			return lo.Contains(obj.GetFinalizers(), v1alpha5.TerminationFinalizer)
+		})))
 }

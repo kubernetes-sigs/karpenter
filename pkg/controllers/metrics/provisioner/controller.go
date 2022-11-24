@@ -17,7 +17,6 @@ package provisioner
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -36,7 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
 const (
@@ -87,41 +86,41 @@ func labelNames() []string {
 	}
 }
 
+var _ corecontroller.TypedController[*v1alpha5.Provisioner] = (*Controller)(nil)
+
 type Controller struct {
 	kubeClient      client.Client
 	labelCollection sync.Map
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client) *Controller {
-	return &Controller{
+func NewController(kubeClient client.Client) corecontroller.Controller {
+	return corecontroller.Typed[*v1alpha5.Provisioner](kubeClient, &Controller{
 		kubeClient: kubeClient,
-	}
+	})
+}
+
+func (c *Controller) Name() string {
+	return "provisionermetrics"
 }
 
 // Reconcile executes a termination control loop for the resource
-func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("provisionermetrics").With("provisioner", req.Name))
+func (c *Controller) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", provisioner.Name))
 
 	// Remove the previous gauge after provisioner labels are updated
-	c.cleanup(req.NamespacedName)
-
-	// Retrieve provisioner from reconcile request
-	provisioner := &v1alpha5.Provisioner{}
-	if err := c.kubeClient.Get(ctx, req.NamespacedName, provisioner); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(err)
-	}
-
+	c.cleanup(client.ObjectKeyFromObject(provisioner))
 	c.record(ctx, provisioner)
 	// periodically update our metrics per provisioner even if nothing has changed
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return controllerruntime.
-		NewControllerManagedBy(m).
-		Named("provisionermetrics").
-		For(&v1alpha5.Provisioner{})
+func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
+	return corecontroller.Adapt(
+		controllerruntime.
+			NewControllerManagedBy(m).
+			For(&v1alpha5.Provisioner{}),
+	)
 }
 
 func (c *Controller) cleanup(provisionerName types.NamespacedName) {
@@ -193,9 +192,5 @@ func (c *Controller) set(resourceList v1.ResourceList, provisioner *v1alpha5.Pro
 			gauge.Set(float64(quantity.Value()))
 		}
 	}
-	return nil
-}
-
-func (c *Controller) LivenessProbe(_ *http.Request) error {
 	return nil
 }

@@ -57,16 +57,16 @@ func NewControllers(
 	return []controller.Controller{
 		provisioner,
 		metricsstate.NewController(cluster),
+		deprovisioning.NewController(clock, kubeClient, provisioner, cloudProvider, eventRecorder, cluster),
 		provisioning.NewController(kubeClient, provisioner, eventRecorder),
 		state.NewNodeController(kubeClient, cluster),
 		state.NewPodController(kubeClient, cluster),
 		state.NewProvisionerController(kubeClient, cluster),
 		node.NewController(clock, kubeClient, cloudProvider, cluster),
-		termination.NewController(ctx, clock, kubeClient, kubernetesInterface.CoreV1(), eventRecorder, cloudProvider),
+		termination.NewController(clock, kubeClient, termination.NewEvictionQueue(ctx, kubernetesInterface.CoreV1(), eventRecorder), eventRecorder, cloudProvider),
 		metricspod.NewController(kubeClient),
 		metricsprovisioner.NewController(kubeClient),
 		counter.NewController(kubeClient, cluster),
-		deprovisioning.NewController(clock, kubeClient, provisioner, cloudProvider, eventRecorder, cluster),
-		inflightchecks.NewController(clock, kubeClient, eventRecorder, cloudProvider, cluster),
+		inflightchecks.NewController(clock, kubeClient, eventRecorder, cloudProvider),
 	}
 }
