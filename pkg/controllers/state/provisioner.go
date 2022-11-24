@@ -58,7 +58,6 @@ func (c *ProvisionerController) Builder(_ context.Context, m manager.Manager) co
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1alpha5.Provisioner{}).
-		Named(c.Name()).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		WithEventFilter(predicate.Funcs{DeleteFunc: func(event event.DeleteEvent) bool { return false }}),

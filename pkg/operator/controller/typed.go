@@ -17,6 +17,7 @@ package controller
 import (
 	"context"
 	"reflect"
+	"strings"
 
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
@@ -24,10 +25,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/operator/injection"
+	"github.com/aws/karpenter-core/pkg/operator/scheme"
 )
 
 type TypedController[T client.Object] interface {
@@ -59,10 +62,16 @@ func (t *typedDecorator[T]) Name() string {
 }
 
 func (t *typedDecorator[T]) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(t.typedController.Name()))
+	obj := reflect.New(reflect.TypeOf(*new(T)).Elem()).Interface().(T) // Create a new pointer to a client.Object
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).
+		Named(t.typedController.Name()).
+		With(
+			strings.ToLower(lo.Must(apiutil.GVKForObject(obj, scheme.Scheme)).Kind),
+			lo.Ternary(req.NamespacedName.Namespace != "", req.NamespacedName.String(), req.Name),
+		),
+	)
 	ctx = injection.WithControllerName(ctx, t.typedController.Name())
 
-	obj := reflect.New(reflect.TypeOf(*new(T)).Elem()).Interface().(T) // Create a new pointer to a client.Object
 	if err := t.kubeClient.Get(ctx, req.NamespacedName, obj); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
