@@ -81,8 +81,6 @@ func (c *Controller) Name() string {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
-
 	// If we get an event before we should check for inflight checks, we ignore and wait
 	if lastTime, ok := c.lastScanned.Get(client.ObjectKeyFromObject(node).String()); ok {
 		if lastTime, ok := lastTime.(time.Time); ok {

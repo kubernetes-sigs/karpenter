@@ -106,8 +106,6 @@ func (c *Controller) Name() string {
 
 // Reconcile executes a termination control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", provisioner.Name))
-
 	// Remove the previous gauge after provisioner labels are updated
 	c.cleanup(client.ObjectKeyFromObject(provisioner))
 	c.record(ctx, provisioner)

@@ -20,8 +20,6 @@ import (
 	"strings"
 	"sync"
 
-	"knative.dev/pkg/logging"
-
 	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -117,7 +115,6 @@ func (c *Controller) Name() string {
 
 // Reconcile executes a termination control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, pod *v1.Pod) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("pod", pod.Name))
 	// Remove the previous gauge after pod labels are updated
 	if labels, ok := c.labelsMap.Load(client.ObjectKeyFromObject(pod)); ok {
 		podGaugeVec.Delete(labels.(prometheus.Labels))
