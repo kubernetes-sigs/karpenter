@@ -28,6 +28,9 @@ import (
 // is capable of managing a diverse set of nodes. Node properties are determined
 // from a combination of provisioner and pod scheduling constraints.
 type ProvisionerSpec struct {
+	// Annotations are applied to every node.
+	//+optional
+	Annotations map[string]string `json:"annotations,omitempty"`
 	// Labels are layered with Requirements and applied to every node.
 	//+optional
 	Labels map[string]string `json:"labels,omitempty"`
