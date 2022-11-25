@@ -36,6 +36,7 @@ type ProvisionerOptions struct {
 	Provider               interface{}
 	ProviderRef            *v1alpha5.ProviderRef
 	Kubelet                *v1alpha5.KubeletConfiguration
+	Annotations            map[string]string
 	Labels                 map[string]string
 	Taints                 []v1.Taint
 	StartupTaints          []v1.Taint
@@ -73,6 +74,7 @@ func Provisioner(overrides ...ProvisionerOptions) *v1alpha5.Provisioner {
 			ProviderRef:            options.ProviderRef,
 			Taints:                 options.Taints,
 			StartupTaints:          options.StartupTaints,
+			Annotations:            options.Annotations,
 			Labels:                 lo.Assign(options.Labels, map[string]string{DiscoveryLabel: "unspecified"}), // For node cleanup discovery
 			Limits:                 &v1alpha5.Limits{Resources: options.Limits},
 			TTLSecondsAfterEmpty:   options.TTLSecondsAfterEmpty,

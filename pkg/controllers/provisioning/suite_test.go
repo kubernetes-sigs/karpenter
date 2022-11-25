@@ -497,6 +497,18 @@ var _ = Describe("Provisioning", func() {
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
 		})
 	})
+	Context("Annotations", func() {
+		It("should annotate nodes", func() {
+			provisioner := test.Provisioner(test.ProvisionerOptions{
+				Annotations: map[string]string{v1alpha5.DoNotConsolidateNodeAnnotationKey: "true"},
+			})
+			ExpectApplied(ctx, env.Client, provisioner)
+			for _, pod := range ExpectProvisioned(ctx, env.Client, recorder, pendingPodController, prov, test.UnschedulablePod()) {
+				node := ExpectScheduled(ctx, env.Client, pod)
+				Expect(node.Annotations).To(HaveKeyWithValue(v1alpha5.DoNotConsolidateNodeAnnotationKey, "true"))
+			}
+		})
+	})
 	Context("Labels", func() {
 		It("should label nodes", func() {
 			provisioner := test.Provisioner(test.ProvisionerOptions{
