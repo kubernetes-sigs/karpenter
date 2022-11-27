@@ -14,7 +14,7 @@ publishHelmChart() {
     cd charts
     helm lint "${CHART_NAME}"
     helm package "${CHART_NAME}" --version $HELM_CHART_VERSION
-    helm push "${HELM_CHART_FILE_NAME}" "oci://${RELEASE_REPO}/${CHART_NAME}"
+    helm push "${HELM_CHART_FILE_NAME}" "oci://${RELEASE_REPO}/karpenter-core"
     rm "${HELM_CHART_FILE_NAME}"
     cd ..
 }
