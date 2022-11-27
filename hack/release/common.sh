@@ -9,7 +9,7 @@ config(){
 publishHelmChart() {
     CHART_NAME=$1
     HELM_CHART_VERSION=$2
-    HELM_CHART_FILE_NAME="karpenter-core-crd-${HELM_CHART_VERSION}.tgz"
+    HELM_CHART_FILE_NAME="${CHART_NAME}-${HELM_CHART_VERSION}.tgz"
 
     cd charts
     helm lint "${CHART_NAME}"
