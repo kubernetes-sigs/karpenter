@@ -13,3 +13,4 @@ source "${SCRIPT_DIR}/common.sh"
 
 config
 publishHelmChart "karpenter-core-crd" "${RELEASE_VERSION}"
+publishHelmChart "karpenter-core-controller" "${RELEASE_VERSION}"
