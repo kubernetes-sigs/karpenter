@@ -6,7 +6,18 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: "marvinpinto/action-automatic-releases@latest"
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Save tag as an environment variable
+        run: |
+          tag=$(git describe --tags --exact-match)
+          echo "TAG=$tag" >> $GITHUB_ENV
+      - name: Create Github Release
+        uses: "marvinpinto/action-automatic-releases@latest"
         with:
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
           prerelease: false
+      - run: ./hack/release/release.sh
+        env:
+          RELEASE_VERSION: ${{ env.TAG }}
