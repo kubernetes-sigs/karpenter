@@ -77,6 +77,12 @@ func NewPodRequirements(pod *v1.Pod) Requirements {
 	return requirements
 }
 
+func (r Requirements) NodeSelectorRequirements() []v1.NodeSelectorRequirement {
+	return lo.Map(lo.Values(r), func(req *Requirement, _ int) v1.NodeSelectorRequirement {
+		return req.NodeSelectorRequirement()
+	})
+}
+
 // Add requirements to provided requirements. Mutates existing requirements
 func (r Requirements) Add(requirements ...*Requirement) {
 	for _, requirement := range requirements {
