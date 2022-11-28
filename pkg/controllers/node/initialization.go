@@ -56,14 +56,14 @@ func (r *Initialization) Reconcile(ctx context.Context, provisioner *v1alpha5.Pr
 	return reconcile.Result{}, nil
 }
 
-func (r *Initialization) getInstanceType(ctx context.Context, provisioner *v1alpha5.Provisioner, instanceTypeName string) (cloudprovider.InstanceType, error) {
+func (r *Initialization) getInstanceType(ctx context.Context, provisioner *v1alpha5.Provisioner, instanceTypeName string) (*cloudprovider.InstanceType, error) {
 	instanceTypes, err := r.cloudProvider.GetInstanceTypes(ctx, provisioner)
 	if err != nil {
 		return nil, err
 	}
 	// The instance type may not be found which can occur if the instance type label was removed/edited.  This shouldn't occur,
 	// but if it does we only lose the ability to check for extended resources.
-	return lo.FindOrElse(instanceTypes, nil, func(it cloudprovider.InstanceType) bool { return it.Name() == instanceTypeName }), nil
+	return lo.FindOrElse(instanceTypes, nil, func(it *cloudprovider.InstanceType) bool { return it.Name == instanceTypeName }), nil
 }
 
 // isInitialized returns true if the node has:
@@ -71,44 +71,55 @@ func (r *Initialization) getInstanceType(ctx context.Context, provisioner *v1alp
 // b) all the startup taints have been removed from the node
 // c) all extended resources have been registered
 // This method handles both nil provisioners and nodes without extended resources gracefully.
-func (r *Initialization) isInitialized(n *v1.Node, provisioner *v1alpha5.Provisioner, instanceType cloudprovider.InstanceType) bool {
+func (r *Initialization) isInitialized(n *v1.Node, provisioner *v1alpha5.Provisioner, instanceType *cloudprovider.InstanceType) bool {
 	// fast checks first
-	return node.GetCondition(n, v1.NodeReady).Status == v1.ConditionTrue &&
-		isStartupTaintRemoved(n, provisioner) && isExtendedResourceRegistered(n, instanceType)
+	if node.GetCondition(n, v1.NodeReady).Status != v1.ConditionTrue {
+		return false
+	}
+	if _, ok := IsStartupTaintRemoved(n, provisioner); !ok {
+		return false
+	}
+
+	if _, ok := IsExtendedResourceRegistered(n, instanceType); !ok {
+		return false
+	}
+	return true
 }
 
-// isStartupTaintRemoved returns true if there are no startup taints registered for the provisioner, or if all startup
+// IsStartupTaintRemoved returns true if there are no startup taints registered for the provisioner, or if all startup
 // taints have been removed from the node
-func isStartupTaintRemoved(node *v1.Node, provisioner *v1alpha5.Provisioner) bool {
+func IsStartupTaintRemoved(node *v1.Node, provisioner *v1alpha5.Provisioner) (*v1.Taint, bool) {
 	if provisioner != nil {
 		for _, startupTaint := range provisioner.Spec.StartupTaints {
 			for i := 0; i < len(node.Spec.Taints); i++ {
 				// if the node still has a startup taint applied, it's not ready
 				if startupTaint.MatchTaint(&node.Spec.Taints[i]) {
-					return false
+					return &node.Spec.Taints[i], false
 				}
 			}
 		}
 	}
-	return true
+	return nil, true
 }
 
-// isExtendedResourceRegistered returns true if there are no extended resources on the node, or they have all been
+// IsExtendedResourceRegistered returns true if there are no extended resources on the node, or they have all been
 // registered by device plugins
-func isExtendedResourceRegistered(node *v1.Node, instanceType cloudprovider.InstanceType) bool {
+func IsExtendedResourceRegistered(node *v1.Node, instanceType *cloudprovider.InstanceType) (v1.ResourceName, bool) {
 	if instanceType == nil {
 		// no way to know, so assume they're registered
-		return true
+		return "", true
 	}
-	for resourceName, quantity := range instanceType.Resources() {
+	for resourceName, quantity := range instanceType.Capacity {
+		if quantity.IsZero() {
+			continue
+		}
 		// kubelet will zero out both the capacity and allocatable for an extended resource on startup, so if our
 		// annotation says the resource should be there, but it's zero'd in both then the device plugin hasn't
-		// registered it yet
-		if resources.IsZero(node.Status.Capacity[resourceName]) &&
-			resources.IsZero(node.Status.Allocatable[resourceName]) &&
-			!quantity.IsZero() {
-			return false
+		// registered it yet.
+		// We wait on allocatable since this is the value that is used in scheduling
+		if resources.IsZero(node.Status.Allocatable[resourceName]) {
+			return resourceName, false
 		}
 	}
-	return true
+	return "", true
 }

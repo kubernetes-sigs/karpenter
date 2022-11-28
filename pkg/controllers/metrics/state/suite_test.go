@@ -32,6 +32,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	statemetrics "github.com/aws/karpenter-core/pkg/controllers/metrics/state/scraper"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
@@ -49,8 +50,8 @@ var ctx context.Context
 var fakeClock *clock.FakeClock
 var env *test.Environment
 var cluster *state.Cluster
-var nodeController *state.NodeController
-var podController *state.PodController
+var nodeController controller.Controller
+var podController controller.Controller
 var cloudProvider *fake.CloudProvider
 var provisioner *v1alpha5.Provisioner
 var nodeScraper *statemetrics.NodeScraper
@@ -65,7 +66,8 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, apis.CRDs...)
 
 	ctx = settings.ToContext(ctx, test.Settings())
-	cloudProvider = &fake.CloudProvider{InstanceTypes: fake.InstanceTypesAssorted()}
+	cloudProvider = fake.NewCloudProvider()
+	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
 	provisioner = test.Provisioner(test.ProvisionerOptions{ObjectMeta: metav1.ObjectMeta{Name: "default"}})

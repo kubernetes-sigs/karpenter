@@ -21,25 +21,22 @@ import (
 	"time"
 
 	"k8s.io/utils/clock"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	v1 "k8s.io/api/core/v1"
-	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/samber/lo"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/scheduling"
 	podutil "github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
 type Terminator struct {
 	EvictionQueue *EvictionQueue
 	KubeClient    client.Client
-	CoreV1Client  corev1.CoreV1Interface
 	CloudProvider cloudprovider.CloudProvider
 	Clock         clock.Clock
 }
@@ -53,44 +50,34 @@ func IsNodeDrainErr(err error) bool {
 
 // cordon cordons a node
 func (t *Terminator) cordon(ctx context.Context, node *v1.Node) error {
-	// 1. Check if node is already cordoned
-	if node.Spec.Unschedulable {
-		return nil
-	}
-	// 2. Cordon node
-	persisted := node.DeepCopy()
+	mergeFrom := client.MergeFrom(node.DeepCopy())
 	node.Spec.Unschedulable = true
-	// Handle nil map
-	if node.Labels == nil {
-		node.Labels = map[string]string{}
+	node.Labels = lo.Assign(node.Labels, map[string]string{
+		v1.LabelNodeExcludeBalancers: "karpenter",
+	})
+	if err := t.KubeClient.Patch(ctx, node, mergeFrom); err != nil {
+		return fmt.Errorf("patching node labels, %w", err)
 	}
-	node.Labels[v1.LabelNodeExcludeBalancers] = "karpenter"
-	if err := t.KubeClient.Patch(ctx, node, client.MergeFrom(persisted)); err != nil {
-		return fmt.Errorf("patching node %s, %w", node.Name, err)
-	}
-	logging.FromContext(ctx).Infof("Cordoned node")
+	logging.FromContext(ctx).Infof("cordoned node")
 	return nil
 }
 
 // drain evicts pods from the node and returns true when all pods are evicted
 // https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
-func (t *Terminator) drain(ctx context.Context, node *v1.Node) (bool, error) {
+func (t *Terminator) drain(ctx context.Context, node *v1.Node) error {
 	// Get evictable pods
 	pods, err := t.getPods(ctx, node)
 	if err != nil {
-		return false, fmt.Errorf("listing pods for node, %w", err)
+		return fmt.Errorf("listing pods for node, %w", err)
 	}
 	var podsToEvict []*v1.Pod
 	// Skip node due to pods that are not able to be evicted
 	for _, p := range pods {
-		// if a pod doesn't have owner references then we can't expect a controller to manage its lifecycle
-		if len(p.ObjectMeta.OwnerReferences) == 0 {
-			return false, NodeDrainErr(fmt.Errorf("pod %s/%s does not have any owner references", p.Namespace, p.Name))
-		} else if podutil.HasDoNotEvict(p) {
-			return false, NodeDrainErr(fmt.Errorf("pod %s/%s has do-not-evict annotation", p.Namespace, p.Name))
+		if podutil.HasDoNotEvict(p) {
+			return NodeDrainErr(fmt.Errorf("pod %s/%s has do-not-evict annotation", p.Namespace, p.Name))
 		}
 		// Ignore if unschedulable is tolerated, since they will reschedule
-		if (scheduling.Taints{{Key: v1.TaintNodeUnschedulable, Effect: v1.TaintEffectNoSchedule}}).Tolerates(p) == nil {
+		if podutil.ToleratesUnschedulableTaint(p) {
 			continue
 		}
 		// Ignore static mirror pods
@@ -101,22 +88,21 @@ func (t *Terminator) drain(ctx context.Context, node *v1.Node) (bool, error) {
 	}
 	// Enqueue for eviction
 	t.evict(podsToEvict)
-	return len(podsToEvict) == 0, nil
+	return lo.Ternary(len(podsToEvict) > 0, NodeDrainErr(fmt.Errorf("%d pods are waiting to be evicted", len(podsToEvict))), nil)
 }
 
 // terminate calls cloud provider delete then removes the finalizer to delete the node
 func (t *Terminator) terminate(ctx context.Context, node *v1.Node) error {
-	// 1. Delete the instance associated with node
+	// Delete the instance associated with node
 	if err := t.CloudProvider.Delete(ctx, node); err != nil {
 		return fmt.Errorf("terminating cloudprovider instance, %w", err)
 	}
-	// 2. Remove finalizer from node in APIServer
-	persisted := node.DeepCopy()
-	node.Finalizers = lo.Without(node.Finalizers, v1alpha5.TerminationFinalizer)
-	if err := t.KubeClient.Patch(ctx, node, client.MergeFrom(persisted)); err != nil {
-		return client.IgnoreNotFound(err)
+	mergeFrom := client.MergeFrom(node.DeepCopy())
+	controllerutil.RemoveFinalizer(node, v1alpha5.TerminationFinalizer)
+	if err := t.KubeClient.Patch(ctx, node, mergeFrom); err != nil {
+		return fmt.Errorf("removing node finalizer, %w", err)
 	}
-	logging.FromContext(ctx).Infof("Deleted node")
+	logging.FromContext(ctx).Infof("deleted node")
 	return nil
 }
 

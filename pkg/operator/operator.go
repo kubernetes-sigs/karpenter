@@ -41,7 +41,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/events"
-	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 	"github.com/aws/karpenter-core/pkg/operator/options"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
@@ -140,13 +140,12 @@ func NewOperator() (context.Context, *Operator) {
 	}
 }
 
-func (o *Operator) WithControllers(ctx context.Context, controllers ...operatorcontroller.Controller) *Operator {
+func (o *Operator) WithControllers(ctx context.Context, controllers ...corecontroller.Controller) *Operator {
 	for _, c := range controllers {
 		// Wrap the controllers with any decorators
-		c = operatorcontroller.InjectSettings(c, o.SettingsStore)
+		c = corecontroller.InjectSettings(c, o.SettingsStore)
 
 		lo.Must0(c.Builder(ctx, o.Manager).Complete(c), "failed to register controller")
-		lo.Must0(o.AddHealthzCheck(fmt.Sprintf("%T", c), c.LivenessProbe), "failed to setup liveness probe")
 	}
 	lo.Must0(o.AddHealthzCheck("healthz", healthz.Ping), "failed to setup liveness probe")
 	lo.Must0(o.AddReadyzCheck("readyz", healthz.Ping), "failed to setup readiness probe")
@@ -165,10 +164,12 @@ func (o *Operator) Start(ctx context.Context) {
 		defer wg.Done()
 		lo.Must0(o.Manager.Start(ctx))
 	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		sharedmain.MainWithConfig(ctx, "webhook", o.GetConfig(), o.webhooks...)
-	}()
+	if !injection.GetOptions(ctx).DisableWebhook {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sharedmain.MainWithConfig(ctx, "webhook", o.GetConfig(), o.webhooks...)
+		}()
+	}
 	wg.Wait()
 }

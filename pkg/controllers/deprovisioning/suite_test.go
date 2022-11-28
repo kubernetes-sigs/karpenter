@@ -45,6 +45,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
@@ -53,17 +54,17 @@ import (
 var ctx context.Context
 var env *test.Environment
 var cluster *state.Cluster
-var controller *deprovisioning.Controller
-var provisioningController *provisioning.Controller
+var deprovisioningController *deprovisioning.Controller
+var provisioningController controller.Controller
 var provisioner *provisioning.Provisioner
 var cloudProvider *fake.CloudProvider
 var recorder *test.EventRecorder
-var nodeStateController *state.NodeController
+var nodeStateController controller.Controller
 var fakeClock *clock.FakeClock
-var onDemandInstances []cloudprovider.InstanceType
-var mostExpensiveInstance cloudprovider.InstanceType
+var onDemandInstances []*cloudprovider.InstanceType
+var mostExpensiveInstance *cloudprovider.InstanceType
 var mostExpensiveOffering cloudprovider.Offering
-var leastExpensiveInstance cloudprovider.InstanceType
+var leastExpensiveInstance *cloudprovider.InstanceType
 var leastExpensiveOffering cloudprovider.Offering
 
 func TestAPIs(t *testing.T) {
@@ -75,7 +76,7 @@ func TestAPIs(t *testing.T) {
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, apis.CRDs...)
 	ctx = settings.ToContext(ctx, test.Settings())
-	cloudProvider = &fake.CloudProvider{}
+	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
 	nodeStateController = state.NewNodeController(env.Client, cluster)
@@ -102,8 +103,9 @@ func triggerVerifyAction() {
 var _ = BeforeEach(func() {
 	cloudProvider.CreateCalls = nil
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
-	onDemandInstances = lo.Filter(cloudProvider.InstanceTypes, func(i cloudprovider.InstanceType, _ int) bool {
-		for _, o := range cloudprovider.AvailableOfferings(i) {
+	cloudProvider.AllowedCreateCalls = math.MaxInt
+	onDemandInstances = lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
+		for _, o := range i.Offerings.Available() {
 			if o.CapacityType == v1alpha5.CapacityTypeOnDemand {
 				return true
 			}
@@ -112,16 +114,16 @@ var _ = BeforeEach(func() {
 	})
 	// Sort the instances by pricing from low to high
 	sort.Slice(onDemandInstances, func(i, j int) bool {
-		return cheapestOffering(onDemandInstances[i].Offerings()).Price < cheapestOffering(onDemandInstances[j].Offerings()).Price
+		return cheapestOffering(onDemandInstances[i].Offerings).Price < cheapestOffering(onDemandInstances[j].Offerings).Price
 	})
 	leastExpensiveInstance = onDemandInstances[0]
-	leastExpensiveOffering = leastExpensiveInstance.Offerings()[0]
+	leastExpensiveOffering = leastExpensiveInstance.Offerings[0]
 	mostExpensiveInstance = onDemandInstances[len(onDemandInstances)-1]
-	mostExpensiveOffering = mostExpensiveInstance.Offerings()[0]
+	mostExpensiveOffering = mostExpensiveInstance.Offerings[0]
 
 	recorder.Reset()
 	fakeClock.SetTime(time.Now())
-	controller = deprovisioning.NewController(fakeClock, env.Client, provisioner, cloudProvider, recorder, cluster)
+	deprovisioningController = deprovisioning.NewController(fakeClock, env.Client, provisioner, cloudProvider, recorder, cluster)
 })
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
@@ -135,6 +137,351 @@ var _ = AfterEach(func() {
 	for _, nodeKey := range nodes {
 		ExpectReconcileSucceeded(ctx, nodeStateController, nodeKey)
 	}
+})
+
+var _ = Describe("Expiration", func() {
+	It("should ignore nodes without TTLSecondsUntilExpired", func() {
+		prov := test.Provisioner()
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+		})
+
+		ExpectApplied(ctx, env.Client, node, prov)
+		ExpectMakeNodesReady(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
+
+		// inform cluster state about the nodes
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		fakeClock.Step(10 * time.Minute)
+		_, err := deprovisioningController.ProcessCluster(ctx)
+		Expect(err).ToNot(HaveOccurred())
+
+		// we don't need a new node
+		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
+		// and can't delete the node since expiry is not enabled
+		ExpectNodeExists(ctx, env.Client, node.Name)
+	})
+	It("can delete expired nodes", func() {
+		prov := test.Provisioner(test.ProvisionerOptions{
+			TTLSecondsUntilExpired: ptr.Int64(60),
+		})
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}},
+		)
+
+		ExpectApplied(ctx, env.Client, node, prov)
+		ExpectMakeNodesReady(ctx, env.Client, node)
+
+		// inform cluster state about the nodes
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		fakeClock.Step(10 * time.Minute)
+		go triggerVerifyAction()
+		_, err := deprovisioningController.ProcessCluster(ctx)
+		Expect(err).ToNot(HaveOccurred())
+
+		// we don't need a new node, but we should evict everything off one of node2 which only has a single pod
+		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
+		// and delete the old one
+		ExpectNotFound(ctx, env.Client, node)
+	})
+	It("should expire one node at a time, starting with most expired", func() {
+		expireProv := test.Provisioner(test.ProvisionerOptions{
+			TTLSecondsUntilExpired: ptr.Int64(100),
+		})
+		nodeToExpire := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: expireProv.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+		})
+		prov := test.Provisioner(test.ProvisionerOptions{
+			TTLSecondsUntilExpired: ptr.Int64(500),
+		})
+		nodeNotExpire := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+		})
+
+		ExpectApplied(ctx, env.Client, nodeToExpire, expireProv, nodeNotExpire, prov)
+		ExpectMakeNodesReady(ctx, env.Client, nodeToExpire, nodeNotExpire)
+
+		// inform cluster state about the nodes
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodeToExpire))
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodeNotExpire))
+		fakeClock.Step(10 * time.Minute)
+		go triggerVerifyAction()
+		_, err := deprovisioningController.ProcessCluster(ctx)
+		Expect(err).ToNot(HaveOccurred())
+
+		// we don't need a new node, but we should evict everything off one of node2 which only has a single pod
+		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
+		// and delete the old one
+		ExpectNotFound(ctx, env.Client, nodeToExpire)
+	})
+	It("can replace node for expiration", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}}})
+
+		prov := test.Provisioner(test.ProvisionerOptions{
+			TTLSecondsUntilExpired: ptr.Int64(30),
+		})
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+		})
+		ExpectApplied(ctx, env.Client, rs, pod, node, prov)
+		ExpectMakeNodesReady(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		ExpectManualBinding(ctx, env.Client, pod, node)
+		ExpectScheduled(ctx, env.Client, pod)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
+
+		// consolidation won't delete the old node until the new node is ready
+		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, node)
+		fakeClock.Step(10 * time.Minute)
+		go triggerVerifyAction()
+		_, err := deprovisioningController.ProcessCluster(ctx)
+		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
+
+		Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+
+		ExpectNotFound(ctx, env.Client, node)
+	})
+	It("should uncordon nodes when expiration replacement partially fails", func() {
+		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "current-on-demand",
+			Offerings: []cloudprovider.Offering{
+				{
+					CapacityType: v1alpha5.CapacityTypeOnDemand,
+					Zone:         "test-zone-1a",
+					Price:        0.5,
+					Available:    false,
+				},
+			},
+		})
+		replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "replacement-on-demand",
+			Offerings: []cloudprovider.Offering{
+				{
+					CapacityType: v1alpha5.CapacityTypeOnDemand,
+					Zone:         "test-zone-1a",
+					Price:        0.3,
+					Available:    true,
+				},
+			},
+			Resources: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("3")},
+		})
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			currentInstance,
+			replacementInstance,
+		}
+		cloudProvider.AllowedCreateCalls = 2
+
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+		pods := test.Pods(3, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}},
+			// Make each pod request about a third of the allocatable on the node
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("2")},
+			},
+		})
+
+		prov := test.Provisioner(test.ProvisionerOptions{
+			TTLSecondsUntilExpired: ptr.Int64(30),
+		})
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       currentInstance.Name,
+					v1alpha5.LabelCapacityType:       currentInstance.Offerings[0].CapacityType,
+					v1.LabelTopologyZone:             currentInstance.Offerings[0].Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("7")},
+		})
+		ExpectApplied(ctx, env.Client, rs, node, prov, pods[0], pods[1], pods[2])
+		ExpectMakeNodesReady(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		ExpectManualBinding(ctx, env.Client, pods[0], node)
+		ExpectManualBinding(ctx, env.Client, pods[1], node)
+		ExpectManualBinding(ctx, env.Client, pods[2], node)
+		ExpectScheduled(ctx, env.Client, pods[0])
+		ExpectScheduled(ctx, env.Client, pods[1])
+		ExpectScheduled(ctx, env.Client, pods[2])
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
+
+		// Consolidation should try to make 3 calls but fail for the third.
+		fakeClock.Step(10 * time.Minute)
+		go triggerVerifyAction()
+		_, err := deprovisioningController.ProcessCluster(ctx)
+		Expect(err).To(HaveOccurred())
+
+		Expect(cloudProvider.CreateCalls).To(HaveLen(3))
+
+		node = ExpectNodeExists(ctx, env.Client, node.Name)
+		Expect(node.Spec.Unschedulable).To(BeFalse())
+	})
+	It("can replace node for expiration with multiple nodes", func() {
+		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "current-on-demand",
+			Offerings: []cloudprovider.Offering{
+				{
+					CapacityType: v1alpha5.CapacityTypeOnDemand,
+					Zone:         "test-zone-1a",
+					Price:        0.5,
+					Available:    false,
+				},
+			},
+		})
+		replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "replacement-on-demand",
+			Offerings: []cloudprovider.Offering{
+				{
+					CapacityType: v1alpha5.CapacityTypeOnDemand,
+					Zone:         "test-zone-1a",
+					Price:        0.3,
+					Available:    true,
+				},
+			},
+			Resources: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("3")},
+		})
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			currentInstance,
+			replacementInstance,
+		}
+
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+		pods := test.Pods(3, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}},
+			// Make each pod request about a third of the allocatable on the node
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("2")},
+			},
+		})
+
+		prov := test.Provisioner(test.ProvisionerOptions{
+			TTLSecondsUntilExpired: ptr.Int64(200),
+		})
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       currentInstance.Name,
+					v1alpha5.LabelCapacityType:       currentInstance.Offerings[0].CapacityType,
+					v1.LabelTopologyZone:             currentInstance.Offerings[0].Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("8")},
+		})
+		ExpectApplied(ctx, env.Client, rs, node, prov, pods[0], pods[1], pods[2])
+		ExpectMakeNodesReady(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		ExpectManualBinding(ctx, env.Client, pods[0], node)
+		ExpectManualBinding(ctx, env.Client, pods[1], node)
+		ExpectManualBinding(ctx, env.Client, pods[2], node)
+		ExpectScheduled(ctx, env.Client, pods[0])
+		ExpectScheduled(ctx, env.Client, pods[1])
+		ExpectScheduled(ctx, env.Client, pods[2])
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
+
+		// consolidation won't delete the old node until the new node is ready
+		wg := ExpectMakeNewNodesReady(ctx, env.Client, 3, node)
+		fakeClock.Step(10 * time.Minute)
+		go triggerVerifyAction()
+		_, err := deprovisioningController.ProcessCluster(ctx)
+		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
+
+		Expect(cloudProvider.CreateCalls).To(HaveLen(3))
+
+		ExpectNotFound(ctx, env.Client, node)
+	})
 })
 
 var _ = Describe("Pod Eviction Cost", func() {
@@ -222,11 +569,12 @@ var _ = Describe("Replace Nodes", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")}})
+			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+		})
 
 		ExpectApplied(ctx, env.Client, rs, pod, node, prov)
 		ExpectMakeNodesReady(ctx, env.Client, node)
@@ -239,7 +587,7 @@ var _ = Describe("Replace Nodes", func() {
 		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, node)
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := controller.ProcessCluster(ctx)
+		_, err := deprovisioningController.ProcessCluster(ctx)
 		Expect(err).ToNot(HaveOccurred())
 		wg.Wait()
 
@@ -290,14 +638,15 @@ var _ = Describe("Replace Nodes", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
 				v1.ResourcePods: resource.MustParse("100"),
-			}})
+			},
+		})
 
 		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], node1, prov, pdb)
 		ExpectApplied(ctx, env.Client, node1)
@@ -313,7 +662,7 @@ var _ = Describe("Replace Nodes", func() {
 		// inform cluster state about the nodes
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 		fakeClock.Step(10 * time.Minute)
-		_, err := controller.ProcessCluster(ctx)
+		_, err := deprovisioningController.ProcessCluster(ctx)
 		Expect(err).ToNot(HaveOccurred())
 
 		// we don't need a new node
@@ -351,14 +700,15 @@ var _ = Describe("Replace Nodes", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
 				v1.ResourcePods: resource.MustParse("100"),
-			}})
+			},
+		})
 
 		annotatedNode := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -367,14 +717,15 @@ var _ = Describe("Replace Nodes", func() {
 				},
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
 				v1.ResourcePods: resource.MustParse("100"),
-			}})
+			},
+		})
 
 		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], prov)
 		ExpectApplied(ctx, env.Client, regularNode, annotatedNode)
@@ -392,7 +743,7 @@ var _ = Describe("Replace Nodes", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(annotatedNode))
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := controller.ProcessCluster(ctx)
+		_, err := deprovisioningController.ProcessCluster(ctx)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
@@ -434,7 +785,7 @@ var _ = Describe("Replace Nodes", func() {
 				},
 			},
 		})
-		cloudProvider.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 			currentInstance,
 			replacementInstance,
 		}
@@ -467,9 +818,9 @@ var _ = Describe("Replace Nodes", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       currentInstance.Name(),
-					v1alpha5.LabelCapacityType:       currentInstance.Offerings()[0].CapacityType,
-					v1.LabelTopologyZone:             currentInstance.Offerings()[0].Zone,
+					v1.LabelInstanceTypeStable:       currentInstance.Name,
+					v1alpha5.LabelCapacityType:       currentInstance.Offerings[0].CapacityType,
+					v1.LabelTopologyZone:             currentInstance.Offerings[0].Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")}})
 
@@ -481,7 +832,8 @@ var _ = Describe("Replace Nodes", func() {
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
 
 		fakeClock.Step(10 * time.Minute)
-		_, err := controller.ProcessCluster(ctx)
+		go triggerVerifyAction()
+		_, err := deprovisioningController.ProcessCluster(ctx)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
 		ExpectNodeExists(ctx, env.Client, node.Name)
@@ -528,7 +880,7 @@ var _ = Describe("Replace Nodes", func() {
 			},
 		})
 
-		cloudProvider.InstanceTypes = []cloudprovider.InstanceType{
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 			currentInstance,
 			replacementInstance,
 		}
@@ -569,9 +921,9 @@ var _ = Describe("Replace Nodes", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       currentInstance.Name(),
-					v1alpha5.LabelCapacityType:       currentInstance.Offerings()[0].CapacityType,
-					v1.LabelTopologyZone:             currentInstance.Offerings()[0].Zone,
+					v1.LabelInstanceTypeStable:       currentInstance.Name,
+					v1alpha5.LabelCapacityType:       currentInstance.Offerings[0].CapacityType,
+					v1.LabelTopologyZone:             currentInstance.Offerings[0].Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")}})
 
@@ -583,7 +935,8 @@ var _ = Describe("Replace Nodes", func() {
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
 
 		fakeClock.Step(10 * time.Minute)
-		_, err := controller.ProcessCluster(ctx)
+		go triggerVerifyAction()
+		_, err := deprovisioningController.ProcessCluster(ctx)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
 		ExpectNodeExists(ctx, env.Client, node.Name)
@@ -618,7 +971,7 @@ var _ = Describe("Replace Nodes", func() {
 				Finalizers: []string{"unit-test.com/block-deletion"},
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -638,7 +991,7 @@ var _ = Describe("Replace Nodes", func() {
 		var consolidationFinished atomic.Bool
 		go triggerVerifyAction()
 		go func() {
-			_, err := controller.ProcessCluster(ctx)
+			_, err := deprovisioningController.ProcessCluster(ctx)
 			Expect(err).ToNot(HaveOccurred())
 			consolidationFinished.Store(true)
 		}()
@@ -694,9 +1047,9 @@ var _ = Describe("Delete Node", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
@@ -707,9 +1060,9 @@ var _ = Describe("Delete Node", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
@@ -731,7 +1084,7 @@ var _ = Describe("Delete Node", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := controller.ProcessCluster(ctx)
+		_, err := deprovisioningController.ProcessCluster(ctx)
 		Expect(err).ToNot(HaveOccurred())
 
 		// we don't need a new node, but we should evict everything off one of node2 which only has a single pod
@@ -785,9 +1138,9 @@ var _ = Describe("Delete Node", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
@@ -798,7 +1151,7 @@ var _ = Describe("Delete Node", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -823,7 +1176,7 @@ var _ = Describe("Delete Node", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := controller.ProcessCluster(ctx)
+		_, err := deprovisioningController.ProcessCluster(ctx)
 		Expect(err).ToNot(HaveOccurred())
 
 		// we don't need a new node
@@ -863,9 +1216,9 @@ var _ = Describe("Delete Node", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
@@ -876,7 +1229,7 @@ var _ = Describe("Delete Node", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -901,7 +1254,7 @@ var _ = Describe("Delete Node", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := controller.ProcessCluster(ctx)
+		_, err := deprovisioningController.ProcessCluster(ctx)
 		Expect(err).ToNot(HaveOccurred())
 
 		// we don't need a new node
@@ -909,7 +1262,7 @@ var _ = Describe("Delete Node", func() {
 		// but we expect to delete the node with more pods (node1) as the pod on node2 has a do-not-evict annotation
 		ExpectNotFound(ctx, env.Client, node1)
 	})
-	It("can delete nodes, doesn't evict standalone pods", func() {
+	It("can delete nodes, evicts pods without an ownerRef", func() {
 		// create our RS so we can link a pod to it
 		rs := test.ReplicaSet()
 		ExpectApplied(ctx, env.Client, rs)
@@ -938,9 +1291,9 @@ var _ = Describe("Delete Node", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
@@ -951,7 +1304,7 @@ var _ = Describe("Delete Node", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -976,14 +1329,14 @@ var _ = Describe("Delete Node", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := controller.ProcessCluster(ctx)
+		_, err := deprovisioningController.ProcessCluster(ctx)
 		Expect(err).ToNot(HaveOccurred())
 
 		// we don't need a new node
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
-		// but we expect to delete the node with more pods (node1) as the pod on node2 doesn't have a controller to
-		// recreate it
-		ExpectNotFound(ctx, env.Client, node1)
+		// but we expect to delete the node with the fewest pods (node 2) even though the pod has no ownerRefs
+		// and will not be recreated
+		ExpectNotFound(ctx, env.Client, node2)
 	})
 })
 
@@ -1018,9 +1371,9 @@ var _ = Describe("Node Lifetime Consideration", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
@@ -1031,9 +1384,9 @@ var _ = Describe("Node Lifetime Consideration", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("32"),
@@ -1059,7 +1412,7 @@ var _ = Describe("Node Lifetime Consideration", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
 		fakeClock.SetTime(time.Now())
 		go triggerVerifyAction()
-		_, err := controller.ProcessCluster(ctx)
+		_, err := deprovisioningController.ProcessCluster(ctx)
 		Expect(err).ToNot(HaveOccurred())
 
 		// the second node has more pods so it would normally not be picked for consolidation, except it very little
@@ -1114,8 +1467,8 @@ var _ = Describe("Topology Consideration", func() {
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelTopologyZone:             "test-zone-1",
-					v1.LabelInstanceTypeStable:       testZone1Instance.Name(),
-					v1alpha5.LabelCapacityType:       testZone1Instance.Offerings()[0].CapacityType,
+					v1.LabelInstanceTypeStable:       testZone1Instance.Name,
+					v1alpha5.LabelCapacityType:       testZone1Instance.Offerings[0].CapacityType,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("1")}})
 
@@ -1124,8 +1477,8 @@ var _ = Describe("Topology Consideration", func() {
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelTopologyZone:             "test-zone-2",
-					v1.LabelInstanceTypeStable:       testZone2Instance.Name(),
-					v1alpha5.LabelCapacityType:       testZone2Instance.Offerings()[0].CapacityType,
+					v1.LabelInstanceTypeStable:       testZone2Instance.Name,
+					v1alpha5.LabelCapacityType:       testZone2Instance.Offerings[0].CapacityType,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("1")}})
 
@@ -1134,8 +1487,8 @@ var _ = Describe("Topology Consideration", func() {
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelTopologyZone:             "test-zone-3",
-					v1.LabelInstanceTypeStable:       testZone3Instance.Name(),
-					v1alpha5.LabelCapacityType:       testZone1Instance.Offerings()[0].CapacityType,
+					v1.LabelInstanceTypeStable:       testZone3Instance.Name,
+					v1alpha5.LabelCapacityType:       testZone1Instance.Offerings[0].CapacityType,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("1")}})
 
@@ -1157,14 +1510,14 @@ var _ = Describe("Topology Consideration", func() {
 		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, zone1Node, zone2Node, zone3Node)
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := controller.ProcessCluster(ctx)
+		_, err := deprovisioningController.ProcessCluster(ctx)
 		Expect(err).ToNot(HaveOccurred())
 		wg.Wait()
 
 		// should create a new node as there is a cheaper one that can hold the pod
 		Expect(cloudProvider.CreateCalls).To(HaveLen(1))
 
-		// we need to emulate the replicaset controller and bind a new pod to the newly created node
+		// we need to emulate the replicaset deprovisioningController and bind a new pod to the newly created node
 		ExpectApplied(ctx, env.Client, pods[3])
 		var nodes v1.NodeList
 		Expect(env.Client.List(ctx, &nodes)).To(Succeed())
@@ -1219,8 +1572,8 @@ var _ = Describe("Topology Consideration", func() {
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelTopologyZone:             "test-zone-1",
-					v1.LabelInstanceTypeStable:       testZone1Instance.Name(),
-					v1alpha5.LabelCapacityType:       testZone1Instance.Offerings()[0].CapacityType,
+					v1.LabelInstanceTypeStable:       testZone1Instance.Name,
+					v1alpha5.LabelCapacityType:       testZone1Instance.Offerings[0].CapacityType,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("1")}})
 
@@ -1229,8 +1582,8 @@ var _ = Describe("Topology Consideration", func() {
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelTopologyZone:             "test-zone-2",
-					v1.LabelInstanceTypeStable:       testZone2Instance.Name(),
-					v1alpha5.LabelCapacityType:       testZone2Instance.Offerings()[0].CapacityType,
+					v1.LabelInstanceTypeStable:       testZone2Instance.Name,
+					v1alpha5.LabelCapacityType:       testZone2Instance.Offerings[0].CapacityType,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("1")}})
 
@@ -1239,8 +1592,8 @@ var _ = Describe("Topology Consideration", func() {
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelTopologyZone:             "test-zone-3",
-					v1.LabelInstanceTypeStable:       testZone3Instance.Name(),
-					v1alpha5.LabelCapacityType:       testZone3Instance.Offerings()[0].CapacityType,
+					v1.LabelInstanceTypeStable:       testZone3Instance.Name,
+					v1alpha5.LabelCapacityType:       testZone3Instance.Offerings[0].CapacityType,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("1")}})
 
@@ -1259,7 +1612,7 @@ var _ = Describe("Topology Consideration", func() {
 		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, zone1Node, zone2Node, zone3Node)
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := controller.ProcessCluster(ctx)
+		_, err := deprovisioningController.ProcessCluster(ctx)
 		Expect(err).ToNot(HaveOccurred())
 		wg.Wait()
 
@@ -1274,7 +1627,7 @@ var _ = Describe("Topology Consideration", func() {
 })
 
 var _ = Describe("Empty Nodes", func() {
-	It("can delete empty nodes with Consolidation", func() {
+	It("can delete empty nodes with consolidation", func() {
 		prov := test.Provisioner(test.ProvisionerOptions{Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)}})
 
 		node1 := test.Node(test.NodeOptions{
@@ -1283,7 +1636,7 @@ var _ = Describe("Empty Nodes", func() {
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelNodeInitialized:    "true",
 				},
 			},
@@ -1298,7 +1651,7 @@ var _ = Describe("Empty Nodes", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := controller.ProcessCluster(ctx)
+		_, err := deprovisioningController.ProcessCluster(ctx)
 		Expect(err).ToNot(HaveOccurred())
 
 		// we don't need any new nodes
@@ -1306,14 +1659,14 @@ var _ = Describe("Empty Nodes", func() {
 		// and should delete the empty one
 		ExpectNotFound(ctx, env.Client, node1)
 	})
-	It("can delete multiple empty nodes with Consolidation", func() {
+	It("can delete multiple empty nodes with consolidation", func() {
 		prov := test.Provisioner(test.ProvisionerOptions{Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)}})
 
 		node1 := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -1325,7 +1678,7 @@ var _ = Describe("Empty Nodes", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				}},
@@ -1342,7 +1695,7 @@ var _ = Describe("Empty Nodes", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := controller.ProcessCluster(ctx)
+		_, err := deprovisioningController.ProcessCluster(ctx)
 		Expect(err).ToNot(HaveOccurred())
 
 		// we don't need any new nodes
@@ -1358,7 +1711,7 @@ var _ = Describe("Empty Nodes", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				},
@@ -1376,7 +1729,7 @@ var _ = Describe("Empty Nodes", func() {
 
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := controller.ProcessCluster(ctx)
+		_, err := deprovisioningController.ProcessCluster(ctx)
 		Expect(err).ToNot(HaveOccurred())
 
 		// we don't need any new nodes
@@ -1384,10 +1737,59 @@ var _ = Describe("Empty Nodes", func() {
 		// and should delete both empty ones
 		ExpectNotFound(ctx, env.Client, node)
 	})
+	It("considers pending pods when consolidating", func() {
+		prov := test.Provisioner(test.ProvisionerOptions{Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)}})
+
+		node1 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("128"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		// there is a pending pod that should land on the node
+		pod := test.UnschedulablePod(test.PodOptions{
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU: resource.MustParse("1"),
+				},
+			},
+		})
+		unsched := test.UnschedulablePod(test.PodOptions{
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU: resource.MustParse("125"),
+				},
+			},
+		})
+
+		ExpectApplied(ctx, env.Client, node1, pod, unsched, prov)
+		ExpectMakeNodesReady(ctx, env.Client, node1)
+		ExpectManualBinding(ctx, env.Client, pod, node1)
+
+		// inform cluster state about the nodes
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+
+		fakeClock.Step(10 * time.Minute)
+		go triggerVerifyAction()
+		_, err := deprovisioningController.ProcessCluster(ctx)
+		Expect(err).ToNot(HaveOccurred())
+
+		// we don't need any new nodes and consolidation should notice the huge pending pod that needs the large
+		// node to schedule, which prevents the large expensive node from being replaced
+		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
+		ExpectNodeExists(ctx, env.Client, node1.Name)
+	})
 })
 
-var _ = Describe("Consolidation TTL", func() {
-	It("should wait for the node TTL before consolidating", func() {
+var _ = Describe("consolidation TTL", func() {
+	It("should wait for the node TTL for empty nodes before consolidating", func() {
 		prov := test.Provisioner(test.ProvisionerOptions{
 			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
@@ -1398,7 +1800,7 @@ var _ = Describe("Consolidation TTL", func() {
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelNodeInitialized:    "true",
 				},
 			},
@@ -1417,12 +1819,12 @@ var _ = Describe("Consolidation TTL", func() {
 		go func() {
 			defer wg.Done()
 			defer finished.Store(true)
-			_, err := controller.ProcessCluster(ctx)
+			_, err := deprovisioningController.ProcessCluster(ctx)
 			Expect(err).ToNot(HaveOccurred())
 		}()
 
-		// wait for the controller to block on the validation timeout
-		Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
+		// wait for the deprovisioningController to block on the validation timeout
+		Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
 		// controller should be blocking during the timeout
 		Expect(finished.Load()).To(BeFalse())
 		// and the node should not be deleted yet
@@ -1439,6 +1841,98 @@ var _ = Describe("Consolidation TTL", func() {
 		// and should delete the empty one
 		ExpectNotFound(ctx, env.Client, node1)
 	})
+	It("should wait for the node TTL for non-empty nodes before consolidating", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+		pods := test.Pods(3, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}}})
+
+		prov := test.Provisioner(test.ProvisionerOptions{
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
+		})
+		node1 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		node2 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], node1, node2, prov)
+		ExpectMakeNodesReady(ctx, env.Client, node1, node2)
+
+		ExpectManualBinding(ctx, env.Client, pods[0], node1)
+		ExpectManualBinding(ctx, env.Client, pods[1], node1)
+		ExpectManualBinding(ctx, env.Client, pods[2], node2)
+		ExpectScheduled(ctx, env.Client, pods[0])
+		ExpectScheduled(ctx, env.Client, pods[1])
+		ExpectScheduled(ctx, env.Client, pods[2])
+
+		// inform cluster state about the nodes
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
+		var wg sync.WaitGroup
+		wg.Add(1)
+		finished := atomic.Bool{}
+		go func() {
+			defer wg.Done()
+			defer finished.Store(true)
+			_, err := deprovisioningController.ProcessCluster(ctx)
+			Expect(err).ToNot(HaveOccurred())
+		}()
+
+		// wait for the controller to block on the validation timeout
+		Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
+		// controller should be blocking during the timeout
+		Expect(finished.Load()).To(BeFalse())
+		// and the node should not be deleted yet
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node1), node1)).To(Succeed())
+
+		// advance the clock so that the timeout expires
+		fakeClock.Step(31 * time.Second)
+		// controller should finish
+		Eventually(finished.Load, 10*time.Second).Should(BeTrue())
+		wg.Wait()
+
+		// we don't need any new nodes
+		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
+		// and should delete the empty one
+		ExpectNotFound(ctx, env.Client, node2)
+	})
 	It("should not consolidate if the action becomes invalid during the node TTL wait", func() {
 		prov := test.Provisioner(test.ProvisionerOptions{
 			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
@@ -1450,7 +1944,7 @@ var _ = Describe("Consolidation TTL", func() {
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelNodeInitialized:    "true",
 				},
 			},
@@ -1470,12 +1964,12 @@ var _ = Describe("Consolidation TTL", func() {
 		go func() {
 			defer wg.Done()
 			defer finished.Store(true)
-			_, err := controller.ProcessCluster(ctx)
+			_, err := deprovisioningController.ProcessCluster(ctx)
 			Expect(err).ToNot(HaveOccurred())
 		}()
 
-		// wait for the controller to block on the validation timeout
-		Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
+		// wait for the deprovisioningController to block on the validation timeout
+		Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
 		// controller should be blocking during the timeout
 		Expect(finished.Load()).To(BeFalse())
 		// and the node should not be deleted yet
@@ -1529,7 +2023,7 @@ var _ = Describe("Parallelization", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name(),
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
 				},
@@ -1549,17 +2043,18 @@ var _ = Describe("Parallelization", func() {
 		// Run the processing loop in parallel in the background with environment context
 		go triggerVerifyAction()
 		go func() {
-			_, err := controller.ProcessCluster(ctx)
+			_, err := deprovisioningController.ProcessCluster(ctx)
 			Expect(err).ToNot(HaveOccurred())
 		}()
 
+		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, node)
 		Eventually(func(g Gomega) {
 			// should create a new node as there is a cheaper one that can hold the pod
 			nodes := &v1.NodeList{}
 			g.Expect(env.Client.List(ctx, nodes)).To(Succeed())
 			g.Expect(len(nodes.Items)).To(Equal(2))
 		}, time.Second*10).Should(Succeed())
-
+		wg.Wait()
 		// Add a new pending pod that should schedule while node is not yet deleted
 		pods := ExpectProvisionedNoBinding(ctx, env.Client, provisioningController, provisioner, test.UnschedulablePod())
 		nodes := &v1.NodeList{}
@@ -1647,27 +2142,289 @@ var _ = Describe("Parallelization", func() {
 		}
 
 		// Trigger a reconciliation run which should take into account the deleting node
-		// Consolidation shouldn't trigger additional actions
+		// cnsolidation shouldn't trigger additional actions
 		fakeClock.Step(10 * time.Minute)
-		result, err := controller.ProcessCluster(ctx)
+		result, err := deprovisioningController.ProcessCluster(ctx)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(Equal(deprovisioning.ResultNothingToDo))
 	})
 })
 
-func leastExpensiveInstanceWithZone(zone string) cloudprovider.InstanceType {
+var _ = Describe("Multi-Node Consolidation", func() {
+	It("can merge 3 nodes into 1", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+		pods := test.Pods(3, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}}})
+
+		prov := test.Provisioner(test.ProvisionerOptions{Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)}})
+		node1 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		node2 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		node3 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], node1, node2, node3, prov)
+		ExpectMakeNodesReady(ctx, env.Client, node1, node2, node3)
+
+		ExpectManualBinding(ctx, env.Client, pods[0], node1)
+		ExpectManualBinding(ctx, env.Client, pods[1], node2)
+		ExpectManualBinding(ctx, env.Client, pods[2], node3)
+		ExpectScheduled(ctx, env.Client, pods[0])
+		ExpectScheduled(ctx, env.Client, pods[1])
+		ExpectScheduled(ctx, env.Client, pods[2])
+		// inform cluster state about the nodes
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node3))
+		fakeClock.Step(10 * time.Minute)
+		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, node1, node2, node3)
+		go triggerVerifyAction()
+		_, err := deprovisioningController.ProcessCluster(ctx)
+		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
+
+		// should create one new node
+		Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+		// and delete the three old ones
+		ExpectNotFound(ctx, env.Client, node1)
+		ExpectNotFound(ctx, env.Client, node2)
+		ExpectNotFound(ctx, env.Client, node3)
+	})
+	It("won't merge 2 nodes into 1 of the same type", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+		pods := test.Pods(3, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}}})
+
+		prov := test.Provisioner(test.ProvisionerOptions{Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)}})
+		node1 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		node2 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], node1, node2, prov)
+		ExpectMakeNodesReady(ctx, env.Client, node1, node2)
+
+		ExpectManualBinding(ctx, env.Client, pods[0], node1)
+		ExpectManualBinding(ctx, env.Client, pods[1], node2)
+		ExpectManualBinding(ctx, env.Client, pods[2], node2)
+		ExpectScheduled(ctx, env.Client, pods[0])
+		ExpectScheduled(ctx, env.Client, pods[1])
+		ExpectScheduled(ctx, env.Client, pods[2])
+		// inform cluster state about the nodes
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
+		fakeClock.Step(10 * time.Minute)
+		go triggerVerifyAction()
+		_, err := deprovisioningController.ProcessCluster(ctx)
+		Expect(err).ToNot(HaveOccurred())
+
+		// We have [cheap-node, cheap-node] which multi-node consolidation could consolidate via
+		// [delete cheap-node, delete cheap-node, launch cheap-node]. This isn't the best method though
+		// as we should instead just delete one of the nodes instead of deleting both and launching a single
+		// identical replacement. This test verifies the filterOutSameType function from multi-node consolidation
+		// works to ensure we perform the least-disruptive action.
+		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
+		// should have just deleted the node with the fewest pods
+		ExpectNotFound(ctx, env.Client, node1)
+		// and left the other node alone
+		ExpectNodeExists(ctx, env.Client, node2.Name)
+	})
+	It("should wait for the node TTL for non-empty nodes before consolidating (multi-node)", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+		pods := test.Pods(3, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}}})
+
+		prov := test.Provisioner(test.ProvisionerOptions{
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
+		})
+		node1 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		node2 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], node1, node2, prov)
+		ExpectMakeNodesReady(ctx, env.Client, node1, node2)
+
+		ExpectManualBinding(ctx, env.Client, pods[0], node1)
+		ExpectManualBinding(ctx, env.Client, pods[1], node1)
+		ExpectManualBinding(ctx, env.Client, pods[2], node2)
+		ExpectScheduled(ctx, env.Client, pods[0])
+		ExpectScheduled(ctx, env.Client, pods[1])
+		ExpectScheduled(ctx, env.Client, pods[2])
+
+		// inform cluster state about the nodes
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
+		ExpectMakeNewNodesReady(ctx, env.Client, 1, node1, node2)
+		var wg sync.WaitGroup
+		wg.Add(1)
+		finished := atomic.Bool{}
+		go func() {
+			defer wg.Done()
+			defer finished.Store(true)
+			_, err := deprovisioningController.ProcessCluster(ctx)
+			Expect(err).ToNot(HaveOccurred())
+		}()
+
+		// wait for the controller to block on the validation timeout
+		Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
+		// controller should be blocking during the timeout
+		Expect(finished.Load()).To(BeFalse())
+		// and the node should not be deleted yet
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node1), node1)).To(Succeed())
+
+		// advance the clock so that the timeout expires
+		fakeClock.Step(31 * time.Second)
+		// controller should finish
+		Eventually(finished.Load, 10*time.Second).Should(BeTrue())
+		wg.Wait()
+
+		// should launch a single smaller replacement node
+		Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+		// and delete the two lage ones
+		ExpectNotFound(ctx, env.Client, node1, node2)
+	})
+})
+
+func leastExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
 	for _, elem := range onDemandInstances {
-		if hasZone(elem.Offerings(), zone) {
+		if hasZone(elem.Offerings, zone) {
 			return elem
 		}
 	}
 	return onDemandInstances[len(onDemandInstances)-1]
 }
 
-func mostExpensiveInstanceWithZone(zone string) cloudprovider.InstanceType {
+func mostExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
 	for i := len(onDemandInstances) - 1; i >= 0; i-- {
 		elem := onDemandInstances[i]
-		if hasZone(elem.Offerings(), zone) {
+		if hasZone(elem.Offerings, zone) {
 			return elem
 		}
 	}

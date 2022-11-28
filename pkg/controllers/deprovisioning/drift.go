@@ -20,11 +20,19 @@ type Drift struct {
 	cluster    *state.Cluster
 }
 
+func NewDrift(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster) *Drift {
+	return &Drift{
+		clock: clk,
+		kubeClient: kubeClient,
+		cluster: cluster,
+	}
+}
+
 func (d *Drift) ShouldDeprovision(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, _ []*v1.Pod) bool {
 	if provisioner == nil {
 		return false
 	}
-	_, hasDriftedAnnotation := n.Node.Annotations[v1alpha5.DriftedAnnotationKey]
+	_, hasDriftedAnnotation := n.Node.Labels[v1alpha5.DriftedLabelKey]
 	return hasDriftedAnnotation
 }
 
@@ -35,9 +43,9 @@ func (d *Drift) SortCandidates(nodes []CandidateNode) []CandidateNode {
 	return nodes
 }
 
-func (d *Drift) ComputeCommand(ctx context.Context, _ int, nodes ...CandidateNode) (Command, error) {
+func (d *Drift) ComputeCommand(ctx context.Context, nodes ...CandidateNode) (Command, error) {
 	driftedNodes := lo.Filter(nodes, func(n CandidateNode, _ int) bool {
-		_, hasDrifted := n.Node.Annotations[v1alpha5.DriftedAnnotationKey]
+		_, hasDrifted := n.Node.Labels[v1alpha5.DriftedLabelKey]
 		return hasDrifted
 	})
 	if len(driftedNodes) == 0 {
@@ -46,7 +54,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, _ int, nodes ...CandidateNod
 	return Command{
 		nodesToRemove: lo.Map(driftedNodes, func(n CandidateNode, _ int) *v1.Node { return n.Node }),
 		action:        actionReplace,
-		created:       d.clock.Now(),
+		//created:       d.clock.Now(),
 	}, nil
 }
 

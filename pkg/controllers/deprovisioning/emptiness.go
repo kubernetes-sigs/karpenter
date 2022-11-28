@@ -16,7 +16,6 @@ package deprovisioning
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"k8s.io/utils/clock"
@@ -36,12 +35,20 @@ import (
 // Emptiness is a subreconciler that deletes empty nodes.
 // Emptiness will respect TTLSecondsAfterEmpty
 type Emptiness struct {
-	kubeClient client.Client
 	clock      clock.Clock
+	kubeClient client.Client
 	cluster    *state.Cluster
 }
 
-// shouldDeprovision is a predicate used to filter deprovisionable nodes
+func NewEmptiness(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster) *Emptiness {
+	return &Emptiness{
+		clock:      clk,
+		kubeClient: kubeClient,
+		cluster:    cluster,
+	}
+}
+
+// ShouldDeprovision is a predicate used to filter deprovisionable nodes
 func (e *Emptiness) ShouldDeprovision(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, nodePods []*v1.Pod) bool {
 	if provisioner == nil || provisioner.Spec.TTLSecondsAfterEmpty == nil || len(nodePods) != 0 {
 		return false
@@ -55,20 +62,15 @@ func (e *Emptiness) ShouldDeprovision(ctx context.Context, n *state.Node, provis
 
 	emptinessTime, err := time.Parse(time.RFC3339, emptinessTimestamp)
 	if err != nil {
-		logging.FromContext(ctx).Debugf("Unable to parse emptiness timestamp, %s for node %s", emptinessTimestamp, n.Node.Name)
+		logging.FromContext(ctx).With("emptiness-timestamp", emptinessTimestamp).Debugf("unable to parse emptiness timestamp")
 		return true
 	}
 	// Don't deprovision if node's emptiness timestamp is before the emptiness TTL
 	return e.clock.Now().After(emptinessTime.Add(ttl))
 }
 
-// sortCandidates orders deprovisionable nodes by the disruptionCost
-func (e *Emptiness) SortCandidates(nodes []CandidateNode) []CandidateNode {
-	return nodes
-}
-
-// computeCommand generates a deprovisioning command given deprovisionable nodes
-func (e *Emptiness) ComputeCommand(_ context.Context, _ int, nodes ...CandidateNode) (Command, error) {
+// ComputeCommand generates a deprovisioning command given deprovisionable nodes
+func (e *Emptiness) ComputeCommand(_ context.Context, nodes ...CandidateNode) (Command, error) {
 	emptyNodes := lo.Filter(nodes, func(n CandidateNode, _ int) bool { return len(n.pods) == 0 })
 	if len(emptyNodes) == 0 {
 		return Command{action: actionDoNothing}, nil
@@ -76,29 +78,7 @@ func (e *Emptiness) ComputeCommand(_ context.Context, _ int, nodes ...CandidateN
 	return Command{
 		nodesToRemove: lo.Map(emptyNodes, func(n CandidateNode, _ int) *v1.Node { return n.Node }),
 		action:        actionDelete,
-		created:       e.clock.Now(),
 	}, nil
-}
-
-// validateCommand validates a command for a deprovisioner
-func (e *Emptiness) ValidateCommand(_ context.Context, candidateNodes []CandidateNode, cmd Command) (bool, error) {
-	if cmd.replacementNode != nil {
-		return false, fmt.Errorf("expected no replacement node for emptiness")
-	}
-	// the deletion of empty nodes is easy to validate, we just ensure that all the nodesToDelete are still empty and that
-	// the node isn't a target of a recent scheduling simulation
-	for _, n := range candidateNodes {
-		if len(n.pods) != 0 && !e.cluster.IsNodeNominated(n.Name) {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
-// getTTL returns the time to wait for a deprovisioner's validation
-// Don't wait since the action has already been TTL'd with the provisioner's `TTLSecondsAfterEmpty`
-func (e *Emptiness) TTL() time.Duration {
-	return 0 * time.Second
 }
 
 // string is the string representation of the deprovisioner

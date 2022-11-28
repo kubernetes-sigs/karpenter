@@ -39,6 +39,7 @@ type EventRecorder struct {
 	mu       sync.RWMutex
 	bindings []Binding
 	calls    map[string]int
+	events   []events.Event
 }
 
 func NewEventRecorder() *EventRecorder {
@@ -50,6 +51,7 @@ func NewEventRecorder() *EventRecorder {
 func (e *EventRecorder) Publish(evt events.Event) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.events = append(e.events, evt)
 
 	fakeNode := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "fake"}}
 	fakePod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "fake"}}
@@ -90,6 +92,15 @@ func (e *EventRecorder) ResetBindings() {
 	defer e.mu.Unlock()
 	e.bindings = nil
 }
+
+func (e *EventRecorder) ForEachEvent(f func(evt events.Event)) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	for _, e := range e.events {
+		f(e)
+	}
+}
+
 func (e *EventRecorder) ForEachBinding(f func(pod *v1.Pod, node *v1.Node)) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()

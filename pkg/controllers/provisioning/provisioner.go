@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"net/http"
 	"sort"
 	"time"
 
@@ -41,7 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
 
@@ -93,6 +92,10 @@ func NewProvisioner(ctx context.Context, kubeClient client.Client, coreV1Client 
 	return p
 }
 
+func (p *Provisioner) Name() string {
+	return "provisioner"
+}
+
 func (p *Provisioner) Trigger() {
 	p.batcher.Trigger()
 }
@@ -101,9 +104,8 @@ func (p *Provisioner) TriggerImmediate() {
 	p.batcher.TriggerImmediate()
 }
 
-func (p *Provisioner) Builder(_ context.Context, mgr manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.NewSingletonManagedBy(mgr).
-		Named("provisioning").
+func (p *Provisioner) Builder(_ context.Context, mgr manager.Manager) controller.Builder {
+	return controller.NewSingletonManagedBy(mgr).
 		WaitUntil(func(ctx context.Context) {
 			// Batch pods
 			p.batcher.Wait(ctx)
@@ -118,13 +120,9 @@ func (p *Provisioner) Builder(_ context.Context, mgr manager.Manager) operatorco
 				}
 			}
 		}).
-		WithOptions(operatorcontroller.Options{
+		WithOptions(controller.Options{
 			DisableWaitOnError: true,
 		})
-}
-
-func (p *Provisioner) LivenessProbe(_ *http.Request) error {
-	return nil
 }
 
 func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
@@ -148,7 +146,7 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (recon
 	})
 
 	// Get pods, exit if nothing to do
-	pendingPods, err := p.getPendingPods(ctx)
+	pendingPods, err := p.GetPendingPods(ctx)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
@@ -212,7 +210,7 @@ func (p *Provisioner) LaunchNodes(ctx context.Context, opts LaunchOptions, nodes
 	return nodeNames, nil
 }
 
-func (p *Provisioner) getPendingPods(ctx context.Context) ([]*v1.Pod, error) {
+func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*v1.Pod, error) {
 	var podList v1.PodList
 	if err := p.kubeClient.List(ctx, &podList, client.MatchingFields{"spec.nodeName": ""}); err != nil {
 		return nil, fmt.Errorf("listing pods, %w", err)
@@ -226,7 +224,7 @@ func (p *Provisioner) getPendingPods(ctx context.Context) ([]*v1.Pod, error) {
 			continue
 		}
 		if err := p.Validate(ctx, &po); err != nil {
-			logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(&po)).Debugf("Ignoring pod, %s", err)
+			logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(&po)).Debugf("ignoring pod, %s", err)
 			continue
 		}
 		pods = append(pods, &po)
@@ -239,7 +237,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	// Build node templates
 	var nodeTemplates []*scheduling.NodeTemplate
 	var provisionerList v1alpha5.ProvisionerList
-	instanceTypes := map[string][]cloudprovider.InstanceType{}
+	instanceTypes := map[string][]*cloudprovider.InstanceType{}
 	domains := map[string]sets.String{}
 	if err := p.kubeClient.List(ctx, &provisionerList); err != nil {
 		return nil, fmt.Errorf("listing provisioners, %w", err)
@@ -266,7 +264,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 
 		// Construct Topology Domains
 		for _, instanceType := range instanceTypeOptions {
-			for key, requirement := range instanceType.Requirements() {
+			for key, requirement := range instanceType.Requirements {
 				domains[key] = domains[key].Union(sets.NewString(requirement.Values()...))
 			}
 		}
@@ -323,12 +321,12 @@ func (p *Provisioner) launch(ctx context.Context, opts LaunchOptions, node *sche
 
 	// Order instance types so that we get the cheapest instance types of the available offerings
 	sort.Slice(node.InstanceTypeOptions, func(i, j int) bool {
-		iOfferings := cloudprovider.AvailableOfferings(node.InstanceTypeOptions[i])
-		jOfferings := cloudprovider.AvailableOfferings(node.InstanceTypeOptions[j])
+		iOfferings := node.InstanceTypeOptions[i].Offerings.Available()
+		jOfferings := node.InstanceTypeOptions[j].Offerings.Available()
 		return cheapestOfferingPrice(iOfferings, node.Requirements) < cheapestOfferingPrice(jOfferings, node.Requirements)
 	})
 
-	logging.FromContext(ctx).Infof("Launching %s", node)
+	logging.FromContext(ctx).Infof("launching %s", node)
 	k8sNode, err := p.cloudProvider.Create(
 		logging.WithLogger(ctx, logging.FromContext(ctx).Named("cloudprovider")),
 		&cloudprovider.NodeRequest{InstanceTypeOptions: node.InstanceTypeOptions, Template: &node.NodeTemplate},
@@ -336,6 +334,7 @@ func (p *Provisioner) launch(ctx context.Context, opts LaunchOptions, node *sche
 	if err != nil {
 		return "", fmt.Errorf("creating cloud provider instance, %w", err)
 	}
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", k8sNode.Name))
 
 	if err := mergo.Merge(k8sNode, node.ToNode()); err != nil {
 		return "", fmt.Errorf("merging cloud provider node, %w", err)
@@ -350,7 +349,7 @@ func (p *Provisioner) launch(ctx context.Context, opts LaunchOptions, node *sche
 	// before the node is fully Ready.
 	if _, err := p.coreV1Client.Nodes().Create(ctx, k8sNode, metav1.CreateOptions{}); err != nil {
 		if errors.IsAlreadyExists(err) {
-			logging.FromContext(ctx).Debugf("node %s already registered", k8sNode.Name)
+			logging.FromContext(ctx).Debugf("node already registered")
 		} else {
 			return "", fmt.Errorf("creating node %s, %w", k8sNode.Name, err)
 		}

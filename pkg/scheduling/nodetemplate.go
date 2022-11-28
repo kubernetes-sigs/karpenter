@@ -30,6 +30,7 @@ type NodeTemplate struct {
 	ProvisionerName      string
 	Provider             *v1alpha5.Provider
 	ProviderRef          *v1alpha5.ProviderRef
+	Annotations          map[string]string
 	Labels               map[string]string
 	Taints               Taints
 	StartupTaints        Taints
@@ -47,6 +48,7 @@ func NewNodeTemplate(provisioner *v1alpha5.Provisioner) *NodeTemplate {
 		Provider:             provisioner.Spec.Provider,
 		ProviderRef:          provisioner.Spec.ProviderRef,
 		KubeletConfiguration: provisioner.Spec.KubeletConfiguration,
+		Annotations:          provisioner.Spec.Annotations,
 		Labels:               labels,
 		Taints:               provisioner.Spec.Taints,
 		StartupTaints:        provisioner.Spec.StartupTaints,
@@ -57,8 +59,9 @@ func NewNodeTemplate(provisioner *v1alpha5.Provisioner) *NodeTemplate {
 func (n *NodeTemplate) ToNode() *v1.Node {
 	return &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
-			Labels:     lo.Assign(n.Labels, n.Requirements.Labels()),
-			Finalizers: []string{v1alpha5.TerminationFinalizer},
+			Labels:      lo.Assign(n.Labels, n.Requirements.Labels()),
+			Annotations: n.Annotations,
+			Finalizers:  []string{v1alpha5.TerminationFinalizer},
 		},
 		Spec: v1.NodeSpec{
 			Taints: append(n.Taints, n.StartupTaints...),

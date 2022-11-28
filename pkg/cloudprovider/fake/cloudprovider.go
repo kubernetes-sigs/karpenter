@@ -17,6 +17,7 @@ package fake
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -35,31 +36,42 @@ import (
 var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)
 
 type CloudProvider struct {
-	InstanceTypes []cloudprovider.InstanceType
+	InstanceTypes []*cloudprovider.InstanceType
 
 	// CreateCalls contains the arguments for every create call that was made since it was cleared
-	mu          sync.Mutex
-	CreateCalls []*cloudprovider.NodeRequest
+	mu                 sync.Mutex
+	CreateCalls        []*cloudprovider.NodeRequest
+	AllowedCreateCalls int
 }
 
 var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)
-var _ cloudprovider.InstanceType = (*InstanceType)(nil)
+
+func NewCloudProvider() *CloudProvider {
+	return &CloudProvider{
+		AllowedCreateCalls: math.MaxInt,
+	}
+}
 
 func (c *CloudProvider) Create(ctx context.Context, nodeRequest *cloudprovider.NodeRequest) (*v1.Node, error) {
 	c.mu.Lock()
 	c.CreateCalls = append(c.CreateCalls, nodeRequest)
+	if len(c.CreateCalls) > c.AllowedCreateCalls {
+		c.mu.Unlock()
+		return &v1.Node{}, fmt.Errorf("erroring as number of AllowedCreateCalls has been exceeded")
+	}
 	c.mu.Unlock()
+
 	name := test.RandomName()
 	instanceType := nodeRequest.InstanceTypeOptions[0]
 	// Labels
 	labels := map[string]string{}
-	for key, requirement := range instanceType.Requirements() {
+	for key, requirement := range instanceType.Requirements {
 		if requirement.Len() == 1 {
 			labels[key] = requirement.Values()[0]
 		}
 	}
 	// Find Offering
-	for _, o := range cloudprovider.AvailableOfferings(instanceType) {
+	for _, o := range instanceType.Offerings.Available() {
 		if nodeRequest.Template.Requirements.Compatible(scheduling.NewRequirements(
 			scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, o.Zone),
 			scheduling.NewRequirement(v1alpha5.LabelCapacityType, v1.NodeSelectorOpIn, o.CapacityType),
@@ -81,11 +93,11 @@ func (c *CloudProvider) Create(ctx context.Context, nodeRequest *cloudprovider.N
 	return n, nil
 }
 
-func (c *CloudProvider) GetInstanceTypes(_ context.Context, provisioner *v1alpha5.Provisioner) ([]cloudprovider.InstanceType, error) {
+func (c *CloudProvider) GetInstanceTypes(_ context.Context, provisioner *v1alpha5.Provisioner) ([]*cloudprovider.InstanceType, error) {
 	if c.InstanceTypes != nil {
 		return c.InstanceTypes, nil
 	}
-	return []cloudprovider.InstanceType{
+	return []*cloudprovider.InstanceType{
 		NewInstanceType(InstanceTypeOptions{
 			Name: "default-instance-type",
 		}),

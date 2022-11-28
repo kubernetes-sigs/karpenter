@@ -42,7 +42,7 @@ type SchedulerOptions struct {
 
 func NewScheduler(ctx context.Context, kubeClient client.Client, nodeTemplates []*scheduling.NodeTemplate,
 	provisioners []v1alpha5.Provisioner, cluster *state.Cluster, stateNodes []*state.Node, topology *Topology,
-	instanceTypes map[string][]cloudprovider.InstanceType, daemonOverhead map[*scheduling.NodeTemplate]v1.ResourceList,
+	instanceTypes map[string][]*cloudprovider.InstanceType, daemonOverhead map[*scheduling.NodeTemplate]v1.ResourceList,
 	recorder events.Recorder, opts SchedulerOptions) *Scheduler {
 
 	// if any of the provisioners add a taint with a prefer no schedule effect, we add a toleration for the taint
@@ -90,7 +90,7 @@ type Scheduler struct {
 	existingNodes      []*ExistingNode
 	nodeTemplates      []*scheduling.NodeTemplate
 	remainingResources map[string]v1.ResourceList // provisioner name -> remaining resources for that provisioner
-	instanceTypes      map[string][]cloudprovider.InstanceType
+	instanceTypes      map[string][]*cloudprovider.InstanceType
 	daemonOverhead     map[*scheduling.NodeTemplate]v1.ResourceList
 	preferences        *Preferences
 	topology           *Topology
@@ -163,9 +163,8 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 	if newCount == 0 {
 		return
 	}
-	logging.FromContext(ctx).Infof("Found %d provisionable pod(s)", len(pods))
-	logging.FromContext(ctx).Infof("Computed %d new node(s) will fit %d pod(s)", len(s.nodes), newCount)
-
+	logging.FromContext(ctx).With("pod-count", len(pods)).Infof("found provisionable pod(s)")
+	logging.FromContext(ctx).With("additional-node-count", len(s.nodes), "pod-count", newCount).Infof("computed new node(s) to fit pod(s)")
 	// Report in flight nodes, or exit to avoid log spam
 	inflightCount := 0
 	existingCount := 0
@@ -176,7 +175,7 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 	if existingCount == 0 {
 		return
 	}
-	logging.FromContext(ctx).Infof("Computed %d unready node(s) will fit %d pod(s)", inflightCount, existingCount)
+	logging.FromContext(ctx).Infof("computed %d unready node(s) will fit %d pod(s)", inflightCount, existingCount)
 }
 
 func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
@@ -252,14 +251,14 @@ func (s *Scheduler) calculateExistingNodes(namedNodeTemplates map[string]*schedu
 // overshooting out, we need to pessimistically assume that if e.g. we request a 2, 4 or 8 CPU instance type
 // that the 8 CPU instance type is all that will be available.  This could cause a batch of pods to take multiple rounds
 // to schedule.
-func subtractMax(remaining v1.ResourceList, instanceTypes []cloudprovider.InstanceType) v1.ResourceList {
+func subtractMax(remaining v1.ResourceList, instanceTypes []*cloudprovider.InstanceType) v1.ResourceList {
 	// shouldn't occur, but to be safe
 	if len(instanceTypes) == 0 {
 		return remaining
 	}
 	var allInstanceResources []v1.ResourceList
 	for _, it := range instanceTypes {
-		allInstanceResources = append(allInstanceResources, it.Resources())
+		allInstanceResources = append(allInstanceResources, it.Capacity)
 	}
 	result := v1.ResourceList{}
 	itResources := resources.MaxResources(allInstanceResources...)
@@ -272,10 +271,10 @@ func subtractMax(remaining v1.ResourceList, instanceTypes []cloudprovider.Instan
 }
 
 // filterByRemainingResources is used to filter out instance types that if launched would exceed the provisioner limits
-func filterByRemainingResources(instanceTypes []cloudprovider.InstanceType, remaining v1.ResourceList) []cloudprovider.InstanceType {
-	var filtered []cloudprovider.InstanceType
+func filterByRemainingResources(instanceTypes []*cloudprovider.InstanceType, remaining v1.ResourceList) []*cloudprovider.InstanceType {
+	var filtered []*cloudprovider.InstanceType
 	for _, it := range instanceTypes {
-		itResources := it.Resources()
+		itResources := it.Capacity
 		viableInstance := true
 		for resourceName, remainingQuantity := range remaining {
 			// if the instance capacity is greater than the remaining quantity for this resource

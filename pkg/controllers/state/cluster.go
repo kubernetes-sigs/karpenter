@@ -17,7 +17,6 @@ package state
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -37,7 +36,6 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	atomicutils "github.com/aws/karpenter-core/pkg/utils/atomic"
@@ -209,20 +207,24 @@ func (c *Cluster) onNominatedNodeEviction(key string, _ interface{}) {
 }
 
 // UnmarkForDeletion removes the marking on the node as a node the controller intends to delete
-func (c *Cluster) UnmarkForDeletion(nodeName string) {
+func (c *Cluster) UnmarkForDeletion(nodeNames ...string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if _, ok := c.nodes[nodeName]; ok {
-		c.nodes[nodeName].MarkedForDeletion = false
+	for _, nodeName := range nodeNames {
+		if _, ok := c.nodes[nodeName]; ok {
+			c.nodes[nodeName].MarkedForDeletion = false
+		}
 	}
 }
 
 // MarkForDeletion marks the node as pending deletion in the internal cluster state
-func (c *Cluster) MarkForDeletion(nodeName string) {
+func (c *Cluster) MarkForDeletion(nodeNames ...string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if _, ok := c.nodes[nodeName]; ok {
-		c.nodes[nodeName].MarkedForDeletion = true
+	for _, nodeName := range nodeNames {
+		if _, ok := c.nodes[nodeName]; ok {
+			c.nodes[nodeName].MarkedForDeletion = true
+		}
 	}
 }
 
@@ -275,20 +277,22 @@ func (c *Cluster) populateCapacity(ctx context.Context, node *v1.Node, n *Node) 
 	if err != nil {
 		return err
 	}
-	instanceType, ok := lo.Find(instanceTypes, func(it cloudprovider.InstanceType) bool { return it.Name() == node.Labels[v1.LabelInstanceTypeStable] })
+	instanceType, ok := lo.Find(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.Name == node.Labels[v1.LabelInstanceTypeStable] })
 	if !ok {
 		return fmt.Errorf("instance type '%s' not found", node.Labels[v1.LabelInstanceTypeStable])
 	}
-	n.Capacity = instanceType.Resources()
 
-	for k, v := range node.Status.Allocatable {
-		n.Allocatable[k] = v
+	n.Capacity = lo.Assign(node.Status.Capacity) // ensure map not nil
+	// Use instance type resource value if resource isn't currently registered in .Status.Capacity
+	for resourceName, quantity := range instanceType.Capacity {
+		if resources.IsZero(node.Status.Capacity[resourceName]) {
+			n.Capacity[resourceName] = quantity
+		}
 	}
-	for resourceName, quantity := range instanceType.Resources() {
-		// kubelet will zero out both the capacity and allocatable for an extended resource on startup
-		if resources.IsZero(node.Status.Capacity[resourceName]) &&
-			resources.IsZero(node.Status.Allocatable[resourceName]) &&
-			!quantity.IsZero() {
+	n.Allocatable = lo.Assign(node.Status.Allocatable) // ensure map not nil
+	// Use instance type resource value if resource isn't currently registered in .Status.Allocatable
+	for resourceName, quantity := range instanceType.Capacity {
+		if resources.IsZero(node.Status.Allocatable[resourceName]) {
 			n.Allocatable[resourceName] = quantity
 		}
 	}
@@ -584,11 +588,4 @@ func (c *Cluster) Synchronized(ctx context.Context) error {
 
 func (c *Cluster) recordConsolidationChange() {
 	atomic.StoreInt64(&c.consolidationState, c.clock.Now().UnixMilli())
-}
-
-func (c *Cluster) LivenessProbe(_ *http.Request) error {
-	c.mu.Lock()
-	//nolint: staticcheck
-	c.mu.Unlock()
-	return nil
 }

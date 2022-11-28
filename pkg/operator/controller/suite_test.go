@@ -16,19 +16,15 @@ package controller_test
 
 import (
 	"context"
-	"net/http"
 	"testing"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/configmap/informer"
 	"knative.dev/pkg/system"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
-	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
 	"github.com/aws/karpenter-core/pkg/test"
@@ -53,7 +49,7 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(scheme.Scheme)
+	env = test.NewEnvironment(scheme.Scheme, apis.CRDs...)
 	cmw = informer.NewInformedWatcher(env.KubernetesInterface, system.Namespace())
 	defaultConfigMap = &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -69,96 +65,3 @@ var _ = BeforeSuite(func() {
 var _ = AfterSuite(func() {
 	Expect(env.Stop()).To(Succeed())
 })
-
-var _ = BeforeEach(func() {
-	defaultConfigMap = &v1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "karpenter-global-settings",
-			Namespace: system.Namespace(),
-		},
-	}
-	ExpectApplied(ctx, env.Client, defaultConfigMap)
-})
-
-var _ = AfterEach(func() {
-	Expect(env.Client.Delete(ctx, defaultConfigMap.DeepCopy())).To(Succeed())
-})
-
-var _ = Describe("Core Settings", func() {
-	It("should inject default settings into Reconcile loop", func() {
-		ExpectApplied(ctx, env.Client, defaultConfigMap.DeepCopy())
-		expected := settings.Settings{
-			BatchMaxDuration:  metav1.Duration{Duration: time.Second * 10},
-			BatchIdleDuration: metav1.Duration{Duration: time.Second * 1},
-		}
-
-		fakeController := &FakeController{
-			ReconcileAssertions: []ReconcileAssertion{
-				ExpectOperatorSettingsInjected(expected),
-			},
-		}
-		c := controller.InjectSettings(fakeController, ss)
-		Eventually(func(g Gomega) {
-			innerCtx := GomegaWithContext(ctx, g)
-			_, err := c.Reconcile(innerCtx, reconcile.Request{})
-			g.Expect(err).To(Succeed())
-		}).Should(Succeed())
-	})
-	It("should inject custom settings into Reconcile loop", func() {
-		expected := settings.Settings{
-			BatchMaxDuration:  metav1.Duration{Duration: time.Second * 30},
-			BatchIdleDuration: metav1.Duration{Duration: time.Second * 5},
-		}
-		cm := defaultConfigMap.DeepCopy()
-		cm.Data = map[string]string{
-			"batchMaxDuration":  expected.BatchMaxDuration.Duration.String(),
-			"batchIdleDuration": expected.BatchIdleDuration.Duration.String(),
-		}
-		ExpectApplied(ctx, env.Client, cm)
-
-		fakeController := &FakeController{
-			ReconcileAssertions: []ReconcileAssertion{
-				ExpectOperatorSettingsInjected(expected),
-			},
-		}
-		c := controller.InjectSettings(fakeController, ss)
-		Eventually(func(g Gomega) {
-			innerCtx := GomegaWithContext(ctx, g)
-			_, err := c.Reconcile(innerCtx, reconcile.Request{})
-			g.Expect(err).To(Succeed())
-		}).Should(Succeed())
-	})
-})
-
-func ExpectSettingsMatch(g Gomega, a settings.Settings, b settings.Settings) {
-	g.Expect(a.BatchMaxDuration.Duration == b.BatchMaxDuration.Duration &&
-		a.BatchIdleDuration.Duration == b.BatchIdleDuration.Duration).To(BeTrue())
-}
-
-func ExpectOperatorSettingsInjected(expected settings.Settings) ReconcileAssertion {
-	return func(ctx context.Context, _ reconcile.Request) {
-		settings := settings.FromContext(ctx)
-		ExpectSettingsMatch(GomegaFromContext(ctx), expected, settings)
-	}
-}
-
-type ReconcileAssertion func(context.Context, reconcile.Request)
-
-type FakeController struct {
-	ReconcileAssertions []ReconcileAssertion
-}
-
-func (c *FakeController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	for _, elem := range c.ReconcileAssertions {
-		elem(ctx, req)
-	}
-	return reconcile.Result{}, nil
-}
-
-func (c *FakeController) Builder(_ context.Context, _ manager.Manager) controller.Builder {
-	return nil
-}
-
-func (c *FakeController) LivenessProbe(_ *http.Request) error {
-	return nil
-}

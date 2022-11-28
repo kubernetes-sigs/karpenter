@@ -16,7 +16,6 @@ package state
 
 import (
 	"context"
-	"net/http"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -28,12 +27,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
 var stateRetryPeriod = 1 * time.Minute
-
-const podControllerName = "pod-state"
 
 // PodController reconciles pods for the purpose of maintaining state regarding pods that is expensive to compute.
 type PodController struct {
@@ -41,39 +38,36 @@ type PodController struct {
 	cluster    *Cluster
 }
 
-func NewPodController(kubeClient client.Client, cluster *Cluster) *PodController {
+func NewPodController(kubeClient client.Client, cluster *Cluster) corecontroller.Controller {
 	return &PodController{
 		kubeClient: kubeClient,
 		cluster:    cluster,
 	}
 }
 
+func (c *PodController) Name() string {
+	return "pod-state"
+}
+
 func (c *PodController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(podControllerName).With("pod", req.NamespacedName))
-	stored := &v1.Pod{}
-	if err := c.kubeClient.Get(ctx, req.NamespacedName, stored); err != nil {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("pod", req.NamespacedName))
+	pod := &v1.Pod{}
+	if err := c.kubeClient.Get(ctx, req.NamespacedName, pod); err != nil {
 		if errors.IsNotFound(err) {
+			// notify cluster state of the node deletion
 			c.cluster.deletePod(req.NamespacedName)
-			return reconcile.Result{}, nil
 		}
+		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
+	if err := c.cluster.updatePod(ctx, pod); err != nil {
 		return reconcile.Result{}, err
 	}
-
-	if err := c.cluster.updatePod(ctx, stored); err != nil {
-		return reconcile.Result{}, err
-	}
-
 	return reconcile.Result{Requeue: true, RequeueAfter: stateRetryPeriod}, nil
 }
 
-func (c *PodController) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return controllerruntime.
+func (c *PodController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
+	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
-		Named(podControllerName).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
-		For(&v1.Pod{})
-}
-
-func (c *PodController) LivenessProbe(_ *http.Request) error {
-	return nil
+		For(&v1.Pod{}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))
 }

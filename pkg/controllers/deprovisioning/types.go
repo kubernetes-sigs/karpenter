@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
 
@@ -55,55 +54,46 @@ func (r Result) String() string {
 }
 
 type Deprovisioner interface {
-	// ShouldDeprovision is a predicate used to filter deprovisionable nodes
 	ShouldDeprovision(context.Context, *state.Node, *v1alpha5.Provisioner, []*v1.Pod) bool
-	// sortCandidates orders deprovisionable nodes by the deprovisioner's pre-determined priority
-	SortCandidates([]CandidateNode) []CandidateNode
-	// computeCommand generates a deprovisioning command given deprovisionable nodes
-	ComputeCommand(context.Context, int, ...CandidateNode) (Command, error)
-	// validateCommand validates a command for a deprovisioner
-	ValidateCommand(context.Context, []CandidateNode, Command) (bool, error)
-	// TTL returns the time to wait for a deprovisioner's validation
-	TTL() time.Duration
-	// String is the String representation of the deprovisioner
+	ComputeCommand(context.Context, ...CandidateNode) (Command, error)
 	String() string
 }
 
 type action byte
 
 const (
-	actionUnknown action = iota
-	actionNotPossible
+	actionFailed action = iota
 	actionDelete
 	actionReplace
+	actionRetry
 	actionDoNothing
-	actionFailed
 )
 
 func (a action) String() string {
 	switch a {
-	case actionUnknown:
-		return "unknown"
-	case actionNotPossible:
-		return "not-possible"
+	// Deprovisioning action with no replacement nodes
 	case actionDelete:
 		return "delete"
+	// Deprovisioning action with replacement nodes
 	case actionReplace:
 		return "replace"
-	case actionDoNothing:
-		return "no-action"
+	// Deprovisioning failed for a retryable reason
+	case actionRetry:
+		return "retry"
+	// Deprovisioning computation unsuccessful
 	case actionFailed:
 		return "failed"
+	case actionDoNothing:
+		return "do nothing"
 	default:
 		return fmt.Sprintf("unknown (%d)", a)
 	}
 }
 
 type Command struct {
-	nodesToRemove   []*v1.Node
-	action          action
-	replacementNode *scheduling.Node
-	created         time.Time
+	nodesToRemove    []*v1.Node
+	action           action
+	replacementNodes []*scheduling.Node
 }
 
 func (o Command) String() string {
@@ -121,19 +111,34 @@ func (o Command) String() string {
 			fmt.Fprintf(&buf, "/%s", capacityType)
 		}
 	}
-	if o.replacementNode != nil {
-		ct := o.replacementNode.Requirements.Get(v1alpha5.LabelCapacityType)
-		nodeDesc := "node"
-		// if there is a single capacity type value, we know what will launch. This makes it more clear
-		// in logs why we replaced a node with one that at first glance appears more expensive when doing an OD->spot
-		// replacement
-		if ct.Len() == 1 {
-			nodeDesc = fmt.Sprintf("%s node", ct.Any())
-		}
-
-		fmt.Fprintf(&buf, " and replacing with %s from types %s",
-			nodeDesc,
-			scheduling.InstanceTypeList(o.replacementNode.InstanceTypeOptions))
+	if len(o.replacementNodes) == 0 {
+		return buf.String()
 	}
+	odNodes := 0
+	spotNodes := 0
+	for _, node := range o.replacementNodes {
+		ct := node.Requirements.Get(v1alpha5.LabelCapacityType)
+		if ct.Has(v1alpha5.CapacityTypeOnDemand) {
+			odNodes++
+		}
+		if ct.Has(v1alpha5.CapacityTypeSpot) {
+			spotNodes++
+		}
+	}
+	// Print list of instance types for the first replacementNode.
+	if len(o.replacementNodes) > 1 {
+		fmt.Fprintf(&buf, " and replacing with %d spot and %d on-demand nodes from types %s",
+			spotNodes, odNodes,
+			scheduling.InstanceTypeList(o.replacementNodes[0].InstanceTypeOptions))
+		return buf.String()
+	}
+	ct := o.replacementNodes[0].Requirements.Get(v1alpha5.LabelCapacityType)
+	nodeDesc := "node"
+	if ct.Len() == 1 {
+		nodeDesc = fmt.Sprintf("%s node", ct.Any())
+	}
+	fmt.Fprintf(&buf, " and replacing with %s from types %s",
+		nodeDesc,
+		scheduling.InstanceTypeList(o.replacementNodes[0].InstanceTypeOptions))
 	return buf.String()
 }

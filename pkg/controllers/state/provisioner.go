@@ -16,7 +16,6 @@ package state
 
 import (
 	"context"
-	"net/http"
 
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -27,10 +26,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
-	operatorcontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
-const provisionerControllerName = "provisioner-state"
+var _ corecontroller.TypedController[*v1alpha5.Provisioner] = (*ProvisionerController)(nil)
 
 // ProvisionerController reconciles provisioners to re-trigger consolidation on change.
 type ProvisionerController struct {
@@ -38,29 +37,29 @@ type ProvisionerController struct {
 	cluster    *Cluster
 }
 
-func NewProvisionerController(kubeClient client.Client, cluster *Cluster) *ProvisionerController {
-	return &ProvisionerController{
+func NewProvisionerController(kubeClient client.Client, cluster *Cluster) corecontroller.Controller {
+	return corecontroller.Typed[*v1alpha5.Provisioner](kubeClient, &ProvisionerController{
 		kubeClient: kubeClient,
 		cluster:    cluster,
-	}
+	})
 }
 
-func (c *ProvisionerController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+func (c *ProvisionerController) Name() string {
+	return "provisionerstate"
+}
+
+func (c *ProvisionerController) Reconcile(_ context.Context, _ *v1alpha5.Provisioner) (reconcile.Result, error) {
 	// Something changed in the provisioner so we should re-consider consolidation
 	c.cluster.recordConsolidationChange()
 	return reconcile.Result{}, nil
 }
 
-func (c *ProvisionerController) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return controllerruntime.
+func (c *ProvisionerController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
+	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
-		Named(provisionerControllerName).
+		For(&v1alpha5.Provisioner{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
-		WithEventFilter(predicate.Funcs{DeleteFunc: func(event event.DeleteEvent) bool { return false }}).
-		For(&v1alpha5.Provisioner{})
-}
-
-func (c *ProvisionerController) LivenessProbe(_ *http.Request) error {
-	return nil
+		WithEventFilter(predicate.Funcs{DeleteFunc: func(event event.DeleteEvent) bool { return false }}),
+	)
 }
