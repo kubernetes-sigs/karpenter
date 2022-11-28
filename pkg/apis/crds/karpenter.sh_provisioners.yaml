@@ -4,6 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.8.0
+    app.kubernetes.io/managed-by: Helm
+    meta.helm.sh/release-name: karpenter
+    meta.helm.sh/release-namespace: {{ .Release.Namespace }}
   creationTimestamp: null
   name: provisioners.karpenter.sh
 spec:
