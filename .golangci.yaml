@@ -4,6 +4,9 @@ run:
 
   timeout: 5m
 
+  build-tags:
+    - test_performance
+
   skip-dirs:
     - tools
     - website
@@ -62,3 +65,6 @@ issues:
   - linters:
     - goheader
     path: 'zz_(.+)\.go'
+  - linters:
+    - goheader
+    path: 'scheduling_benchmark_test.go'
