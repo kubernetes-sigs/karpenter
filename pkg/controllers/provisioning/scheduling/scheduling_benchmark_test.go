@@ -190,36 +190,12 @@ func makeDiversePods(count int) []*v1.Pod {
 	pods = append(pods, makeTopologySpreadPods(count/7, v1.LabelHostname)...)
 	pods = append(pods, makePodAffinityPods(count/7, v1.LabelHostname)...)
 	pods = append(pods, makePodAffinityPods(count/7, v1.LabelTopologyZone)...)
-	// We intentionally don't do anti-affinity by zone as that creates tons of unschedulable pods.
-	//pods = append(pods, makePodAntiAffinityPods(count/7, v1.LabelTopologyZone)...)
 
 	// fill out due to count being not evenly divisible with generic pods
 	nRemaining := count - len(pods)
 	pods = append(pods, makeGenericPods(nRemaining)...)
 	return pods
 }
-
-//func makePodAntiAffinityPods(count int, key string) []*v1.Pod {
-//	var pods []*v1.Pod
-//	for i := 0; i < count; i++ {
-//		pods = append(pods, test.Pod(
-//			test.PodOptions{
-//				ObjectMeta: metav1.ObjectMeta{Labels: randomAntiAffinityLabels()},
-//				PodAntiRequirements: []v1.PodAffinityTerm{
-//					{
-//						LabelSelector: &metav1.LabelSelector{MatchLabels: randomAntiAffinityLabels()},
-//						TopologyKey:   key,
-//					},
-//				},
-//				ResourceRequirements: v1.ResourceRequirements{
-//					Requests: v1.ResourceList{
-//						v1.ResourceCPU:    randomCPU(),
-//						v1.ResourceMemory: randomMemory(),
-//					},
-//				}}))
-//	}
-//	return pods
-//}
 
 func makePodAffinityPods(count int, key string) []*v1.Pod {
 	var pods []*v1.Pod
@@ -290,12 +266,6 @@ func randomAffinityLabels() map[string]string {
 		"my-affininity": randomLabelValue(),
 	}
 }
-
-//func randomAntiAffinityLabels() map[string]string {
-//	return map[string]string{
-//		"my-anti-affininity": randomLabelValue(),
-//	}
-//}
 
 func randomLabels() map[string]string {
 	return map[string]string{
