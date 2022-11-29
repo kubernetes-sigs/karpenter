@@ -5,7 +5,7 @@ metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.8.0
   creationTimestamp: null
-  name: provisioners.karpenter.sh
+  name: provisioners2.karpenter.sh
   labels:
     app.kubernetes.io/managed-by: Helm
     meta.helm.sh/release-name: karpenter
