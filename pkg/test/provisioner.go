@@ -19,7 +19,6 @@ import (
 	"fmt"
 
 	"github.com/imdario/mergo"
-	. "github.com/onsi/gomega" //nolint:revive,stylecheck
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -64,7 +63,7 @@ func Provisioner(overrides ...ProvisionerOptions) *v1alpha5.Provisioner {
 		options.Limits = v1.ResourceList{v1.ResourceCPU: resource.MustParse("2000")}
 	}
 	raw := &runtime.RawExtension{}
-	ExpectWithOffset(1, raw.UnmarshalJSON(lo.Must(json.Marshal(options.Provider)))).To(Succeed())
+	lo.Must0(raw.UnmarshalJSON(lo.Must(json.Marshal(options.Provider))))
 
 	provisioner := &v1alpha5.Provisioner{
 		ObjectMeta: ObjectMeta(options.ObjectMeta),
