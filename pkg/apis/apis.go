@@ -30,6 +30,12 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/sets"
 )
 
+const (
+	Group           = "karpenter.sh"
+	ExtensionsGroup = "extensions." + Group
+	TestingGroup    = "testing." + Group // Exclusively used for labeling/discovery in testing
+)
+
 var (
 	// Builder includes all types within the apis package
 	Builder = runtime.NewSchemeBuilder(

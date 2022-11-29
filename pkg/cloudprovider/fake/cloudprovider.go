@@ -20,8 +20,10 @@ import (
 	"math"
 	"sync"
 
+	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -40,7 +42,7 @@ type CloudProvider struct {
 
 	// CreateCalls contains the arguments for every create call that was made since it was cleared
 	mu                 sync.Mutex
-	CreateCalls        []*cloudprovider.NodeRequest
+	CreateCalls        []*v1alpha1.Machine
 	AllowedCreateCalls int
 }
 
@@ -52,9 +54,9 @@ func NewCloudProvider() *CloudProvider {
 	}
 }
 
-func (c *CloudProvider) Create(ctx context.Context, nodeRequest *cloudprovider.NodeRequest) (*v1.Node, error) {
+func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha1.Machine) (*v1.Node, error) {
 	c.mu.Lock()
-	c.CreateCalls = append(c.CreateCalls, nodeRequest)
+	c.CreateCalls = append(c.CreateCalls, machine)
 	if len(c.CreateCalls) > c.AllowedCreateCalls {
 		c.mu.Unlock()
 		return &v1.Node{}, fmt.Errorf("erroring as number of AllowedCreateCalls has been exceeded")
@@ -62,10 +64,17 @@ func (c *CloudProvider) Create(ctx context.Context, nodeRequest *cloudprovider.N
 	c.mu.Unlock()
 
 	name := test.RandomName()
-	instanceType := nodeRequest.InstanceTypeOptions[0]
+	requirements := scheduling.NewNodeSelectorRequirements(machine.Spec.Requirements...)
+	instanceTypeName := requirements.Get(v1.LabelInstanceType).Values()[0]
+
+	lo.Find(machine.OwnerReferences, func(reference metav1.OwnerReference) bool {
+		return reference.APIVersion ==
+	})
+	machine.GetOwnerReferences()
+	c.GetInstanceTypes(ctx, )
 	// Labels
 	labels := map[string]string{}
-	for key, requirement := range instanceType.Requirements {
+	for key, requirement := range instanceType. {
 		if requirement.Len() == 1 {
 			labels[key] = requirement.Values()[0]
 		}

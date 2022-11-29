@@ -40,6 +40,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+
 	"github.com/aws/karpenter-core/pkg/controllers/node"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/test"
