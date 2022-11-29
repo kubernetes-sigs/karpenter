@@ -44,10 +44,15 @@ func RandomName() string {
 }
 
 func ObjectMeta(overrides ...metav1.ObjectMeta) metav1.ObjectMeta {
-	return MustMerge(metav1.ObjectMeta{
-		Name:      RandomName(),
+	return MustMerge(ObjectMetaWithoutNamespace(metav1.ObjectMeta{
 		Namespace: "default",
-		Labels:    map[string]string{DiscoveryLabel: "unspecified"}, // For cleanup discovery
+	}), overrides...)
+}
+
+func ObjectMetaWithoutNamespace(overrides ...metav1.ObjectMeta) metav1.ObjectMeta {
+	return MustMerge(metav1.ObjectMeta{
+		Name:   RandomName(),
+		Labels: map[string]string{DiscoveryLabel: "unspecified"}, // For cleanup discovery
 	}, overrides...)
 }
 
