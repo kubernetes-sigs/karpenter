@@ -242,7 +242,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 			continue
 		}
 		// Create node template
-		nodeTemplates = append(nodeTemplates, scheduling.NewNodeTemplate(provisioner))
+		nodeTemplates = append(nodeTemplates, scheduling.NewMachineTemplate(provisioner))
 		// Get instance type options
 		instanceTypeOptions, err := p.cloudProvider.GetInstanceTypes(ctx, provisioner)
 		if err != nil {
@@ -317,7 +317,7 @@ func (p *Provisioner) launch(ctx context.Context, opts LaunchOptions, node *sche
 	logging.FromContext(ctx).Infof("launching %s", node)
 	k8sNode, err := p.cloudProvider.Create(
 		logging.WithLogger(ctx, logging.FromContext(ctx).Named("cloudprovider")),
-		&cloudprovider.NodeRequest{InstanceTypeOptions: node.InstanceTypeOptions, Template: &node.NodeTemplate},
+		node.ToMachine(),
 	)
 	if err != nil {
 		return "", fmt.Errorf("creating cloud provider instance, %w", err)

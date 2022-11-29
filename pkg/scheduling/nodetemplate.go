@@ -16,18 +16,17 @@ package scheduling
 
 import (
 	"github.com/samber/lo"
-
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-
-	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 )
 
-// NodeTemplate encapsulates the fields required to create a node and mirrors
+// MachineTemplate encapsulates the fields required to create a node and mirrors
 // the fields in Provisioner. These structs are maintained separately in order
 // for fields like Requirements to be able to be stored more efficiently.
-type NodeTemplate struct {
-	ProvisionerName      string
+type MachineTemplate struct {
+	ProvisionerRef       *v1alpha5.Provisioner
 	Provider             *v1alpha5.Provider
 	ProviderRef          *v1alpha5.ProviderRef
 	Annotations          map[string]string
@@ -38,13 +37,13 @@ type NodeTemplate struct {
 	KubeletConfiguration *v1alpha5.KubeletConfiguration
 }
 
-func NewNodeTemplate(provisioner *v1alpha5.Provisioner) *NodeTemplate {
+func NewMachineTemplate(provisioner *v1alpha5.Provisioner) *MachineTemplate {
 	labels := lo.Assign(provisioner.Spec.Labels, map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name})
 	requirements := NewRequirements()
 	requirements.Add(NewNodeSelectorRequirements(provisioner.Spec.Requirements...).Values()...)
 	requirements.Add(NewLabelRequirements(labels).Values()...)
-	return &NodeTemplate{
-		ProvisionerName:      provisioner.Name,
+	return &MachineTemplate{
+		ProvisionerRef:       provisioner,
 		Provider:             provisioner.Spec.Provider,
 		ProviderRef:          provisioner.Spec.ProviderRef,
 		KubeletConfiguration: provisioner.Spec.KubeletConfiguration,
@@ -56,15 +55,21 @@ func NewNodeTemplate(provisioner *v1alpha5.Provisioner) *NodeTemplate {
 	}
 }
 
-func (n *NodeTemplate) ToNode() *v1.Node {
-	return &v1.Node{
+func (n *MachineTemplate) ToMachine() *v1alpha1.Machine {
+	return &v1alpha1.Machine{
 		ObjectMeta: metav1.ObjectMeta{
-			Labels:      lo.Assign(n.Labels, n.Requirements.Labels()),
-			Annotations: n.Annotations,
-			Finalizers:  []string{v1alpha5.TerminationFinalizer},
+			GenerateName: n.ProvisionerRef.Name,
+			OwnerReferences: []metav1.OwnerReference{
+				{},
+			},
 		},
-		Spec: v1.NodeSpec{
-			Taints: append(n.Taints, n.StartupTaints...),
+		Spec: v1alpha1.MachineSpec{
+			Labels:          n.Labels,
+			Taints:          n.Taints,
+			StartupTaints:   n.StartupTaints,
+			Requirements:    n.Requirements.NodeSelectorRequirements(),
+			Kubelet:         n.KubeletConfiguration,
+			NodeTemplateRef: n.ProviderRef,
 		},
 	}
 }
