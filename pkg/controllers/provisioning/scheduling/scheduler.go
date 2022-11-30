@@ -25,12 +25,11 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/aws/karpenter-core/pkg/apis/core"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
-	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
@@ -40,9 +39,9 @@ type SchedulerOptions struct {
 	SimulationMode bool
 }
 
-func NewScheduler(ctx context.Context, kubeClient client.Client, nodeTemplates []*scheduling.NodeTemplate,
+func NewScheduler(ctx context.Context, kubeClient client.Client, machines []*MachineTemplate,
 	provisioners []v1alpha5.Provisioner, cluster *state.Cluster, stateNodes []*state.Node, topology *Topology,
-	instanceTypes map[string][]*cloudprovider.InstanceType, daemonOverhead map[*scheduling.NodeTemplate]v1.ResourceList,
+	instanceTypes map[string][]*cloudprovider.InstanceType, daemonOverhead map[*MachineTemplate]v1.ResourceList,
 	recorder events.Recorder, opts SchedulerOptions) *Scheduler {
 
 	// if any of the provisioners add a taint with a prefer no schedule effect, we add a toleration for the taint
@@ -59,7 +58,7 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, nodeTemplates [
 	s := &Scheduler{
 		ctx:                ctx,
 		kubeClient:         kubeClient,
-		nodeTemplates:      nodeTemplates,
+		nodeTemplates:      machines,
 		topology:           topology,
 		cluster:            cluster,
 		instanceTypes:      instanceTypes,
@@ -70,8 +69,8 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, nodeTemplates [
 		remainingResources: map[string]v1.ResourceList{},
 	}
 
-	namedNodeTemplates := lo.KeyBy(s.nodeTemplates, func(nodeTemplate *scheduling.NodeTemplate) string {
-		return nodeTemplate.Requirements.Get(v1alpha5.ProvisionerNameLabelKey).Values()[0]
+	namedNodeTemplates := lo.KeyBy(s.nodeTemplates, func(nodeTemplate *MachineTemplate) string {
+		return nodeTemplate.Requirements.Get(core.ProvisionerNameLabelKey).Values()[0]
 	})
 
 	for _, provisioner := range provisioners {
@@ -86,12 +85,12 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, nodeTemplates [
 
 type Scheduler struct {
 	ctx                context.Context
-	nodes              []*Node
-	existingNodes      []*ExistingNode
-	nodeTemplates      []*scheduling.NodeTemplate
+	nodes              []*Machine
+	existingNodes      []*ExistingMachine
+	nodeTemplates      []*MachineTemplate
 	remainingResources map[string]v1.ResourceList // provisioner name -> remaining resources for that provisioner
 	instanceTypes      map[string][]*cloudprovider.InstanceType
-	daemonOverhead     map[*scheduling.NodeTemplate]v1.ResourceList
+	daemonOverhead     map[*MachineTemplate]v1.ResourceList
 	preferences        *Preferences
 	topology           *Topology
 	cluster            *state.Cluster
@@ -100,7 +99,7 @@ type Scheduler struct {
 	kubeClient         client.Client
 }
 
-func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) ([]*Node, []*ExistingNode, error) {
+func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) ([]*Machine, []*ExistingMachine, error) {
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
 	// issues including pods with affinity to another pod in the batch. We could topo-sort to solve this, but it wouldn't
 	// solve the problem of scheduling pods where a particular order is needed to prevent a max-skew violation. E.g. if we
@@ -168,7 +167,7 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 	// Report in flight nodes, or exit to avoid log spam
 	inflightCount := 0
 	existingCount := 0
-	for _, node := range lo.Filter(s.existingNodes, func(node *ExistingNode, _ int) bool { return len(node.Pods) > 0 }) {
+	for _, node := range lo.Filter(s.existingNodes, func(node *ExistingMachine, _ int) bool { return len(node.Pods) > 0 }) {
 		inflightCount++
 		existingCount += len(node.Pods)
 	}
@@ -212,7 +211,7 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 			}
 		}
 
-		node := NewNode(nodeTemplate, s.topology, s.daemonOverhead[nodeTemplate], instanceTypes)
+		node := NewMachine(nodeTemplate, s.topology, s.daemonOverhead[nodeTemplate], instanceTypes)
 		if err := node.Add(ctx, pod); err != nil {
 			errs = multierr.Append(errs, fmt.Errorf("incompatible with provisioner %q, %w", nodeTemplate.ProvisionerName, err))
 			continue
@@ -225,10 +224,10 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 	return errs
 }
 
-func (s *Scheduler) calculateExistingNodes(namedNodeTemplates map[string]*scheduling.NodeTemplate, stateNodes []*state.Node) {
+func (s *Scheduler) calculateExistingNodes(namedNodeTemplates map[string]*MachineTemplate, stateNodes []*state.Node) {
 	// create our existing nodes
 	for _, node := range stateNodes {
-		name, ok := node.Node.Labels[v1alpha5.ProvisionerNameLabelKey]
+		name, ok := node.Node.Labels[core.ProvisionerNameLabelKey]
 		if !ok {
 			// ignoring this node as it wasn't launched by us
 			continue
@@ -242,7 +241,7 @@ func (s *Scheduler) calculateExistingNodes(namedNodeTemplates map[string]*schedu
 
 		// We don't use the status field and instead recompute the remaining resources to ensure we have a consistent view
 		// of the cluster during scheduling.  Depending on how node creation falls out, this will also work for cases where
-		// we don't create Node resources.
+		// we don't create Machine resources.
 		s.remainingResources[name] = resources.Subtract(s.remainingResources[name], node.Capacity)
 	}
 }

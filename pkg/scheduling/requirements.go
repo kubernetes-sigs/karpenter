@@ -24,7 +24,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/core"
 )
 
 // Requirements are an efficient set representation under the hood. Since its underlying
@@ -122,7 +122,7 @@ func (r Requirements) Get(key string) *Requirement {
 // Compatible ensures the provided requirements can be met.
 func (r Requirements) Compatible(requirements Requirements) (errs error) {
 	// Custom Labels must intersect, but if not defined are denied.
-	for key := range requirements.Keys().Difference(v1alpha5.WellKnownLabels) {
+	for key := range requirements.Keys().Difference(core.WellKnownLabels) {
 		if operator := requirements.Get(key).Operator(); r.Has(key) || operator == v1.NodeSelectorOpNotIn || operator == v1.NodeSelectorOpDoesNotExist {
 			continue
 		}
@@ -172,7 +172,7 @@ func editDistance(s, t string) int {
 }
 
 func labelHint(r Requirements, key string) string {
-	for wellKnown := range v1alpha5.WellKnownLabels {
+	for wellKnown := range core.WellKnownLabels {
 		if strings.Contains(wellKnown, key) || editDistance(key, wellKnown) < len(wellKnown)/5 {
 			return fmt.Sprintf(" (typo of %q?)", wellKnown)
 		}
@@ -208,7 +208,7 @@ func (r Requirements) Intersects(requirements Requirements) (errs error) {
 func (r Requirements) Labels() map[string]string {
 	labels := map[string]string{}
 	for key, requirement := range r {
-		if !v1alpha5.IsRestrictedNodeLabel(key) {
+		if !core.IsRestrictedNodeLabel(key) {
 			if value := requirement.Any(); value != "" {
 				labels[key] = value
 			}
@@ -218,6 +218,6 @@ func (r Requirements) Labels() map[string]string {
 }
 
 func (r Requirements) String() string {
-	requirements := lo.Reject(r.Values(), func(requirement *Requirement, _ int) bool { return v1alpha5.RestrictedLabels.Has(requirement.Key) })
+	requirements := lo.Reject(r.Values(), func(requirement *Requirement, _ int) bool { return core.RestrictedLabels.Has(requirement.Key) })
 	return strings.Join(lo.Map(requirements, func(requirement *Requirement, _ int) string { return requirement.String() }), ", ")
 }

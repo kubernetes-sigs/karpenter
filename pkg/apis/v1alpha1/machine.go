@@ -15,22 +15,13 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/operator/scheme"
 )
 
 type MachineSpec struct {
-	// Annotations are added and applied to the node.
-	// +optional
-	Annotations map[string]string `json:"annotations,omitempty"`
-	// Labels are layered with Requirements and applied to the node.
-	// +optional
-	Labels map[string]string `json:"labels,omitempty"`
 	// Taints will be applied to the machine's node.
 	// +optional
 	Taints []v1.Taint `json:"taints,omitempty"`
@@ -50,6 +41,9 @@ type MachineSpec struct {
 }
 
 // Machine is the Schema for the Machines API
+// +kubebuilder:object:root=true
+// +kubebuilder:resource:path=machines,scope=Cluster,categories=karpenter
+// +kubebuilder:subresource:status
 type Machine struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -59,36 +53,9 @@ type Machine struct {
 }
 
 // MachineList contains a list of Provisioner
+// +kubebuilder:object:root=true
 type MachineList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Machine `json:"items"`
-}
-
-func NewMachine(provisioner *v1alpha5.Provisioner) *Machine {
-	labels := lo.Assign(provisioner.Spec.Labels, map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name})
-	requirements := provisioner.Spec.Requirements
-	for k, v := range labels {
-		requirements = append(requirements, v1.NodeSelectorRequirement{
-			Key:      k,
-			Operator: v1.NodeSelectorOpIn,
-			Values:   []string{v},
-		})
-	}
-	m := &Machine{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "placeholder", // TODO joinnis: Replace this name when we get to generating the name
-		},
-		Spec: MachineSpec{
-			Annotations:     provisioner.Annotations,
-			Labels:          labels,
-			Kubelet:         provisioner.Spec.KubeletConfiguration,
-			Taints:          provisioner.Spec.Taints,
-			StartupTaints:   provisioner.Spec.StartupTaints,
-			Requirements:    requirements,
-			NodeTemplateRef: provisioner.Spec.ProviderRef,
-		},
-	}
-	lo.Must0(controllerutil.SetOwnerReference(provisioner, m, scheme.Scheme))
-	return m
 }

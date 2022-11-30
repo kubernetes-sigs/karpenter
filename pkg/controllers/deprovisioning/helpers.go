@@ -22,6 +22,7 @@ import (
 
 	"github.com/samber/lo"
 
+	"github.com/aws/karpenter-core/pkg/apis/core"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
@@ -40,7 +41,7 @@ import (
 
 //nolint:gocyclo
 func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
-	nodesToDelete ...CandidateNode) (newNodes []*pscheduling.Node, allPodsScheduled bool, err error) {
+	nodesToDelete ...CandidateNode) (newNodes []*pscheduling.Machine, allPodsScheduled bool, err error) {
 	var stateNodes []*state.Node
 	var markedForDeletionNodes []*state.Node
 	candidateNodeIsDeleting := false
@@ -107,7 +108,7 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	// to schedule since we want to assume that we can delete a node and its pods will immediately
 	// move to an existing node which won't occur if that node isn't ready.
 	for _, n := range ifn {
-		if n.Node.Labels[v1alpha5.LabelNodeInitialized] != "true" {
+		if n.Node.Labels[core.LabelNodeInitialized] != "true" {
 			return nil, false, nil
 		}
 	}
@@ -178,7 +179,7 @@ func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient clie
 	cluster.ForEachNode(func(n *state.Node) bool {
 		var provisioner *v1alpha5.Provisioner
 		var instanceTypeMap map[string]*cloudprovider.InstanceType
-		if provName, ok := n.Node.Labels[v1alpha5.ProvisionerNameLabelKey]; ok {
+		if provName, ok := n.Node.Labels[core.ProvisionerNameLabelKey]; ok {
 			provisioner = provisioners[provName]
 			instanceTypeMap = instanceTypesByProvisioner[provName]
 		}
@@ -198,7 +199,7 @@ func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient clie
 		}
 
 		// skip any nodes that we can't determine the capacity type or the topology zone for
-		ct, ok := n.Node.Labels[v1alpha5.LabelCapacityType]
+		ct, ok := n.Node.Labels[core.LabelCapacityType]
 		if !ok {
 			return true
 		}
@@ -208,7 +209,7 @@ func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient clie
 		}
 
 		// Skip nodes that aren't initialized
-		if n.Node.Labels[v1alpha5.LabelNodeInitialized] != "true" {
+		if n.Node.Labels[core.LabelNodeInitialized] != "true" {
 			return true
 		}
 
@@ -292,9 +293,9 @@ func calculateLifetimeRemaining(node CandidateNode, clock clock.Clock) float64 {
 // to get the launch price; else, it uses the on-demand launch price
 func worstLaunchPrice(ofs []cloudprovider.Offering, reqs scheduling.Requirements) float64 {
 	// We prefer to launch spot offerings, so we will get the worst price based on the node requirements
-	if reqs.Get(v1alpha5.LabelCapacityType).Has(v1alpha5.CapacityTypeSpot) {
+	if reqs.Get(core.LabelCapacityType).Has(core.CapacityTypeSpot) {
 		spotOfferings := lo.Filter(ofs, func(of cloudprovider.Offering, _ int) bool {
-			return of.CapacityType == v1alpha5.CapacityTypeSpot && reqs.Get(v1.LabelTopologyZone).Has(of.Zone)
+			return of.CapacityType == core.CapacityTypeSpot && reqs.Get(v1.LabelTopologyZone).Has(of.Zone)
 		})
 		if len(spotOfferings) > 0 {
 			return lo.MaxBy(spotOfferings, func(of1, of2 cloudprovider.Offering) bool {
@@ -302,9 +303,9 @@ func worstLaunchPrice(ofs []cloudprovider.Offering, reqs scheduling.Requirements
 			}).Price
 		}
 	}
-	if reqs.Get(v1alpha5.LabelCapacityType).Has(v1alpha5.CapacityTypeOnDemand) {
+	if reqs.Get(core.LabelCapacityType).Has(core.CapacityTypeOnDemand) {
 		onDemandOfferings := lo.Filter(ofs, func(of cloudprovider.Offering, _ int) bool {
-			return of.CapacityType == v1alpha5.CapacityTypeOnDemand && reqs.Get(v1.LabelTopologyZone).Has(of.Zone)
+			return of.CapacityType == core.CapacityTypeOnDemand && reqs.Get(v1.LabelTopologyZone).Has(of.Zone)
 		})
 		if len(onDemandOfferings) > 0 {
 			return lo.MaxBy(onDemandOfferings, func(of1, of2 cloudprovider.Offering) bool {
@@ -325,7 +326,7 @@ func clamp(min, val, max float64) float64 {
 	return val
 }
 
-// mapNodes maps from a list of *v1.Node to candidateNode
+// mapNodes maps from a list of *v1.Machine to candidateNode
 func mapNodes(nodes []*v1.Node, candidateNodes []CandidateNode) []CandidateNode {
 	verifyNodeNames := sets.NewString(lo.Map(nodes, func(t *v1.Node, i int) string { return t.Name })...)
 	var ret []CandidateNode

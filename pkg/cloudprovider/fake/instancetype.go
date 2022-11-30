@@ -20,14 +20,13 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/scheduling"
-
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	utilsets "k8s.io/apimachinery/pkg/util/sets"
+
+	"github.com/aws/karpenter-core/pkg/apis/core"
+	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	"github.com/aws/karpenter-core/pkg/scheduling"
 )
 
 const (
@@ -39,7 +38,7 @@ const (
 )
 
 func init() {
-	v1alpha5.WellKnownLabels.Insert(
+	core.WellKnownLabels.Insert(
 		LabelInstanceSize,
 		ExoticInstanceLabelKey,
 		IntegerInstanceLabelKey,
@@ -79,7 +78,7 @@ func NewInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 		scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, options.Architecture),
 		scheduling.NewRequirement(v1.LabelOSStable, v1.NodeSelectorOpIn, options.OperatingSystems.List()...),
 		scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string { return o.Zone })...),
-		scheduling.NewRequirement(v1alpha5.LabelCapacityType, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string { return o.CapacityType })...),
+		scheduling.NewRequirement(core.LabelCapacityType, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string { return o.CapacityType })...),
 		scheduling.NewRequirement(LabelInstanceSize, v1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(ExoticInstanceLabelKey, v1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(IntegerInstanceLabelKey, v1.NodeSelectorOpIn, fmt.Sprint(options.Resources.Cpu().Value())),
@@ -112,9 +111,9 @@ func InstanceTypesAssorted() []*cloudprovider.InstanceType {
 	for _, cpu := range []int{1, 2, 4, 8, 16, 32, 64} {
 		for _, mem := range []int{1, 2, 4, 8, 16, 32, 64, 128} {
 			for _, zone := range []string{"test-zone-1", "test-zone-2", "test-zone-3"} {
-				for _, ct := range []string{v1alpha5.CapacityTypeSpot, v1alpha5.CapacityTypeOnDemand} {
+				for _, ct := range []string{core.CapacityTypeSpot, core.CapacityTypeOnDemand} {
 					for _, os := range []utilsets.String{utilsets.NewString(string(v1.Linux)), utilsets.NewString(string(v1.Windows))} {
-						for _, arch := range []string{v1alpha5.ArchitectureAmd64, v1alpha5.ArchitectureArm64} {
+						for _, arch := range []string{core.ArchitectureAmd64, core.ArchitectureArm64} {
 							opts := InstanceTypeOptions{
 								Name:             fmt.Sprintf("%d-cpu-%d-mem-%s-%s-%s-%s", cpu, mem, arch, strings.Join(os.List(), ","), zone, ct),
 								Architecture:     arch,
