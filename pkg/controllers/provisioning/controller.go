@@ -16,14 +16,12 @@ package provisioning
 
 import (
 	"context"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/events"
@@ -54,19 +52,17 @@ func (c *Controller) Name() string {
 }
 
 // Reconcile the resource
-func (c *Controller) Reconcile(_ context.Context, _ *v1.Pod) (reconcile.Result, error) {
-	c.provisioner.Trigger()
-	// TODO: This is only necessary due to a bug in the batcher. Ideally we should retrigger on provisioning error instead
-	return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
+func (c *Controller) Reconcile(_ context.Context, p *v1.Pod) (reconcile.Result, error) {
+	if pod.IsProvisionable(p) {
+		c.provisioner.Trigger()
+	}
+	return reconcile.Result{}, nil
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1.Pod{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
-		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
-			// Ensure the pod can be provisioned
-			return pod.IsProvisionable(obj.(*v1.Pod))
-		})))
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
+	)
 }

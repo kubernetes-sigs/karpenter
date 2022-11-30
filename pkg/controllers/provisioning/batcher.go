@@ -19,62 +19,42 @@ import (
 	"time"
 
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
-	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
 )
 
 // Batcher separates a stream of Trigger() calls into windowed slices. The
 // window is dynamic and will be extended if additional items are added up to a
 // maximum batch duration.
 type Batcher struct {
-	running context.Context
-
-	trigger       chan struct{}
-	immediate     chan struct{}
-	settingsStore settingsstore.Store
+	trigger chan struct{}
 }
 
 // NewBatcher is a constructor for the Batcher
-func NewBatcher(running context.Context, settingsStore settingsstore.Store) *Batcher {
+func NewBatcher() *Batcher {
 	return &Batcher{
-		running:       running,
-		trigger:       make(chan struct{}), // triggering shouldn't block
-		immediate:     make(chan struct{}),
-		settingsStore: settingsStore,
+		trigger: make(chan struct{}, 1),
 	}
 }
 
 // Trigger causes the batcher to start a batching window, or extend the current batching window if it hasn't reached the
 // maximum length.
 func (b *Batcher) Trigger() {
-	// it's ok to miss a trigger as that means Wait() already has a trigger inbound
+	// The trigger is idempotently armed. This statement never blocks
 	select {
 	case b.trigger <- struct{}{}:
 	default:
 	}
 }
 
-// TriggerImmediate causes the batcher to immediately end the current batching window and causes the waiter on the batching
-// window to continue.
-func (b *Batcher) TriggerImmediate() {
-	b.immediate <- struct{}{}
-}
-
 // Wait starts a batching window and continues waiting as long as it continues receiving triggers within
 // the idleDuration, up to the maxDuration
-func (b *Batcher) Wait(ctx context.Context) {
+func (b *Batcher) Wait(ctx context.Context) bool {
 	select {
 	case <-b.trigger:
 		// start the batching window after the first item is received
-	case <-b.immediate:
-		// but for immediate triggering and context cancellations, end the batching window
-		return
-	case <-b.running.Done():
-		return
+	case <-time.After(1 * time.Second):
+		// If no pods, bail to the outer controller framework to refresh the context
+		return false
 	}
-
-	// Settings are injected here so that we ensure we have the latest
-	// timeout/idle values after a potentially long wait
-	ctx = b.settingsStore.InjectSettings(ctx)
 	timeout := time.NewTimer(settings.FromContext(ctx).BatchMaxDuration.Duration)
 	idle := time.NewTimer(settings.FromContext(ctx).BatchIdleDuration.Duration)
 	for {
@@ -85,12 +65,10 @@ func (b *Batcher) Wait(ctx context.Context) {
 				<-idle.C
 			}
 			idle.Reset(settings.FromContext(ctx).BatchIdleDuration.Duration)
-		case <-b.immediate:
-			return
 		case <-timeout.C:
-			return
+			return true
 		case <-idle.C:
-			return
+			return true
 		}
 	}
 }

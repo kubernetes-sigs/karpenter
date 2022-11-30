@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"time"
 
 	"github.com/imdario/mergo"
 	"github.com/prometheus/client_golang/prometheus"
@@ -61,9 +60,6 @@ var WaitForClusterSync = true
 
 // Provisioner waits for enqueued pods, batches them, creates capacity and binds the pods to the capacity.
 type Provisioner struct {
-	// State
-	Stop context.CancelFunc
-	// Dependencies
 	cloudProvider  cloudprovider.CloudProvider
 	kubeClient     client.Client
 	coreV1Client   corev1.CoreV1Interface
@@ -76,11 +72,8 @@ type Provisioner struct {
 
 func NewProvisioner(ctx context.Context, kubeClient client.Client, coreV1Client corev1.CoreV1Interface,
 	recorder events.Recorder, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster, settingsStore settingsstore.Store) *Provisioner {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("provisioning"))
-	running, stop := context.WithCancel(ctx)
 	p := &Provisioner{
-		Stop:           stop,
-		batcher:        NewBatcher(running, settingsStore),
+		batcher:        NewBatcher(),
 		cloudProvider:  cloudProvider,
 		kubeClient:     kubeClient,
 		coreV1Client:   coreV1Client,
@@ -100,32 +93,30 @@ func (p *Provisioner) Trigger() {
 	p.batcher.Trigger()
 }
 
-func (p *Provisioner) TriggerImmediate() {
-	p.batcher.TriggerImmediate()
-}
-
 func (p *Provisioner) Builder(_ context.Context, mgr manager.Manager) controller.Builder {
-	return controller.NewSingletonManagedBy(mgr).
-		WaitUntil(func(ctx context.Context) {
-			// Batch pods
-			p.batcher.Wait(ctx)
-
-			// wait to ensure that our cluster state is synced with the current known nodes to prevent over-provisioning
-			for WaitForClusterSync {
-				if err := p.cluster.Synchronized(ctx); err != nil {
-					logging.FromContext(ctx).Infof("waiting for cluster state to catch up, %s", err)
-					time.Sleep(1 * time.Second)
-				} else {
-					break
-				}
-			}
-		}).
-		WithOptions(controller.Options{
-			DisableWaitOnError: true,
-		})
+	return controller.NewSingletonManagedBy(mgr)
 }
 
-func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
+func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (result reconcile.Result, err error) {
+	// If the provisioning loop fails for any reason, retrigger it,
+	// since pod watch events have already been processed
+	defer func() {
+		if err != nil {
+			p.Trigger()
+		}
+	}()
+	// Batch pods
+	if triggered := p.batcher.Wait(ctx); !triggered {
+		return reconcile.Result{}, nil
+	}
+
+	// wait to ensure that our cluster state is synced with the current known nodes to prevent over-provisioning
+	if WaitForClusterSync {
+		if err := p.cluster.Synchronized(ctx); err != nil {
+			return reconcile.Result{}, fmt.Errorf("waiting for cluster state to catch up, %w", err)
+		}
+	}
+
 	// We collect the nodes with their used capacities before we get the list of pending pods. This ensures that
 	// the node capacities we schedule against are always >= what the actual capacity is at any given instance. This
 	// prevents over-provisioning at the cost of potentially under-provisioning which will self-heal during the next
