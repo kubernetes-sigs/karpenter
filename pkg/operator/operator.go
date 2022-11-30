@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/go-logr/zapr"
 	"github.com/samber/lo"
@@ -83,6 +84,7 @@ func NewOperator() (context.Context, *Operator) {
 		Port:        opts.WebhookPort,
 		ServiceName: opts.ServiceName,
 		SecretName:  fmt.Sprintf("%s-cert", opts.ServiceName),
+		GracePeriod: 5 * time.Second,
 	})
 
 	// Client Config
