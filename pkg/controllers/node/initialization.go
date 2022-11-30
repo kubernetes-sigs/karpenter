@@ -23,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/aws/karpenter-core/pkg/apis/core"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -38,7 +39,7 @@ type Initialization struct {
 // Reconcile reconciles the node
 func (r *Initialization) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner, n *v1.Node) (reconcile.Result, error) {
 	// node has been previously determined to be ready, so there's nothing to do
-	if n.Labels[v1alpha5.LabelNodeInitialized] == "true" {
+	if n.Labels[core.LabelNodeInitialized] == "true" {
 		return reconcile.Result{}, nil
 	}
 
@@ -52,7 +53,7 @@ func (r *Initialization) Reconcile(ctx context.Context, provisioner *v1alpha5.Pr
 		return reconcile.Result{}, nil
 	}
 
-	n.Labels[v1alpha5.LabelNodeInitialized] = "true"
+	n.Labels[core.LabelNodeInitialized] = "true"
 	return reconcile.Result{}, nil
 }
 

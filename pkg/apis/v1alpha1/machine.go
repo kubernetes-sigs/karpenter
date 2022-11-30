@@ -52,6 +52,9 @@ type ResourceRequirements struct {
 }
 
 // Machine is the Schema for the Machines API
+// +kubebuilder:object:root=true
+// +kubebuilder:resource:path=machines,scope=Cluster,categories=karpenter
+// +kubebuilder:subresource:status
 type Machine struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -61,6 +64,7 @@ type Machine struct {
 }
 
 // MachineList contains a list of Provisioner
+// +kubebuilder:object:root=true
 type MachineList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`

@@ -36,7 +36,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/test"
 
 	"go.uber.org/zap"
@@ -120,9 +119,9 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	instanceTypes := fake.InstanceTypes(instanceCount)
 	cloudProv = fake.NewCloudProvider()
 	cloudProv.InstanceTypes = instanceTypes
-	scheduler := pscheduling.NewScheduler(ctx, nil, []*scheduling.NodeTemplate{scheduling.NewMachineTemplate(provisioner)},
+	scheduler := pscheduling.NewScheduler(ctx, nil, []*pscheduling.MachineTemplate{pscheduling.NewMachineTemplate(provisioner)},
 		nil, state.NewCluster(ctx, &clock.RealClock{}, nil, cloudProv), nil, &pscheduling.Topology{},
-		map[string][]*cloudprovider.InstanceType{provisioner.Name: instanceTypes}, map[*scheduling.NodeTemplate]v1.ResourceList{},
+		map[string][]*cloudprovider.InstanceType{provisioner.Name: instanceTypes}, map[*pscheduling.MachineTemplate]v1.ResourceList{},
 		test.NewEventRecorder(),
 		pscheduling.SchedulerOptions{})
 

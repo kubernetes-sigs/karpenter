@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/aws/karpenter-core/pkg/apis/core"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 
@@ -271,14 +272,14 @@ func (c *Controller) launchReplacementNodes(ctx context.Context, action Command)
 		return fmt.Errorf("cordoning nodes, %w", err)
 	}
 
-	nodeNames, err := c.provisioner.LaunchNodes(ctx, provisioning.LaunchOptions{RecordPodNomination: false}, action.replacementNodes...)
+	nodeNames, err := c.provisioner.LaunchMachines(ctx, provisioning.LaunchOptions{RecordPodNomination: false}, action.replacementNodes...)
 	if err != nil {
 		// uncordon the nodes as the launch may fail (e.g. ICE or incompatible AMI)
 		err = multierr.Append(err, c.setNodesUnschedulable(ctx, false, nodeNamesToRemove...))
 		return err
 	}
 	if len(nodeNames) != len(action.replacementNodes) {
-		// shouldn't ever occur since a partially failed LaunchNodes should return an error
+		// shouldn't ever occur since a partially failed LaunchMachines should return an error
 		return fmt.Errorf("expected %d node names, got %d", len(action.replacementNodes), len(nodeNames))
 	}
 	metrics.NodesCreatedCounter.WithLabelValues(metrics.DeprovisioningReason).Add(float64(len(nodeNames)))
@@ -300,7 +301,7 @@ func (c *Controller) launchReplacementNodes(ctx context.Context, action Command)
 				c.recorder.Publish(deprovisioningevents.LaunchingNode(&k8Node, action.String()))
 			})
 
-			if _, ok := k8Node.Labels[v1alpha5.LabelNodeInitialized]; !ok {
+			if _, ok := k8Node.Labels[core.LabelNodeInitialized]; !ok {
 				// make the user aware of why deprovisioning is paused
 				c.recorder.Publish(deprovisioningevents.WaitingOnReadiness(&k8Node))
 				return fmt.Errorf("node is not initialized")

@@ -31,6 +31,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
+	"github.com/aws/karpenter-core/pkg/apis/core"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
@@ -121,7 +122,7 @@ var _ = Describe("Provisioning", func() {
 		provisioner := test.Provisioner()
 		schedulable := []*v1.Pod{
 			// Constrained by provisioner
-			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name}}),
+			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{core.ProvisionerNameLabelKey: provisioner.Name}}),
 			// Constrained by zone
 			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelTopologyZone: "test-zone-1"}}),
 			// Constrained by instanceType
@@ -133,7 +134,7 @@ var _ = Describe("Provisioning", func() {
 		}
 		unschedulable := []*v1.Pod{
 			// Ignored, matches another provisioner
-			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1alpha5.ProvisionerNameLabelKey: "unknown"}}),
+			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{core.ProvisionerNameLabelKey: "unknown"}}),
 			// Ignored, invalid zone
 			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelTopologyZone: "unknown"}}),
 			// Ignored, invalid instance type
@@ -143,7 +144,7 @@ var _ = Describe("Provisioning", func() {
 			// Ignored, invalid operating system
 			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelOSStable: "unknown"}}),
 			// Ignored, invalid capacity type
-			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1alpha5.LabelCapacityType: "unknown"}}),
+			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{core.LabelCapacityType: "unknown"}}),
 			// Ignored, label selector does not match
 			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{"foo": "bar"}}),
 		}
@@ -196,10 +197,10 @@ var _ = Describe("Provisioning", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-					v1.LabelInstanceTypeStable:       its[0].Name,
+					core.ProvisionerNameLabelKey: provisioner.Name,
+					v1.LabelInstanceTypeStable:   its[0].Name,
 				},
-				Finalizers: []string{v1alpha5.TerminationFinalizer},
+				Finalizers: []string{core.TerminationFinalizer},
 			}},
 		)
 		ExpectApplied(ctx, env.Client, node, provisioner)
@@ -500,12 +501,12 @@ var _ = Describe("Provisioning", func() {
 	Context("Annotations", func() {
 		It("should annotate nodes", func() {
 			provisioner := test.Provisioner(test.ProvisionerOptions{
-				Annotations: map[string]string{v1alpha5.DoNotConsolidateNodeAnnotationKey: "true"},
+				Annotations: map[string]string{core.DoNotConsolidateNodeAnnotationKey: "true"},
 			})
 			ExpectApplied(ctx, env.Client, provisioner)
 			for _, pod := range ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod()) {
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Annotations).To(HaveKeyWithValue(v1alpha5.DoNotConsolidateNodeAnnotationKey, "true"))
+				Expect(node.Annotations).To(HaveKeyWithValue(core.DoNotConsolidateNodeAnnotationKey, "true"))
 			}
 		})
 	})
@@ -525,7 +526,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
 			for _, pod := range ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod()) {
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels).To(HaveKeyWithValue(v1alpha5.ProvisionerNameLabelKey, provisioner.Name))
+				Expect(node.Labels).To(HaveKeyWithValue(core.ProvisionerNameLabelKey, provisioner.Name))
 				Expect(node.Labels).To(HaveKeyWithValue("test-key-1", "test-value-1"))
 				Expect(node.Labels).To(HaveKeyWithValue("test-key-2", "test-value-2"))
 				Expect(node.Labels).To(And(HaveKey("test-key-3"), Not(HaveValue(Equal("test-value-3")))))
@@ -536,7 +537,7 @@ var _ = Describe("Provisioning", func() {
 			}
 		})
 		It("should label nodes with labels in the LabelDomainExceptions list", func() {
-			for domain := range v1alpha5.LabelDomainExceptions {
+			for domain := range core.LabelDomainExceptions {
 				provisioner := test.Provisioner(test.ProvisionerOptions{Labels: map[string]string{domain + "/test": "test-value"}})
 				ExpectApplied(ctx, env.Client, provisioner)
 				pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
@@ -790,10 +791,10 @@ var _ = Describe("Multiple Provisioners", func() {
 		provisioner := test.Provisioner()
 		ExpectApplied(ctx, env.Client, provisioner, test.Provisioner())
 		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
-			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name}}),
+			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{core.ProvisionerNameLabelKey: provisioner.Name}}),
 		)[0]
 		node := ExpectScheduled(ctx, env.Client, pod)
-		Expect(node.Labels[v1alpha5.ProvisionerNameLabelKey]).To(Equal(provisioner.Name))
+		Expect(node.Labels[core.ProvisionerNameLabelKey]).To(Equal(provisioner.Name))
 	})
 	It("should schedule to a provisioner by labels", func() {
 		provisioner := test.Provisioner(test.ProvisionerOptions{Labels: map[string]string{"foo": "bar"}})
@@ -802,14 +803,14 @@ var _ = Describe("Multiple Provisioners", func() {
 			test.UnschedulablePod(test.PodOptions{NodeSelector: provisioner.Spec.Labels}),
 		)[0]
 		node := ExpectScheduled(ctx, env.Client, pod)
-		Expect(node.Labels[v1alpha5.ProvisionerNameLabelKey]).To(Equal(provisioner.Name))
+		Expect(node.Labels[core.ProvisionerNameLabelKey]).To(Equal(provisioner.Name))
 	})
 	It("should not match provisioner with PreferNoSchedule taint when other provisioner match", func() {
 		provisioner := test.Provisioner(test.ProvisionerOptions{Taints: []v1.Taint{{Key: "foo", Value: "bar", Effect: v1.TaintEffectPreferNoSchedule}}})
 		ExpectApplied(ctx, env.Client, provisioner, test.Provisioner())
 		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())[0]
 		node := ExpectScheduled(ctx, env.Client, pod)
-		Expect(node.Labels[v1alpha5.ProvisionerNameLabelKey]).ToNot(Equal(provisioner.Name))
+		Expect(node.Labels[core.ProvisionerNameLabelKey]).ToNot(Equal(provisioner.Name))
 	})
 	Context("Weighted Provisioners", func() {
 		It("should schedule to the provisioner with the highest priority always", func() {
@@ -822,7 +823,7 @@ var _ = Describe("Multiple Provisioners", func() {
 			pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(), test.UnschedulablePod(), test.UnschedulablePod())
 			for _, pod := range pods {
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels[v1alpha5.ProvisionerNameLabelKey]).To(Equal(provisioners[2].GetName()))
+				Expect(node.Labels[core.ProvisionerNameLabelKey]).To(Equal(provisioners[2].GetName()))
 			}
 		})
 		It("should schedule to explicitly selected provisioner even if other provisioners are higher priority", func() {
@@ -834,10 +835,10 @@ var _ = Describe("Multiple Provisioners", func() {
 			}
 			ExpectApplied(ctx, env.Client, provisioners...)
 			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
-				test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1alpha5.ProvisionerNameLabelKey: targetedProvisioner.Name}}),
+				test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{core.ProvisionerNameLabelKey: targetedProvisioner.Name}}),
 			)[0]
 			node := ExpectScheduled(ctx, env.Client, pod)
-			Expect(node.Labels[v1alpha5.ProvisionerNameLabelKey]).To(Equal(targetedProvisioner.Name))
+			Expect(node.Labels[core.ProvisionerNameLabelKey]).To(Equal(targetedProvisioner.Name))
 		})
 	})
 })

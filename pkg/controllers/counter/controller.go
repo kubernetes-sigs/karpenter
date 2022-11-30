@@ -61,7 +61,7 @@ func (c *Controller) Name() string {
 // Reconcile a control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner) (reconcile.Result, error) {
 	nodes := v1.NodeList{}
-	if err := c.kubeClient.List(ctx, &nodes, client.MatchingLabels{v1alpha5.ProvisionerNameLabelKey: provisioner.Name}); err != nil {
+	if err := c.kubeClient.List(ctx, &nodes, client.MatchingLabels{core.ProvisionerNameLabelKey: provisioner.Name}); err != nil {
 		return reconcile.Result{}, err
 	}
 	// Nodes aren't synced yet, so return an error which will cause retry with backoff.
@@ -80,7 +80,7 @@ func (c *Controller) resourceCountsFor(provisionerName string) v1.ResourceList {
 	// is accurately reported even for nodes that haven't fully started yet. This allows us to update our provisioner
 	// status immediately upon node creation instead of waiting for the node to become ready.
 	c.cluster.ForEachNode(func(n *state.Node) bool {
-		if n.Node.Labels[v1alpha5.ProvisionerNameLabelKey] == provisionerName {
+		if n.Node.Labels[core.ProvisionerNameLabelKey] == provisionerName {
 			provisioned = append(provisioned, n.Capacity)
 		}
 		return true
@@ -104,7 +104,7 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontrolle
 		Watches(
 			&source.Kind{Type: &v1.Node{}},
 			handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
-				if name, ok := o.GetLabels()[v1alpha5.ProvisionerNameLabelKey]; ok {
+				if name, ok := o.GetLabels()[core.ProvisionerNameLabelKey]; ok {
 					return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: name}}}
 				}
 				return nil
@@ -125,7 +125,7 @@ func (c *Controller) nodesSynced(nodes []v1.Node, provisionerName string) bool {
 	missingNode := false
 	c.cluster.ForEachNode(func(n *state.Node) bool {
 		// skip any nodes not created by this provisioner
-		if n.Node.Labels[v1alpha5.ProvisionerNameLabelKey] != provisionerName {
+		if n.Node.Labels[core.ProvisionerNameLabelKey] != provisionerName {
 			return true
 		}
 		if !extraNodes.Has(n.Node.Name) {

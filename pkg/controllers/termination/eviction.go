@@ -50,9 +50,8 @@ func NewEvictionQueue(ctx context.Context, coreV1Client corev1.CoreV1Interface, 
 	queue := &EvictionQueue{
 		RateLimitingInterface: workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(evictionQueueBaseDelay, evictionQueueMaxDelay)),
 		Set:                   set.NewSet(),
-
-		coreV1Client: coreV1Client,
-		recorder:     recorder,
+		coreV1Client:          coreV1Client,
+		recorder:              recorder,
 	}
 	go queue.Start(logging.WithLogger(ctx, logging.FromContext(ctx).Named("eviction")))
 	return queue

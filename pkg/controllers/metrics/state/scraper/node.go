@@ -26,7 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/core"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
@@ -216,7 +216,7 @@ func (ns *NodeScraper) getNodeLabels(node *v1.Node, resourceTypeName string) pro
 	metricLabels := prometheus.Labels{}
 	metricLabels[resourceType] = resourceTypeName
 	metricLabels[nodeName] = node.GetName()
-	if provisionerName, ok := node.Labels[v1alpha5.ProvisionerNameLabelKey]; !ok {
+	if provisionerName, ok := node.Labels[core.ProvisionerNameLabelKey]; !ok {
 		metricLabels[nodeProvisioner] = "N/A"
 	} else {
 		metricLabels[nodeProvisioner] = provisionerName
@@ -237,7 +237,7 @@ func (ns *NodeScraper) getNodeLabels(node *v1.Node, resourceTypeName string) pro
 
 func getWellKnownLabels() map[string]string {
 	labels := make(map[string]string)
-	for wellKnownLabel := range v1alpha5.WellKnownLabels {
+	for wellKnownLabel := range core.WellKnownLabels {
 		if parts := strings.Split(wellKnownLabel, "/"); len(parts) == 2 {
 			label := parts[1]
 			// Reformat label names to be consistent with Prometheus naming conventions (snake_case)

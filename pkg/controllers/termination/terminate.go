@@ -29,7 +29,7 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/core"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	podutil "github.com/aws/karpenter-core/pkg/utils/pod"
 )
@@ -98,7 +98,7 @@ func (t *Terminator) terminate(ctx context.Context, node *v1.Node) error {
 		return fmt.Errorf("terminating cloudprovider instance, %w", err)
 	}
 	mergeFrom := client.MergeFrom(node.DeepCopy())
-	controllerutil.RemoveFinalizer(node, v1alpha5.TerminationFinalizer)
+	controllerutil.RemoveFinalizer(node, core.TerminationFinalizer)
 	if err := t.KubeClient.Patch(ctx, node, mergeFrom); err != nil {
 		return fmt.Errorf("removing node finalizer, %w", err)
 	}

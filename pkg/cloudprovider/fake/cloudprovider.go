@@ -18,14 +18,15 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"sync"
 
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	"github.com/aws/karpenter-core/pkg/apis/core"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/test"
@@ -63,30 +64,34 @@ func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha1.Machine) (
 	}
 	c.mu.Unlock()
 
-	name := test.RandomName()
 	requirements := scheduling.NewNodeSelectorRequirements(machine.Spec.Requirements...)
-	instanceTypeName := requirements.Get(v1.LabelInstanceType).Values()[0]
-
-	lo.Find(machine.OwnerReferences, func(reference metav1.OwnerReference) bool {
-		return reference.APIVersion ==
+	instanceTypes := lo.Filter(lo.Must(c.GetInstanceTypes(ctx, &v1alpha5.Provisioner{})), func(i *cloudprovider.InstanceType, _ int) bool {
+		return requirements.Get(v1.LabelInstanceTypeStable).Has(i.Name)
 	})
-	machine.GetOwnerReferences()
-	c.GetInstanceTypes(ctx, )
+	// Order instance types so that we get the cheapest instance types of the available offerings
+	sort.Slice(instanceTypes, func(i, j int) bool {
+		iOfferings := instanceTypes[i].Offerings.Available()
+		jOfferings := instanceTypes[j].Offerings.Available()
+		return cheapestOfferingPrice(iOfferings, requirements) < cheapestOfferingPrice(jOfferings, requirements)
+	})
+
+	name := test.RandomName()
+	instanceType := instanceTypes[0]
 	// Labels
 	labels := map[string]string{}
-	for key, requirement := range instanceType. {
+	for key, requirement := range instanceType.Requirements {
 		if requirement.Len() == 1 {
 			labels[key] = requirement.Values()[0]
 		}
 	}
 	// Find Offering
 	for _, o := range instanceType.Offerings.Available() {
-		if nodeRequest.Template.Requirements.Compatible(scheduling.NewRequirements(
+		if requirements.Compatible(scheduling.NewRequirements(
 			scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, o.Zone),
-			scheduling.NewRequirement(v1alpha5.LabelCapacityType, v1.NodeSelectorOpIn, o.CapacityType),
+			scheduling.NewRequirement(core.LabelCapacityType, v1.NodeSelectorOpIn, o.CapacityType),
 		)) == nil {
 			labels[v1.LabelTopologyZone] = o.Zone
-			labels[v1alpha5.LabelCapacityType] = o.CapacityType
+			labels[core.LabelCapacityType] = o.CapacityType
 			break
 		}
 	}
@@ -102,7 +107,7 @@ func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha1.Machine) (
 	return n, nil
 }
 
-func (c *CloudProvider) GetInstanceTypes(_ context.Context, provisioner *v1alpha5.Provisioner) ([]*cloudprovider.InstanceType, error) {
+func (c *CloudProvider) GetInstanceTypes(_ context.Context, _ *v1alpha5.Provisioner) ([]*cloudprovider.InstanceType, error) {
 	if c.InstanceTypes != nil {
 		return c.InstanceTypes, nil
 	}
@@ -153,4 +158,16 @@ func (c *CloudProvider) Delete(context.Context, *v1.Node) error {
 // Name returns the CloudProvider implementation name.
 func (c *CloudProvider) Name() string {
 	return "fake"
+}
+
+// cheapestOfferingPrice gets the cheapest price of an offering on an instance type given
+// the node requirements
+func cheapestOfferingPrice(ofs []cloudprovider.Offering, requirements scheduling.Requirements) float64 {
+	minPrice := math.MaxFloat64
+	for _, of := range ofs {
+		if requirements.Get(core.LabelCapacityType).Has(of.CapacityType) && requirements.Get(v1.LabelTopologyZone).Has(of.Zone) {
+			minPrice = math.Min(minPrice, of.Price)
+		}
+	}
+	return minPrice
 }
