@@ -38,11 +38,14 @@ var Registration = &config.Registration{
 var defaultSettings = Settings{
 	BatchMaxDuration:  metav1.Duration{Duration: time.Second * 10},
 	BatchIdleDuration: metav1.Duration{Duration: time.Second * 1},
+	DriftEnabled:      false,
 }
 
 type Settings struct {
 	BatchMaxDuration  metav1.Duration `json:"batchMaxDuration"`
 	BatchIdleDuration metav1.Duration `json:"batchIdleDuration"`
+	// This feature flag is temporary and will be removed in the near future.
+	DriftEnabled bool `json:"driftEnabled"`
 }
 
 // NewSettingsFromConfigMap creates a Settings from the supplied ConfigMap
@@ -52,6 +55,7 @@ func NewSettingsFromConfigMap(cm *v1.ConfigMap) (Settings, error) {
 	if err := configmap.Parse(cm.Data,
 		AsMetaDuration("batchMaxDuration", &s.BatchMaxDuration),
 		AsMetaDuration("batchIdleDuration", &s.BatchIdleDuration),
+		configmap.AsBool("driftEnabled", &s.DriftEnabled),
 	); err != nil {
 		// Failing to parse means that there is some error in the Settings, so we should crash
 		panic(fmt.Sprintf("parsing settings, %v", err))

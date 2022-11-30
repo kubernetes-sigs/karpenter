@@ -44,6 +44,10 @@ const (
 	DoNotConsolidateNodeAnnotationKey  = Group + "/do-not-consolidate"
 	EmptinessTimestampAnnotationKey    = Group + "/emptiness-timestamp"
 	ProviderCompatabilityAnnotationKey = Group + "/compatibility/provider"
+	VoluntaryDisruptionAnnotationKey   = Group + "/voluntary-disruption"
+
+	// Karpenter specific annotation values
+	VoluntaryDisruptionDriftedAnnotationValue = "drifted"
 )
 
 // Karpenter specific finalizers

@@ -54,6 +54,7 @@ type Controller struct {
 	cloudProvider           cloudprovider.CloudProvider
 	emptiness               *Emptiness
 	expiration              *Expiration
+	drift                   *Drift
 	singleNodeConsolidation *SingleNodeConsolidation
 	multiNodeConsolidation  *MultiNodeConsolidation
 	emptyNodeConsolidation  *EmptyNodeConsolidation
@@ -85,6 +86,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 		cloudProvider:           cp,
 		expiration:              NewExpiration(clk, kubeClient, cluster, provisioner),
 		emptiness:               NewEmptiness(clk, kubeClient, cluster),
+		drift:                   NewDrift(kubeClient, cluster, provisioner),
 		emptyNodeConsolidation:  NewEmptyNodeConsolidation(clk, cluster, kubeClient, provisioner, cp),
 		multiNodeConsolidation:  NewMultiNodeConsolidation(clk, cluster, kubeClient, provisioner, cp),
 		singleNodeConsolidation: NewSingleNodeConsolidation(clk, cluster, kubeClient, provisioner, cp),
@@ -140,6 +142,9 @@ func (c *Controller) ProcessCluster(ctx context.Context) (Result, error) {
 		// Expire any nodes that must be deleted, allowing their pods to potentially land on currently
 		// empty nodes
 		c.expiration,
+
+		// Terminate any nodes that have drifted from provisioning specifications, allowing the pods to reschedule.
+		c.drift,
 
 		// Delete any remaining empty nodes as there is zero cost in terms of dirsuption.  Emptiness and
 		// emptyNodeConsolidation are mutually exclusive, only one of these will operate
