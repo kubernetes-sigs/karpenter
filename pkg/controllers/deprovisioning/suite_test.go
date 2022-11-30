@@ -2101,7 +2101,7 @@ var _ = Describe("Parallelization", func() {
 			pods = append(pods, pod)
 		}
 		ExpectApplied(ctx, env.Client, rs, prov)
-		ExpectProvisioned(ctx, env.Client, recorder, provisioningController, provisioner, lo.Map(pods, func(p *v1.Pod, _ int) *v1.Pod { return p.DeepCopy() })...)
+		ExpectProvisionedNoBinding(ctx, env.Client, provisioningController, provisioner, lo.Map(pods, func(p *v1.Pod, _ int) *v1.Pod { return p.DeepCopy() })...)
 
 		nodeList := &v1.NodeList{}
 		Expect(env.Client.List(ctx, nodeList)).To(Succeed())
@@ -2116,8 +2116,7 @@ var _ = Describe("Parallelization", func() {
 		// Mark the node for deletion and re-trigger reconciliation
 		oldNodeName := nodeList.Items[0].Name
 		cluster.MarkForDeletion(nodeList.Items[0].Name)
-
-		ExpectProvisionedNoBinding(ctx, env.Client, provisioningController, provisioner)
+		ExpectProvisionedNoBinding(ctx, env.Client, provisioningController, provisioner, lo.Map(pods, func(p *v1.Pod, _ int) *v1.Pod { return p.DeepCopy() })...)
 
 		// Make sure that the cluster state is aware of the current node state
 		Expect(env.Client.List(ctx, nodeList)).To(Succeed())

@@ -20,7 +20,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
-	"go.uber.org/multierr"
 	"k8s.io/client-go/util/workqueue"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -31,16 +30,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
-type WaitUntilFunc func(context.Context)
-
-type Options struct {
-	DisableWaitOnError bool
-}
-
 type SingletonBuilder struct {
-	mgr       manager.Manager
-	waitUntil WaitUntilFunc
-	options   Options
+	mgr manager.Manager
 }
 
 func NewSingletonManagedBy(m manager.Manager) SingletonBuilder {
@@ -49,29 +40,13 @@ func NewSingletonManagedBy(m manager.Manager) SingletonBuilder {
 	}
 }
 
-// WaitUntil runs the passed WaitFunc prior to each reconcile loop and waits for the function
-// to exit before
-func (b SingletonBuilder) WaitUntil(waitUntil WaitUntilFunc) SingletonBuilder {
-	b.waitUntil = waitUntil
-	return b
-}
-
-func (b SingletonBuilder) WithOptions(o Options) SingletonBuilder {
-	b.options = o
-	return b
-}
-
 func (b SingletonBuilder) Complete(r Reconciler) error {
-	return b.mgr.Add(newSingleton(r, b.waitUntil, b.options))
+	return b.mgr.Add(newSingleton(r))
 }
 
 type Singleton struct {
 	Reconciler
-
-	metrics *singletonMetrics
-
-	waitUntil   WaitUntilFunc
-	options     Options
+	metrics     *singletonMetrics
 	rateLimiter ratelimiter.RateLimiter
 }
 
@@ -80,12 +55,10 @@ type singletonMetrics struct {
 	reconcileErrors   prometheus.Counter
 }
 
-func newSingleton(r Reconciler, waitUntil WaitUntilFunc, opts Options) *Singleton {
+func newSingleton(r Reconciler) *Singleton {
 	return &Singleton{
 		Reconciler:  r,
 		metrics:     newSingletonMetrics(r.Name()),
-		waitUntil:   waitUntil,
-		options:     opts,
 		rateLimiter: workqueue.DefaultItemBasedRateLimiter(),
 	}
 }
@@ -118,55 +91,36 @@ var singletonRequest = reconcile.Request{}
 
 func (s *Singleton) Start(ctx context.Context) error {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(s.Name()))
-	logging.FromContext(ctx).Infof("starting Controller")
-	defer logging.FromContext(ctx).Infof("stopping Controller")
-	for {
-		// This waits until the waitUntil is completed or the context is closed
-		// to avoid hanging on the wait when the context gets closed in the middle of the wait
-		if s.waitUntil != nil {
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-withDoneChan(func() { s.waitUntil(ctx) }):
-			}
-		}
-		measureDuration := metrics.Measure(s.metrics.reconcileDuration)
-		res, errs := s.Reconcile(ctx, singletonRequest)
-		measureDuration() // Observe the length of time between the function creation and now
+	logging.FromContext(ctx).Infof("starting controller")
+	defer logging.FromContext(ctx).Infof("stopping controller")
 
-		var waitDuration time.Duration
-		switch {
-		case errs != nil:
-			s.metrics.reconcileErrors.Inc()
-			for _, err := range multierr.Errors(errs) {
-				logging.FromContext(ctx).Error(err)
-			}
-			if !s.options.DisableWaitOnError {
-				waitDuration = s.rateLimiter.When(singletonRequest)
-			}
-		case res.Requeue:
-			waitDuration = s.rateLimiter.When(singletonRequest)
-		default:
-			waitDuration = lo.Ternary(res.RequeueAfter > 0, res.RequeueAfter, time.Duration(0))
-			s.rateLimiter.Forget(singletonRequest)
-		}
+	for {
 		select {
+		case <-time.After(s.reconcile(ctx)):
 		case <-ctx.Done():
 			return nil
-		case <-time.After(waitDuration):
 		}
+	}
+}
+
+func (s *Singleton) reconcile(ctx context.Context) time.Duration {
+	measureDuration := metrics.Measure(s.metrics.reconcileDuration)
+	res, err := s.Reconcile(ctx, singletonRequest)
+	measureDuration() // Observe the length of time between the function creation and now
+
+	switch {
+	case err != nil:
+		s.metrics.reconcileErrors.Inc()
+		logging.FromContext(ctx).Error(err)
+		return s.rateLimiter.When(singletonRequest)
+	case res.Requeue:
+		return s.rateLimiter.When(singletonRequest)
+	default:
+		s.rateLimiter.Forget(singletonRequest)
+		return lo.Ternary(res.RequeueAfter > 0, res.RequeueAfter, time.Duration(0))
 	}
 }
 
 func (s *Singleton) NeedLeaderElection() bool {
 	return true
-}
-
-func withDoneChan(f func()) <-chan struct{} {
-	done := make(chan struct{})
-	go func() {
-		f()
-		close(done)
-	}()
-	return done
 }

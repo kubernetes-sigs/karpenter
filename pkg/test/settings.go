@@ -16,7 +16,6 @@ package test
 
 import (
 	"context"
-	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -38,7 +37,7 @@ func (ss SettingsStore) InjectSettings(ctx context.Context) context.Context {
 
 func Settings() settings.Settings {
 	return settings.Settings{
-		BatchMaxDuration:  metav1.Duration{Duration: time.Second * 10},
-		BatchIdleDuration: metav1.Duration{Duration: time.Second},
+		BatchMaxDuration:  metav1.Duration{Duration: 0},
+		BatchIdleDuration: metav1.Duration{Duration: 0},
 	}
 }
