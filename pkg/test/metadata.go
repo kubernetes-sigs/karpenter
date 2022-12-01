@@ -25,7 +25,7 @@ import (
 	"github.com/imdario/mergo"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 )
 
 const DiscoveryLabel = v1alpha5.TestingGroup + "/test-id"
