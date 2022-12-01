@@ -21,7 +21,6 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 
-	"github.com/aws/karpenter-core/pkg/apis/core"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -107,7 +106,7 @@ func (o Command) String() string {
 		if instanceType, ok := old.Labels[v1.LabelInstanceTypeStable]; ok {
 			fmt.Fprintf(&buf, "/%s", instanceType)
 		}
-		if capacityType, ok := old.Labels[core.LabelCapacityType]; ok {
+		if capacityType, ok := old.Labels[v1alpha5.LabelCapacityType]; ok {
 			fmt.Fprintf(&buf, "/%s", capacityType)
 		}
 	}
@@ -117,11 +116,11 @@ func (o Command) String() string {
 	odNodes := 0
 	spotNodes := 0
 	for _, node := range o.replacementNodes {
-		ct := node.Requirements.Get(core.LabelCapacityType)
-		if ct.Has(core.CapacityTypeOnDemand) {
+		ct := node.Requirements.Get(v1alpha5.LabelCapacityType)
+		if ct.Has(v1alpha5.CapacityTypeOnDemand) {
 			odNodes++
 		}
-		if ct.Has(core.CapacityTypeSpot) {
+		if ct.Has(v1alpha5.CapacityTypeSpot) {
 			spotNodes++
 		}
 	}
@@ -132,7 +131,7 @@ func (o Command) String() string {
 			scheduling.InstanceTypeList(o.replacementNodes[0].InstanceTypeOptions))
 		return buf.String()
 	}
-	ct := o.replacementNodes[0].Requirements.Get(core.LabelCapacityType)
+	ct := o.replacementNodes[0].Requirements.Get(v1alpha5.LabelCapacityType)
 	nodeDesc := "node"
 	if ct.Len() == 1 {
 		nodeDesc = fmt.Sprintf("%s node", ct.Any())

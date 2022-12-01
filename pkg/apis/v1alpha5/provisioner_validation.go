@@ -28,8 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
-
-	"github.com/aws/karpenter-core/pkg/apis/core"
 )
 
 var (
@@ -110,7 +108,7 @@ func (s *ProvisionerSpec) Validate(ctx context.Context) (errs *apis.FieldError) 
 
 func (s *ProvisionerSpec) validateLabels() (errs *apis.FieldError) {
 	for key, value := range s.Labels {
-		if key == core.ProvisionerNameLabelKey {
+		if key == ProvisionerNameLabelKey {
 			errs = errs.Also(apis.ErrInvalidKeyName(key, "labels", "restricted"))
 		}
 		for _, err := range validation.IsQualifiedName(key) {
@@ -119,7 +117,7 @@ func (s *ProvisionerSpec) validateLabels() (errs *apis.FieldError) {
 		for _, err := range validation.IsValidLabelValue(value) {
 			errs = errs.Also(apis.ErrInvalidValue(fmt.Sprintf("%s, %s", value, err), fmt.Sprintf("labels[%s]", key)))
 		}
-		if err := core.IsRestrictedLabel(key); err != nil {
+		if err := IsRestrictedLabel(key); err != nil {
 			errs = errs.Also(apis.ErrInvalidKeyName(key, "labels", err.Error()))
 		}
 	}
@@ -177,7 +175,7 @@ func (s *ProvisionerSpec) validateTaintsField(taints []v1.Taint, existing map[ta
 // Provisioner requirements only support well known labels.
 func (s *ProvisionerSpec) validateRequirements() (errs *apis.FieldError) {
 	for i, requirement := range s.Requirements {
-		if requirement.Key == core.ProvisionerNameLabelKey {
+		if requirement.Key == ProvisionerNameLabelKey {
 			errs = errs.Also(apis.ErrInvalidArrayValue(fmt.Sprintf("%s is restricted", requirement.Key), "requirements", i))
 		}
 		if err := ValidateRequirement(requirement); err != nil {
@@ -275,13 +273,13 @@ func validateEvictionThresholds(m map[string]string, fieldName string) (errs *ap
 
 func ValidateRequirement(requirement v1.NodeSelectorRequirement) error { //nolint:gocyclo
 	var errs error
-	if normalized, ok := core.NormalizedLabels[requirement.Key]; ok {
+	if normalized, ok := NormalizedLabels[requirement.Key]; ok {
 		requirement.Key = normalized
 	}
 	if !SupportedNodeSelectorOps.Has(string(requirement.Operator)) {
 		errs = multierr.Append(errs, fmt.Errorf("key %s has an unsupported operator %s not in %s", requirement.Key, requirement.Operator, SupportedNodeSelectorOps.UnsortedList()))
 	}
-	if e := core.IsRestrictedLabel(requirement.Key); e != nil {
+	if e := IsRestrictedLabel(requirement.Key); e != nil {
 		errs = multierr.Append(errs, e)
 	}
 	for _, err := range validation.IsQualifiedName(requirement.Key) {

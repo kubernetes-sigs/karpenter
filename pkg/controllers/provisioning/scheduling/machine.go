@@ -23,7 +23,7 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 
-	"github.com/aws/karpenter-core/pkg/apis/core"
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
@@ -110,7 +110,7 @@ func (m *Machine) Add(ctx context.Context, pod *v1.Pod) error {
 // FinalizeScheduling is called once all scheduling has completed and allows the node to perform any cleanup
 // necessary before its requirements are used for instance launching
 func (m *Machine) FinalizeScheduling() {
-	// We need nodes to have hostnames for topology purposes, but we don't want to pass that node name on to consumers
+	// We need machines to have hostnames for topology purposes, but we don't want to pass that node name on to consumers
 	// of the node as it will be displayed in error messages
 	delete(m.Requirements, v1.LabelHostname)
 }
@@ -152,7 +152,7 @@ func fits(instanceType *cloudprovider.InstanceType, requests v1.ResourceList) bo
 func hasOffering(instanceType *cloudprovider.InstanceType, requirements scheduling.Requirements) bool {
 	for _, offering := range instanceType.Offerings.Available() {
 		if (!requirements.Has(v1.LabelTopologyZone) || requirements.Get(v1.LabelTopologyZone).Has(offering.Zone)) &&
-			(!requirements.Has(core.LabelCapacityType) || requirements.Get(core.LabelCapacityType).Has(offering.CapacityType)) {
+			(!requirements.Has(v1alpha5.LabelCapacityType) || requirements.Get(v1alpha5.LabelCapacityType).Has(offering.CapacityType)) {
 			return true
 		}
 	}

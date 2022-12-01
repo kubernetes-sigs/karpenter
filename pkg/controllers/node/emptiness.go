@@ -28,7 +28,6 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/aws/karpenter-core/pkg/apis/core"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
@@ -49,7 +48,7 @@ func (r *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 	}
 
 	// node is not ready yet, so we don't consider it to possibly be empty
-	if n.Labels[core.LabelNodeInitialized] != "true" {
+	if n.Labels[v1alpha5.LabelNodeInitialized] != "true" {
 		return reconcile.Result{}, nil
 	}
 
@@ -63,13 +62,13 @@ func (r *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 		return reconcile.Result{}, nil
 	}
 
-	_, hasEmptinessTimestamp := n.Annotations[core.EmptinessTimestampAnnotationKey]
+	_, hasEmptinessTimestamp := n.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
 	if !empty && hasEmptinessTimestamp {
-		delete(n.Annotations, core.EmptinessTimestampAnnotationKey)
+		delete(n.Annotations, v1alpha5.EmptinessTimestampAnnotationKey)
 		logging.FromContext(ctx).Infof("removed emptiness TTL from node")
 	} else if empty && !hasEmptinessTimestamp {
 		n.Annotations = lo.Assign(n.Annotations, map[string]string{
-			core.EmptinessTimestampAnnotationKey: r.clock.Now().Format(time.RFC3339),
+			v1alpha5.EmptinessTimestampAnnotationKey: r.clock.Now().Format(time.RFC3339),
 		})
 		logging.FromContext(ctx).Infof("added TTL to empty node")
 	}

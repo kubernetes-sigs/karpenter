@@ -19,13 +19,17 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"knative.dev/pkg/apis"
+)
 
-	"github.com/aws/karpenter-core/pkg/apis/core"
+const (
+	Group           = "karpenter.sh"
+	ExtensionsGroup = "extensions." + Group
+	TestingGroup    = "testing." + Group // Exclusively used for labeling/discovery in testing
 )
 
 var (
 	ProvisionerKind    = "Provisioner"
-	SchemeGroupVersion = schema.GroupVersion{Group: core.Group, Version: "v1alpha5"}
+	SchemeGroupVersion = schema.GroupVersion{Group: Group, Version: "v1alpha5"}
 	SchemeBuilder      = runtime.NewSchemeBuilder(func(scheme *runtime.Scheme) error {
 		scheme.AddKnownTypes(SchemeGroupVersion,
 			&Provisioner{},

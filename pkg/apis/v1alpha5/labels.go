@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package core
+package v1alpha5
 
 import (
 	"fmt"
@@ -31,6 +31,7 @@ var (
 
 	// Karpenter specific domains and labels
 	ProvisionerNameLabelKey           = Group + "/provisioner-name"
+	MachineNameLabelKey               = Group + "/machine-name"
 	DoNotEvictPodAnnotationKey        = Group + "/do-not-evict"
 	DoNotConsolidateNodeAnnotationKey = Group + "/do-not-consolidate"
 	EmptinessTimestampAnnotationKey   = Group + "/emptiness-timestamp"

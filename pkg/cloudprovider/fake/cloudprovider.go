@@ -22,18 +22,17 @@ import (
 	"sync"
 
 	"github.com/samber/lo"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"github.com/aws/karpenter-core/pkg/apis/core"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/test"
-
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)
@@ -74,8 +73,6 @@ func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha1.Machine) (
 		jOfferings := instanceTypes[j].Offerings.Available()
 		return cheapestOfferingPrice(iOfferings, requirements) < cheapestOfferingPrice(jOfferings, requirements)
 	})
-
-	name := test.RandomName()
 	instanceType := instanceTypes[0]
 	// Labels
 	labels := map[string]string{}
@@ -88,13 +85,14 @@ func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha1.Machine) (
 	for _, o := range instanceType.Offerings.Available() {
 		if requirements.Compatible(scheduling.NewRequirements(
 			scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, o.Zone),
-			scheduling.NewRequirement(core.LabelCapacityType, v1.NodeSelectorOpIn, o.CapacityType),
+			scheduling.NewRequirement(v1alpha5.LabelCapacityType, v1.NodeSelectorOpIn, o.CapacityType),
 		)) == nil {
 			labels[v1.LabelTopologyZone] = o.Zone
-			labels[core.LabelCapacityType] = o.CapacityType
+			labels[v1alpha5.LabelCapacityType] = o.CapacityType
 			break
 		}
 	}
+	name := test.RandomName()
 	n := &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   name,
@@ -165,7 +163,7 @@ func (c *CloudProvider) Name() string {
 func cheapestOfferingPrice(ofs []cloudprovider.Offering, requirements scheduling.Requirements) float64 {
 	minPrice := math.MaxFloat64
 	for _, of := range ofs {
-		if requirements.Get(core.LabelCapacityType).Has(of.CapacityType) && requirements.Get(v1.LabelTopologyZone).Has(of.Zone) {
+		if requirements.Get(v1alpha5.LabelCapacityType).Has(of.CapacityType) && requirements.Get(v1.LabelTopologyZone).Has(of.Zone) {
 			minPrice = math.Min(minPrice, of.Price)
 		}
 	}

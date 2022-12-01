@@ -42,8 +42,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	pscheduling "github.com/aws/karpenter-core/pkg/scheduling"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/test"
 
@@ -96,9 +94,9 @@ var _ = AfterSuite(func() {
 
 var _ = BeforeEach(func() {
 	provisioner = test.Provisioner(test.ProvisionerOptions{Requirements: []v1.NodeSelectorRequirement{{
-		Key:      core.LabelCapacityType,
+		Key:      v1alpha5.LabelCapacityType,
 		Operator: v1.NodeSelectorOpIn,
-		Values:   []string{core.CapacityTypeSpot, core.CapacityTypeOnDemand},
+		Values:   []string{v1alpha5.CapacityTypeSpot, v1alpha5.CapacityTypeOnDemand},
 	}}})
 	// reset instance types
 	newCP := fake.CloudProvider{}
@@ -197,7 +195,7 @@ var _ = Describe("Custom Constraints", func() {
 			node := ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-2"))
 		})
-		It("should not schedule nodes with a hostname selector", func() {
+		It("should not schedule machines with a hostname selector", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
 			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeSelector: map[string]string{v1.LabelHostname: "red-node"}},
@@ -369,7 +367,7 @@ var _ = Describe("Custom Constraints", func() {
 	Context("Constraints Validation", func() {
 		It("should not schedule pods that have node selectors with restricted labels", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
-			for label := range core.RestrictedLabels {
+			for label := range v1alpha5.RestrictedLabels {
 				pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
 					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 						{Key: label, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
@@ -379,7 +377,7 @@ var _ = Describe("Custom Constraints", func() {
 		})
 		It("should not schedule pods that have node selectors with restricted domains", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
-			for domain := range core.RestrictedLabelDomains {
+			for domain := range v1alpha5.RestrictedLabelDomains {
 				pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
 					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 						{Key: domain + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
@@ -389,12 +387,12 @@ var _ = Describe("Custom Constraints", func() {
 		})
 		It("should schedule pods that have node selectors with label in restricted domains exceptions list", func() {
 			var requirements []v1.NodeSelectorRequirement
-			for domain := range core.LabelDomainExceptions {
+			for domain := range v1alpha5.LabelDomainExceptions {
 				requirements = append(requirements, v1.NodeSelectorRequirement{Key: domain + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}})
 			}
 			provisioner.Spec.Requirements = requirements
 			ExpectApplied(ctx, env.Client, provisioner)
-			for domain := range core.LabelDomainExceptions {
+			for domain := range v1alpha5.LabelDomainExceptions {
 				pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())[0]
 				node := ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Labels).To(HaveKeyWithValue(domain+"/test", "test-value"))
@@ -411,7 +409,7 @@ var _ = Describe("Custom Constraints", func() {
 				// Constrained by operatingSystem
 				test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelOSStable: string(v1.Linux)}}),
 				// Constrained by capacity type
-				test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{core.LabelCapacityType: "spot"}}),
+				test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1alpha5.LabelCapacityType: "spot"}}),
 			}
 			ExpectApplied(ctx, env.Client, provisioner)
 			for _, pod := range ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, schedulable...) {
@@ -918,7 +916,7 @@ var _ = Describe("Topology", func() {
 					ResourceRequirements: rr, TopologySpreadConstraints: topology})...,
 			)
 
-			// max skew of 1, so test-zone-2/3 will have 2 nodes each and the rest of the pods will fail to schedule
+			// max skew of 1, so test-zone-2/3 will have 2 machines each and the rest of the pods will fail to schedule
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 2, 2))
 		})
 		It("should not violate max-skew when unsat = do not schedule (discover domains)", func() {
@@ -949,11 +947,11 @@ var _ = Describe("Topology", func() {
 					TopologySpreadConstraints: topology, ResourceRequirements: rr})...,
 			)
 
-			// max skew of 1, so test-zone-2/3 will have 2 nodes each and the rest of the pods will fail to schedule since
+			// max skew of 1, so test-zone-2/3 will have 2 machines each and the rest of the pods will fail to schedule since
 			// test-zone-1 has 1 pods in it.
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 2, 2))
 		})
-		It("should only count running/scheduled pods with matching labels scheduled to nodes with a corresponding domain", func() {
+		It("should only count running/scheduled pods with matching labels scheduled to machines with a corresponding domain", func() {
 			wrongNamespace := test.RandomName()
 			firstNode := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.LabelTopologyZone: "test-zone-1"}}})
 			secondNode := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1.LabelTopologyZone: "test-zone-2"}}})
@@ -1022,7 +1020,7 @@ var _ = Describe("Topology", func() {
 	})
 
 	Context("Hostname", func() {
-		It("should balance pods across nodes", func() {
+		It("should balance pods across machines", func() {
 			topology := []v1.TopologySpreadConstraint{{
 				TopologyKey:       v1.LabelHostname,
 				WhenUnsatisfiable: v1.DoNotSchedule,
@@ -1086,7 +1084,7 @@ var _ = Describe("Topology", func() {
 			}
 			nodes := v1.NodeList{}
 			Expect(env.Client.List(ctx, &nodes)).To(Succeed())
-			// this wasn't part of #1425, but ensures that we launch the minimum number of nodes
+			// this wasn't part of #1425, but ensures that we launch the minimum number of machines
 			Expect(nodes.Items).To(HaveLen(2))
 		})
 		It("balance multiple deployments with hostname topology spread & varying arch", func() {
@@ -1120,15 +1118,15 @@ var _ = Describe("Topology", func() {
 
 			ExpectApplied(ctx, env.Client, provisioner)
 			scheduled := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
-				test.UnschedulablePod(spreadPod("app1", core.ArchitectureAmd64)), test.UnschedulablePod(spreadPod("app1", core.ArchitectureAmd64)),
-				test.UnschedulablePod(spreadPod("app2", core.ArchitectureArm64)), test.UnschedulablePod(spreadPod("app2", core.ArchitectureArm64)))
+				test.UnschedulablePod(spreadPod("app1", v1alpha5.ArchitectureAmd64)), test.UnschedulablePod(spreadPod("app1", v1alpha5.ArchitectureAmd64)),
+				test.UnschedulablePod(spreadPod("app2", v1alpha5.ArchitectureArm64)), test.UnschedulablePod(spreadPod("app2", v1alpha5.ArchitectureArm64)))
 
 			for _, p := range scheduled {
 				ExpectScheduled(ctx, env.Client, p)
 			}
 			nodes := v1.NodeList{}
 			Expect(env.Client.List(ctx, &nodes)).To(Succeed())
-			// same test as the previous one, but now the architectures are different so we need four nodes in total
+			// same test as the previous one, but now the architectures are different so we need four machines in total
 			Expect(nodes.Items).To(HaveLen(4))
 		})
 	})
@@ -1136,7 +1134,7 @@ var _ = Describe("Topology", func() {
 	Context("CapacityType", func() {
 		It("should balance pods across capacity types", func() {
 			topology := []v1.TopologySpreadConstraint{{
-				TopologyKey:       core.LabelCapacityType,
+				TopologyKey:       v1alpha5.LabelCapacityType,
 				WhenUnsatisfiable: v1.DoNotSchedule,
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:           1,
@@ -1152,9 +1150,9 @@ var _ = Describe("Topology", func() {
 		})
 		It("should respect provisioner capacity type constraints", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
-				{Key: core.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{core.CapacityTypeSpot, core.CapacityTypeOnDemand}}}
+				{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeSpot, v1alpha5.CapacityTypeOnDemand}}}
 			topology := []v1.TopologySpreadConstraint{{
-				TopologyKey:       core.LabelCapacityType,
+				TopologyKey:       v1alpha5.LabelCapacityType,
 				WhenUnsatisfiable: v1.DoNotSchedule,
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:           1,
@@ -1172,7 +1170,7 @@ var _ = Describe("Topology", func() {
 			// this test can pass in a flaky manner if we don't restrict our min domain selection to valid choices
 			// per the provisioner spec
 			topology := []v1.TopologySpreadConstraint{{
-				TopologyKey:       core.LabelCapacityType,
+				TopologyKey:       v1alpha5.LabelCapacityType,
 				WhenUnsatisfiable: v1.DoNotSchedule,
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:           1,
@@ -1184,7 +1182,7 @@ var _ = Describe("Topology", func() {
 			}
 			// force this pod onto spot
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
-				{Key: core.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{core.CapacityTypeSpot}}}
+				{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeSpot}}}
 			ExpectApplied(ctx, env.Client, provisioner)
 			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
@@ -1193,7 +1191,7 @@ var _ = Describe("Topology", func() {
 
 			// now only allow scheduling pods on on-demand
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
-				{Key: core.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{core.CapacityTypeOnDemand}}}
+				{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand}}}
 			ExpectApplied(ctx, env.Client, provisioner)
 			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
 				MakePods(5, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
@@ -1205,7 +1203,7 @@ var _ = Describe("Topology", func() {
 		})
 		It("should violate max-skew when unsat = schedule anyway (capacity type)", func() {
 			topology := []v1.TopologySpreadConstraint{{
-				TopologyKey:       core.LabelCapacityType,
+				TopologyKey:       v1alpha5.LabelCapacityType,
 				WhenUnsatisfiable: v1.ScheduleAnyway,
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:           1,
@@ -1216,7 +1214,7 @@ var _ = Describe("Topology", func() {
 				},
 			}
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
-				{Key: core.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{core.CapacityTypeSpot}}}
+				{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeSpot}}}
 			ExpectApplied(ctx, env.Client, provisioner)
 			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
@@ -1224,7 +1222,7 @@ var _ = Describe("Topology", func() {
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1))
 
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
-				{Key: core.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{core.CapacityTypeOnDemand}}}
+				{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand}}}
 			ExpectApplied(ctx, env.Client, provisioner)
 			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
 				MakePods(5, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
@@ -1234,13 +1232,13 @@ var _ = Describe("Topology", func() {
 			// max skew of 1, on-demand will end up with 5 pods even though spot has a single pod
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 5))
 		})
-		It("should only count running/scheduled pods with matching labels scheduled to nodes with a corresponding domain", func() {
+		It("should only count running/scheduled pods with matching labels scheduled to machines with a corresponding domain", func() {
 			wrongNamespace := test.RandomName()
-			firstNode := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{core.LabelCapacityType: core.CapacityTypeSpot}}})
-			secondNode := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{core.LabelCapacityType: core.CapacityTypeOnDemand}}})
+			firstNode := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1alpha5.LabelCapacityType: v1alpha5.CapacityTypeSpot}}})
+			secondNode := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{v1alpha5.LabelCapacityType: v1alpha5.CapacityTypeOnDemand}}})
 			thirdNode := test.Node(test.NodeOptions{}) // missing topology capacity type
 			topology := []v1.TopologySpreadConstraint{{
-				TopologyKey:       core.LabelCapacityType,
+				TopologyKey:       v1alpha5.LabelCapacityType,
 				WhenUnsatisfiable: v1.DoNotSchedule,
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:           1,
@@ -1266,7 +1264,7 @@ var _ = Describe("Topology", func() {
 		})
 		It("should match all pods when labelSelector is not specified", func() {
 			topology := []v1.TopologySpreadConstraint{{
-				TopologyKey:       core.LabelCapacityType,
+				TopologyKey:       v1alpha5.LabelCapacityType,
 				WhenUnsatisfiable: v1.DoNotSchedule,
 				MaxSkew:           1,
 			}}
@@ -1307,13 +1305,13 @@ var _ = Describe("Topology", func() {
 				NodeRequirements: []v1.NodeSelectorRequirement{
 					// launch this on-demand pod in zone-1
 					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}},
-					{Key: core.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{"on-demand"}},
+					{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{"on-demand"}},
 				},
 			})...)
 			ExpectScheduled(ctx, env.Client, pod[0])
 
 			topology := []v1.TopologySpreadConstraint{{
-				TopologyKey:       core.LabelCapacityType,
+				TopologyKey:       v1alpha5.LabelCapacityType,
 				WhenUnsatisfiable: v1.DoNotSchedule,
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:           1,
@@ -1326,10 +1324,10 @@ var _ = Describe("Topology", func() {
 			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
 				MakePods(5, test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{Labels: labels},
-					// limit our provisioner to only creating spot nodes
+					// limit our provisioner to only creating spot machines
 					NodeRequirements: []v1.NodeSelectorRequirement{
 						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-2"}},
-						{Key: core.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{"spot"}},
+						{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{"spot"}},
 					},
 					TopologySpreadConstraints: topology,
 				})...,
@@ -1345,7 +1343,7 @@ var _ = Describe("Topology", func() {
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				NodeRequirements: []v1.NodeSelectorRequirement{
 					{
-						Key:      core.LabelCapacityType,
+						Key:      v1alpha5.LabelCapacityType,
 						Operator: v1.NodeSelectorOpIn,
 						Values:   []string{"on-demand"},
 					},
@@ -1355,15 +1353,15 @@ var _ = Describe("Topology", func() {
 			ExpectScheduled(ctx, env.Client, pod[0])
 
 			topology := []v1.TopologySpreadConstraint{{
-				TopologyKey:       core.LabelCapacityType,
+				TopologyKey:       v1alpha5.LabelCapacityType,
 				WhenUnsatisfiable: v1.DoNotSchedule,
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:           1,
 			}}
 
-			// limit our provisioner to only creating spot nodes
+			// limit our provisioner to only creating spot machines
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
-				{Key: core.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{"spot"}}}
+				{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{"spot"}}}
 
 			// since there is no node selector on this pod, the topology can see the single on-demand node that already
 			// exists and that limits us to scheduling 2 more spot pods before we would violate max-skew
@@ -1402,7 +1400,7 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 
-			// limit our provisioner to only creating arm64 nodes
+			// limit our provisioner to only creating arm64 machines
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelArchStable, Operator: v1.NodeSelectorOpIn, Values: []string{"arm64"}}}
 
@@ -1465,7 +1463,7 @@ var _ = Describe("Topology", func() {
 			spotProv := test.Provisioner(test.ProvisionerOptions{
 				Requirements: []v1.NodeSelectorRequirement{
 					{
-						Key:      core.LabelCapacityType,
+						Key:      v1alpha5.LabelCapacityType,
 						Operator: v1.NodeSelectorOpIn,
 						Values:   []string{"spot"},
 					},
@@ -1479,7 +1477,7 @@ var _ = Describe("Topology", func() {
 			onDemandProv := test.Provisioner(test.ProvisionerOptions{
 				Requirements: []v1.NodeSelectorRequirement{
 					{
-						Key:      core.LabelCapacityType,
+						Key:      v1alpha5.LabelCapacityType,
 						Operator: v1.NodeSelectorOpIn,
 						Values:   []string{"on-demand"},
 					},
@@ -1509,7 +1507,7 @@ var _ = Describe("Topology", func() {
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(4, 4, 4, 4, 4))
 			// due to the spread across provisioners, we've forced a 4:1 spot to on-demand spread
 			ExpectSkew(ctx, env.Client, "default", &v1.TopologySpreadConstraint{
-				TopologyKey:       core.LabelCapacityType,
+				TopologyKey:       v1alpha5.LabelCapacityType,
 				WhenUnsatisfiable: v1.DoNotSchedule,
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:           1,
@@ -1548,7 +1546,7 @@ var _ = Describe("Topology", func() {
 	Context("Combined Hostname and Capacity Type Topology", func() {
 		It("should spread pods while respecting both constraints", func() {
 			topology := []v1.TopologySpreadConstraint{{
-				TopologyKey:       core.LabelCapacityType,
+				TopologyKey:       v1alpha5.LabelCapacityType,
 				WhenUnsatisfiable: v1.DoNotSchedule,
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:           1,
@@ -1591,7 +1589,7 @@ var _ = Describe("Topology", func() {
 	Context("Combined Zonal and Capacity Type Topology", func() {
 		It("should spread pods while respecting both constraints", func() {
 			topology := []v1.TopologySpreadConstraint{{
-				TopologyKey:       core.LabelCapacityType,
+				TopologyKey:       v1alpha5.LabelCapacityType,
 				WhenUnsatisfiable: v1.DoNotSchedule,
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:           1,
@@ -1633,7 +1631,7 @@ var _ = Describe("Topology", func() {
 			// ensure we've got an instance type for every zone/capacity-type pair
 			cloudProv.InstanceTypes = fake.InstanceTypesAssorted()
 			topology := []v1.TopologySpreadConstraint{{
-				TopologyKey:       core.LabelCapacityType,
+				TopologyKey:       v1alpha5.LabelCapacityType,
 				WhenUnsatisfiable: v1.DoNotSchedule,
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:           1,
@@ -1765,7 +1763,7 @@ var _ = Describe("Topology", func() {
 	Context("Combined Capacity Type Topology and Machine Affinity", func() {
 		It("should limit spread options by nodeSelector", func() {
 			topology := []v1.TopologySpreadConstraint{{
-				TopologyKey:       core.LabelCapacityType,
+				TopologyKey:       v1alpha5.LabelCapacityType,
 				WhenUnsatisfiable: v1.ScheduleAnyway,
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:           1,
@@ -1776,12 +1774,12 @@ var _ = Describe("Topology", func() {
 					MakePods(5, test.PodOptions{
 						ObjectMeta:                metav1.ObjectMeta{Labels: labels},
 						TopologySpreadConstraints: topology,
-						NodeSelector:              map[string]string{core.LabelCapacityType: core.CapacityTypeSpot},
+						NodeSelector:              map[string]string{v1alpha5.LabelCapacityType: v1alpha5.CapacityTypeSpot},
 					}),
 					MakePods(5, test.PodOptions{
 						ObjectMeta:                metav1.ObjectMeta{Labels: labels},
 						TopologySpreadConstraints: topology,
-						NodeSelector:              map[string]string{core.LabelCapacityType: core.CapacityTypeOnDemand},
+						NodeSelector:              map[string]string{v1alpha5.LabelCapacityType: v1alpha5.CapacityTypeOnDemand},
 					})...,
 				)...,
 			)
@@ -1789,7 +1787,7 @@ var _ = Describe("Topology", func() {
 		})
 		It("should limit spread options by node affinity (capacity type)", func() {
 			topology := []v1.TopologySpreadConstraint{{
-				TopologyKey:       core.LabelCapacityType,
+				TopologyKey:       v1alpha5.LabelCapacityType,
 				WhenUnsatisfiable: v1.DoNotSchedule,
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:           1,
@@ -1802,7 +1800,7 @@ var _ = Describe("Topology", func() {
 					ObjectMeta:                metav1.ObjectMeta{Labels: labels},
 					TopologySpreadConstraints: topology,
 					NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: core.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{core.CapacityTypeSpot}},
+						{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeSpot}},
 					},
 				})...)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(3))
@@ -1813,7 +1811,7 @@ var _ = Describe("Topology", func() {
 				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
 				TopologySpreadConstraints: topology,
 				NodeRequirements: []v1.NodeSelectorRequirement{
-					{Key: core.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{core.CapacityTypeOnDemand, core.CapacityTypeSpot}},
+					{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand, v1alpha5.CapacityTypeSpot}},
 				},
 			})...)
 
@@ -2147,7 +2145,7 @@ var _ = Describe("Topology", func() {
 			}
 
 		})
-		It("should separate nodes using simple pod anti-affinity on hostname", func() {
+		It("should separate machines using simple pod anti-affinity on hostname", func() {
 			affLabels := map[string]string{"security": "s2"}
 			// pod affinity/anti-affinity are bidirectional, so run this a few times to ensure we handle it regardless
 			// of pod scheduling order
@@ -2270,7 +2268,7 @@ var _ = Describe("Topology", func() {
 			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pods...)
 			n1 := ExpectScheduled(ctx, env.Client, affPod1)
 			n2 := ExpectScheduled(ctx, env.Client, affPod2)
-			// should not be scheduled on nodes with the same arch
+			// should not be scheduled on machines with the same arch
 			Expect(n1.Labels[v1.LabelArchStable]).ToNot(Equal(n2.Labels[v1.LabelArchStable]))
 		})
 		It("should violate preferred pod anti-affinity on zone (inverse)", func() {
@@ -2386,7 +2384,7 @@ var _ = Describe("Topology", func() {
 			Expect(node1.Labels[v1.LabelTopologyZone]).ToNot(Equal(node2.Labels[v1.LabelTopologyZone]))
 
 		})
-		It("should not violate pod anti-affinity on zone (inverse w/existing nodes)", func() {
+		It("should not violate pod anti-affinity on zone (inverse w/existing machines)", func() {
 			affLabels := map[string]string{"security": "s2"}
 			anti := []v1.PodAffinityTerm{{
 				LabelSelector: &metav1.LabelSelector{
@@ -2412,7 +2410,7 @@ var _ = Describe("Topology", func() {
 
 			affPod := test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: affLabels}})
 
-			// provision these so we get three nodes that exist in the cluster with anti-affinity to a pod that we will
+			// provision these so we get three machines that exist in the cluster with anti-affinity to a pod that we will
 			// then try to schedule
 			ExpectApplied(ctx, env.Client, provisioner)
 			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, zone1Pod, zone2Pod, zone3Pod)
@@ -2436,7 +2434,7 @@ var _ = Describe("Topology", func() {
 			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, affPod)
 			ExpectNotScheduled(ctx, env.Client, affPod)
 		})
-		It("should violate preferred pod anti-affinity on zone (inverse w/existing nodes)", func() {
+		It("should violate preferred pod anti-affinity on zone (inverse w/existing machines)", func() {
 			affLabels := map[string]string{"security": "s2"}
 			anti := []v1.WeightedPodAffinityTerm{
 				{
@@ -2467,7 +2465,7 @@ var _ = Describe("Topology", func() {
 
 			affPod := test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: affLabels}})
 
-			// provision these so we get three nodes that exist in the cluster with anti-affinity to a pod that we will
+			// provision these so we get three machines that exist in the cluster with anti-affinity to a pod that we will
 			// then try to schedule
 			ExpectApplied(ctx, env.Client, provisioner)
 			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, zone1Pod, zone2Pod, zone3Pod)
@@ -2517,7 +2515,7 @@ var _ = Describe("Topology", func() {
 			for _, pod := range pods {
 				ExpectScheduled(ctx, env.Client, pod)
 			}
-			// and we'll get three nodes due to the topology spread
+			// and we'll get three machines due to the topology spread
 			ExpectSkew(ctx, env.Client, "", &constraint).To(ConsistOf(1, 1, 1))
 		})
 		It("should support pod anti-affinity with a zone topology", func() {
@@ -2715,7 +2713,7 @@ var _ = Describe("Topology", func() {
 			}}})
 
 			var pods []*v1.Pod
-			// creates 10 nodes due to topo spread
+			// creates 10 machines due to topo spread
 			pods = append(pods, MakePods(10, test.PodOptions{
 				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
 				TopologySpreadConstraints: topology,
@@ -2754,7 +2752,7 @@ var _ = Describe("Topology", func() {
 			}}})
 
 			var pods []*v1.Pod
-			// create 10 nodes
+			// create 10 machines
 			pods = append(pods, MakePods(10, test.PodOptions{
 				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
 				TopologySpreadConstraints: topology,
@@ -2797,7 +2795,7 @@ var _ = Describe("Topology", func() {
 			}}})
 
 			var pods []*v1.Pod
-			// create 10 nodes
+			// create 10 machines
 			pods = append(pods, MakePods(10, test.PodOptions{
 				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
 				TopologySpreadConstraints: topology,
@@ -2850,7 +2848,7 @@ func ExpectDeleteAllUnscheduledPods(ctx2 context.Context, c client.Client) {
 }
 
 var _ = Describe("Taints", func() {
-	It("should taint nodes with provisioner taints", func() {
+	It("should taint machines with provisioner taints", func() {
 		provisioner.Spec.Taints = []v1.Taint{{Key: "test", Value: "bar", Effect: v1.TaintEffectNoSchedule}}
 		ExpectApplied(ctx, env.Client, provisioner)
 		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
@@ -2882,7 +2880,7 @@ var _ = Describe("Taints", func() {
 			ExpectNotScheduled(ctx, env.Client, pod)
 		}
 	})
-	It("should provision nodes with taints and schedule pods if the taint is only a startup taint", func() {
+	It("should provision machines with taints and schedule pods if the taint is only a startup taint", func() {
 		provisioner.Spec.StartupTaints = []v1.Taint{{Key: "ignore-me", Value: "nothing-to-see-here", Effect: v1.TaintEffectNoSchedule}}
 
 		ExpectApplied(ctx, env.Client, provisioner)
@@ -2915,16 +2913,16 @@ var _ = Describe("Instance Type Compatibility", func() {
 		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{{
 			Key:      v1.LabelArchStable,
 			Operator: v1.NodeSelectorOpIn,
-			Values:   []string{core.ArchitectureArm64, core.ArchitectureAmd64},
+			Values:   []string{v1alpha5.ArchitectureArm64, v1alpha5.ArchitectureAmd64},
 		}}
 		nodeNames := sets.NewString()
 		ExpectApplied(ctx, env.Client, provisioner)
 		for _, pod := range ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
 			test.UnschedulablePod(test.PodOptions{
-				NodeSelector: map[string]string{v1.LabelArchStable: core.ArchitectureAmd64},
+				NodeSelector: map[string]string{v1.LabelArchStable: v1alpha5.ArchitectureAmd64},
 			}),
 			test.UnschedulablePod(test.PodOptions{
-				NodeSelector: map[string]string{v1.LabelArchStable: core.ArchitectureArm64},
+				NodeSelector: map[string]string{v1.LabelArchStable: v1alpha5.ArchitectureArm64},
 			})) {
 			node := ExpectScheduled(ctx, env.Client, pod)
 			nodeNames.Insert(node.Name)
@@ -2935,7 +2933,7 @@ var _ = Describe("Instance Type Compatibility", func() {
 		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{{
 			Key:      v1.LabelArchStable,
 			Operator: v1.NodeSelectorOpIn,
-			Values:   []string{core.ArchitectureAmd64},
+			Values:   []string{v1alpha5.ArchitectureAmd64},
 		}}
 		ExpectApplied(ctx, env.Client, provisioner)
 		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
@@ -2954,7 +2952,7 @@ var _ = Describe("Instance Type Compatibility", func() {
 		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{{
 			Key:      v1.LabelArchStable,
 			Operator: v1.NodeSelectorOpIn,
-			Values:   []string{core.ArchitectureAmd64},
+			Values:   []string{v1alpha5.ArchitectureAmd64},
 		}}
 		ExpectApplied(ctx, env.Client, provisioner)
 		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
@@ -2974,7 +2972,7 @@ var _ = Describe("Instance Type Compatibility", func() {
 		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{{
 			Key:      v1.LabelArchStable,
 			Operator: v1.NodeSelectorOpIn,
-			Values:   []string{core.ArchitectureAmd64},
+			Values:   []string{v1alpha5.ArchitectureAmd64},
 		}}
 		ExpectApplied(ctx, env.Client, provisioner)
 		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
@@ -2987,7 +2985,7 @@ var _ = Describe("Instance Type Compatibility", func() {
 		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{{
 			Key:      v1.LabelArchStable,
 			Operator: v1.NodeSelectorOpIn,
-			Values:   []string{core.ArchitectureArm64, core.ArchitectureAmd64},
+			Values:   []string{v1alpha5.ArchitectureArm64, v1alpha5.ArchitectureAmd64},
 		}}
 		nodeNames := sets.NewString()
 		ExpectApplied(ctx, env.Client, provisioner)
@@ -3007,7 +3005,7 @@ var _ = Describe("Instance Type Compatibility", func() {
 		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{{
 			Key:      v1.LabelArchStable,
 			Operator: v1.NodeSelectorOpIn,
-			Values:   []string{core.ArchitectureArm64, core.ArchitectureAmd64},
+			Values:   []string{v1alpha5.ArchitectureArm64, v1alpha5.ArchitectureAmd64},
 		}}
 		nodeNames := sets.NewString()
 		ExpectApplied(ctx, env.Client, provisioner)
@@ -3027,7 +3025,7 @@ var _ = Describe("Instance Type Compatibility", func() {
 		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{{
 			Key:      v1.LabelArchStable,
 			Operator: v1.NodeSelectorOpIn,
-			Values:   []string{core.ArchitectureArm64, core.ArchitectureAmd64},
+			Values:   []string{v1alpha5.ArchitectureArm64, v1alpha5.ArchitectureAmd64},
 		}}
 		nodeNames := sets.NewString()
 		ExpectApplied(ctx, env.Client, provisioner)
@@ -3342,7 +3340,7 @@ var _ = Describe("Binpacking", func() {
 		}
 		Expect(nodeNames).To(HaveLen(1))
 	})
-	It("should create new nodes when a node is at capacity", func() {
+	It("should create new machines when a node is at capacity", func() {
 		opts := test.PodOptions{
 			NodeSelector: map[string]string{v1.LabelArchStable: "amd64"},
 			Conditions:   []v1.PodCondition{{Type: v1.PodScheduled, Reason: v1.PodReasonUnschedulable, Status: v1.ConditionFalse}},
@@ -3380,8 +3378,8 @@ var _ = Describe("Binpacking", func() {
 			}}
 
 		// Two large pods are all that will fit on the default-instance type (the largest instance type) which will create
-		// twenty nodes. This leaves just enough room on each of those nodes for one additional small pod per node, so we
-		// should only end up with 20 nodes total.
+		// twenty machines. This leaves just enough room on each of those machines for one additional small pod per node, so we
+		// should only end up with 20 machines total.
 		provPods := append(test.Pods(40, largeOpts), test.Pods(20, smallOpts)...)
 		ExpectApplied(ctx, env.Client, provisioner)
 		pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, provPods...)
@@ -3393,7 +3391,7 @@ var _ = Describe("Binpacking", func() {
 		}
 		Expect(nodeNames).To(HaveLen(20))
 	})
-	It("should pack nodes tightly", func() {
+	It("should pack machines tightly", func() {
 		cloudProv.InstanceTypes = fake.InstanceTypes(5)
 		var nodes []*v1.Node
 		ExpectApplied(ctx, env.Client, provisioner)
@@ -3438,7 +3436,7 @@ var _ = Describe("Binpacking", func() {
 			}}))[0]
 		ExpectNotScheduled(ctx, env.Client, pod)
 	})
-	It("should create new nodes when a node is at capacity due to pod limits per node", func() {
+	It("should create new machines when a node is at capacity due to pod limits per node", func() {
 		opts := test.PodOptions{
 			NodeSelector: map[string]string{v1.LabelArchStable: "amd64"},
 			Conditions:   []v1.PodCondition{{Type: v1.PodScheduled, Reason: v1.PodReasonUnschedulable, Status: v1.ConditionFalse}},
@@ -3510,7 +3508,7 @@ var _ = Describe("Binpacking", func() {
 				},
 				Offerings: []cloudprovider.Offering{
 					{
-						CapacityType: core.CapacityTypeOnDemand,
+						CapacityType: v1alpha5.CapacityTypeOnDemand,
 						Zone:         "test-zone-1a",
 						Price:        3.00,
 						Available:    true,
@@ -3525,7 +3523,7 @@ var _ = Describe("Binpacking", func() {
 				},
 				Offerings: []cloudprovider.Offering{
 					{
-						CapacityType: core.CapacityTypeOnDemand,
+						CapacityType: v1alpha5.CapacityTypeOnDemand,
 						Zone:         "test-zone-1a",
 						Price:        2.00,
 						Available:    true,
@@ -3540,7 +3538,7 @@ var _ = Describe("Binpacking", func() {
 				},
 				Offerings: []cloudprovider.Offering{
 					{
-						CapacityType: core.CapacityTypeOnDemand,
+						CapacityType: v1alpha5.CapacityTypeOnDemand,
 						Zone:         "test-zone-1a",
 						Price:        1.00,
 						Available:    true,
@@ -3683,7 +3681,7 @@ var _ = Describe("In-Flight Nodes", func() {
 		Expect(node1.Name).ToNot(Equal(node2.Name))
 	})
 	Context("Topology", func() {
-		It("should balance pods across zones with in-flight nodes", func() {
+		It("should balance pods across zones with in-flight machines", func() {
 			labels := map[string]string{"foo": "bar"}
 			topology := []v1.TopologySpreadConstraint{{
 				TopologyKey:       v1.LabelTopologyZone,
@@ -3700,7 +3698,7 @@ var _ = Describe("In-Flight Nodes", func() {
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 2))
 
-			// reconcile our nodes with the cluster state so they'll show up as in-flight
+			// reconcile our machines with the cluster state so they'll show up as in-flight
 			var nodeList v1.NodeList
 			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 			for _, node := range nodeList.Items {
@@ -3718,10 +3716,10 @@ var _ = Describe("In-Flight Nodes", func() {
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(3, 3, 3))
 			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 
-			// shouldn't create any new nodes as the in-flight ones can support the pods
+			// shouldn't create any new machines as the in-flight ones can support the pods
 			Expect(nodeList.Items).To(HaveLen(firstRoundNumNodes))
 		})
-		It("should balance pods across hostnames with in-flight nodes", func() {
+		It("should balance pods across hostnames with in-flight machines", func() {
 			labels := map[string]string{"foo": "bar"}
 			topology := []v1.TopologySpreadConstraint{{
 				TopologyKey:       v1.LabelHostname,
@@ -3738,7 +3736,7 @@ var _ = Describe("In-Flight Nodes", func() {
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 1, 1))
 
-			// reconcile our nodes with the cluster state so they'll show up as in-flight
+			// reconcile our machines with the cluster state so they'll show up as in-flight
 			var nodeList v1.NodeList
 			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 			for _, node := range nodeList.Items {
@@ -3752,7 +3750,7 @@ var _ = Describe("In-Flight Nodes", func() {
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 			)
-			// we prefer to launch new nodes to satisfy the topology spread even though we could technnically schedule against existingNodes
+			// we prefer to launch new machines to satisfy the topology spread even though we could technnically schedule against existingNodes
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 1, 1, 1, 1, 1, 1, 1))
 		})
 	})
@@ -3845,7 +3843,7 @@ var _ = Describe("In-Flight Nodes", func() {
 
 			// Mark it initialized which only occurs once the startup taint was removed and re-apply only the startup taint.
 			// We also need to add resource capacity as after initialization we assume that kubelet has recorded them.
-			node1.Labels[core.LabelNodeInitialized] = "true"
+			node1.Labels[v1alpha5.LabelNodeInitialized] = "true"
 			node1.Spec.Taints = []v1.Taint{startupTaint}
 			node1.Status.Capacity = v1.ResourceList{v1.ResourcePods: resource.MustParse("10")}
 			ExpectApplied(ctx, env.Client, node1)
@@ -3868,7 +3866,7 @@ var _ = Describe("In-Flight Nodes", func() {
 			node1 := ExpectScheduled(ctx, env.Client, pod)
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 			// Mark Initialized
-			node1.Labels[core.LabelNodeInitialized] = "true"
+			node1.Labels[v1alpha5.LabelNodeInitialized] = "true"
 			node1.Spec.Taints = []v1.Taint{
 				{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
 				{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
@@ -4039,7 +4037,7 @@ var _ = Describe("In-Flight Nodes", func() {
 
 	})
 	// nolint:gosec
-	It("should pack in-flight nodes before launching new nodes", func() {
+	It("should pack in-flight machines before launching new machines", func() {
 		cloudProv.InstanceTypes = []*cloudprovider.InstanceType{
 			fake.NewInstanceType(fake.InstanceTypeOptions{
 				Name: "medium",
@@ -4067,7 +4065,7 @@ var _ = Describe("In-Flight Nodes", func() {
 			}
 		}
 
-		// due to the in-flight node support, we should pack existing nodes before launching new node. The end result
+		// due to the in-flight node support, we should pack existing machines before launching new node. The end result
 		// is that we should only have some spare capacity on our final node
 		nodesWithCPUFree := 0
 		cluster.ForEachNode(func(n *state.Node) bool {
@@ -4109,7 +4107,7 @@ var _ = Describe("In-Flight Nodes", func() {
 })
 
 var _ = Describe("No Pre-Binding", func() {
-	It("should not bind pods to nodes", func() {
+	It("should not bind pods to machines", func() {
 		opts := test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
 			Limits: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("10m"),
@@ -4117,7 +4115,7 @@ var _ = Describe("No Pre-Binding", func() {
 		}}
 
 		var nodeList v1.NodeList
-		// shouldn't have any nodes
+		// shouldn't have any machines
 		Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 		Expect(nodeList.Items).To(HaveLen(0))
 
@@ -4147,7 +4145,7 @@ var _ = Describe("No Pre-Binding", func() {
 		}}
 
 		var nodeList v1.NodeList
-		// shouldn't have any nodes
+		// shouldn't have any machines
 		Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 		Expect(nodeList.Items).To(HaveLen(0))
 
@@ -4209,7 +4207,7 @@ var _ = Describe("No Pre-Binding", func() {
 })
 
 var _ = Describe("Volume Limits", func() {
-	It("should launch multiple nodes if required due to volume limits", func() {
+	It("should launch multiple machines if required due to volume limits", func() {
 		const csiProvider = "fake.csi.provider"
 		cloudProv.InstanceTypes = []*cloudprovider.InstanceType{
 			fake.NewInstanceType(
@@ -4491,7 +4489,7 @@ func ExpectMaxSkew(ctx context.Context, c client.Client, namespace string, const
 					skew[key]++
 				}
 			}
-			if constraint.TopologyKey == core.LabelCapacityType {
+			if constraint.TopologyKey == v1alpha5.LabelCapacityType {
 				if key, ok := node.Labels[constraint.TopologyKey]; ok {
 					skew[key]++
 				}

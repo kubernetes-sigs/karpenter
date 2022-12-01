@@ -23,7 +23,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/core"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 )
 
@@ -45,6 +44,6 @@ func (r *Finalizer) Reconcile(_ context.Context, provisioner *v1alpha5.Provision
 		UID:                provisioner.UID,
 		BlockOwnerDeletion: ptr.Bool(true),
 	}}
-	controllerutil.AddFinalizer(node, core.TerminationFinalizer)
+	controllerutil.AddFinalizer(node, v1alpha5.TerminationFinalizer)
 	return reconcile.Result{}, nil
 }

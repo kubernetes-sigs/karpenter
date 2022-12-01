@@ -27,7 +27,6 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/aws/karpenter-core/pkg/apis/core"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/metrics"
@@ -55,7 +54,7 @@ func (e *Emptiness) ShouldDeprovision(ctx context.Context, n *state.Node, provis
 		return false
 	}
 
-	emptinessTimestamp, hasEmptinessTimestamp := n.Node.Annotations[core.EmptinessTimestampAnnotationKey]
+	emptinessTimestamp, hasEmptinessTimestamp := n.Node.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
 	if !hasEmptinessTimestamp {
 		return false
 	}

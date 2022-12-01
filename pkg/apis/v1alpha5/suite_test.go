@@ -31,8 +31,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-
-	"github.com/aws/karpenter-core/pkg/apis/core"
 )
 
 var ctx context.Context
@@ -113,7 +111,7 @@ var _ = Describe("Validation", func() {
 			Expect(provisioner.Validate(ctx)).To(Succeed())
 		})
 		It("should fail for the provisioner name label", func() {
-			provisioner.Spec.Labels = map[string]string{core.ProvisionerNameLabelKey: randomdata.SillyName()}
+			provisioner.Spec.Labels = map[string]string{ProvisionerNameLabelKey: randomdata.SillyName()}
 			Expect(provisioner.Validate(ctx)).ToNot(Succeed())
 		})
 		It("should fail for invalid label keys", func() {
@@ -125,7 +123,7 @@ var _ = Describe("Validation", func() {
 			Expect(provisioner.Validate(ctx)).ToNot(Succeed())
 		})
 		It("should fail for restricted label domains", func() {
-			for label := range core.RestrictedLabelDomains {
+			for label := range RestrictedLabelDomains {
 				provisioner.Spec.Labels = map[string]string{label + "/unknown": randomdata.SillyName()}
 				Expect(provisioner.Validate(ctx)).ToNot(Succeed())
 			}
@@ -138,7 +136,7 @@ var _ = Describe("Validation", func() {
 			Expect(provisioner.Validate(ctx)).To(Succeed())
 		})
 		It("should allow labels in restricted domains exceptions list", func() {
-			for label := range core.LabelDomainExceptions {
+			for label := range LabelDomainExceptions {
 				provisioner.Spec.Labels = map[string]string{
 					label: "test-value",
 				}
@@ -197,7 +195,7 @@ var _ = Describe("Validation", func() {
 	Context("Requirements", func() {
 		It("should fail for the provisioner name label", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
-				{Key: core.ProvisionerNameLabelKey, Operator: v1.NodeSelectorOpIn, Values: []string{randomdata.SillyName()}},
+				{Key: ProvisionerNameLabelKey, Operator: v1.NodeSelectorOpIn, Values: []string{randomdata.SillyName()}},
 			}
 			Expect(provisioner.Validate(ctx)).ToNot(Succeed())
 		})
@@ -220,7 +218,7 @@ var _ = Describe("Validation", func() {
 			}
 		})
 		It("should fail for restricted domains", func() {
-			for label := range core.RestrictedLabelDomains {
+			for label := range RestrictedLabelDomains {
 				provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 					{Key: label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
 				}
@@ -228,7 +226,7 @@ var _ = Describe("Validation", func() {
 			}
 		})
 		It("should allow restricted domains exceptions", func() {
-			for label := range core.LabelDomainExceptions {
+			for label := range LabelDomainExceptions {
 				provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 					{Key: label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
 				}
@@ -236,7 +234,7 @@ var _ = Describe("Validation", func() {
 			}
 		})
 		It("should allow well known label exceptions", func() {
-			for label := range core.WellKnownLabels.Difference(sets.NewString(core.ProvisionerNameLabelKey)) {
+			for label := range WellKnownLabels.Difference(sets.NewString(ProvisionerNameLabelKey)) {
 				provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 					{Key: label, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
 				}

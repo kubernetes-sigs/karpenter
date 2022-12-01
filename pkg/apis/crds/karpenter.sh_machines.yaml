@@ -147,6 +147,11 @@ spec:
                     description: 'UID of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids'
                     type: string
                 type: object
+              provider:
+                description: 'Provider contains fields specific to your cloudprovider.
+                  Deprecated: NodeTemplateRef is favored over Provider'
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
               requirements:
                 description: Requirements are layered with Labels and applied to every
                   node.

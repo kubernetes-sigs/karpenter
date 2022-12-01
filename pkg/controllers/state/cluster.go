@@ -35,7 +35,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
-	"github.com/aws/karpenter-core/pkg/apis/core"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -256,7 +255,7 @@ func (c *Cluster) newNode(ctx context.Context, node *v1.Node) (*Node, error) {
 // nolint:gocyclo
 func (c *Cluster) populateCapacity(ctx context.Context, node *v1.Node, n *Node) error {
 	// Use node's values if initialized
-	if node.Labels[core.LabelNodeInitialized] == "true" {
+	if node.Labels[v1alpha5.LabelNodeInitialized] == "true" {
 		n.Allocatable = node.Status.Allocatable
 		n.Capacity = node.Status.Capacity
 		return nil
@@ -264,10 +263,10 @@ func (c *Cluster) populateCapacity(ctx context.Context, node *v1.Node, n *Node) 
 	// Fallback to instance type capacity otherwise
 	provisioner := &v1alpha5.Provisioner{}
 	// In flight nodes not owned by karpenter are not included in calculations
-	if _, ok := node.Labels[core.ProvisionerNameLabelKey]; !ok {
+	if _, ok := node.Labels[v1alpha5.ProvisionerNameLabelKey]; !ok {
 		return nil
 	}
-	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: node.Labels[core.ProvisionerNameLabelKey]}, provisioner); err != nil {
+	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
 		if errors.IsNotFound(err) {
 			// Nodes that are not owned by an existing provisioner are not included in calculations
 			return nil
@@ -375,7 +374,7 @@ func (c *Cluster) updateNode(ctx context.Context, node *v1.Node) error {
 	// If the old node existed and its initialization status changed, we want to reconsider consolidation.  This handles
 	// a situation where we re-start with an unready node and it becomes ready later.
 	if ok {
-		if oldNode.Node.Labels[core.LabelNodeInitialized] != n.Node.Labels[core.LabelNodeInitialized] {
+		if oldNode.Node.Labels[v1alpha5.LabelNodeInitialized] != n.Node.Labels[v1alpha5.LabelNodeInitialized] {
 			c.recordConsolidationChange()
 		}
 		// We mark the node for deletion either:

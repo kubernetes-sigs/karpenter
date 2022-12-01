@@ -100,13 +100,13 @@ func TestSchedulingProfile(t *testing.T) {
 			start := time.Now()
 			res := testing.Benchmark(func(b *testing.B) { benchmarkScheduler(b, instanceCount, podCount) })
 			totalTime += time.Since(start) / time.Duration(res.N)
-			nodeCount := res.Extra["nodes"]
-			fmt.Fprintf(tw, "%d instances %d pods\t%d nodes\t%s per scheduling\t%s per pod\n", instanceCount, podCount, int(nodeCount), time.Duration(res.NsPerOp()), time.Duration(res.NsPerOp()/int64(podCount)))
+			nodeCount := res.Extra["machines"]
+			fmt.Fprintf(tw, "%d instances %d pods\t%d machines\t%s per scheduling\t%s per pod\n", instanceCount, podCount, int(nodeCount), time.Duration(res.NsPerOp()), time.Duration(res.NsPerOp()/int64(podCount)))
 			totalPods += podCount
 			totalNodes += int(nodeCount)
 		}
 	}
-	fmt.Println("scheduled", totalPods, "against", totalNodes, "nodes in total in", totalTime, float64(totalPods)/totalTime.Seconds(), "pods/sec")
+	fmt.Println("scheduled", totalPods, "against", totalNodes, "machines in total in", totalTime, float64(totalPods)/totalTime.Seconds(), "pods/sec")
 	tw.Flush()
 }
 
@@ -161,7 +161,7 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 				}
 				variance /= float64(nodesInRound1)
 				stddev := math.Sqrt(variance)
-				fmt.Printf("%d instance types %d pods resulted in %d nodes with pods per node min=%d max=%d mean=%f stddev=%f\n",
+				fmt.Printf("%d instance types %d pods resulted in %d machines with pods per node min=%d max=%d mean=%f stddev=%f\n",
 					instanceCount, podCount, nodesInRound1, minPods, maxPods, meanPodsPerNode, stddev)
 			}
 		}
@@ -170,7 +170,7 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	podsPerSec := float64(len(pods)) / (duration.Seconds() / float64(b.N))
 	b.ReportMetric(podsPerSec, "pods/sec")
 	b.ReportMetric(float64(podsScheduledInRound1), "pods")
-	b.ReportMetric(float64(nodesInRound1), "nodes")
+	b.ReportMetric(float64(nodesInRound1), "machines")
 
 	// we don't care if it takes a bit of time to schedule a few pods as there is some setup time required for sorting
 	// instance types, computing topologies, etc.  We want to ensure that the larger batches of pods don't become too

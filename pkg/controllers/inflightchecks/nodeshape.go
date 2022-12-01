@@ -21,7 +21,6 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 
-	"github.com/aws/karpenter-core/pkg/apis/core"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
@@ -44,7 +43,7 @@ func (n *NodeShape) Check(ctx context.Context, node *v1.Node, provisioner *v1alp
 		return nil, nil
 	}
 	// and nodes that haven't initialized yet
-	if node.Labels[core.LabelNodeInitialized] != "true" {
+	if node.Labels[v1alpha5.LabelNodeInitialized] != "true" {
 		return nil, nil
 	}
 

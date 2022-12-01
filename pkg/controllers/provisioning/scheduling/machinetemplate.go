@@ -20,7 +20,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	"github.com/aws/karpenter-core/pkg/apis/core"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -45,7 +44,7 @@ type MachineTemplate struct {
 }
 
 func NewMachineTemplate(provisioner *v1alpha5.Provisioner) *MachineTemplate {
-	labels := lo.Assign(provisioner.Spec.Labels, map[string]string{core.ProvisionerNameLabelKey: provisioner.Name})
+	labels := lo.Assign(provisioner.Spec.Labels, map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name})
 	requirements := scheduling.NewRequirements()
 	requirements.Add(scheduling.NewNodeSelectorRequirements(provisioner.Spec.Requirements...).Values()...)
 	requirements.Add(scheduling.NewLabelRequirements(labels).Values()...)
@@ -67,7 +66,7 @@ func (i *MachineTemplate) ToNode() *v1.Node {
 		ObjectMeta: metav1.ObjectMeta{
 			Labels:      lo.Assign(i.Labels, i.Requirements.Labels()),
 			Annotations: i.Annotations,
-			Finalizers:  []string{core.TerminationFinalizer},
+			Finalizers:  []string{v1alpha5.TerminationFinalizer},
 		},
 		Spec: v1.NodeSpec{
 			Taints: append(i.Taints, i.StartupTaints...),
@@ -86,13 +85,18 @@ func (i *MachineTemplate) ToMachine(owner *v1alpha5.Provisioner) *v1alpha1.Machi
 			Labels:       i.Labels,
 		},
 		Spec: v1alpha1.MachineSpec{
-			Taints:          i.Taints,
-			StartupTaints:   i.StartupTaints,
-			Requirements:    i.Requirements.NodeSelectorRequirements(),
-			Kubelet:         i.Kubelet,
-			NodeTemplateRef: i.ProviderRef,
+			Taints:        i.Taints,
+			StartupTaints: i.StartupTaints,
+			Requirements:  i.Requirements.NodeSelectorRequirements(),
+			Kubelet:       i.Kubelet,
+			MachineTemplateRef: v1.ObjectReference{
+				APIVersion: i.ProviderRef.APIVersion,
+				Kind:       i.ProviderRef.Kind,
+				Name:       i.ProviderRef.Name,
+			},
+			Provider: i.Provider,
 		},
 	}
 	lo.Must0(controllerutil.SetOwnerReference(owner, m, scheme.Scheme))
-	return m, nil
+	return m
 }

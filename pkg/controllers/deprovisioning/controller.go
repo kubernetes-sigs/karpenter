@@ -33,7 +33,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/core"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 
@@ -301,7 +300,7 @@ func (c *Controller) launchReplacementNodes(ctx context.Context, action Command)
 				c.recorder.Publish(deprovisioningevents.LaunchingNode(&k8Node, action.String()))
 			})
 
-			if _, ok := k8Node.Labels[core.LabelNodeInitialized]; !ok {
+			if _, ok := k8Node.Labels[v1alpha5.LabelNodeInitialized]; !ok {
 				// make the user aware of why deprovisioning is paused
 				c.recorder.Publish(deprovisioningevents.WaitingOnReadiness(&k8Node))
 				return fmt.Errorf("node is not initialized")

@@ -35,7 +35,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/aws/karpenter-core/pkg/apis/core"
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 
@@ -130,6 +130,6 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontrolle
 			return !obj.GetDeletionTimestamp().IsZero()
 		})).
 		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
-			return lo.Contains(obj.GetFinalizers(), core.TerminationFinalizer)
+			return lo.Contains(obj.GetFinalizers(), v1alpha5.TerminationFinalizer)
 		})))
 }

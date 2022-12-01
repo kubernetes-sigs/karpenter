@@ -33,7 +33,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
-	"github.com/aws/karpenter-core/pkg/apis/core"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 
@@ -71,7 +70,7 @@ func (c *Controller) Name() string {
 // Reconcile executes a reallocation control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Result, error) {
 	provisioner := &v1alpha5.Provisioner{}
-	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: node.Labels[core.ProvisionerNameLabelKey]}, provisioner); err != nil {
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
@@ -110,7 +109,7 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 			&source.Kind{Type: &v1alpha5.Provisioner{}},
 			handler.EnqueueRequestsFromMapFunc(func(o client.Object) (requests []reconcile.Request) {
 				nodes := &v1.NodeList{}
-				if err := c.kubeClient.List(ctx, nodes, client.MatchingLabels(map[string]string{core.ProvisionerNameLabelKey: o.GetName()})); err != nil {
+				if err := c.kubeClient.List(ctx, nodes, client.MatchingLabels(map[string]string{v1alpha5.ProvisionerNameLabelKey: o.GetName()})); err != nil {
 					logging.FromContext(ctx).Errorf("Failed to list nodes when mapping expiration watch events, %s", err)
 					return requests
 				}
@@ -132,7 +131,7 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 		).
 		Watches(&source.Channel{Source: ch}, &handler.EnqueueRequestForObject{}).
 		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
-			_, ok := obj.GetLabels()[core.ProvisionerNameLabelKey]
+			_, ok := obj.GetLabels()[v1alpha5.ProvisionerNameLabelKey]
 			return ok
 		})).
 		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {

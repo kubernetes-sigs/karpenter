@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/core"
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/termination"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
@@ -76,7 +76,7 @@ var _ = Describe("Termination", func() {
 	var node *v1.Node
 
 	BeforeEach(func() {
-		node = test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{core.TerminationFinalizer}}})
+		node = test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1alpha5.TerminationFinalizer}}})
 	})
 
 	AfterEach(func() {
@@ -97,7 +97,7 @@ var _ = Describe("Termination", func() {
 			for i := 0; i < 10; i++ {
 				node = test.Node(test.NodeOptions{
 					ObjectMeta: metav1.ObjectMeta{
-						Finalizers: []string{core.TerminationFinalizer},
+						Finalizers: []string{v1alpha5.TerminationFinalizer},
 					},
 				})
 				ExpectApplied(ctx, env.Client, node)
@@ -125,7 +125,7 @@ var _ = Describe("Termination", func() {
 			podNoEvict := test.Pod(test.PodOptions{
 				NodeName: node.Name,
 				ObjectMeta: metav1.ObjectMeta{
-					Annotations:     map[string]string{core.DoNotEvictPodAnnotationKey: "true"},
+					Annotations:     map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"},
 					OwnerReferences: defaultOwnerRefs,
 				},
 			})
@@ -172,7 +172,7 @@ var _ = Describe("Termination", func() {
 			podNoEvict := test.Pod(test.PodOptions{
 				NodeName: node.Name,
 				ObjectMeta: metav1.ObjectMeta{
-					Annotations:     map[string]string{core.DoNotEvictPodAnnotationKey: "true"},
+					Annotations:     map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"},
 					OwnerReferences: defaultOwnerRefs,
 				},
 			})
@@ -216,7 +216,7 @@ var _ = Describe("Termination", func() {
 				NodeName:    node.Name,
 				Tolerations: []v1.Toleration{{Key: v1.TaintNodeUnschedulable, Operator: v1.TolerationOpExists, Effect: v1.TaintEffectNoSchedule}},
 				ObjectMeta: metav1.ObjectMeta{
-					Annotations:     map[string]string{core.DoNotEvictPodAnnotationKey: "true"},
+					Annotations:     map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"},
 					OwnerReferences: defaultOwnerRefs,
 				},
 			})
@@ -261,7 +261,7 @@ var _ = Describe("Termination", func() {
 			podNoEvict := test.Pod(test.PodOptions{
 				NodeName: node.Name,
 				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{core.DoNotEvictPodAnnotationKey: "true"},
+					Annotations: map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"},
 					OwnerReferences: []metav1.OwnerReference{{
 						APIVersion: "v1",
 						Kind:       "Node",
@@ -340,7 +340,7 @@ var _ = Describe("Termination", func() {
 			podNoEvict := test.Pod(test.PodOptions{
 				NodeName: node.Name,
 				ObjectMeta: metav1.ObjectMeta{
-					Annotations:     map[string]string{core.DoNotEvictPodAnnotationKey: "true"},
+					Annotations:     map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"},
 					OwnerReferences: nil,
 				},
 			})
@@ -396,7 +396,7 @@ var _ = Describe("Termination", func() {
 				test.Pod(test.PodOptions{
 					NodeName: node.Name,
 					ObjectMeta: metav1.ObjectMeta{
-						Annotations:     map[string]string{core.DoNotEvictPodAnnotationKey: "true"},
+						Annotations:     map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"},
 						OwnerReferences: defaultOwnerRefs,
 					},
 				}),
@@ -616,7 +616,7 @@ func ExpectEvicted(c client.Client, pods ...*v1.Pod) {
 func ExpectNodeDraining(c client.Client, nodeName string) *v1.Node {
 	node := ExpectNodeExistsWithOffset(1, ctx, c, nodeName)
 	ExpectWithOffset(1, node.Spec.Unschedulable).To(BeTrue())
-	ExpectWithOffset(1, lo.Contains(node.Finalizers, core.TerminationFinalizer)).To(BeTrue())
+	ExpectWithOffset(1, lo.Contains(node.Finalizers, v1alpha5.TerminationFinalizer)).To(BeTrue())
 	ExpectWithOffset(1, node.DeletionTimestamp.IsZero()).To(BeFalse())
 	return node
 }
