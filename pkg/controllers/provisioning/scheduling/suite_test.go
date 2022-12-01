@@ -83,7 +83,7 @@ var _ = BeforeSuite(func() {
 	nodeStateController = state.NewNodeController(env.Client, cluster)
 	podStateController = state.NewPodController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
-	prov = provisioning.NewProvisioner(ctx, env.Client, env.KubernetesInterface.CoreV1(), recorder, cloudProv, cluster, test.SettingsStore{})
+	prov = provisioning.NewProvisioner(ctx, env.Client, env.KubernetesInterface.CoreV1(), recorder, cloudProv, cluster)
 	provisioningController = provisioning.NewController(env.Client, prov, recorder)
 	provisioning.WaitForClusterSync = false
 })
