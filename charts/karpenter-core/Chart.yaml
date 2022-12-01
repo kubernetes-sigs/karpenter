@@ -16,5 +16,5 @@ sources:
   - https://github.com/aws/karpenter-core/
 dependencies:
   - name: karpenter-core-crd
-    version: "v0.0.15"
+    version: "v0.0.16"
     repository: "oci://ghcr.io/spring1843/karpenter-core"
