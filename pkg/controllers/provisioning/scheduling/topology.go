@@ -266,7 +266,7 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 		if !ok {
 			continue // Don't include pods if node doesn't contain domain https://kubernetes.io/docs/concepts/workloads/pods/pod-topology-spread-constraints/#conventions
 		}
-		// nodes may or may not be considered for counting purposes for topology spread constraints depending on if they
+		// machines may or may not be considered for counting purposes for topology spread constraints depending on if they
 		// are selected by the pod's node selectors and required node affinities.  If these are unset, the node always counts.
 		if !tg.nodeFilter.Matches(node) {
 			continue

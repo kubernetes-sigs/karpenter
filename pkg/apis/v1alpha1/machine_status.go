@@ -15,41 +15,39 @@ limitations under the License.
 package v1alpha1
 
 import (
-	v1 "k8s.io/api/core/v1"
 	"knative.dev/pkg/apis"
 )
 
 // MachineStatus defines the observed state of Machine
 type MachineStatus struct {
+	NodeName string `json:"nodeName,omitempty"`
 	// ProviderID of the corresponding node object
 	ProviderID string `json:"providerID,omitempty"`
-	// Allocatable is the resources available to use for scheduling
-	Allocatable v1.ResourceList `json:"allocatable,omitempty"`
-	// Properties of the node that may be used for scheduling
-	Labels map[string]string `json:"labels,omitempty"`
 	// Conditions contains signals for health and readiness
 	// +optional
 	Conditions apis.Conditions `json:"conditions,omitempty"`
 }
 
-func (m *Machine) StatusConditions() apis.ConditionManager {
+func (in *Machine) StatusConditions() apis.ConditionManager {
 	return apis.NewLivingConditionSet(
 		MachineCreated,
+		MachineRegistered,
 		MachineInitialized,
 		MachineHealthy,
-	).Manage(m)
+	).Manage(in)
 }
 
 var (
 	MachineCreated     apis.ConditionType
+	MachineRegistered  apis.ConditionType
 	MachineInitialized apis.ConditionType
 	MachineHealthy     apis.ConditionType
 )
 
-func (m *Machine) GetConditions() apis.Conditions {
-	return m.Status.Conditions
+func (in *Machine) GetConditions() apis.Conditions {
+	return in.Status.Conditions
 }
 
-func (m *Machine) SetConditions(conditions apis.Conditions) {
-	m.Status.Conditions = conditions
+func (in *Machine) SetConditions(conditions apis.Conditions) {
+	in.Status.Conditions = conditions
 }

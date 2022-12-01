@@ -26,7 +26,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/core"
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/test"
 
@@ -45,7 +45,7 @@ var _ = Describe("Typed", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					core.ProvisionerNameLabelKey: "default",
+					v1alpha5.ProvisionerNameLabelKey: "default",
 				},
 			},
 		})
@@ -54,7 +54,7 @@ var _ = Describe("Typed", func() {
 			ReconcileAssertions: []TypedReconcileAssertion[*v1.Node]{
 				func(ctx context.Context, n *v1.Node) {
 					Expect(n.Name).To(Equal(node.Name))
-					Expect(n.Labels).To(HaveKeyWithValue(core.ProvisionerNameLabelKey, "default"))
+					Expect(n.Labels).To(HaveKeyWithValue(v1alpha5.ProvisionerNameLabelKey, "default"))
 				},
 			},
 		}
@@ -65,7 +65,7 @@ var _ = Describe("Typed", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					core.ProvisionerNameLabelKey: "default",
+					v1alpha5.ProvisionerNameLabelKey: "default",
 				},
 			},
 		})
@@ -88,10 +88,10 @@ var _ = Describe("Typed", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					core.ProvisionerNameLabelKey: "default",
+					v1alpha5.ProvisionerNameLabelKey: "default",
 				},
 				Finalizers: []string{
-					core.TestingGroup + "/finalizer",
+					v1alpha5.TestingGroup + "/finalizer",
 				},
 			},
 		})
@@ -114,10 +114,10 @@ var _ = Describe("Typed", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					core.ProvisionerNameLabelKey: "default",
+					v1alpha5.ProvisionerNameLabelKey: "default",
 				},
 				Finalizers: []string{
-					core.TestingGroup + "/finalizer",
+					v1alpha5.TestingGroup + "/finalizer",
 				},
 			},
 		})
@@ -126,7 +126,7 @@ var _ = Describe("Typed", func() {
 		fakeController := &FakeTypedController[*v1.Node]{
 			FinalizeAssertions: []TypedReconcileAssertion[*v1.Node]{
 				func(ctx context.Context, node *v1.Node) {
-					controllerutil.RemoveFinalizer(node, core.TestingGroup+"/finalizer")
+					controllerutil.RemoveFinalizer(node, v1alpha5.TestingGroup+"/finalizer")
 				},
 			},
 		}

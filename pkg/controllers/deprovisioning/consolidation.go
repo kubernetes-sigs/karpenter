@@ -27,7 +27,6 @@ import (
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/core"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
@@ -88,7 +87,7 @@ func (c *consolidation) sortAndFilterCandidates(ctx context.Context, nodes []Can
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes
 func (c *consolidation) ShouldDeprovision(_ context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, _ []*v1.Pod) bool {
-	if val, ok := n.Node.Annotations[core.DoNotConsolidateNodeAnnotationKey]; ok {
+	if val, ok := n.Node.Annotations[v1alpha5.DoNotConsolidateNodeAnnotationKey]; ok {
 		return val != "true"
 	}
 	return provisioner != nil && provisioner.Spec.Consolidation != nil && ptr.BoolValue(provisioner.Spec.Consolidation.Enabled)
@@ -208,13 +207,13 @@ func (c *consolidation) computeConsolidation(ctx context.Context, nodes ...Candi
 	// a spot node with one that is less available and more likely to be reclaimed).
 	allExistingAreSpot := true
 	for _, n := range nodes {
-		if n.capacityType != core.CapacityTypeSpot {
+		if n.capacityType != v1alpha5.CapacityTypeSpot {
 			allExistingAreSpot = false
 		}
 	}
 
 	if allExistingAreSpot &&
-		newNodes[0].Requirements.Get(core.LabelCapacityType).Has(core.CapacityTypeSpot) {
+		newNodes[0].Requirements.Get(v1alpha5.LabelCapacityType).Has(v1alpha5.CapacityTypeSpot) {
 		return Command{action: actionDoNothing}, nil
 	}
 
@@ -222,9 +221,9 @@ func (c *consolidation) computeConsolidation(ctx context.Context, nodes ...Candi
 	// assumption, that the spot variant will launch. We also need to add a requirement to the node to ensure that if
 	// spot capacity is insufficient we don't replace the node with a more expensive on-demand node.  Instead the launch
 	// should fail and we'll just leave the node alone.
-	ctReq := newNodes[0].Requirements.Get(core.LabelCapacityType)
-	if ctReq.Has(core.CapacityTypeSpot) && ctReq.Has(core.CapacityTypeOnDemand) {
-		newNodes[0].Requirements.Add(scheduling.NewRequirement(core.LabelCapacityType, v1.NodeSelectorOpIn, core.CapacityTypeSpot))
+	ctReq := newNodes[0].Requirements.Get(v1alpha5.LabelCapacityType)
+	if ctReq.Has(v1alpha5.CapacityTypeSpot) && ctReq.Has(v1alpha5.CapacityTypeOnDemand) {
+		newNodes[0].Requirements.Add(scheduling.NewRequirement(v1alpha5.LabelCapacityType, v1.NodeSelectorOpIn, v1alpha5.CapacityTypeSpot))
 	}
 
 	return Command{

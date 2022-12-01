@@ -24,7 +24,7 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/core"
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	scheduling2 "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
@@ -144,8 +144,8 @@ func (c *SingleNodeConsolidation) computeConsolidation(ctx context.Context, node
 	// If the existing node is spot and the replacement is spot, we don't consolidate.  We don't have a reliable
 	// mechanism to determine if this replacement makes sense given instance type availability (e.g. we may replace
 	// a spot node with one that is less available and more likely to be reclaimed).
-	if node.capacityType == core.CapacityTypeSpot &&
-		newNodes[0].Requirements.Get(core.LabelCapacityType).Has(core.CapacityTypeSpot) {
+	if node.capacityType == v1alpha5.CapacityTypeSpot &&
+		newNodes[0].Requirements.Get(v1alpha5.LabelCapacityType).Has(v1alpha5.CapacityTypeSpot) {
 		return Command{action: actionDoNothing}, nil
 	}
 
@@ -153,9 +153,9 @@ func (c *SingleNodeConsolidation) computeConsolidation(ctx context.Context, node
 	// assumption, that the spot variant will launch. We also need to add a requirement to the node to ensure that if
 	// spot capacity is insufficient we don't replace the node with a more expensive on-demand node.  Instead the launch
 	// should fail and we'll just leave the node alone.
-	ctReq := newNodes[0].Requirements.Get(core.LabelCapacityType)
-	if ctReq.Has(core.CapacityTypeSpot) && ctReq.Has(core.CapacityTypeOnDemand) {
-		newNodes[0].Requirements.Add(scheduling.NewRequirement(core.LabelCapacityType, v1.NodeSelectorOpIn, core.CapacityTypeSpot))
+	ctReq := newNodes[0].Requirements.Get(v1alpha5.LabelCapacityType)
+	if ctReq.Has(v1alpha5.CapacityTypeSpot) && ctReq.Has(v1alpha5.CapacityTypeOnDemand) {
+		newNodes[0].Requirements.Add(scheduling.NewRequirement(v1alpha5.LabelCapacityType, v1.NodeSelectorOpIn, v1alpha5.CapacityTypeSpot))
 	}
 
 	return Command{

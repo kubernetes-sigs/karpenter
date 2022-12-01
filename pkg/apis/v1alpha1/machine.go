@@ -15,8 +15,10 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 )
@@ -36,8 +38,12 @@ type MachineSpec struct {
 	// Kubelet are options passed to the kubelet when provisioning nodes
 	// +optional
 	Kubelet *v1alpha5.KubeletConfiguration `json:"kubelet,omitempty"`
-	// NodeTemplateRef is a reference to an object that defines provider specific configuration
-	NodeTemplateRef *v1alpha5.ProviderRef `json:"nodeTemplateRef,omitempty"`
+	// MachineTemplateRef is a reference to an object that defines provider specific configuration
+	MachineTemplateRef v1.ObjectReference `json:"nodeTemplateRef,omitempty"`
+	// Provider contains fields specific to your cloudprovider.
+	// Deprecated: NodeTemplateRef is favored over Provider
+	// +kubebuilder:pruning:PreserveUnknownFields
+	Provider *v1alpha5.Provider `json:"provider,omitempty"`
 }
 
 // Machine is the Schema for the Machines API
@@ -58,4 +64,15 @@ type MachineList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Machine `json:"items"`
+}
+
+func (in *Machine) Owner() (client.ObjectKey, bool) {
+	ref, ok := lo.Find(in.OwnerReferences, func(o metav1.OwnerReference) bool {
+		return o.APIVersion == v1alpha5.SchemeGroupVersion.String() &&
+			o.Kind == v1alpha5.ProvisionerKind
+	})
+	if !ok {
+		return client.ObjectKey{}, false
+	}
+	return client.ObjectKey{Name: ref.Name}, true
 }

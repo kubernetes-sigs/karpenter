@@ -30,7 +30,7 @@ import (
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/core"
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 )
@@ -176,7 +176,7 @@ func (c *Controller) labels(ctx context.Context, pod *v1.Pod) prometheus.Labels 
 		metricLabels[podHostArchitecture] = "N/A"
 		metricLabels[podHostCapacityType] = "N/A"
 		metricLabels[podHostInstanceType] = "N/A"
-		if provisionerName, ok := pod.Spec.NodeSelector[core.ProvisionerNameLabelKey]; ok {
+		if provisionerName, ok := pod.Spec.NodeSelector[v1alpha5.ProvisionerNameLabelKey]; ok {
 			metricLabels[podProvisioner] = provisionerName
 		} else {
 			metricLabels[podProvisioner] = "N/A"
@@ -184,13 +184,13 @@ func (c *Controller) labels(ctx context.Context, pod *v1.Pod) prometheus.Labels 
 	} else {
 		metricLabels[podHostZone] = node.Labels[v1.LabelTopologyZone]
 		metricLabels[podHostArchitecture] = node.Labels[v1.LabelArchStable]
-		if capacityType, ok := node.Labels[core.LabelCapacityType]; !ok {
+		if capacityType, ok := node.Labels[v1alpha5.LabelCapacityType]; !ok {
 			metricLabels[podHostCapacityType] = "N/A"
 		} else {
 			metricLabels[podHostCapacityType] = capacityType
 		}
 		metricLabels[podHostInstanceType] = node.Labels[v1.LabelInstanceTypeStable]
-		if provisionerName, ok := node.Labels[core.ProvisionerNameLabelKey]; !ok {
+		if provisionerName, ok := node.Labels[v1alpha5.ProvisionerNameLabelKey]; !ok {
 			metricLabels[podProvisioner] = "N/A"
 		} else {
 			metricLabels[podProvisioner] = provisionerName

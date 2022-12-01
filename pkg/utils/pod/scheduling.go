@@ -18,7 +18,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/aws/karpenter-core/pkg/apis/core"
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 )
 
@@ -83,7 +83,7 @@ func HasDoNotEvict(pod *v1.Pod) bool {
 	if pod.Annotations == nil {
 		return false
 	}
-	return pod.Annotations[core.DoNotEvictPodAnnotationKey] == "true"
+	return pod.Annotations[v1alpha5.DoNotEvictPodAnnotationKey] == "true"
 }
 
 // HasUnschedulableToleration returns true if the pod tolerates node.kubernetes.io/unschedulable taint

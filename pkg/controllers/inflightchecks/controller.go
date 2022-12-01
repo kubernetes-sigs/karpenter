@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/core"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
@@ -94,7 +93,7 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Re
 	c.lastScanned.SetDefault(client.ObjectKeyFromObject(node).String(), c.clock.Now())
 
 	provisioner := &v1alpha5.Provisioner{}
-	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: node.Labels[core.ProvisionerNameLabelKey]}, provisioner); err != nil {
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
 		// provisioner is missing, node should be removed soon
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}

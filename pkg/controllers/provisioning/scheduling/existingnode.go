@@ -21,7 +21,7 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 
-	"github.com/aws/karpenter-core/pkg/apis/core"
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
@@ -40,7 +40,7 @@ type ExistingMachine struct {
 	volumeLimits  scheduling.VolumeCount
 }
 
-func NewExistingNode(n *state.Node, topology *Topology, startupTaints []v1.Taint, daemonResources v1.ResourceList) *ExistingMachine {
+func NewExistingMachine(n *state.Node, topology *Topology, startupTaints []v1.Taint, daemonResources v1.ResourceList) *ExistingMachine {
 	// The state node passed in here must be a deep copy from cluster state as we modify it
 	// the remaining daemonResources to schedule are the total daemonResources minus what has already scheduled
 	remainingDaemonResources := resources.Subtract(daemonResources, n.DaemonSetRequested)
@@ -71,7 +71,7 @@ func NewExistingNode(n *state.Node, topology *Topology, startupTaints []v1.Taint
 	// Only consider startup taints until the node is initialized. Without this, if the startup taint is generic and
 	// re-appears on the node for a different reason (e.g. the node is cordoned) we will assume that pods can
 	// schedule against the node in the future incorrectly.
-	if n.Node.Labels[core.LabelNodeInitialized] != "true" {
+	if n.Node.Labels[v1alpha5.LabelNodeInitialized] != "true" {
 		ephemeralTaints = append(ephemeralTaints, startupTaints...)
 	}
 

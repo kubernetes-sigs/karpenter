@@ -23,7 +23,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 
-	"github.com/aws/karpenter-core/pkg/apis/core"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
@@ -53,7 +52,7 @@ func (f FailedInit) Check(ctx context.Context, n *v1.Node, provisioner *v1alpha5
 
 	nodeAge := f.clock.Since(n.CreationTimestamp.Time)
 	// n is already initialized or not old enough
-	if n.Labels[core.LabelNodeInitialized] == "true" || nodeAge < initFailureTime {
+	if n.Labels[v1alpha5.LabelNodeInitialized] == "true" || nodeAge < initFailureTime {
 		return nil, nil
 	}
 

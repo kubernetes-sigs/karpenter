@@ -18,11 +18,14 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/imdario/mergo"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -33,7 +36,6 @@ import (
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/core"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
@@ -178,10 +180,10 @@ func (p *Provisioner) LaunchMachines(ctx context.Context, opts LaunchOptions, ma
 	machineNames := make([]string, len(machines))
 	workqueue.ParallelizeUntil(ctx, len(machines), len(machines), func(i int) {
 		// create a new context to avoid a data race on the ctx variable
-		ctx := logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", machines[i].Labels[core.ProvisionerNameLabelKey]))
+		ctx := logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", machines[i].Labels[v1alpha5.ProvisionerNameLabelKey]))
 		// register the provisioner on the context so we can pull it off for tagging purposes
 		// TODO: rethink this, maybe just pass the provisioner down instead of hiding it in the context?
-		ctx = injection.WithNamespacedName(ctx, types.NamespacedName{Name: machines[i].Labels[core.ProvisionerNameLabelKey]})
+		ctx = injection.WithNamespacedName(ctx, types.NamespacedName{Name: machines[i].Labels[v1alpha5.ProvisionerNameLabelKey]})
 		if machineName, err := p.launch(ctx, opts, machines[i]); err != nil {
 			errs[i] = fmt.Errorf("launching machine, %w", err)
 		} else {
@@ -302,14 +304,33 @@ func (p *Provisioner) launch(ctx context.Context, opts LaunchOptions, scheduledM
 		return "", err
 	}
 
-	// TODO joinnis: Sorting for instance types should now be handled within the CloudProvider code
 	logging.FromContext(ctx).Infof("launching %s", scheduledMachine)
 	k8sNode, err := p.cloudProvider.Create(
 		logging.WithLogger(ctx, logging.FromContext(ctx).Named("cloudprovider")),
 		scheduledMachine.ToMachine(latest),
 	)
 	if err != nil {
-		return "", fmt.Errorf("creating instance, %w", err)
+		return "", fmt.Errorf("creating cloud provider instance, %w", err)
+	}
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", k8sNode.Name))
+
+	if err := mergo.Merge(k8sNode, scheduledMachine.ToNode()); err != nil {
+		return "", fmt.Errorf("merging cloud provider node, %w", err)
+	}
+	// ensure we clear out the status
+	k8sNode.Status = v1.NodeStatus{}
+
+	// Idempotently create a node. In rare cases, nodes can come online and
+	// self register before the controller is able to register a node object
+	// with the API server. In the common case, we create the node object
+	// ourselves to enforce the binding decision and enable images to be pulled
+	// before the node is fully Ready.
+	if _, err := p.coreV1Client.Nodes().Create(ctx, k8sNode, metav1.CreateOptions{}); err != nil {
+		if errors.IsAlreadyExists(err) {
+			logging.FromContext(ctx).Debugf("node already registered")
+		} else {
+			return "", fmt.Errorf("creating node %s, %w", k8sNode.Name, err)
+		}
 	}
 	p.cluster.NominateNodeForPod(k8sNode.Name)
 	if opts.RecordPodNomination {

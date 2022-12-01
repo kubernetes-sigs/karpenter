@@ -110,19 +110,47 @@ spec:
                     type: object
                 type: object
               nodeTemplateRef:
-                description: NodeTemplateRef is a reference to an object that defines
+                description: MachineTemplateRef is a reference to an object that defines
                   provider specific configuration
                 properties:
                   apiVersion:
                     description: API version of the referent.
                     type: string
+                  fieldPath:
+                    description: 'If referring to a piece of an object instead of
+                      an entire object, this string should contain a valid JSON/Go
+                      field access statement, such as desiredState.manifest.containers[2].
+                      For example, if the object reference is to a container within
+                      a pod, this would take on a value like: "spec.containers{name}"
+                      (where "name" refers to the name of the container that triggered
+                      the event) or if no container name is specified "spec.containers[2]"
+                      (container with index 2 in this pod). This syntax is chosen
+                      only to have some well-defined way of referencing a part of
+                      an object. TODO: this design is not final and this field is
+                      subject to change in the future.'
+                    type: string
                   kind:
-                    description: 'Kind of the referent; More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds"'
+                    description: 'Kind of the referent. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
                     type: string
                   name:
-                    description: 'Name of the referent; More info: http://kubernetes.io/docs/user-guide/identifiers#names'
+                    description: 'Name of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names'
+                    type: string
+                  namespace:
+                    description: 'Namespace of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/'
+                    type: string
+                  resourceVersion:
+                    description: 'Specific resourceVersion to which this reference
+                      is made, if any. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency'
+                    type: string
+                  uid:
+                    description: 'UID of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids'
                     type: string
                 type: object
+              provider:
+                description: 'Provider contains fields specific to your cloudprovider.
+                  Deprecated: NodeTemplateRef is favored over Provider'
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
               requirements:
                 description: Requirements are layered with Labels and applied to every
                   node.
@@ -217,15 +245,6 @@ spec:
           status:
             description: MachineStatus defines the observed state of Machine
             properties:
-              allocatable:
-                additionalProperties:
-                  anyOf:
-                  - type: integer
-                  - type: string
-                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                  x-kubernetes-int-or-string: true
-                description: Allocatable is the resources available to use for scheduling
-                type: object
               conditions:
                 description: Conditions contains signals for health and readiness
                 items:
@@ -260,11 +279,8 @@ spec:
                   - type
                   type: object
                 type: array
-              labels:
-                additionalProperties:
-                  type: string
-                description: Properties of the node that may be used for scheduling
-                type: object
+              nodeName:
+                type: string
               providerID:
                 description: ProviderID of the corresponding node object
                 type: string

@@ -47,10 +47,9 @@ type Context struct {
 
 // CloudProvider interface is implemented by cloud providers to support provisioning.
 type CloudProvider interface {
-	// Create a node given constraints and instance type options. This API uses a
-	// callback pattern to enable cloudproviders to batch capacity creation
-	// requests. The callback must be called with a theoretical node object that
-	// is fulfilled by the cloud providers capacity creation request.
+	// Create idempotently creates a machine given a Machine spec which contains constraints on the
+	// machine to be launched. This Create request is expected to resolve the Machine requirements into the
+	// Metadata labels and resolve the providerID into the Machine status.
 	Create(context.Context, *v1alpha1.Machine) (*v1.Node, error)
 	// Delete node in cloudprovider
 	Delete(context.Context, *v1.Node) error

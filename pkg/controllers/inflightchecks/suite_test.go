@@ -32,7 +32,6 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
-	"github.com/aws/karpenter-core/pkg/apis/core"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/inflightchecks"
@@ -89,8 +88,8 @@ var _ = Describe("Controller", func() {
 			n := test.Node(test.NodeOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						core.ProvisionerNameLabelKey: provisioner.Name,
-						v1.LabelInstanceType:         "gpu-vendor-instance-type",
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceType:             "gpu-vendor-instance-type",
 					},
 				},
 			})
@@ -113,8 +112,8 @@ var _ = Describe("Controller", func() {
 			n := test.Node(test.NodeOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						core.ProvisionerNameLabelKey: provisioner.Name,
-						v1.LabelInstanceType:         "default-instance-type",
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceType:             "default-instance-type",
 					},
 				},
 			})
@@ -136,8 +135,8 @@ var _ = Describe("Controller", func() {
 			n := test.Node(test.NodeOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						core.ProvisionerNameLabelKey: provisioner.Name,
-						v1.LabelInstanceType:         "default-instance-type",
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceType:             "default-instance-type",
 					},
 				},
 			})
@@ -166,9 +165,9 @@ var _ = Describe("Controller", func() {
 			n := test.Node(test.NodeOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						core.ProvisionerNameLabelKey: provisioner.Name,
-						v1.LabelInstanceType:         "arm-instance-type",
-						core.LabelNodeInitialized:    "true",
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceType:             "arm-instance-type",
+						v1alpha5.LabelNodeInitialized:    "true",
 					},
 				},
 			})

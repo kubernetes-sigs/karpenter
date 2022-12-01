@@ -25,10 +25,10 @@ import (
 	"github.com/imdario/mergo"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/aws/karpenter-core/pkg/apis/core"
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 )
 
-const DiscoveryLabel = core.TestingGroup + "/test-id"
+const DiscoveryLabel = v1alpha5.TestingGroup + "/test-id"
 
 var (
 	sequentialNumber     = 0
