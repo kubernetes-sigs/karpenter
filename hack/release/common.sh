@@ -12,6 +12,7 @@ publishHelmChart() {
     HELM_CHART_FILE_NAME="${CHART_NAME}-${HELM_CHART_VERSION}.tgz"
 
     cd charts
+    helm dependency update "${CHART_NAME}"
     helm lint "${CHART_NAME}"
     helm package "${CHART_NAME}" --version $HELM_CHART_VERSION
     helm push "${HELM_CHART_FILE_NAME}" "oci://${RELEASE_REPO}"

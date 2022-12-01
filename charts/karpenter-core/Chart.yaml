@@ -1,5 +1,5 @@
 apiVersion: v2
-name: karpenter-core-controller
+name: karpenter-core
 description: Manifest of karpenter-core
 type: application
 version: 0.0.1
@@ -14,3 +14,7 @@ home: https://karpenter.sh/
 icon: https://repository-images.githubusercontent.com/278480393/dab059c8-caa1-4b55-aaa7-3d30e47a5616
 sources:
   - https://github.com/aws/karpenter-core/
+dependencies:
+  - name: karpenter-core-crd
+    version: "v0.0.10"
+    repository: "oci://ghcr.io/spring1843/karpenter-core"
