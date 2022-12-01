@@ -41,7 +41,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
-	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	scheduler "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
@@ -67,11 +66,10 @@ type Provisioner struct {
 	volumeTopology *VolumeTopology
 	cluster        *state.Cluster
 	recorder       events.Recorder
-	settingsStore  settingsstore.Store
 }
 
 func NewProvisioner(ctx context.Context, kubeClient client.Client, coreV1Client corev1.CoreV1Interface,
-	recorder events.Recorder, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster, settingsStore settingsstore.Store) *Provisioner {
+	recorder events.Recorder, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Provisioner {
 	p := &Provisioner{
 		batcher:        NewBatcher(),
 		cloudProvider:  cloudProvider,
@@ -80,7 +78,6 @@ func NewProvisioner(ctx context.Context, kubeClient client.Client, coreV1Client 
 		volumeTopology: NewVolumeTopology(kubeClient),
 		cluster:        cluster,
 		recorder:       recorder,
-		settingsStore:  settingsStore,
 	}
 	return p
 }

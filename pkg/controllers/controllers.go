@@ -52,7 +52,7 @@ func NewControllers(
 	settingsStore settingsstore.Store,
 	cloudProvider cloudprovider.CloudProvider,
 ) []controller.Controller {
-	provisioner := provisioning.NewProvisioner(ctx, kubeClient, kubernetesInterface.CoreV1(), eventRecorder, cloudProvider, cluster, settingsStore)
+	provisioner := provisioning.NewProvisioner(ctx, kubeClient, kubernetesInterface.CoreV1(), eventRecorder, cloudProvider, cluster)
 
 	return []controller.Controller{
 		provisioner,
