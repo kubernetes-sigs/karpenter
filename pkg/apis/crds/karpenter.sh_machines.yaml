@@ -177,6 +177,21 @@ spec:
                   - operator
                   type: object
                 type: array
+              resources:
+                description: Resources models the resource requirements for the Machine
+                  to launch
+                properties:
+                  requests:
+                    additionalProperties:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    description: Requests describes the minimum required resources
+                      for the Machine to launch
+                    type: object
+                type: object
               startupTaints:
                 description: StartupTaints are taints that are applied to nodes upon
                   startup which are expected to be removed automatically within a
@@ -241,6 +256,17 @@ spec:
           status:
             description: MachineStatus defines the observed state of Machine
             properties:
+              allocatable:
+                additionalProperties:
+                  anyOf:
+                  - type: integer
+                  - type: string
+                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                  x-kubernetes-int-or-string: true
+                description: Allocatable is the allocatable capacity of the machine.
+                  This value resolves to the inflight capacity until the node is launched,
+                  at which point, it becomes the node object's allocatable
+                type: object
               conditions:
                 description: Conditions contains signals for health and readiness
                 items:
