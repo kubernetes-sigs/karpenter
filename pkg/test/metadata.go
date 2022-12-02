@@ -43,13 +43,13 @@ func RandomName() string {
 	return strings.ToLower(fmt.Sprintf("%s-%d-%s", randomdata.SillyName(), sequentialNumber, randomdata.Alphanumeric(10)))
 }
 
-func ObjectMeta(overrides ...metav1.ObjectMeta) metav1.ObjectMeta {
-	return MustMerge(ObjectMetaWithoutNamespace(metav1.ObjectMeta{
+func NamespacedObjectMeta(overrides ...metav1.ObjectMeta) metav1.ObjectMeta {
+	return MustMerge(ObjectMeta(metav1.ObjectMeta{
 		Namespace: "default",
 	}), overrides...)
 }
 
-func ObjectMetaWithoutNamespace(overrides ...metav1.ObjectMeta) metav1.ObjectMeta {
+func ObjectMeta(overrides ...metav1.ObjectMeta) metav1.ObjectMeta {
 	return MustMerge(metav1.ObjectMeta{
 		Name:   RandomName(),
 		Labels: map[string]string{DiscoveryLabel: "unspecified"}, // For cleanup discovery

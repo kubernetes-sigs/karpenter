@@ -51,7 +51,7 @@ func PersistentVolume(overrides ...PersistentVolumeOptions) *v1.PersistentVolume
 	}
 
 	return &v1.PersistentVolume{
-		ObjectMeta: ObjectMeta(metav1.ObjectMeta{}),
+		ObjectMeta: NamespacedObjectMeta(metav1.ObjectMeta{}),
 		Spec: v1.PersistentVolumeSpec{
 			PersistentVolumeSource: v1.PersistentVolumeSource{CSI: &v1.CSIPersistentVolumeSource{Driver: options.Driver, VolumeHandle: "test-handle"}},
 			StorageClassName:       options.StorageClassName,
@@ -80,7 +80,7 @@ func PersistentVolumeClaim(overrides ...PersistentVolumeClaimOptions) *v1.Persis
 		options.Resources = v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceStorage: resource.MustParse("1Gi")}}
 	}
 	return &v1.PersistentVolumeClaim{
-		ObjectMeta: ObjectMeta(options.ObjectMeta),
+		ObjectMeta: NamespacedObjectMeta(options.ObjectMeta),
 		Spec: v1.PersistentVolumeClaimSpec{
 			StorageClassName: options.StorageClassName,
 			VolumeName:       options.VolumeName,
@@ -114,7 +114,7 @@ func StorageClass(overrides ...StorageClassOptions) *storagev1.StorageClass {
 	}
 
 	return &storagev1.StorageClass{
-		ObjectMeta:        ObjectMeta(options.ObjectMeta),
+		ObjectMeta:        NamespacedObjectMeta(options.ObjectMeta),
 		Provisioner:       *options.Provisioner,
 		AllowedTopologies: allowedTopologies,
 		VolumeBindingMode: options.VolumeBindingMode,

@@ -670,7 +670,7 @@ var _ = Describe("Replace Nodes", func() {
 		// and can't delete the node due to the PDB
 		ExpectNodeExists(ctx, env.Client, node1.Name)
 	})
-	It("can replace nodes, do not considers PDB from different namespace", func() {
+	It("can replace nodes, PDB namespace must match", func() {
 		labels := map[string]string{
 			"app": "test",
 		}

@@ -78,7 +78,7 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 	}
 
 	p := &v1.Pod{
-		ObjectMeta: ObjectMeta(options.ObjectMeta),
+		ObjectMeta: NamespacedObjectMeta(options.ObjectMeta),
 		Spec: v1.PodSpec{
 			NodeSelector:              options.NodeSelector,
 			Affinity:                  buildAffinity(options),
@@ -158,7 +158,7 @@ func PodDisruptionBudget(overrides ...PDBOptions) *policyv1.PodDisruptionBudget 
 	}
 
 	return &policyv1.PodDisruptionBudget{
-		ObjectMeta: ObjectMeta(options.ObjectMeta),
+		ObjectMeta: NamespacedObjectMeta(options.ObjectMeta),
 		Spec: policyv1.PodDisruptionBudgetSpec{
 			MinAvailable: options.MinAvailable,
 			Selector: &metav1.LabelSelector{

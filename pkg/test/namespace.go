@@ -36,6 +36,6 @@ func Namespace(overrides ...NamespaceOptions) *corev1.Namespace {
 		}
 	}
 	return &corev1.Namespace{
-		ObjectMeta: ObjectMetaWithoutNamespace(options.ObjectMeta),
+		ObjectMeta: ObjectMeta(options.ObjectMeta),
 	}
 }
