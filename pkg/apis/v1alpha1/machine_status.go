@@ -15,13 +15,20 @@ limitations under the License.
 package v1alpha1
 
 import (
+	v1 "k8s.io/api/core/v1"
 	"knative.dev/pkg/apis"
 )
 
 // MachineStatus defines the observed state of Machine
 type MachineStatus struct {
 	// ProviderID of the corresponding node object
+	// +optional
 	ProviderID string `json:"providerID,omitempty"`
+	// Allocatable is the allocatable capacity of the machine. This value resolves
+	// to the inflight capacity until the node is launched, at which point, it becomes the
+	// node object's allocatable
+	// +optional
+	Allocatable v1.ResourceList `json:"allocatable,omitempty"`
 	// Conditions contains signals for health and readiness
 	// +optional
 	Conditions apis.Conditions `json:"conditions,omitempty"`
