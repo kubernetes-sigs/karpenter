@@ -66,7 +66,7 @@ func Provisioner(overrides ...ProvisionerOptions) *v1alpha5.Provisioner {
 	lo.Must0(raw.UnmarshalJSON(lo.Must(json.Marshal(options.Provider))))
 
 	provisioner := &v1alpha5.Provisioner{
-		ObjectMeta: NamespacedObjectMeta(options.ObjectMeta),
+		ObjectMeta: ObjectMeta(options.ObjectMeta),
 		Spec: v1alpha5.ProvisionerSpec{
 			Requirements:           options.Requirements,
 			KubeletConfiguration:   options.Kubelet,

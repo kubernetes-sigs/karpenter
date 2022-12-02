@@ -114,7 +114,7 @@ func StorageClass(overrides ...StorageClassOptions) *storagev1.StorageClass {
 	}
 
 	return &storagev1.StorageClass{
-		ObjectMeta:        NamespacedObjectMeta(options.ObjectMeta),
+		ObjectMeta:        ObjectMeta(options.ObjectMeta),
 		Provisioner:       *options.Provisioner,
 		AllowedTopologies: allowedTopologies,
 		VolumeBindingMode: options.VolumeBindingMode,
