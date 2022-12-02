@@ -28,7 +28,6 @@ const (
 )
 
 var (
-	ProvisionerKind    = "Provisioner"
 	SchemeGroupVersion = schema.GroupVersion{Group: Group, Version: "v1alpha5"}
 	SchemeBuilder      = runtime.NewSchemeBuilder(func(scheme *runtime.Scheme) error {
 		scheme.AddKnownTypes(SchemeGroupVersion,

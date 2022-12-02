@@ -27,7 +27,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
-	scheduling2 "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
+	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -159,8 +159,8 @@ func (c *SingleNodeConsolidation) computeConsolidation(ctx context.Context, node
 	}
 
 	return Command{
-		nodesToRemove:    []*v1.Node{node.Node},
-		action:           actionReplace,
-		replacementNodes: []*scheduling2.Machine{newNodes[0]},
+		nodesToRemove:       []*v1.Node{node.Node},
+		action:              actionReplace,
+		replacementMachines: []*pscheduling.Machine{newNodes[0]},
 	}, nil
 }

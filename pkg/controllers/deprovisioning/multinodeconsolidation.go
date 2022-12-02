@@ -103,8 +103,8 @@ func (m *MultiNodeConsolidation) firstNNodeConsolidationOption(ctx context.Conte
 		// ensure that the action is sensical for replacements, see explanation on filterOutSameType for why this is
 		// required
 		if action.action == actionReplace {
-			action.replacementNodes[0].InstanceTypeOptions = filterOutSameType(action.replacementNodes[0], nodesToConsolidate)
-			if len(action.replacementNodes[0].InstanceTypeOptions) == 0 {
+			action.replacementMachines[0].InstanceTypeOptions = filterOutSameType(action.replacementMachines[0], nodesToConsolidate)
+			if len(action.replacementMachines[0].InstanceTypeOptions) == 0 {
 				action.action = actionDoNothing
 			}
 		}

@@ -42,18 +42,18 @@ type Machine struct {
 
 var nodeID int64
 
-func NewMachine(machineData *MachineTemplate, topology *Topology, daemonResources v1.ResourceList, instanceTypes []*cloudprovider.InstanceType) *Machine {
+func NewMachine(machineTemplate *MachineTemplate, topology *Topology, daemonResources v1.ResourceList, instanceTypes []*cloudprovider.InstanceType) *Machine {
 	// Copy the template, and add hostname
 	hostname := fmt.Sprintf("hostname-placeholder-%04d", atomic.AddInt64(&nodeID, 1))
 	topology.Register(v1.LabelHostname, hostname)
-	data := *machineData
-	data.Requirements = scheduling.NewRequirements()
-	data.Requirements.Add(machineData.Requirements.Values()...)
-	data.Requirements.Add(scheduling.NewRequirement(v1.LabelHostname, v1.NodeSelectorOpIn, hostname))
-	data.InstanceTypeOptions = instanceTypes
+	template := *machineTemplate
+	template.Requirements = scheduling.NewRequirements()
+	template.Requirements.Add(machineTemplate.Requirements.Values()...)
+	template.Requirements.Add(scheduling.NewRequirement(v1.LabelHostname, v1.NodeSelectorOpIn, hostname))
+	template.InstanceTypeOptions = instanceTypes
 
 	return &Machine{
-		MachineTemplate: data,
+		MachineTemplate: template,
 		hostPortUsage:   scheduling.NewHostPortUsage(),
 		topology:        topology,
 		requests:        daemonResources,

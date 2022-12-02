@@ -15,8 +15,10 @@ limitations under the License.
 package v1alpha5
 
 import (
+	"encoding/json"
 	"sort"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -96,6 +98,13 @@ type Consolidation struct {
 
 // +kubebuilder:object:generate=false
 type Provider = runtime.RawExtension
+
+func ProviderAnnotation(p *Provider) map[string]string {
+	raw := lo.Must(json.Marshal(p))
+	return map[string]string{
+		ProviderCompatabilityAnnotationKey: string(raw),
+	}
+}
 
 type ProviderRef struct {
 	// Kind of the referent; More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds"

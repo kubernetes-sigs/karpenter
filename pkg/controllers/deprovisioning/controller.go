@@ -271,15 +271,15 @@ func (c *Controller) launchReplacementNodes(ctx context.Context, action Command)
 		return fmt.Errorf("cordoning nodes, %w", err)
 	}
 
-	nodeNames, err := c.provisioner.LaunchMachines(ctx, provisioning.LaunchOptions{RecordPodNomination: false}, action.replacementNodes...)
+	nodeNames, err := c.provisioner.LaunchMachines(ctx, provisioning.LaunchOptions{RecordPodNomination: false}, action.replacementMachines...)
 	if err != nil {
 		// uncordon the nodes as the launch may fail (e.g. ICE or incompatible AMI)
 		err = multierr.Append(err, c.setNodesUnschedulable(ctx, false, nodeNamesToRemove...))
 		return err
 	}
-	if len(nodeNames) != len(action.replacementNodes) {
+	if len(nodeNames) != len(action.replacementMachines) {
 		// shouldn't ever occur since a partially failed LaunchMachines should return an error
-		return fmt.Errorf("expected %d node names, got %d", len(action.replacementNodes), len(nodeNames))
+		return fmt.Errorf("expected %d node names, got %d", len(action.replacementMachines), len(nodeNames))
 	}
 	metrics.NodesCreatedCounter.WithLabelValues(metrics.DeprovisioningReason).Add(float64(len(nodeNames)))
 

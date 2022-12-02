@@ -89,13 +89,17 @@ func (i *MachineTemplate) ToMachine(owner *v1alpha5.Provisioner) *v1alpha1.Machi
 			StartupTaints: i.StartupTaints,
 			Requirements:  i.Requirements.NodeSelectorRequirements(),
 			Kubelet:       i.Kubelet,
-			MachineTemplateRef: v1.ObjectReference{
-				APIVersion: i.ProviderRef.APIVersion,
-				Kind:       i.ProviderRef.Kind,
-				Name:       i.ProviderRef.Name,
-			},
-			Provider: i.Provider,
 		},
+	}
+	if i.Provider != nil {
+		m.Annotations = lo.Assign(m.Annotations, v1alpha5.ProviderAnnotation(i.Provider))
+	}
+	if i.ProviderRef != nil {
+		m.Spec.MachineTemplateRef = &v1.ObjectReference{
+			APIVersion: i.ProviderRef.APIVersion,
+			Kind:       i.ProviderRef.Kind,
+			Name:       i.ProviderRef.Name,
+		}
 	}
 	lo.Must0(controllerutil.SetOwnerReference(owner, m, scheme.Scheme))
 	return m

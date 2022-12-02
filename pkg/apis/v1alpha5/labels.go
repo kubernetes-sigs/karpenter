@@ -30,14 +30,15 @@ var (
 	CapacityTypeOnDemand = "on-demand"
 
 	// Karpenter specific domains and labels
-	ProvisionerNameLabelKey           = Group + "/provisioner-name"
-	MachineNameLabelKey               = Group + "/machine-name"
-	DoNotEvictPodAnnotationKey        = Group + "/do-not-evict"
-	DoNotConsolidateNodeAnnotationKey = Group + "/do-not-consolidate"
-	EmptinessTimestampAnnotationKey   = Group + "/emptiness-timestamp"
-	TerminationFinalizer              = Group + "/termination"
-	LabelNodeInitialized              = Group + "/initialized"
-	LabelCapacityType                 = Group + "/capacity-type"
+	ProvisionerNameLabelKey            = Group + "/provisioner-name"
+	MachineNameLabelKey                = Group + "/machine-name"
+	DoNotEvictPodAnnotationKey         = Group + "/do-not-evict"
+	DoNotConsolidateNodeAnnotationKey  = Group + "/do-not-consolidate"
+	EmptinessTimestampAnnotationKey    = Group + "/emptiness-timestamp"
+	ProviderCompatabilityAnnotationKey = Group + "/compatibility/provider"
+	TerminationFinalizer               = Group + "/termination"
+	LabelNodeInitialized               = Group + "/initialized"
+	LabelCapacityType                  = Group + "/capacity-type"
 
 	// Tags for infrastructure resources deployed into cloudproviders' accounts
 	DiscoveryTagKey = Group + "/discovery"

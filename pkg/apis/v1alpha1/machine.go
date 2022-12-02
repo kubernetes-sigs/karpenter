@@ -15,10 +15,8 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 )
@@ -71,15 +69,4 @@ type MachineList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Machine `json:"items"`
-}
-
-func (in *Machine) Owner() (client.ObjectKey, bool) {
-	ref, ok := lo.Find(in.OwnerReferences, func(o metav1.OwnerReference) bool {
-		return o.APIVersion == v1alpha5.SchemeGroupVersion.String() &&
-			o.Kind == v1alpha5.ProvisionerKind
-	})
-	if !ok {
-		return client.ObjectKey{}, false
-	}
-	return client.ObjectKey{Name: ref.Name}, true
 }
