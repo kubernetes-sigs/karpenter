@@ -41,6 +41,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
+	"github.com/aws/karpenter-core/pkg/controllers/state"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/test"
 )
@@ -183,7 +184,7 @@ func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objects ...cl
 	}
 }
 
-func ExpectProvisioned(ctx context.Context, c client.Client, recorder *test.EventRecorder, controller corecontroller.Controller,
+func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Cluster, recorder *test.EventRecorder, controller corecontroller.Controller,
 	provisioner *provisioning.Provisioner, pods ...*v1.Pod) (result []*v1.Pod) {
 
 	ExpectProvisionedNoBindingWithOffset(1, ctx, c, controller, provisioner, pods...)
@@ -197,6 +198,7 @@ func ExpectProvisioned(ctx context.Context, c client.Client, recorder *test.Even
 	// Update objects after reconciling
 	for _, pod := range pods {
 		result = append(result, ExpectPodExistsWithOffset(1, ctx, c, pod.GetName(), pod.GetNamespace()))
+		Expect(cluster.UpdatePod(ctx, result[len(result)-1])).WithOffset(1).To(Succeed()) // track pod bindings
 	}
 	return
 }

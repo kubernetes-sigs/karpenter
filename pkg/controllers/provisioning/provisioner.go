@@ -53,10 +53,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
-// WaitForClusterSync controls whether or not we synchronize before scheduling. This is exposed for
-// unit testing purposes so we can avoid a lengthy delay in cluster sync.
-var WaitForClusterSync = true
-
 // Provisioner waits for enqueued pods, batches them, creates capacity and binds the pods to the capacity.
 type Provisioner struct {
 	cloudProvider  cloudprovider.CloudProvider
@@ -95,6 +91,10 @@ func (p *Provisioner) Builder(_ context.Context, mgr manager.Manager) controller
 }
 
 func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (result reconcile.Result, err error) {
+	// Batch pods
+	if triggered := p.batcher.Wait(ctx); !triggered {
+		return reconcile.Result{}, nil
+	}
 	// If the provisioning loop fails for any reason, retrigger it,
 	// since pod watch events have already been processed
 	defer func() {
@@ -102,17 +102,6 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 			p.Trigger()
 		}
 	}()
-	// Batch pods
-	if triggered := p.batcher.Wait(ctx); !triggered {
-		return reconcile.Result{}, nil
-	}
-
-	// wait to ensure that our cluster state is synced with the current known nodes to prevent over-provisioning
-	if WaitForClusterSync {
-		if err := p.cluster.Synchronized(ctx); err != nil {
-			return reconcile.Result{}, fmt.Errorf("waiting for cluster state to catch up, %w", err)
-		}
-	}
 
 	// We collect the nodes with their used capacities before we get the list of pending pods. This ensures that
 	// the node capacities we schedule against are always >= what the actual capacity is at any given instance. This
@@ -343,6 +332,9 @@ func (p *Provisioner) launch(ctx context.Context, opts LaunchOptions, node *sche
 		}
 	}
 	p.cluster.NominateNodeForPod(k8sNode.Name)
+	if err := p.cluster.UpdateNode(ctx, k8sNode); err != nil {
+		return "", fmt.Errorf("upating cluster state, %w", err)
+	}
 	if opts.RecordPodNomination {
 		for _, pod := range node.Pods {
 			p.recorder.Publish(events.NominatePod(pod, k8sNode))
