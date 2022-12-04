@@ -670,6 +670,77 @@ var _ = Describe("Replace Nodes", func() {
 		// and can't delete the node due to the PDB
 		ExpectNodeExists(ctx, env.Client, node1.Name)
 	})
+	It("can replace nodes, PDB namespace must match", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}}})
+
+		prov := test.Provisioner(test.ProvisionerOptions{
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
+		})
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+		})
+		namespace := test.Namespace()
+		pdb := test.PodDisruptionBudget(test.PDBOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: namespace.ObjectMeta.Name,
+			},
+			Labels:         labels,
+			MaxUnavailable: fromInt(0),
+			Status: &policyv1.PodDisruptionBudgetStatus{
+				ObservedGeneration: 1,
+				DisruptionsAllowed: 0,
+				CurrentHealthy:     1,
+				DesiredHealthy:     1,
+				ExpectedPods:       1,
+			},
+		})
+
+		ExpectApplied(ctx, env.Client, rs, pod, node, prov, namespace, pdb)
+		ExpectMakeNodesReady(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		ExpectManualBinding(ctx, env.Client, pod, node)
+		ExpectScheduled(ctx, env.Client, pod)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
+
+		// consolidation won't delete the old node until the new node is ready
+		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, node)
+		fakeClock.Step(10 * time.Minute)
+		go triggerVerifyAction()
+		_, err := deprovisioningController.ProcessCluster(ctx)
+		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
+
+		// should create a new node as there is a cheaper one that can hold the pod
+		Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+		// and delete the old one
+		ExpectNotFound(ctx, env.Client, node)
+	})
 	It("can replace nodes, considers do-not-consolidate annotation", func() {
 		labels := map[string]string{
 			"app": "test",
