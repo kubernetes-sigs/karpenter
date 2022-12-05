@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -50,15 +51,17 @@ func IsNodeDrainErr(err error) bool {
 
 // cordon cordons a node
 func (t *Terminator) cordon(ctx context.Context, node *v1.Node) error {
-	mergeFrom := client.MergeFrom(node.DeepCopy())
+	stored := node.DeepCopy()
 	node.Spec.Unschedulable = true
 	node.Labels = lo.Assign(node.Labels, map[string]string{
 		v1.LabelNodeExcludeBalancers: "karpenter",
 	})
-	if err := t.KubeClient.Patch(ctx, node, mergeFrom); err != nil {
-		return fmt.Errorf("patching node labels, %w", err)
+	if !equality.Semantic.DeepEqual(node, stored) {
+		if err := t.KubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		logging.FromContext(ctx).Infof("cordoned node")
 	}
-	logging.FromContext(ctx).Infof("cordoned node")
 	return nil
 }
 
@@ -93,16 +96,18 @@ func (t *Terminator) drain(ctx context.Context, node *v1.Node) error {
 
 // terminate calls cloud provider delete then removes the finalizer to delete the node
 func (t *Terminator) terminate(ctx context.Context, node *v1.Node) error {
+	stored := node.DeepCopy()
 	// Delete the instance associated with node
 	if err := t.CloudProvider.Delete(ctx, node); err != nil {
 		return fmt.Errorf("terminating cloudprovider instance, %w", err)
 	}
-	mergeFrom := client.MergeFrom(node.DeepCopy())
 	controllerutil.RemoveFinalizer(node, v1alpha5.TerminationFinalizer)
-	if err := t.KubeClient.Patch(ctx, node, mergeFrom); err != nil {
-		return fmt.Errorf("removing node finalizer, %w", err)
+	if !equality.Semantic.DeepEqual(node, stored) {
+		if err := t.KubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		logging.FromContext(ctx).Infof("deleted node")
 	}
-	logging.FromContext(ctx).Infof("deleted node")
 	return nil
 }
 
