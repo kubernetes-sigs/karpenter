@@ -51,10 +51,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
-// WaitForClusterSync controls whether or not we synchronize before scheduling. This is exposed for
-// unit testing purposes so we can avoid a lengthy delay in cluster sync.
-var WaitForClusterSync = true
-
 // Provisioner waits for enqueued pods, batches them, creates capacity and binds the pods to the capacity.
 type Provisioner struct {
 	cloudProvider  cloudprovider.CloudProvider
@@ -93,6 +89,10 @@ func (p *Provisioner) Builder(_ context.Context, mgr manager.Manager) controller
 }
 
 func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (result reconcile.Result, err error) {
+	// Batch pods
+	if triggered := p.batcher.Wait(ctx); !triggered {
+		return reconcile.Result{}, nil
+	}
 	// If the provisioning loop fails for any reason, retrigger it,
 	// since pod watch events have already been processed
 	defer func() {
@@ -100,17 +100,6 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 			p.Trigger()
 		}
 	}()
-	// Batch pods
-	if triggered := p.batcher.Wait(ctx); !triggered {
-		return reconcile.Result{}, nil
-	}
-
-	// wait to ensure that our cluster state is synced with the current known nodes to prevent over-provisioning
-	if WaitForClusterSync {
-		if err := p.cluster.Synchronized(ctx); err != nil {
-			return reconcile.Result{}, fmt.Errorf("waiting for cluster state to catch up, %w", err)
-		}
-	}
 
 	// We collect the nodes with their used capacities before we get the list of pending pods. This ensures that
 	// the node capacities we schedule against are always >= what the actual capacity is at any given instance. This
@@ -158,7 +147,7 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 		return reconcile.Result{}, nil
 	}
 
-	nodeNames, err := p.LaunchMachines(ctx, LaunchOptions{RecordPodNomination: true}, nodes...)
+	nodeNames, err := p.LaunchMachines(ctx, nodes, RecordPodNomination)
 
 	// Any successfully created node is going to have the nodeName value filled in the slice
 	successfullyCreatedNodeCount := lo.CountBy(nodeNames, func(name string) bool { return name != "" })
@@ -167,14 +156,9 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 	return reconcile.Result{}, err
 }
 
-type LaunchOptions struct {
-	// RecordPodNomination causes nominate pod events to be recorded against the node.
-	RecordPodNomination bool
-}
-
 // LaunchMachines launches nodes passed into the function in parallel. It returns a slice of the successfully created node
 // names as well as a multierr of any errors that occurred while launching nodes
-func (p *Provisioner) LaunchMachines(ctx context.Context, opts LaunchOptions, machines ...*scheduler.Machine) ([]string, error) {
+func (p *Provisioner) LaunchMachines(ctx context.Context, machines []*scheduler.Machine, opts ...LaunchOption) ([]string, error) {
 	// Launch capacity and bind pods
 	errs := make([]error, len(machines))
 	machineNames := make([]string, len(machines))
@@ -184,7 +168,7 @@ func (p *Provisioner) LaunchMachines(ctx context.Context, opts LaunchOptions, ma
 		// register the provisioner on the context so we can pull it off for tagging purposes
 		// TODO: rethink this, maybe just pass the provisioner down instead of hiding it in the context?
 		ctx = injection.WithNamespacedName(ctx, types.NamespacedName{Name: machines[i].Labels[v1alpha5.ProvisionerNameLabelKey]})
-		if machineName, err := p.launch(ctx, opts, machines[i]); err != nil {
+		if machineName, err := p.launch(ctx, machines[i], opts...); err != nil {
 			errs[i] = fmt.Errorf("launching machine, %w", err)
 		} else {
 			machineNames[i] = machineName
@@ -294,7 +278,7 @@ func (p *Provisioner) schedule(ctx context.Context, pods []*v1.Pod, stateNodes [
 	return nodes, err
 }
 
-func (p *Provisioner) launch(ctx context.Context, opts LaunchOptions, scheduledMachine *scheduler.Machine) (string, error) {
+func (p *Provisioner) launch(ctx context.Context, scheduledMachine *scheduler.Machine, opts ...LaunchOption) (string, error) {
 	// Check limits
 	latest := &v1alpha5.Provisioner{}
 	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: scheduledMachine.ProvisionerName}, latest); err != nil {
@@ -333,7 +317,10 @@ func (p *Provisioner) launch(ctx context.Context, opts LaunchOptions, scheduledM
 		}
 	}
 	p.cluster.NominateNodeForPod(k8sNode.Name)
-	if opts.RecordPodNomination {
+	if err := p.cluster.UpdateNode(ctx, k8sNode); err != nil {
+		return "", fmt.Errorf("updating cluster state, %w", err)
+	}
+	if ResolveOptions(opts...).RecordPodNomination {
 		for _, pod := range scheduledMachine.Pods {
 			p.recorder.Publish(events.NominatePod(pod, k8sNode))
 		}

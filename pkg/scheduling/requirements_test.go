@@ -403,7 +403,7 @@ var _ = Describe("Requirements", func() {
 				v1.NodeSelectorRequirement{Key: "lessThan1", Operator: v1.NodeSelectorOpLt, Values: []string{"1"}},
 				v1.NodeSelectorRequirement{Key: "lessThan9", Operator: v1.NodeSelectorOpLt, Values: []string{"9"}},
 			))
-			Expect(len(reqs.NodeSelectorRequirements())).To(Equal(14))
+			Expect(reqs.NodeSelectorRequirements()).To(HaveLen(14))
 		})
 	})
 })

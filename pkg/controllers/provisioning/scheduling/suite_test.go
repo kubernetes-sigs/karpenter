@@ -85,7 +85,6 @@ var _ = BeforeSuite(func() {
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(ctx, env.Client, env.KubernetesInterface.CoreV1(), recorder, cloudProv, cluster)
 	provisioningController = provisioning.NewController(env.Client, prov, recorder)
-	provisioning.WaitForClusterSync = false
 })
 
 var _ = AfterSuite(func() {
@@ -106,28 +105,8 @@ var _ = BeforeEach(func() {
 })
 
 var _ = AfterEach(func() {
-	var nodes v1.NodeList
-	Expect(env.Client.List(ctx, &nodes)).To(Succeed())
-	var pods v1.PodList
-	Expect(env.Client.List(ctx, &pods)).To(Succeed())
-
 	ExpectCleanedUp(ctx, env.Client)
-
-	for i := range nodes.Items {
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(&nodes.Items[i]))
-	}
-	for i := range pods.Items {
-		ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(&pods.Items[i]))
-	}
-
-	cluster.ForEachNode(func(n *state.Node) bool {
-		Fail("expected to not be called")
-		return true
-	})
-	cluster.ForPodsWithAntiAffinity(func(p *v1.Pod, n *v1.Node) bool {
-		Fail("expected to not be called")
-		return true
-	})
+	cluster.Reset(ctx)
 })
 
 var _ = Describe("Custom Constraints", func() {
@@ -135,21 +114,21 @@ var _ = Describe("Custom Constraints", func() {
 		It("should schedule unconstrained pods that don't have matching node selectors", func() {
 			provisioner.Spec.Labels = map[string]string{"test-key": "test-value"}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())[0]
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())[0]
 			node := ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Labels).To(HaveKeyWithValue("test-key", "test-value"))
 		})
 		It("should not schedule pods that have conflicting node selectors", func() {
 			provisioner.Spec.Labels = map[string]string{"test-key": "test-value"}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeSelector: map[string]string{"test-key": "different-value"}},
 			))[0]
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 		It("should not schedule pods that have node selectors with undefined key", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeSelector: map[string]string{"test-key": "test-value"}},
 			))[0]
 			ExpectNotScheduled(ctx, env.Client, pod)
@@ -157,7 +136,7 @@ var _ = Describe("Custom Constraints", func() {
 		It("should schedule pods that have matching requirements", func() {
 			provisioner.Spec.Labels = map[string]string{"test-key": "test-value"}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 					{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value", "another-value"}},
 				}},
@@ -168,7 +147,7 @@ var _ = Describe("Custom Constraints", func() {
 		It("should not schedule pods that have conflicting requirements", func() {
 			provisioner.Spec.Labels = map[string]string{"test-key": "test-value"}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 					{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"another-value"}},
 				}},
@@ -181,7 +160,7 @@ var _ = Describe("Custom Constraints", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-2"}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())[0]
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())[0]
 			node := ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-2"))
 		})
@@ -189,7 +168,7 @@ var _ = Describe("Custom Constraints", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeSelector: map[string]string{v1.LabelTopologyZone: "test-zone-2"}},
 			))[0]
 			node := ExpectScheduled(ctx, env.Client, pod)
@@ -197,7 +176,7 @@ var _ = Describe("Custom Constraints", func() {
 		})
 		It("should not schedule machines with a hostname selector", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeSelector: map[string]string{v1.LabelHostname: "red-node"}},
 			))[0]
 			ExpectNotScheduled(ctx, env.Client, pod)
@@ -206,7 +185,7 @@ var _ = Describe("Custom Constraints", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeSelector: map[string]string{v1.LabelTopologyZone: "unknown"}},
 			))[0]
 			ExpectNotScheduled(ctx, env.Client, pod)
@@ -215,14 +194,14 @@ var _ = Describe("Custom Constraints", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeSelector: map[string]string{v1.LabelTopologyZone: "test-zone-2"}},
 			))[0]
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 		It("should schedule compatible requirements with Operator=In", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-3"}},
 				}},
@@ -235,7 +214,7 @@ var _ = Describe("Custom Constraints", func() {
 				Key: fake.IntegerInstanceLabelKey, Operator: v1.NodeSelectorOpGt, Values: []string{"8"},
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())[0]
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())[0]
 			node := ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Labels).To(HaveKeyWithValue(fake.IntegerInstanceLabelKey, "16"))
 		})
@@ -244,13 +223,13 @@ var _ = Describe("Custom Constraints", func() {
 				Key: fake.IntegerInstanceLabelKey, Operator: v1.NodeSelectorOpLt, Values: []string{"8"},
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())[0]
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())[0]
 			node := ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Labels).To(HaveKeyWithValue(fake.IntegerInstanceLabelKey, "2"))
 		})
 		It("should not schedule incompatible preferences and requirements with Operator=In", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"unknown"}},
 				}},
@@ -259,7 +238,7 @@ var _ = Describe("Custom Constraints", func() {
 		})
 		It("should schedule compatible requirements with Operator=NotIn", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn, Values: []string{"test-zone-1", "test-zone-2", "unknown"}},
 				}},
@@ -269,7 +248,7 @@ var _ = Describe("Custom Constraints", func() {
 		})
 		It("should not schedule incompatible preferences and requirements with Operator=NotIn", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{
 					NodeRequirements: []v1.NodeSelectorRequirement{
 						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}},
@@ -279,7 +258,7 @@ var _ = Describe("Custom Constraints", func() {
 		})
 		It("should schedule compatible preferences and requirements with Operator=In", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{
 					NodeRequirements: []v1.NodeSelectorRequirement{
 						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}}},
@@ -292,7 +271,7 @@ var _ = Describe("Custom Constraints", func() {
 		})
 		It("should schedule incompatible preferences and requirements with Operator=In", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{
 					NodeRequirements: []v1.NodeSelectorRequirement{
 						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}}},
@@ -304,7 +283,7 @@ var _ = Describe("Custom Constraints", func() {
 		})
 		It("should schedule compatible preferences and requirements with Operator=NotIn", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{
 					NodeRequirements: []v1.NodeSelectorRequirement{
 						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}}},
@@ -317,7 +296,7 @@ var _ = Describe("Custom Constraints", func() {
 		})
 		It("should schedule incompatible preferences and requirements with Operator=NotIn", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{
 					NodeRequirements: []v1.NodeSelectorRequirement{
 						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}}},
@@ -329,7 +308,7 @@ var _ = Describe("Custom Constraints", func() {
 		})
 		It("should schedule compatible node selectors, preferences and requirements", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{
 					NodeSelector: map[string]string{v1.LabelTopologyZone: "test-zone-3"},
 					NodeRequirements: []v1.NodeSelectorRequirement{
@@ -343,7 +322,7 @@ var _ = Describe("Custom Constraints", func() {
 		})
 		It("should combine multidimensional node selectors, preferences and requirements", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{
 					NodeSelector: map[string]string{
 						v1.LabelTopologyZone:       "test-zone-3",
@@ -368,7 +347,7 @@ var _ = Describe("Custom Constraints", func() {
 		It("should not schedule pods that have node selectors with restricted labels", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
 			for label := range v1alpha5.RestrictedLabels {
-				pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+				pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 						{Key: label, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
 					}}))[0]
@@ -378,7 +357,7 @@ var _ = Describe("Custom Constraints", func() {
 		It("should not schedule pods that have node selectors with restricted domains", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
 			for domain := range v1alpha5.RestrictedLabelDomains {
-				pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+				pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 						{Key: domain + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
 					}}))[0]
@@ -393,7 +372,7 @@ var _ = Describe("Custom Constraints", func() {
 			provisioner.Spec.Requirements = requirements
 			ExpectApplied(ctx, env.Client, provisioner)
 			for domain := range v1alpha5.LabelDomainExceptions {
-				pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())[0]
+				pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())[0]
 				node := ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Labels).To(HaveKeyWithValue(domain+"/test", "test-value"))
 			}
@@ -412,7 +391,7 @@ var _ = Describe("Custom Constraints", func() {
 				test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1alpha5.LabelCapacityType: "spot"}}),
 			}
 			ExpectApplied(ctx, env.Client, provisioner)
-			for _, pod := range ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, schedulable...) {
+			for _, pod := range ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, schedulable...) {
 				ExpectScheduled(ctx, env.Client, pod)
 			}
 		})
@@ -420,7 +399,7 @@ var _ = Describe("Custom Constraints", func() {
 	Context("Scheduling Logic", func() {
 		It("should not schedule pods that have node selectors with In operator and undefined key", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 					{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}},
 				}}))[0]
@@ -428,7 +407,7 @@ var _ = Describe("Custom Constraints", func() {
 		})
 		It("should schedule pods that have node selectors with NotIn operator and undefined key", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 					{Key: "test-key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"test-value"}},
 				}}))[0]
@@ -437,7 +416,7 @@ var _ = Describe("Custom Constraints", func() {
 		})
 		It("should not schedule pods that have node selectors with Exists operator and undefined key", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 					{Key: "test-key", Operator: v1.NodeSelectorOpExists},
 				}}))[0]
@@ -445,7 +424,7 @@ var _ = Describe("Custom Constraints", func() {
 		})
 		It("should schedule pods that with DoesNotExists operator and undefined key", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 					{Key: "test-key", Operator: v1.NodeSelectorOpDoesNotExist},
 				}}))[0]
@@ -456,7 +435,7 @@ var _ = Describe("Custom Constraints", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())[0]
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())[0]
 			node := ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Labels).To(HaveKeyWithValue("test-key", "test-value"))
 		})
@@ -464,7 +443,7 @@ var _ = Describe("Custom Constraints", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 					{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}},
 				}}))[0]
@@ -475,7 +454,7 @@ var _ = Describe("Custom Constraints", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 					{Key: "test-key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"test-value"}},
 				}}))[0]
@@ -485,7 +464,7 @@ var _ = Describe("Custom Constraints", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 					{Key: "test-key", Operator: v1.NodeSelectorOpExists},
 				}},
@@ -496,7 +475,7 @@ var _ = Describe("Custom Constraints", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 					{Key: "test-key", Operator: v1.NodeSelectorOpDoesNotExist},
 				}},
@@ -507,7 +486,7 @@ var _ = Describe("Custom Constraints", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 					{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"another-value"}},
 				}}))[0]
@@ -517,7 +496,7 @@ var _ = Describe("Custom Constraints", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 					{Key: "test-key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"another-value"}},
 				}}))[0]
@@ -528,7 +507,7 @@ var _ = Describe("Custom Constraints", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value", "another-value"}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 					{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}},
 				}}),
@@ -545,7 +524,7 @@ var _ = Describe("Custom Constraints", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value", "another-value"}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 					{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}},
 				}}),
@@ -560,7 +539,7 @@ var _ = Describe("Custom Constraints", func() {
 		})
 		It("Exists operator should not overwrite the existing value", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 				test.PodOptions{
 					NodeRequirements: []v1.NodeSelectorRequirement{
 						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"non-existent-zone"}},
@@ -587,7 +566,7 @@ var _ = Describe("Preferential Fallback", func() {
 			}}}}
 			// Don't relax
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod = ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pod)[0]
+			pod = ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pod)[0]
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 		It("should relax multiple terms", func() {
@@ -608,7 +587,7 @@ var _ = Describe("Preferential Fallback", func() {
 			}}}}
 			// Success
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod = ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pod)[0]
+			pod = ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pod)[0]
 			node := ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-1"))
 		})
@@ -630,7 +609,7 @@ var _ = Describe("Preferential Fallback", func() {
 			}}}
 			// Success
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod = ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pod)[0]
+			pod = ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pod)[0]
 			ExpectScheduled(ctx, env.Client, pod)
 		})
 		It("should relax to use lighter weights", func() {
@@ -656,7 +635,7 @@ var _ = Describe("Preferential Fallback", func() {
 			}}}
 			// Success
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod = ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pod)[0]
+			pod = ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pod)[0]
 			node := ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-2"))
 		})
@@ -677,7 +656,7 @@ var _ = Describe("Preferential Fallback", func() {
 			}}
 			// Success
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod = ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pod)[0]
+			pod = ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pod)[0]
 			node := ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
 		})
@@ -687,7 +666,7 @@ var _ = Describe("Preferential Fallback", func() {
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn, Values: []string{"invalid"}},
 			}})
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod = ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pod)[0]
+			pod = ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pod)[0]
 			ExpectScheduled(ctx, env.Client, pod)
 		})
 	})
@@ -698,7 +677,7 @@ var _ = Describe("Topology", func() {
 
 	It("should ignore unknown topology keys", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 			test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: []v1.TopologySpreadConstraint{{
 				TopologyKey:       "unknown",
 				WhenUnsatisfiable: v1.DoNotSchedule,
@@ -717,7 +696,7 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
@@ -741,7 +720,7 @@ var _ = Describe("Topology", func() {
 				MaxSkew: 1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
@@ -759,7 +738,7 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
@@ -776,14 +755,14 @@ var _ = Describe("Topology", func() {
 					v1.ResourceCPU: resource.MustParse("1.1"),
 				},
 			}
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
 					ResourceRequirements: rr,
 					NodeSelector: map[string]string{
 						v1.LabelTopologyZone: "test-zone-3",
 					},
 				}))
-			ExpectScheduled(ctx, env.Client, pod[0])
+			ExpectScheduled(ctx, env.Client, pods[0])
 
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}
@@ -794,7 +773,7 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, ResourceRequirements: rr, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, ResourceRequirements: rr, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, ResourceRequirements: rr, TopologySpreadConstraints: topology}),
@@ -822,7 +801,7 @@ var _ = Describe("Topology", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
 					ResourceRequirements: rr, TopologySpreadConstraints: topology}))
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1))
@@ -831,7 +810,7 @@ var _ = Describe("Topology", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-2"}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
 					ResourceRequirements: rr, TopologySpreadConstraints: topology}))
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1))
@@ -840,7 +819,7 @@ var _ = Describe("Topology", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-3"}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(10, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
 					ResourceRequirements: rr, TopologySpreadConstraints: topology})...,
 			)
@@ -870,7 +849,7 @@ var _ = Describe("Topology", func() {
 			}
 			// Spread 9 pods
 			ExpectApplied(ctx, env.Client, provisioner)
-			pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, createPods(9)...)
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, createPods(9)...)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(3, 3, 3))
 
 			// Delete pods to create a skew
@@ -883,7 +862,7 @@ var _ = Describe("Topology", func() {
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(3))
 
 			// Create 3 more pods, skew should recover
-			_ = ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, createPods(3)...)
+			_ = ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, createPods(3)...)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(3, 1, 2))
 		})
 		It("should not violate max-skew when unsat = do not schedule", func() {
@@ -902,7 +881,7 @@ var _ = Describe("Topology", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
 					ResourceRequirements: rr, TopologySpreadConstraints: topology}))
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1))
@@ -911,7 +890,7 @@ var _ = Describe("Topology", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-2", "test-zone-3"}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(10, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
 					ResourceRequirements: rr, TopologySpreadConstraints: topology})...,
 			)
@@ -935,14 +914,14 @@ var _ = Describe("Topology", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, ResourceRequirements: rr}))
 
 			// now only allow scheduling pods on zone-2 and zone-3
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-2", "test-zone-3"}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(10, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
 					TopologySpreadConstraints: topology, ResourceRequirements: rr})...,
 			)
@@ -963,7 +942,7 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner, firstNode, secondNode, thirdNode, &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: wrongNamespace}})
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.Pod(test.PodOptions{NodeName: firstNode.Name}),                                                                                                                         // ignored, missing labels
 				test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}}),                                                                                                    // ignored, pending
 				test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, NodeName: thirdNode.Name}),                                                                          // ignored, no domain on node
@@ -988,7 +967,7 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(),
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1))
@@ -1001,7 +980,7 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(5, test.PodOptions{TopologySpreadConstraints: topology})...,
 			)
 			// This is weird, but the topology label selector is used for determining domain counts. The pod that
@@ -1028,7 +1007,7 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
@@ -1044,7 +1023,7 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           4,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
@@ -1075,7 +1054,7 @@ var _ = Describe("Topology", func() {
 			}
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			scheduled := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			scheduled := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(spreadPod("app1")), test.UnschedulablePod(spreadPod("app1")),
 				test.UnschedulablePod(spreadPod("app2")), test.UnschedulablePod(spreadPod("app2")))
 
@@ -1117,7 +1096,7 @@ var _ = Describe("Topology", func() {
 			}
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			scheduled := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			scheduled := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(spreadPod("app1", v1alpha5.ArchitectureAmd64)), test.UnschedulablePod(spreadPod("app1", v1alpha5.ArchitectureAmd64)),
 				test.UnschedulablePod(spreadPod("app2", v1alpha5.ArchitectureArm64)), test.UnschedulablePod(spreadPod("app2", v1alpha5.ArchitectureArm64)))
 
@@ -1140,7 +1119,7 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
@@ -1158,7 +1137,7 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
@@ -1184,7 +1163,7 @@ var _ = Describe("Topology", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeSpot}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
 					ResourceRequirements: rr, TopologySpreadConstraints: topology}))
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1))
@@ -1193,7 +1172,7 @@ var _ = Describe("Topology", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(5, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
 					ResourceRequirements: rr, TopologySpreadConstraints: topology})...,
 			)
@@ -1216,7 +1195,7 @@ var _ = Describe("Topology", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeSpot}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
 					ResourceRequirements: rr, TopologySpreadConstraints: topology}))
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1))
@@ -1224,7 +1203,7 @@ var _ = Describe("Topology", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand}}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(5, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
 					ResourceRequirements: rr, TopologySpreadConstraints: topology})...,
 			)
@@ -1244,7 +1223,7 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner, firstNode, secondNode, thirdNode, &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: wrongNamespace}})
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.Pod(test.PodOptions{NodeName: firstNode.Name}),                                                                                                                         // ignored, missing labels
 				test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}}),                                                                                                    // ignored, pending
 				test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, NodeName: thirdNode.Name}),                                                                          // ignored, no domain on node
@@ -1269,7 +1248,7 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(),
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1))
@@ -1282,7 +1261,7 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(5, test.PodOptions{TopologySpreadConstraints: topology})...,
 			)
 			// This is weird, but the topology label selector is used for determining domain counts. The pod that
@@ -1300,7 +1279,7 @@ var _ = Describe("Topology", func() {
 		})
 		It("should balance pods across capacity-types (node required affinity constrained)", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, MakePods(1, test.PodOptions{
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, MakePods(1, test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				NodeRequirements: []v1.NodeSelectorRequirement{
 					// launch this on-demand pod in zone-1
@@ -1321,7 +1300,7 @@ var _ = Describe("Topology", func() {
 			// spot node. This doesn't violate the max-skew of 1 as the node selector requirement here excludes the
 			// existing on-demand pod from counting within this topology.
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(5, test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{Labels: labels},
 					// limit our provisioner to only creating spot machines
@@ -1339,8 +1318,9 @@ var _ = Describe("Topology", func() {
 				Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("2")},
 			}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(test.PodOptions{
+				ObjectMeta:   metav1.ObjectMeta{Labels: labels},
+				NodeSelector: map[string]string{v1.LabelInstanceTypeStable: "single-pod-instance-type"},
 				NodeRequirements: []v1.NodeSelectorRequirement{
 					{
 						Key:      v1alpha5.LabelCapacityType,
@@ -1348,9 +1328,9 @@ var _ = Describe("Topology", func() {
 						Values:   []string{"on-demand"},
 					},
 				},
-			}))
+			}))[0]
 
-			ExpectScheduled(ctx, env.Client, pod[0])
+			ExpectScheduled(ctx, env.Client, pod)
 
 			topology := []v1.TopologySpreadConstraint{{
 				TopologyKey:       v1alpha5.LabelCapacityType,
@@ -1361,12 +1341,13 @@ var _ = Describe("Topology", func() {
 
 			// limit our provisioner to only creating spot machines
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
-				{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{"spot"}}}
+				{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{"spot"}},
+			}
 
 			// since there is no node selector on this pod, the topology can see the single on-demand node that already
 			// exists and that limits us to scheduling 2 more spot pods before we would violate max-skew
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(5, test.PodOptions{
 					ObjectMeta:                metav1.ObjectMeta{Labels: labels},
 					ResourceRequirements:      rr,
@@ -1380,8 +1361,9 @@ var _ = Describe("Topology", func() {
 				Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("2")},
 			}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(test.PodOptions{
+				ObjectMeta:   metav1.ObjectMeta{Labels: labels},
+				NodeSelector: map[string]string{v1.LabelInstanceTypeStable: "single-pod-instance-type"},
 				NodeRequirements: []v1.NodeSelectorRequirement{
 					{
 						Key:      v1.LabelArchStable,
@@ -1404,10 +1386,10 @@ var _ = Describe("Topology", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelArchStable, Operator: v1.NodeSelectorOpIn, Values: []string{"arm64"}}}
 
-			// since there is no node selector on this pod, the topology can see the single on-demand node that already
+			// since there is no node selector on this pod, the topology can see the single arm64 node that already
 			// exists and that limits us to scheduling 2 more spot pods before we would violate max-skew
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(5, test.PodOptions{
 					ObjectMeta:                metav1.ObjectMeta{Labels: labels},
 					ResourceRequirements:      rr,
@@ -1432,28 +1414,28 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           3,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(2, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology})...,
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1))
 			ExpectSkew(ctx, env.Client, "default", &topology[1]).ToNot(ContainElements(BeNumerically(">", 3)))
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(3, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology})...,
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 2, 1))
 			ExpectSkew(ctx, env.Client, "default", &topology[1]).ToNot(ContainElements(BeNumerically(">", 3)))
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(5, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology})...,
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(4, 3, 3))
 			ExpectSkew(ctx, env.Client, "default", &topology[1]).ToNot(ContainElements(BeNumerically(">", 3)))
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(11, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology})...,
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(7, 7, 7))
@@ -1496,7 +1478,7 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, spotProv, onDemandProv)
-			pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, MakePods(20, test.PodOptions{
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, MakePods(20, test.PodOptions{
 				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
 				TopologySpreadConstraints: topology,
 			})...)
@@ -1532,7 +1514,7 @@ var _ = Describe("Topology", func() {
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(10, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology})...,
 			)
 
@@ -1557,28 +1539,28 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           3,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(2, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology})...,
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1))
 			ExpectSkew(ctx, env.Client, "default", &topology[1]).ToNot(ContainElements(BeNumerically(">", 3)))
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(3, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology})...,
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(3, 2))
 			ExpectSkew(ctx, env.Client, "default", &topology[1]).ToNot(ContainElements(BeNumerically(">", 3)))
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(5, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology})...,
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(5, 5))
 			ExpectSkew(ctx, env.Client, "default", &topology[1]).ToNot(ContainElements(BeNumerically(">", 3)))
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(11, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology})...,
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(11, 10))
@@ -1600,25 +1582,25 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(2, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology})...,
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).ToNot(ContainElements(BeNumerically(">", 1)))
 			ExpectSkew(ctx, env.Client, "default", &topology[1]).ToNot(ContainElements(BeNumerically(">", 1)))
 
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(3, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology})...,
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).ToNot(ContainElements(BeNumerically(">", 3)))
 			ExpectSkew(ctx, env.Client, "default", &topology[1]).ToNot(ContainElements(BeNumerically(">", 2)))
 
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(5, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology})...,
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).ToNot(ContainElements(BeNumerically(">", 5)))
 			ExpectSkew(ctx, env.Client, "default", &topology[1]).ToNot(ContainElements(BeNumerically(">", 4)))
 
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(11, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology})...,
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).ToNot(ContainElements(BeNumerically(">", 11)))
@@ -1652,7 +1634,7 @@ var _ = Describe("Topology", func() {
 			for i := 1; i < 15; i++ {
 				pods := MakePods(i, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology})
 				ExpectApplied(ctx, env.Client, provisioner)
-				ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pods...)
+				ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pods...)
 				ExpectMaxSkew(ctx, env.Client, "default", &topology[0]).To(BeNumerically("<=", 1))
 				ExpectMaxSkew(ctx, env.Client, "default", &topology[1]).To(BeNumerically("<=", 2))
 				ExpectMaxSkew(ctx, env.Client, "default", &topology[2]).To(BeNumerically("<=", 3))
@@ -1673,7 +1655,7 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				append(
 					MakePods(5, test.PodOptions{
 						ObjectMeta:                metav1.ObjectMeta{Labels: labels},
@@ -1699,7 +1681,7 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(10, test.PodOptions{
 					ObjectMeta:                metav1.ObjectMeta{Labels: labels},
 					TopologySpreadConstraints: topology,
@@ -1722,7 +1704,7 @@ var _ = Describe("Topology", func() {
 			}}
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(6, test.PodOptions{
 					ObjectMeta:                metav1.ObjectMeta{Labels: labels},
 					TopologySpreadConstraints: topology,
@@ -1737,7 +1719,7 @@ var _ = Describe("Topology", func() {
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}}
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, MakePods(1, test.PodOptions{
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, MakePods(1, test.PodOptions{
 				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
 				TopologySpreadConstraints: topology,
 				NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{
@@ -1749,7 +1731,7 @@ var _ = Describe("Topology", func() {
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(3, 3, 1))
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(5, test.PodOptions{
 					ObjectMeta:                metav1.ObjectMeta{Labels: labels},
 					TopologySpreadConstraints: topology,
@@ -1769,7 +1751,7 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				append(
 					MakePods(5, test.PodOptions{
 						ObjectMeta:                metav1.ObjectMeta{Labels: labels},
@@ -1795,7 +1777,7 @@ var _ = Describe("Topology", func() {
 
 			// need to limit the rules to spot or else it will know that on-demand has 0 pods and won't violate the max-skew
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(3, test.PodOptions{
 					ObjectMeta:                metav1.ObjectMeta{Labels: labels},
 					TopologySpreadConstraints: topology,
@@ -1807,7 +1789,7 @@ var _ = Describe("Topology", func() {
 
 			// open the rules back to up so it can see all capacity types
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, MakePods(1, test.PodOptions{
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, MakePods(1, test.PodOptions{
 				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
 				TopologySpreadConstraints: topology,
 				NodeRequirements: []v1.NodeSelectorRequirement{
@@ -1819,7 +1801,7 @@ var _ = Describe("Topology", func() {
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(3, 1))
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(5, test.PodOptions{
 					ObjectMeta:                metav1.ObjectMeta{Labels: labels},
 					TopologySpreadConstraints: topology,
@@ -1833,7 +1815,7 @@ var _ = Describe("Topology", func() {
 		It("should schedule a pod with empty pod affinity and anti-affinity", func() {
 			ExpectApplied(ctx, env.Client)
 			ExpectApplied(ctx, env.Client, provisioner)
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(test.PodOptions{
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(test.PodOptions{
 				PodRequirements:     []v1.PodAffinityTerm{},
 				PodAntiRequirements: []v1.PodAffinityTerm{},
 			}))[0]
@@ -1867,7 +1849,7 @@ var _ = Describe("Topology", func() {
 			pods = append(pods, affPod2)
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pods...)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pods...)
 			n1 := ExpectScheduled(ctx, env.Client, affPod1)
 			n2 := ExpectScheduled(ctx, env.Client, affPod2)
 			// should be scheduled on the same node
@@ -1908,7 +1890,7 @@ var _ = Describe("Topology", func() {
 			pods := []*v1.Pod{affPod1, affPod2}
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pods...)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pods...)
 			n1 := ExpectScheduled(ctx, env.Client, affPod1)
 			n2 := ExpectScheduled(ctx, env.Client, affPod2)
 			// should be scheduled on a node with the same arch
@@ -1932,7 +1914,7 @@ var _ = Describe("Topology", func() {
 			})
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			pods = ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pods...)
+			pods = ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pods...)
 			nodeNames := map[string]struct{}{}
 			for _, p := range pods {
 				n := ExpectScheduled(ctx, env.Client, p)
@@ -1956,7 +1938,7 @@ var _ = Describe("Topology", func() {
 				})
 			}
 			ExpectApplied(ctx, env.Client, provisioner)
-			pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, createPods()...)
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, createPods()...)
 			nodeNames := map[string]struct{}{}
 			unscheduledCount := 0
 			scheduledCount := 0
@@ -1975,7 +1957,7 @@ var _ = Describe("Topology", func() {
 			Expect(unscheduledCount).To(BeNumerically("==", 5))
 
 			// and pods in a different batch should not schedule as well even if the node is not ready yet
-			pods = ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, createPods()...)
+			pods = ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, createPods()...)
 			for _, p := range pods {
 				ExpectNotScheduled(ctx, env.Client, p)
 			}
@@ -1985,7 +1967,7 @@ var _ = Describe("Topology", func() {
 			// put one pod in test-zone-1, this does affect pod affinity even though we have different node selectors.
 			// The node selector and required node affinity restrictions to topology counting only apply to topology spread.
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(test.PodOptions{
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: affLabels,
 				},
@@ -2018,7 +2000,7 @@ var _ = Describe("Topology", func() {
 					TopologyKey: v1.LabelHostname,
 				}},
 			})
-			pods = ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pods...)
+			pods = ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pods...)
 			for _, p := range pods {
 				// none of this should schedule
 				ExpectNotScheduled(ctx, env.Client, p)
@@ -2040,7 +2022,7 @@ var _ = Describe("Topology", func() {
 			})
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			pods = ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pods...)
+			pods = ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pods...)
 			nodeNames := map[string]struct{}{}
 			for _, p := range pods {
 				n := ExpectScheduled(ctx, env.Client, p)
@@ -2070,7 +2052,7 @@ var _ = Describe("Topology", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, provisioner)
-			pods = ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pods...)
+			pods = ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pods...)
 			nodeNames := map[string]struct{}{}
 			for _, p := range pods {
 				n := ExpectScheduled(ctx, env.Client, p)
@@ -2106,7 +2088,7 @@ var _ = Describe("Topology", func() {
 			pods = append(pods, affPod2)
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pods...)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pods...)
 			// should be scheduled as the pod it has affinity to doesn't exist, but it's only a preference and not a
 			// hard constraints
 			ExpectScheduled(ctx, env.Client, affPod2)
@@ -2139,7 +2121,7 @@ var _ = Describe("Topology", func() {
 			pods = append(pods, affPods...)
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pods...)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pods...)
 			for _, aff := range affPods {
 				ExpectScheduled(ctx, env.Client, aff)
 			}
@@ -2160,7 +2142,7 @@ var _ = Describe("Topology", func() {
 					TopologyKey: v1.LabelHostname,
 				}}})
 
-				ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, affPod2, affPod1)
+				ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, affPod2, affPod1)
 				n1 := ExpectScheduled(ctx, env.Client, affPod1)
 				n2 := ExpectScheduled(ctx, env.Client, affPod2)
 				// should not be scheduled on the same node
@@ -2197,7 +2179,7 @@ var _ = Describe("Topology", func() {
 				}}})
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, zone1Pod, zone2Pod, zone3Pod, affPod)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, zone1Pod, zone2Pod, zone3Pod, affPod)
 			// the three larger zone specific pods should get scheduled first due to first fit descending onto one
 			// node per zone.
 			ExpectScheduled(ctx, env.Client, zone1Pod)
@@ -2222,7 +2204,7 @@ var _ = Describe("Topology", func() {
 				}}})
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pod, affPod)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pod, affPod)
 			// the pod we need to avoid schedules first, but we don't know where.
 			ExpectScheduled(ctx, env.Client, pod)
 			// the pod with anti-affinity
@@ -2265,7 +2247,7 @@ var _ = Describe("Topology", func() {
 			pods := []*v1.Pod{affPod1, affPod2}
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pods...)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pods...)
 			n1 := ExpectScheduled(ctx, env.Client, affPod1)
 			n2 := ExpectScheduled(ctx, env.Client, affPod2)
 			// should not be scheduled on machines with the same arch
@@ -2303,7 +2285,7 @@ var _ = Describe("Topology", func() {
 			affPod := test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: affLabels}})
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, zone1Pod, zone2Pod, zone3Pod, affPod)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, zone1Pod, zone2Pod, zone3Pod, affPod)
 			// three pods with anti-affinity will schedule first due to first fit-descending
 			ExpectScheduled(ctx, env.Client, zone1Pod)
 			ExpectScheduled(ctx, env.Client, zone2Pod)
@@ -2338,7 +2320,7 @@ var _ = Describe("Topology", func() {
 			affPod := test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: affLabels}})
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, zone1Pod, zone2Pod, zone3Pod, affPod)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, zone1Pod, zone2Pod, zone3Pod, affPod)
 			// three pods with anti-affinity will schedule first due to first fit-descending
 			ExpectScheduled(ctx, env.Client, zone1Pod)
 			ExpectScheduled(ctx, env.Client, zone2Pod)
@@ -2365,9 +2347,7 @@ var _ = Describe("Topology", func() {
 			affPod := test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: affLabels}})
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, zoneAnywherePod, affPod)
-			ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(zoneAnywherePod))
-			ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(affPod))
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, zoneAnywherePod, affPod)
 			// the pod with anti-affinity will schedule first due to first fit-descending, but we don't know which zone it landed in
 			node1 := ExpectScheduled(ctx, env.Client, zoneAnywherePod)
 
@@ -2376,11 +2356,8 @@ var _ = Describe("Topology", func() {
 
 			// a second batching will now allow the pod to schedule as the zoneAnywherePod has been committed to a zone
 			// by the actual node creation
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, affPod)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, affPod)
 			node2 := ExpectScheduled(ctx, env.Client, affPod)
-			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
-			ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(affPod))
-
 			Expect(node1.Labels[v1.LabelTopologyZone]).ToNot(Equal(node2.Labels[v1.LabelTopologyZone]))
 
 		})
@@ -2413,7 +2390,7 @@ var _ = Describe("Topology", func() {
 			// provision these so we get three machines that exist in the cluster with anti-affinity to a pod that we will
 			// then try to schedule
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, zone1Pod, zone2Pod, zone3Pod)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, zone1Pod, zone2Pod, zone3Pod)
 			node1 := ExpectScheduled(ctx, env.Client, zone1Pod)
 			node2 := ExpectScheduled(ctx, env.Client, zone2Pod)
 			node3 := ExpectScheduled(ctx, env.Client, zone3Pod)
@@ -2431,7 +2408,7 @@ var _ = Describe("Topology", func() {
 
 			// this pod with no anti-affinity rules can't schedule. It has no anti-affinity rules, but every zone has an
 			// existing pod (not from this batch) with anti-affinity rules that prevent it from scheduling
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, affPod)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, affPod)
 			ExpectNotScheduled(ctx, env.Client, affPod)
 		})
 		It("should violate preferred pod anti-affinity on zone (inverse w/existing machines)", func() {
@@ -2468,7 +2445,7 @@ var _ = Describe("Topology", func() {
 			// provision these so we get three machines that exist in the cluster with anti-affinity to a pod that we will
 			// then try to schedule
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, zone1Pod, zone2Pod, zone3Pod)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, zone1Pod, zone2Pod, zone3Pod)
 			node1 := ExpectScheduled(ctx, env.Client, zone1Pod)
 			node2 := ExpectScheduled(ctx, env.Client, zone2Pod)
 			node3 := ExpectScheduled(ctx, env.Client, zone3Pod)
@@ -2481,7 +2458,7 @@ var _ = Describe("Topology", func() {
 			ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(zone3Pod))
 
 			// this pod with no anti-affinity rules can schedule, though it couldn't if the anti-affinity were required
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, affPod)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, affPod)
 			ExpectScheduled(ctx, env.Client, affPod)
 		})
 		It("should allow violation of a pod affinity preference with a conflicting required constraint", func() {
@@ -2510,7 +2487,7 @@ var _ = Describe("Topology", func() {
 					},
 				}}})
 			ExpectApplied(ctx, env.Client, provisioner)
-			pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, append(affPods, affPod1)...)
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, append(affPods, affPod1)...)
 			// all pods should be scheduled since the affinity term is just a preference
 			for _, pod := range pods {
 				ExpectScheduled(ctx, env.Client, pod)
@@ -2542,24 +2519,24 @@ var _ = Describe("Topology", func() {
 
 			// one pod pod will schedule
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, createPods()...)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, createPods()...)
 			ExpectSkew(ctx, env.Client, "default", top).To(ConsistOf(1))
 			// delete all of the unscheduled ones as provisioning will only bind pods passed into the provisioning call
 			// the scheduler looks at all pods though, so it may assume a pod from this batch schedules and no others do
 			ExpectDeleteAllUnscheduledPods(ctx, env.Client)
 
 			// second pod in a second zone
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, createPods()...)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, createPods()...)
 			ExpectSkew(ctx, env.Client, "default", top).To(ConsistOf(1, 1))
 			ExpectDeleteAllUnscheduledPods(ctx, env.Client)
 
 			// third pod in the last zone
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, createPods()...)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, createPods()...)
 			ExpectSkew(ctx, env.Client, "default", top).To(ConsistOf(1, 1, 1))
 			ExpectDeleteAllUnscheduledPods(ctx, env.Client)
 
 			// and nothing else can schedule
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, createPods()...)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, createPods()...)
 			ExpectSkew(ctx, env.Client, "default", top).To(ConsistOf(1, 1, 1))
 			ExpectDeleteAllUnscheduledPods(ctx, env.Client)
 		})
@@ -2574,7 +2551,7 @@ var _ = Describe("Topology", func() {
 				}}})
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, affPods...)
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, affPods...)
 			// the pod we have affinity to is not in the cluster, so all of these pods are unschedulable
 			for _, p := range pods {
 				ExpectNotScheduled(ctx, env.Client, p)
@@ -2596,7 +2573,7 @@ var _ = Describe("Topology", func() {
 				}}})
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, append(affPods, targetPod)...)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, append(affPods, targetPod)...)
 			top := &v1.TopologySpreadConstraint{TopologyKey: v1.LabelTopologyZone}
 			// these pods can't schedule as the pod they have affinity to isn't limited to any particular zone
 			for i := range affPods {
@@ -2607,7 +2584,7 @@ var _ = Describe("Topology", func() {
 
 			// now that targetPod has been scheduled to a node, it's zone is committed and the pods with affinity to it
 			// should schedule in the same zone
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, affPods...)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, affPods...)
 			for _, pod := range affPods {
 				ExpectScheduled(ctx, env.Client, pod)
 			}
@@ -2638,7 +2615,7 @@ var _ = Describe("Topology", func() {
 			affPods = append(affPods, affPod1)
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, affPods...)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, affPods...)
 			top := &v1.TopologySpreadConstraint{TopologyKey: v1.LabelTopologyZone}
 			ExpectSkew(ctx, env.Client, "default", top).To(ConsistOf(11))
 		})
@@ -2650,7 +2627,7 @@ var _ = Describe("Topology", func() {
 			for i := 0; i < 50; i++ {
 				ExpectApplied(ctx, env.Client, provisioner.DeepCopy())
 				// we have to schedule DB -> Web -> Cache -> UI in that order or else there are pod affinity violations
-				pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+				pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 					test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: dbLabels}}),
 					test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: webLabels},
 						PodRequirements: []v1.PodAffinityTerm{{
@@ -2673,6 +2650,7 @@ var _ = Describe("Topology", func() {
 					ExpectScheduled(ctx, env.Client, pods[i])
 				}
 				ExpectCleanedUp(ctx, env.Client)
+				cluster.Reset(ctx)
 			}
 		})
 		It("should fail to schedule pods with unsatisfiable dependencies", func() {
@@ -2681,7 +2659,7 @@ var _ = Describe("Topology", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
 			// this pods wants to schedule with a non-existent pod, this test just ensures that the scheduling loop
 			// doesn't infinite loop
-			pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: dbLabels},
 					PodRequirements: []v1.PodAffinityTerm{
 						{
@@ -2722,7 +2700,7 @@ var _ = Describe("Topology", func() {
 			pods = append(pods, affPod2)
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pods...)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pods...)
 
 			// the target pod gets scheduled
 			ExpectScheduled(ctx, env.Client, affPod1)
@@ -2763,7 +2741,7 @@ var _ = Describe("Topology", func() {
 			pods = append(pods, affPod2)
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pods...)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pods...)
 			n1 := ExpectScheduled(ctx, env.Client, affPod1)
 			n2 := ExpectScheduled(ctx, env.Client, affPod2)
 			// should be scheduled on the same node
@@ -2806,7 +2784,7 @@ var _ = Describe("Topology", func() {
 			pods = append(pods, affPod2)
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pods...)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pods...)
 			n1 := ExpectScheduled(ctx, env.Client, affPod1)
 			n2 := ExpectScheduled(ctx, env.Client, affPod2)
 			// should be scheduled on the same node due to the empty namespace selector
@@ -2828,7 +2806,7 @@ var _ = Describe("Topology", func() {
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 				WhenUnsatisfiable: v1.DoNotSchedule,
 			}
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.Pods(10, test.UnscheduleablePodOptions(test.PodOptions{
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.Pods(10, test.UnscheduleablePodOptions(test.PodOptions{
 				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
 				TopologySpreadConstraints: []v1.TopologySpreadConstraint{topology},
 			}))...)
@@ -2851,7 +2829,7 @@ var _ = Describe("Taints", func() {
 	It("should taint machines with provisioner taints", func() {
 		provisioner.Spec.Taints = []v1.Taint{{Key: "test", Value: "bar", Effect: v1.TaintEffectNoSchedule}}
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 			test.PodOptions{Tolerations: []v1.Toleration{{Effect: v1.TaintEffectNoSchedule, Operator: v1.TolerationOpExists}}},
 		))[0]
 		node := ExpectScheduled(ctx, env.Client, pod)
@@ -2860,7 +2838,7 @@ var _ = Describe("Taints", func() {
 	It("should schedule pods that tolerate provisioner constraints", func() {
 		provisioner.Spec.Taints = []v1.Taint{{Key: "test-key", Value: "test-value", Effect: v1.TaintEffectNoSchedule}}
 		ExpectApplied(ctx, env.Client, provisioner)
-		for _, pod := range ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+		for _, pod := range ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 			// Tolerates with OpExists
 			test.UnschedulablePod(test.PodOptions{Tolerations: []v1.Toleration{{Key: "test-key", Operator: v1.TolerationOpExists, Effect: v1.TaintEffectNoSchedule}}}),
 			// Tolerates with OpEqual
@@ -2869,7 +2847,7 @@ var _ = Describe("Taints", func() {
 			ExpectScheduled(ctx, env.Client, pod)
 		}
 		ExpectApplied(ctx, env.Client, provisioner)
-		for _, pod := range ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+		for _, pod := range ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 			// Missing toleration
 			test.UnschedulablePod(),
 			// key mismatch with OpExists
@@ -2884,12 +2862,12 @@ var _ = Describe("Taints", func() {
 		provisioner.Spec.StartupTaints = []v1.Taint{{Key: "ignore-me", Value: "nothing-to-see-here", Effect: v1.TaintEffectNoSchedule}}
 
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())[0]
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())[0]
 		ExpectScheduled(ctx, env.Client, pod)
 	})
 	It("should not generate taints for OpExists", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 			test.UnschedulablePod(test.PodOptions{Tolerations: []v1.Toleration{{Key: "test-key", Operator: v1.TolerationOpExists, Effect: v1.TaintEffectNoExecute}}}),
 		)[0]
 		node := ExpectScheduled(ctx, env.Client, pod)
@@ -2900,7 +2878,7 @@ var _ = Describe("Taints", func() {
 var _ = Describe("Instance Type Compatibility", func() {
 	It("should not schedule if requesting more resources than any instance type has", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 			test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
 					Requests: map[v1.ResourceName]resource.Quantity{
@@ -2917,7 +2895,7 @@ var _ = Describe("Instance Type Compatibility", func() {
 		}}
 		nodeNames := sets.NewString()
 		ExpectApplied(ctx, env.Client, provisioner)
-		for _, pod := range ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+		for _, pod := range ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 			test.UnschedulablePod(test.PodOptions{
 				NodeSelector: map[string]string{v1.LabelArchStable: v1alpha5.ArchitectureAmd64},
 			}),
@@ -2936,7 +2914,7 @@ var _ = Describe("Instance Type Compatibility", func() {
 			Values:   []string{v1alpha5.ArchitectureAmd64},
 		}}
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 			test.UnschedulablePod(test.PodOptions{
 				NodeRequirements: []v1.NodeSelectorRequirement{
 					{
@@ -2955,7 +2933,7 @@ var _ = Describe("Instance Type Compatibility", func() {
 			Values:   []string{v1alpha5.ArchitectureAmd64},
 		}}
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 			test.UnschedulablePod(test.PodOptions{
 				NodeRequirements: []v1.NodeSelectorRequirement{
 					{
@@ -2975,7 +2953,7 @@ var _ = Describe("Instance Type Compatibility", func() {
 			Values:   []string{v1alpha5.ArchitectureAmd64},
 		}}
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 			test.UnschedulablePod(test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
 				Limits: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("14")}}}))
 		// only the ARM instance has enough CPU, but it's not allowed per the provisioner
@@ -2989,7 +2967,7 @@ var _ = Describe("Instance Type Compatibility", func() {
 		}}
 		nodeNames := sets.NewString()
 		ExpectApplied(ctx, env.Client, provisioner)
-		for _, pod := range ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+		for _, pod := range ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 			test.UnschedulablePod(test.PodOptions{
 				NodeSelector: map[string]string{v1.LabelOSStable: string(v1.Linux)},
 			}),
@@ -3009,7 +2987,7 @@ var _ = Describe("Instance Type Compatibility", func() {
 		}}
 		nodeNames := sets.NewString()
 		ExpectApplied(ctx, env.Client, provisioner)
-		for _, pod := range ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+		for _, pod := range ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 			test.UnschedulablePod(test.PodOptions{
 				NodeSelector: map[string]string{v1.LabelInstanceType: "small-instance-type"},
 			}),
@@ -3029,7 +3007,7 @@ var _ = Describe("Instance Type Compatibility", func() {
 		}}
 		nodeNames := sets.NewString()
 		ExpectApplied(ctx, env.Client, provisioner)
-		for _, pod := range ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+		for _, pod := range ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 			test.UnschedulablePod(test.PodOptions{
 				NodeSelector: map[string]string{v1.LabelTopologyZone: "test-zone-1"},
 			}),
@@ -3050,7 +3028,7 @@ var _ = Describe("Instance Type Compatibility", func() {
 
 		nodeNames := sets.NewString()
 		ExpectApplied(ctx, env.Client, provisioner)
-		for _, pod := range ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+		for _, pod := range ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 			test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
 					Limits: v1.ResourceList{fakeGPU1: resource.MustParse("1")},
@@ -3075,7 +3053,7 @@ var _ = Describe("Instance Type Compatibility", func() {
 		cloudProv.InstanceTypes[1].Capacity[fakeGPU2] = resource.MustParse("25")
 
 		ExpectApplied(ctx, env.Client, provisioner)
-		pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+		pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 			test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
 					Limits: v1.ResourceList{
@@ -3089,7 +3067,7 @@ var _ = Describe("Instance Type Compatibility", func() {
 		It("should filter instance types that match labels", func() {
 			cloudProv.InstanceTypes = fake.InstanceTypes(5)
 			ExpectApplied(ctx, env.Client, provisioner)
-			pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{fake.LabelInstanceSize: "large"}}),
 				test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{fake.LabelInstanceSize: "small"}}),
 			)
@@ -3101,7 +3079,7 @@ var _ = Describe("Instance Type Compatibility", func() {
 		It("should not schedule with incompatible labels", func() {
 			cloudProv.InstanceTypes = fake.InstanceTypes(5)
 			ExpectApplied(ctx, env.Client, provisioner)
-			pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{
 					fake.LabelInstanceSize:     "large",
 					v1.LabelInstanceTypeStable: cloudProv.InstanceTypes[0].Name,
@@ -3117,7 +3095,7 @@ var _ = Describe("Instance Type Compatibility", func() {
 		It("should schedule optional labels", func() {
 			cloudProv.InstanceTypes = fake.InstanceTypes(5)
 			ExpectApplied(ctx, env.Client, provisioner)
-			pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 					// Only some instance types have this key
 					{Key: fake.ExoticInstanceLabelKey, Operator: v1.NodeSelectorOpExists},
@@ -3130,7 +3108,7 @@ var _ = Describe("Instance Type Compatibility", func() {
 		It("should schedule without optional labels if disallowed", func() {
 			cloudProv.InstanceTypes = fake.InstanceTypes(5)
 			ExpectApplied(ctx, env.Client, test.Provisioner())
-			pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 					// Only some instance types have this key
 					{Key: fake.ExoticInstanceLabelKey, Operator: v1.NodeSelectorOpDoesNotExist},
@@ -3156,7 +3134,7 @@ var _ = Describe("Networking constraints", func() {
 			pod2.Spec.Containers[0].Ports = append(pod2.Spec.Containers[0].Ports, port)
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pod1, pod2)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pod1, pod2)
 			node1 := ExpectScheduled(ctx, env.Client, pod1)
 			node2 := ExpectScheduled(ctx, env.Client, pod2)
 			Expect(node1.Name).ToNot(Equal(node2.Name))
@@ -3174,7 +3152,7 @@ var _ = Describe("Networking constraints", func() {
 			pod2.Spec.Containers[0].Ports = append(pod2.Spec.Containers[0].Ports, port)
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pod1, pod2)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pod1, pod2)
 			node1 := ExpectScheduled(ctx, env.Client, pod1)
 			node2 := ExpectScheduled(ctx, env.Client, pod2)
 			Expect(node1.Name).ToNot(Equal(node2.Name))
@@ -3192,7 +3170,7 @@ var _ = Describe("Networking constraints", func() {
 			pod2.Spec.Containers[0].Ports = append(pod2.Spec.Containers[0].Ports, port)
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pod1, pod2)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pod1, pod2)
 			node1 := ExpectScheduled(ctx, env.Client, pod1)
 			node2 := ExpectScheduled(ctx, env.Client, pod2)
 			Expect(node1.Name).ToNot(Equal(node2.Name))
@@ -3212,7 +3190,7 @@ var _ = Describe("Networking constraints", func() {
 			pod2.Spec.Containers[0].Ports = append(pod2.Spec.Containers[0].Ports, port)
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pod1, pod2)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pod1, pod2)
 			node1 := ExpectScheduled(ctx, env.Client, pod1)
 			node2 := ExpectScheduled(ctx, env.Client, pod2)
 			Expect(node1.Name).ToNot(Equal(node2.Name))
@@ -3232,11 +3210,11 @@ var _ = Describe("Networking constraints", func() {
 			pod2.Spec.Containers[0].Ports = append(pod2.Spec.Containers[0].Ports, port)
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pod1)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pod1)
 			node1 := ExpectScheduled(ctx, env.Client, pod1)
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pod2)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pod2)
 			node2 := ExpectScheduled(ctx, env.Client, pod2)
 			Expect(node1.Name).ToNot(Equal(node2.Name))
 		})
@@ -3254,7 +3232,7 @@ var _ = Describe("Networking constraints", func() {
 			pod2.Spec.Containers[0].Ports = append(pod2.Spec.Containers[0].Ports, port)
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pod1, pod2)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pod1, pod2)
 			node1 := ExpectScheduled(ctx, env.Client, pod1)
 			node2 := ExpectScheduled(ctx, env.Client, pod2)
 			Expect(node1.Name).To(Equal(node2.Name))
@@ -3274,7 +3252,7 @@ var _ = Describe("Networking constraints", func() {
 			pod2.Spec.Containers[0].Ports = append(pod2.Spec.Containers[0].Ports, port)
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pod1, pod2)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pod1, pod2)
 			node1 := ExpectScheduled(ctx, env.Client, pod1)
 			node2 := ExpectScheduled(ctx, env.Client, pod2)
 			Expect(node1.Name).To(Equal(node2.Name))
@@ -3291,7 +3269,7 @@ var _ = Describe("Networking constraints", func() {
 			pod2.Spec.Containers[0].Ports = append(pod2.Spec.Containers[0].Ports, port)
 
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pod1, pod2)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pod1, pod2)
 			node1 := ExpectScheduled(ctx, env.Client, pod1)
 			node2 := ExpectScheduled(ctx, env.Client, pod2)
 			Expect(node1.Name).To(Equal(node2.Name))
@@ -3302,7 +3280,7 @@ var _ = Describe("Networking constraints", func() {
 var _ = Describe("Binpacking", func() {
 	It("should schedule a small pod on the smallest instance", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 			test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
 				Requests: map[v1.ResourceName]resource.Quantity{
 					v1.ResourceMemory: resource.MustParse("100M"),
@@ -3313,7 +3291,7 @@ var _ = Describe("Binpacking", func() {
 	})
 	It("should schedule a small pod on the smallest possible instance type", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 			test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
 				Requests: map[v1.ResourceName]resource.Quantity{
 					v1.ResourceMemory: resource.MustParse("2000M"),
@@ -3331,7 +3309,7 @@ var _ = Describe("Binpacking", func() {
 				},
 			}}
 		ExpectApplied(ctx, env.Client, provisioner)
-		pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.Pods(5, opts)...)
+		pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.Pods(5, opts)...)
 		nodeNames := sets.NewString()
 		for _, p := range pods {
 			node := ExpectScheduled(ctx, env.Client, p)
@@ -3350,7 +3328,7 @@ var _ = Describe("Binpacking", func() {
 				},
 			}}
 		ExpectApplied(ctx, env.Client, provisioner)
-		pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.Pods(40, opts)...)
+		pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.Pods(40, opts)...)
 		nodeNames := sets.NewString()
 		for _, p := range pods {
 			node := ExpectScheduled(ctx, env.Client, p)
@@ -3382,7 +3360,7 @@ var _ = Describe("Binpacking", func() {
 		// should only end up with 20 machines total.
 		provPods := append(test.Pods(40, largeOpts), test.Pods(20, smallOpts)...)
 		ExpectApplied(ctx, env.Client, provisioner)
-		pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, provPods...)
+		pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, provPods...)
 		nodeNames := sets.NewString()
 		for _, p := range pods {
 			node := ExpectScheduled(ctx, env.Client, p)
@@ -3395,7 +3373,7 @@ var _ = Describe("Binpacking", func() {
 		cloudProv.InstanceTypes = fake.InstanceTypes(5)
 		var nodes []*v1.Node
 		ExpectApplied(ctx, env.Client, provisioner)
-		for _, pod := range ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+		for _, pod := range ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 			test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
 					Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4.5")},
@@ -3416,7 +3394,7 @@ var _ = Describe("Binpacking", func() {
 	})
 	It("should handle zero-quantity resource requests", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 			test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
 					Requests: v1.ResourceList{"foo.com/weird-resources": resource.MustParse("0")},
@@ -3428,7 +3406,7 @@ var _ = Describe("Binpacking", func() {
 	})
 	It("should not schedule pods that exceed every instance type's capacity", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 			test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
 				Requests: map[v1.ResourceName]resource.Quantity{
 					v1.ResourceMemory: resource.MustParse("2Ti"),
@@ -3447,7 +3425,7 @@ var _ = Describe("Binpacking", func() {
 				},
 			}}
 		ExpectApplied(ctx, env.Client, provisioner)
-		pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.Pods(25, opts)...)
+		pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.Pods(25, opts)...)
 		nodeNames := sets.NewString()
 		// all of the test instance types support 5 pods each, so we use the 5 instances of the smallest one for our 25 pods
 		for _, p := range pods {
@@ -3459,7 +3437,7 @@ var _ = Describe("Binpacking", func() {
 	})
 	It("should take into account initContainer resource requests when binpacking", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 			test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
 				Requests: map[v1.ResourceName]resource.Quantity{
 					v1.ResourceMemory: resource.MustParse("1Gi"),
@@ -3479,7 +3457,7 @@ var _ = Describe("Binpacking", func() {
 	})
 	It("should not schedule pods when initContainer resource requests are greater than available instance types", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 			test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
 				Requests: map[v1.ResourceName]resource.Quantity{
 					v1.ResourceMemory: resource.MustParse("1Gi"),
@@ -3547,7 +3525,7 @@ var _ = Describe("Binpacking", func() {
 			}),
 		}
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 			test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
 				Limits: map[v1.ResourceName]resource.Quantity{
 					v1.ResourceCPU:    resource.MustParse("1m"),
@@ -3572,17 +3550,17 @@ var _ = Describe("In-Flight Nodes", func() {
 			},
 		}}
 		ExpectApplied(ctx, env.Client, provisioner)
-		initialPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(opts))
+		initialPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(opts))
 		node1 := ExpectScheduled(ctx, env.Client, initialPod[0])
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
-		secondPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(opts))
+		secondPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(opts))
 		node2 := ExpectScheduled(ctx, env.Client, secondPod[0])
 		Expect(node1.Name).To(Equal(node2.Name))
 	})
 	It("should not launch a second node if there is an in-flight node that can support the pod (node selectors)", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
-		initialPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
+		initialPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
 			Limits: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("10m"),
 			},
@@ -3596,7 +3574,7 @@ var _ = Describe("In-Flight Nodes", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
 		// the node gets created in test-zone-2
-		secondPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
+		secondPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
 			Limits: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("10m"),
 			},
@@ -3612,7 +3590,7 @@ var _ = Describe("In-Flight Nodes", func() {
 		Expect(node1.Name).To(Equal(node2.Name))
 
 		// the node gets created in test-zone-2
-		thirdPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
+		thirdPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
 			Limits: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("10m"),
 			},
@@ -3633,13 +3611,13 @@ var _ = Describe("In-Flight Nodes", func() {
 				v1.ResourceCPU: resource.MustParse("1001m"),
 			},
 		}}
-		initialPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(opts))
+		initialPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(opts))
 		node1 := ExpectScheduled(ctx, env.Client, initialPod[0])
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
 		// the node will have 2000m CPU, so these two pods can't both fit on it
 		opts.ResourceRequirements.Limits[v1.ResourceCPU] = resource.MustParse("1")
-		secondPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(opts))
+		secondPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(opts))
 		node2 := ExpectScheduled(ctx, env.Client, secondPod[0])
 		Expect(node1.Name).ToNot(Equal(node2.Name))
 	})
@@ -3650,11 +3628,11 @@ var _ = Describe("In-Flight Nodes", func() {
 				v1.ResourceCPU: resource.MustParse("10m"),
 			},
 		}}
-		initialPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(opts))
+		initialPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(opts))
 		node1 := ExpectScheduled(ctx, env.Client, initialPod[0])
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
-		secondPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+		secondPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelArchStable: "arm64"}}))
 		node2 := ExpectScheduled(ctx, env.Client, secondPod[0])
 		Expect(node1.Name).ToNot(Equal(node2.Name))
@@ -3666,7 +3644,7 @@ var _ = Describe("In-Flight Nodes", func() {
 			},
 		}}
 		ExpectApplied(ctx, env.Client, provisioner)
-		initialPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(opts))
+		initialPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(opts))
 		node1 := ExpectScheduled(ctx, env.Client, initialPod[0])
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
@@ -3676,7 +3654,7 @@ var _ = Describe("In-Flight Nodes", func() {
 		ExpectDeleted(ctx, env.Client, node1)
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
-		secondPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(opts))
+		secondPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(opts))
 		node2 := ExpectScheduled(ctx, env.Client, secondPod[0])
 		Expect(node1.Name).ToNot(Equal(node2.Name))
 	})
@@ -3690,7 +3668,7 @@ var _ = Describe("In-Flight Nodes", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
@@ -3706,7 +3684,7 @@ var _ = Describe("In-Flight Nodes", func() {
 			}
 
 			firstRoundNumNodes := len(nodeList.Items)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
@@ -3728,7 +3706,7 @@ var _ = Describe("In-Flight Nodes", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
@@ -3743,7 +3721,7 @@ var _ = Describe("In-Flight Nodes", func() {
 				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKey{Name: node.Name})
 			}
 
-			ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
 				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
@@ -3762,7 +3740,7 @@ var _ = Describe("In-Flight Nodes", func() {
 				},
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			initialPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(opts))
+			initialPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(opts))
 			node1 := ExpectScheduled(ctx, env.Client, initialPod[0])
 
 			// delete the pod so that the node is empty
@@ -3771,7 +3749,7 @@ var _ = Describe("In-Flight Nodes", func() {
 			ExpectApplied(ctx, env.Client, node1)
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
-			secondPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())
+			secondPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
 			node2 := ExpectScheduled(ctx, env.Client, secondPod[0])
 			Expect(node1.Name).To(Equal(node2.Name))
 		})
@@ -3782,7 +3760,7 @@ var _ = Describe("In-Flight Nodes", func() {
 				},
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
-			initialPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(opts))
+			initialPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(opts))
 			node1 := ExpectScheduled(ctx, env.Client, initialPod[0])
 
 			// delete the pod so that the node is empty
@@ -3796,7 +3774,7 @@ var _ = Describe("In-Flight Nodes", func() {
 			ExpectApplied(ctx, env.Client, node1)
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
-			secondPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())
+			secondPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
 			node2 := ExpectScheduled(ctx, env.Client, secondPod[0])
 			Expect(node1.Name).ToNot(Equal(node2.Name))
 		})
@@ -3812,7 +3790,7 @@ var _ = Describe("In-Flight Nodes", func() {
 				Effect: v1.TaintEffectNoSchedule,
 			})
 			ExpectApplied(ctx, env.Client, provisioner)
-			initialPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(opts))
+			initialPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(opts))
 			node1 := ExpectScheduled(ctx, env.Client, initialPod[0])
 
 			// delete the pod so that the node is empty
@@ -3827,7 +3805,7 @@ var _ = Describe("In-Flight Nodes", func() {
 			ExpectApplied(ctx, env.Client, node1)
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
-			secondPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())
+			secondPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
 			node2 := ExpectScheduled(ctx, env.Client, secondPod[0])
 			Expect(node1.Name).To(Equal(node2.Name))
 		})
@@ -3835,7 +3813,7 @@ var _ = Describe("In-Flight Nodes", func() {
 			startupTaint := v1.Taint{Key: "ignore-me", Value: "nothing-to-see-here", Effect: v1.TaintEffectNoSchedule}
 			provisioner.Spec.StartupTaints = []v1.Taint{startupTaint}
 			ExpectApplied(ctx, env.Client, provisioner)
-			initialPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())
+			initialPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
 			node1 := ExpectScheduled(ctx, env.Client, initialPod[0])
 
 			// delete the pod so that the node is empty
@@ -3851,7 +3829,7 @@ var _ = Describe("In-Flight Nodes", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
 			// we should launch a new node since the startup taint is there, but was gone at some point
-			secondPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())
+			secondPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
 			node2 := ExpectScheduled(ctx, env.Client, secondPod[0])
 			Expect(node1.Name).ToNot(Equal(node2.Name))
 		})
@@ -3861,8 +3839,8 @@ var _ = Describe("In-Flight Nodes", func() {
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
 
-			// Schedule to New Machine
-			pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(opts))[0]
+			// Schedule to New Node
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(opts))[0]
 			node1 := ExpectScheduled(ctx, env.Client, pod)
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 			// Mark Initialized
@@ -3872,8 +3850,8 @@ var _ = Describe("In-Flight Nodes", func() {
 				{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
 			}
 			ExpectApplied(ctx, env.Client, node1)
-			// Schedule to In Flight Machine
-			pod = ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(opts))[0]
+			// Schedule to In Flight Node
+			pod = ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(opts))[0]
 			node2 := ExpectScheduled(ctx, env.Client, pod)
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
 
@@ -3897,7 +3875,7 @@ var _ = Describe("In-Flight Nodes", func() {
 					v1.ResourceCPU: resource.MustParse("8"),
 				},
 			}}
-			initialPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(opts))
+			initialPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(opts))
 			node1 := ExpectScheduled(ctx, env.Client, initialPod[0])
 
 			// create our daemonset pod and manually bind it to the node
@@ -3945,7 +3923,7 @@ var _ = Describe("In-Flight Nodes", func() {
 			}}
 			// this pod should schedule on the existingNodes node as the daemonset pod has already bound, meaning that the
 			// remaining daemonset resources should be zero leaving 15 CPUs for the pod
-			secondPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(opts))
+			secondPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(opts))
 			node2 := ExpectScheduled(ctx, env.Client, secondPod[0])
 			Expect(node1.Name).To(Equal(node2.Name))
 		})
@@ -3973,7 +3951,7 @@ var _ = Describe("In-Flight Nodes", func() {
 					v1.ResourceCPU: resource.MustParse("8"),
 				},
 			}}
-			initialPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(opts))
+			initialPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(opts))
 			node1 := ExpectScheduled(ctx, env.Client, initialPod[0])
 			// this label appears on the node for some reason that Karpenter can't track
 			node1.Labels["my-node-label"] = "value"
@@ -4029,7 +4007,7 @@ var _ = Describe("In-Flight Nodes", func() {
 			// we don't reintroduce a bug where more daemonsets scheduled than anticipated due to unexepected labels
 			// appearing on the node which caused us to compute a negative amount of resources remaining for daemonsets
 			// which in turn caused us to mis-calculate the amount of resources that were free on the node.
-			secondPod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(opts))
+			secondPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(opts))
 			node2 := ExpectScheduled(ctx, env.Client, secondPod[0])
 			// must create a new node
 			Expect(node1.Name).ToNot(Equal(node2.Name))
@@ -4058,7 +4036,7 @@ var _ = Describe("In-Flight Nodes", func() {
 
 		// scheduling in multiple batches random sets of pods
 		for i := 0; i < 10; i++ {
-			initialPods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, MakePods(rand.Intn(10), opts)...)
+			initialPods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, MakePods(rand.Intn(10), opts)...)
 			for _, pod := range initialPods {
 				node := ExpectScheduled(ctx, env.Client, pod)
 				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
@@ -4222,7 +4200,7 @@ var _ = Describe("Volume Limits", func() {
 
 		provisioner.Spec.Limits = nil
 		ExpectApplied(ctx, env.Client, provisioner)
-		initialPods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())
+		initialPods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
 		node := ExpectScheduled(ctx, env.Client, initialPods[0])
 		csiNode := &storagev1.CSINode{
 			ObjectMeta: metav1.ObjectMeta{
@@ -4264,7 +4242,7 @@ var _ = Describe("Volume Limits", func() {
 				PersistentVolumeClaims: []string{pvcA.Name, pvcB.Name},
 			}))
 		}
-		ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pods...)
+		ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pods...)
 		var nodeList v1.NodeList
 		Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 		// we need to create a new node as the in-flight one can only contain 5 pods due to the CSINode volume limit
@@ -4285,7 +4263,7 @@ var _ = Describe("Volume Limits", func() {
 
 		provisioner.Spec.Limits = nil
 		ExpectApplied(ctx, env.Client, provisioner)
-		initialPods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())
+		initialPods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
 		node := ExpectScheduled(ctx, env.Client, initialPods[0])
 		csiNode := &storagev1.CSINode{
 			ObjectMeta: metav1.ObjectMeta{
@@ -4330,7 +4308,7 @@ var _ = Describe("Volume Limits", func() {
 			}))
 		}
 		ExpectApplied(ctx, env.Client, provisioner)
-		ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pods...)
+		ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pods...)
 		var nodeList v1.NodeList
 		Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 		// 100 of the same PVC should all be schedulable on the same node
@@ -4351,7 +4329,7 @@ var _ = Describe("Volume Limits", func() {
 
 		provisioner.Spec.Limits = nil
 		ExpectApplied(ctx, env.Client, provisioner)
-		initialPods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())
+		initialPods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
 		node := ExpectScheduled(ctx, env.Client, initialPods[0])
 		csiNode := &storagev1.CSINode{
 			ObjectMeta: metav1.ObjectMeta{
@@ -4397,7 +4375,7 @@ var _ = Describe("Volume Limits", func() {
 			}))
 		}
 		ExpectApplied(ctx, env.Client, provisioner)
-		_ = ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pods...)
+		_ = ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pods...)
 
 		var nodeList v1.NodeList
 		Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
@@ -4418,7 +4396,7 @@ var _ = Describe("Volume Limits", func() {
 
 		provisioner.Spec.Limits = nil
 		ExpectApplied(ctx, env.Client, provisioner)
-		initialPods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())
+		initialPods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
 		node := ExpectScheduled(ctx, env.Client, initialPods[0])
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 
@@ -4446,7 +4424,7 @@ var _ = Describe("Volume Limits", func() {
 			}))
 		}
 		ExpectApplied(ctx, env.Client, provisioner)
-		_ = ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, pods...)
+		_ = ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pods...)
 
 		var nodeList v1.NodeList
 		Expect(env.Client.List(ctx, &nodeList)).To(Succeed())

@@ -85,7 +85,7 @@ func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha1.Machine) (
 	// Labels
 	labels := map[string]string{}
 	for key, requirement := range instanceType.Requirements {
-		if requirement.Len() == 1 {
+		if requirement.Operator() == v1.NodeSelectorOpIn {
 			labels[key] = requirement.Values()[0]
 		}
 	}

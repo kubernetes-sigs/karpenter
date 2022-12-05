@@ -63,11 +63,6 @@ type CloudProvider interface {
 	Name() string
 }
 
-type Machine struct {
-	*v1alpha1.Machine
-	InstanceTypes []*InstanceType
-}
-
 // InstanceType describes the properties of a potential node (either concrete attributes of an instance of this type
 // or supported options in the case of arrays)
 type InstanceType struct {

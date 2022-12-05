@@ -72,13 +72,13 @@ var _ = Describe("Instance Type Selection", func() {
 	// passed to the cloud provider is unique.
 	It("should schedule on one of the cheapest instances", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
 		node := ExpectScheduled(ctx, env.Client, pod[0])
 		Expect(nodePrice(node)).To(Equal(minPrice))
 	})
 	It("should schedule on one of the cheapest instances (pod arch = amd64)", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{
 				Key:      v1.LabelArchStable,
 				Operator: v1.NodeSelectorOpIn,
@@ -91,7 +91,7 @@ var _ = Describe("Instance Type Selection", func() {
 	})
 	It("should schedule on one of the cheapest instances (pod arch = arm64)", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{
 				Key:      v1.LabelArchStable,
 				Operator: v1.NodeSelectorOpIn,
@@ -110,7 +110,7 @@ var _ = Describe("Instance Type Selection", func() {
 			},
 		}
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
 		node := ExpectScheduled(ctx, env.Client, pod[0])
 		Expect(nodePrice(node)).To(Equal(minPrice))
 		ExpectInstancesWithLabel(supportedInstanceTypes(cloudProv.CreateCalls[0]), v1.LabelArchStable, v1alpha5.ArchitectureAmd64)
@@ -124,7 +124,7 @@ var _ = Describe("Instance Type Selection", func() {
 			},
 		}
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
 		node := ExpectScheduled(ctx, env.Client, pod[0])
 		Expect(nodePrice(node)).To(Equal(minPrice))
 		ExpectInstancesWithLabel(supportedInstanceTypes(cloudProv.CreateCalls[0]), v1.LabelArchStable, v1alpha5.ArchitectureArm64)
@@ -138,14 +138,14 @@ var _ = Describe("Instance Type Selection", func() {
 			},
 		}
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
 		node := ExpectScheduled(ctx, env.Client, pod[0])
 		Expect(nodePrice(node)).To(Equal(minPrice))
 		ExpectInstancesWithLabel(supportedInstanceTypes(cloudProv.CreateCalls[0]), v1.LabelOSStable, string(v1.Windows))
 	})
 	It("should schedule on one of the cheapest instances (pod os = windows)", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{
 				Key:      v1.LabelOSStable,
 				Operator: v1.NodeSelectorOpIn,
@@ -164,14 +164,14 @@ var _ = Describe("Instance Type Selection", func() {
 			},
 		}
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
 		node := ExpectScheduled(ctx, env.Client, pod[0])
 		Expect(nodePrice(node)).To(Equal(minPrice))
 		ExpectInstancesWithLabel(supportedInstanceTypes(cloudProv.CreateCalls[0]), v1.LabelOSStable, string(v1.Windows))
 	})
 	It("should schedule on one of the cheapest instances (pod os = linux)", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{
 				Key:      v1.LabelOSStable,
 				Operator: v1.NodeSelectorOpIn,
@@ -183,7 +183,7 @@ var _ = Describe("Instance Type Selection", func() {
 	})
 	It("should schedule on one of the cheapest instances (pod os = linux)", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{
 				Key:      v1.LabelOSStable,
 				Operator: v1.NodeSelectorOpIn,
@@ -202,14 +202,14 @@ var _ = Describe("Instance Type Selection", func() {
 			},
 		}
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
 		node := ExpectScheduled(ctx, env.Client, pod[0])
 		Expect(nodePrice(node)).To(Equal(minPrice))
 		ExpectInstancesWithLabel(supportedInstanceTypes(cloudProv.CreateCalls[0]), v1.LabelTopologyZone, "test-zone-2")
 	})
 	It("should schedule on one of the cheapest instances (pod zone = test-zone-2)", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{
 				Key:      v1.LabelTopologyZone,
 				Operator: v1.NodeSelectorOpIn,
@@ -228,14 +228,14 @@ var _ = Describe("Instance Type Selection", func() {
 			},
 		}
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
 		node := ExpectScheduled(ctx, env.Client, pod[0])
 		Expect(nodePrice(node)).To(Equal(minPrice))
 		ExpectInstancesWithLabel(supportedInstanceTypes(cloudProv.CreateCalls[0]), v1alpha5.LabelCapacityType, v1alpha5.CapacityTypeSpot)
 	})
 	It("should schedule on one of the cheapest instances (pod ct = spot)", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{
 				Key:      v1alpha5.LabelCapacityType,
 				Operator: v1.NodeSelectorOpIn,
@@ -259,14 +259,14 @@ var _ = Describe("Instance Type Selection", func() {
 			},
 		}
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
 		node := ExpectScheduled(ctx, env.Client, pod[0])
 		Expect(nodePrice(node)).To(Equal(minPrice))
 		ExpectInstancesWithOffering(supportedInstanceTypes(cloudProv.CreateCalls[0]), v1alpha5.CapacityTypeOnDemand, "test-zone-1")
 	})
 	It("should schedule on one of the cheapest instances (pod ct = spot, pod zone = test-zone-1)", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{
 				Key:      v1alpha5.LabelCapacityType,
 				Operator: v1.NodeSelectorOpIn,
@@ -291,7 +291,7 @@ var _ = Describe("Instance Type Selection", func() {
 			},
 		}
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{
 				Key:      v1.LabelTopologyZone,
 				Operator: v1.NodeSelectorOpIn,
@@ -325,7 +325,7 @@ var _ = Describe("Instance Type Selection", func() {
 			},
 		}
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
 		node := ExpectScheduled(ctx, env.Client, pod[0])
 		Expect(nodePrice(node)).To(Equal(minPrice))
 		ExpectInstancesWithOffering(supportedInstanceTypes(cloudProv.CreateCalls[0]), v1alpha5.CapacityTypeOnDemand, "test-zone-1")
@@ -346,7 +346,7 @@ var _ = Describe("Instance Type Selection", func() {
 			},
 		}
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 				{
 					Key:      v1alpha5.LabelCapacityType,
@@ -367,7 +367,7 @@ var _ = Describe("Instance Type Selection", func() {
 	})
 	It("should schedule on one of the cheapest instances (pod ct = spot/test-zone-2/amd64/linux)", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 				{
 					Key:      v1.LabelArchStable,
@@ -404,7 +404,7 @@ var _ = Describe("Instance Type Selection", func() {
 
 		Expect(len(cloudProv.InstanceTypes)).To(BeNumerically(">", 0))
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 				{
 					Key:      v1.LabelArchStable,
@@ -427,7 +427,7 @@ var _ = Describe("Instance Type Selection", func() {
 		})
 		Expect(len(cloudProv.InstanceTypes)).To(BeNumerically(">", 0))
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 				{
 					Key:      v1.LabelArchStable,
@@ -463,7 +463,7 @@ var _ = Describe("Instance Type Selection", func() {
 		}
 		Expect(len(cloudProv.InstanceTypes)).To(BeNumerically(">", 0))
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod(
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
 				{
 					Key:      v1.LabelTopologyZone,
@@ -491,13 +491,14 @@ var _ = Describe("Instance Type Selection", func() {
 		// these values are constructed so that three of these pods can always fit on at least one of our instance types
 		for _, cpu := range []float64{0.1, 1.0, 2, 2.5, 4, 8, 16} {
 			for _, mem := range []float64{0.1, 1.0, 2, 4, 8, 16, 32} {
+				cluster.Reset(ctx)
 				cloudProv.CreateCalls = nil
 				opts := test.PodOptions{
 					ResourceRequirements: v1.ResourceRequirements{Requests: map[v1.ResourceName]resource.Quantity{
 						v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%0.1f", cpu)),
 						v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%0.1fGi", mem)),
 					}}}
-				pods := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov,
+				pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 					test.UnschedulablePod(opts), test.UnschedulablePod(opts), test.UnschedulablePod(opts))
 				nodeNames := sets.NewString()
 				for _, p := range pods {
@@ -563,7 +564,7 @@ var _ = Describe("Instance Type Selection", func() {
 		}
 
 		ExpectApplied(ctx, env.Client, provisioner)
-		pod := ExpectProvisioned(ctx, env.Client, recorder, provisioningController, prov, test.UnschedulablePod())
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
 		node := ExpectScheduled(ctx, env.Client, pod[0])
 		Expect(node.Labels[v1.LabelInstanceTypeStable]).To(Equal("test-instance1"))
 	})

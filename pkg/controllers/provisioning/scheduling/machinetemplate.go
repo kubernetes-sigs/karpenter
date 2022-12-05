@@ -15,6 +15,8 @@ limitations under the License.
 package scheduling
 
 import (
+	"encoding/json"
+
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -92,7 +94,10 @@ func (i *MachineTemplate) ToMachine(owner *v1alpha5.Provisioner) *v1alpha1.Machi
 		},
 	}
 	if i.Provider != nil {
-		m.Annotations = lo.Assign(m.Annotations, v1alpha5.ProviderAnnotation(i.Provider))
+		raw := lo.Must(json.Marshal(i.Provider)) // Provider should already have been validated so this shouldn't fail
+		m.Annotations = lo.Assign(m.Annotations, map[string]string{
+			v1alpha5.ProviderCompatabilityAnnotationKey: string(raw),
+		})
 	}
 	if i.ProviderRef != nil {
 		m.Spec.MachineTemplateRef = &v1.ObjectReference{

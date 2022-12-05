@@ -271,7 +271,7 @@ func (c *Controller) launchReplacementNodes(ctx context.Context, action Command)
 		return fmt.Errorf("cordoning nodes, %w", err)
 	}
 
-	nodeNames, err := c.provisioner.LaunchMachines(ctx, provisioning.LaunchOptions{RecordPodNomination: false}, action.replacementMachines...)
+	nodeNames, err := c.provisioner.LaunchMachines(ctx, action.replacementMachines)
 	if err != nil {
 		// uncordon the nodes as the launch may fail (e.g. ICE or incompatible AMI)
 		err = multierr.Append(err, c.setNodesUnschedulable(ctx, false, nodeNamesToRemove...))

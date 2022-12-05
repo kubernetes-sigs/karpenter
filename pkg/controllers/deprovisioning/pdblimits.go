@@ -57,9 +57,11 @@ func NewPDBLimits(ctx context.Context, kubeClient client.Client) (*PDBLimits, er
 func (s *PDBLimits) CanEvictPods(pods []*v1.Pod) (client.ObjectKey, bool) {
 	for _, pod := range pods {
 		for _, pdb := range s.pdbs {
-			if pdb.selector.Matches(labels.Set(pod.Labels)) {
-				if pdb.disruptionsAllowed == 0 {
-					return pdb.name, false
+			if pdb.name.Namespace == pod.ObjectMeta.Namespace {
+				if pdb.selector.Matches(labels.Set(pod.Labels)) {
+					if pdb.disruptionsAllowed == 0 {
+						return pdb.name, false
+					}
 				}
 			}
 		}
