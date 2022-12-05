@@ -677,6 +677,39 @@ var _ = Describe("Volume Topology Requirements", func() {
 		}))[0]
 		ExpectNotScheduled(ctx, env.Client, pod)
 	})
+	It("should not relax an added volume topology zone node-selector away", func() {
+		persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{Zones: []string{"test-zone-3"}})
+		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{VolumeName: persistentVolume.Name, StorageClassName: &storageClass.Name})
+		ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, persistentVolumeClaim, persistentVolume)
+
+		pod := test.UnschedulablePod(test.PodOptions{
+			PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+			NodeRequirements: []v1.NodeSelectorRequirement{
+				{
+					Key:      "example.com/label",
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{"unsupported"},
+				},
+			},
+		})
+
+		// Add the second capacity type that is OR'd with the first. Previously we only added the volume topology requirement
+		// to a single node selector term which would sometimes get relaxed away.  Now we add it to all of them to AND
+		// it with each existing term.
+		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = append(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms,
+			v1.NodeSelectorTerm{
+				MatchExpressions: []v1.NodeSelectorRequirement{
+					{
+						Key:      v1alpha5.LabelCapacityType,
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{v1alpha5.CapacityTypeOnDemand},
+					},
+				},
+			})
+		pod = ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pod)[0]
+		node := ExpectScheduled(ctx, env.Client, pod)
+		Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
+	})
 })
 
 var _ = Describe("Preferential Fallback", func() {

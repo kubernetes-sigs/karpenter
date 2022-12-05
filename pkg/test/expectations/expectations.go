@@ -93,7 +93,7 @@ func ExpectNotFoundWithOffset(offset int, ctx context.Context, c client.Client, 
 
 func ExpectScheduled(ctx context.Context, c client.Client, pod *v1.Pod) *v1.Node {
 	p := ExpectPodExistsWithOffset(1, ctx, c, pod.Name, pod.Namespace)
-	Expect(p.Spec.NodeName).ToNot(BeEmpty(), fmt.Sprintf("expected %s/%s to be scheduled", pod.Namespace, pod.Name))
+	ExpectWithOffset(1, p.Spec.NodeName).ToNot(BeEmpty(), fmt.Sprintf("expected %s/%s to be scheduled", pod.Namespace, pod.Name))
 	return ExpectNodeExistsWithOffset(1, ctx, c, p.Spec.NodeName)
 }
 
