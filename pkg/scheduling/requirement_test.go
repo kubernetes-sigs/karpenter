@@ -78,7 +78,6 @@ var _ = Describe("Requirement", func() {
 			}
 		})
 	})
-
 	Context("Intersection", func() {
 		It("should intersect sets", func() {
 			Expect(exists.Intersection(exists)).To(Equal(exists))
@@ -406,7 +405,6 @@ var _ = Describe("Requirement", func() {
 			Expect(lessThan9.Len()).To(Equal(math.MaxInt64))
 		})
 	})
-
 	Context("Any", func() {
 		It("should return any", func() {
 			Expect(exists.Any()).ToNot(BeEmpty())
@@ -425,7 +423,6 @@ var _ = Describe("Requirement", func() {
 			Expect(strconv.Atoi(lessThan9.Any())).To(And(BeNumerically(">=", 0), BeNumerically("<", 9)))
 		})
 	})
-
 	Context("String", func() {
 		It("should print the right string", func() {
 			Expect(exists.String()).To(Equal("key Exists"))
@@ -445,5 +442,24 @@ var _ = Describe("Requirement", func() {
 			Expect(greaterThan1.Intersection(lessThan9).String()).To(Equal("key Exists >1 <9"))
 			Expect(greaterThan9.Intersection(lessThan1).String()).To(Equal("key DoesNotExist"))
 		})
+	})
+	Context("NodeSelectorRequirements Conversion", func() {
+		It("should return the expected NodeSelectorRequirement", func() {
+			Expect(exists.NodeSelectorRequirement()).To(Equal(v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpExists}))
+			Expect(doesNotExist.NodeSelectorRequirement()).To(Equal(v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpDoesNotExist}))
+			Expect(inA.NodeSelectorRequirement()).To(Equal(v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"A"}}))
+			Expect(inB.NodeSelectorRequirement()).To(Equal(v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"B"}}))
+			Expect(inAB.NodeSelectorRequirement()).To(Equal(v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"A", "B"}}))
+			Expect(notInA.NodeSelectorRequirement()).To(Equal(v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"A"}}))
+			Expect(in1.NodeSelectorRequirement()).To(Equal(v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"1"}}))
+			Expect(in9.NodeSelectorRequirement()).To(Equal(v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"9"}}))
+			Expect(in19.NodeSelectorRequirement()).To(Equal(v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"1", "9"}}))
+			Expect(notIn12.NodeSelectorRequirement()).To(Equal(v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"1", "2"}}))
+			Expect(greaterThan1.NodeSelectorRequirement()).To(Equal(v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpGt, Values: []string{"1"}}))
+			Expect(greaterThan9.NodeSelectorRequirement()).To(Equal(v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpGt, Values: []string{"9"}}))
+			Expect(lessThan1.NodeSelectorRequirement()).To(Equal(v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpLt, Values: []string{"1"}}))
+			Expect(lessThan9.NodeSelectorRequirement()).To(Equal(v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpLt, Values: []string{"9"}}))
+		})
+
 	})
 })

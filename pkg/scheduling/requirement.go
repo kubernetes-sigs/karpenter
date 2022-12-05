@@ -79,7 +79,7 @@ func (r *Requirement) NodeSelectorRequirement() v1.NodeSelectorRequirement {
 		return v1.NodeSelectorRequirement{
 			Key:      r.Key,
 			Operator: v1.NodeSelectorOpLt,
-			Values:   []string{strconv.FormatInt(int64(lo.FromPtr(r.greaterThan)), 10)},
+			Values:   []string{strconv.FormatInt(int64(lo.FromPtr(r.lessThan)), 10)},
 		}
 	case r.complement:
 		switch {

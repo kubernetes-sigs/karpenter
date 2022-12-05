@@ -54,6 +54,14 @@ func NewCloudProvider() *CloudProvider {
 	}
 }
 
+// Reset is for BeforeEach calls in testing to reset the tracking of CreateCalls
+func (c *CloudProvider) Reset() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.CreateCalls = []*v1alpha1.Machine{}
+	c.AllowedCreateCalls = math.MaxInt
+}
+
 func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha1.Machine) (*v1.Node, error) {
 	c.mu.Lock()
 	c.CreateCalls = append(c.CreateCalls, machine)

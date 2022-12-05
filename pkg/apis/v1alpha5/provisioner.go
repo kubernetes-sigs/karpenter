@@ -111,7 +111,7 @@ type ProviderRef struct {
 	Kind string `json:"kind,omitempty"`
 	// Name of the referent; More info: http://kubernetes.io/docs/user-guide/identifiers#names
 	Name string `json:"name,omitempty"`
-	// API version of the referent.
+	// API version of the referent
 	// +optional
 	APIVersion string `json:"apiVersion,omitempty"`
 }
