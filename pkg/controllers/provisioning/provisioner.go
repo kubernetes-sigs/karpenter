@@ -333,7 +333,7 @@ func (p *Provisioner) launch(ctx context.Context, opts LaunchOptions, node *sche
 	}
 	p.cluster.NominateNodeForPod(k8sNode.Name)
 	if err := p.cluster.UpdateNode(ctx, k8sNode); err != nil {
-		return "", fmt.Errorf("upating cluster state, %w", err)
+		return "", fmt.Errorf("updating cluster state, %w", err)
 	}
 	if opts.RecordPodNomination {
 		for _, pod := range node.Pods {

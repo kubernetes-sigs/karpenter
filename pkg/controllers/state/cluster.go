@@ -27,7 +27,6 @@ import (
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/ptr"
@@ -52,11 +51,12 @@ type Cluster struct {
 	nominatedNodeObservers atomicutils.Slice[observerFunc]
 
 	// State: Node Status & Pod -> Node Binding
-	mu               sync.RWMutex
-	nodes            map[string]*Node // node name -> node
+	mu       sync.RWMutex
+	nodes    map[string]*Node                // node name -> node
+	bindings map[types.NamespacedName]string // pod namespaced named -> node name
+
 	nominatedNodes   *cache.Cache
-	bindings         map[types.NamespacedName]string // pod namespaced named -> node name
-	antiAffinityPods sync.Map                        // mapping of pod namespaced name to *v1.Pod of pods that have required anti affinities
+	antiAffinityPods sync.Map // mapping of pod namespaced name to *v1.Pod of pods that have required anti affinities
 
 	// consolidationState is a number indicating the state of the cluster with respect to consolidation.  If this number
 	// hasn't changed, it indicates that the cluster hasn't changed in a state which would enable consolidation if
@@ -263,11 +263,8 @@ func (c *Cluster) populateCapacity(ctx context.Context, node *v1.Node, n *Node) 
 		return nil
 	}
 	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
-		if errors.IsNotFound(err) {
-			// Nodes that are not owned by an existing provisioner are not included in calculations
-			return nil
-		}
-		return fmt.Errorf("getting provisioner, %w", err)
+		// Nodes that are not owned by an existing provisioner are not included in calculations
+		return client.IgnoreNotFound(fmt.Errorf("getting provisioner, %w", err))
 	}
 	instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, provisioner)
 	if err != nil {
@@ -335,8 +332,8 @@ func (c *Cluster) populateResourceRequests(ctx context.Context, node *v1.Node, n
 
 func (c *Cluster) populateVolumeLimits(ctx context.Context, node *v1.Node, n *Node) error {
 	var csiNode storagev1.CSINode
-	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: node.Name}, &csiNode); err != nil && !errors.IsNotFound(err) {
-		return fmt.Errorf("getting CSINode to determine volume limit for %s, %w", node.Name, err)
+	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: node.Name}, &csiNode); err != nil {
+		return client.IgnoreNotFound(fmt.Errorf("getting CSINode to determine volume limit for %s, %w", node.Name, err))
 	}
 
 	for _, driver := range csiNode.Spec.Drivers {
@@ -361,8 +358,6 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 	defer c.mu.Unlock()
 	n, err := c.newNode(ctx, node)
 	if err != nil {
-		// ensure that the out of date node is forgotten
-		c.DeleteNode(node.Name)
 		return err
 	}
 
@@ -521,8 +516,8 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 	n, ok := c.nodes[pod.Spec.NodeName]
 	if !ok {
 		var node v1.Node
-		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: pod.Spec.NodeName}, &node); err != nil && !errors.IsNotFound(err) {
-			return fmt.Errorf("getting node, %w", err)
+		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: pod.Spec.NodeName}, &node); err != nil {
+			return client.IgnoreNotFound(fmt.Errorf("getting node, %w", err))
 		}
 
 		var err error
@@ -560,6 +555,7 @@ func (c *Cluster) recordConsolidationChange() {
 	atomic.StoreInt64(&c.consolidationState, c.clock.Now().UnixMilli())
 }
 
+// Reset the cluster state for unit testing
 func (c *Cluster) Reset(ctx context.Context) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
