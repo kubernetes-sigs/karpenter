@@ -83,7 +83,6 @@ var _ = BeforeSuite(func() {
 	recorder = test.NewEventRecorder()
 	provisioner = provisioning.NewProvisioner(ctx, env.Client, env.KubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
 	provisioningController = provisioning.NewController(env.Client, provisioner, recorder)
-	provisioning.WaitForClusterSync = false
 })
 
 var _ = AfterSuite(func() {
@@ -2130,7 +2129,7 @@ var _ = Describe("Parallelization", func() {
 		pods := ExpectProvisionedNoBinding(ctx, env.Client, provisioningController, provisioner, test.UnschedulablePod())
 		nodes := &v1.NodeList{}
 		Expect(env.Client.List(ctx, nodes)).To(Succeed())
-		Expect(len(nodes.Items)).To(Equal(3))
+		Expect(len(nodes.Items)).To(Equal(2))
 		Expect(pods[0].Spec.NodeName).NotTo(Equal(node.Name))
 	})
 	It("should not consolidate a node that is launched for pods on a deleting node", func() {
