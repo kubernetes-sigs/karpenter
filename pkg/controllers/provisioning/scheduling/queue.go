@@ -31,7 +31,7 @@ type Queue struct {
 	lastLen map[types.UID]int
 }
 
-// NewQueue constructs a new queue given the input pods, sorting them to optimize for bin-packing into machines.
+// NewQueue constructs a new queue given the input pods, sorting them to optimize for bin-packing into nodes.
 func NewQueue(pods ...*v1.Pod) *Queue {
 	sort.Slice(pods, byCPUAndMemoryDescending(pods))
 	return &Queue{

@@ -34,7 +34,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
-	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
+	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/test"
 
@@ -119,11 +119,11 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	instanceTypes := fake.InstanceTypes(instanceCount)
 	cloudProv = fake.NewCloudProvider()
 	cloudProv.InstanceTypes = instanceTypes
-	scheduler := pscheduling.NewScheduler(ctx, nil, []*pscheduling.MachineTemplate{pscheduling.NewMachineTemplate(provisioner)},
-		nil, state.NewCluster(ctx, &clock.RealClock{}, nil, cloudProv), nil, &pscheduling.Topology{},
-		map[string][]*cloudprovider.InstanceType{provisioner.Name: instanceTypes}, map[*pscheduling.MachineTemplate]v1.ResourceList{},
+	scheduler := scheduling.NewScheduler(ctx, nil, []*scheduling.MachineTemplate{scheduling.NewMachineTemplate(provisioner)},
+		nil, state.NewCluster(ctx, &clock.RealClock{}, nil, cloudProv), nil, &scheduling.Topology{},
+		map[string][]*cloudprovider.InstanceType{provisioner.Name: instanceTypes}, map[*scheduling.MachineTemplate]v1.ResourceList{},
 		test.NewEventRecorder(),
-		pscheduling.SchedulerOptions{})
+		scheduling.SchedulerOptions{})
 
 	pods := makeDiversePods(podCount)
 

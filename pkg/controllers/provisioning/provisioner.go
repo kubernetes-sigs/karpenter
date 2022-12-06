@@ -40,6 +40,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 	"github.com/aws/karpenter-core/pkg/scheduling"
+	"github.com/aws/karpenter-core/pkg/utils/functional"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	scheduler "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
@@ -50,6 +51,18 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/pod"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
+
+// LaunchOptions are the set of options that can be used to trigger certain
+// actions and configuration during scheduling
+type LaunchOptions struct {
+	RecordPodNomination bool
+}
+
+// RecordPodNomination causes nominate pod events to be recorded against the node.
+func RecordPodNomination(o LaunchOptions) LaunchOptions {
+	o.RecordPodNomination = true
+	return o
+}
 
 // Provisioner waits for enqueued pods, batches them, creates capacity and binds the pods to the capacity.
 type Provisioner struct {
@@ -158,7 +171,7 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 
 // LaunchMachines launches nodes passed into the function in parallel. It returns a slice of the successfully created node
 // names as well as a multierr of any errors that occurred while launching nodes
-func (p *Provisioner) LaunchMachines(ctx context.Context, machines []*scheduler.Machine, opts ...LaunchOption) ([]string, error) {
+func (p *Provisioner) LaunchMachines(ctx context.Context, machines []*scheduler.Machine, opts ...functional.Option[LaunchOptions]) ([]string, error) {
 	// Launch capacity and bind pods
 	errs := make([]error, len(machines))
 	machineNames := make([]string, len(machines))
@@ -278,27 +291,27 @@ func (p *Provisioner) schedule(ctx context.Context, pods []*v1.Pod, stateNodes [
 	return nodes, err
 }
 
-func (p *Provisioner) launch(ctx context.Context, scheduledMachine *scheduler.Machine, opts ...LaunchOption) (string, error) {
+func (p *Provisioner) launch(ctx context.Context, machine *scheduler.Machine, opts ...functional.Option[LaunchOptions]) (string, error) {
 	// Check limits
 	latest := &v1alpha5.Provisioner{}
-	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: scheduledMachine.ProvisionerName}, latest); err != nil {
+	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: machine.ProvisionerName}, latest); err != nil {
 		return "", fmt.Errorf("getting current resource usage, %w", err)
 	}
 	if err := latest.Spec.Limits.ExceededBy(latest.Status.Resources); err != nil {
 		return "", err
 	}
 
-	logging.FromContext(ctx).Infof("launching %s", scheduledMachine)
+	logging.FromContext(ctx).Infof("launching %s", machine)
 	k8sNode, err := p.cloudProvider.Create(
 		logging.WithLogger(ctx, logging.FromContext(ctx).Named("cloudprovider")),
-		scheduledMachine.ToMachine(latest),
+		machine.ToMachine(latest),
 	)
 	if err != nil {
 		return "", fmt.Errorf("creating cloud provider instance, %w", err)
 	}
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", k8sNode.Name))
 
-	if err := mergo.Merge(k8sNode, scheduledMachine.ToNode()); err != nil {
+	if err := mergo.Merge(k8sNode, machine.ToNode()); err != nil {
 		return "", fmt.Errorf("merging cloud provider node, %w", err)
 	}
 	// ensure we clear out the status
@@ -320,8 +333,8 @@ func (p *Provisioner) launch(ctx context.Context, scheduledMachine *scheduler.Ma
 	if err := p.cluster.UpdateNode(ctx, k8sNode); err != nil {
 		return "", fmt.Errorf("updating cluster state, %w", err)
 	}
-	if ResolveOptions(opts...).RecordPodNomination {
-		for _, pod := range scheduledMachine.Pods {
+	if functional.ResolveOptions[LaunchOptions](opts...).RecordPodNomination {
+		for _, pod := range machine.Pods {
 			p.recorder.Publish(events.NominatePod(pod, k8sNode))
 		}
 	}

@@ -120,3 +120,18 @@ func (ofs Offerings) Available() Offerings {
 		return o.Available
 	})
 }
+
+// Requirements filters the offerings based on the passed requirements
+func (ofs Offerings) Requirements(reqs scheduling.Requirements) Offerings {
+	return lo.Filter(ofs, func(offering Offering, _ int) bool {
+		return (!reqs.Has(v1.LabelTopologyZone) || reqs.Get(v1.LabelTopologyZone).Has(offering.Zone)) &&
+			(!reqs.Has(v1alpha5.LabelCapacityType) || reqs.Get(v1alpha5.LabelCapacityType).Has(offering.CapacityType))
+	})
+}
+
+// Cheapest returns the cheapest offering from the returned offerings
+func (ofs Offerings) Cheapest() Offering {
+	return lo.MinBy(ofs, func(a, b Offering) bool {
+		return a.Price < b.Price
+	})
+}

@@ -23,8 +23,8 @@ import (
 // TopologyNodeFilter is used to determine if a given actual node or scheduling node matches the pod's node selectors
 // and required node affinity terms.  This is used with topology spread constraints to determine if the node should be
 // included for topology counting purposes. This is only used with topology spread constraints as affinities/anti-affinities
-// always count across all machines. A nil or zero-value TopologyNodeFilter behaves well and the filter returns true for
-// all machines.
+// always count across all nodes. A nil or zero-value TopologyNodeFilter behaves well and the filter returns true for
+// all nodes.
 type TopologyNodeFilter []scheduling.Requirements
 
 func MakeTopologyNodeFilter(p *v1.Pod) TopologyNodeFilter {

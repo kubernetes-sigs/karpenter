@@ -77,9 +77,9 @@ func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha1.Machine) (
 	})
 	// Order instance types so that we get the cheapest instance types of the available offerings
 	sort.Slice(instanceTypes, func(i, j int) bool {
-		iOfferings := instanceTypes[i].Offerings.Available()
-		jOfferings := instanceTypes[j].Offerings.Available()
-		return cheapestOfferingPrice(iOfferings, requirements) < cheapestOfferingPrice(jOfferings, requirements)
+		iOfferings := instanceTypes[i].Offerings.Available().Requirements(requirements)
+		jOfferings := instanceTypes[j].Offerings.Available().Requirements(requirements)
+		return iOfferings.Cheapest().Price < jOfferings.Cheapest().Price
 	})
 	instanceType := instanceTypes[0]
 	// Labels
@@ -164,16 +164,4 @@ func (c *CloudProvider) Delete(context.Context, *v1.Node) error {
 // Name returns the CloudProvider implementation name.
 func (c *CloudProvider) Name() string {
 	return "fake"
-}
-
-// cheapestOfferingPrice gets the cheapest price of an offering on an instance type given
-// the node requirements
-func cheapestOfferingPrice(ofs []cloudprovider.Offering, requirements scheduling.Requirements) float64 {
-	minPrice := math.MaxFloat64
-	for _, of := range ofs {
-		if requirements.Get(v1alpha5.LabelCapacityType).Has(of.CapacityType) && requirements.Get(v1.LabelTopologyZone).Has(of.Zone) {
-			minPrice = math.Min(minPrice, of.Price)
-		}
-	}
-	return minPrice
 }

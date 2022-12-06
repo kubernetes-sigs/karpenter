@@ -330,229 +330,6 @@ var _ = Describe("Provisioning", func() {
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 	})
-	Context("Machine Creation", func() {
-		It("should create a machine request with expected requirements", func() {
-			provisioner := test.Provisioner()
-			ExpectApplied(ctx, env.Client, provisioner)
-			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
-
-			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
-			ExpectMachineRequirements(cloudProvider.CreateCalls[0],
-				v1.NodeSelectorRequirement{
-					Key:      v1.LabelInstanceTypeStable,
-					Operator: v1.NodeSelectorOpIn,
-					Values:   lo.Keys(instanceTypeMap),
-				},
-				v1.NodeSelectorRequirement{
-					Key:      v1alpha5.ProvisionerNameLabelKey,
-					Operator: v1.NodeSelectorOpIn,
-					Values:   []string{provisioner.Name},
-				},
-			)
-			for _, pod := range pods {
-				ExpectScheduled(ctx, env.Client, pod)
-			}
-		})
-		It("should create a machine request with additional expected requirements", func() {
-			provisioner := test.Provisioner(test.ProvisionerOptions{
-				Requirements: []v1.NodeSelectorRequirement{
-					{
-						Key:      "custom-requirement-key",
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{"value"},
-					},
-					{
-						Key:      "custom-requirement-key2",
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{"value"},
-					},
-				},
-			})
-			ExpectApplied(ctx, env.Client, provisioner)
-			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
-
-			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
-			ExpectMachineRequirements(cloudProvider.CreateCalls[0],
-				v1.NodeSelectorRequirement{
-					Key:      v1.LabelInstanceTypeStable,
-					Operator: v1.NodeSelectorOpIn,
-					Values:   lo.Keys(instanceTypeMap),
-				},
-				v1.NodeSelectorRequirement{
-					Key:      v1alpha5.ProvisionerNameLabelKey,
-					Operator: v1.NodeSelectorOpIn,
-					Values:   []string{provisioner.Name},
-				},
-				v1.NodeSelectorRequirement{
-					Key:      "custom-requirement-key",
-					Operator: v1.NodeSelectorOpIn,
-					Values:   []string{"value"},
-				},
-				v1.NodeSelectorRequirement{
-					Key:      "custom-requirement-key2",
-					Operator: v1.NodeSelectorOpIn,
-					Values:   []string{"value"},
-				},
-			)
-			for _, pod := range pods {
-				ExpectScheduled(ctx, env.Client, pod)
-			}
-		})
-		It("should create a machine request restricting instance types on architecture", func() {
-			provisioner := test.Provisioner(test.ProvisionerOptions{
-				Requirements: []v1.NodeSelectorRequirement{
-					{
-						Key:      v1.LabelArchStable,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{"arm64"},
-					},
-				},
-			})
-			ExpectApplied(ctx, env.Client, provisioner)
-			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
-
-			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
-
-			// Expect a more restricted set of instance types
-			ExpectMachineRequirements(cloudProvider.CreateCalls[0],
-				v1.NodeSelectorRequirement{
-					Key:      v1.LabelArchStable,
-					Operator: v1.NodeSelectorOpIn,
-					Values:   []string{"arm64"},
-				},
-				v1.NodeSelectorRequirement{
-					Key:      v1.LabelInstanceTypeStable,
-					Operator: v1.NodeSelectorOpIn,
-					Values:   []string{"arm-instance-type"},
-				},
-			)
-			for _, pod := range pods {
-				ExpectScheduled(ctx, env.Client, pod)
-			}
-		})
-		It("should create a machine request restricting instance types on operating system", func() {
-			provisioner := test.Provisioner(test.ProvisionerOptions{
-				Requirements: []v1.NodeSelectorRequirement{
-					{
-						Key:      v1.LabelOSStable,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{"ios"},
-					},
-				},
-			})
-			ExpectApplied(ctx, env.Client, provisioner)
-			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
-
-			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
-
-			// Expect a more restricted set of instance types
-			ExpectMachineRequirements(cloudProvider.CreateCalls[0],
-				v1.NodeSelectorRequirement{
-					Key:      v1.LabelOSStable,
-					Operator: v1.NodeSelectorOpIn,
-					Values:   []string{"ios"},
-				},
-				v1.NodeSelectorRequirement{
-					Key:      v1.LabelInstanceTypeStable,
-					Operator: v1.NodeSelectorOpIn,
-					Values:   []string{"arm-instance-type"},
-				},
-			)
-			for _, pod := range pods {
-				ExpectScheduled(ctx, env.Client, pod)
-			}
-		})
-		It("should create a machine request restricting instance types based on pod resource requests", func() {
-			provisioner := test.Provisioner()
-			ExpectApplied(ctx, env.Client, provisioner)
-			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						fake.ResourceGPUVendorA: resource.MustParse("1"),
-					},
-					Limits: v1.ResourceList{
-						fake.ResourceGPUVendorA: resource.MustParse("1"),
-					},
-				},
-			}))
-
-			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
-
-			// Expect a more restricted set of instance types
-			ExpectMachineRequirements(cloudProvider.CreateCalls[0],
-				v1.NodeSelectorRequirement{
-					Key:      v1.LabelInstanceTypeStable,
-					Operator: v1.NodeSelectorOpIn,
-					Values:   []string{"gpu-vendor-instance-type"},
-				},
-			)
-			for _, pod := range pods {
-				ExpectScheduled(ctx, env.Client, pod)
-			}
-		})
-		It("should create a machine request with the correct owner reference", func() {
-			provisioner := test.Provisioner(test.ProvisionerOptions{})
-			ExpectApplied(ctx, env.Client, provisioner)
-			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
-
-			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
-			Expect(cloudProvider.CreateCalls[0].OwnerReferences).To(ContainElement(
-				metav1.OwnerReference{
-					APIVersion: "karpenter.sh/v1alpha5",
-					Kind:       "Provisioner",
-					Name:       provisioner.Name,
-					UID:        provisioner.UID,
-				},
-			))
-			for _, pod := range pods {
-				ExpectScheduled(ctx, env.Client, pod)
-			}
-		})
-		It("should create a machine request propagating the provider reference", func() {
-			ExpectApplied(ctx, env.Client, test.Provisioner(test.ProvisionerOptions{
-				ProviderRef: &v1alpha5.ProviderRef{
-					APIVersion: "cloudprovider.karpenter.sh/v1alpha1",
-					Kind:       "CloudProvider",
-					Name:       "default",
-				},
-			}))
-			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
-
-			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
-			Expect(cloudProvider.CreateCalls[0].Spec.MachineTemplateRef).To(Equal(
-				&v1.ObjectReference{
-					APIVersion: "cloudprovider.karpenter.sh/v1alpha1",
-					Kind:       "CloudProvider",
-					Name:       "default",
-				},
-			))
-			for _, pod := range pods {
-				ExpectScheduled(ctx, env.Client, pod)
-			}
-		})
-		It("should create a machine request with the karpenter.sh/compatibility/provider annotation", func() {
-			ExpectApplied(ctx, env.Client, test.Provisioner(test.ProvisionerOptions{
-				Provider: map[string]string{
-					"providerField1": "value",
-					"providerField2": "value",
-				},
-			}))
-			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
-
-			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
-			Expect(cloudProvider.CreateCalls[0].Annotations).To(HaveKey(v1alpha5.ProviderCompatabilityAnnotationKey))
-
-			// Deserialze the provider into the expected format
-			provider := map[string]string{}
-			Expect(json.Unmarshal([]byte(cloudProvider.CreateCalls[0].Annotations[v1alpha5.ProviderCompatabilityAnnotationKey]), &provider)).To(Succeed())
-			Expect(provider).To(HaveKeyWithValue("providerField1", "value"))
-			Expect(provider).To(HaveKeyWithValue("providerField2", "value"))
-
-			for _, pod := range pods {
-				ExpectScheduled(ctx, env.Client, pod)
-			}
-		})
-	})
 	Context("Daemonsets and Node Overhead", func() {
 		It("should account for overhead", func() {
 			ExpectApplied(ctx, env.Client, test.Provisioner(), test.DaemonSet(
@@ -813,6 +590,229 @@ var _ = Describe("Provisioning", func() {
 						},
 					}}),
 			) {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+		})
+	})
+	Context("Machine Creation", func() {
+		It("should create a machine request with expected requirements", func() {
+			provisioner := test.Provisioner()
+			ExpectApplied(ctx, env.Client, provisioner)
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
+
+			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+			ExpectMachineRequirements(cloudProvider.CreateCalls[0],
+				v1.NodeSelectorRequirement{
+					Key:      v1.LabelInstanceTypeStable,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   lo.Keys(instanceTypeMap),
+				},
+				v1.NodeSelectorRequirement{
+					Key:      v1alpha5.ProvisionerNameLabelKey,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{provisioner.Name},
+				},
+			)
+			for _, pod := range pods {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+		})
+		It("should create a machine request with additional expected requirements", func() {
+			provisioner := test.Provisioner(test.ProvisionerOptions{
+				Requirements: []v1.NodeSelectorRequirement{
+					{
+						Key:      "custom-requirement-key",
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{"value"},
+					},
+					{
+						Key:      "custom-requirement-key2",
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{"value"},
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, provisioner)
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
+
+			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+			ExpectMachineRequirements(cloudProvider.CreateCalls[0],
+				v1.NodeSelectorRequirement{
+					Key:      v1.LabelInstanceTypeStable,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   lo.Keys(instanceTypeMap),
+				},
+				v1.NodeSelectorRequirement{
+					Key:      v1alpha5.ProvisionerNameLabelKey,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{provisioner.Name},
+				},
+				v1.NodeSelectorRequirement{
+					Key:      "custom-requirement-key",
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{"value"},
+				},
+				v1.NodeSelectorRequirement{
+					Key:      "custom-requirement-key2",
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{"value"},
+				},
+			)
+			for _, pod := range pods {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+		})
+		It("should create a machine request restricting instance types on architecture", func() {
+			provisioner := test.Provisioner(test.ProvisionerOptions{
+				Requirements: []v1.NodeSelectorRequirement{
+					{
+						Key:      v1.LabelArchStable,
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{"arm64"},
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, provisioner)
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
+
+			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+
+			// Expect a more restricted set of instance types
+			ExpectMachineRequirements(cloudProvider.CreateCalls[0],
+				v1.NodeSelectorRequirement{
+					Key:      v1.LabelArchStable,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{"arm64"},
+				},
+				v1.NodeSelectorRequirement{
+					Key:      v1.LabelInstanceTypeStable,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{"arm-instance-type"},
+				},
+			)
+			for _, pod := range pods {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+		})
+		It("should create a machine request restricting instance types on operating system", func() {
+			provisioner := test.Provisioner(test.ProvisionerOptions{
+				Requirements: []v1.NodeSelectorRequirement{
+					{
+						Key:      v1.LabelOSStable,
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{"ios"},
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, provisioner)
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
+
+			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+
+			// Expect a more restricted set of instance types
+			ExpectMachineRequirements(cloudProvider.CreateCalls[0],
+				v1.NodeSelectorRequirement{
+					Key:      v1.LabelOSStable,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{"ios"},
+				},
+				v1.NodeSelectorRequirement{
+					Key:      v1.LabelInstanceTypeStable,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{"arm-instance-type"},
+				},
+			)
+			for _, pod := range pods {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+		})
+		It("should create a machine request restricting instance types based on pod resource requests", func() {
+			provisioner := test.Provisioner()
+			ExpectApplied(ctx, env.Client, provisioner)
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						fake.ResourceGPUVendorA: resource.MustParse("1"),
+					},
+					Limits: v1.ResourceList{
+						fake.ResourceGPUVendorA: resource.MustParse("1"),
+					},
+				},
+			}))
+
+			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+
+			// Expect a more restricted set of instance types
+			ExpectMachineRequirements(cloudProvider.CreateCalls[0],
+				v1.NodeSelectorRequirement{
+					Key:      v1.LabelInstanceTypeStable,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{"gpu-vendor-instance-type"},
+				},
+			)
+			for _, pod := range pods {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+		})
+		It("should create a machine request with the correct owner reference", func() {
+			provisioner := test.Provisioner(test.ProvisionerOptions{})
+			ExpectApplied(ctx, env.Client, provisioner)
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
+
+			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+			Expect(cloudProvider.CreateCalls[0].OwnerReferences).To(ContainElement(
+				metav1.OwnerReference{
+					APIVersion: "karpenter.sh/v1alpha5",
+					Kind:       "Provisioner",
+					Name:       provisioner.Name,
+					UID:        provisioner.UID,
+				},
+			))
+			for _, pod := range pods {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+		})
+		It("should create a machine request propagating the provider reference", func() {
+			ExpectApplied(ctx, env.Client, test.Provisioner(test.ProvisionerOptions{
+				ProviderRef: &v1alpha5.ProviderRef{
+					APIVersion: "cloudprovider.karpenter.sh/v1alpha1",
+					Kind:       "CloudProvider",
+					Name:       "default",
+				},
+			}))
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
+
+			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+			Expect(cloudProvider.CreateCalls[0].Spec.MachineTemplateRef).To(Equal(
+				&v1.ObjectReference{
+					APIVersion: "cloudprovider.karpenter.sh/v1alpha1",
+					Kind:       "CloudProvider",
+					Name:       "default",
+				},
+			))
+			for _, pod := range pods {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+		})
+		It("should create a machine request with the karpenter.sh/compatibility/provider annotation", func() {
+			ExpectApplied(ctx, env.Client, test.Provisioner(test.ProvisionerOptions{
+				Provider: map[string]string{
+					"providerField1": "value",
+					"providerField2": "value",
+				},
+			}))
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
+
+			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+			Expect(cloudProvider.CreateCalls[0].Annotations).To(HaveKey(v1alpha5.ProviderCompatabilityAnnotationKey))
+
+			// Deserialze the provider into the expected format
+			provider := map[string]string{}
+			Expect(json.Unmarshal([]byte(cloudProvider.CreateCalls[0].Annotations[v1alpha5.ProviderCompatabilityAnnotationKey]), &provider)).To(Succeed())
+			Expect(provider).To(HaveKeyWithValue("providerField1", "value"))
+			Expect(provider).To(HaveKeyWithValue("providerField2", "value"))
+
+			for _, pod := range pods {
 				ExpectScheduled(ctx, env.Client, pod)
 			}
 		})
