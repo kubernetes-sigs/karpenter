@@ -24,6 +24,7 @@ import (
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -50,7 +51,7 @@ type CloudProvider interface {
 	// callback pattern to enable cloudproviders to batch capacity creation
 	// requests. The callback must be called with a theoretical node object that
 	// is fulfilled by the cloud providers capacity creation request.
-	Create(context.Context, *NodeRequest) (*v1.Node, error)
+	Create(context.Context, *v1alpha1.Machine) (*v1.Node, error)
 	// Delete node in cloudprovider
 	Delete(context.Context, *v1.Node) error
 	// GetInstanceTypes returns instance types supported by the cloudprovider.
@@ -60,11 +61,6 @@ type CloudProvider interface {
 	GetInstanceTypes(context.Context, *v1alpha5.Provisioner) ([]*InstanceType, error)
 	// Name returns the CloudProvider implementation name.
 	Name() string
-}
-
-type NodeRequest struct {
-	Template            *scheduling.NodeTemplate
-	InstanceTypeOptions []*InstanceType
 }
 
 // InstanceType describes the properties of a potential node (either concrete attributes of an instance of this type
@@ -122,5 +118,20 @@ func (ofs Offerings) Get(ct, zone string) (Offering, bool) {
 func (ofs Offerings) Available() Offerings {
 	return lo.Filter(ofs, func(o Offering, _ int) bool {
 		return o.Available
+	})
+}
+
+// Requirements filters the offerings based on the passed requirements
+func (ofs Offerings) Requirements(reqs scheduling.Requirements) Offerings {
+	return lo.Filter(ofs, func(offering Offering, _ int) bool {
+		return (!reqs.Has(v1.LabelTopologyZone) || reqs.Get(v1.LabelTopologyZone).Has(offering.Zone)) &&
+			(!reqs.Has(v1alpha5.LabelCapacityType) || reqs.Get(v1alpha5.LabelCapacityType).Has(offering.CapacityType))
+	})
+}
+
+// Cheapest returns the cheapest offering from the returned offerings
+func (ofs Offerings) Cheapest() Offering {
+	return lo.MinBy(ofs, func(a, b Offering) bool {
+		return a.Price < b.Price
 	})
 }

@@ -24,19 +24,17 @@ import (
 	v1 "k8s.io/api/core/v1"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
-// Node is a set of constraints, compatible pods, and possible instance types that could fulfill these constraints. This
+// Machine is a set of constraints, compatible pods, and possible instance types that could fulfill these constraints. This
 // will be turned into one or more actual node instances within the cluster after bin packing.
-type Node struct {
-	scheduling.NodeTemplate
-	InstanceTypeOptions []*cloudprovider.InstanceType
-	Pods                []*v1.Pod
+type Machine struct {
+	MachineTemplate
 
+	Pods          []*v1.Pod
 	topology      *Topology
 	requests      v1.ResourceList
 	hostPortUsage *scheduling.HostPortUsage
@@ -44,46 +42,46 @@ type Node struct {
 
 var nodeID int64
 
-func NewNode(nodeTemplate *scheduling.NodeTemplate, topology *Topology, daemonResources v1.ResourceList, instanceTypes []*cloudprovider.InstanceType) *Node {
+func NewMachine(machineTemplate *MachineTemplate, topology *Topology, daemonResources v1.ResourceList, instanceTypes []*cloudprovider.InstanceType) *Machine {
 	// Copy the template, and add hostname
 	hostname := fmt.Sprintf("hostname-placeholder-%04d", atomic.AddInt64(&nodeID, 1))
 	topology.Register(v1.LabelHostname, hostname)
-	template := *nodeTemplate
+	template := *machineTemplate
 	template.Requirements = scheduling.NewRequirements()
-	template.Requirements.Add(nodeTemplate.Requirements.Values()...)
+	template.Requirements.Add(machineTemplate.Requirements.Values()...)
 	template.Requirements.Add(scheduling.NewRequirement(v1.LabelHostname, v1.NodeSelectorOpIn, hostname))
+	template.InstanceTypeOptions = instanceTypes
 
-	return &Node{
-		NodeTemplate:        template,
-		InstanceTypeOptions: instanceTypes,
-		hostPortUsage:       scheduling.NewHostPortUsage(),
-		topology:            topology,
-		requests:            daemonResources,
+	return &Machine{
+		MachineTemplate: template,
+		hostPortUsage:   scheduling.NewHostPortUsage(),
+		topology:        topology,
+		requests:        daemonResources,
 	}
 }
 
-func (n *Node) Add(ctx context.Context, pod *v1.Pod) error {
+func (m *Machine) Add(ctx context.Context, pod *v1.Pod) error {
 	// Check Taints
-	if err := n.Taints.Tolerates(pod); err != nil {
+	if err := m.Taints.Tolerates(pod); err != nil {
 		return err
 	}
 
 	// exposed host ports on the node
-	if err := n.hostPortUsage.Validate(pod); err != nil {
+	if err := m.hostPortUsage.Validate(pod); err != nil {
 		return err
 	}
 
-	nodeRequirements := scheduling.NewRequirements(n.Requirements.Values()...)
+	nodeRequirements := scheduling.NewRequirements(m.Requirements.Values()...)
 	podRequirements := scheduling.NewPodRequirements(pod)
 
-	// Check Node Affinity Requirements
+	// Check Machine Affinity Requirements
 	if err := nodeRequirements.Compatible(podRequirements); err != nil {
 		return fmt.Errorf("incompatible requirements, %w", err)
 	}
 	nodeRequirements.Add(podRequirements.Values()...)
 
 	// Check Topology Requirements
-	topologyRequirements, err := n.topology.AddRequirements(podRequirements, nodeRequirements, pod)
+	topologyRequirements, err := m.topology.AddRequirements(podRequirements, nodeRequirements, pod)
 	if err != nil {
 		return err
 	}
@@ -93,33 +91,33 @@ func (n *Node) Add(ctx context.Context, pod *v1.Pod) error {
 	nodeRequirements.Add(topologyRequirements.Values()...)
 
 	// Check instance type combinations
-	requests := resources.Merge(n.requests, resources.RequestsForPods(pod))
-	instanceTypes := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeRequirements, requests)
+	requests := resources.Merge(m.requests, resources.RequestsForPods(pod))
+	instanceTypes := filterInstanceTypesByRequirements(m.InstanceTypeOptions, nodeRequirements, requests)
 	if len(instanceTypes) == 0 {
 		return fmt.Errorf("no instance type satisfied resources %s and requirements %s", resources.String(resources.RequestsForPods(pod)), nodeRequirements)
 	}
 
 	// Update node
-	n.Pods = append(n.Pods, pod)
-	n.InstanceTypeOptions = instanceTypes
-	n.requests = requests
-	n.Requirements = nodeRequirements
-	n.topology.Record(pod, nodeRequirements)
-	n.hostPortUsage.Add(ctx, pod)
+	m.Pods = append(m.Pods, pod)
+	m.InstanceTypeOptions = instanceTypes
+	m.requests = requests
+	m.Requirements = nodeRequirements
+	m.topology.Record(pod, nodeRequirements)
+	m.hostPortUsage.Add(ctx, pod)
 	return nil
 }
 
 // FinalizeScheduling is called once all scheduling has completed and allows the node to perform any cleanup
 // necessary before its requirements are used for instance launching
-func (n *Node) FinalizeScheduling() {
-	// We need nodes to have hostnames for topology purposes, but we don't want to pass that node name on to consumers
+func (m *Machine) FinalizeScheduling() {
+	// We need machines to have hostnames for topology purposes, but we don't want to pass that node name on to consumers
 	// of the node as it will be displayed in error messages
-	delete(n.Requirements, v1.LabelHostname)
+	delete(m.Requirements, v1.LabelHostname)
 }
 
-func (n *Node) String() string {
-	return fmt.Sprintf("node with %d pods requesting %s from types %s", len(n.Pods), resources.String(n.requests),
-		InstanceTypeList(n.InstanceTypeOptions))
+func (m *Machine) String() string {
+	return fmt.Sprintf("machine with %d pods requesting %s from types %s", len(m.Pods), resources.String(m.requests),
+		InstanceTypeList(m.InstanceTypeOptions))
 }
 
 func InstanceTypeList(instanceTypeOptions []*cloudprovider.InstanceType) string {

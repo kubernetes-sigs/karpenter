@@ -22,7 +22,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 )
@@ -91,9 +90,9 @@ func (a action) String() string {
 }
 
 type Command struct {
-	nodesToRemove    []*v1.Node
-	action           action
-	replacementNodes []*scheduling.Node
+	nodesToRemove       []*v1.Node
+	action              action
+	replacementMachines []*scheduling.Machine
 }
 
 func (o Command) String() string {
@@ -111,12 +110,12 @@ func (o Command) String() string {
 			fmt.Fprintf(&buf, "/%s", capacityType)
 		}
 	}
-	if len(o.replacementNodes) == 0 {
+	if len(o.replacementMachines) == 0 {
 		return buf.String()
 	}
 	odNodes := 0
 	spotNodes := 0
-	for _, node := range o.replacementNodes {
+	for _, node := range o.replacementMachines {
 		ct := node.Requirements.Get(v1alpha5.LabelCapacityType)
 		if ct.Has(v1alpha5.CapacityTypeOnDemand) {
 			odNodes++
@@ -126,19 +125,19 @@ func (o Command) String() string {
 		}
 	}
 	// Print list of instance types for the first replacementNode.
-	if len(o.replacementNodes) > 1 {
+	if len(o.replacementMachines) > 1 {
 		fmt.Fprintf(&buf, " and replacing with %d spot and %d on-demand nodes from types %s",
 			spotNodes, odNodes,
-			scheduling.InstanceTypeList(o.replacementNodes[0].InstanceTypeOptions))
+			scheduling.InstanceTypeList(o.replacementMachines[0].InstanceTypeOptions))
 		return buf.String()
 	}
-	ct := o.replacementNodes[0].Requirements.Get(v1alpha5.LabelCapacityType)
+	ct := o.replacementMachines[0].Requirements.Get(v1alpha5.LabelCapacityType)
 	nodeDesc := "node"
 	if ct.Len() == 1 {
 		nodeDesc = fmt.Sprintf("%s node", ct.Any())
 	}
 	fmt.Fprintf(&buf, " and replacing with %s from types %s",
 		nodeDesc,
-		scheduling.InstanceTypeList(o.replacementNodes[0].InstanceTypeOptions))
+		scheduling.InstanceTypeList(o.replacementMachines[0].InstanceTypeOptions))
 	return buf.String()
 }

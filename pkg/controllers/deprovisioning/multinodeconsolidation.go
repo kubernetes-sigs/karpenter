@@ -103,8 +103,8 @@ func (m *MultiNodeConsolidation) firstNNodeConsolidationOption(ctx context.Conte
 		// ensure that the action is sensical for replacements, see explanation on filterOutSameType for why this is
 		// required
 		if action.action == actionReplace {
-			action.replacementNodes[0].InstanceTypeOptions = filterOutSameType(action.replacementNodes[0], nodesToConsolidate)
-			if len(action.replacementNodes[0].InstanceTypeOptions) == 0 {
+			action.replacementMachines[0].InstanceTypeOptions = filterOutSameType(action.replacementMachines[0], nodesToConsolidate)
+			if len(action.replacementMachines[0].InstanceTypeOptions) == 0 {
 				action.action = actionDoNothing
 			}
 		}
@@ -136,7 +136,7 @@ func (m *MultiNodeConsolidation) firstNNodeConsolidationOption(ctx context.Conte
 // This code sees that t3a.small is the cheapest type in both lists and filters it and anything more expensive out
 // leaving the valid consolidation:
 // nodes=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.nano
-func filterOutSameType(newNode *scheduling.Node, consolidate []CandidateNode) []*cloudprovider.InstanceType {
+func filterOutSameType(newNode *scheduling.Machine, consolidate []CandidateNode) []*cloudprovider.InstanceType {
 	existingInstanceTypes := sets.NewString()
 	nodePricesByInstanceType := map[string]float64{}
 
