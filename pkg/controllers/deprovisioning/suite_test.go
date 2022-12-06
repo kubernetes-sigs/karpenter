@@ -121,6 +121,10 @@ var _ = BeforeEach(func() {
 	mostExpensiveOffering = mostExpensiveInstance.Offerings[0]
 
 	recorder.Reset()
+	// ensure any waiters on our clock are allowed to proceed before resetting our clock time
+	for fakeClock.HasWaiters() {
+		fakeClock.Step(1 * time.Minute)
+	}
 	fakeClock.SetTime(time.Now())
 	deprovisioningController = deprovisioning.NewController(fakeClock, env.Client, provisioner, cloudProvider, recorder, cluster)
 })
