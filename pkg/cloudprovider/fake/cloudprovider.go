@@ -22,7 +22,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -66,7 +66,7 @@ func (c *CloudProvider) Create(ctx context.Context, nodeRequest *cloudprovider.N
 	// Labels
 	labels := map[string]string{}
 	for key, requirement := range instanceType.Requirements {
-		if requirement.Len() == 1 {
+		if requirement.Operator() == v1.NodeSelectorOpIn {
 			labels[key] = requirement.Values()[0]
 		}
 	}

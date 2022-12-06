@@ -55,11 +55,11 @@ func (c *PodController) Reconcile(ctx context.Context, req reconcile.Request) (r
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, pod); err != nil {
 		if errors.IsNotFound(err) {
 			// notify cluster state of the node deletion
-			c.cluster.deletePod(req.NamespacedName)
+			c.cluster.DeletePod(req.NamespacedName)
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	if err := c.cluster.updatePod(ctx, pod); err != nil {
+	if err := c.cluster.UpdatePod(ctx, pod); err != nil {
 		return reconcile.Result{}, err
 	}
 	return reconcile.Result{Requeue: true, RequeueAfter: stateRetryPeriod}, nil

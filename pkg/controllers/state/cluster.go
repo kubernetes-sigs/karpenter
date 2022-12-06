@@ -27,15 +27,13 @@ import (
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
-	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	atomicutils "github.com/aws/karpenter-core/pkg/utils/atomic"
@@ -47,20 +45,18 @@ type observerFunc func(string)
 
 // Cluster maintains cluster state that is often needed but expensive to compute.
 type Cluster struct {
-	kubeClient    client.Client
-	cloudProvider cloudprovider.CloudProvider
-	clock         clock.Clock
-
-	// Pod Specific Tracking
-	antiAffinityPods sync.Map // mapping of pod namespaced name to *v1.Pod of pods that have required anti affinities
-
-	nominatedNodes         *cache.Cache
+	kubeClient             client.Client
+	cloudProvider          cloudprovider.CloudProvider
+	clock                  clock.Clock
 	nominatedNodeObservers atomicutils.Slice[observerFunc]
 
-	// Node Status & Pod -> Node Binding
+	// State: Node Status & Pod -> Node Binding
 	mu       sync.RWMutex
 	nodes    map[string]*Node                // node name -> node
 	bindings map[types.NamespacedName]string // pod namespaced named -> node name
+
+	nominatedNodes   *cache.Cache
+	antiAffinityPods sync.Map // mapping of pod namespaced name to *v1.Pod of pods that have required anti affinities
 
 	// consolidationState is a number indicating the state of the cluster with respect to consolidation.  If this number
 	// hasn't changed, it indicates that the cluster hasn't changed in a state which would enable consolidation if
@@ -267,11 +263,8 @@ func (c *Cluster) populateCapacity(ctx context.Context, node *v1.Node, n *Node) 
 		return nil
 	}
 	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
-		if errors.IsNotFound(err) {
-			// Nodes that are not owned by an existing provisioner are not included in calculations
-			return nil
-		}
-		return fmt.Errorf("getting provisioner, %w", err)
+		// Nodes that are not owned by an existing provisioner are not included in calculations
+		return client.IgnoreNotFound(fmt.Errorf("getting provisioner, %w", err))
 	}
 	instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, provisioner)
 	if err != nil {
@@ -339,8 +332,8 @@ func (c *Cluster) populateResourceRequests(ctx context.Context, node *v1.Node, n
 
 func (c *Cluster) populateVolumeLimits(ctx context.Context, node *v1.Node, n *Node) error {
 	var csiNode storagev1.CSINode
-	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: node.Name}, &csiNode); err != nil && !errors.IsNotFound(err) {
-		return fmt.Errorf("getting CSINode to determine volume limit for %s, %w", node.Name, err)
+	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: node.Name}, &csiNode); err != nil {
+		return client.IgnoreNotFound(fmt.Errorf("getting CSINode to determine volume limit for %s, %w", node.Name, err))
 	}
 
 	for _, driver := range csiNode.Spec.Drivers {
@@ -352,7 +345,7 @@ func (c *Cluster) populateVolumeLimits(ctx context.Context, node *v1.Node, n *No
 	return nil
 }
 
-func (c *Cluster) deleteNode(nodeName string) {
+func (c *Cluster) DeleteNode(nodeName string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.nodes, nodeName)
@@ -360,13 +353,11 @@ func (c *Cluster) deleteNode(nodeName string) {
 }
 
 // updateNode is called for every node reconciliation
-func (c *Cluster) updateNode(ctx context.Context, node *v1.Node) error {
+func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	n, err := c.newNode(ctx, node)
 	if err != nil {
-		// ensure that the out of date node is forgotten
-		delete(c.nodes, node.Name)
 		return err
 	}
 
@@ -423,7 +414,7 @@ func (c *Cluster) LastNodeCreationTime() time.Time {
 }
 
 // deletePod is called when the pod has been deleted
-func (c *Cluster) deletePod(podKey types.NamespacedName) {
+func (c *Cluster) DeletePod(podKey types.NamespacedName) {
 	c.antiAffinityPods.Delete(podKey)
 	c.updateNodeUsageFromPodCompletion(podKey)
 	c.recordConsolidationChange()
@@ -461,7 +452,7 @@ func (c *Cluster) updateNodeUsageFromPodCompletion(podKey types.NamespacedName) 
 }
 
 // updatePod is called every time the pod is reconciled
-func (c *Cluster) updatePod(ctx context.Context, pod *v1.Pod) error {
+func (c *Cluster) UpdatePod(ctx context.Context, pod *v1.Pod) error {
 	var err error
 	if podutils.IsTerminal(pod) {
 		c.updateNodeUsageFromPodCompletion(client.ObjectKeyFromObject(pod))
@@ -525,8 +516,8 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 	n, ok := c.nodes[pod.Spec.NodeName]
 	if !ok {
 		var node v1.Node
-		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: pod.Spec.NodeName}, &node); err != nil && !errors.IsNotFound(err) {
-			return fmt.Errorf("getting node, %w", err)
+		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: pod.Spec.NodeName}, &node); err != nil {
+			return client.IgnoreNotFound(fmt.Errorf("getting node, %w", err))
 		}
 
 		var err error
@@ -560,32 +551,15 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 	return nil
 }
 
-// Synchronized ensures that our cluster state is aware of at least all of the nodes that our list cache has.
-// Since we launch nodes in parallel, we can create many node objects which may not all be reconciled by the cluster
-// state before we start trying to schedule again.  In this case, we would over-provision as we weren't aware of the
-// inflight nodes.
-func (c *Cluster) Synchronized(ctx context.Context) error {
-	// collect the nodes known by the kube API server
-	var nodes v1.NodeList
-	if err := c.kubeClient.List(ctx, &nodes); err != nil {
-		return err
-	}
-	unknownNodes := sets.NewString()
-	for _, n := range nodes.Items {
-		unknownNodes.Insert(n.Name)
-	}
-	// delete any that cluster state already knows about
-	c.ForEachNode(func(n *Node) bool {
-		unknownNodes.Delete(n.Node.Name)
-		return true
-	})
-	// and we're left with nodes which exist, but haven't reconciled with cluster state yet
-	if len(unknownNodes) != 0 {
-		return fmt.Errorf("%d/%d nodes not yet synchronized", unknownNodes.Len(), len(nodes.Items))
-	}
-	return nil
-}
-
 func (c *Cluster) recordConsolidationChange() {
 	atomic.StoreInt64(&c.consolidationState, c.clock.Now().UnixMilli())
+}
+
+// Reset the cluster state for unit testing
+func (c *Cluster) Reset(ctx context.Context) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.nodes = map[string]*Node{}
+	c.bindings = map[types.NamespacedName]string{}
+	c.antiAffinityPods = sync.Map{}
 }

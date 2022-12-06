@@ -12,21 +12,26 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package scheme
+package v1alpha1
 
 import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+)
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+const (
+	Group = "karpenter.sh"
 )
 
 var (
-	Scheme = runtime.NewScheme()
+	SchemeGroupVersion = schema.GroupVersion{Group: Group, Version: "v1alpha1"}
+	SchemeBuilder      = runtime.NewSchemeBuilder(func(scheme *runtime.Scheme) error {
+		scheme.AddKnownTypes(SchemeGroupVersion,
+			&Machine{},
+			&MachineList{},
+		)
+		metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
+		return nil
+	})
 )
-
-func init() {
-	utilruntime.Must(clientgoscheme.AddToScheme(Scheme))
-	utilruntime.Must(v1alpha5.SchemeBuilder.AddToScheme(Scheme))
-}

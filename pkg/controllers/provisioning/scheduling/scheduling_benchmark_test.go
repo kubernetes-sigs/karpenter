@@ -27,9 +27,11 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/clock"
 
+	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
@@ -47,6 +49,7 @@ import (
 const MinPodsPerSec = 100.0
 const PrintStats = false
 
+//nolint:gosec
 var r = rand.New(rand.NewSource(42))
 
 func BenchmarkScheduling1(b *testing.B) {
@@ -81,14 +84,14 @@ func TestSchedulingProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error creating CPU profile: %s", err)
 	}
-	pprof.StartCPUProfile(cpuf)
+	lo.Must0(pprof.StartCPUProfile(cpuf))
 	defer pprof.StopCPUProfile()
 
 	heapf, err := os.Create("schedule.heapprofile")
 	if err != nil {
 		t.Fatalf("error creating heap profile: %s", err)
 	}
-	defer pprof.WriteHeapProfile(heapf)
+	defer lo.Must0(pprof.WriteHeapProfile(heapf))
 
 	totalPods := 0
 	totalNodes := 0
@@ -112,14 +115,14 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	// disable logging
 	ctx := logging.WithLogger(context.Background(), zap.NewNop().Sugar())
 	ctx = settings.ToContext(ctx, test.Settings())
-	provisioner := test.Provisioner(test.ProvisionerOptions{Limits: map[v1.ResourceName]resource.Quantity{}})
+	provisioner = test.Provisioner(test.ProvisionerOptions{Limits: map[v1.ResourceName]resource.Quantity{}})
 
 	instanceTypes := fake.InstanceTypes(instanceCount)
-	cloudProv := fake.NewCloudProvider()
+	cloudProv = fake.NewCloudProvider()
 	cloudProv.InstanceTypes = instanceTypes
 	scheduler := pscheduling.NewScheduler(ctx, nil, []*scheduling.NodeTemplate{scheduling.NewNodeTemplate(provisioner)},
 		nil, state.NewCluster(ctx, &clock.RealClock{}, nil, cloudProv), nil, &pscheduling.Topology{},
-		map[string][]cloudprovider.InstanceType{provisioner.Name: instanceTypes}, map[*scheduling.NodeTemplate]v1.ResourceList{},
+		map[string][]*cloudprovider.InstanceType{provisioner.Name: instanceTypes}, map[*scheduling.NodeTemplate]v1.ResourceList{},
 		test.NewEventRecorder(),
 		pscheduling.SchedulerOptions{})
 
@@ -187,8 +190,6 @@ func makeDiversePods(count int) []*v1.Pod {
 	pods = append(pods, makeTopologySpreadPods(count/7, v1.LabelHostname)...)
 	pods = append(pods, makePodAffinityPods(count/7, v1.LabelHostname)...)
 	pods = append(pods, makePodAffinityPods(count/7, v1.LabelTopologyZone)...)
-	// We intentionally don't do anti-affinity by zone as that creates tons of unschedulable pods.
-	//pods = append(pods, makePodAntiAffinityPods(count/7, v1.LabelTopologyZone)...)
 
 	// fill out due to count being not evenly divisible with generic pods
 	nRemaining := count - len(pods)
@@ -196,27 +197,6 @@ func makeDiversePods(count int) []*v1.Pod {
 	return pods
 }
 
-func makePodAntiAffinityPods(count int, key string) []*v1.Pod {
-	var pods []*v1.Pod
-	for i := 0; i < count; i++ {
-		pods = append(pods, test.Pod(
-			test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: randomAntiAffinityLabels()},
-				PodAntiRequirements: []v1.PodAffinityTerm{
-					{
-						LabelSelector: &metav1.LabelSelector{MatchLabels: randomAntiAffinityLabels()},
-						TopologyKey:   key,
-					},
-				},
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:    randomCpu(),
-						v1.ResourceMemory: randomMemory(),
-					},
-				}}))
-	}
-	return pods
-}
 func makePodAffinityPods(count int, key string) []*v1.Pod {
 	var pods []*v1.Pod
 	for i := 0; i < count; i++ {
@@ -231,7 +211,7 @@ func makePodAffinityPods(count int, key string) []*v1.Pod {
 				},
 				ResourceRequirements: v1.ResourceRequirements{
 					Requests: v1.ResourceList{
-						v1.ResourceCPU:    randomCpu(),
+						v1.ResourceCPU:    randomCPU(),
 						v1.ResourceMemory: randomMemory(),
 					},
 				}}))
@@ -257,7 +237,7 @@ func makeTopologySpreadPods(count int, key string) []*v1.Pod {
 				},
 				ResourceRequirements: v1.ResourceRequirements{
 					Requests: v1.ResourceList{
-						v1.ResourceCPU:    randomCpu(),
+						v1.ResourceCPU:    randomCPU(),
 						v1.ResourceMemory: randomMemory(),
 					},
 				}}))
@@ -273,7 +253,7 @@ func makeGenericPods(count int) []*v1.Pod {
 				ObjectMeta: metav1.ObjectMeta{Labels: randomLabels()},
 				ResourceRequirements: v1.ResourceRequirements{
 					Requests: v1.ResourceList{
-						v1.ResourceCPU:    randomCpu(),
+						v1.ResourceCPU:    randomCPU(),
 						v1.ResourceMemory: randomMemory(),
 					},
 				}}))
@@ -286,11 +266,7 @@ func randomAffinityLabels() map[string]string {
 		"my-affininity": randomLabelValue(),
 	}
 }
-func randomAntiAffinityLabels() map[string]string {
-	return map[string]string{
-		"my-anti-affininity": randomLabelValue(),
-	}
-}
+
 func randomLabels() map[string]string {
 	return map[string]string{
 		"my-label": randomLabelValue(),
@@ -307,7 +283,7 @@ func randomMemory() resource.Quantity {
 	return resource.MustParse(fmt.Sprintf("%dMi", mem[r.Intn(len(mem))]))
 }
 
-func randomCpu() resource.Quantity {
+func randomCPU() resource.Quantity {
 	cpu := []int{100, 250, 500, 1000, 1500}
 	return resource.MustParse(fmt.Sprintf("%dm", cpu[r.Intn(len(cpu))]))
 }

@@ -12,21 +12,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package scheme
-
-import (
-	"k8s.io/apimachinery/pkg/runtime"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-)
-
-var (
-	Scheme = runtime.NewScheme()
-)
-
-func init() {
-	utilruntime.Must(clientgoscheme.AddToScheme(Scheme))
-	utilruntime.Must(v1alpha5.SchemeBuilder.AddToScheme(Scheme))
-}
+// +k8s:openapi-gen=true
+// +k8s:deepcopy-gen=package,register
+// +k8s:defaulter-gen=TypeMeta
+// +groupName=karpenter.sh
+package v1alpha1 // doc.go is discovered by codegen

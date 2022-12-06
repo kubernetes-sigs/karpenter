@@ -25,7 +25,7 @@ import (
 	"github.com/imdario/mergo"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/aws/karpenter-core/pkg/apis/provisioning/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 )
 
 const DiscoveryLabel = v1alpha5.TestingGroup + "/test-id"
@@ -43,11 +43,16 @@ func RandomName() string {
 	return strings.ToLower(fmt.Sprintf("%s-%d-%s", randomdata.SillyName(), sequentialNumber, randomdata.Alphanumeric(10)))
 }
 
+func NamespacedObjectMeta(overrides ...metav1.ObjectMeta) metav1.ObjectMeta {
+	return MustMerge(ObjectMeta(metav1.ObjectMeta{
+		Namespace: "default",
+	}), overrides...)
+}
+
 func ObjectMeta(overrides ...metav1.ObjectMeta) metav1.ObjectMeta {
 	return MustMerge(metav1.ObjectMeta{
-		Name:      RandomName(),
-		Namespace: "default",
-		Labels:    map[string]string{DiscoveryLabel: "unspecified"}, // For cleanup discovery
+		Name:   RandomName(),
+		Labels: map[string]string{DiscoveryLabel: "unspecified"}, // For cleanup discovery
 	}, overrides...)
 }
 

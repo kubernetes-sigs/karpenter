@@ -69,31 +69,26 @@ func NewWatcherOrDie(ctx context.Context, kubernetesInterface kubernetes.Interfa
 
 // waitForConfigMapsOrDie waits until all registered configMaps in the settingsStore are created
 func (s *store) waitForConfigMapsOrDie(ctx context.Context, kubernetesInterface kubernetes.Interface, configMapWatcher *informer.InformedWatcher) {
-	logging.FromContext(ctx).Debugf("Waiting for settings ConfigMap(s) creation")
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	factory := informers.NewSharedInformerFactoryWithOptions(kubernetesInterface, time.Second*30, informers.WithNamespace(configMapWatcher.Namespace))
-	configMapInformer := factory.Core().V1().ConfigMaps().Informer()
+	informer := factory.Core().V1().ConfigMaps().Informer()
 	factory.Start(ctx.Done())
-	expectedNames := sets.NewString(lo.Map(s.registrations, func(r *config.Registration, _ int) string {
-		return r.ConfigMapName
-	})...)
+	expected := sets.NewString(lo.Map(s.registrations, func(r *config.Registration, _ int) string { return r.ConfigMapName })...)
+	logging.FromContext(ctx).With("configmaps", expected.List()).Debugf("waiting for configmaps")
 	for {
-		got := configMapInformer.GetStore().List()
-		gotNames := sets.NewString(lo.Map(got, func(obj interface{}, _ int) string {
-			return obj.(*v1.ConfigMap).Name
-		})...)
-		if gotNames.IsSuperset(expectedNames) {
+		if sets.NewString(
+			lo.Map(informer.GetStore().List(), func(obj interface{}, _ int) string { return obj.(*v1.ConfigMap).Name })...,
+		).IsSuperset(expected) {
 			break
 		}
 		select {
 		case <-ctx.Done():
-			panic(fmt.Sprintf("Timed out waiting for ConfigMap(s) %v to be created", lo.Keys(expectedNames)))
+			return
 		case <-time.After(time.Millisecond * 500):
 		}
 	}
-	logging.FromContext(ctx).Debugf("settings ConfigMap(s) exist")
 }
 
 func (s *store) InjectSettings(ctx context.Context) context.Context {
