@@ -144,19 +144,27 @@ func (v *VolumeTopology) getPersistentVolumeClaim(ctx context.Context, pod *v1.P
 // PVCs (e.g. the PVC is not found or references an unknown storage class).
 func (v *VolumeTopology) validatePersistentVolumeClaims(ctx context.Context, pod *v1.Pod) error {
 	for _, volume := range pod.Spec.Volumes {
-		// validate the PVC if it exists
-		pvc, err := v.getPersistentVolumeClaim(ctx, pod, volume)
-		if err != nil {
-			return err
+		var storageClassName *string
+		if volume.PersistentVolumeClaim != nil {
+			// validate the PVC if it exists
+			pvc, err := v.getPersistentVolumeClaim(ctx, pod, volume)
+			if err != nil {
+				return err
+			}
+			// may not have a PVC
+			if pvc == nil {
+				continue
+
+			}
+			storageClassName = pvc.Spec.StorageClassName
+		} else if volume.Ephemeral != nil {
+			storageClassName = volume.Ephemeral.VolumeClaimTemplate.Spec.StorageClassName
 		}
-		// may not have a PVC
-		if pvc == nil {
-			continue
-		}
-		// if the PVC exists and it has a storage class, ensure it's valid as well
-		if pvc.Spec.StorageClassName != nil && ptr.StringValue(pvc.Spec.StorageClassName) != "" {
+
+		// we have a storage class name, so ensure that it exists
+		if storageClassName != nil && ptr.StringValue(storageClassName) != "" {
 			storageClass := &storagev1.StorageClass{}
-			if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: ptr.StringValue(pvc.Spec.StorageClassName)}, storageClass); err != nil {
+			if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: ptr.StringValue(storageClassName)}, storageClass); err != nil {
 				return err
 			}
 		}

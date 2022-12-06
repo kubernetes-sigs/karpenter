@@ -4184,7 +4184,7 @@ var _ = Describe("No Pre-Binding", func() {
 	})
 })
 
-var _ = Describe("Volume Limits", func() {
+var _ = Describe("Volumes", func() {
 	It("should launch multiple machines if required due to volume limits", func() {
 		const csiProvider = "fake.csi.provider"
 		cloudProv.InstanceTypes = []*cloudprovider.InstanceType{
@@ -4430,6 +4430,37 @@ var _ = Describe("Volume Limits", func() {
 		Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 		// 5 of the same PVC should all be schedulable on the same node
 		Expect(nodeList.Items).To(HaveLen(1))
+	})
+	It("should not launch nodes for pods with ephemeral volume using a non-existent storage classes", func() {
+		ExpectApplied(ctx, env.Client, provisioner)
+		pod := test.UnschedulablePod(test.PodOptions{})
+		pod.Spec.Volumes = append(pod.Spec.Volumes, v1.Volume{
+			Name: "tmp-ephemeral",
+			VolumeSource: v1.VolumeSource{
+				Ephemeral: &v1.EphemeralVolumeSource{
+					VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
+						Spec: v1.PersistentVolumeClaimSpec{
+							StorageClassName: ptr.String("non-existent"),
+							AccessModes: []v1.PersistentVolumeAccessMode{
+								v1.ReadWriteOnce,
+							},
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{
+									v1.ResourceStorage: resource.MustParse("1Gi"),
+								},
+							},
+						},
+					},
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, provisioner)
+		_ = ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, pod)
+
+		var nodeList v1.NodeList
+		Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
+		// no nodes should be created as the storage class doesn't eixst
+		Expect(nodeList.Items).To(HaveLen(0))
 	})
 })
 
