@@ -102,9 +102,9 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...Candidate
 			}, nil
 		}
 		return Command{
-			nodesToRemove:    []*v1.Node{candidate.Node},
-			action:           actionReplace,
-			replacementNodes: newNodes,
+			nodesToRemove:       []*v1.Node{candidate.Node},
+			action:              actionReplace,
+			replacementMachines: newNodes,
 		}, nil
 	}
 	return Command{action: actionDoNothing}, nil

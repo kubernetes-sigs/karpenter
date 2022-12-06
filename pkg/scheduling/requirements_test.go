@@ -354,6 +354,58 @@ var _ = Describe("Requirements", func() {
 			Expect(unconstrained.Compatible(provisionerRequirement).Error()).To(Equal(`label "deployment" does not have known values`))
 		})
 	})
+	Context("NodeSelectorRequirements Conversion", func() {
+		It("should convert combinations of labels to expected NodeSelectorRequirements", func() {
+			exists := NewRequirement("exists", v1.NodeSelectorOpExists)
+			doesNotExist := NewRequirement("doesNotExist", v1.NodeSelectorOpDoesNotExist)
+			inA := NewRequirement("inA", v1.NodeSelectorOpIn, "A")
+			inB := NewRequirement("inB", v1.NodeSelectorOpIn, "B")
+			inAB := NewRequirement("inAB", v1.NodeSelectorOpIn, "A", "B")
+			notInA := NewRequirement("notInA", v1.NodeSelectorOpNotIn, "A")
+			in1 := NewRequirement("in1", v1.NodeSelectorOpIn, "1")
+			in9 := NewRequirement("in9", v1.NodeSelectorOpIn, "9")
+			in19 := NewRequirement("in19", v1.NodeSelectorOpIn, "1", "9")
+			notIn12 := NewRequirement("notIn12", v1.NodeSelectorOpNotIn, "1", "2")
+			greaterThan1 := NewRequirement("greaterThan1", v1.NodeSelectorOpGt, "1")
+			greaterThan9 := NewRequirement("greaterThan9", v1.NodeSelectorOpGt, "9")
+			lessThan1 := NewRequirement("lessThan1", v1.NodeSelectorOpLt, "1")
+			lessThan9 := NewRequirement("lessThan9", v1.NodeSelectorOpLt, "9")
+
+			reqs := NewRequirements(
+				exists,
+				doesNotExist,
+				inA,
+				inB,
+				inAB,
+				notInA,
+				in1,
+				in9,
+				in19,
+				notIn12,
+				greaterThan1,
+				greaterThan9,
+				lessThan1,
+				lessThan9,
+			)
+			Expect(reqs.NodeSelectorRequirements()).To(ContainElements(
+				v1.NodeSelectorRequirement{Key: "exists", Operator: v1.NodeSelectorOpExists},
+				v1.NodeSelectorRequirement{Key: "doesNotExist", Operator: v1.NodeSelectorOpDoesNotExist},
+				v1.NodeSelectorRequirement{Key: "inA", Operator: v1.NodeSelectorOpIn, Values: []string{"A"}},
+				v1.NodeSelectorRequirement{Key: "inB", Operator: v1.NodeSelectorOpIn, Values: []string{"B"}},
+				v1.NodeSelectorRequirement{Key: "inAB", Operator: v1.NodeSelectorOpIn, Values: []string{"A", "B"}},
+				v1.NodeSelectorRequirement{Key: "notInA", Operator: v1.NodeSelectorOpNotIn, Values: []string{"A"}},
+				v1.NodeSelectorRequirement{Key: "in1", Operator: v1.NodeSelectorOpIn, Values: []string{"1"}},
+				v1.NodeSelectorRequirement{Key: "in9", Operator: v1.NodeSelectorOpIn, Values: []string{"9"}},
+				v1.NodeSelectorRequirement{Key: "in19", Operator: v1.NodeSelectorOpIn, Values: []string{"1", "9"}},
+				v1.NodeSelectorRequirement{Key: "notIn12", Operator: v1.NodeSelectorOpNotIn, Values: []string{"1", "2"}},
+				v1.NodeSelectorRequirement{Key: "greaterThan1", Operator: v1.NodeSelectorOpGt, Values: []string{"1"}},
+				v1.NodeSelectorRequirement{Key: "greaterThan9", Operator: v1.NodeSelectorOpGt, Values: []string{"9"}},
+				v1.NodeSelectorRequirement{Key: "lessThan1", Operator: v1.NodeSelectorOpLt, Values: []string{"1"}},
+				v1.NodeSelectorRequirement{Key: "lessThan9", Operator: v1.NodeSelectorOpLt, Values: []string{"9"}},
+			))
+			Expect(reqs.NodeSelectorRequirements()).To(HaveLen(14))
+		})
+	})
 })
 
 // Keeping this in case we need it, I ran for 1m+ samples and had no issues

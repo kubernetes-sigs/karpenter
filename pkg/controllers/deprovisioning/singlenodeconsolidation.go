@@ -159,8 +159,8 @@ func (c *SingleNodeConsolidation) computeConsolidation(ctx context.Context, node
 	}
 
 	return Command{
-		nodesToRemove:    []*v1.Node{node.Node},
-		action:           actionReplace,
-		replacementNodes: []*pscheduling.Node{newNodes[0]},
+		nodesToRemove:       []*v1.Node{node.Node},
+		action:              actionReplace,
+		replacementMachines: []*pscheduling.Machine{newNodes[0]},
 	}, nil
 }

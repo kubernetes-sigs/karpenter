@@ -18,19 +18,21 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"sync"
 
+	"github.com/samber/lo"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/scheduling"
-	"github.com/aws/karpenter-core/pkg/test"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	"github.com/aws/karpenter-core/pkg/scheduling"
+	"github.com/aws/karpenter-core/pkg/test"
 )
 
 var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)
@@ -40,7 +42,7 @@ type CloudProvider struct {
 
 	// CreateCalls contains the arguments for every create call that was made since it was cleared
 	mu                 sync.Mutex
-	CreateCalls        []*cloudprovider.NodeRequest
+	CreateCalls        []*v1alpha1.Machine
 	AllowedCreateCalls int
 }
 
@@ -52,17 +54,34 @@ func NewCloudProvider() *CloudProvider {
 	}
 }
 
-func (c *CloudProvider) Create(ctx context.Context, nodeRequest *cloudprovider.NodeRequest) (*v1.Node, error) {
+// Reset is for BeforeEach calls in testing to reset the tracking of CreateCalls
+func (c *CloudProvider) Reset() {
 	c.mu.Lock()
-	c.CreateCalls = append(c.CreateCalls, nodeRequest)
+	defer c.mu.Unlock()
+	c.CreateCalls = []*v1alpha1.Machine{}
+	c.AllowedCreateCalls = math.MaxInt
+}
+
+func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha1.Machine) (*v1.Node, error) {
+	c.mu.Lock()
+	c.CreateCalls = append(c.CreateCalls, machine)
 	if len(c.CreateCalls) > c.AllowedCreateCalls {
 		c.mu.Unlock()
 		return &v1.Node{}, fmt.Errorf("erroring as number of AllowedCreateCalls has been exceeded")
 	}
 	c.mu.Unlock()
 
-	name := test.RandomName()
-	instanceType := nodeRequest.InstanceTypeOptions[0]
+	requirements := scheduling.NewNodeSelectorRequirements(machine.Spec.Requirements...)
+	instanceTypes := lo.Filter(lo.Must(c.GetInstanceTypes(ctx, &v1alpha5.Provisioner{})), func(i *cloudprovider.InstanceType, _ int) bool {
+		return requirements.Get(v1.LabelInstanceTypeStable).Has(i.Name)
+	})
+	// Order instance types so that we get the cheapest instance types of the available offerings
+	sort.Slice(instanceTypes, func(i, j int) bool {
+		iOfferings := instanceTypes[i].Offerings.Available().Requirements(requirements)
+		jOfferings := instanceTypes[j].Offerings.Available().Requirements(requirements)
+		return iOfferings.Cheapest().Price < jOfferings.Cheapest().Price
+	})
+	instanceType := instanceTypes[0]
 	// Labels
 	labels := map[string]string{}
 	for key, requirement := range instanceType.Requirements {
@@ -72,7 +91,7 @@ func (c *CloudProvider) Create(ctx context.Context, nodeRequest *cloudprovider.N
 	}
 	// Find Offering
 	for _, o := range instanceType.Offerings.Available() {
-		if nodeRequest.Template.Requirements.Compatible(scheduling.NewRequirements(
+		if requirements.Compatible(scheduling.NewRequirements(
 			scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, o.Zone),
 			scheduling.NewRequirement(v1alpha5.LabelCapacityType, v1.NodeSelectorOpIn, o.CapacityType),
 		)) == nil {
@@ -81,6 +100,7 @@ func (c *CloudProvider) Create(ctx context.Context, nodeRequest *cloudprovider.N
 			break
 		}
 	}
+	name := test.RandomName()
 	n := &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   name,
@@ -93,7 +113,7 @@ func (c *CloudProvider) Create(ctx context.Context, nodeRequest *cloudprovider.N
 	return n, nil
 }
 
-func (c *CloudProvider) GetInstanceTypes(_ context.Context, provisioner *v1alpha5.Provisioner) ([]*cloudprovider.InstanceType, error) {
+func (c *CloudProvider) GetInstanceTypes(_ context.Context, _ *v1alpha5.Provisioner) ([]*cloudprovider.InstanceType, error) {
 	if c.InstanceTypes != nil {
 		return c.InstanceTypes, nil
 	}

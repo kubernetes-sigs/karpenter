@@ -25,6 +25,18 @@ type Pair[A, B any] struct {
 	Second B
 }
 
+type Option[T any] func(T) T
+
+func ResolveOptions[T any](opts ...Option[T]) T {
+	o := *new(T)
+	for _, opt := range opts {
+		if opt != nil {
+			o = opt(o)
+		}
+	}
+	return o
+}
+
 // HasAnyPrefix returns true if any of the provided prefixes match the given string s
 func HasAnyPrefix(s string, prefixes ...string) bool {
 	for _, prefix := range prefixes {

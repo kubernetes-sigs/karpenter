@@ -19,9 +19,9 @@ import (
 	"sync"
 
 	"github.com/samber/lo"
-)
 
-type Option func(Options) Options
+	"github.com/aws/karpenter-core/pkg/utils/functional"
+)
 
 type Options struct {
 	ignoreCache bool
@@ -49,8 +49,8 @@ func (c *Lazy[T]) Set(v T) {
 
 // TryGet attempts to get a non-nil value from the internal value. If the internal value is nil, the Resolve function
 // will attempt to resolve the value, setting the value to be persistently stored if the resolve of Resolve is non-nil.
-func (c *Lazy[T]) TryGet(ctx context.Context, opts ...Option) (T, error) {
-	o := resolveOptions(opts)
+func (c *Lazy[T]) TryGet(ctx context.Context, opts ...functional.Option[Options]) (T, error) {
+	o := functional.ResolveOptions[Options](opts...)
 	c.mu.RLock()
 	if c.value != nil && !o.ignoreCache {
 		ret := *c.value
@@ -73,14 +73,4 @@ func (c *Lazy[T]) TryGet(ctx context.Context, opts ...Option) (T, error) {
 	}
 	c.value = lo.ToPtr(ret) // copies the value so we don't keep the reference
 	return ret, nil
-}
-
-func resolveOptions(opts []Option) Options {
-	o := Options{}
-	for _, opt := range opts {
-		if opt != nil {
-			o = opt(o)
-		}
-	}
-	return o
 }

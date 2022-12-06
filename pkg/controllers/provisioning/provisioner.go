@@ -17,8 +17,6 @@ package provisioning
 import (
 	"context"
 	"fmt"
-	"math"
-	"sort"
 
 	"github.com/imdario/mergo"
 	"github.com/prometheus/client_golang/prometheus"
@@ -41,17 +39,30 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
+	"github.com/aws/karpenter-core/pkg/scheduling"
+	"github.com/aws/karpenter-core/pkg/utils/functional"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	scheduler "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
-	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/utils/node"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
+
+// LaunchOptions are the set of options that can be used to trigger certain
+// actions and configuration during scheduling
+type LaunchOptions struct {
+	RecordPodNomination bool
+}
+
+// RecordPodNomination causes nominate pod events to be recorded against the node.
+func RecordPodNomination(o LaunchOptions) LaunchOptions {
+	o.RecordPodNomination = true
+	return o
+}
 
 // Provisioner waits for enqueued pods, batches them, creates capacity and binds the pods to the capacity.
 type Provisioner struct {
@@ -149,7 +160,7 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 		return reconcile.Result{}, nil
 	}
 
-	nodeNames, err := p.LaunchNodes(ctx, LaunchOptions{RecordPodNomination: true}, nodes...)
+	nodeNames, err := p.LaunchMachines(ctx, nodes, RecordPodNomination)
 
 	// Any successfully created node is going to have the nodeName value filled in the slice
 	successfullyCreatedNodeCount := lo.CountBy(nodeNames, func(name string) bool { return name != "" })
@@ -158,33 +169,28 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 	return reconcile.Result{}, err
 }
 
-type LaunchOptions struct {
-	// RecordPodNomination causes nominate pod events to be recorded against the node.
-	RecordPodNomination bool
-}
-
-// LaunchNodes launches nodes passed into the function in parallel. It returns a slice of the successfully created node
+// LaunchMachines launches nodes passed into the function in parallel. It returns a slice of the successfully created node
 // names as well as a multierr of any errors that occurred while launching nodes
-func (p *Provisioner) LaunchNodes(ctx context.Context, opts LaunchOptions, nodes ...*scheduler.Node) ([]string, error) {
+func (p *Provisioner) LaunchMachines(ctx context.Context, machines []*scheduler.Machine, opts ...functional.Option[LaunchOptions]) ([]string, error) {
 	// Launch capacity and bind pods
-	errs := make([]error, len(nodes))
-	nodeNames := make([]string, len(nodes))
-	workqueue.ParallelizeUntil(ctx, len(nodes), len(nodes), func(i int) {
+	errs := make([]error, len(machines))
+	machineNames := make([]string, len(machines))
+	workqueue.ParallelizeUntil(ctx, len(machines), len(machines), func(i int) {
 		// create a new context to avoid a data race on the ctx variable
-		ctx := logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", nodes[i].Labels[v1alpha5.ProvisionerNameLabelKey]))
+		ctx := logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", machines[i].Labels[v1alpha5.ProvisionerNameLabelKey]))
 		// register the provisioner on the context so we can pull it off for tagging purposes
 		// TODO: rethink this, maybe just pass the provisioner down instead of hiding it in the context?
-		ctx = injection.WithNamespacedName(ctx, types.NamespacedName{Name: nodes[i].Labels[v1alpha5.ProvisionerNameLabelKey]})
-		if nodeName, err := p.launch(ctx, opts, nodes[i]); err != nil {
-			errs[i] = fmt.Errorf("launching node, %w", err)
+		ctx = injection.WithNamespacedName(ctx, types.NamespacedName{Name: machines[i].Labels[v1alpha5.ProvisionerNameLabelKey]})
+		if machineName, err := p.launch(ctx, machines[i], opts...); err != nil {
+			errs[i] = fmt.Errorf("launching machine, %w", err)
 		} else {
-			nodeNames[i] = nodeName
+			machineNames[i] = machineName
 		}
 	})
 	if err := multierr.Combine(errs...); err != nil {
-		return nodeNames, err
+		return machineNames, err
 	}
-	return nodeNames, nil
+	return machineNames, nil
 }
 
 func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*v1.Pod, error) {
@@ -212,7 +218,7 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*v1.Pod, error) {
 // nolint: gocyclo
 func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNodes []*state.Node, opts scheduler.SchedulerOptions) (*scheduler.Scheduler, error) {
 	// Build node templates
-	var nodeTemplates []*scheduling.NodeTemplate
+	var machines []*scheduler.MachineTemplate
 	var provisionerList v1alpha5.ProvisionerList
 	instanceTypes := map[string][]*cloudprovider.InstanceType{}
 	domains := map[string]sets.String{}
@@ -231,7 +237,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 			continue
 		}
 		// Create node template
-		nodeTemplates = append(nodeTemplates, scheduling.NewNodeTemplate(provisioner))
+		machines = append(machines, scheduler.NewMachineTemplate(provisioner))
 		// Get instance type options
 		instanceTypeOptions, err := p.cloudProvider.GetInstanceTypes(ctx, provisioner)
 		if err != nil {
@@ -251,7 +257,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 			}
 		}
 	}
-	if len(nodeTemplates) == 0 {
+	if len(machines) == 0 {
 		return nil, fmt.Errorf("no provisioners found")
 	}
 
@@ -265,14 +271,14 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	}
 
 	// Calculate daemon overhead
-	daemonOverhead, err := p.getDaemonOverhead(ctx, nodeTemplates)
+	daemonOverhead, err := p.getDaemonOverhead(ctx, machines)
 	if err != nil {
 		return nil, fmt.Errorf("getting daemon overhead, %w", err)
 	}
-	return scheduler.NewScheduler(ctx, p.kubeClient, nodeTemplates, provisionerList.Items, p.cluster, stateNodes, topology, instanceTypes, daemonOverhead, p.recorder, opts), nil
+	return scheduler.NewScheduler(ctx, p.kubeClient, machines, provisionerList.Items, p.cluster, stateNodes, topology, instanceTypes, daemonOverhead, p.recorder, opts), nil
 }
 
-func (p *Provisioner) schedule(ctx context.Context, pods []*v1.Pod, stateNodes []*state.Node) ([]*scheduler.Node, error) {
+func (p *Provisioner) schedule(ctx context.Context, pods []*v1.Pod, stateNodes []*state.Node) ([]*scheduler.Machine, error) {
 	defer metrics.Measure(schedulingDuration.WithLabelValues(injection.GetNamespacedName(ctx).Name))()
 
 	scheduler, err := p.NewScheduler(ctx, pods, stateNodes, scheduler.SchedulerOptions{})
@@ -285,35 +291,27 @@ func (p *Provisioner) schedule(ctx context.Context, pods []*v1.Pod, stateNodes [
 	return nodes, err
 }
 
-func (p *Provisioner) launch(ctx context.Context, opts LaunchOptions, node *scheduler.Node) (string, error) {
+func (p *Provisioner) launch(ctx context.Context, machine *scheduler.Machine, opts ...functional.Option[LaunchOptions]) (string, error) {
 	// Check limits
 	latest := &v1alpha5.Provisioner{}
-	name := node.Requirements.Get(v1alpha5.ProvisionerNameLabelKey).Values()[0]
-	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: name}, latest); err != nil {
+	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: machine.ProvisionerName}, latest); err != nil {
 		return "", fmt.Errorf("getting current resource usage, %w", err)
 	}
 	if err := latest.Spec.Limits.ExceededBy(latest.Status.Resources); err != nil {
 		return "", err
 	}
 
-	// Order instance types so that we get the cheapest instance types of the available offerings
-	sort.Slice(node.InstanceTypeOptions, func(i, j int) bool {
-		iOfferings := node.InstanceTypeOptions[i].Offerings.Available()
-		jOfferings := node.InstanceTypeOptions[j].Offerings.Available()
-		return cheapestOfferingPrice(iOfferings, node.Requirements) < cheapestOfferingPrice(jOfferings, node.Requirements)
-	})
-
-	logging.FromContext(ctx).Infof("launching %s", node)
+	logging.FromContext(ctx).Infof("launching %s", machine)
 	k8sNode, err := p.cloudProvider.Create(
 		logging.WithLogger(ctx, logging.FromContext(ctx).Named("cloudprovider")),
-		&cloudprovider.NodeRequest{InstanceTypeOptions: node.InstanceTypeOptions, Template: &node.NodeTemplate},
+		machine.ToMachine(latest),
 	)
 	if err != nil {
 		return "", fmt.Errorf("creating cloud provider instance, %w", err)
 	}
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", k8sNode.Name))
 
-	if err := mergo.Merge(k8sNode, node.ToNode()); err != nil {
+	if err := mergo.Merge(k8sNode, machine.ToNode()); err != nil {
 		return "", fmt.Errorf("merging cloud provider node, %w", err)
 	}
 	// ensure we clear out the status
@@ -335,16 +333,16 @@ func (p *Provisioner) launch(ctx context.Context, opts LaunchOptions, node *sche
 	if err := p.cluster.UpdateNode(ctx, k8sNode); err != nil {
 		return "", fmt.Errorf("updating cluster state, %w", err)
 	}
-	if opts.RecordPodNomination {
-		for _, pod := range node.Pods {
+	if functional.ResolveOptions[LaunchOptions](opts...).RecordPodNomination {
+		for _, pod := range machine.Pods {
 			p.recorder.Publish(events.NominatePod(pod, k8sNode))
 		}
 	}
 	return k8sNode.Name, nil
 }
 
-func (p *Provisioner) getDaemonOverhead(ctx context.Context, nodeTemplates []*scheduling.NodeTemplate) (map[*scheduling.NodeTemplate]v1.ResourceList, error) {
-	overhead := map[*scheduling.NodeTemplate]v1.ResourceList{}
+func (p *Provisioner) getDaemonOverhead(ctx context.Context, nodeTemplates []*scheduler.MachineTemplate) (map[*scheduler.MachineTemplate]v1.ResourceList, error) {
+	overhead := map[*scheduler.MachineTemplate]v1.ResourceList{}
 
 	daemonSetList := &appsv1.DaemonSetList{}
 	if err := p.kubeClient.List(ctx, daemonSetList); err != nil {
@@ -399,18 +397,6 @@ func (p *Provisioner) injectTopology(ctx context.Context, pods []*v1.Pod) []*v1.
 		}
 	}
 	return schedulablePods
-}
-
-// cheapestOfferingPrice gets the cheapest price of an offering on an instance type given
-// the node requirements
-func cheapestOfferingPrice(ofs []cloudprovider.Offering, requirements scheduling.Requirements) float64 {
-	minPrice := math.MaxFloat64
-	for _, of := range ofs {
-		if requirements.Get(v1alpha5.LabelCapacityType).Has(of.CapacityType) && requirements.Get(v1.LabelTopologyZone).Has(of.Zone) {
-			minPrice = math.Min(minPrice, of.Price)
-		}
-	}
-	return minPrice
 }
 
 func validateAffinity(p *v1.Pod) (errs error) {
