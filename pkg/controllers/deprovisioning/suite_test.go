@@ -178,6 +178,38 @@ var _ = Describe("Drift", func() {
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
 		ExpectExists(ctx, env.Client, node)
 	})
+	It("should ignore nodes with the drift label, but not the drifted value", func() {
+		prov := test.Provisioner()
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				},
+				Annotations: map[string]string{
+					v1alpha5.VoluntaryDisruptionAnnotationKey: "wrong-value",
+				}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}},
+		)
+
+		ExpectApplied(ctx, env.Client, node, prov)
+		ExpectMakeNodesReady(ctx, env.Client, node)
+
+		// inform cluster state about the nodes
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		fakeClock.Step(10 * time.Minute)
+		go triggerVerifyAction()
+		_, err := deprovisioningController.ProcessCluster(ctx)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
+		ExpectExists(ctx, env.Client, node)
+	})
 	It("should ignore nodes without the drift label", func() {
 		prov := test.Provisioner()
 		node := test.Node(test.NodeOptions{

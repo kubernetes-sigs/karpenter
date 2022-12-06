@@ -50,9 +50,9 @@ var _ = Describe("Validation", func() {
 	It("should succeed to set custom values", func() {
 		cm := &v1.ConfigMap{
 			Data: map[string]string{
-				"batchMaxDuration":  "30s",
-				"batchIdleDuration": "5s",
-				"driftEnabled":      "true",
+				"batchMaxDuration":          "30s",
+				"batchIdleDuration":         "5s",
+				"featureGates.driftEnabled": "true",
 			},
 		}
 		s, _ := settings.NewSettingsFromConfigMap(cm)
@@ -82,7 +82,7 @@ var _ = Describe("Validation", func() {
 		defer ExpectPanic()
 		cm := &v1.ConfigMap{
 			Data: map[string]string{
-				"batchIdleDuration": "foobar",
+				"featureGates.driftEnabled": "foobar",
 			},
 		}
 		_, _ = settings.NewSettingsFromConfigMap(cm)
