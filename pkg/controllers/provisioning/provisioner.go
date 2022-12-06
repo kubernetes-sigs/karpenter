@@ -378,7 +378,7 @@ func (p *Provisioner) injectTopology(ctx context.Context, pods []*v1.Pod) []*v1.
 	var schedulablePods []*v1.Pod
 	for _, pod := range pods {
 		if err := p.volumeTopology.Inject(ctx, pod); err != nil {
-			logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(pod)).Errorf("getting volume topology requirements, %w", err)
+			logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(pod)).Errorf("getting volume topology requirements, %s", err)
 		} else {
 			schedulablePods = append(schedulablePods, pod)
 		}
