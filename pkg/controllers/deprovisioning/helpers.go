@@ -337,18 +337,18 @@ func mapNodes(nodes []*v1.Node, candidateNodes []CandidateNode) []CandidateNode 
 	return ret
 }
 
-func canBeTerminated(node CandidateNode, pdbs *PDBLimits) bool {
+func canBeTerminated(node CandidateNode, pdbs *PDBLimits) (string, bool) {
 	if !node.DeletionTimestamp.IsZero() {
-		return false
+		return "in the process of deletion", false
 	}
-	if _, ok := pdbs.CanEvictPods(node.pods); !ok {
-		return false
+	if pdb, ok := pdbs.CanEvictPods(node.pods); !ok {
+		return fmt.Sprintf("pdb %s prevents pod evictions", pdb), false
 	}
 
-	if _, ok := PodsPreventEviction(node.pods); ok {
-		return false
+	if reason, ok := PodsPreventEviction(node.pods); ok {
+		return reason, false
 	}
-	return true
+	return "", true
 }
 
 // PodsPreventEviction returns true if there are pods that would prevent eviction

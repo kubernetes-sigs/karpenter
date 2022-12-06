@@ -22,8 +22,8 @@ import (
 )
 
 // ChangeMonitor is used to reduce logging when discovering information that may change. The values recorded expire after
-// 24 hours to prevent a value from being logged at startup only which could impede debugging if full sets of logs aren't
-// available.
+// 24 hours by default to prevent a value from being logged at startup only which could impede debugging if full sets
+// of logs aren't available.
 type ChangeMonitor struct {
 	lastSeen *cache.Cache
 }
@@ -32,6 +32,12 @@ func NewChangeMonitor() *ChangeMonitor {
 	return &ChangeMonitor{
 		lastSeen: cache.New(24*time.Hour, 12*time.Hour),
 	}
+}
+
+// Reconfigure allows reconfiguring the change monitor with a new duration. This resets any previously recorded
+// changes and should only be done at construction.
+func (c *ChangeMonitor) Reconfigure(expiration time.Duration) {
+	c.lastSeen = cache.New(expiration, expiration/2)
 }
 
 // HasChanged takes a key and value and returns true if the hash of the value has changed since the last tine the

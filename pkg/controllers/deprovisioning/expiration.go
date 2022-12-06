@@ -75,7 +75,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...Candidate
 	for _, candidate := range candidates {
 		// is this a node that we can terminate?  This check is meant to be fast so we can save the expense of simulated
 		// scheduling unless its really needed
-		if !canBeTerminated(candidate, pdbs) {
+		if _, canBeTerminated := canBeTerminated(candidate, pdbs); !canBeTerminated {
 			continue
 		}
 
