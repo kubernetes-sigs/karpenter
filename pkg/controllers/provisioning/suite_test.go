@@ -806,12 +806,66 @@ var _ = Describe("Provisioning", func() {
 			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
 			Expect(cloudProvider.CreateCalls[0].Annotations).To(HaveKey(v1alpha5.ProviderCompatabilityAnnotationKey))
 
-			// Deserialze the provider into the expected format
+			// Deserialize the provider into the expected format
 			provider := map[string]string{}
 			Expect(json.Unmarshal([]byte(cloudProvider.CreateCalls[0].Annotations[v1alpha5.ProviderCompatabilityAnnotationKey]), &provider)).To(Succeed())
 			Expect(provider).To(HaveKeyWithValue("providerField1", "value"))
 			Expect(provider).To(HaveKeyWithValue("providerField2", "value"))
 
+			for _, pod := range pods {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+		})
+		It("should create a machine with resource requests", func() {
+			ExpectApplied(ctx, env.Client, test.Provisioner(test.ProvisionerOptions{
+				Provider: map[string]string{
+					"providerField1": "value",
+					"providerField2": "value",
+				},
+			}))
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:          resource.MustParse("1"),
+							v1.ResourceMemory:       resource.MustParse("1Mi"),
+							fake.ResourceGPUVendorA: resource.MustParse("1"),
+						},
+						Limits: v1.ResourceList{
+							fake.ResourceGPUVendorA: resource.MustParse("1"),
+						},
+					},
+				}),
+			)
+			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+			Expect(cloudProvider.CreateCalls[0].Spec.Resources.Requests).To(HaveLen(4))
+			ExpectMachineRequests(cloudProvider.CreateCalls[0], v1.ResourceList{
+				v1.ResourceCPU:          resource.MustParse("1"),
+				v1.ResourceMemory:       resource.MustParse("1Mi"),
+				fake.ResourceGPUVendorA: resource.MustParse("1"),
+				v1.ResourcePods:         resource.MustParse("1"),
+			})
+			for _, pod := range pods {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+		})
+		It("should create a machine with resource requests with daemon overhead", func() {
+			ExpectApplied(ctx, env.Client, test.Provisioner(), test.DaemonSet(
+				test.DaemonSetOptions{PodOptions: test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Mi")}},
+				}},
+			))
+			pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Mi")}},
+				},
+			))
+			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+			ExpectMachineRequests(cloudProvider.CreateCalls[0], v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse("2"),
+				v1.ResourceMemory: resource.MustParse("2Mi"),
+				v1.ResourcePods:   resource.MustParse("2"),
+			})
 			for _, pod := range pods {
 				ExpectScheduled(ctx, env.Client, pod)
 			}
@@ -1113,5 +1167,12 @@ func ExpectMachineRequirements(machine *v1alpha1.Machine, requirements ...v1.Nod
 		expected := sets.New(requirement.Values...)
 		ExpectWithOffset(1, have.Len()).To(Equal(expected.Len()))
 		ExpectWithOffset(1, have.Intersection(expected).Len()).To(Equal(expected.Len()))
+	}
+}
+
+func ExpectMachineRequests(machine *v1alpha1.Machine, resources v1.ResourceList) {
+	for name, value := range resources {
+		v := machine.Spec.Resources.Requests[name]
+		ExpectWithOffset(1, v.AsApproximateFloat64()).To(BeNumerically("~", value.AsApproximateFloat64(), 10))
 	}
 }

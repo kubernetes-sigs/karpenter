@@ -36,7 +36,6 @@ type Machine struct {
 
 	Pods          []*v1.Pod
 	topology      *Topology
-	requests      v1.ResourceList
 	hostPortUsage *scheduling.HostPortUsage
 }
 
@@ -51,12 +50,12 @@ func NewMachine(machineTemplate *MachineTemplate, topology *Topology, daemonReso
 	template.Requirements.Add(machineTemplate.Requirements.Values()...)
 	template.Requirements.Add(scheduling.NewRequirement(v1.LabelHostname, v1.NodeSelectorOpIn, hostname))
 	template.InstanceTypeOptions = instanceTypes
+	template.Requests = daemonResources
 
 	return &Machine{
 		MachineTemplate: template,
 		hostPortUsage:   scheduling.NewHostPortUsage(),
 		topology:        topology,
-		requests:        daemonResources,
 	}
 }
 
@@ -91,7 +90,7 @@ func (m *Machine) Add(ctx context.Context, pod *v1.Pod) error {
 	nodeRequirements.Add(topologyRequirements.Values()...)
 
 	// Check instance type combinations
-	requests := resources.Merge(m.requests, resources.RequestsForPods(pod))
+	requests := resources.Merge(m.Requests, resources.RequestsForPods(pod))
 	instanceTypes := filterInstanceTypesByRequirements(m.InstanceTypeOptions, nodeRequirements, requests)
 	if len(instanceTypes) == 0 {
 		return fmt.Errorf("no instance type satisfied resources %s and requirements %s", resources.String(resources.RequestsForPods(pod)), nodeRequirements)
@@ -100,7 +99,7 @@ func (m *Machine) Add(ctx context.Context, pod *v1.Pod) error {
 	// Update node
 	m.Pods = append(m.Pods, pod)
 	m.InstanceTypeOptions = instanceTypes
-	m.requests = requests
+	m.Requests = requests
 	m.Requirements = nodeRequirements
 	m.topology.Record(pod, nodeRequirements)
 	m.hostPortUsage.Add(ctx, pod)
@@ -116,7 +115,7 @@ func (m *Machine) FinalizeScheduling() {
 }
 
 func (m *Machine) String() string {
-	return fmt.Sprintf("machine with %d pods requesting %s from types %s", len(m.Pods), resources.String(m.requests),
+	return fmt.Sprintf("machine with %d pods requesting %s from types %s", len(m.Pods), resources.String(m.Requests),
 		InstanceTypeList(m.InstanceTypeOptions))
 }
 
