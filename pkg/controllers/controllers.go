@@ -25,6 +25,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/counter"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/inflightchecks"
+	"github.com/aws/karpenter-core/pkg/controllers/machine"
 	metricspod "github.com/aws/karpenter-core/pkg/controllers/metrics/pod"
 	metricsprovisioner "github.com/aws/karpenter-core/pkg/controllers/metrics/provisioner"
 	metricsstate "github.com/aws/karpenter-core/pkg/controllers/metrics/state"
@@ -36,7 +37,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
 )
 
 func init() {
@@ -50,7 +50,6 @@ func NewControllers(
 	kubernetesInterface kubernetes.Interface,
 	cluster *state.Cluster,
 	eventRecorder events.Recorder,
-	settingsStore settingsstore.Store,
 	cloudProvider cloudprovider.CloudProvider,
 ) []controller.Controller {
 	provisioner := provisioning.NewProvisioner(ctx, kubeClient, kubernetesInterface.CoreV1(), eventRecorder, cloudProvider, cluster)
@@ -69,5 +68,6 @@ func NewControllers(
 		metricsprovisioner.NewController(kubeClient),
 		counter.NewController(kubeClient, cluster),
 		inflightchecks.NewController(clock, kubeClient, eventRecorder, cloudProvider),
+		machine.NewController(kubeClient, cloudProvider),
 	}
 }
