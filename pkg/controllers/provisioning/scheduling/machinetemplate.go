@@ -42,6 +42,7 @@ type MachineTemplate struct {
 	Taints              scheduling.Taints
 	StartupTaints       scheduling.Taints
 	Requirements        scheduling.Requirements
+	Requests            v1.ResourceList
 	Kubelet             *v1alpha5.KubeletConfiguration
 }
 
@@ -91,6 +92,9 @@ func (i *MachineTemplate) ToMachine(owner *v1alpha5.Provisioner) *v1alpha1.Machi
 			StartupTaints: i.StartupTaints,
 			Requirements:  i.Requirements.NodeSelectorRequirements(),
 			Kubelet:       i.Kubelet,
+			Resources: v1alpha1.ResourceRequirements{
+				Requests: i.Requests,
+			},
 		},
 	}
 	if i.Provider != nil {
