@@ -33,6 +33,7 @@ const (
 	ProvisioningReason   = "provisioning"
 	ExpirationReason     = "expiration"
 	EmptinessReason      = "emptiness"
+	DriftReason          = "drift"
 )
 
 // DurationBuckets returns a []float64 of default threshold values for duration histograms.

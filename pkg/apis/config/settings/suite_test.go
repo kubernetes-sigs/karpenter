@@ -45,17 +45,20 @@ var _ = Describe("Validation", func() {
 		s, _ := settings.NewSettingsFromConfigMap(cm)
 		Expect(s.BatchMaxDuration.Duration).To(Equal(time.Second * 10))
 		Expect(s.BatchIdleDuration.Duration).To(Equal(time.Second))
+		Expect(s.DriftEnabled).To(BeFalse())
 	})
 	It("should succeed to set custom values", func() {
 		cm := &v1.ConfigMap{
 			Data: map[string]string{
-				"batchMaxDuration":  "30s",
-				"batchIdleDuration": "5s",
+				"batchMaxDuration":          "30s",
+				"batchIdleDuration":         "5s",
+				"featureGates.driftEnabled": "true",
 			},
 		}
 		s, _ := settings.NewSettingsFromConfigMap(cm)
 		Expect(s.BatchMaxDuration.Duration).To(Equal(time.Second * 30))
 		Expect(s.BatchIdleDuration.Duration).To(Equal(time.Second * 5))
+		Expect(s.DriftEnabled).To(BeTrue())
 	})
 	It("should fail validation with panic when batchMaxDuration is negative", func() {
 		defer ExpectPanic()
@@ -71,6 +74,15 @@ var _ = Describe("Validation", func() {
 		cm := &v1.ConfigMap{
 			Data: map[string]string{
 				"batchIdleDuration": "-1s",
+			},
+		}
+		_, _ = settings.NewSettingsFromConfigMap(cm)
+	})
+	It("should fail validation with panic when driftEnabled is not a valid boolean value", func() {
+		defer ExpectPanic()
+		cm := &v1.ConfigMap{
+			Data: map[string]string{
+				"featureGates.driftEnabled": "foobar",
 			},
 		}
 		_, _ = settings.NewSettingsFromConfigMap(cm)
