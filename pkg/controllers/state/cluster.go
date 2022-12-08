@@ -51,7 +51,7 @@ type Cluster struct {
 	// State: Node Status & Pod -> Node Binding
 	mu sync.RWMutex
 
-	inflightNodes map[string]*Node
+	// Nodes contains
 	nodes         map[string]*Node                // node name -> node
 	machineToNode map[string]string               // an efficient index track machine to node mappings
 	bindings      map[types.NamespacedName]string // pod namespaced named -> node name
@@ -79,7 +79,6 @@ func NewCluster(ctx context.Context, clk clock.Clock, client client.Client, cp c
 		kubeClient:     client,
 		cloudProvider:  cp,
 		nominatedNodes: cache.New(nominationPeriod, 10*time.Second),
-		inflightNodes:  map[string]*Node{},
 		nodes:          map[string]*Node{},
 		machineToNode:  map[string]string{},
 		bindings:       map[types.NamespacedName]string{},
@@ -153,10 +152,7 @@ func (c *Cluster) ForEachNode(f func(n *Node) bool) {
 	for _, node := range c.nodes {
 		nodes = append(nodes, node)
 	}
-	for _, node := range c.inflightNodes {
-		nodes = append(nodes, node)
-	}
-	// sort nodes by creation time so we provide a consistent ordering
+	// sort nodes by creation time, so we provide a consistent ordering
 	sort.Slice(nodes, func(a, b int) bool {
 		if nodes[a].Node.CreationTimestamp != nodes[b].Node.CreationTimestamp {
 			return nodes[a].Node.CreationTimestamp.Time.Before(nodes[b].Node.CreationTimestamp.Time)
@@ -209,15 +205,16 @@ func (c *Cluster) MarkForDeletion(nodeNames ...string) {
 // newNode always returns a node, even if some portion of the update has failed
 func (c *Cluster) newNode(ctx context.Context, node *v1.Node) (*Node, error) {
 	n := &Node{
-		Node:          node,
-		Capacity:      v1.ResourceList{},
-		Allocatable:   v1.ResourceList{},
-		Available:     v1.ResourceList{},
-		HostPortUsage: scheduling.NewHostPortUsage(),
-		VolumeUsage:   scheduling.NewVolumeLimits(c.kubeClient),
-		VolumeLimits:  scheduling.VolumeCount{},
-		podRequests:   map[types.NamespacedName]v1.ResourceList{},
-		podLimits:     map[types.NamespacedName]v1.ResourceList{},
+		Node:              node,
+		Capacity:          v1.ResourceList{},
+		Allocatable:       v1.ResourceList{},
+		Available:         v1.ResourceList{},
+		HostPortUsage:     scheduling.NewHostPortUsage(),
+		VolumeUsage:       scheduling.NewVolumeLimits(c.kubeClient),
+		VolumeLimits:      scheduling.VolumeCount{},
+		podRequests:       map[types.NamespacedName]v1.ResourceList{},
+		podLimits:         map[types.NamespacedName]v1.ResourceList{},
+		MarkedForDeletion: !node.DeletionTimestamp.IsZero(),
 	}
 	if err := multierr.Combine(
 		c.populateCapacity(ctx, node, n),
@@ -233,7 +230,7 @@ func (c *Cluster) newInflightNode(machine *v1alpha1.Machine) *Node {
 	return &Node{
 		Node: &v1.Node{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:              getPseudoNodeName(machine.Name),
+				Name:              inflightNodeName(machine.Name),
 				CreationTimestamp: machine.CreationTimestamp,
 				DeletionTimestamp: machine.DeletionTimestamp,
 				Labels:            machine.Labels,
@@ -354,16 +351,15 @@ func (c *Cluster) populateVolumeLimits(ctx context.Context, node *v1.Node, n *No
 	return nil
 }
 
-func (c *Cluster) DeleteMachine(machineName string) {
+func (c *Cluster) DeleteMachineNode(machineName string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	nodeName, ok := c.machineToNode[machineName]
-	if !ok {
-		return
+	// If Machine is in machine-node mapping, remove it
+	if nodeName, ok := c.machineToNode[machineName]; ok {
+		delete(c.nodes, nodeName)
+		delete(c.machineToNode, machineName)
 	}
-	delete(c.nodes, nodeName)
-	delete(c.machineToNode, machineName)
 	c.recordConsolidationChange()
 }
 
@@ -371,30 +367,50 @@ func (c *Cluster) DeleteNode(nodeName string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	node, ok := c.nodes[nodeName]
-	if !ok {
-		return
-	}
-	// This node is owned by a machine, so we should let the machine deletion handle the node deletion
-	_, ok = node.Node.Labels[v1alpha5.MachineNameLabelKey]
-	if ok {
-		return
-	}
 	delete(c.nodes, nodeName)
 	c.recordConsolidationChange()
 }
 
-func (c *Cluster) UpdateMachine(machine *v1alpha1.Machine) {
+//nolint:gocyclo
+func (c *Cluster) UpdateMachineNode(ctx context.Context, machine *v1alpha1.Machine, node *v1.Node) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// If the machine already has a mapping to a node, don't act on this machine
-	nodeName, ok := c.machineToNode[machine.Name]
-	if ok {
-		c.nodes[nodeName].MarkedForDeletion = c.nodes[nodeName].MarkedForDeletion || !machine.DeletionTimestamp.IsZero()
+	// If the machine isn't initialized, then use the inflight node logic, else use the machine details
+	if node == nil || machine.StatusConditions().GetCondition(v1alpha1.MachineInitialized) == nil ||
+		machine.StatusConditions().GetCondition(v1alpha1.MachineInitialized).Status != v1.ConditionTrue {
+		oldNode, foundOldNode := c.nodes[inflightNodeName(machine.Name)]
+		n := c.newInflightNode(machine)
+		if foundOldNode {
+			n.MarkedForDeletion = n.MarkedForDeletion || oldNode.MarkedForDeletion
+		}
+		c.nodes[inflightNodeName(machine.Name)] = n
+		c.machineToNode[machine.Name] = inflightNodeName(machine.Name)
+	} else {
+		node.DeletionTimestamp = machine.DeletionTimestamp
+		n, err := c.newNode(ctx, node)
+		if err != nil {
+			return err
+		}
+		// When we see a change from inflight to real node, we know that the node is initialized
+		if inflightNode, ok := c.nodes[inflightNodeName(machine.Name)]; ok {
+			n.MarkedForDeletion = n.MarkedForDeletion || inflightNode.MarkedForDeletion
+
+			// Migrate the nominated node cache over to the new name for the node if we find it in the cache
+			_, expiration, found := c.nominatedNodes.GetWithExpiration(inflightNodeName(machine.Name))
+			if found {
+				c.nominatedNodes.Delete(inflightNodeName(machine.Name))
+				c.nominatedNodes.Set(node.Name, nil, time.Until(expiration))
+			}
+			c.recordConsolidationChange()
+			delete(c.nodes, inflightNodeName(machine.Name))
+		} else if oldNode, foundOldNode := c.nodes[node.Name]; foundOldNode {
+			n.MarkedForDeletion = n.MarkedForDeletion || oldNode.MarkedForDeletion
+		}
+		c.machineToNode[machine.Name] = node.Name
+		c.nodes[node.Name] = n
 	}
-	node := c.newInflightNode(machine)
-	c.nodes[node.Node.Name] = node
+	return nil
 }
 
 // UpdateNode is called for every node reconciliation
@@ -406,50 +422,13 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 		return err
 	}
 
-	// Get the old node so that we can check the old state
-	oldNode, foundOldNode := c.nodes[node.Name]
-
-	// Remove this machine from the inflight nodes if the machine node has registered
-	machineName, ok := node.Labels[v1alpha5.MachineNameLabelKey]
+	oldNode, ok := c.nodes[node.Name]
+	// If the old node existed and its initialization status changed, we want to reconsider consolidation.  This handles
+	// a situation where we re-start with an unready node and it becomes ready later.
 	if ok {
-		// Check if the machine has initialized. We consider the node inflight until the
-		// node has fully initialized
-		machine := &v1alpha1.Machine{}
-		if err = c.kubeClient.Get(ctx, types.NamespacedName{Name: machineName}, machine); err != nil {
-			return client.IgnoreNotFound(err)
-		}
-		if machine.StatusConditions().GetCondition(v1alpha1.MachineInitialized).Status != v1.ConditionTrue {
-			return nil
-		}
-
-		c.machineToNode[machineName] = node.Name
-
-		// The first time that we go from uninitialized to initialized, we will go into this branch
-		// because the uninitialized node will be set in the inflight nodes
-		_, ok = c.inflightNodes[getPseudoNodeName(machineName)]
-		if ok {
-			c.recordConsolidationChange()
-			delete(c.inflightNodes, getPseudoNodeName(machineName))
-
-			// Migrate the nominated node cache over to the new name for the node if we find it in the cache
-			_, expiration, found := c.nominatedNodes.GetWithExpiration(getPseudoNodeName(machineName))
-			if found {
-				c.nominatedNodes.Delete(getPseudoNodeName(machineName))
-				c.nominatedNodes.Set(node.Name, nil, time.Until(expiration))
-			}
-		}
-	} else {
-		// We mark the node for deletion either:
-		// 1. If the DeletionTimestamp is set (the node is explicitly being deleted)
-		// 2. If the last state of the node has the node MarkedForDeletion
-		n.MarkedForDeletion = !node.DeletionTimestamp.IsZero()
-
-		// TODO joinnis: This check can be removed when we stop labeling the node
-		if foundOldNode && oldNode.Node.Labels[v1alpha5.LabelNodeInitialized] != n.Node.Labels[v1alpha5.LabelNodeInitialized] {
+		if oldNode.Node.Labels[v1alpha5.LabelNodeInitialized] != n.Node.Labels[v1alpha5.LabelNodeInitialized] {
 			c.recordConsolidationChange()
 		}
-	}
-	if foundOldNode {
 		n.MarkedForDeletion = n.MarkedForDeletion || oldNode.MarkedForDeletion
 	}
 	c.nodes[node.Name] = n
@@ -622,6 +601,6 @@ func (c *Cluster) Reset(ctx context.Context) {
 	c.antiAffinityPods = sync.Map{}
 }
 
-func getPseudoNodeName(machineName string) string {
+func inflightNodeName(machineName string) string {
 	return fmt.Sprintf("machine_%s", machineName)
 }

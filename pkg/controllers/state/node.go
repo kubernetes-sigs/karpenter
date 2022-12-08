@@ -24,8 +24,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
@@ -52,7 +54,6 @@ func (c *NodeController) Reconcile(ctx context.Context, req reconcile.Request) (
 	node := &v1.Node{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, node); err != nil {
 		if errors.IsNotFound(err) {
-			// notify cluster state of the node deletion
 			c.cluster.DeleteNode(req.Name)
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
@@ -60,7 +61,6 @@ func (c *NodeController) Reconcile(ctx context.Context, req reconcile.Request) (
 	if err := c.cluster.UpdateNode(ctx, node); err != nil {
 		return reconcile.Result{}, err
 	}
-	// ensure it's aware of any nodes we discover, this is a no-op if the node is already known to our cluster state
 	return reconcile.Result{Requeue: true, RequeueAfter: stateRetryPeriod}, nil
 }
 
@@ -68,5 +68,9 @@ func (c *NodeController) Builder(_ context.Context, m manager.Manager) corecontr
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1.Node{}).
+		WithEventFilter(predicate.NewPredicateFuncs(func(o client.Object) bool {
+			_, ok := o.GetLabels()[v1alpha5.MachineNameLabelKey]
+			return !ok
+		})).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))
 }

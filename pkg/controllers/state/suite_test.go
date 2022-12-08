@@ -26,6 +26,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
@@ -55,6 +56,7 @@ var fakeClock *clock.FakeClock
 var cluster *state.Cluster
 var nodeController controller.Controller
 var podController controller.Controller
+var machineNodeController controller.Controller
 var provisionerController controller.Controller
 var cloudProvider *fake.CloudProvider
 var provisioner *v1alpha5.Provisioner
@@ -81,10 +83,12 @@ var _ = BeforeEach(func() {
 	cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
 	nodeController = state.NewNodeController(env.Client, cluster)
 	podController = state.NewPodController(env.Client, cluster)
+	machineNodeController = state.NewMachineNodeController(env.Client, cluster)
 	provisionerController = state.NewProvisionerController(env.Client, cluster)
 	provisioner = test.Provisioner(test.ProvisionerOptions{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
 	ExpectApplied(ctx, env.Client, provisioner)
 })
+
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 })
@@ -119,7 +123,7 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
 
 		// two pods, but neither is bound to the node so the node's CPU requests should be zero
-		ExpectNodeResourceRequest(node, v1.ResourceCPU, "0.0")
+		ExpectNodeResourceRequest(node.Name, v1.ResourceCPU, "0.0")
 	})
 	It("should count new pods bound to nodes", func() {
 		pod1 := test.UnschedulablePod(test.PodOptions{
@@ -153,11 +157,11 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
 
-		ExpectNodeResourceRequest(node, v1.ResourceCPU, "1.5")
+		ExpectNodeResourceRequest(node.Name, v1.ResourceCPU, "1.5")
 
 		ExpectManualBinding(ctx, env.Client, pod2, node)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
-		ExpectNodeResourceRequest(node, v1.ResourceCPU, "3.5")
+		ExpectNodeResourceRequest(node.Name, v1.ResourceCPU, "3.5")
 	})
 	It("should count existing pods bound to nodes", func() {
 		pod1 := test.UnschedulablePod(test.PodOptions{
@@ -189,7 +193,7 @@ var _ = Describe("Node Resource Level", func() {
 
 		// that we just noticed
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectNodeResourceRequest(node, v1.ResourceCPU, "3.5")
+		ExpectNodeResourceRequest(node.Name, v1.ResourceCPU, "3.5")
 	})
 	It("should subtract requests if the pod is deleted", func() {
 		pod1 := test.UnschedulablePod(test.PodOptions{
@@ -224,16 +228,16 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
 
-		ExpectNodeResourceRequest(node, v1.ResourceCPU, "3.5")
+		ExpectNodeResourceRequest(node.Name, v1.ResourceCPU, "3.5")
 
 		// delete the pods and the CPU usage should go down
 		ExpectDeleted(ctx, env.Client, pod2)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
-		ExpectNodeResourceRequest(node, v1.ResourceCPU, "1.5")
+		ExpectNodeResourceRequest(node.Name, v1.ResourceCPU, "1.5")
 
 		ExpectDeleted(ctx, env.Client, pod1)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
-		ExpectNodeResourceRequest(node, v1.ResourceCPU, "0")
+		ExpectNodeResourceRequest(node.Name, v1.ResourceCPU, "0")
 	})
 	It("should not add requests if the pod is terminal", func() {
 		pod1 := test.UnschedulablePod(test.PodOptions{
@@ -271,7 +275,7 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
 
-		ExpectNodeResourceRequest(node, v1.ResourceCPU, "0")
+		ExpectNodeResourceRequest(node.Name, v1.ResourceCPU, "0")
 	})
 	It("should stop tracking nodes that are deleted", func() {
 		pod1 := test.UnschedulablePod(test.PodOptions{
@@ -408,8 +412,8 @@ var _ = Describe("Node Resource Level", func() {
 				v1.ResourcePods: resource.MustParse("500"),
 			}})
 		ExpectApplied(ctx, env.Client, node)
-		ExpectNodeResourceRequest(node, v1.ResourceCPU, "0.0")
-		ExpectNodeResourceRequest(node, v1.ResourcePods, "0")
+		ExpectNodeResourceRequest(node.Name, v1.ResourceCPU, "0.0")
+		ExpectNodeResourceRequest(node.Name, v1.ResourcePods, "0")
 
 		sum := 0.0
 		podCount := 0
@@ -424,8 +428,8 @@ var _ = Describe("Node Resource Level", func() {
 				ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
 			}
 			sum += pod.Spec.Containers[0].Resources.Requests.Cpu().AsApproximateFloat64()
-			ExpectNodeResourceRequest(node, v1.ResourceCPU, fmt.Sprintf("%1.1f", sum))
-			ExpectNodeResourceRequest(node, v1.ResourcePods, fmt.Sprintf("%d", podCount))
+			ExpectNodeResourceRequest(node.Name, v1.ResourceCPU, fmt.Sprintf("%1.1f", sum))
+			ExpectNodeResourceRequest(node.Name, v1.ResourcePods, fmt.Sprintf("%d", podCount))
 		}
 
 		for _, pod := range pods {
@@ -437,11 +441,11 @@ var _ = Describe("Node Resource Level", func() {
 			}
 			sum -= pod.Spec.Containers[0].Resources.Requests.Cpu().AsApproximateFloat64()
 			podCount--
-			ExpectNodeResourceRequest(node, v1.ResourceCPU, fmt.Sprintf("%1.1f", sum))
-			ExpectNodeResourceRequest(node, v1.ResourcePods, fmt.Sprintf("%d", podCount))
+			ExpectNodeResourceRequest(node.Name, v1.ResourceCPU, fmt.Sprintf("%1.1f", sum))
+			ExpectNodeResourceRequest(node.Name, v1.ResourcePods, fmt.Sprintf("%d", podCount))
 		}
-		ExpectNodeResourceRequest(node, v1.ResourceCPU, "0.0")
-		ExpectNodeResourceRequest(node, v1.ResourcePods, "0")
+		ExpectNodeResourceRequest(node.Name, v1.ResourceCPU, "0.0")
+		ExpectNodeResourceRequest(node.Name, v1.ResourcePods, "0")
 	})
 	It("should track daemonset requested resources separately", func() {
 		ds := test.DaemonSet(
@@ -494,9 +498,9 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
 
 		// daemonset pod isn't bound yet
-		ExpectNodeDaemonSetRequested(node, v1.ResourceCPU, "0")
-		ExpectNodeDaemonSetRequested(node, v1.ResourceMemory, "0")
-		ExpectNodeResourceRequest(node, v1.ResourceCPU, "1.5")
+		ExpectNodeDaemonSetRequested(node.Name, v1.ResourceCPU, "0")
+		ExpectNodeDaemonSetRequested(node.Name, v1.ResourceMemory, "0")
+		ExpectNodeResourceRequest(node.Name, v1.ResourceCPU, "1.5")
 
 		ExpectApplied(ctx, env.Client, dsPod)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(dsPod))
@@ -504,11 +508,11 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(dsPod))
 
 		// just the DS request portion
-		ExpectNodeDaemonSetRequested(node, v1.ResourceCPU, "1")
-		ExpectNodeDaemonSetRequested(node, v1.ResourceMemory, "2Gi")
+		ExpectNodeDaemonSetRequested(node.Name, v1.ResourceCPU, "1")
+		ExpectNodeDaemonSetRequested(node.Name, v1.ResourceMemory, "2Gi")
 		// total request
-		ExpectNodeResourceRequest(node, v1.ResourceCPU, "2.5")
-		ExpectNodeResourceRequest(node, v1.ResourceMemory, "2Gi")
+		ExpectNodeResourceRequest(node.Name, v1.ResourceCPU, "2.5")
+		ExpectNodeResourceRequest(node.Name, v1.ResourceMemory, "2Gi")
 	})
 	It("should mark node for deletion when node is deleted", func() {
 		node := test.Node(test.NodeOptions{
@@ -530,7 +534,124 @@ var _ = Describe("Node Resource Level", func() {
 
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectNodeExists(ctx, env.Client, node.Name)
-		ExpectNodeDeletionMarked(node)
+		ExpectNodeDeletionMarked(node.Name)
+	})
+})
+
+var _ = Describe("Machine (in-flight) Level", func() {
+	It("should create an in-flight node when the machine is created", func() {
+		machine := test.Machine(test.MachineOptions{
+			Allocatable: v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse("2"),
+				v1.ResourceMemory: resource.MustParse("2Mi"),
+			},
+		})
+		ExpectApplied(ctx, env.Client, machine.DeepCopy())
+
+		ExpectReconcileSucceeded(ctx, machineNodeController, client.ObjectKeyFromObject(machine))
+		ExpectNodeResourceRequest(inflightNodeName(machine.Name), v1.ResourceCPU, "2")
+		ExpectNodeResourceRequest(inflightNodeName(machine.Name), v1.ResourceMemory, "2Mi")
+	})
+	It("should use machine allocatable until the machine is initialized", func() {
+		machine := test.Machine(test.MachineOptions{
+			Allocatable: v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse("2"),
+				v1.ResourceMemory: resource.MustParse("2Mi"),
+			},
+		})
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1alpha5.MachineNameLabelKey: machine.Name,
+			}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:    resource.MustParse("4"),
+				v1.ResourceMemory: resource.MustParse("4Mi"),
+			},
+		})
+		// We deep-copy the machine here since we need the status
+		ExpectApplied(ctx, env.Client, node, machine.DeepCopy())
+		ExpectReconcileSucceeded(ctx, machineNodeController, client.ObjectKeyFromObject(machine))
+
+		Expect(Nodes()).To(HaveLen(1))
+		ExpectNodeResourceRequest(inflightNodeName(machine.Name), v1.ResourceCPU, "2")
+		ExpectNodeResourceRequest(inflightNodeName(machine.Name), v1.ResourceMemory, "2Mi")
+
+		machine.StatusConditions().MarkTrue(v1alpha1.MachineInitialized)
+		ExpectApplied(ctx, env.Client, machine)
+		ExpectReconcileSucceeded(ctx, machineNodeController, client.ObjectKeyFromObject(machine))
+
+		Expect(Nodes()).To(HaveLen(1))
+		ExpectNodeResourceRequest(inflightNodeName(machine.Name), v1.ResourceCPU, "4")
+		ExpectNodeResourceRequest(inflightNodeName(machine.Name), v1.ResourceMemory, "4Mi")
+	})
+	It("should migrate an in-flight node to an actual node in state", func() {
+		machine := test.Machine(test.MachineOptions{
+			Allocatable: v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse("2"),
+				v1.ResourceMemory: resource.MustParse("2Mi"),
+			},
+		})
+		ExpectApplied(ctx, env.Client, machine.DeepCopy())
+		ExpectReconcileSucceeded(ctx, machineNodeController, client.ObjectKeyFromObject(machine))
+
+		Expect(Nodes()).To(HaveLen(1))
+
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1alpha5.MachineNameLabelKey: machine.Name,
+			}},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:    resource.MustParse("4"),
+				v1.ResourceMemory: resource.MustParse("4Mi"),
+			}},
+		)
+		ExpectApplied(ctx, env.Client, node)
+		machine.StatusConditions().MarkTrue(v1alpha1.MachineInitialized)
+		ExpectReconcileSucceeded(ctx, machineNodeController, client.ObjectKeyFromObject(node))
+
+		// In-flight node should be overridden with the actual node
+		Expect(Nodes()).To(HaveLen(1))
+		ExpectNodeResourceRequest(node.Name, v1.ResourceCPU, "4")
+		ExpectNodeResourceRequest(node.Name, v1.ResourceMemory, "4Mi")
+	})
+	It("should have MarkedForDeletion for an in-flight node", func() {
+		machine := test.Machine(test.MachineOptions{
+			Allocatable: v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse("2"),
+				v1.ResourceMemory: resource.MustParse("2Mi"),
+			},
+		})
+		ExpectApplied(ctx, env.Client, machine.DeepCopy())
+		ExpectReconcileSucceeded(ctx, machineNodeController, client.ObjectKeyFromObject(machine))
+
+		cluster.MarkForDeletion(inflightNodeName(machine.Name))
+
+		// Node should be marked for deletion
+		nodes := Nodes()
+		Expect(nodes).To(HaveLen(1))
+		Expect(nodes[0].MarkedForDeletion).To(BeTrue())
+
+		// Update the machine and keep the MarkedForDeletion
+		machine.Labels["test-label"] = "test-value"
+		ExpectApplied(ctx, env.Client, machine.DeepCopy())
+		ExpectReconcileSucceeded(ctx, machineNodeController, client.ObjectKeyFromObject(machine))
+
+		// Node should maintain marked for deletion
+		nodes = Nodes()
+		Expect(nodes).To(HaveLen(1))
+		Expect(nodes[0].MarkedForDeletion).To(BeTrue())
+	})
+	It("should maintain MarkedForDeletion when moving from in-flight to real node", func() {
+		machine := test.Machine(test.MachineOptions{
+			Allocatable: v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse("2"),
+				v1.ResourceMemory: resource.MustParse("2Mi"),
+			},
+		})
+		ExpectApplied(ctx, env.Client, machine.DeepCopy())
+		ExpectReconcileSucceeded(ctx, machineNodeController, client.ObjectKeyFromObject(machine))
+
+		cluster.MarkForDeletion(inflightNodeName(machine.Name))
 	})
 })
 
@@ -722,9 +843,18 @@ var _ = Describe("Provisioner Spec Updates", func() {
 	})
 })
 
-func ExpectNodeResourceRequest(node *v1.Node, resourceName v1.ResourceName, amount string) {
+func Nodes() []*state.Node {
+	var nodes []*state.Node
 	cluster.ForEachNode(func(n *state.Node) bool {
-		if n.Node.Name != node.Name {
+		nodes = append(nodes, n)
+		return true
+	})
+	return nodes
+}
+
+func ExpectNodeResourceRequest(name string, resourceName v1.ResourceName, amount string) {
+	cluster.ForEachNode(func(n *state.Node) bool {
+		if n.Node.Name != name {
 			return true
 		}
 		requested := resources.Subtract(n.Node.Status.Allocatable, n.Available)
@@ -735,24 +865,29 @@ func ExpectNodeResourceRequest(node *v1.Node, resourceName v1.ResourceName, amou
 		return false
 	})
 }
-func ExpectNodeDaemonSetRequested(node *v1.Node, resourceName v1.ResourceName, amount string) {
+
+func ExpectNodeDaemonSetRequested(name string, resourceName v1.ResourceName, amount string) {
 	cluster.ForEachNode(func(n *state.Node) bool {
-		if n.Node.Name != node.Name {
+		if n.Node.Name != name {
 			return true
 		}
 		dsReq := n.DaemonSetRequested[resourceName]
 		expected := resource.MustParse(amount)
-		Expect(dsReq.AsApproximateFloat64()).To(BeNumerically("~", expected.AsApproximateFloat64(), 0.001))
+		ExpectWithOffset(1, dsReq.AsApproximateFloat64()).To(BeNumerically("~", expected.AsApproximateFloat64(), 0.001))
 		return false
 	})
 }
 
-func ExpectNodeDeletionMarked(node *v1.Node) {
+func ExpectNodeDeletionMarked(name string) {
 	cluster.ForEachNode(func(n *state.Node) bool {
-		if n.Node.Name != node.Name {
+		if n.Node.Name != name {
 			return true
 		}
-		Expect(n.MarkedForDeletion).To(BeTrue())
+		ExpectWithOffset(1, n.MarkedForDeletion).To(BeTrue())
 		return false
 	})
+}
+
+func inflightNodeName(machineName string) string {
+	return fmt.Sprintf("machine_%s", machineName)
 }

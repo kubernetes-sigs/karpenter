@@ -17,54 +17,76 @@ package state
 import (
 	"context"
 
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
-// MachineController reconciles machines for the purpose of maintaining state regarding nodes that is expensive to compute.
-type MachineController struct {
+// MachineNodeController reconciles machines for the purpose of maintaining state regarding nodes that is expensive to compute.
+type MachineNodeController struct {
 	kubeClient client.Client
 	cluster    *Cluster
 }
 
-// NewMachineController constructs a controller instance
-func NewMachineController(kubeClient client.Client, cluster *Cluster) corecontroller.Controller {
-	return &MachineController{
+// NewMachineNodeController constructs a controller instance
+func NewMachineNodeController(kubeClient client.Client, cluster *Cluster) corecontroller.Controller {
+	return &MachineNodeController{
 		kubeClient: kubeClient,
 		cluster:    cluster,
 	}
 }
 
-func (c *MachineController) Name() string {
+func (c *MachineNodeController) Name() string {
 	return "machine-state"
 }
 
-func (c *MachineController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+func (c *MachineNodeController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("machine", req.NamespacedName.Name))
 	machine := &v1alpha1.Machine{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, machine); err != nil {
 		if errors.IsNotFound(err) {
-			// notify cluster state of the node deletion
-			c.cluster.DeleteMachine(req.Name)
+			c.cluster.DeleteMachineNode(req.Name)
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	c.cluster.UpdateMachine(machine)
-	// ensure it's aware of any nodes we discover, this is a no-op if the node is already known to our cluster state
+	var node *v1.Node
+	nodeList := &v1.NodeList{}
+	if err := c.kubeClient.List(ctx, nodeList, client.MatchingLabels{v1alpha5.MachineNameLabelKey: machine.Name}); client.IgnoreNotFound(err) != nil {
+		return reconcile.Result{}, err
+	}
+	if len(nodeList.Items) == 1 {
+		node = &nodeList.Items[0]
+	}
+	if err := c.cluster.UpdateMachineNode(ctx, machine, node); err != nil {
+		return reconcile.Result{}, err
+	}
 	return reconcile.Result{Requeue: true, RequeueAfter: stateRetryPeriod}, nil
 }
 
-func (c *MachineController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
+func (c *MachineNodeController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1alpha1.Machine{}).
+		Watches(
+			&source.Kind{Type: &v1.Node{}},
+			handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
+				if name, ok := o.GetLabels()[v1alpha5.MachineNameLabelKey]; ok {
+					return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: name}}}
+				}
+				return nil
+			}),
+		).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))
 }
