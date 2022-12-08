@@ -161,6 +161,10 @@ func (c *CloudProvider) Delete(context.Context, *v1.Node) error {
 	return nil
 }
 
+func (c *CloudProvider) IsMachineDrifted(context.Context, *v1alpha1.Machine) (bool, error) {
+	return false, nil
+}
+
 // Name returns the CloudProvider implementation name.
 func (c *CloudProvider) Name() string {
 	return "fake"

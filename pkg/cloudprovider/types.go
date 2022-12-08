@@ -59,6 +59,9 @@ type CloudProvider interface {
 	// availability, the GetInstanceTypes method should always return all instance types,
 	// even those with no offerings available.
 	GetInstanceTypes(context.Context, *v1alpha5.Provisioner) ([]*InstanceType, error)
+	// IsNodeDrifted returns whether a machine has drifted from the provisioning requirements
+	// it is tied to.
+	IsMachineDrifted(context.Context, *v1alpha1.Machine) (bool, error)
 	// Name returns the CloudProvider implementation name.
 	Name() string
 }
