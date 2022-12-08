@@ -32,15 +32,9 @@ type SingleNodeConsolidation struct {
 	consolidation
 }
 
-func NewSingleNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider) *SingleNodeConsolidation {
-	return &SingleNodeConsolidation{consolidation: consolidation{
-		clock:         clk,
-		cluster:       cluster,
-		kubeClient:    kubeClient,
-		provisioner:   provisioner,
-		cloudProvider: cp,
-	},
-	}
+func NewSingleNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
+	cp cloudprovider.CloudProvider, reporter *Reporter) *SingleNodeConsolidation {
+	return &SingleNodeConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, reporter)}
 }
 
 // ComputeCommand generates a deprovisioning command given deprovisionable nodes

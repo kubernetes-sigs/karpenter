@@ -35,15 +35,9 @@ type EmptyNodeConsolidation struct {
 	consolidation
 }
 
-func NewEmptyNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider) *EmptyNodeConsolidation {
-	return &EmptyNodeConsolidation{consolidation: consolidation{
-		clock:         clk,
-		cluster:       cluster,
-		kubeClient:    kubeClient,
-		provisioner:   provisioner,
-		cloudProvider: cp,
-	},
-	}
+func NewEmptyNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client,
+	provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, reporter *Reporter) *EmptyNodeConsolidation {
+	return &EmptyNodeConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, reporter)}
 }
 
 // ComputeCommand generates a deprovisioning command given deprovisionable nodes

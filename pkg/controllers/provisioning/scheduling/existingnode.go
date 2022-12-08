@@ -27,7 +27,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
-type ExistingMachine struct {
+type ExistingNode struct {
 	Pods          []*v1.Pod
 	Node          *v1.Node
 	requests      v1.ResourceList
@@ -40,7 +40,7 @@ type ExistingMachine struct {
 	volumeLimits  scheduling.VolumeCount
 }
 
-func NewExistingMachine(n *state.Node, topology *Topology, startupTaints []v1.Taint, daemonResources v1.ResourceList) *ExistingMachine {
+func NewExistingNode(n *state.Node, topology *Topology, startupTaints []v1.Taint, daemonResources v1.ResourceList) *ExistingNode {
 	// The state node passed in here must be a deep copy from cluster state as we modify it
 	// the remaining daemonResources to schedule are the total daemonResources minus what has already scheduled
 	remainingDaemonResources := resources.Subtract(daemonResources, n.DaemonSetRequested)
@@ -53,7 +53,7 @@ func NewExistingMachine(n *state.Node, topology *Topology, startupTaints []v1.Ta
 			remainingDaemonResources[k] = v
 		}
 	}
-	node := &ExistingMachine{
+	node := &ExistingNode{
 		Node:          n.Node,
 		available:     n.Available,
 		topology:      topology,
@@ -94,7 +94,7 @@ func NewExistingMachine(n *state.Node, topology *Topology, startupTaints []v1.Ta
 	return node
 }
 
-func (n *ExistingMachine) Add(ctx context.Context, pod *v1.Pod) error {
+func (n *ExistingNode) Add(ctx context.Context, pod *v1.Pod) error {
 	// Check Taints
 	if err := scheduling.Taints(n.taints).Tolerates(pod); err != nil {
 		return err
@@ -123,7 +123,7 @@ func (n *ExistingMachine) Add(ctx context.Context, pod *v1.Pod) error {
 
 	nodeRequirements := scheduling.NewRequirements(n.requirements.Values()...)
 	podRequirements := scheduling.NewPodRequirements(pod)
-	// Check Machine Affinity Requirements
+	// Check Node Affinity Requirements
 	if err := nodeRequirements.Compatible(podRequirements); err != nil {
 		return err
 	}

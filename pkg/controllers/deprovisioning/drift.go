@@ -64,7 +64,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, candidates ...CandidateNode)
 	for _, candidate := range candidates {
 		// is this a node that we can terminate?  This check is meant to be fast so we can save the expense of simulated
 		// scheduling unless its really needed
-		if !canBeTerminated(candidate, pdbs) {
+		if _, canTerminate := canBeTerminated(candidate, pdbs); !canTerminate {
 			continue
 		}
 
@@ -89,9 +89,9 @@ func (d *Drift) ComputeCommand(ctx context.Context, candidates ...CandidateNode)
 			}, nil
 		}
 		return Command{
-			nodesToRemove:       []*v1.Node{candidate.Node},
-			action:              actionReplace,
-			replacementMachines: newNodes,
+			nodesToRemove:    []*v1.Node{candidate.Node},
+			action:           actionReplace,
+			replacementNodes: newNodes,
 		}, nil
 	}
 	return Command{action: actionDoNothing}, nil

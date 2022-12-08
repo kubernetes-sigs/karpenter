@@ -61,3 +61,13 @@ func WaitingOnDeletion(node *v1.Node) events.Event {
 		DedupeValues:   []string{node.Name},
 	}
 }
+
+func UnconsolidatableReason(node *v1.Node, reason string) events.Event {
+	return events.Event{
+		InvolvedObject: node,
+		Type:           v1.EventTypeNormal,
+		Reason:         "Unconsolidatable",
+		Message:        reason,
+		DedupeValues:   []string{node.Name},
+	}
+}
