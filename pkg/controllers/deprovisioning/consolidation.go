@@ -43,7 +43,21 @@ type consolidation struct {
 	kubeClient             client.Client
 	provisioner            *provisioning.Provisioner
 	cloudProvider          cloudprovider.CloudProvider
+	reporter               *Reporter
 	lastConsolidationState int64
+}
+
+func makeConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
+	cloudProvider cloudprovider.CloudProvider, reporter *Reporter) consolidation {
+	return consolidation{
+		clock:                  clock,
+		cluster:                cluster,
+		kubeClient:             kubeClient,
+		provisioner:            provisioner,
+		cloudProvider:          cloudProvider,
+		reporter:               reporter,
+		lastConsolidationState: 0,
+	}
 }
 
 // consolidationTTL is the TTL between creating a consolidation command and validating that it still works.
@@ -75,8 +89,12 @@ func (c *consolidation) sortAndFilterCandidates(ctx context.Context, nodes []Can
 	}
 
 	// filter out nodes that can't be terminated
-	nodes = lo.Filter(nodes, func(c CandidateNode, _ int) bool {
-		return canBeTerminated(c, pdbs)
+	nodes = lo.Filter(nodes, func(cn CandidateNode, _ int) bool {
+		if reason, canTerminate := canBeTerminated(cn, pdbs); !canTerminate {
+			c.reporter.RecordUnconsolidatableReason(ctx, cn.Node, reason)
+			return false
+		}
+		return true
 	})
 
 	sort.Slice(nodes, func(i int, j int) bool {
@@ -86,11 +104,20 @@ func (c *consolidation) sortAndFilterCandidates(ctx context.Context, nodes []Can
 }
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes
-func (c *consolidation) ShouldDeprovision(_ context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, _ []*v1.Pod) bool {
+func (c *consolidation) ShouldDeprovision(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, _ []*v1.Pod) bool {
 	if val, ok := n.Node.Annotations[v1alpha5.DoNotConsolidateNodeAnnotationKey]; ok {
+		c.reporter.RecordUnconsolidatableReason(ctx, n.Node, fmt.Sprintf("%s annotation exists", v1alpha5.DoNotConsolidateNodeAnnotationKey))
 		return val != "true"
 	}
-	return provisioner != nil && provisioner.Spec.Consolidation != nil && ptr.BoolValue(provisioner.Spec.Consolidation.Enabled)
+	if provisioner == nil {
+		c.reporter.RecordUnconsolidatableReason(ctx, n.Node, "provisioner is unknown")
+		return false
+	}
+	if provisioner.Spec.Consolidation == nil || !ptr.BoolValue(provisioner.Spec.Consolidation.Enabled) {
+		c.reporter.RecordUnconsolidatableReason(ctx, n.Node, fmt.Sprintf("provisioner %s has consolidation disabled", provisioner.Name))
+		return false
+	}
+	return true
 }
 
 // ValidateCommand validates a command for a deprovisioner
@@ -117,7 +144,7 @@ func (c *consolidation) ValidateCommand(ctx context.Context, cmd Command, candid
 	//                    be deleted without producing more than one node
 	// len(newNodes) == 1, as long as the node looks like what we were expecting, this is valid
 	if len(newNodes) == 0 {
-		if len(cmd.replacementMachines) == 0 {
+		if len(cmd.replacementNodes) == 0 {
 			// scheduling produced zero new nodes and we weren't expecting any, so this is valid.
 			return true, nil
 		}
@@ -132,7 +159,7 @@ func (c *consolidation) ValidateCommand(ctx context.Context, cmd Command, candid
 	}
 
 	// we now know that scheduling simulation wants to create one new node
-	if len(cmd.replacementMachines) == 0 {
+	if len(cmd.replacementNodes) == 0 {
 		// but we weren't expecting any new nodes, so this is invalid
 		return false, nil
 	}
@@ -147,7 +174,7 @@ func (c *consolidation) ValidateCommand(ctx context.Context, cmd Command, candid
 	// a 4xlarge and replace it with a 2xlarge. If things have changed and the scheduling simulation we just performed
 	// now says that we need to launch a 4xlarge. It's still launching the correct number of nodes, but it's just
 	// as expensive or possibly more so we shouldn't validate.
-	if !instanceTypesAreSubset(cmd.replacementMachines[0].InstanceTypeOptions, newNodes[0].InstanceTypeOptions) {
+	if !instanceTypesAreSubset(cmd.replacementNodes[0].InstanceTypeOptions, newNodes[0].InstanceTypeOptions) {
 		return false, nil
 	}
 
@@ -174,6 +201,10 @@ func (c *consolidation) computeConsolidation(ctx context.Context, nodes ...Candi
 
 	// if not all of the pods were scheduled, we can't do anything
 	if !allPodsScheduled {
+		// This method is used by multi-node consolidation as well, so we'll only report in the single node case
+		if len(nodes) == 1 {
+			c.reporter.RecordUnconsolidatableReason(ctx, nodes[0].Node, "not all pods would schedule")
+		}
 		return Command{action: actionDoNothing}, nil
 	}
 
@@ -187,6 +218,9 @@ func (c *consolidation) computeConsolidation(ctx context.Context, nodes ...Candi
 
 	// we're not going to turn a single node into multiple nodes
 	if len(newNodes) != 1 {
+		if len(nodes) == 1 {
+			c.reporter.RecordUnconsolidatableReason(ctx, nodes[0].Node, fmt.Sprintf("can't remove without creating %d nodes", len(newNodes)))
+		}
 		return Command{action: actionDoNothing}, nil
 	}
 
@@ -198,6 +232,9 @@ func (c *consolidation) computeConsolidation(ctx context.Context, nodes ...Candi
 	}
 	newNodes[0].InstanceTypeOptions = filterByPrice(newNodes[0].InstanceTypeOptions, newNodes[0].Requirements, nodesPrice)
 	if len(newNodes[0].InstanceTypeOptions) == 0 {
+		if len(nodes) == 1 {
+			c.reporter.RecordUnconsolidatableReason(ctx, nodes[0].Node, "can't replace with a cheaper node")
+		}
 		// no instance types remain after filtering by price
 		return Command{action: actionDoNothing}, nil
 	}
@@ -214,6 +251,9 @@ func (c *consolidation) computeConsolidation(ctx context.Context, nodes ...Candi
 
 	if allExistingAreSpot &&
 		newNodes[0].Requirements.Get(v1alpha5.LabelCapacityType).Has(v1alpha5.CapacityTypeSpot) {
+		if len(nodes) == 1 {
+			c.reporter.RecordUnconsolidatableReason(ctx, nodes[0].Node, "can't replace a spot node with a spot node")
+		}
 		return Command{action: actionDoNothing}, nil
 	}
 
@@ -227,9 +267,9 @@ func (c *consolidation) computeConsolidation(ctx context.Context, nodes ...Candi
 	}
 
 	return Command{
-		nodesToRemove:       lo.Map(nodes, func(n CandidateNode, _ int) *v1.Node { return n.Node }),
-		action:              actionReplace,
-		replacementMachines: newNodes,
+		nodesToRemove:    lo.Map(nodes, func(n CandidateNode, _ int) *v1.Node { return n.Node }),
+		action:           actionReplace,
+		replacementNodes: newNodes,
 	}, nil
 }
 

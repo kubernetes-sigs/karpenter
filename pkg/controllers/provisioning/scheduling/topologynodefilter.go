@@ -53,7 +53,7 @@ func (t TopologyNodeFilter) Matches(node *v1.Node) bool {
 }
 
 // MatchesRequirements returns true if the TopologyNodeFilter doesn't prohibit a node with the requirements from
-// participating in the topology. This method allows checking the requirements from a scheduling.Machine to see if the
+// participating in the topology. This method allows checking the requirements from a scheduling.Node to see if the
 // node we will soon create participates in this topology.
 func (t TopologyNodeFilter) MatchesRequirements(requirements scheduling.Requirements) bool {
 	// no requirements, so it always matches

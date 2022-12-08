@@ -41,6 +41,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/utils/functional"
+	"github.com/aws/karpenter-core/pkg/utils/pretty"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	scheduler "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
@@ -73,6 +74,7 @@ type Provisioner struct {
 	volumeTopology *VolumeTopology
 	cluster        *state.Cluster
 	recorder       events.Recorder
+	cm             *pretty.ChangeMonitor
 }
 
 func NewProvisioner(ctx context.Context, kubeClient client.Client, coreV1Client corev1.CoreV1Interface,
@@ -85,6 +87,7 @@ func NewProvisioner(ctx context.Context, kubeClient client.Client, coreV1Client 
 		volumeTopology: NewVolumeTopology(kubeClient),
 		cluster:        cluster,
 		recorder:       recorder,
+		cm:             pretty.NewChangeMonitor(),
 	}
 	return p
 }
@@ -171,7 +174,7 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 
 // LaunchMachines launches nodes passed into the function in parallel. It returns a slice of the successfully created node
 // names as well as a multierr of any errors that occurred while launching nodes
-func (p *Provisioner) LaunchMachines(ctx context.Context, machines []*scheduler.Machine, opts ...functional.Option[LaunchOptions]) ([]string, error) {
+func (p *Provisioner) LaunchMachines(ctx context.Context, machines []*scheduler.Node, opts ...functional.Option[LaunchOptions]) ([]string, error) {
 	// Launch capacity and bind pods
 	errs := make([]error, len(machines))
 	machineNames := make([]string, len(machines))
@@ -209,6 +212,21 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*v1.Pod, error) {
 		if err := p.Validate(ctx, &po); err != nil {
 			logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(&po)).Debugf("ignoring pod, %s", err)
 			continue
+		}
+
+		// We have pending pods that have preferred anti-affinity or topology spread constraints.  These can interact
+		// unexpectedly with consolidation so we warn once per hour when we see these pods.
+		if po.Spec.Affinity != nil && po.Spec.Affinity.PodAntiAffinity != nil {
+			if len(po.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) != 0 {
+				if p.cm.HasChanged(string(po.UID), "pod-antiaffinity") {
+					logging.FromContext(ctx).Infof("pod %s has a preferred Anti-Affinity which can prevent consolidation", client.ObjectKeyFromObject(&po))
+				}
+			}
+		}
+		for _, tsc := range po.Spec.TopologySpreadConstraints {
+			if tsc.WhenUnsatisfiable == v1.ScheduleAnyway {
+				logging.FromContext(ctx).Infof("pod %s has a preferred TopologySpreadConstraint which can prevent consolidation", client.ObjectKeyFromObject(&po))
+			}
 		}
 		pods = append(pods, &po)
 	}
@@ -278,7 +296,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	return scheduler.NewScheduler(ctx, p.kubeClient, machines, provisionerList.Items, p.cluster, stateNodes, topology, instanceTypes, daemonOverhead, p.recorder, opts), nil
 }
 
-func (p *Provisioner) schedule(ctx context.Context, pods []*v1.Pod, stateNodes []*state.Node) ([]*scheduler.Machine, error) {
+func (p *Provisioner) schedule(ctx context.Context, pods []*v1.Pod, stateNodes []*state.Node) ([]*scheduler.Node, error) {
 	defer metrics.Measure(schedulingDuration.WithLabelValues(injection.GetNamespacedName(ctx).Name))()
 
 	scheduler, err := p.NewScheduler(ctx, pods, stateNodes, scheduler.SchedulerOptions{})
@@ -291,7 +309,7 @@ func (p *Provisioner) schedule(ctx context.Context, pods []*v1.Pod, stateNodes [
 	return nodes, err
 }
 
-func (p *Provisioner) launch(ctx context.Context, machine *scheduler.Machine, opts ...functional.Option[LaunchOptions]) (string, error) {
+func (p *Provisioner) launch(ctx context.Context, machine *scheduler.Node, opts ...functional.Option[LaunchOptions]) (string, error) {
 	// Check limits
 	latest := &v1alpha5.Provisioner{}
 	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: machine.ProvisionerName}, latest); err != nil {
