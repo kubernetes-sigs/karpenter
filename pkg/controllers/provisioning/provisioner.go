@@ -348,10 +348,10 @@ func (p *Provisioner) launch(ctx context.Context, machine *scheduler.Node, opts 
 			return "", fmt.Errorf("creating node %s, %w", k8sNode.Name, err)
 		}
 	}
-	p.cluster.NominateNodeForPod(k8sNode.Name)
 	if err := p.cluster.UpdateNode(ctx, k8sNode); err != nil {
 		return "", fmt.Errorf("updating cluster state, %w", err)
 	}
+	p.cluster.NominateNodeForPod(k8sNode.Name)
 	if functional.ResolveOptions(opts...).RecordPodNomination {
 		for _, pod := range machine.Pods {
 			p.recorder.Publish(events.NominatePod(pod, k8sNode))

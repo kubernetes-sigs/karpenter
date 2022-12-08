@@ -17,7 +17,6 @@ package state
 import (
 	"context"
 
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -26,45 +25,47 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
-// NodeController reconciles nodes for the purpose of maintaining state regarding nodes that is expensive to compute.
-type NodeController struct {
+// MachineController reconciles inflightNodes for the purpose of maintaining state regarding nodes that is expensive to compute.
+type MachineController struct {
 	kubeClient client.Client
 	cluster    *Cluster
 }
 
-// NewNodeController constructs a controller instance
-func NewNodeController(kubeClient client.Client, cluster *Cluster) corecontroller.Controller {
-	return &NodeController{
+// NewMachineController constructs a controller instance
+func NewMachineController(kubeClient client.Client, cluster *Cluster) corecontroller.Controller {
+	return &MachineController{
 		kubeClient: kubeClient,
 		cluster:    cluster,
 	}
 }
 
-func (c *NodeController) Name() string {
-	return "node-state"
+func (c *MachineController) Name() string {
+	return "machine-state"
 }
 
-func (c *NodeController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("node", req.NamespacedName.Name))
-	node := &v1.Node{}
-	if err := c.kubeClient.Get(ctx, req.NamespacedName, node); err != nil {
+func (c *MachineController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("machine", req.NamespacedName.Name))
+	machine := &v1alpha1.Machine{}
+	if err := c.kubeClient.Get(ctx, req.NamespacedName, machine); err != nil {
 		if errors.IsNotFound(err) {
-			c.cluster.DeleteNode(req.Name)
+			c.cluster.DeleteMachine(req.Name)
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	if err := c.cluster.UpdateNode(ctx, node); err != nil {
-		return reconcile.Result{}, err
+	if machine.Status.ProviderID == "" {
+		return reconcile.Result{}, nil
 	}
+	c.cluster.UpdateMachine(machine)
 	return reconcile.Result{RequeueAfter: stateRetryPeriod}, nil
 }
 
-func (c *NodeController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
+func (c *MachineController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
-		For(&v1.Node{}).
+		For(&v1alpha1.Machine{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))
 }

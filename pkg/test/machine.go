@@ -34,6 +34,7 @@ type MachineOptions struct {
 	StartupTaints []v1.Taint
 	Capacity      v1.ResourceList
 	Allocatable   v1.ResourceList
+	ProviderID    string
 }
 
 // Machine creates a test machine with defaults that can be overridden by MachineOptions.
@@ -59,6 +60,7 @@ func Machine(overrides ...MachineOptions) *v1alpha1.Machine {
 		Status: v1alpha1.MachineStatus{
 			Capacity:    options.Capacity,
 			Allocatable: options.Allocatable,
+			ProviderID:  options.ProviderID,
 		},
 	}
 }
