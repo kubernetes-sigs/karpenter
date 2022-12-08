@@ -84,8 +84,8 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, machines []*Mac
 
 type Scheduler struct {
 	ctx                context.Context
-	machines           []*Machine
-	existingNodes      []*ExistingMachine
+	newNodes           []*Node
+	existingNodes      []*ExistingNode
 	machineTemplates   []*MachineTemplate
 	remainingResources map[string]v1.ResourceList // provisioner name -> remaining resources for that provisioner
 	instanceTypes      map[string][]*cloudprovider.InstanceType
@@ -98,7 +98,7 @@ type Scheduler struct {
 	kubeClient         client.Client
 }
 
-func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) ([]*Machine, []*ExistingMachine, error) {
+func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) ([]*Node, []*ExistingNode, error) {
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
 	// issues including pods with affinity to another pod in the batch. We could topo-sort to solve this, but it wouldn't
 	// solve the problem of scheduling pods where a particular order is needed to prevent a max-skew violation. E.g. if we
@@ -113,7 +113,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) ([]*Machine, []*E
 			break
 		}
 
-		// Schedule to existing machines or create a new node
+		// Schedule to existing nodes or create a new node
 		if errors[pod] = s.add(ctx, pod); errors[pod] == nil {
 			continue
 		}
@@ -128,13 +128,13 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) ([]*Machine, []*E
 		}
 	}
 
-	for _, n := range s.machines {
+	for _, n := range s.newNodes {
 		n.FinalizeScheduling()
 	}
 	if !s.opts.SimulationMode {
 		s.recordSchedulingResults(ctx, pods, q.List(), errors)
 	}
-	return s.machines, s.existingNodes, nil
+	return s.newNodes, s.existingNodes, nil
 }
 
 func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod, failedToSchedule []*v1.Pod, errors map[*v1.Pod]error) {
@@ -153,20 +153,20 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 		}
 	}
 
-	// Report new machines, or exit to avoid log spam
+	// Report new nodes, or exit to avoid log spam
 	newCount := 0
-	for _, node := range s.machines {
+	for _, node := range s.newNodes {
 		newCount += len(node.Pods)
 	}
 	if newCount == 0 {
 		return
 	}
 	logging.FromContext(ctx).With("pods", len(pods)).Infof("found provisionable pod(s)")
-	logging.FromContext(ctx).With("machines", len(s.machines), "pods", newCount).Infof("computed new node(s) to fit pod(s)")
-	// Report in flight machines, or exit to avoid log spam
+	logging.FromContext(ctx).With("newNodes", len(s.newNodes), "pods", newCount).Infof("computed new node(s) to fit pod(s)")
+	// Report in flight newNodes, or exit to avoid log spam
 	inflightCount := 0
 	existingCount := 0
-	for _, node := range lo.Filter(s.existingNodes, func(node *ExistingMachine, _ int) bool { return len(node.Pods) > 0 }) {
+	for _, node := range lo.Filter(s.existingNodes, func(node *ExistingNode, _ int) bool { return len(node.Pods) > 0 }) {
 		inflightCount++
 		existingCount += len(node.Pods)
 	}
@@ -185,10 +185,10 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 	}
 
 	// Consider using https://pkg.go.dev/container/heap
-	sort.Slice(s.machines, func(a, b int) bool { return len(s.machines[a].Pods) < len(s.machines[b].Pods) })
+	sort.Slice(s.newNodes, func(a, b int) bool { return len(s.newNodes[a].Pods) < len(s.newNodes[b].Pods) })
 
 	// Pick existing node that we are about to create
-	for _, node := range s.machines {
+	for _, node := range s.newNodes {
 		if err := node.Add(ctx, pod); err == nil {
 			return nil
 		}
@@ -210,13 +210,13 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 			}
 		}
 
-		node := NewMachine(nodeTemplate, s.topology, s.daemonOverhead[nodeTemplate], instanceTypes)
+		node := NewNode(nodeTemplate, s.topology, s.daemonOverhead[nodeTemplate], instanceTypes)
 		if err := node.Add(ctx, pod); err != nil {
 			errs = multierr.Append(errs, fmt.Errorf("incompatible with provisioner %q, %w", nodeTemplate.ProvisionerName, err))
 			continue
 		}
 		// we will launch this node and need to track its maximum possible resource usage against our remaining resources
-		s.machines = append(s.machines, node)
+		s.newNodes = append(s.newNodes, node)
 		s.remainingResources[nodeTemplate.ProvisionerName] = subtractMax(s.remainingResources[nodeTemplate.ProvisionerName], node.InstanceTypeOptions)
 		return nil
 	}
@@ -224,7 +224,7 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 }
 
 func (s *Scheduler) calculateExistingMachines(namedNodeTemplates map[string]*MachineTemplate, stateNodes []*state.Node) {
-	// create our existing machines
+	// create our existing nodes
 	for _, node := range stateNodes {
 		name, ok := node.Node.Labels[v1alpha5.ProvisionerNameLabelKey]
 		if !ok {
@@ -236,11 +236,11 @@ func (s *Scheduler) calculateExistingMachines(namedNodeTemplates map[string]*Mac
 			// ignoring this node as it wasn't launched by a provisioner that we recognize
 			continue
 		}
-		s.existingNodes = append(s.existingNodes, NewExistingMachine(node, s.topology, nodeTemplate.StartupTaints, s.daemonOverhead[nodeTemplate]))
+		s.existingNodes = append(s.existingNodes, NewExistingNode(node, s.topology, nodeTemplate.StartupTaints, s.daemonOverhead[nodeTemplate]))
 
 		// We don't use the status field and instead recompute the remaining resources to ensure we have a consistent view
 		// of the cluster during scheduling.  Depending on how node creation falls out, this will also work for cases where
-		// we don't create Machine resources.
+		// we don't create Node resources.
 		s.remainingResources[name] = resources.Subtract(s.remainingResources[name], node.Capacity)
 	}
 }

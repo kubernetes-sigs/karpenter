@@ -89,9 +89,9 @@ func (d *Drift) ComputeCommand(ctx context.Context, candidates ...CandidateNode)
 			}, nil
 		}
 		return Command{
-			nodesToRemove:       []*v1.Node{candidate.Node},
-			action:              actionReplace,
-			replacementMachines: newNodes,
+			nodesToRemove:    []*v1.Node{candidate.Node},
+			action:           actionReplace,
+			replacementNodes: newNodes,
 		}, nil
 	}
 	return Command{action: actionDoNothing}, nil
