@@ -27,12 +27,14 @@ import (
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -47,9 +49,12 @@ type Cluster struct {
 	clock         clock.Clock
 
 	// State: Node Status & Pod -> Node Binding
-	mu       sync.RWMutex
-	nodes    map[string]*Node                // node name -> node
-	bindings map[types.NamespacedName]string // pod namespaced named -> node name
+	mu sync.RWMutex
+
+	inflightNodes map[string]*Node
+	nodes         map[string]*Node                // node name -> node
+	machineToNode map[string]string               // an efficient index track machine to node mappings
+	bindings      map[types.NamespacedName]string // pod namespaced named -> node name
 
 	nominatedNodes   *cache.Cache
 	antiAffinityPods sync.Map // mapping of pod namespaced name to *v1.Pod of pods that have required anti affinities
@@ -57,9 +62,7 @@ type Cluster struct {
 	// consolidationState is a number indicating the state of the cluster with respect to consolidation.  If this number
 	// hasn't changed, it indicates that the cluster hasn't changed in a state which would enable consolidation if
 	// it previously couldn't occur.
-	consolidationState   int64
-	lastNodeDeletionTime int64
-	lastNodeCreationTime int64
+	consolidationState int64
 }
 
 func NewCluster(ctx context.Context, clk clock.Clock, client client.Client, cp cloudprovider.CloudProvider) *Cluster {
@@ -76,7 +79,9 @@ func NewCluster(ctx context.Context, clk clock.Clock, client client.Client, cp c
 		kubeClient:     client,
 		cloudProvider:  cp,
 		nominatedNodes: cache.New(nominationPeriod, 10*time.Second),
+		inflightNodes:  map[string]*Node{},
 		nodes:          map[string]*Node{},
+		machineToNode:  map[string]string{},
 		bindings:       map[types.NamespacedName]string{},
 	}
 	return c
@@ -148,6 +153,9 @@ func (c *Cluster) ForEachNode(f func(n *Node) bool) {
 	for _, node := range c.nodes {
 		nodes = append(nodes, node)
 	}
+	for _, node := range c.inflightNodes {
+		nodes = append(nodes, node)
+	}
 	// sort nodes by creation time so we provide a consistent ordering
 	sort.Slice(nodes, func(a, b int) bool {
 		if nodes[a].Node.CreationTimestamp != nodes[b].Node.CreationTimestamp {
@@ -201,16 +209,15 @@ func (c *Cluster) MarkForDeletion(nodeNames ...string) {
 // newNode always returns a node, even if some portion of the update has failed
 func (c *Cluster) newNode(ctx context.Context, node *v1.Node) (*Node, error) {
 	n := &Node{
-		Node:              node,
-		Capacity:          v1.ResourceList{},
-		Allocatable:       v1.ResourceList{},
-		Available:         v1.ResourceList{},
-		HostPortUsage:     scheduling.NewHostPortUsage(),
-		VolumeUsage:       scheduling.NewVolumeLimits(c.kubeClient),
-		VolumeLimits:      scheduling.VolumeCount{},
-		MarkedForDeletion: !node.DeletionTimestamp.IsZero(),
-		podRequests:       map[types.NamespacedName]v1.ResourceList{},
-		podLimits:         map[types.NamespacedName]v1.ResourceList{},
+		Node:          node,
+		Capacity:      v1.ResourceList{},
+		Allocatable:   v1.ResourceList{},
+		Available:     v1.ResourceList{},
+		HostPortUsage: scheduling.NewHostPortUsage(),
+		VolumeUsage:   scheduling.NewVolumeLimits(c.kubeClient),
+		VolumeLimits:  scheduling.VolumeCount{},
+		podRequests:   map[types.NamespacedName]v1.ResourceList{},
+		podLimits:     map[types.NamespacedName]v1.ResourceList{},
 	}
 	if err := multierr.Combine(
 		c.populateCapacity(ctx, node, n),
@@ -222,7 +229,35 @@ func (c *Cluster) newNode(ctx context.Context, node *v1.Node) (*Node, error) {
 	return n, nil
 }
 
+func (c *Cluster) newInflightNode(machine *v1alpha1.Machine) *Node {
+	return &Node{
+		Node: &v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              getPseudoNodeName(machine.Name),
+				CreationTimestamp: machine.CreationTimestamp,
+				DeletionTimestamp: machine.DeletionTimestamp,
+				Labels:            machine.Labels,
+				Annotations:       machine.Annotations,
+			},
+			Spec: v1.NodeSpec{
+				Taints:     append(machine.Spec.Taints, machine.Spec.StartupTaints...),
+				ProviderID: machine.Status.ProviderID,
+			},
+			Status: v1.NodeStatus{
+				Capacity:    machine.Status.Capacity,
+				Allocatable: machine.Status.Allocatable,
+			},
+		},
+		Capacity:          machine.Status.Capacity,
+		Allocatable:       machine.Status.Allocatable,
+		MarkedForDeletion: !machine.DeletionTimestamp.IsZero(),
+	}
+}
+
 // nolint:gocyclo
+// TODO joinnis: Note that this entire function can be removed and reduced down to checking the
+// Node status for the capacity and allocatable when we have migrated away from using node labels and we have fully
+// migrated everyone over to using the Machine CR
 func (c *Cluster) populateCapacity(ctx context.Context, node *v1.Node, n *Node) error {
 	// Use node's values if initialized
 	if node.Labels[v1alpha5.LabelNodeInitialized] == "true" {
@@ -319,14 +354,50 @@ func (c *Cluster) populateVolumeLimits(ctx context.Context, node *v1.Node, n *No
 	return nil
 }
 
+func (c *Cluster) DeleteMachine(machineName string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	nodeName, ok := c.machineToNode[machineName]
+	if !ok {
+		return
+	}
+	delete(c.nodes, nodeName)
+	delete(c.machineToNode, machineName)
+	c.recordConsolidationChange()
+}
+
 func (c *Cluster) DeleteNode(nodeName string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	node, ok := c.nodes[nodeName]
+	if !ok {
+		return
+	}
+	// This node is owned by a machine, so we should let the machine deletion handle the node deletion
+	_, ok = node.Node.Labels[v1alpha5.MachineNameLabelKey]
+	if ok {
+		return
+	}
 	delete(c.nodes, nodeName)
 	c.recordConsolidationChange()
 }
 
-// updateNode is called for every node reconciliation
+func (c *Cluster) UpdateMachine(machine *v1alpha1.Machine) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// If the machine already has a mapping to a node, don't act on this machine
+	nodeName, ok := c.machineToNode[machine.Name]
+	if ok {
+		c.nodes[nodeName].MarkedForDeletion = c.nodes[nodeName].MarkedForDeletion || !machine.DeletionTimestamp.IsZero()
+	}
+	node := c.newInflightNode(machine)
+	c.nodes[node.Node.Name] = node
+}
+
+// UpdateNode is called for every node reconciliation
 func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -335,30 +406,53 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 		return err
 	}
 
-	oldNode, ok := c.nodes[node.Name]
-	// If the old node existed and its initialization status changed, we want to reconsider consolidation.  This handles
-	// a situation where we re-start with an unready node and it becomes ready later.
+	// Get the old node so that we can check the old state
+	oldNode, foundOldNode := c.nodes[node.Name]
+
+	// Remove this machine from the inflight nodes if the machine node has registered
+	machineName, ok := node.Labels[v1alpha5.MachineNameLabelKey]
 	if ok {
-		if oldNode.Node.Labels[v1alpha5.LabelNodeInitialized] != n.Node.Labels[v1alpha5.LabelNodeInitialized] {
-			c.recordConsolidationChange()
+		// Check if the machine has initialized. We consider the node inflight until the
+		// node has fully initialized
+		machine := &v1alpha1.Machine{}
+		if err = c.kubeClient.Get(ctx, types.NamespacedName{Name: machineName}, machine); err != nil {
+			return client.IgnoreNotFound(err)
 		}
+		if machine.StatusConditions().GetCondition(v1alpha1.MachineInitialized).Status != v1.ConditionTrue {
+			return nil
+		}
+
+		c.machineToNode[machineName] = node.Name
+
+		// The first time that we go from uninitialized to initialized, we will go into this branch
+		// because the uninitialized node will be set in the inflight nodes
+		_, ok = c.inflightNodes[getPseudoNodeName(machineName)]
+		if ok {
+			c.recordConsolidationChange()
+			delete(c.inflightNodes, getPseudoNodeName(machineName))
+
+			// Migrate the nominated node cache over to the new name for the node if we find it in the cache
+			_, expiration, found := c.nominatedNodes.GetWithExpiration(getPseudoNodeName(machineName))
+			if found {
+				c.nominatedNodes.Delete(getPseudoNodeName(machineName))
+				c.nominatedNodes.Set(node.Name, nil, time.Until(expiration))
+			}
+		}
+	} else {
 		// We mark the node for deletion either:
 		// 1. If the DeletionTimestamp is set (the node is explicitly being deleted)
 		// 2. If the last state of the node has the node MarkedForDeletion
+		n.MarkedForDeletion = !node.DeletionTimestamp.IsZero()
+
+		// TODO joinnis: This check can be removed when we stop labeling the node
+		if foundOldNode && oldNode.Node.Labels[v1alpha5.LabelNodeInitialized] != n.Node.Labels[v1alpha5.LabelNodeInitialized] {
+			c.recordConsolidationChange()
+		}
+	}
+	if foundOldNode {
 		n.MarkedForDeletion = n.MarkedForDeletion || oldNode.MarkedForDeletion
 	}
 	c.nodes[node.Name] = n
-
-	if node.DeletionTimestamp != nil {
-		nodeDeletionTime := node.DeletionTimestamp.UnixMilli()
-		if nodeDeletionTime > atomic.LoadInt64(&c.lastNodeDeletionTime) {
-			atomic.StoreInt64(&c.lastNodeDeletionTime, nodeDeletionTime)
-		}
-	}
-	nodeCreationTime := node.CreationTimestamp.UnixMilli()
-	if nodeCreationTime > atomic.LoadInt64(&c.lastNodeCreationTime) {
-		atomic.StoreInt64(&c.lastNodeCreationTime, nodeCreationTime)
-	}
 	return nil
 }
 
@@ -377,17 +471,7 @@ func (c *Cluster) ClusterConsolidationState() int64 {
 	return cs
 }
 
-// LastNodeDeletionTime returns the last time that at a node was marked for deletion.
-func (c *Cluster) LastNodeDeletionTime() time.Time {
-	return time.UnixMilli(atomic.LoadInt64(&c.lastNodeDeletionTime))
-}
-
-// LastNodeCreationTime returns the last time that at a node was created.
-func (c *Cluster) LastNodeCreationTime() time.Time {
-	return time.UnixMilli(atomic.LoadInt64(&c.lastNodeCreationTime))
-}
-
-// deletePod is called when the pod has been deleted
+// DeletePod is called when the pod has been deleted
 func (c *Cluster) DeletePod(podKey types.NamespacedName) {
 	c.antiAffinityPods.Delete(podKey)
 	c.updateNodeUsageFromPodCompletion(podKey)
@@ -425,7 +509,7 @@ func (c *Cluster) updateNodeUsageFromPodCompletion(podKey types.NamespacedName) 
 	// worst case we will resync to correct this.
 }
 
-// updatePod is called every time the pod is reconciled
+// UpdatePod is called every time the pod is reconciled
 func (c *Cluster) UpdatePod(ctx context.Context, pod *v1.Pod) error {
 	var err error
 	if podutils.IsTerminal(pod) {
@@ -536,4 +620,8 @@ func (c *Cluster) Reset(ctx context.Context) {
 	c.nodes = map[string]*Node{}
 	c.bindings = map[types.NamespacedName]string{}
 	c.antiAffinityPods = sync.Map{}
+}
+
+func getPseudoNodeName(machineName string) string {
+	return fmt.Sprintf("machine_%s", machineName)
 }

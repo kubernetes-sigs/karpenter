@@ -24,9 +24,12 @@ type MachineStatus struct {
 	// ProviderID of the corresponding node object
 	// +optional
 	ProviderID string `json:"providerID,omitempty"`
+	// Capacity is the total capacity of the machine. This value resolves to the inflight
+	// capcity until the node is launched, at which point, it becomes the node's capacity
+	Capacity v1.ResourceList `json:"capacity,omitempty"`
 	// Allocatable is the allocatable capacity of the machine. This value resolves
-	// to the inflight capacity until the node is launched, at which point, it becomes the
-	// node object's allocatable
+	// to the inflight allocatable until the node is launched, at which point, it becomes the
+	// node's allocatable
 	// +optional
 	Allocatable v1.ResourceList `json:"allocatable,omitempty"`
 	// Conditions contains signals for health and readiness
