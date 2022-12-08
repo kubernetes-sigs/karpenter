@@ -40,7 +40,7 @@ import (
 
 //nolint:gocyclo
 func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
-	nodesToDelete ...CandidateNode) (newNodes []*pscheduling.Node, allPodsScheduled bool, err error) {
+	nodesToDelete ...CandidateNode) (newNodes []*pscheduling.Machine, allPodsScheduled bool, err error) {
 	var stateNodes []*state.Node
 	var markedForDeletionNodes []*state.Node
 	candidateNodeIsDeleting := false
@@ -325,7 +325,7 @@ func clamp(min, val, max float64) float64 {
 	return val
 }
 
-// mapNodes maps from a list of *v1.Node to candidateNode
+// mapNodes maps from a list of *v1.Machine to candidateNode
 func mapNodes(nodes []*v1.Node, candidateNodes []CandidateNode) []CandidateNode {
 	verifyNodeNames := sets.NewString(lo.Map(nodes, func(t *v1.Node, i int) string { return t.Name })...)
 	var ret []CandidateNode

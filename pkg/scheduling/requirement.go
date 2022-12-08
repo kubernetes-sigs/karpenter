@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
@@ -64,6 +65,51 @@ func NewRequirement(key string, operator v1.NodeSelectorOperator, values ...stri
 		r.lessThan = &value
 	}
 	return r
+}
+
+func (r *Requirement) NodeSelectorRequirement() v1.NodeSelectorRequirement {
+	switch {
+	case r.greaterThan != nil:
+		return v1.NodeSelectorRequirement{
+			Key:      r.Key,
+			Operator: v1.NodeSelectorOpGt,
+			Values:   []string{strconv.FormatInt(int64(lo.FromPtr(r.greaterThan)), 10)},
+		}
+	case r.lessThan != nil:
+		return v1.NodeSelectorRequirement{
+			Key:      r.Key,
+			Operator: v1.NodeSelectorOpLt,
+			Values:   []string{strconv.FormatInt(int64(lo.FromPtr(r.lessThan)), 10)},
+		}
+	case r.complement:
+		switch {
+		case len(r.values) > 0:
+			return v1.NodeSelectorRequirement{
+				Key:      r.Key,
+				Operator: v1.NodeSelectorOpNotIn,
+				Values:   r.values.List(),
+			}
+		default:
+			return v1.NodeSelectorRequirement{
+				Key:      r.Key,
+				Operator: v1.NodeSelectorOpExists,
+			}
+		}
+	default:
+		switch {
+		case len(r.values) > 0:
+			return v1.NodeSelectorRequirement{
+				Key:      r.Key,
+				Operator: v1.NodeSelectorOpIn,
+				Values:   r.values.List(),
+			}
+		default:
+			return v1.NodeSelectorRequirement{
+				Key:      r.Key,
+				Operator: v1.NodeSelectorOpDoesNotExist,
+			}
+		}
+	}
 }
 
 // Intersection constraints the Requirement from the incoming requirements

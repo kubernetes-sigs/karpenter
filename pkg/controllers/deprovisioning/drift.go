@@ -18,34 +18,28 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
-	"time"
-
-	"k8s.io/utils/clock"
 
 	v1 "k8s.io/api/core/v1"
 	"knative.dev/pkg/logging"
-	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
-// Expiration is a subreconciler that deletes empty nodes.
-// Expiration will respect TTLSecondsAfterEmpty
-type Expiration struct {
-	clock       clock.Clock
+// Drift is a subreconciler that deletes empty nodes.
+// Drift will respect TTLSecondsAfterEmpty
+type Drift struct {
 	kubeClient  client.Client
 	cluster     *state.Cluster
 	provisioner *provisioning.Provisioner
 }
 
-func NewExpiration(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner) *Expiration {
-	return &Expiration{
-		clock:       clk,
+func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner) *Drift {
+	return &Drift{
 		kubeClient:  kubeClient,
 		cluster:     cluster,
 		provisioner: provisioner,
@@ -53,22 +47,17 @@ func NewExpiration(clk clock.Clock, kubeClient client.Client, cluster *state.Clu
 }
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes
-func (e *Expiration) ShouldDeprovision(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, nodePods []*v1.Pod) bool {
-	return e.clock.Now().After(getExpirationTime(n.Node, provisioner))
-}
-
-// SortCandidates orders expired nodes by when they've expired
-func (e *Expiration) SortCandidates(nodes []CandidateNode) []CandidateNode {
-	sort.Slice(nodes, func(i int, j int) bool {
-		return getExpirationTime(nodes[i].Node, nodes[i].provisioner).Before(getExpirationTime(nodes[j].Node, nodes[j].provisioner))
-	})
-	return nodes
+func (d *Drift) ShouldDeprovision(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, nodePods []*v1.Pod) bool {
+	// Look up the feature flag to see if we should deprovision the node because of drift.
+	if !settings.FromContext(ctx).DriftEnabled {
+		return false
+	}
+	return n.Node.Annotations[v1alpha5.VoluntaryDisruptionAnnotationKey] == v1alpha5.VoluntaryDisruptionDriftedAnnotationValue
 }
 
 // ComputeCommand generates a deprovisioning command given deprovisionable nodes
-func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...CandidateNode) (Command, error) {
-	candidates = e.SortCandidates(candidates)
-	pdbs, err := NewPDBLimits(ctx, e.kubeClient)
+func (d *Drift) ComputeCommand(ctx context.Context, candidates ...CandidateNode) (Command, error) {
+	pdbs, err := NewPDBLimits(ctx, d.kubeClient)
 	if err != nil {
 		return Command{}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
@@ -80,7 +69,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...Candidate
 		}
 
 		// Check if we need to create any nodes.
-		newNodes, allPodsScheduled, err := simulateScheduling(ctx, e.kubeClient, e.cluster, e.provisioner, candidate)
+		newNodes, allPodsScheduled, err := simulateScheduling(ctx, d.kubeClient, d.cluster, d.provisioner, candidate)
 		if err != nil {
 			// if a candidate node is now deleting, just retry
 			if errors.Is(err, errCandidateNodeDeleting) {
@@ -90,12 +79,8 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...Candidate
 		}
 		// Log when all pods can't schedule, as the command will get executed immediately.
 		if !allPodsScheduled {
-			logging.FromContext(ctx).With("node", candidate.Name).Debugf("continuing to expire node after scheduling simulation failed to schedule all pods")
+			logging.FromContext(ctx).With("node", candidate.Name).Debug("Continuing to terminate drifted node after scheduling simulation failed to schedule all pods")
 		}
-
-		logging.FromContext(ctx).With("expirationTTL", time.Duration(ptr.Int64Value(candidates[0].provisioner.Spec.TTLSecondsUntilExpired))*time.Second).
-			With("delay", time.Since(getExpirationTime(candidates[0].Node, candidates[0].provisioner))).Infof("triggering termination for expired node after TTL")
-
 		// were we able to schedule all the pods on the inflight nodes?
 		if len(newNodes) == 0 {
 			return Command{
@@ -113,15 +98,6 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...Candidate
 }
 
 // String is the string representation of the deprovisioner
-func (e *Expiration) String() string {
-	return metrics.ExpirationReason
-}
-
-func getExpirationTime(node *v1.Node, provisioner *v1alpha5.Provisioner) time.Time {
-	if provisioner == nil || provisioner.Spec.TTLSecondsUntilExpired == nil {
-		// If not defined, return some much larger time.
-		return time.Date(5000, 0, 0, 0, 0, 0, 0, time.UTC)
-	}
-	expirationTTL := time.Duration(ptr.Int64Value(provisioner.Spec.TTLSecondsUntilExpired)) * time.Second
-	return node.CreationTimestamp.Add(expirationTTL)
+func (d *Drift) String() string {
+	return metrics.DriftReason
 }

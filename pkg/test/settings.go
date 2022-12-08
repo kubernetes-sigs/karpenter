@@ -16,8 +16,12 @@ package test
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/imdario/mergo"
 
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
@@ -35,9 +39,20 @@ func (ss SettingsStore) InjectSettings(ctx context.Context) context.Context {
 	return ctx
 }
 
-func Settings() settings.Settings {
+type SettingsOptions struct {
+	DriftEnabled bool
+}
+
+func Settings(overrides ...SettingsOptions) settings.Settings {
+	options := SettingsOptions{}
+	for _, opts := range overrides {
+		if err := mergo.Merge(&options, opts, mergo.WithOverride); err != nil {
+			panic(fmt.Sprintf("Failed to merge pod options: %s", err))
+		}
+	}
 	return settings.Settings{
-		BatchMaxDuration:  metav1.Duration{Duration: 0},
-		BatchIdleDuration: metav1.Duration{Duration: 0},
+		BatchMaxDuration:  metav1.Duration{Duration: time.Second * 10},
+		BatchIdleDuration: metav1.Duration{Duration: time.Second},
+		DriftEnabled:      options.DriftEnabled,
 	}
 }

@@ -22,26 +22,46 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
-var (
-	// Well known labels and resources
+// Well known labels and resources
+const (
 	ArchitectureAmd64    = "amd64"
 	ArchitectureArm64    = "arm64"
 	CapacityTypeSpot     = "spot"
 	CapacityTypeOnDemand = "on-demand"
+)
 
-	// Karpenter specific domains and labels
-	ProvisionerNameLabelKey           = Group + "/provisioner-name"
-	DoNotEvictPodAnnotationKey        = Group + "/do-not-evict"
-	DoNotConsolidateNodeAnnotationKey = Group + "/do-not-consolidate"
-	EmptinessTimestampAnnotationKey   = Group + "/emptiness-timestamp"
-	TerminationFinalizer              = Group + "/termination"
-	LabelNodeInitialized              = Group + "/initialized"
-	LabelCapacityType                 = Group + "/capacity-type"
+// Karpenter specific domains and labels
+const (
+	ProvisionerNameLabelKey = Group + "/provisioner-name"
+	MachineNameLabelKey     = Group + "/machine-name"
+	LabelNodeInitialized    = Group + "/initialized"
+	LabelCapacityType       = Group + "/capacity-type"
+)
 
-	// Tags for infrastructure resources deployed into cloudproviders' accounts
+// Karpenter specific annotations
+const (
+	DoNotEvictPodAnnotationKey         = Group + "/do-not-evict"
+	DoNotConsolidateNodeAnnotationKey  = Group + "/do-not-consolidate"
+	EmptinessTimestampAnnotationKey    = Group + "/emptiness-timestamp"
+	ProviderCompatabilityAnnotationKey = Group + "/compatibility/provider"
+	VoluntaryDisruptionAnnotationKey   = Group + "/voluntary-disruption"
+
+	// Karpenter specific annotation values
+	VoluntaryDisruptionDriftedAnnotationValue = "drifted"
+)
+
+// Karpenter specific finalizers
+const (
+	TerminationFinalizer = Group + "/termination"
+)
+
+// Tags for infrastructure resources deployed into Cloud Provider's accounts
+const (
 	DiscoveryTagKey = Group + "/discovery"
 	ManagedByTagKey = Group + "/managed-by"
+)
 
+var (
 	// RestrictedLabelDomains are either prohibited by the kubelet or reserved by karpenter
 	RestrictedLabelDomains = sets.NewString(
 		"kubernetes.io",
