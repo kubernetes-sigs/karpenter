@@ -53,7 +53,7 @@ type CloudProvider interface {
 	// is fulfilled by the cloud providers capacity creation request.
 	Create(context.Context, *v1alpha1.Machine) (*v1.Node, error)
 	// Delete node in cloudprovider
-	Delete(context.Context, *v1alpha1.Machine) error
+	Delete(context.Context, *v1.Node) error
 	// GetInstanceTypes returns instance types supported by the cloudprovider.
 	// Availability of types or zone may vary by provisioner or over time.  Regardless of
 	// availability, the GetInstanceTypes method should always return all instance types,

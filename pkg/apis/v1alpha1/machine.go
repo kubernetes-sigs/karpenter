@@ -19,7 +19,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/scheduling"
 )
 
 // MachineSpec describes the desired state of the Machine
@@ -70,26 +69,4 @@ type MachineList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Machine `json:"items"`
-}
-
-// MachineFromNode converts a node into a pseudo-Machine using known values from the node
-func MachineFromNode(node *v1.Node) *Machine {
-	return &Machine{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        node.Name,
-			Annotations: node.Annotations,
-			Labels:      node.Labels,
-		},
-		Spec: MachineSpec{
-			Taints:       node.Spec.Taints,
-			Requirements: scheduling.NewLabelRequirements(node.Labels).NodeSelectorRequirements(),
-			Resources: ResourceRequirements{
-				Requests: node.Status.Allocatable,
-			},
-		},
-		Status: MachineStatus{
-			ProviderID:  node.Spec.ProviderID,
-			Allocatable: node.Status.Allocatable,
-		},
-	}
 }

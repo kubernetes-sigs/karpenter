@@ -30,7 +30,6 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	podutil "github.com/aws/karpenter-core/pkg/utils/pod"
@@ -99,7 +98,7 @@ func (t *Terminator) drain(ctx context.Context, node *v1.Node) error {
 func (t *Terminator) terminate(ctx context.Context, node *v1.Node) error {
 	stored := node.DeepCopy()
 	// Delete the instance associated with node
-	if err := t.CloudProvider.Delete(ctx, v1alpha1.MachineFromNode(node)); err != nil {
+	if err := t.CloudProvider.Delete(ctx, node); err != nil {
 		return fmt.Errorf("terminating cloudprovider instance, %w", err)
 	}
 	controllerutil.RemoveFinalizer(node, v1alpha5.TerminationFinalizer)

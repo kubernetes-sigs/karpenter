@@ -73,9 +73,9 @@ func (d *decorator) Create(ctx context.Context, machine *v1alpha1.Machine) (*v1.
 	return d.CloudProvider.Create(ctx, machine)
 }
 
-func (d *decorator) Delete(ctx context.Context, machine *v1alpha1.Machine) error {
+func (d *decorator) Delete(ctx context.Context, node *v1.Node) error {
 	defer metrics.Measure(methodDurationHistogramVec.WithLabelValues(injection.GetControllerName(ctx), "Delete", d.Name()))()
-	return d.CloudProvider.Delete(ctx, machine)
+	return d.CloudProvider.Delete(ctx, node)
 }
 
 func (d *decorator) GetInstanceTypes(ctx context.Context, provisioner *v1alpha5.Provisioner) ([]*cloudprovider.InstanceType, error) {
