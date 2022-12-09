@@ -62,7 +62,7 @@ func (e *Emptiness) ShouldDeprovision(ctx context.Context, n *state.Node, provis
 
 	emptinessTime, err := time.Parse(time.RFC3339, emptinessTimestamp)
 	if err != nil {
-		logging.FromContext(ctx).With("emptiness-timestamp", emptinessTimestamp).Debugf("unable to parse emptiness timestamp")
+		logging.FromContext(ctx).With("emptiness-timestamp", emptinessTimestamp).Errorf("unable to parse emptiness timestamp")
 		return true
 	}
 	// Don't deprovision if node's emptiness timestamp is before the emptiness TTL

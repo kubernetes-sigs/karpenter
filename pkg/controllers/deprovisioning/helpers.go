@@ -40,7 +40,7 @@ import (
 
 //nolint:gocyclo
 func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
-	nodesToDelete ...CandidateNode) (newNodes []*pscheduling.Machine, allPodsScheduled bool, err error) {
+	nodesToDelete ...CandidateNode) (newNodes []*pscheduling.Node, allPodsScheduled bool, err error) {
 	var stateNodes []*state.Node
 	var markedForDeletionNodes []*state.Node
 	candidateNodeIsDeleting := false
@@ -325,7 +325,7 @@ func clamp(min, val, max float64) float64 {
 	return val
 }
 
-// mapNodes maps from a list of *v1.Machine to candidateNode
+// mapNodes maps from a list of *v1.Node to candidateNode
 func mapNodes(nodes []*v1.Node, candidateNodes []CandidateNode) []CandidateNode {
 	verifyNodeNames := sets.NewString(lo.Map(nodes, func(t *v1.Node, i int) string { return t.Name })...)
 	var ret []CandidateNode
@@ -337,18 +337,18 @@ func mapNodes(nodes []*v1.Node, candidateNodes []CandidateNode) []CandidateNode 
 	return ret
 }
 
-func canBeTerminated(node CandidateNode, pdbs *PDBLimits) bool {
+func canBeTerminated(node CandidateNode, pdbs *PDBLimits) (string, bool) {
 	if !node.DeletionTimestamp.IsZero() {
-		return false
+		return "in the process of deletion", false
 	}
-	if _, ok := pdbs.CanEvictPods(node.pods); !ok {
-		return false
+	if pdb, ok := pdbs.CanEvictPods(node.pods); !ok {
+		return fmt.Sprintf("pdb %s prevents pod evictions", pdb), false
 	}
 
-	if _, ok := PodsPreventEviction(node.pods); ok {
-		return false
+	if reason, ok := PodsPreventEviction(node.pods); ok {
+		return reason, false
 	}
-	return true
+	return "", true
 }
 
 // PodsPreventEviction returns true if there are pods that would prevent eviction

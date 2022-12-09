@@ -90,9 +90,9 @@ func (a action) String() string {
 }
 
 type Command struct {
-	nodesToRemove       []*v1.Node
-	action              action
-	replacementMachines []*scheduling.Machine
+	nodesToRemove    []*v1.Node
+	action           action
+	replacementNodes []*scheduling.Node
 }
 
 func (o Command) String() string {
@@ -110,12 +110,12 @@ func (o Command) String() string {
 			fmt.Fprintf(&buf, "/%s", capacityType)
 		}
 	}
-	if len(o.replacementMachines) == 0 {
+	if len(o.replacementNodes) == 0 {
 		return buf.String()
 	}
 	odNodes := 0
 	spotNodes := 0
-	for _, node := range o.replacementMachines {
+	for _, node := range o.replacementNodes {
 		ct := node.Requirements.Get(v1alpha5.LabelCapacityType)
 		if ct.Has(v1alpha5.CapacityTypeOnDemand) {
 			odNodes++
@@ -125,19 +125,19 @@ func (o Command) String() string {
 		}
 	}
 	// Print list of instance types for the first replacementNode.
-	if len(o.replacementMachines) > 1 {
+	if len(o.replacementNodes) > 1 {
 		fmt.Fprintf(&buf, " and replacing with %d spot and %d on-demand nodes from types %s",
 			spotNodes, odNodes,
-			scheduling.InstanceTypeList(o.replacementMachines[0].InstanceTypeOptions))
+			scheduling.InstanceTypeList(o.replacementNodes[0].InstanceTypeOptions))
 		return buf.String()
 	}
-	ct := o.replacementMachines[0].Requirements.Get(v1alpha5.LabelCapacityType)
+	ct := o.replacementNodes[0].Requirements.Get(v1alpha5.LabelCapacityType)
 	nodeDesc := "node"
 	if ct.Len() == 1 {
 		nodeDesc = fmt.Sprintf("%s node", ct.Any())
 	}
 	fmt.Fprintf(&buf, " and replacing with %s from types %s",
 		nodeDesc,
-		scheduling.InstanceTypeList(o.replacementMachines[0].InstanceTypeOptions))
+		scheduling.InstanceTypeList(o.replacementNodes[0].InstanceTypeOptions))
 	return buf.String()
 }

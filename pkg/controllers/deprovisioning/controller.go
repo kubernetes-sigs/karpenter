@@ -34,14 +34,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/operator/controller"
-
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
 // Controller is the deprovisioning controller.
@@ -58,6 +57,7 @@ type Controller struct {
 	singleNodeConsolidation *SingleNodeConsolidation
 	multiNodeConsolidation  *MultiNodeConsolidation
 	emptyNodeConsolidation  *EmptyNodeConsolidation
+	reporter                *Reporter
 }
 
 // pollingPeriod that we inspect cluster to look for opportunities to deprovision
@@ -77,19 +77,22 @@ var waitRetryOptions = []retry.Option{
 
 func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
 	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster) *Controller {
+
+	reporter := NewReporter(recorder)
 	return &Controller{
 		clock:                   clk,
 		kubeClient:              kubeClient,
 		cluster:                 cluster,
 		provisioner:             provisioner,
 		recorder:                recorder,
+		reporter:                reporter,
 		cloudProvider:           cp,
 		expiration:              NewExpiration(clk, kubeClient, cluster, provisioner),
 		emptiness:               NewEmptiness(clk, kubeClient, cluster),
 		drift:                   NewDrift(kubeClient, cluster, provisioner),
-		emptyNodeConsolidation:  NewEmptyNodeConsolidation(clk, cluster, kubeClient, provisioner, cp),
-		multiNodeConsolidation:  NewMultiNodeConsolidation(clk, cluster, kubeClient, provisioner, cp),
-		singleNodeConsolidation: NewSingleNodeConsolidation(clk, cluster, kubeClient, provisioner, cp),
+		emptyNodeConsolidation:  NewEmptyNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, reporter),
+		multiNodeConsolidation:  NewMultiNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, reporter),
+		singleNodeConsolidation: NewSingleNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, reporter),
 	}
 }
 
@@ -276,15 +279,15 @@ func (c *Controller) launchReplacementNodes(ctx context.Context, action Command)
 		return fmt.Errorf("cordoning nodes, %w", err)
 	}
 
-	nodeNames, err := c.provisioner.LaunchMachines(ctx, action.replacementMachines)
+	nodeNames, err := c.provisioner.LaunchMachines(ctx, action.replacementNodes)
 	if err != nil {
 		// uncordon the nodes as the launch may fail (e.g. ICE or incompatible AMI)
 		err = multierr.Append(err, c.setNodesUnschedulable(ctx, false, nodeNamesToRemove...))
 		return err
 	}
-	if len(nodeNames) != len(action.replacementMachines) {
+	if len(nodeNames) != len(action.replacementNodes) {
 		// shouldn't ever occur since a partially failed LaunchMachines should return an error
-		return fmt.Errorf("expected %d node names, got %d", len(action.replacementMachines), len(nodeNames))
+		return fmt.Errorf("expected %d node names, got %d", len(action.replacementNodes), len(nodeNames))
 	}
 	metrics.NodesCreatedCounter.WithLabelValues(metrics.DeprovisioningReason).Add(float64(len(nodeNames)))
 
