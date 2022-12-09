@@ -157,7 +157,7 @@ func (c *CloudProvider) GetInstanceTypes(_ context.Context, _ *v1alpha5.Provisio
 	}, nil
 }
 
-func (c *CloudProvider) Delete(context.Context, *v1alpha1.Machine) error {
+func (c *CloudProvider) Delete(context.Context, *v1.Node) error {
 	return nil
 }
 
