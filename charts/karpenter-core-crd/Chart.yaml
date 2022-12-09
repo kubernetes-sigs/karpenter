@@ -2,8 +2,8 @@ apiVersion: v2
 name: karpenter-core-crd
 description: Core APIs CRDs, and everything else that is part of karpenter-core
 type: application
-version: 0.0.1
-appVersion: 0.0.1
+version: 0.0.2
+appVersion: 0.0.2
 keywords:
   - cluster
   - node
