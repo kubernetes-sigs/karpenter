@@ -12,21 +12,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package scheme
+package v1alpha1
 
-import (
-	"k8s.io/apimachinery/pkg/runtime"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+import "context"
 
-	"github.com/aws/karpenter-core/pkg/apis"
-)
-
-var (
-	Scheme = runtime.NewScheme()
-)
-
-func init() {
-	utilruntime.Must(clientgoscheme.AddToScheme(Scheme))
-	utilruntime.Must(apis.AddToScheme(Scheme))
-}
+// SetDefaults for the machine
+func (in *Machine) SetDefaults(_ context.Context) {}

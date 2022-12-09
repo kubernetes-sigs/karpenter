@@ -12,21 +12,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package scheme
+package v1alpha1
 
 import (
-	"k8s.io/apimachinery/pkg/runtime"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"context"
 
-	"github.com/aws/karpenter-core/pkg/apis"
+	"knative.dev/pkg/apis"
 )
 
-var (
-	Scheme = runtime.NewScheme()
-)
-
-func init() {
-	utilruntime.Must(clientgoscheme.AddToScheme(Scheme))
-	utilruntime.Must(apis.AddToScheme(Scheme))
+// Validate the Machine
+func (in *Machine) Validate(_ context.Context) *apis.FieldError {
+	return nil
 }
