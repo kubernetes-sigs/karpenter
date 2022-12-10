@@ -390,11 +390,8 @@ func (c *Cluster) UpdateMachine(ctx context.Context, machine *v1alpha1.Machine) 
 	}
 	// See if there is a node associated with this providerID
 	node, err := c.getNodeByProviderID(ctx, machine.Status.ProviderID)
-	if err != nil || node == nil {
+	if err != nil {
 		return fmt.Errorf("getting node by providerID [%s], %w", machine.Status.ProviderID, err)
-	}
-	if node == nil {
-		return fmt.Errorf("no nodes associated with this node providerID [%s]", machine.Status.ProviderID)
 	}
 
 	oldNode, foundOldNode := c.nodes[machine.Status.ProviderID]
@@ -454,7 +451,7 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 
 func (c *Cluster) makeMachineOwnedNode(ctx context.Context, machine *v1alpha1.Machine, node *v1.Node) (*Node, error) {
 	// If this machine isn't initialized, use the machine as its representation in state
-	if machine.StatusConditions().GetCondition(v1alpha1.MachineInitialized) == nil ||
+	if node == nil || machine.StatusConditions().GetCondition(v1alpha1.MachineInitialized) == nil ||
 		machine.StatusConditions().GetCondition(v1alpha1.MachineInitialized).Status != v1.ConditionTrue {
 		return c.newInflightNode(machine), nil
 	}

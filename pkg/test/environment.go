@@ -15,18 +15,22 @@ limitations under the License.
 package test
 
 import (
+	"context"
 	"os"
 	"strings"
 
 	"github.com/samber/lo"
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/client-go/kubernetes"
 	"knative.dev/pkg/system"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
 	"github.com/aws/karpenter-core/pkg/utils/env"
 )
 
@@ -36,9 +40,12 @@ type Environment struct {
 	KubernetesInterface kubernetes.Interface
 	Version             *version.Version
 	Done                chan struct{}
+	Cancel              context.CancelFunc
 }
 
 func NewEnvironment(scheme *runtime.Scheme, crds ...*v1.CustomResourceDefinition) *Environment {
+	ctx, cancel := context.WithCancel(context.Background())
+
 	os.Setenv(system.NamespaceEnvKey, "default")
 	version := version.MustParseSemantic(strings.Replace(env.WithDefaultString("K8S_VERSION", "1.21.x"), ".x", ".0", -1))
 	environment := envtest.Environment{Scheme: scheme, CRDs: crds}
@@ -49,20 +56,35 @@ func NewEnvironment(scheme *runtime.Scheme, crds ...*v1.CustomResourceDefinition
 		// https://github.com/kubernetes/enhancements/issues/2249 for more info.
 		environment.ControlPlane.GetAPIServer().Configure().Set("feature-gates", "PodAffinityNamespaceSelector=true")
 	}
+
 	_ = lo.Must(environment.Start())
-	environment.
-		environment.Start()
-	client.FieldIndexer.IndexField()
+
+	cache := lo.Must(cache.New(environment.Config, cache.Options{Scheme: scheme}))
+	lo.Must0(cache.IndexField(ctx, &corev1.Node{}, "spec.providerID", func(o client.Object) []string {
+		return []string{o.(*corev1.Node).Spec.ProviderID}
+	}), "failed to setup providerID node indexer")
+	lo.Must0(cache.IndexField(ctx, &v1alpha1.Machine{}, "status.providerID", func(o client.Object) []string {
+		return []string{o.(*v1alpha1.Machine).Status.ProviderID}
+	}), "failed to setup providerID machine indexer")
+
+	go func() {
+		lo.Must0(cache.Start(ctx))
+	}()
 	return &Environment{
-		Environment:         environment,
-		Client:              lo.Must(client.New(environment.Config, client.Options{Scheme: environment.Scheme})),
+		Environment: environment,
+		Client: lo.Must(client.NewDelegatingClient(client.NewDelegatingClientInput{
+			CacheReader: cache,
+			Client:      lo.Must(client.New(environment.Config, client.Options{Scheme: environment.Scheme})),
+		})),
 		KubernetesInterface: kubernetes.NewForConfigOrDie(environment.Config),
 		Version:             version,
 		Done:                make(chan struct{}),
+		Cancel:              cancel,
 	}
 }
 
 func (e *Environment) Stop() error {
 	close(e.Done)
+	e.Cancel()
 	return e.Environment.Stop()
 }
