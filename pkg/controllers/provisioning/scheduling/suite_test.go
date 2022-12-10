@@ -106,7 +106,7 @@ var _ = BeforeEach(func() {
 
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
-	cluster.Reset(ctx)
+	cluster.Reset()
 })
 
 var _ = Describe("Custom Constraints", func() {
@@ -2650,7 +2650,7 @@ var _ = Describe("Topology", func() {
 					ExpectScheduled(ctx, env.Client, pods[i])
 				}
 				ExpectCleanedUp(ctx, env.Client)
-				cluster.Reset(ctx)
+				cluster.Reset()
 			}
 		})
 		It("should fail to schedule pods with unsatisfiable dependencies", func() {

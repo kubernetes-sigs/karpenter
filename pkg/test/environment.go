@@ -50,6 +50,9 @@ func NewEnvironment(scheme *runtime.Scheme, crds ...*v1.CustomResourceDefinition
 		environment.ControlPlane.GetAPIServer().Configure().Set("feature-gates", "PodAffinityNamespaceSelector=true")
 	}
 	_ = lo.Must(environment.Start())
+	environment.
+		environment.Start()
+	client.FieldIndexer.IndexField()
 	return &Environment{
 		Environment:         environment,
 		Client:              lo.Must(client.New(environment.Config, client.Options{Scheme: environment.Scheme})),

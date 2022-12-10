@@ -59,7 +59,9 @@ func (c *MachineController) Reconcile(ctx context.Context, req reconcile.Request
 	if machine.Status.ProviderID == "" {
 		return reconcile.Result{}, nil
 	}
-	c.cluster.UpdateMachine(machine)
+	if err := c.cluster.UpdateMachine(ctx, machine); err != nil {
+		return reconcile.Result{}, err
+	}
 	return reconcile.Result{RequeueAfter: stateRetryPeriod}, nil
 }
 

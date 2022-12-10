@@ -491,7 +491,7 @@ var _ = Describe("Instance Type Selection", func() {
 		// these values are constructed so that three of these pods can always fit on at least one of our instance types
 		for _, cpu := range []float64{0.1, 1.0, 2, 2.5, 4, 8, 16} {
 			for _, mem := range []float64{0.1, 1.0, 2, 4, 8, 16, 32} {
-				cluster.Reset(ctx)
+				cluster.Reset()
 				cloudProv.CreateCalls = nil
 				opts := test.PodOptions{
 					ResourceRequirements: v1.ResourceRequirements{Requests: map[v1.ResourceName]resource.Quantity{

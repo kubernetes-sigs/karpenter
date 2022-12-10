@@ -40,7 +40,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
-	"github.com/aws/karpenter-core/pkg/utils/sets"
 )
 
 // Cluster maintains cluster state that is often needed but expensive to compute.
@@ -52,20 +51,12 @@ type Cluster struct {
 	// State: Node Status & Pod -> Node Binding
 	mu sync.RWMutex
 
-	// Nodes contains
-	inflightNodes map[string]*Node                // inflight node name -> inflight node
-	nodes         map[string]*Node                // node name -> node
-	bindings      map[types.NamespacedName]string // pod namespaced named -> node name
+	nodes                map[string]*Node               // provider id -> node
+	bindings             map[types.NamespacedName]*Node // pod namespace name -> node
+	nodeNameToProviderID map[string]string              // node name -> providerID
 
-	inflightNodeNameToProviderID map[string]string // inflight node name -> provider id
-	nodeNameToProviderID         map[string]string // node name -> provider id
-
-	inflightProviderIDs          sets.Set[string] // determines whether there is an inflight representation of this node
-	initializedProviderIDs       sets.Set[string] // initialized nodes based on providerID
-	markedForDeletionProviderIDs sets.Set[string] // marked for deletion nodes based on providerID
-	nominatedProviderIDs         *cache.Cache     // nominated nodes based on providerID
-
-	antiAffinityPods sync.Map // mapping of pod namespaced name to *v1.Pod of pods that have required anti affinities
+	nominatedNodes   *cache.Cache
+	antiAffinityPods sync.Map // mapping of pod UID to *v1.Pod of pods that have required anti affinities
 
 	// consolidationState is a number indicating the state of the cluster with respect to consolidation.  If this number
 	// hasn't changed, it indicates that the cluster hasn't changed in a state which would enable consolidation if
@@ -83,22 +74,14 @@ func NewCluster(ctx context.Context, clk clock.Clock, client client.Client, cp c
 	}
 
 	c := &Cluster{
-		clock:         clk,
-		kubeClient:    client,
-		cloudProvider: cp,
-		inflightNodes: map[string]*Node{},
-		nodes:         map[string]*Node{},
-		bindings:      map[types.NamespacedName]string{},
-
-		inflightNodeNameToProviderID: map[string]string{},
-		nodeNameToProviderID:         map[string]string{},
-
-		inflightProviderIDs:          sets.New[string](),
-		initializedProviderIDs:       sets.New[string](),
-		markedForDeletionProviderIDs: sets.New[string](),
-		nominatedProviderIDs:         cache.New(nominationPeriod, 10*time.Second),
+		clock:                clk,
+		kubeClient:           client,
+		cloudProvider:        cp,
+		nominatedNodes:       cache.New(nominationPeriod, 10*time.Second),
+		nodes:                map[string]*Node{},
+		bindings:             map[types.NamespacedName]*Node{},
+		nodeNameToProviderID: map[string]string{},
 	}
-	c.nominatedProviderIDs.OnEvicted(c.onNominatedNodeEviction)
 	return c
 }
 
@@ -136,6 +119,7 @@ type Node struct {
 	// MarkedForDeletion marks this node to say that there is some controller that is
 	// planning to delete this node so consider pods that are present on it available for scheduling
 	MarkedForDeletion bool
+	Initialized       bool
 }
 
 // ForPodsWithAntiAffinity calls the supplied function once for each pod with required anti affinity terms that is
@@ -146,13 +130,8 @@ func (c *Cluster) ForPodsWithAntiAffinity(fn func(p *v1.Pod, n *v1.Node) bool) {
 		pod := value.(*v1.Pod)
 		c.mu.RLock()
 		defer c.mu.RUnlock()
-		nodeName, ok := c.bindings[client.ObjectKeyFromObject(pod)]
+		node, ok := c.bindings[client.ObjectKeyFromObject(pod)]
 		if !ok {
-			return true
-		}
-		node, ok := c.nodes[nodeName]
-		if !ok {
-			// if we receive the node deletion event before the pod deletion event, this can happen
 			return true
 		}
 		return fn(pod, node.Node)
@@ -164,27 +143,10 @@ func (c *Cluster) ForPodsWithAntiAffinity(fn func(p *v1.Pod, n *v1.Node) bool) {
 func (c *Cluster) ForEachNode(f func(n *Node) bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-
-	nodeMap := map[string]*Node{}
-	// We take all the inflight nodes to be valid nodes. Then, if there are real nodes that have the same providerID
-	// and are initialized, we take those to be the source-of-truth over the inflight nodes.
-	for _, node := range c.inflightNodes {
-		if c.markedForDeletionProviderIDs.Has(node.Node.Spec.ProviderID) {
-			node.MarkedForDeletion = true
-		}
-		nodeMap[node.Node.Spec.ProviderID] = node
-	}
+	var nodes []*Node
 	for _, node := range c.nodes {
-		if c.markedForDeletionProviderIDs.Has(node.Node.Spec.ProviderID) {
-			node.MarkedForDeletion = true
-		}
-		if _, ok := nodeMap[node.Node.Spec.ProviderID]; ok && !c.initializedProviderIDs.Has(node.Node.Spec.ProviderID) {
-			continue
-		}
-		nodeMap[node.Node.Spec.ProviderID] = node
+		nodes = append(nodes, node)
 	}
-	nodes := lo.Values(nodeMap)
-
 	// sort nodes by creation time, so we provide a consistent ordering
 	sort.Slice(nodes, func(a, b int) bool {
 		if nodes[a].Node.CreationTimestamp != nodes[b].Node.CreationTimestamp {
@@ -193,6 +155,7 @@ func (c *Cluster) ForEachNode(f func(n *Node) bool) {
 		// sometimes we get nodes created in the same second, so sort again by node UID to provide a consistent ordering
 		return nodes[a].Node.UID < nodes[b].Node.UID
 	})
+
 	for _, node := range nodes {
 		if !f(node) {
 			return
@@ -202,60 +165,45 @@ func (c *Cluster) ForEachNode(f func(n *Node) bool) {
 
 // IsNodeNominated returns true if the given node was expected to have a pod bound to it during a recent scheduling
 // batch
-func (c *Cluster) IsNodeNominated(nodeName string) bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	if id, ok := c.nodeNameToProviderID[nodeName]; ok {
-		_, found := c.nominatedProviderIDs.Get(id)
-		return found
-	}
-	if id, ok := c.inflightNodeNameToProviderID[nodeName]; ok {
-		_, found := c.nominatedProviderIDs.Get(id)
-		return found
+func (c *Cluster) IsNodeNominated(name string) bool {
+	if id, ok := c.nodeNameToProviderID[name]; ok {
+		_, exists := c.nominatedNodes.Get(id)
+		return exists
 	}
 	return false
 }
 
 // NominateNodeForPod records that a node was the target of a pending pod during a scheduling batch
-func (c *Cluster) NominateNodeForPod(nodeName string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if id, ok := c.nodeNameToProviderID[nodeName]; ok {
-		c.nominatedProviderIDs.SetDefault(id, nil)
-	}
-	if id, ok := c.inflightNodeNameToProviderID[nodeName]; ok {
-		c.nominatedProviderIDs.SetDefault(id, nil)
+func (c *Cluster) NominateNodeForPod(name string) {
+	if id, ok := c.nodeNameToProviderID[name]; ok {
+		c.nominatedNodes.SetDefault(id, nil)
 	}
 }
 
 // UnmarkForDeletion removes the marking on the node as a node the controller intends to delete
-func (c *Cluster) UnmarkForDeletion(nodeNames ...string) {
+func (c *Cluster) UnmarkForDeletion(names ...string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	for _, name := range nodeNames {
+	for _, name := range names {
 		if id, ok := c.nodeNameToProviderID[name]; ok {
-			c.markedForDeletionProviderIDs.Delete(id)
-		}
-		if id, ok := c.inflightNodeNameToProviderID[name]; ok {
-			c.markedForDeletionProviderIDs.Delete(id)
+			if _, ok := c.nodes[id]; ok {
+				c.nodes[id].MarkedForDeletion = false
+			}
 		}
 	}
 }
 
 // MarkForDeletion marks the node as pending deletion in the internal cluster state
-func (c *Cluster) MarkForDeletion(nodeNames ...string) {
+func (c *Cluster) MarkForDeletion(names ...string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	for _, name := range nodeNames {
+	for _, name := range names {
 		if id, ok := c.nodeNameToProviderID[name]; ok {
-			c.markedForDeletionProviderIDs.Insert(id)
-		}
-		if id, ok := c.inflightNodeNameToProviderID[name]; ok {
-			c.markedForDeletionProviderIDs.Insert(id)
+			if _, ok := c.nodes[id]; ok {
+				c.nodes[id].MarkedForDeletion = true
+			}
 		}
 	}
 }
@@ -263,15 +211,16 @@ func (c *Cluster) MarkForDeletion(nodeNames ...string) {
 // newNode always returns a node, even if some portion of the update has failed
 func (c *Cluster) newNode(ctx context.Context, node *v1.Node) (*Node, error) {
 	n := &Node{
-		Node:          node,
-		Capacity:      v1.ResourceList{},
-		Allocatable:   v1.ResourceList{},
-		Available:     v1.ResourceList{},
-		HostPortUsage: scheduling.NewHostPortUsage(),
-		VolumeUsage:   scheduling.NewVolumeLimits(c.kubeClient),
-		VolumeLimits:  scheduling.VolumeCount{},
-		podRequests:   map[types.NamespacedName]v1.ResourceList{},
-		podLimits:     map[types.NamespacedName]v1.ResourceList{},
+		Node:              node,
+		Capacity:          v1.ResourceList{},
+		Allocatable:       v1.ResourceList{},
+		Available:         v1.ResourceList{},
+		HostPortUsage:     scheduling.NewHostPortUsage(),
+		VolumeUsage:       scheduling.NewVolumeLimits(c.kubeClient),
+		VolumeLimits:      scheduling.VolumeCount{},
+		podRequests:       map[types.NamespacedName]v1.ResourceList{},
+		podLimits:         map[types.NamespacedName]v1.ResourceList{},
+		MarkedForDeletion: !node.DeletionTimestamp.IsZero(),
 	}
 	if err := multierr.Combine(
 		c.populateCapacity(ctx, node, n),
@@ -302,8 +251,10 @@ func (c *Cluster) newInflightNode(machine *v1alpha1.Machine) *Node {
 				Allocatable: machine.Status.Allocatable,
 			},
 		},
-		Capacity:    machine.Status.Capacity,
-		Allocatable: machine.Status.Allocatable,
+		Capacity:          machine.Status.Capacity,
+		Allocatable:       machine.Status.Allocatable,
+		MarkedForDeletion: !machine.DeletionTimestamp.IsZero(),
+		Initialized:       false,
 	}
 }
 
@@ -373,7 +324,7 @@ func (c *Cluster) populateResourceRequests(ctx context.Context, node *v1.Node, n
 		podKey := client.ObjectKeyFromObject(pod)
 		n.podRequests[podKey] = requests
 		n.podLimits[podKey] = podLimits
-		c.bindings[podKey] = n.Node.Name
+		c.bindings[podKey] = n
 		if podutils.IsOwnedByDaemonSet(pod) {
 			daemonsetRequested = append(daemonsetRequested, requests)
 			daemonsetLimits = append(daemonsetLimits, podLimits)
@@ -411,15 +362,11 @@ func (c *Cluster) DeleteMachine(machineName string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if id, ok := c.inflightNodeNameToProviderID[machineName]; ok {
-		c.nominatedProviderIDs.Delete(id)
-		c.inflightProviderIDs.Delete(id)
-		c.initializedProviderIDs.Delete(id)
-		c.markedForDeletionProviderIDs.Delete(id)
+	if id, ok := c.nodeNameToProviderID[machineName]; ok {
+		delete(c.nodes, id)
+		delete(c.nodeNameToProviderID, machineName)
+		c.recordConsolidationChange()
 	}
-	delete(c.inflightNodes, machineName)
-	delete(c.inflightNodeNameToProviderID, machineName)
-	c.recordConsolidationChange()
 }
 
 func (c *Cluster) DeleteNode(nodeName string) {
@@ -427,43 +374,43 @@ func (c *Cluster) DeleteNode(nodeName string) {
 	defer c.mu.Unlock()
 
 	if id, ok := c.nodeNameToProviderID[nodeName]; ok {
-		if !c.inflightProviderIDs.Has(id) {
-			c.markedForDeletionProviderIDs.Delete(id)
-			c.nominatedProviderIDs.Delete(id)
-		}
+		delete(c.nodes, id)
+		delete(c.nodeNameToProviderID, nodeName)
+		c.recordConsolidationChange()
 	}
-	delete(c.nodes, nodeName)
-	delete(c.nodeNameToProviderID, nodeName)
-	c.recordConsolidationChange()
 }
 
-func (c *Cluster) UpdateMachine(machine *v1alpha1.Machine) {
+func (c *Cluster) UpdateMachine(ctx context.Context, machine *v1alpha1.Machine) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Update the initialized providerIDs and alert consolidation of the change
-	if machine.StatusConditions().GetCondition(v1alpha1.MachineInitialized) != nil &&
-		machine.StatusConditions().GetCondition(v1alpha1.MachineInitialized).Status == v1.ConditionTrue {
-		if !c.initializedProviderIDs.Has(machine.Status.ProviderID) {
-			c.recordConsolidationChange()
-		}
-		c.initializedProviderIDs.Insert(machine.Status.ProviderID)
-	} else {
-		if c.initializedProviderIDs.Has(machine.Status.ProviderID) {
-			c.recordConsolidationChange()
-		}
-		c.initializedProviderIDs.Delete(machine.Status.ProviderID)
+	// We don't consider machines without providerIDs
+	if machine.Status.ProviderID == "" {
+		return nil
+	}
+	// See if there is a node associated with this providerID
+	node, err := c.getNodeByProviderID(ctx, machine.Status.ProviderID)
+	if err != nil || node == nil {
+		return fmt.Errorf("getting node by providerID [%s], %w", machine.Status.ProviderID, err)
+	}
+	if node == nil {
+		return fmt.Errorf("no nodes associated with this node providerID [%s]", machine.Status.ProviderID)
 	}
 
-	// If the machine is in a deleting state, we should take note of this and mark for deletion
-	if !machine.DeletionTimestamp.IsZero() {
-		c.markedForDeletionProviderIDs.Insert(machine.Status.ProviderID)
-		c.recordConsolidationChange()
+	oldNode, foundOldNode := c.nodes[machine.Status.ProviderID]
+	stateNode, err := c.makeMachineOwnedNode(ctx, machine, node)
+	if err != nil {
+		return fmt.Errorf("creating state node, %w", err)
 	}
-	n := c.newInflightNode(machine)
-	c.inflightNodes[machine.Name] = n
-	c.inflightNodeNameToProviderID[machine.Name] = machine.Status.ProviderID
-	c.inflightProviderIDs.Insert(machine.Status.ProviderID)
+	if foundOldNode {
+		stateNode.MarkedForDeletion = stateNode.MarkedForDeletion || oldNode.MarkedForDeletion
+		if shouldTriggerConsolidation(oldNode, stateNode) {
+			c.recordConsolidationChange()
+		}
+	}
+	c.nodes[machine.Status.ProviderID] = stateNode
+	c.nodeNameToProviderID[stateNode.Node.Name] = machine.Status.ProviderID
+	return nil
 }
 
 // UpdateNode is called for every node reconciliation
@@ -471,36 +418,81 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// We need to mock the provider ID for a node if it isn't set
+	// We don't consider nodes without providerIDs
 	if node.Spec.ProviderID == "" {
-		node.Spec.ProviderID = node.Name
+		return nil
 	}
-	n, err := c.newNode(ctx, node)
+	// See if there is a machine associated with this providerID
+	machine, err := c.getMachineByProviderID(ctx, node.Spec.ProviderID)
 	if err != nil {
-		return err
+		return fmt.Errorf("getting machine for node, %w", err)
 	}
 
-	if oldNode, ok := c.nodes[node.Name]; ok {
-		if oldNode.Node.Labels[v1alpha5.LabelNodeInitialized] != n.Node.Labels[v1alpha5.LabelNodeInitialized] {
+	oldNode, foundOldNode := c.nodes[node.Spec.ProviderID]
+	var stateNode *Node
+
+	// This is a machine-owned node
+	if machine != nil {
+		if stateNode, err = c.makeMachineOwnedNode(ctx, machine, node); err != nil {
+			return fmt.Errorf("creating state node, %w", err)
+		}
+	} else {
+		if stateNode, err = c.newNode(ctx, node); err != nil {
+			return fmt.Errorf("creating state node, %w", err)
+		}
+	}
+	if foundOldNode {
+		stateNode.MarkedForDeletion = stateNode.MarkedForDeletion || oldNode.MarkedForDeletion
+		if shouldTriggerConsolidation(oldNode, stateNode) {
 			c.recordConsolidationChange()
 		}
 	}
-	if !c.inflightProviderIDs.Has(n.Node.Spec.ProviderID) {
-		// If this isn't a node with an inflight node, marked for deletion is handled by the node
-		if !node.DeletionTimestamp.IsZero() {
-			c.markedForDeletionProviderIDs.Insert(n.Node.Spec.ProviderID)
-			c.recordConsolidationChange()
-		}
-		// If the providerID changed, we should cleanup the old provider info
-		if c.nodeNameToProviderID[node.Name] != n.Node.Spec.ProviderID {
-			id := c.nodeNameToProviderID[node.Name]
-			c.markedForDeletionProviderIDs.Delete(id)
-			c.nominatedProviderIDs.Delete(id)
-		}
-	}
-	c.nodes[node.Name] = n
-	c.nodeNameToProviderID[node.Name] = n.Node.Spec.ProviderID
+	c.nodes[node.Spec.ProviderID] = stateNode
+	c.nodeNameToProviderID[stateNode.Node.Name] = node.Spec.ProviderID
 	return nil
+}
+
+func (c *Cluster) makeMachineOwnedNode(ctx context.Context, machine *v1alpha1.Machine, node *v1.Node) (*Node, error) {
+	// If this machine isn't initialized, use the machine as its representation in state
+	if machine.StatusConditions().GetCondition(v1alpha1.MachineInitialized) == nil ||
+		machine.StatusConditions().GetCondition(v1alpha1.MachineInitialized).Status != v1.ConditionTrue {
+		return c.newInflightNode(machine), nil
+	}
+	stateNode, err := c.newNode(ctx, node)
+	if err != nil {
+		return nil, fmt.Errorf("creating new node, %w", err)
+	}
+	stateNode.Initialized = true
+	stateNode.MarkedForDeletion = stateNode.MarkedForDeletion || !machine.DeletionTimestamp.IsZero()
+	return stateNode, nil
+}
+
+func (c *Cluster) getMachineByProviderID(ctx context.Context, providerID string) (*v1alpha1.Machine, error) {
+	machineList := &v1alpha1.MachineList{}
+	if err := c.kubeClient.List(ctx, machineList, client.MatchingFields{"status.providerID": providerID}); err != nil {
+		return nil, fmt.Errorf("listing machines for providerID [%s], %w", providerID, err)
+	}
+	if len(machineList.Items) > 1 {
+		return nil, fmt.Errorf("multiple machines mapped to providerID [%s]", providerID)
+	}
+	if len(machineList.Items) == 0 {
+		return nil, nil
+	}
+	return &machineList.Items[0], nil
+}
+
+func (c *Cluster) getNodeByProviderID(ctx context.Context, providerID string) (*v1.Node, error) {
+	nodeList := &v1.NodeList{}
+	if err := c.kubeClient.List(ctx, nodeList, client.MatchingFields{"spec.providerID": providerID}); err != nil {
+		return nil, fmt.Errorf("listing nodes for providerID [%s], %w", providerID, err)
+	}
+	if len(nodeList.Items) > 1 {
+		return nil, fmt.Errorf("multiple nodes mapped to providerID [%s]", providerID)
+	}
+	if len(nodeList.Items) == 0 {
+		return nil, nil
+	}
+	return &nodeList.Items[0], nil
 }
 
 // ClusterConsolidationState returns a number representing the state of the cluster with respect to consolidation.  If
@@ -525,22 +517,101 @@ func (c *Cluster) DeletePod(podKey types.NamespacedName) {
 	c.recordConsolidationChange()
 }
 
+// UpdatePod is called every time the pod is reconciled
+func (c *Cluster) UpdatePod(ctx context.Context, pod *v1.Pod) error {
+	if podutils.IsTerminal(pod) {
+		c.updateNodeUsageFromPodCompletion(client.ObjectKeyFromObject(pod))
+	} else {
+		if err := c.updateNodeUsageFromPod(ctx, pod); err != nil {
+			return fmt.Errorf("updating node usage for pod, %w", err)
+		}
+	}
+	c.updatePodAntiAffinities(pod)
+	return nil
+}
+
+func (c *Cluster) updatePodAntiAffinities(pod *v1.Pod) {
+	// We intentionally don't track inverse anti-affinity preferences. We're not
+	// required to enforce them, so it just adds complexity for very little
+	// value. The problem with them comes from the relaxation process, the pod
+	// we are relaxing is not the pod with the anti-affinity term.
+	if podutils.HasRequiredPodAntiAffinity(pod) {
+		c.antiAffinityPods.Store(client.ObjectKeyFromObject(pod), pod)
+	} else {
+		c.antiAffinityPods.Delete(client.ObjectKeyFromObject(pod))
+	}
+}
+
+// updateNodeUsageFromPod is called every time a reconcile event occurs for the pod. If the pods binding has changed
+// (unbound to bound), we need to update the resource requests on the node.
+func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error {
+	podKey := client.ObjectKeyFromObject(pod)
+
+	// nothing to do if the pod isn't bound, checking early allows avoiding unnecessary locking
+	if pod.Spec.NodeName == "" {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// If we haven't gotten the node update yet, we should error, retry and wait for the node update
+	providerID, ok := c.nodeNameToProviderID[pod.Spec.NodeName]
+	if !ok {
+		return fmt.Errorf("bound node not found in cluster state")
+	}
+	node, ok := c.nodes[providerID]
+	if !ok {
+		return fmt.Errorf("bound node not found in cluster state")
+	}
+
+	if n, ok := c.bindings[podKey]; !ok {
+		// No need to update anything if pod binding hasn't changed
+		if n.Node.Name == pod.Spec.NodeName {
+			return nil
+		}
+		// If the binding changed, we know the pod was deleted and re-created, so we should
+		// delete the pod resources from the old node state
+		delete(c.bindings, podKey)
+		delete(n.podRequests, podKey)
+		delete(n.podLimits, podKey)
+
+		n.Available = resources.Merge(n.Available, n.podRequests[podKey])
+		n.PodTotalRequests = resources.Subtract(n.PodTotalRequests, n.podRequests[podKey])
+		n.PodTotalLimits = resources.Subtract(n.PodTotalLimits, n.podLimits[podKey])
+		n.HostPortUsage.DeletePod(podKey)
+	}
+
+	// sum the newly bound pod's requests and limits into the existing node and record the binding
+	podRequests := resources.RequestsForPods(pod)
+	podLimits := resources.LimitsForPods(pod)
+	// our available capacity goes down by the amount that the pod had requested
+	node.Available = resources.Subtract(node.Available, podRequests)
+	node.PodTotalRequests = resources.Merge(node.PodTotalRequests, podRequests)
+	node.PodTotalLimits = resources.Merge(node.PodTotalLimits, podLimits)
+	// if it's a daemonset, we track what it has requested separately
+	if podutils.IsOwnedByDaemonSet(pod) {
+		node.DaemonSetRequested = resources.Merge(node.DaemonSetRequested, podRequests)
+		node.DaemonSetLimits = resources.Merge(node.DaemonSetRequested, podLimits)
+	}
+	node.HostPortUsage.Add(ctx, pod)
+	node.VolumeUsage.Add(ctx, pod)
+	node.podRequests[podKey] = podRequests
+	node.podLimits[podKey] = podLimits
+	c.bindings[podKey] = node
+	return nil
+}
+
 func (c *Cluster) updateNodeUsageFromPodCompletion(podKey types.NamespacedName) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	nodeName, bindingKnown := c.bindings[podKey]
+	n, bindingKnown := c.bindings[podKey]
 	if !bindingKnown {
 		// we didn't think the pod was bound, so we weren't tracking it and don't need to do anything
 		return
 	}
-
 	delete(c.bindings, podKey)
-	n, ok := c.nodes[nodeName]
-	if !ok {
-		// we weren't tracking the node yet, so nothing to do
-		return
-	}
+
 	// pod has been deleted so our available capacity increases by the resources that had been
 	// requested by the pod
 	n.Available = resources.Merge(n.Available, n.podRequests[podKey])
@@ -556,115 +627,20 @@ func (c *Cluster) updateNodeUsageFromPodCompletion(podKey types.NamespacedName) 
 	// worst case we will resync to correct this.
 }
 
-// UpdatePod is called every time the pod is reconciled
-func (c *Cluster) UpdatePod(ctx context.Context, pod *v1.Pod) error {
-	var err error
-	if podutils.IsTerminal(pod) {
-		c.updateNodeUsageFromPodCompletion(client.ObjectKeyFromObject(pod))
-	} else {
-		err = c.updateNodeUsageFromPod(ctx, pod)
-	}
-	c.updatePodAntiAffinities(pod)
-	return err
-}
-
-func (c *Cluster) updatePodAntiAffinities(pod *v1.Pod) {
-	// We intentionally don't track inverse anti-affinity preferences. We're not
-	// required to enforce them so it just adds complexity for very little
-	// value. The problem with them comes from the relaxation process, the pod
-	// we are relaxing is not the pod with the anti-affinity term.
-	if podKey := client.ObjectKeyFromObject(pod); podutils.HasRequiredPodAntiAffinity(pod) {
-		c.antiAffinityPods.Store(podKey, pod)
-	} else {
-		c.antiAffinityPods.Delete(podKey)
-	}
-}
-
-// updateNodeUsageFromPod is called every time a reconcile event occurs for the pod. If the pods binding has changed
-// (unbound to bound), we need to update the resource requests on the node.
-func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error {
-	// nothing to do if the pod isn't bound, checking early allows avoiding unnecessary locking
-	if pod.Spec.NodeName == "" {
-		return nil
-	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	podKey := client.ObjectKeyFromObject(pod)
-	oldNodeName, bindingKnown := c.bindings[podKey]
-	if bindingKnown {
-		if oldNodeName == pod.Spec.NodeName {
-			// we are already tracking the pod binding, so nothing to update
-			return nil
-		}
-		// the pod has switched nodes, this can occur if a pod name was re-used and it was deleted/re-created rapidly,
-		// binding to a different node the second time
-		n, ok := c.nodes[oldNodeName]
-		if ok {
-			// we were tracking the old node, so we need to reduce its capacity by the amount of the pod that has
-			// left it
-			delete(c.bindings, podKey)
-			n.Available = resources.Merge(n.Available, n.podRequests[podKey])
-			n.PodTotalRequests = resources.Subtract(n.PodTotalRequests, n.podRequests[podKey])
-			n.PodTotalLimits = resources.Subtract(n.PodTotalLimits, n.podLimits[podKey])
-			n.HostPortUsage.DeletePod(podKey)
-			delete(n.podRequests, podKey)
-			delete(n.podLimits, podKey)
-		}
-	} else {
-		// new pod binding has occurred
-		c.recordConsolidationChange()
-	}
-
-	// did we notice that the pod is bound to a node and didn't know about the node before?
-	n, ok := c.nodes[pod.Spec.NodeName]
-	if !ok {
-		var node v1.Node
-		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: pod.Spec.NodeName}, &node); err != nil {
-			return client.IgnoreNotFound(fmt.Errorf("getting node, %w", err))
-		}
-
-		var err error
-		// node didn't exist, but creating it will pick up this newly bound pod as well
-		n, err = c.newNode(ctx, &node)
-		if err != nil {
-			// no need to delete c.nodes[node.Name] as it wasn't stored previously
-			return err
-		}
-		c.nodes[node.Name] = n
-		return nil
-	}
-
-	// sum the newly bound pod's requests and limits into the existing node and record the binding
-	podRequests := resources.RequestsForPods(pod)
-	podLimits := resources.LimitsForPods(pod)
-	// our available capacity goes down by the amount that the pod had requested
-	n.Available = resources.Subtract(n.Available, podRequests)
-	n.PodTotalRequests = resources.Merge(n.PodTotalRequests, podRequests)
-	n.PodTotalLimits = resources.Merge(n.PodTotalLimits, podLimits)
-	// if it's a daemonset, we track what it has requested separately
-	if podutils.IsOwnedByDaemonSet(pod) {
-		n.DaemonSetRequested = resources.Merge(n.DaemonSetRequested, podRequests)
-		n.DaemonSetLimits = resources.Merge(n.DaemonSetRequested, podLimits)
-	}
-	n.HostPortUsage.Add(ctx, pod)
-	n.VolumeUsage.Add(ctx, pod)
-	n.podRequests[podKey] = podRequests
-	n.podLimits[podKey] = podLimits
-	c.bindings[podKey] = n.Node.Name
-	return nil
-}
-
 func (c *Cluster) recordConsolidationChange() {
 	atomic.StoreInt64(&c.consolidationState, c.clock.Now().UnixMilli())
 }
 
+func shouldTriggerConsolidation(oldNode, newNode *Node) bool {
+	return oldNode.Initialized != newNode.Initialized ||
+		oldNode.MarkedForDeletion != newNode.MarkedForDeletion
+}
+
 // Reset the cluster state for unit testing
-func (c *Cluster) Reset(ctx context.Context) {
+func (c *Cluster) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.nodes = map[string]*Node{}
-	c.bindings = map[types.NamespacedName]string{}
+	c.bindings = map[types.NamespacedName]*Node{}
 	c.antiAffinityPods = sync.Map{}
 }
