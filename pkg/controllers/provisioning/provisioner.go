@@ -214,23 +214,31 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*v1.Pod, error) {
 			continue
 		}
 
-		// We have pending pods that have preferred anti-affinity or topology spread constraints.  These can interact
-		// unexpectedly with consolidation so we warn once per hour when we see these pods.
-		if po.Spec.Affinity != nil && po.Spec.Affinity.PodAntiAffinity != nil {
-			if len(po.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) != 0 {
-				if p.cm.HasChanged(string(po.UID), "pod-antiaffinity") {
-					logging.FromContext(ctx).Infof("pod %s has a preferred Anti-Affinity which can prevent consolidation", client.ObjectKeyFromObject(&po))
-				}
-			}
-		}
-		for _, tsc := range po.Spec.TopologySpreadConstraints {
-			if tsc.WhenUnsatisfiable == v1.ScheduleAnyway {
-				logging.FromContext(ctx).Infof("pod %s has a preferred TopologySpreadConstraint which can prevent consolidation", client.ObjectKeyFromObject(&po))
-			}
-		}
+		p.consolidationWarnings(ctx, po)
 		pods = append(pods, &po)
 	}
 	return pods, nil
+}
+
+// consolidationWarnings potentially writes logs warning about possible unexpected interactions between scheduling
+// constraints and consolidation
+func (p *Provisioner) consolidationWarnings(ctx context.Context, po v1.Pod) {
+	// We have pending pods that have preferred anti-affinity or topology spread constraints.  These can interact
+	// unexpectedly with consolidation so we warn once per hour when we see these pods.
+	if po.Spec.Affinity != nil && po.Spec.Affinity.PodAntiAffinity != nil {
+		if len(po.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) != 0 {
+			if p.cm.HasChanged(string(po.UID), "pod-antiaffinity") {
+				logging.FromContext(ctx).Infof("pod %s has a preferred Anti-Affinity which can prevent consolidation", client.ObjectKeyFromObject(&po))
+			}
+		}
+	}
+	for _, tsc := range po.Spec.TopologySpreadConstraints {
+		if tsc.WhenUnsatisfiable == v1.ScheduleAnyway {
+			if p.cm.HasChanged(string(po.UID), "pod-topology-spread") {
+				logging.FromContext(ctx).Infof("pod %s has a preferred TopologySpreadConstraint which can prevent consolidation", client.ObjectKeyFromObject(&po))
+			}
+		}
+	}
 }
 
 // nolint: gocyclo
