@@ -50,7 +50,7 @@ func (c *Lazy[T]) Set(v T) {
 // TryGet attempts to get a non-nil value from the internal value. If the internal value is nil, the Resolve function
 // will attempt to resolve the value, setting the value to be persistently stored if the resolve of Resolve is non-nil.
 func (c *Lazy[T]) TryGet(ctx context.Context, opts ...functional.Option[Options]) (T, error) {
-	o := functional.ResolveOptions[Options](opts...)
+	o := functional.ResolveOptions(opts...)
 	c.mu.RLock()
 	if c.value != nil && !o.ignoreCache {
 		ret := *c.value
