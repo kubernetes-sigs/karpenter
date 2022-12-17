@@ -109,13 +109,6 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 	if triggered := p.batcher.Wait(ctx); !triggered {
 		return reconcile.Result{}, nil
 	}
-	// If the provisioning loop fails for any reason, retrigger it,
-	// since pod watch events have already been processed
-	defer func() {
-		if err != nil {
-			p.Trigger()
-		}
-	}()
 
 	// We collect the nodes with their used capacities before we get the list of pending pods. This ensures that
 	// the node capacities we schedule against are always >= what the actual capacity is at any given instance. This
@@ -351,7 +344,7 @@ func (p *Provisioner) launch(ctx context.Context, machine *scheduler.Node, opts 
 	if err := p.cluster.UpdateNode(ctx, k8sNode); err != nil {
 		return "", fmt.Errorf("updating cluster state, %w", err)
 	}
-	if functional.ResolveOptions[LaunchOptions](opts...).RecordPodNomination {
+	if functional.ResolveOptions(opts...).RecordPodNomination {
 		for _, pod := range machine.Pods {
 			p.recorder.Publish(events.NominatePod(pod, k8sNode))
 		}

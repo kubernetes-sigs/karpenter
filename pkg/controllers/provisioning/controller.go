@@ -16,6 +16,7 @@ package provisioning
 
 import (
 	"context"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -52,11 +53,16 @@ func (c *Controller) Name() string {
 }
 
 // Reconcile the resource
-func (c *Controller) Reconcile(_ context.Context, p *v1.Pod) (reconcile.Result, error) {
-	if pod.IsProvisionable(p) {
-		c.provisioner.Trigger()
+func (c *Controller) Reconcile(ctx context.Context, p *v1.Pod) (reconcile.Result, error) {
+	if !pod.IsProvisionable(p) {
+		return reconcile.Result{}, nil
 	}
-	return reconcile.Result{}, nil
+	c.provisioner.Trigger()
+	// Continue to requeue until the pod is no longer provisionable. Pods may
+	// not be scheduled as expected if new pods are created while nodes are
+	// coming online. Even if a provisioning loop is successful, the pod may
+	// require another provisioning loop to become schedulable.
+	return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
