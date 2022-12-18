@@ -2,7 +2,7 @@
 set -euo pipefail
 
 config(){
-  GITHUB_ACCOUNT="aws"
+  GITHUB_ACCOUNT="spring1843"
   RELEASE_REPO=${RELEASE_REPO:-ghcr.io/${GITHUB_ACCOUNT}/karpenter-core}
 }
 
