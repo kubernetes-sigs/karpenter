@@ -20,6 +20,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	v1 "k8s.io/api/core/v1"
 	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -55,10 +56,33 @@ var _ = Describe("Pod Metrics", func() {
 		ExpectApplied(ctx, env.Client, p)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
 
-		ExpectMetricExistsWithLabelValues("karpenter_pods_state", map[string]string{
+		_, found := FindMetricWithLabelValues("karpenter_pods_state", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
-		}).To(BeTrue())
+		})
+		Expect(found).To(BeTrue())
+	})
+	It("should update the pod state metrics with pod phase", func() {
+		p := test.Pod()
+		ExpectApplied(ctx, env.Client, p)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
+
+		_, found := FindMetricWithLabelValues("karpenter_pods_state", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeTrue())
+
+		p.Status.Phase = v1.PodRunning
+		ExpectApplied(ctx, env.Client, p)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
+
+		_, found = FindMetricWithLabelValues("karpenter_pods_state", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+			"phase":     string(p.Status.Phase),
+		})
+		Expect(found).To(BeTrue())
 	})
 	It("should delete the pod state metric on pod delete", func() {
 		p := test.Pod()
@@ -68,9 +92,10 @@ var _ = Describe("Pod Metrics", func() {
 		ExpectDeleted(ctx, env.Client, p)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
 
-		ExpectMetricExistsWithLabelValues("karpenter_pods_state", map[string]string{
+		_, found := FindMetricWithLabelValues("karpenter_pods_state", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
-		}).To(BeFalse())
+		})
+		Expect(found).To(BeFalse())
 	})
 })

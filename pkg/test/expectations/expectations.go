@@ -33,6 +33,8 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -124,14 +126,45 @@ func ExpectAppliedWithOffset(offset int, ctx context.Context, c client.Client, o
 			object.SetResourceVersion(current.GetResourceVersion())
 			ExpectWithOffset(offset+1, c.Update(ctx, object)).To(Succeed())
 		}
+		err := setStatus(object, statuscopy)
+		Expect(err).To(BeNil())
+
 		// Update status
-		statuscopy.SetResourceVersion(object.GetResourceVersion())
-		ExpectWithOffset(offset+1, c.Status().Update(ctx, statuscopy)).To(Or(Succeed(), MatchError("the server could not find the requested resource"))) // Some objects do not have a status
+		ExpectWithOffset(offset+1, c.Status().Update(ctx, object)).To(Or(Succeed(), MatchError("the server could not find the requested resource"))) // Some objects do not have a status
+
 		// Delete if timestamp set
 		if deletecopy.GetDeletionTimestamp() != nil {
 			ExpectWithOffset(offset+1, c.Delete(ctx, deletecopy)).To(Succeed())
 		}
 	}
+}
+
+// setStatus sets the status field on the passed object so that we can perform a status update and return
+// the full updated object back to the caller
+func setStatus(obj, statusObj client.Object) error {
+	rawObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+	if err != nil {
+		return err
+	}
+	rawStatusObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(statusObj)
+	if err != nil {
+		return err
+	}
+	statusField, found, err := unstructured.NestedFieldNoCopy(rawStatusObj, "status")
+	// If we don't find the status, this means we don't need to perform a status update
+	if !found {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err = unstructured.SetNestedField(rawObj, statusField, "status"); err != nil {
+		return err
+	}
+	if err = runtime.DefaultUnstructuredConverter.FromUnstructured(rawObj, obj); err != nil {
+		return err
+	}
+	return nil
 }
 
 func ExpectDeleted(ctx context.Context, c client.Client, objects ...client.Object) {
@@ -152,6 +185,12 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 	for i := range nodes.Items {
 		nodes.Items[i].SetFinalizers([]string{})
 		ExpectWithOffset(1, c.Update(ctx, &nodes.Items[i])).To(Succeed())
+	}
+	pvcList := &v1.PersistentVolumeClaimList{}
+	ExpectWithOffset(1, c.List(ctx, pvcList)).To(Succeed())
+	for i := range pvcList.Items {
+		pvcList.Items[i].SetFinalizers([]string{})
+		ExpectWithOffset(1, c.Update(ctx, &pvcList.Items[i])).To(Succeed())
 	}
 	for _, object := range []client.Object{
 		&v1.Pod{},
@@ -257,17 +296,18 @@ func ExpectMetric(prefix string) *prometheus.MetricFamily {
 	return selected
 }
 
-// ExpectMetricExistsWithLabelValues returns an assertion based on whether we find a metric with the passed name and the
-// given label values
-func ExpectMetricExistsWithLabelValues(name string, labelValues map[string]string) Assertion {
+// FindMetricWithLabelValues attempts to find a metric with a name with a set of label values
+// If no metric is found, the *prometheus.Metric will be nil
+func FindMetricWithLabelValues(name string, labelValues map[string]string) (*prometheus.Metric, bool) {
 	metrics, err := metrics.Registry.Gather()
 	ExpectWithOffset(1, err).To(BeNil())
 
 	mf, found := lo.Find(metrics, func(mf *prometheus.MetricFamily) bool {
 		return mf.GetName() == name
 	})
-	ExpectWithOffset(1, found).To(BeTrue(), fmt.Sprintf("expected to find a '%s' metric", name))
-
+	if !found {
+		return nil, false
+	}
 	for _, m := range mf.Metric {
 		temp := lo.Assign(labelValues)
 		for _, labelPair := range m.Label {
@@ -276,10 +316,10 @@ func ExpectMetricExistsWithLabelValues(name string, labelValues map[string]strin
 			}
 		}
 		if len(temp) == 0 {
-			return Expect(true)
+			return m, true
 		}
 	}
-	return Expect(false)
+	return nil, false
 }
 
 func ExpectManualBinding(ctx context.Context, c client.Client, pod *v1.Pod, node *v1.Node) {
