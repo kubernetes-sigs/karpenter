@@ -33,11 +33,10 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -112,9 +111,10 @@ func ExpectApplied(ctx context.Context, c client.Client, objects ...client.Objec
 
 func ExpectAppliedWithOffset(offset int, ctx context.Context, c client.Client, objects ...client.Object) {
 	for _, object := range objects {
+		deletionTimestampSet := !object.GetDeletionTimestamp().IsZero()
 		current := object.DeepCopyObject().(client.Object)
 		statuscopy := object.DeepCopyObject().(client.Object) // Snapshot the status, since create/update may override
-		deletecopy := object.DeepCopyObject().(client.Object) // Snapshot the status, since create/update may override
+
 		// Create or Update
 		if err := c.Get(ctx, client.ObjectKeyFromObject(current), current); err != nil {
 			if errors.IsNotFound(err) {
@@ -126,45 +126,19 @@ func ExpectAppliedWithOffset(offset int, ctx context.Context, c client.Client, o
 			object.SetResourceVersion(current.GetResourceVersion())
 			ExpectWithOffset(offset+1, c.Update(ctx, object)).To(Succeed())
 		}
-		err := setStatus(object, statuscopy)
-		Expect(err).To(BeNil())
-
 		// Update status
-		ExpectWithOffset(offset+1, c.Status().Update(ctx, object)).To(Or(Succeed(), MatchError("the server could not find the requested resource"))) // Some objects do not have a status
+		statuscopy.SetResourceVersion(object.GetResourceVersion())
+		ExpectWithOffset(offset+1, c.Status().Update(ctx, statuscopy)).To(Or(Succeed(), MatchError("the server could not find the requested resource"))) // Some objects do not have a status
 
-		// Delete if timestamp set
-		if deletecopy.GetDeletionTimestamp() != nil {
-			ExpectWithOffset(offset+1, c.Delete(ctx, deletecopy)).To(Succeed())
+		// Re-get the object to grab the updated spec and status
+		err := c.Get(ctx, client.ObjectKeyFromObject(object), object)
+		ExpectWithOffset(offset+1, err).ToNot(HaveOccurred())
+
+		// Set the deletion timestamp by adding a finalizer and deleting
+		if deletionTimestampSet {
+			ExpectDeletionTimestampSetWithOffset(1, ctx, c, object)
 		}
 	}
-}
-
-// setStatus sets the status field on the passed object so that we can perform a status update and return
-// the full updated object back to the caller
-func setStatus(obj, statusObj client.Object) error {
-	rawObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
-	if err != nil {
-		return err
-	}
-	rawStatusObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(statusObj)
-	if err != nil {
-		return err
-	}
-	statusField, found, err := unstructured.NestedFieldNoCopy(rawStatusObj, "status")
-	// If we don't find the status, this means we don't need to perform a status update
-	if !found {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if err = unstructured.SetNestedField(rawObj, statusField, "status"); err != nil {
-		return err
-	}
-	if err = runtime.DefaultUnstructuredConverter.FromUnstructured(rawObj, obj); err != nil {
-		return err
-	}
-	return nil
 }
 
 func ExpectDeleted(ctx context.Context, c client.Client, objects ...client.Object) {
@@ -173,6 +147,26 @@ func ExpectDeleted(ctx context.Context, c client.Client, objects ...client.Objec
 			ExpectWithOffset(1, err).To(BeNil())
 		}
 		ExpectNotFoundWithOffset(1, ctx, c, object)
+	}
+}
+
+func ExpectDeletionTimestampSet(ctx context.Context, c client.Client, objects ...client.Object) {
+	ExpectDeletionTimestampSetWithOffset(1, ctx, c, objects...)
+}
+
+// ExpectDeletionTimestampSetWithOffset ensures that the deletion timestamp is set on the objects by adding a finalizer
+// and then deleting the object immediately after. This holds the object until the finalizer is patched out in the DeferCleanup
+func ExpectDeletionTimestampSetWithOffset(offset int, ctx context.Context, c client.Client, objects ...client.Object) {
+	for _, object := range objects {
+		ExpectWithOffset(offset+1, c.Get(ctx, client.ObjectKeyFromObject(object), object)).To(Succeed())
+		controllerutil.AddFinalizer(object, v1alpha5.TestingGroup+"/finalizer")
+		ExpectWithOffset(offset+1, c.Update(ctx, object)).To(Succeed())
+		ExpectWithOffset(offset+1, c.Delete(ctx, object)).To(Succeed())
+		DeferCleanup(func(obj client.Object) {
+			mergeFrom := client.MergeFrom(obj.DeepCopyObject().(client.Object))
+			obj.SetFinalizers([]string{})
+			ExpectWithOffset(offset+1, c.Patch(ctx, obj, mergeFrom)).To(Succeed())
+		}, object)
 	}
 }
 

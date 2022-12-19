@@ -112,7 +112,9 @@ var _ = Describe("Provisioning", func() {
 		}
 	})
 	It("should ignore provisioners that are deleting", func() {
-		ExpectApplied(ctx, env.Client, test.Provisioner(test.ProvisionerOptions{ObjectMeta: metav1.ObjectMeta{DeletionTimestamp: &metav1.Time{Time: time.Now()}}}))
+		provisioner := test.Provisioner()
+		ExpectApplied(ctx, env.Client, provisioner)
+		ExpectDeletionTimestampSet(ctx, env.Client, provisioner)
 		pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
 		nodes := &v1.NodeList{}
 		Expect(env.Client.List(ctx, nodes)).To(Succeed())
