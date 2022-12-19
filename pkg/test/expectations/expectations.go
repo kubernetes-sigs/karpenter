@@ -23,9 +23,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega" //nolint:revive,stylecheck
+	. "github.com/onsi/ginkgo/v2" //nolint:revive,stylecheck
+	. "github.com/onsi/gomega"    //nolint:revive,stylecheck
 	prometheus "github.com/prometheus/client_model/go"
+	"github.com/samber/lo"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/api/policy/v1beta1"
@@ -166,7 +167,7 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 			wg.Add(1)
 			go func(object client.Object, namespace string) {
 				defer wg.Done()
-				defer ginkgo.GinkgoRecover()
+				defer GinkgoRecover()
 				ExpectWithOffset(1, c.DeleteAllOf(ctx, object, client.InNamespace(namespace),
 					&client.DeleteAllOfOptions{DeleteOptions: client.DeleteOptions{GracePeriodSeconds: ptr.Int64(0)}})).ToNot(HaveOccurred())
 			}(object, namespace.Name)
@@ -216,7 +217,7 @@ func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c cli
 	// shuffle the pods to try to detect any issues where we rely on pod order within a batch, we shuffle a copy of
 	// the slice so we can return the provisioned pods in the same order that the test supplied them for consistency
 	unorderedPods := append([]*v1.Pod{}, pods...)
-	r := rand.New(rand.NewSource(ginkgo.GinkgoRandomSeed())) //nolint
+	r := rand.New(rand.NewSource(GinkgoRandomSeed())) //nolint
 	r.Shuffle(len(unorderedPods), func(i, j int) { unorderedPods[i], unorderedPods[j] = unorderedPods[j], unorderedPods[i] })
 	for _, pod := range unorderedPods {
 		_, _ = controller.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(pod)})
@@ -254,6 +255,31 @@ func ExpectMetric(prefix string) *prometheus.MetricFamily {
 	}
 	ExpectWithOffset(1, selected).ToNot(BeNil(), fmt.Sprintf("expected to find a '%s' metric", prefix))
 	return selected
+}
+
+// ExpectMetricExistsWithLabelValues returns an assertion based on whether we find a metric with the passed name and the
+// given label values
+func ExpectMetricExistsWithLabelValues(name string, labelValues map[string]string) Assertion {
+	metrics, err := metrics.Registry.Gather()
+	ExpectWithOffset(1, err).To(BeNil())
+
+	mf, found := lo.Find(metrics, func(mf *prometheus.MetricFamily) bool {
+		return mf.GetName() == name
+	})
+	ExpectWithOffset(1, found).To(BeTrue(), fmt.Sprintf("expected to find a '%s' metric", name))
+
+	for _, m := range mf.Metric {
+		temp := lo.Assign(labelValues)
+		for _, labelPair := range m.Label {
+			if v, ok := temp[labelPair.GetName()]; ok && v == labelPair.GetValue() {
+				delete(temp, labelPair.GetName())
+			}
+		}
+		if len(temp) == 0 {
+			return Expect(true)
+		}
+	}
+	return Expect(false)
 }
 
 func ExpectManualBinding(ctx context.Context, c client.Client, pod *v1.Pod, node *v1.Node) {

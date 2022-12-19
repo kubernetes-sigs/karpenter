@@ -16,12 +16,10 @@ package pod_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	prometheus "github.com/prometheus/client_model/go"
 	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -57,21 +55,22 @@ var _ = Describe("Pod Metrics", func() {
 		ExpectApplied(ctx, env.Client, p)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
 
-		podState := ExpectMetric("karpenter_pods_state")
-		ExpectMetricLabel(podState, "name", p.GetName())
-		ExpectMetricLabel(podState, "namespace", p.GetNamespace())
+		ExpectMetricExistsWithLabelValues("karpenter_pods_state", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		}).To(BeTrue())
+	})
+	It("should delete the pod state metric on pod delete", func() {
+		p := test.Pod()
+		ExpectApplied(ctx, env.Client, p)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
+
+		ExpectDeleted(ctx, env.Client, p)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
+
+		ExpectMetricExistsWithLabelValues("karpenter_pods_state", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		}).To(BeFalse())
 	})
 })
-
-func ExpectMetricLabel(mf *prometheus.MetricFamily, name string, value string) {
-	found := false
-	for _, m := range mf.Metric {
-		for _, l := range m.Label {
-			if l.GetName() == name {
-				Expect(l.GetValue()).To(Equal(value), fmt.Sprintf("expected metrics %s = %s", name, value))
-				found = true
-			}
-		}
-	}
-	Expect(found).To(BeTrue())
-}
