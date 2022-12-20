@@ -24,6 +24,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -72,11 +73,12 @@ var (
 	)
 )
 
-var _ controller.TypedController[*v1.Pod] = (*Controller)(nil)
-
 // Controller for the resource
 type Controller struct {
-	kubeClient  client.Client
+	kubeClient client.Client
+
+	// labelsMap keeps track of the pod gauge for gauge deletion
+	// podKey (types.NamespacedName) -> prometheus.Labels
 	labelsMap   sync.Map
 	pendingPods sets.String
 }
@@ -103,10 +105,10 @@ func labelNames() []string {
 
 // NewController constructs a podController instance
 func NewController(kubeClient client.Client) controller.Controller {
-	return controller.Typed[*v1.Pod](kubeClient, &Controller{
+	return &Controller{
 		kubeClient:  kubeClient,
 		pendingPods: sets.NewString(),
-	})
+	}
 }
 
 func (c *Controller) Name() string {
@@ -114,18 +116,31 @@ func (c *Controller) Name() string {
 }
 
 // Reconcile executes a termination control loop for the resource
-func (c *Controller) Reconcile(ctx context.Context, pod *v1.Pod) (reconcile.Result, error) {
-	// Remove the previous gauge after pod labels are updated
-	if labels, ok := c.labelsMap.Load(client.ObjectKeyFromObject(pod)); ok {
-		podGaugeVec.Delete(labels.(prometheus.Labels))
+func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("pod", req.Name))
+
+	// Remove the previous gauge on CREATE/UPDATE/DELETE
+	c.cleanup(req.NamespacedName)
+
+	// Retrieve pod from reconcile request
+	pod := &v1.Pod{}
+	if err := c.kubeClient.Get(ctx, req.NamespacedName, pod); err != nil {
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
+
 	c.record(ctx, pod)
 	return reconcile.Result{}, nil
 }
 
+func (c *Controller) cleanup(podKey types.NamespacedName) {
+	if labels, ok := c.labelsMap.Load(podKey); ok {
+		podGaugeVec.Delete(labels.(prometheus.Labels))
+	}
+}
+
 func (c *Controller) record(ctx context.Context, pod *v1.Pod) {
 	// Record pods state metric
-	labels := c.labels(ctx, pod)
+	labels := c.makeLabels(ctx, pod)
 	podGaugeVec.With(labels).Set(float64(1))
 	c.labelsMap.Store(client.ObjectKeyFromObject(pod), labels)
 
@@ -146,16 +161,8 @@ func (c *Controller) record(ctx context.Context, pod *v1.Pod) {
 	}
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) controller.Builder {
-	return controller.Adapt(
-		controllerruntime.
-			NewControllerManagedBy(m).
-			For(&v1.Pod{}),
-	)
-}
-
-// labels creates the labels using the current state of the pod
-func (c *Controller) labels(ctx context.Context, pod *v1.Pod) prometheus.Labels {
+// makeLabels creates the makeLabels using the current state of the pod
+func (c *Controller) makeLabels(ctx context.Context, pod *v1.Pod) prometheus.Labels {
 	metricLabels := prometheus.Labels{}
 	metricLabels[podName] = pod.GetName()
 	metricLabels[podNameSpace] = pod.GetNamespace()
@@ -197,4 +204,12 @@ func (c *Controller) labels(ctx context.Context, pod *v1.Pod) prometheus.Labels 
 		}
 	}
 	return metricLabels
+}
+
+func (c *Controller) Builder(_ context.Context, m manager.Manager) controller.Builder {
+	return controller.Adapt(
+		controllerruntime.
+			NewControllerManagedBy(m).
+			For(&v1.Pod{}),
+	)
 }

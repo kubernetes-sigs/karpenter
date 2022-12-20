@@ -23,9 +23,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega" //nolint:revive,stylecheck
+	. "github.com/onsi/ginkgo/v2" //nolint:revive,stylecheck
+	. "github.com/onsi/gomega"    //nolint:revive,stylecheck
 	prometheus "github.com/prometheus/client_model/go"
+	"github.com/samber/lo"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/api/policy/v1beta1"
@@ -35,6 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -109,9 +111,10 @@ func ExpectApplied(ctx context.Context, c client.Client, objects ...client.Objec
 
 func ExpectAppliedWithOffset(offset int, ctx context.Context, c client.Client, objects ...client.Object) {
 	for _, object := range objects {
+		deletionTimestampSet := !object.GetDeletionTimestamp().IsZero()
 		current := object.DeepCopyObject().(client.Object)
 		statuscopy := object.DeepCopyObject().(client.Object) // Snapshot the status, since create/update may override
-		deletecopy := object.DeepCopyObject().(client.Object) // Snapshot the status, since create/update may override
+
 		// Create or Update
 		if err := c.Get(ctx, client.ObjectKeyFromObject(current), current); err != nil {
 			if errors.IsNotFound(err) {
@@ -126,9 +129,14 @@ func ExpectAppliedWithOffset(offset int, ctx context.Context, c client.Client, o
 		// Update status
 		statuscopy.SetResourceVersion(object.GetResourceVersion())
 		ExpectWithOffset(offset+1, c.Status().Update(ctx, statuscopy)).To(Or(Succeed(), MatchError("the server could not find the requested resource"))) // Some objects do not have a status
-		// Delete if timestamp set
-		if deletecopy.GetDeletionTimestamp() != nil {
-			ExpectWithOffset(offset+1, c.Delete(ctx, deletecopy)).To(Succeed())
+
+		// Re-get the object to grab the updated spec and status
+		err := c.Get(ctx, client.ObjectKeyFromObject(object), object)
+		ExpectWithOffset(offset+1, err).ToNot(HaveOccurred())
+
+		// Set the deletion timestamp by adding a finalizer and deleting
+		if deletionTimestampSet {
+			ExpectDeletionTimestampSetWithOffset(1, ctx, c, object)
 		}
 	}
 }
@@ -142,6 +150,26 @@ func ExpectDeleted(ctx context.Context, c client.Client, objects ...client.Objec
 	}
 }
 
+func ExpectDeletionTimestampSet(ctx context.Context, c client.Client, objects ...client.Object) {
+	ExpectDeletionTimestampSetWithOffset(1, ctx, c, objects...)
+}
+
+// ExpectDeletionTimestampSetWithOffset ensures that the deletion timestamp is set on the objects by adding a finalizer
+// and then deleting the object immediately after. This holds the object until the finalizer is patched out in the DeferCleanup
+func ExpectDeletionTimestampSetWithOffset(offset int, ctx context.Context, c client.Client, objects ...client.Object) {
+	for _, object := range objects {
+		ExpectWithOffset(offset+1, c.Get(ctx, client.ObjectKeyFromObject(object), object)).To(Succeed())
+		controllerutil.AddFinalizer(object, v1alpha5.TestingGroup+"/finalizer")
+		ExpectWithOffset(offset+1, c.Update(ctx, object)).To(Succeed())
+		ExpectWithOffset(offset+1, c.Delete(ctx, object)).To(Succeed())
+		DeferCleanup(func(obj client.Object) {
+			mergeFrom := client.MergeFrom(obj.DeepCopyObject().(client.Object))
+			obj.SetFinalizers([]string{})
+			ExpectWithOffset(offset+1, c.Patch(ctx, obj, mergeFrom)).To(Succeed())
+		}, object)
+	}
+}
+
 func ExpectCleanedUp(ctx context.Context, c client.Client) {
 	wg := sync.WaitGroup{}
 	namespaces := &v1.NamespaceList{}
@@ -151,6 +179,12 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 	for i := range nodes.Items {
 		nodes.Items[i].SetFinalizers([]string{})
 		ExpectWithOffset(1, c.Update(ctx, &nodes.Items[i])).To(Succeed())
+	}
+	pvcList := &v1.PersistentVolumeClaimList{}
+	ExpectWithOffset(1, c.List(ctx, pvcList)).To(Succeed())
+	for i := range pvcList.Items {
+		pvcList.Items[i].SetFinalizers([]string{})
+		ExpectWithOffset(1, c.Update(ctx, &pvcList.Items[i])).To(Succeed())
 	}
 	for _, object := range []client.Object{
 		&v1.Pod{},
@@ -166,7 +200,7 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 			wg.Add(1)
 			go func(object client.Object, namespace string) {
 				defer wg.Done()
-				defer ginkgo.GinkgoRecover()
+				defer GinkgoRecover()
 				ExpectWithOffset(1, c.DeleteAllOf(ctx, object, client.InNamespace(namespace),
 					&client.DeleteAllOfOptions{DeleteOptions: client.DeleteOptions{GracePeriodSeconds: ptr.Int64(0)}})).ToNot(HaveOccurred())
 			}(object, namespace.Name)
@@ -216,7 +250,7 @@ func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c cli
 	// shuffle the pods to try to detect any issues where we rely on pod order within a batch, we shuffle a copy of
 	// the slice so we can return the provisioned pods in the same order that the test supplied them for consistency
 	unorderedPods := append([]*v1.Pod{}, pods...)
-	r := rand.New(rand.NewSource(ginkgo.GinkgoRandomSeed())) //nolint
+	r := rand.New(rand.NewSource(GinkgoRandomSeed())) //nolint
 	r.Shuffle(len(unorderedPods), func(i, j int) { unorderedPods[i], unorderedPods[j] = unorderedPods[j], unorderedPods[i] })
 	for _, pod := range unorderedPods {
 		_, _ = controller.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(pod)})
@@ -254,6 +288,32 @@ func ExpectMetric(prefix string) *prometheus.MetricFamily {
 	}
 	ExpectWithOffset(1, selected).ToNot(BeNil(), fmt.Sprintf("expected to find a '%s' metric", prefix))
 	return selected
+}
+
+// FindMetricWithLabelValues attempts to find a metric with a name with a set of label values
+// If no metric is found, the *prometheus.Metric will be nil
+func FindMetricWithLabelValues(name string, labelValues map[string]string) (*prometheus.Metric, bool) {
+	metrics, err := metrics.Registry.Gather()
+	ExpectWithOffset(1, err).To(BeNil())
+
+	mf, found := lo.Find(metrics, func(mf *prometheus.MetricFamily) bool {
+		return mf.GetName() == name
+	})
+	if !found {
+		return nil, false
+	}
+	for _, m := range mf.Metric {
+		temp := lo.Assign(labelValues)
+		for _, labelPair := range m.Label {
+			if v, ok := temp[labelPair.GetName()]; ok && v == labelPair.GetValue() {
+				delete(temp, labelPair.GetName())
+			}
+		}
+		if len(temp) == 0 {
+			return m, true
+		}
+	}
+	return nil, false
 }
 
 func ExpectManualBinding(ctx context.Context, c client.Client, pod *v1.Pod, node *v1.Node) {
