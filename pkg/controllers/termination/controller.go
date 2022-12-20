@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/workqueue"
@@ -28,9 +27,9 @@ import (
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -95,6 +94,12 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if err := c.KubeClient.Get(ctx, req.NamespacedName, node); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
+	if node.DeletionTimestamp.IsZero() {
+		return reconcile.Result{}, nil
+	}
+	if !controllerutil.ContainsFinalizer(node, v1alpha5.TerminationFinalizer) {
+		return reconcile.Result{}, nil
+	}
 	if err := c.Terminator.cordon(ctx, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("cordoning node, %w", err)
 	}
@@ -125,11 +130,5 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontrolle
 				),
 				MaxConcurrentReconciles: 10,
 			},
-		).
-		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
-			return !obj.GetDeletionTimestamp().IsZero()
-		})).
-		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
-			return lo.Contains(obj.GetFinalizers(), v1alpha5.TerminationFinalizer)
-		})))
+		))
 }
