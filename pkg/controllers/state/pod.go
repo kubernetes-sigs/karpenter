@@ -19,8 +19,6 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -29,6 +27,8 @@ import (
 
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
+
+var _ corecontroller.DeleteReconcilingTypedController[*v1.Pod] = (*PodController)(nil)
 
 var stateRetryPeriod = 1 * time.Minute
 
@@ -39,30 +39,26 @@ type PodController struct {
 }
 
 func NewPodController(kubeClient client.Client, cluster *Cluster) corecontroller.Controller {
-	return &PodController{
+	return corecontroller.Typed[*v1.Pod](kubeClient, &PodController{
 		kubeClient: kubeClient,
 		cluster:    cluster,
-	}
+	})
 }
 
 func (c *PodController) Name() string {
 	return "pod-state"
 }
 
-func (c *PodController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("pod", req.NamespacedName))
-	pod := &v1.Pod{}
-	if err := c.kubeClient.Get(ctx, req.NamespacedName, pod); err != nil {
-		if errors.IsNotFound(err) {
-			// notify cluster state of the node deletion
-			c.cluster.DeletePod(req.NamespacedName)
-		}
-		return reconcile.Result{}, client.IgnoreNotFound(err)
-	}
+func (c *PodController) Reconcile(ctx context.Context, pod *v1.Pod) (reconcile.Result, error) {
 	if err := c.cluster.UpdatePod(ctx, pod); err != nil {
 		return reconcile.Result{}, err
 	}
 	return reconcile.Result{Requeue: true, RequeueAfter: stateRetryPeriod}, nil
+}
+
+func (c *PodController) ReconcileDelete(_ context.Context, req reconcile.Request) (reconcile.Result, error) {
+	c.cluster.DeletePod(req.NamespacedName)
+	return reconcile.Result{}, nil
 }
 
 func (c *PodController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {

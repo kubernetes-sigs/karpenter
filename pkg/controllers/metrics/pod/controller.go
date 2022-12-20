@@ -24,7 +24,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -73,6 +72,8 @@ var (
 	)
 )
 
+var _ controller.DeleteReconcilingTypedController[*v1.Pod] = (*Controller)(nil)
+
 // Controller for the resource
 type Controller struct {
 	kubeClient client.Client
@@ -105,30 +106,28 @@ func labelNames() []string {
 
 // NewController constructs a podController instance
 func NewController(kubeClient client.Client) controller.Controller {
-	return &Controller{
+	return controller.Typed[*v1.Pod](kubeClient, &Controller{
 		kubeClient:  kubeClient,
 		pendingPods: sets.NewString(),
-	}
+	})
 }
 
 func (c *Controller) Name() string {
 	return "podmetrics"
 }
 
-// Reconcile executes a termination control loop for the resource
-func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("pod", req.Name))
-
-	// Remove the previous gauge on CREATE/UPDATE/DELETE
-	c.cleanup(req.NamespacedName)
-
-	// Retrieve pod from reconcile request
-	pod := &v1.Pod{}
-	if err := c.kubeClient.Get(ctx, req.NamespacedName, pod); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(err)
-	}
-
+// Reconcile records pod metrics for CREATE/UPDATE
+func (c *Controller) Reconcile(ctx context.Context, pod *v1.Pod) (reconcile.Result, error) {
+	// Remove the previous gauge on CREATE/UPDATE
+	c.cleanup(client.ObjectKeyFromObject(pod))
 	c.record(ctx, pod)
+	return reconcile.Result{}, nil
+}
+
+// ReconcileDelete removes the pod metric gauges on DELETE
+func (c *Controller) ReconcileDelete(_ context.Context, req reconcile.Request) (reconcile.Result, error) {
+	// Remove the previous gauge on DELETE
+	c.cleanup(req.NamespacedName)
 	return reconcile.Result{}, nil
 }
 

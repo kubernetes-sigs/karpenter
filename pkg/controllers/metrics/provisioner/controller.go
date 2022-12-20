@@ -85,6 +85,8 @@ func labelNames() []string {
 	}
 }
 
+var _ corecontroller.DeleteReconcilingTypedController[*v1alpha5.Provisioner] = (*Controller)(nil)
+
 type Controller struct {
 	kubeClient client.Client
 
@@ -95,31 +97,29 @@ type Controller struct {
 
 // NewController constructs a controller instance
 func NewController(kubeClient client.Client) corecontroller.Controller {
-	return &Controller{
+	return corecontroller.Typed[*v1alpha5.Provisioner](kubeClient, &Controller{
 		kubeClient: kubeClient,
-	}
+	})
 }
 
 func (c *Controller) Name() string {
 	return "provisionermetrics"
 }
 
-// Reconcile executes a termination control loop for the resource
-func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("provisioner", req.Name))
-
-	// Remove the previous gauge on CREATE/UPDATE/DELETE
-	c.cleanup(req.NamespacedName)
-
-	// Retrieve provisioner from reconcile request
-	provisioner := &v1alpha5.Provisioner{}
-	if err := c.kubeClient.Get(ctx, req.NamespacedName, provisioner); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(err)
-	}
-
+// Reconcile records provisioner metrics for CREATE/UPDATE
+func (c *Controller) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner) (reconcile.Result, error) {
+	// Remove the previous gauge on CREATE/UPDATE
+	c.cleanup(client.ObjectKeyFromObject(provisioner))
 	c.record(ctx, provisioner)
 	// periodically update our metrics per provisioner even if nothing has changed
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+}
+
+// ReconcileDelete removes the provisioner metric gauges on DELETE
+func (c *Controller) ReconcileDelete(_ context.Context, req reconcile.Request) (reconcile.Result, error) {
+	// Remove the previous gauge on DELETE
+	c.cleanup(req.NamespacedName)
+	return reconcile.Result{}, nil
 }
 
 func (c *Controller) cleanup(provisionerKey types.NamespacedName) {

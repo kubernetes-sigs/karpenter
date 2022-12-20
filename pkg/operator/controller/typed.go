@@ -22,6 +22,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,16 +34,33 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 )
 
+// TypedController is a generic controller interface implemented by controllers
+// that want to adopt the Typed controller Reconcile() which automatically retrieves
+// the typed object, passing it into the TypedController Reconcile() and Patches any updates to the
+// typed object made inside the TypedController Reconcile()
 type TypedController[T client.Object] interface {
 	Reconcile(context.Context, T) (reconcile.Result, error)
 	Name() string
 	Builder(context.Context, manager.Manager) Builder
 }
 
+// FinalizingTypedController is implemented by controllers that own a finalizer on the typed object
+// and want to perform some finalization logic on the typed object before removing the finalizer
 type FinalizingTypedController[T client.Object] interface {
 	TypedController[T]
 
 	Finalize(context.Context, T) (reconcile.Result, error)
+}
+
+// DeleteReconcilingTypedController is implemented by controllers that watch delete events on typed objects
+// but do not own a finalizer or own the object. This is useful for in-memory stores that do not survive restart.
+// Note: Because this DELETE logic isn't operated using a finalizer, it is dependent on the ability for the
+// informer to catch these DELETE events and pass them into the controller. There is no guarantee that this operation
+// will always occur since a controller crash means this DELETE event is lost/
+type DeleteReconcilingTypedController[T client.Object] interface {
+	TypedController[T]
+
+	ReconcileDelete(context.Context, reconcile.Request) (reconcile.Result, error)
 }
 
 type typedDecorator[T client.Object] struct {
@@ -50,10 +68,10 @@ type typedDecorator[T client.Object] struct {
 	typedController TypedController[T]
 }
 
-func Typed[T client.Object](kubeClient client.Client, typedReconciler TypedController[T]) Controller {
+func Typed[T client.Object](kubeClient client.Client, typedController TypedController[T]) Controller {
 	return &typedDecorator[T]{
 		kubeClient:      kubeClient,
-		typedController: typedReconciler,
+		typedController: typedController,
 	}
 }
 
@@ -72,7 +90,11 @@ func (t *typedDecorator[T]) Reconcile(ctx context.Context, req reconcile.Request
 	)
 	ctx = injection.WithControllerName(ctx, t.typedController.Name())
 
+	deleteReconcilingTypedController, ok := t.typedController.(DeleteReconcilingTypedController[T])
 	if err := t.kubeClient.Get(ctx, req.NamespacedName, obj); err != nil {
+		if errors.IsNotFound(err) && ok {
+			return deleteReconcilingTypedController.ReconcileDelete(ctx, req)
+		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	stored := obj.DeepCopyObject().(client.Object)
@@ -98,20 +120,18 @@ func (t *typedDecorator[T]) Builder(ctx context.Context, m manager.Manager) Buil
 }
 
 func (t *typedDecorator[T]) patch(ctx context.Context, obj, updated client.Object) error {
-	// If an updated value returns as nil from the Reconcile function, this means we shouldn't update the object
-	if reflect.ValueOf(updated).IsNil() {
-		return nil
-	}
+	statusCopy := updated.DeepCopyObject().(client.Object) // Snapshot the status, since create/update may override
+
 	// Patch Body if changed
 	if !bodyEqual(obj, updated) {
 		if err := t.kubeClient.Patch(ctx, updated, client.MergeFrom(obj)); err != nil {
-			return err
+			return client.IgnoreNotFound(err)
 		}
 	}
 	// Patch Status if changed
-	if !statusEqual(obj, updated) {
-		if err := t.kubeClient.Status().Patch(ctx, updated, client.MergeFrom(obj)); err != nil {
-			return err
+	if !statusEqual(obj, statusCopy) {
+		if err := t.kubeClient.Status().Patch(ctx, statusCopy, client.MergeFrom(obj)); err != nil {
+			return client.IgnoreNotFound(err) // Status subresource may not exist
 		}
 	}
 	return nil
