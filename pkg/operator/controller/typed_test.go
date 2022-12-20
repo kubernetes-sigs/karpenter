@@ -19,6 +19,7 @@ import (
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -83,6 +84,32 @@ var _ = Describe("Typed", func() {
 		ExpectReconcileSucceeded(ctx, typedController, client.ObjectKeyFromObject(node))
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
 		Expect(node.Labels).To(HaveKeyWithValue("custom-key", "custom-value"))
+	})
+	It("should modify the provisioner and the provisioner status in the reconcile", func() {
+		provisioner := test.Provisioner()
+		ExpectApplied(ctx, env.Client, provisioner)
+		fakeController := &FakeTypedController[*v1alpha5.Provisioner]{
+			ReconcileAssertions: []TypedReconcileAssertion[*v1alpha5.Provisioner]{
+				func(ctx context.Context, p *v1alpha5.Provisioner) {
+					p.Labels = lo.Assign(p.Labels, map[string]string{
+						"custom-key": "custom-value",
+					})
+					p.Status.Resources = v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("1"),
+						v1.ResourceMemory:           resource.MustParse("1Mi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
+					}
+				},
+			},
+		}
+		typedController := controller.Typed[*v1alpha5.Provisioner](env.Client, fakeController)
+		ExpectReconcileSucceeded(ctx, typedController, client.ObjectKeyFromObject(provisioner))
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(provisioner), provisioner)).To(Succeed())
+		Expect(provisioner.Labels).To(HaveKeyWithValue("custom-key", "custom-value"))
+		Expect(provisioner.Status.Resources).To(HaveLen(3))
+		Expect(provisioner.Status.Resources).To(HaveKeyWithValue(v1.ResourceCPU, resource.MustParse("1")))
+		Expect(provisioner.Status.Resources).To(HaveKeyWithValue(v1.ResourceMemory, resource.MustParse("1Mi")))
+		Expect(provisioner.Status.Resources).To(HaveKeyWithValue(v1.ResourceEphemeralStorage, resource.MustParse("1Gi")))
 	})
 	It("should call finalizer func when finalizing", func() {
 		node := test.Node(test.NodeOptions{
