@@ -500,6 +500,7 @@ var _ = Describe("Termination", func() {
 			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should not evict static pods", func() {
+			ExpectApplied(ctx, env.Client, node)
 			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
 			ExpectApplied(ctx, env.Client, node, podEvict)
 

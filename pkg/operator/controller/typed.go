@@ -98,20 +98,16 @@ func (t *typedDecorator[T]) Builder(ctx context.Context, m manager.Manager) Buil
 }
 
 func (t *typedDecorator[T]) patch(ctx context.Context, obj, updated client.Object) error {
-	// If an updated value returns as nil from the Reconcile function, this means we shouldn't update the object
-	if reflect.ValueOf(updated).IsNil() {
-		return nil
-	}
 	// Patch Body if changed
 	if !bodyEqual(obj, updated) {
-		if err := t.kubeClient.Patch(ctx, updated, client.MergeFrom(obj)); err != nil {
-			return err
+		if err := t.kubeClient.Patch(ctx, updated.DeepCopyObject().(client.Object), client.MergeFrom(obj)); err != nil {
+			return client.IgnoreNotFound(err)
 		}
 	}
 	// Patch Status if changed
 	if !statusEqual(obj, updated) {
-		if err := t.kubeClient.Status().Patch(ctx, updated, client.MergeFrom(obj)); err != nil {
-			return err
+		if err := t.kubeClient.Status().Patch(ctx, updated.DeepCopyObject().(client.Object), client.MergeFrom(obj)); err != nil {
+			return client.IgnoreNotFound(err) // Status subresource may not exist
 		}
 	}
 	return nil

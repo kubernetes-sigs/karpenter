@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
@@ -72,6 +71,12 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Re
 	provisioner := &v1alpha5.Provisioner{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
+	if _, ok := node.Labels[v1alpha5.ProvisionerNameLabelKey]; !ok {
+		return reconcile.Result{}, nil
+	}
+	if !node.DeletionTimestamp.IsZero() {
+		return reconcile.Result{}, nil
 	}
 
 	// Execute Reconcilers
@@ -129,12 +134,5 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 				return requests
 			}),
 		).
-		Watches(&source.Channel{Source: ch}, &handler.EnqueueRequestForObject{}).
-		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
-			_, ok := obj.GetLabels()[v1alpha5.ProvisionerNameLabelKey]
-			return ok
-		})).
-		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
-			return obj.GetDeletionTimestamp().IsZero()
-		})))
+		Watches(&source.Channel{Source: ch}, &handler.EnqueueRequestForObject{}))
 }

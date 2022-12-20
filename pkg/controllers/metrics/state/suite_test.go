@@ -16,13 +16,12 @@ package metrics_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
+	"k8s.io/apimachinery/pkg/types"
 	clock "k8s.io/utils/clock/testing"
 
-	io_prometheus_client "github.com/prometheus/client_model/go"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,7 +30,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	statemetrics "github.com/aws/karpenter-core/pkg/controllers/metrics/state/scraper"
+	metricsstate "github.com/aws/karpenter-core/pkg/controllers/metrics/state"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 
@@ -52,9 +51,9 @@ var env *test.Environment
 var cluster *state.Cluster
 var nodeController controller.Controller
 var podController controller.Controller
+var metricsStateController controller.Controller
 var cloudProvider *fake.CloudProvider
 var provisioner *v1alpha5.Provisioner
-var nodeScraper *statemetrics.NodeScraper
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -73,7 +72,7 @@ var _ = BeforeSuite(func() {
 	provisioner = test.Provisioner(test.ProvisionerOptions{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
 	nodeController = state.NewNodeController(env.Client, cluster)
 	podController = state.NewPodController(env.Client, cluster)
-	nodeScraper = statemetrics.NewNodeScraper(cluster)
+	metricsStateController = metricsstate.NewController(cluster)
 	ExpectApplied(ctx, env.Client, provisioner)
 })
 
@@ -93,34 +92,41 @@ var _ = Describe("Node Metrics", func() {
 		node := test.Node(test.NodeOptions{Allocatable: resources})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, metricsStateController, types.NamespacedName{})
 
-		// metrics should now be tracking the allocatable capacity of our single node
-		nodeScraper.Scrape(ctx)
-		nodeAllocation := ExpectMetric("karpenter_nodes_allocatable")
-
-		expectedValues := map[string]float64{
-			"cpu":    float64(resources.Cpu().MilliValue()) / float64(1000),
-			"pods":   float64(resources.Pods().Value()),
-			"memory": float64(resources.Memory().Value()),
+		for k, v := range resources {
+			metric, found := FindMetricWithLabelValues("karpenter_nodes_allocatable", map[string]string{
+				"node_name":     node.GetName(),
+				"resource_type": k.String(),
+			})
+			Expect(found).To(BeTrue())
+			Expect(metric.GetGauge().GetValue()).To(BeNumerically("~", v.AsApproximateFloat64()))
+		}
+	})
+	It("should remove the node metric gauge when the node is deleted", func() {
+		resources := v1.ResourceList{
+			v1.ResourcePods:   resource.MustParse("100"),
+			v1.ResourceCPU:    resource.MustParse("5000"),
+			v1.ResourceMemory: resource.MustParse("32Gi"),
 		}
 
-		var metrics []*io_prometheus_client.Metric
-		for _, m := range nodeAllocation.Metric {
-			for _, l := range m.Label {
-				if l.GetName() == "node_name" && l.GetValue() == node.GetName() {
-					metrics = append(metrics, m)
-				}
-			}
-		}
+		node := test.Node(test.NodeOptions{Allocatable: resources})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, metricsStateController, types.NamespacedName{})
 
-		for _, metric := range metrics {
-			for _, l := range metric.Label {
-				if l.GetName() == "resource_type" {
-					Expect(metric.GetGauge().GetValue()).To(Equal(expectedValues[l.GetValue()]),
-						fmt.Sprintf("%s, %f to equal %f", l.GetValue(), metric.GetGauge().GetValue(),
-							expectedValues[l.GetValue()]))
-				}
-			}
-		}
+		_, found := FindMetricWithLabelValues("karpenter_nodes_allocatable", map[string]string{
+			"node_name": node.GetName(),
+		})
+		Expect(found).To(BeTrue())
+
+		ExpectDeleted(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, metricsStateController, types.NamespacedName{})
+
+		_, found = FindMetricWithLabelValues("karpenter_nodes_allocatable", map[string]string{
+			"node_name": node.GetName(),
+		})
+		Expect(found).To(BeFalse())
 	})
 })
