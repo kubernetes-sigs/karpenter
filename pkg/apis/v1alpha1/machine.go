@@ -72,6 +72,26 @@ type MachineList struct {
 	Items           []Machine `json:"items"`
 }
 
+func (in *Machine) ToNode() *v1.Node {
+	return &v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              in.Name,
+			CreationTimestamp: in.CreationTimestamp,
+			DeletionTimestamp: in.DeletionTimestamp,
+			Labels:            in.Labels,
+			Annotations:       in.Annotations,
+		},
+		Spec: v1.NodeSpec{
+			Taints:     append(in.Spec.Taints, in.Spec.StartupTaints...),
+			ProviderID: in.Status.ProviderID,
+		},
+		Status: v1.NodeStatus{
+			Capacity:    in.Status.Capacity,
+			Allocatable: in.Status.Allocatable,
+		},
+	}
+}
+
 // MachineFromNode converts a node into a pseudo-Machine using known values from the node
 func MachineFromNode(node *v1.Node) *Machine {
 	return &Machine{

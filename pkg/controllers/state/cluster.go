@@ -27,7 +27,6 @@ import (
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/ptr"
@@ -52,11 +51,11 @@ type Cluster struct {
 	mu sync.RWMutex
 
 	nodes                map[string]*Node               // provider id -> node
-	bindings             map[types.NamespacedName]*Node // pod namespace name -> node
+	bindings             map[types.NamespacedName]*Node // pod namespaced name -> node name
 	nodeNameToProviderID map[string]string              // node name -> providerID
 
-	nominatedNodes   *cache.Cache
-	antiAffinityPods sync.Map // mapping of pod UID to *v1.Pod of pods that have required anti affinities
+	nominatedNodes   *cache.Cache // set of providerIDs nominated for pods
+	antiAffinityPods sync.Map     // mapping of pod namespaced name -> *v1.Pod of pods that have required anti affinities
 
 	// consolidationState is a number indicating the state of the cluster with respect to consolidation.  If this number
 	// hasn't changed, it indicates that the cluster hasn't changed in a state which would enable consolidation if
@@ -187,7 +186,7 @@ func (c *Cluster) UnmarkForDeletion(names ...string) {
 
 	for _, name := range names {
 		if id, ok := c.nodeNameToProviderID[name]; ok {
-			if _, ok := c.nodes[id]; ok {
+			if _, ok = c.nodes[id]; ok {
 				c.nodes[id].MarkedForDeletion = false
 			}
 		}
@@ -201,7 +200,7 @@ func (c *Cluster) MarkForDeletion(names ...string) {
 
 	for _, name := range names {
 		if id, ok := c.nodeNameToProviderID[name]; ok {
-			if _, ok := c.nodes[id]; ok {
+			if _, ok = c.nodes[id]; ok {
 				c.nodes[id].MarkedForDeletion = true
 			}
 		}
@@ -221,6 +220,7 @@ func (c *Cluster) newNode(ctx context.Context, node *v1.Node) (*Node, error) {
 		podRequests:       map[types.NamespacedName]v1.ResourceList{},
 		podLimits:         map[types.NamespacedName]v1.ResourceList{},
 		MarkedForDeletion: !node.DeletionTimestamp.IsZero(),
+		Initialized:       node.Labels[v1alpha5.LabelNodeInitialized] == "true",
 	}
 	if err := multierr.Combine(
 		c.populateCapacity(ctx, node, n),
@@ -234,23 +234,7 @@ func (c *Cluster) newNode(ctx context.Context, node *v1.Node) (*Node, error) {
 
 func (c *Cluster) newInflightNode(machine *v1alpha1.Machine) *Node {
 	return &Node{
-		Node: &v1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:              machine.Name,
-				CreationTimestamp: machine.CreationTimestamp,
-				DeletionTimestamp: machine.DeletionTimestamp,
-				Labels:            machine.Labels,
-				Annotations:       machine.Annotations,
-			},
-			Spec: v1.NodeSpec{
-				Taints:     append(machine.Spec.Taints, machine.Spec.StartupTaints...),
-				ProviderID: machine.Status.ProviderID,
-			},
-			Status: v1.NodeStatus{
-				Capacity:    machine.Status.Capacity,
-				Allocatable: machine.Status.Allocatable,
-			},
-		},
+		Node:              machine.ToNode(),
 		Capacity:          machine.Status.Capacity,
 		Allocatable:       machine.Status.Allocatable,
 		MarkedForDeletion: !machine.DeletionTimestamp.IsZero(),
@@ -405,7 +389,7 @@ func (c *Cluster) UpdateMachine(ctx context.Context, machine *v1alpha1.Machine) 
 			c.recordConsolidationChange()
 		}
 	}
-	c.nodes[machine.Status.ProviderID] = stateNode
+	c.updateStateNode(node.Spec.ProviderID, stateNode)
 	c.nodeNameToProviderID[stateNode.Node.Name] = machine.Status.ProviderID
 	return nil
 }
@@ -444,9 +428,18 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 			c.recordConsolidationChange()
 		}
 	}
-	c.nodes[node.Spec.ProviderID] = stateNode
+	c.updateStateNode(node.Spec.ProviderID, stateNode)
 	c.nodeNameToProviderID[stateNode.Node.Name] = node.Spec.ProviderID
 	return nil
+}
+
+func (c *Cluster) updateStateNode(providerID string, stateNode *Node) {
+	// Node pointer should be updated if it exists, else we have to create a new entry in the map
+	if _, ok := c.nodes[providerID]; ok {
+		*c.nodes[providerID] = *stateNode
+	} else {
+		c.nodes[providerID] = stateNode
+	}
 }
 
 func (c *Cluster) makeMachineOwnedNode(ctx context.Context, machine *v1alpha1.Machine, node *v1.Node) (*Node, error) {
