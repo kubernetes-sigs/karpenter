@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -532,35 +531,6 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectNodeExists(ctx, env.Client, node.Name)
 		ExpectNodeDeletionMarked(node)
-	})
-	It("should trigger node nomination eviction observers", func() {
-		// Reduce the nomination timeframe for a quicker test
-		ctx = settings.ToContext(ctx, settings.Settings{BatchMaxDuration: metav1.Duration{Duration: time.Second}, BatchIdleDuration: metav1.Duration{Duration: time.Second}})
-		cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
-
-		node := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-					v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
-				},
-				Finalizers: []string{v1alpha5.TerminationFinalizer},
-			},
-		})
-		calledFunc1 := &atomic.Bool{}
-		calledFunc2 := &atomic.Bool{}
-		cluster.AddNominatedNodeEvictionObserver(func(_ string) {
-			calledFunc1.Store(true)
-		})
-		cluster.AddNominatedNodeEvictionObserver(func(_ string) {
-			calledFunc2.Store(true)
-		})
-		cluster.NominateNodeForPod(node.Name)
-
-		Eventually(func(g Gomega) {
-			g.Expect(calledFunc1.Load()).To(BeTrue())
-			g.Expect(calledFunc2.Load()).To(BeTrue())
-		}, time.Second*30).Should(Succeed())
 	})
 })
 
