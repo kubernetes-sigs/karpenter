@@ -16,17 +16,16 @@ package node
 
 import (
 	"context"
+	"time"
 
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -93,18 +92,12 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Re
 		errs = multierr.Append(errs, err)
 		results = append(results, res)
 	}
+	// Append a short requeue result so that we requeue to check for emptiness when the node nomination time ends
+	results = append(results, reconcile.Result{RequeueAfter: time.Minute})
 	return result.Min(results...), errs
 }
 
 func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontroller.Builder {
-	// Enqueues a reconcile request when nominated node expiration is triggered
-	ch := make(chan event.GenericEvent, 300)
-	c.cluster.AddNominatedNodeEvictionObserver(func(nodeName string) {
-		ch <- event.GenericEvent{Object: &v1.Node{
-			ObjectMeta: metav1.ObjectMeta{Name: nodeName},
-		}}
-	})
-
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1.Node{}).
@@ -133,6 +126,5 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 				}
 				return requests
 			}),
-		).
-		Watches(&source.Channel{Source: ch}, &handler.EnqueueRequestForObject{}))
+		))
 }
