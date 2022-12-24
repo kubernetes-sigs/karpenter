@@ -131,6 +131,9 @@ func NewOperator() (context.Context, *Operator) {
 	lo.Must0(manager.GetFieldIndexer().IndexField(ctx, &v1.Pod{}, "spec.nodeName", func(o client.Object) []string {
 		return []string{o.(*v1.Pod).Spec.NodeName}
 	}), "failed to setup pod indexer")
+	lo.Must0(manager.GetFieldIndexer().IndexField(ctx, &v1.Node{}, "spec.providerID", func(o client.Object) []string {
+		return []string{o.(*v1.Node).Spec.ProviderID}
+	}), "failed to setup node providerID indexer")
 
 	return ctx, &Operator{
 		Manager:             manager,
