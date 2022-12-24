@@ -389,7 +389,7 @@ func (c *Cluster) UpdateMachine(ctx context.Context, machine *v1alpha1.Machine) 
 			c.recordConsolidationChange()
 		}
 	}
-	c.updateStateNode(node.Spec.ProviderID, stateNode)
+	c.updateStateNode(machine.Status.ProviderID, stateNode)
 	c.nodeNameToProviderID[stateNode.Node.Name] = machine.Status.ProviderID
 	return nil
 }
@@ -399,9 +399,9 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// We don't consider nodes without providerIDs
+	// If node doesn't have ProviderID, we mock it as the UID
 	if node.Spec.ProviderID == "" {
-		return nil
+		node.Spec.ProviderID = string(node.UID)
 	}
 	// See if there is a machine associated with this providerID
 	machine, err := c.getMachineByProviderID(ctx, node.Spec.ProviderID)
@@ -554,7 +554,7 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 		return fmt.Errorf("bound node not found in cluster state")
 	}
 
-	if n, ok := c.bindings[podKey]; !ok {
+	if n, ok := c.bindings[podKey]; ok {
 		// No need to update anything if pod binding hasn't changed
 		if n.Node.Name == pod.Spec.NodeName {
 			return nil

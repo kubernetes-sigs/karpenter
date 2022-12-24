@@ -20,7 +20,6 @@ import (
 	"strings"
 
 	"github.com/samber/lo"
-	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/version"
@@ -30,7 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
 	"github.com/aws/karpenter-core/pkg/utils/env"
 )
 
@@ -60,22 +58,24 @@ func NewEnvironment(scheme *runtime.Scheme, crds ...*v1.CustomResourceDefinition
 	_ = lo.Must(environment.Start())
 
 	cache := lo.Must(cache.New(environment.Config, cache.Options{Scheme: scheme}))
-	lo.Must0(cache.IndexField(ctx, &corev1.Node{}, "spec.providerID", func(o client.Object) []string {
-		return []string{o.(*corev1.Node).Spec.ProviderID}
-	}), "failed to setup providerID node indexer")
-	lo.Must0(cache.IndexField(ctx, &v1alpha1.Machine{}, "status.providerID", func(o client.Object) []string {
-		return []string{o.(*v1alpha1.Machine).Status.ProviderID}
-	}), "failed to setup providerID machine indexer")
+	//lo.Must0(cache.IndexField(ctx, &corev1.Pod{}, "spec.nodeName", func(o client.Object) []string {
+	//	return []string{o.(*corev1.Pod).Spec.NodeName}
+	//}), "failed to setup nodeName pod indexer")
+	//lo.Must0(cache.IndexField(ctx, &corev1.Node{}, "spec.providerID", func(o client.Object) []string {
+	//	return []string{o.(*corev1.Node).Spec.ProviderID}
+	//}), "failed to setup providerID node indexer")
+	//lo.Must0(cache.IndexField(ctx, &v1alpha1.Machine{}, "status.providerID", func(o client.Object) []string {
+	//	return []string{o.(*v1alpha1.Machine).Status.ProviderID}
+	//}), "failed to setup providerID machine indexer")
+
+	client := lo.Must(client.New(environment.Config, client.Options{Scheme: environment.Scheme}))
 
 	go func() {
 		lo.Must0(cache.Start(ctx))
 	}()
 	return &Environment{
-		Environment: environment,
-		Client: lo.Must(client.NewDelegatingClient(client.NewDelegatingClientInput{
-			CacheReader: cache,
-			Client:      lo.Must(client.New(environment.Config, client.Options{Scheme: environment.Scheme})),
-		})),
+		Environment:         environment,
+		Client:              ,
 		KubernetesInterface: kubernetes.NewForConfigOrDie(environment.Config),
 		Version:             version,
 		Done:                make(chan struct{}),

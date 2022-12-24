@@ -374,6 +374,7 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectManualBinding(ctx, env.Client, pod2, node2)
 		// deleted the pod and then recreated it, but simulated only receiving an event on the new pod after it has
 		// bound and not getting the new node event entirely
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node2))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
 
 		cluster.ForEachNode(func(n *state.Node) bool {
@@ -547,7 +548,7 @@ var _ = Describe("Machine (in-flight) Level", func() {
 			},
 			ProviderID: "test",
 		})
-		ExpectApplied(ctx, env.Client, machine.DeepCopy())
+		ExpectApplied(ctx, env.Client, machine)
 
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 		ExpectNodeResourceRequest(machine.Name, v1.ResourceCPU, "2")
@@ -572,7 +573,7 @@ var _ = Describe("Machine (in-flight) Level", func() {
 			ProviderID: "test",
 		})
 		// We deep-copy the machine here since we need the status
-		ExpectApplied(ctx, env.Client, node, machine.DeepCopy())
+		ExpectApplied(ctx, env.Client, node, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
@@ -596,7 +597,7 @@ var _ = Describe("Machine (in-flight) Level", func() {
 			},
 			ProviderID: "test",
 		})
-		ExpectApplied(ctx, env.Client, machine.DeepCopy())
+		ExpectApplied(ctx, env.Client, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 
 		Expect(Nodes()).To(HaveLen(1))
@@ -627,7 +628,7 @@ var _ = Describe("Machine (in-flight) Level", func() {
 			},
 			ProviderID: "test",
 		})
-		ExpectApplied(ctx, env.Client, machine.DeepCopy())
+		ExpectApplied(ctx, env.Client, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 
 		cluster.MarkForDeletion(machine.Name)
@@ -639,7 +640,7 @@ var _ = Describe("Machine (in-flight) Level", func() {
 
 		// Update the machine and keep the MarkedForDeletion
 		machine.Labels["test-label"] = "test-value"
-		ExpectApplied(ctx, env.Client, machine.DeepCopy())
+		ExpectApplied(ctx, env.Client, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 
 		// Node should maintain marked for deletion
@@ -654,7 +655,7 @@ var _ = Describe("Machine (in-flight) Level", func() {
 				v1.ResourceMemory: resource.MustParse("2Mi"),
 			},
 		})
-		ExpectApplied(ctx, env.Client, machine.DeepCopy())
+		ExpectApplied(ctx, env.Client, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 
 		cluster.MarkForDeletion(machine.Name)
