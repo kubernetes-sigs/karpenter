@@ -22,9 +22,10 @@ import (
 )
 
 const (
-	Group           = "karpenter.sh"
-	ExtensionsGroup = "extensions." + Group
-	TestingGroup    = "testing." + Group // Exclusively used for labeling/discovery in testing
+	Group              = "karpenter.sh"
+	ExtensionsGroup    = "extensions." + Group
+	CompatabilityGroup = "compatability." + Group
+	TestingGroup       = "testing." + Group // Exclusively used for labeling/discovery in testing
 )
 
 var (

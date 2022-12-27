@@ -41,6 +41,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/aws/karpenter-core/pkg/apis"
+	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	"github.com/aws/karpenter-core/pkg/controllers/machine"
 	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
@@ -159,7 +161,11 @@ func (o *Operator) WithWebhooks(webhooks ...knativeinjection.ControllerConstruct
 	return o
 }
 
-func (o *Operator) Start(ctx context.Context) {
+func (o *Operator) Start(ctx context.Context, cloudProvider cloudprovider.CloudProvider) {
+	// Run machine hydration before manager or webhook startup
+	lo.Must0(machine.HydrateAll(ctx, lo.Must(client.New(o.RESTConfig, client.Options{})), cloudProvider),
+		"hydrating machines from existing owned Karpenter nodes")
+
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	go func() {

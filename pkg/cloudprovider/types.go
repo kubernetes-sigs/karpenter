@@ -16,6 +16,7 @@ package cloudprovider
 
 import (
 	"context"
+	"errors"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -62,6 +63,9 @@ type CloudProvider interface {
 	// IsMachineDrifted returns whether a machine has drifted from the provisioning requirements
 	// it is tied to.
 	IsMachineDrifted(context.Context, *v1alpha1.Machine) (bool, error)
+	// HydrateMachine hydrates an existing instance with machine ownership details
+	// Deprecated: This method will be removed when migration to v1alpha6 has completed
+	HydrateMachine(context.Context, *v1alpha1.Machine) error
 	// Name returns the CloudProvider implementation name.
 	Name() string
 }
@@ -137,4 +141,14 @@ func (ofs Offerings) Cheapest() Offering {
 	return lo.MinBy(ofs, func(a, b Offering) bool {
 		return a.Price < b.Price
 	})
+}
+
+type InstanceNotFound error
+
+func IsInstanceNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var infErr InstanceNotFound
+	return errors.As(err, &infErr)
 }
