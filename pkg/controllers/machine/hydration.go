@@ -20,7 +20,7 @@ import (
 
 func HydrateAll(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) error {
 	nodeList := &v1.NodeList{}
-	if err := kubeClient.List(ctx, nodeList, client.MatchingLabels{v1alpha5.ProvisionerNameLabelKey: ""}); err != nil {
+	if err := kubeClient.List(ctx, nodeList, client.HasLabels{v1alpha5.ProvisionerNameLabelKey}); err != nil {
 		return fmt.Errorf("listing nodes, %w", err)
 	}
 	provisionerList := &v1alpha5.ProvisionerList{}
