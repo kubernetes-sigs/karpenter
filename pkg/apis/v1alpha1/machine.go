@@ -16,10 +16,13 @@ package v1alpha1
 
 import (
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/scheduling"
+	"github.com/aws/karpenter-core/pkg/utils/functional"
+	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
 // MachineSpec describes the desired state of the Machine
@@ -78,18 +81,29 @@ func MachineFromNode(node *v1.Node) *Machine {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        node.Name,
 			Annotations: node.Annotations,
-			Labels:      node.Labels,
+			Labels: functional.FilterMap(node.Labels, func(k string, _ string) bool {
+				return v1alpha5.WellKnownLabels.Has(k)
+			}),
 		},
 		Spec: MachineSpec{
-			Taints:       node.Spec.Taints,
-			Requirements: scheduling.NewLabelRequirements(node.Labels).NodeSelectorRequirements(),
+			Taints: node.Spec.Taints,
+			Requirements: scheduling.NewLabelRequirements(functional.FilterMap(node.Labels, func(k string, _ string) bool {
+				return v1alpha5.WellKnownLabels.Has(k)
+			})).NodeSelectorRequirements(),
 			Resources: ResourceRequirements{
-				Requests: node.Status.Allocatable,
+				Requests: functional.FilterMap(node.Status.Allocatable, func(_ v1.ResourceName, v resource.Quantity) bool {
+					return !resources.IsZero(v)
+				}),
 			},
 		},
 		Status: MachineStatus{
-			ProviderID:  node.Spec.ProviderID,
-			Allocatable: node.Status.Allocatable,
+			ProviderID: node.Spec.ProviderID,
+			Capacity: functional.FilterMap(node.Status.Capacity, func(_ v1.ResourceName, v resource.Quantity) bool {
+				return !resources.IsZero(v)
+			}),
+			Allocatable: functional.FilterMap(node.Status.Allocatable, func(_ v1.ResourceName, v resource.Quantity) bool {
+				return !resources.IsZero(v)
+			}),
 		},
 	}
 	if _, ok := node.Labels[v1alpha5.LabelNodeInitialized]; ok {
@@ -97,6 +111,7 @@ func MachineFromNode(node *v1.Node) *Machine {
 	}
 	m.StatusConditions().MarkTrue(MachineCreated)
 	m.StatusConditions().MarkTrue(MachineRegistered)
+	// TODO @joinnis: Re-enable the finalizer
 	//controllerutil.AddFinalizer(m, v1alpha5.TerminationFinalizer)
 	return m
 }

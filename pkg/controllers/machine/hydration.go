@@ -1,8 +1,23 @@
+/*
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package machine
 
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/avast/retry-go"
 	"github.com/samber/lo"
@@ -19,6 +34,11 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/utils/sets"
 )
+
+var waitRetryOptions = []retry.Option{
+	retry.LastErrorOnly(true),
+	retry.MaxDelay(5 * time.Second),
+}
 
 func HydrateAll(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) error {
 	logging.FromContext(ctx).Debugf("hydrating machines from existing nodes owned by a provisioner")
@@ -56,7 +76,7 @@ func HydrateAll(ctx context.Context, kubeClient client.Client, cloudProvider clo
 		// Allow for multiple attempts to hydrating before failing outright
 		if err := retry.Do(func() error {
 			return hydrate(ctx, kubeClient, cloudProvider, node, provisioner, machineNames)
-		}); err != nil {
+		}, waitRetryOptions...); err != nil {
 			return fmt.Errorf("hydrating machine from node '%s', %w", node.Name, err)
 		}
 	}
@@ -94,6 +114,9 @@ func hydrate(ctx context.Context, kubeClient client.Client, cloudProvider cloudp
 		if !errors.IsAlreadyExists(err) {
 			return fmt.Errorf("creating hydrated machine from node '%s', %w", node.Name, err)
 		}
+		if err = kubeClient.Get(ctx, client.ObjectKeyFromObject(machine), machine); err != nil {
+			return fmt.Errorf("getting machine '%s' from node '%s', %w", machine.Name, node.Name, err)
+		}
 	}
 	machine.Labels = lo.Assign(machine.Labels, map[string]string{
 		v1alpha5.MachineNameLabelKey: machine.Name,
@@ -101,7 +124,8 @@ func hydrate(ctx context.Context, kubeClient client.Client, cloudProvider cloudp
 	if err := kubeClient.Update(ctx, machine); err != nil {
 		return fmt.Errorf("updating hydrated machine label for machine '%s', %w", machine.Name, err)
 	}
-	if err := kubeClient.Status().Patch(ctx, statusCopy, client.MergeFrom(machine)); err != nil {
+	statusCopy.SetResourceVersion(machine.ResourceVersion)
+	if err := kubeClient.Status().Update(ctx, statusCopy); err != nil {
 		return fmt.Errorf("updating status for hydrated machine '%s', %w", machine.Name, err)
 	}
 	return nil

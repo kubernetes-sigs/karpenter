@@ -165,6 +165,10 @@ func (c *CloudProvider) IsMachineDrifted(context.Context, *v1alpha1.Machine) (bo
 	return false, nil
 }
 
+func (c *CloudProvider) HydrateMachine(context.Context, *v1alpha1.Machine) error {
+	return nil
+}
+
 // Name returns the CloudProvider implementation name.
 func (c *CloudProvider) Name() string {
 	return "fake"

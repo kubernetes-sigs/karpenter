@@ -24,7 +24,7 @@ import (
 const (
 	Group              = "karpenter.sh"
 	ExtensionsGroup    = "extensions." + Group
-	CompatabilityGroup = "compatability." + Group
+	CompatabilityGroup = "compatibility." + Group
 	TestingGroup       = "testing." + Group // Exclusively used for labeling/discovery in testing
 )
 
