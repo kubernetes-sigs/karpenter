@@ -942,6 +942,9 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner, firstNode, secondNode, thirdNode, &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: wrongNamespace}})
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(firstNode))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(secondNode))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(thirdNode))
 			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.Pod(test.PodOptions{NodeName: firstNode.Name}),                                                                                               // ignored, missing labels
 				test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}}),                                                                          // ignored, pending
@@ -1223,6 +1226,9 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner, firstNode, secondNode, thirdNode, &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: wrongNamespace}})
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(firstNode))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(secondNode))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(thirdNode))
 			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.Pod(test.PodOptions{NodeName: firstNode.Name}),                                                                                               // ignored, missing labels
 				test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}}),                                                                          // ignored, pending

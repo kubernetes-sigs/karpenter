@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
@@ -195,6 +196,7 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 		&v1.PersistentVolume{},
 		&storagev1.StorageClass{},
 		&v1alpha5.Provisioner{},
+		&v1alpha1.Machine{},
 	} {
 		for _, namespace := range namespaces.Items {
 			wg.Add(1)
@@ -232,7 +234,7 @@ func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Clus
 	// Update objects after reconciling
 	for _, pod := range pods {
 		result = append(result, ExpectPodExistsWithOffset(1, ctx, c, pod.GetName(), pod.GetNamespace()))
-		Expect(cluster.UpdatePod(ctx, result[len(result)-1])).WithOffset(1).To(Succeed()) // track pod bindings
+		cluster.UpdatePod(ctx, result[len(result)-1]) // track pod bindings
 	}
 	return
 }

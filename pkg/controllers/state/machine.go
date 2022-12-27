@@ -29,7 +29,7 @@ import (
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
-// MachineController reconciles inflightNodes for the purpose of maintaining state regarding nodes that is expensive to compute.
+// MachineController reconciles machines for the purpose of maintaining state regarding nodes that is expensive to compute.
 type MachineController struct {
 	kubeClient client.Client
 	cluster    *Cluster
@@ -55,9 +55,6 @@ func (c *MachineController) Reconcile(ctx context.Context, req reconcile.Request
 			c.cluster.DeleteMachine(req.Name)
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
-	}
-	if machine.Status.ProviderID == "" {
-		return reconcile.Result{}, nil
 	}
 	c.cluster.UpdateMachine(machine)
 	return reconcile.Result{RequeueAfter: stateRetryPeriod}, nil

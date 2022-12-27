@@ -369,11 +369,11 @@ var _ = Describe("Node Resource Level", func() {
 					v1.ResourceCPU: resource.MustParse("5.0"),
 				}},
 		})
-
 		ExpectApplied(ctx, env.Client, pod2, node2)
 		ExpectManualBinding(ctx, env.Client, pod2, node2)
-		// deleted the pod and then recreated it, but simulated only receiving an event on the new pod after it has
-		// bound and not getting the new node event entirely
+
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node2))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
 
 		cluster.ForEachNode(func(n *state.Node) bool {
@@ -412,6 +412,7 @@ var _ = Describe("Node Resource Level", func() {
 				v1.ResourcePods: resource.MustParse("500"),
 			}})
 		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectNodeResourceRequest(node.Name, v1.ResourceCPU, "0.0")
 		ExpectNodeResourceRequest(node.Name, v1.ResourcePods, "0")
 

@@ -59,9 +59,7 @@ func (c *PodController) Reconcile(ctx context.Context, req reconcile.Request) (r
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	if err := c.cluster.UpdatePod(ctx, pod); err != nil {
-		return reconcile.Result{}, err
-	}
+	c.cluster.UpdatePod(ctx, pod)
 	return reconcile.Result{Requeue: true, RequeueAfter: stateRetryPeriod}, nil
 }
 

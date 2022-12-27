@@ -21,7 +21,6 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
@@ -30,6 +29,7 @@ import (
 type ExistingNode struct {
 	Pods          []*v1.Pod
 	Node          *v1.Node
+	Initialized   bool
 	requests      v1.ResourceList
 	topology      *Topology
 	requirements  scheduling.Requirements
@@ -55,6 +55,7 @@ func NewExistingNode(n *state.Node, topology *Topology, startupTaints []v1.Taint
 	}
 	node := &ExistingNode{
 		Node:          n.Node,
+		Initialized:   n.Initialized,
 		available:     n.Available,
 		topology:      topology,
 		requests:      remainingDaemonResources,
@@ -71,7 +72,7 @@ func NewExistingNode(n *state.Node, topology *Topology, startupTaints []v1.Taint
 	// Only consider startup taints until the node is initialized. Without this, if the startup taint is generic and
 	// re-appears on the node for a different reason (e.g. the node is cordoned) we will assume that pods can
 	// schedule against the node in the future incorrectly.
-	if n.Node.Labels[v1alpha5.LabelNodeInitialized] != "true" {
+	if !n.Initialized {
 		ephemeralTaints = append(ephemeralTaints, startupTaints...)
 	}
 

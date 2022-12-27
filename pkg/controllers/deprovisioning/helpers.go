@@ -107,7 +107,7 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	// to schedule since we want to assume that we can delete a node and its pods will immediately
 	// move to an existing node which won't occur if that node isn't ready.
 	for _, n := range ifn {
-		if n.Node.Labels[v1alpha5.LabelNodeInitialized] != "true" {
+		if !n.Initialized {
 			return nil, false, nil
 		}
 	}
@@ -208,7 +208,7 @@ func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient clie
 		}
 
 		// Skip nodes that aren't initialized
-		if n.Node.Labels[v1alpha5.LabelNodeInitialized] != "true" {
+		if !n.Initialized {
 			return true
 		}
 
