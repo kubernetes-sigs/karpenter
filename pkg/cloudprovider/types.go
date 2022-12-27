@@ -63,7 +63,8 @@ type CloudProvider interface {
 	// IsMachineDrifted returns whether a machine has drifted from the provisioning requirements
 	// it is tied to.
 	IsMachineDrifted(context.Context, *v1alpha1.Machine) (bool, error)
-	// HydrateMachine hydrates an existing instance with machine ownership details
+	// HydrateMachine hydrates an existing instance with machine ownership details that can be used to
+	// determine if a machine has an associated CloudProvider instance
 	// Deprecated: This method will be removed when migration to v1alpha6 has completed
 	HydrateMachine(context.Context, *v1alpha1.Machine) error
 	// Name returns the CloudProvider implementation name.

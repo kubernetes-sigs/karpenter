@@ -165,7 +165,7 @@ func (o *Operator) WithWebhooks(webhooks ...knativeinjection.ControllerConstruct
 func (o *Operator) Start(ctx context.Context, cloudProvider cloudprovider.CloudProvider) {
 	// Run machine hydration before manager or webhook startup
 	if settings.FromContext(ctx).MachineEnabled {
-		lo.Must0(machine.HydrateAll(ctx, lo.Must(client.New(o.RESTConfig, client.Options{})), cloudProvider),
+		lo.Must0(machine.HydrateAll(ctx, lo.Must(client.New(o.RESTConfig, client.Options{Scheme: scheme.Scheme})), cloudProvider),
 			"hydrating machines from existing owned Karpenter nodes")
 	}
 

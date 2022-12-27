@@ -24,9 +24,10 @@ type MachineStatus struct {
 	// ProviderID of the corresponding node object
 	// +optional
 	ProviderID string `json:"providerID,omitempty"`
-	// Allocatable is the allocatable capacity of the machine. This value resolves
-	// to the inflight capacity until the node is launched, at which point, it becomes the
-	// node object's allocatable
+	// Capacity is the estimated full capacity of the machine
+	// +optional
+	Capacity v1.ResourceList `json:"capacity,omitempty"`
+	// Allocatable is the estimated allocatable capacity of the machine
 	// +optional
 	Allocatable v1.ResourceList `json:"allocatable,omitempty"`
 	// Conditions contains signals for health and readiness
@@ -39,22 +40,13 @@ func (in *Machine) StatusConditions() apis.ConditionManager {
 		MachineCreated,
 		MachineRegistered,
 		MachineInitialized,
-		MachineVoluntarilyDisrupted,
-		MachineInvoluntarilyDisrupted,
 	).Manage(in)
 }
 
 var (
-	MachineCreated                apis.ConditionType = "MachineCreated"
-	MachineRegistered             apis.ConditionType = "MachineRegistered"
-	MachineInitialized            apis.ConditionType = "MachineInitialized"
-	MachineVoluntarilyDisrupted   apis.ConditionType = "MachineVoluntarilyDisrupted"
-	MachineInvoluntarilyDisrupted apis.ConditionType = "MachineInvoluntarilyDisrupted"
-)
-
-const (
-	EmptinessDisruptionReason = "MachineEmpty"
-	DriftedDisruptionReason   = "MachineDrifted"
+	MachineCreated     apis.ConditionType = "MachineCreated"
+	MachineRegistered  apis.ConditionType = "MachineRegistered"
+	MachineInitialized apis.ConditionType = "MachineInitialized"
 )
 
 func (in *Machine) GetConditions() apis.Conditions {

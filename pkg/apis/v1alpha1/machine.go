@@ -17,8 +17,6 @@ package v1alpha1
 import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"knative.dev/pkg/apis"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -94,15 +92,11 @@ func MachineFromNode(node *v1.Node) *Machine {
 			Allocatable: node.Status.Allocatable,
 		},
 	}
-	if v, ok := node.Annotations[v1alpha5.VoluntaryDisruptionAnnotationKey]; ok && v == v1alpha5.VoluntaryDisruptionDriftedAnnotationValue {
-		m.StatusConditions().MarkTrueWithReason(MachineVoluntarilyDisrupted, DriftedDisruptionReason, "Machine has drifted from desired state")
-	}
-	if _, ok := node.Annotations[v1alpha5.LabelNodeInitialized]; ok {
+	if _, ok := node.Labels[v1alpha5.LabelNodeInitialized]; ok {
 		m.StatusConditions().MarkTrue(MachineInitialized)
-		m.StatusConditions().MarkTrue(apis.ConditionReady)
 	}
 	m.StatusConditions().MarkTrue(MachineCreated)
 	m.StatusConditions().MarkTrue(MachineRegistered)
-	controllerutil.AddFinalizer(m, v1alpha5.TerminationFinalizer)
+	//controllerutil.AddFinalizer(m, v1alpha5.TerminationFinalizer)
 	return m
 }
