@@ -64,3 +64,7 @@ func MustMerge[T interface{}](dest T, srcs ...T) T {
 	}
 	return dest
 }
+
+func ProviderID() string {
+	return fmt.Sprintf("fake://%s", RandomName())
+}

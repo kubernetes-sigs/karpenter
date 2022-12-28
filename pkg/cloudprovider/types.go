@@ -64,7 +64,8 @@ type CloudProvider interface {
 	// it is tied to.
 	IsMachineDrifted(context.Context, *v1alpha1.Machine) (bool, error)
 	// HydrateMachine hydrates an existing instance with machine ownership details that can be used to
-	// determine if a machine has an associated CloudProvider instance
+	// determine if a machine has an associated CloudProvider instance. This ownership should be based on the providerID
+	// which is populated through the machine.Status.ProviderID in the call
 	// Deprecated: This method will be removed when migration to v1alpha6 has completed
 	HydrateMachine(context.Context, *v1alpha1.Machine) error
 	// Name returns the CloudProvider implementation name.
@@ -152,4 +153,11 @@ func IsInstanceNotFound(err error) bool {
 	}
 	var infErr InstanceNotFound
 	return errors.As(err, &infErr)
+}
+
+func IgnoreInstanceNotFound(err error) error {
+	if IsInstanceNotFound(err) {
+		return nil
+	}
+	return err
 }

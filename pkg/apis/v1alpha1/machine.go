@@ -18,6 +18,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -111,7 +112,6 @@ func MachineFromNode(node *v1.Node) *Machine {
 	}
 	m.StatusConditions().MarkTrue(MachineCreated)
 	m.StatusConditions().MarkTrue(MachineRegistered)
-	// TODO @joinnis: Re-enable the finalizer
-	//controllerutil.AddFinalizer(m, v1alpha5.TerminationFinalizer)
+	controllerutil.AddFinalizer(m, v1alpha5.TerminationFinalizer)
 	return m
 }

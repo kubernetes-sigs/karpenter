@@ -35,13 +35,15 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/sets"
 )
 
-var waitRetryOptions = []retry.Option{
+var WaitRetryOptions = []retry.Option{
 	retry.LastErrorOnly(true),
 	retry.MaxDelay(5 * time.Second),
 }
 
+// HydrateAll hydrates machines from existing nodes that are owned by Karpenter provisioners
+// Deprecated: This method will be removed when migration to v1alpha6 has completed
 func HydrateAll(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) error {
-	logging.FromContext(ctx).Debugf("hydrating machines from existing nodes owned by a provisioner")
+	logging.FromContext(ctx).Debugf("hydrating machines from existing nodes")
 	nodeList := &v1.NodeList{}
 	if err := kubeClient.List(ctx, nodeList, client.HasLabels{v1alpha5.ProvisionerNameLabelKey}); err != nil {
 		return fmt.Errorf("listing nodes, %w", err)
@@ -76,11 +78,11 @@ func HydrateAll(ctx context.Context, kubeClient client.Client, cloudProvider clo
 		// Allow for multiple attempts to hydrating before failing outright
 		if err := retry.Do(func() error {
 			return hydrate(ctx, kubeClient, cloudProvider, node, provisioner, machineNames)
-		}, waitRetryOptions...); err != nil {
+		}, WaitRetryOptions...); err != nil {
 			return fmt.Errorf("hydrating machine from node '%s', %w", node.Name, err)
 		}
 	}
-	logging.FromContext(ctx).Debugf("finished hydrating machines from existing nodes")
+	logging.FromContext(ctx).Debugf("finished hydrating machines")
 	return nil
 }
 
@@ -101,8 +103,7 @@ func hydrate(ctx context.Context, kubeClient client.Client, cloudProvider cloudp
 	}
 	lo.Must0(controllerutil.SetOwnerReference(provisioner, machine, scheme.Scheme)) // shouldn't fail
 
-	// Hydrates the machine with the correct tags at the cloud provider
-	// This also updates the machine if there are any existing tags for it
+	// Hydrates the machine with the correct values if the instance exists at the cloudprovider
 	if err := cloudProvider.HydrateMachine(ctx, machine); err != nil {
 		if cloudprovider.IsInstanceNotFound(err) {
 			return nil
@@ -118,6 +119,7 @@ func hydrate(ctx context.Context, kubeClient client.Client, cloudProvider cloudp
 			return fmt.Errorf("getting machine '%s' from node '%s', %w", machine.Name, node.Name, err)
 		}
 	}
+	machineNames.Insert(machine.Name)
 	machine.Labels = lo.Assign(machine.Labels, map[string]string{
 		v1alpha5.MachineNameLabelKey: machine.Name,
 	})
