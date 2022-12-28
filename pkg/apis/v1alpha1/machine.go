@@ -15,8 +15,10 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -72,9 +74,27 @@ type MachineList struct {
 	Items           []Machine `json:"items"`
 }
 
-// MachineFromNode converts a node into a pseudo-Machine using known values from the node
-func MachineFromNode(node *v1.Node) *Machine {
-	return &Machine{
+// NewMachine converts a node into a Machine using known values from the node and provisioner spec values
+// Deprecated: This Machine generator function can be removed when v1alpha6 migration has completed.
+func NewMachine(node *v1.Node, provisioner *v1alpha5.Provisioner) *Machine {
+	machine := NewMachineFromNode(node)
+	machine.Spec.Kubelet = provisioner.Spec.KubeletConfiguration
+	machine.Spec.Taints = provisioner.Spec.Taints
+	machine.Spec.Requirements = provisioner.Spec.Requirements
+	machine.Spec.StartupTaints = provisioner.Spec.StartupTaints
+
+	if provisioner.Spec.ProviderRef != nil {
+		machine.Spec.MachineTemplateRef = provisioner.Spec.ProviderRef.ToObjectReference()
+	} else {
+		machine.Annotations = lo.Assign(machine.Annotations, v1alpha5.ProviderAnnotation(provisioner.Spec.Provider))
+	}
+	return machine
+}
+
+// NewMachineFromNode converts a node into a pseudo-Machine using known values from the node
+// Deprecated: This Machine generator function can be removed when v1alpha6 migration has completed.
+func NewMachineFromNode(node *v1.Node) *Machine {
+	m := &Machine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        node.Name,
 			Annotations: node.Annotations,
@@ -89,7 +109,15 @@ func MachineFromNode(node *v1.Node) *Machine {
 		},
 		Status: MachineStatus{
 			ProviderID:  node.Spec.ProviderID,
+			Capacity:    node.Status.Capacity,
 			Allocatable: node.Status.Allocatable,
 		},
 	}
+	controllerutil.AddFinalizer(m, v1alpha5.TerminationFinalizer)
+	if _, ok := node.Labels[v1alpha5.LabelNodeInitialized]; ok {
+		m.StatusConditions().MarkTrue(MachineInitialized)
+	}
+	m.StatusConditions().MarkTrue(MachineCreated)
+	m.StatusConditions().MarkTrue(MachineRegistered)
+	return m
 }

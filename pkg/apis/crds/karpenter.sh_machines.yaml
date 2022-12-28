@@ -263,9 +263,17 @@ spec:
                   - type: string
                   pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                   x-kubernetes-int-or-string: true
-                description: Allocatable is the allocatable capacity of the machine.
-                  This value resolves to the inflight capacity until the node is launched,
-                  at which point, it becomes the node object's allocatable
+                description: Allocatable is the estimated allocatable capacity of
+                  the machine
+                type: object
+              capacity:
+                additionalProperties:
+                  anyOf:
+                  - type: integer
+                  - type: string
+                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                  x-kubernetes-int-or-string: true
+                description: Capacity is the estimated full capacity of the machine
                 type: object
               conditions:
                 description: Conditions contains signals for health and readiness
