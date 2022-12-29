@@ -28,7 +28,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -42,7 +41,7 @@ type CloudProvider struct {
 
 	// CreateCalls contains the arguments for every create call that was made since it was cleared
 	mu                 sync.Mutex
-	CreateCalls        []*v1alpha1.Machine
+	CreateCalls        []*v1alpha5.Machine
 	AllowedCreateCalls int
 }
 
@@ -58,11 +57,11 @@ func NewCloudProvider() *CloudProvider {
 func (c *CloudProvider) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.CreateCalls = []*v1alpha1.Machine{}
+	c.CreateCalls = []*v1alpha5.Machine{}
 	c.AllowedCreateCalls = math.MaxInt
 }
 
-func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha1.Machine) (*v1.Node, error) {
+func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (*v1.Node, error) {
 	c.mu.Lock()
 	c.CreateCalls = append(c.CreateCalls, machine)
 	if len(c.CreateCalls) > c.AllowedCreateCalls {
@@ -157,11 +156,11 @@ func (c *CloudProvider) GetInstanceTypes(_ context.Context, _ *v1alpha5.Provisio
 	}, nil
 }
 
-func (c *CloudProvider) Delete(context.Context, *v1alpha1.Machine) error {
+func (c *CloudProvider) Delete(context.Context, *v1alpha5.Machine) error {
 	return nil
 }
 
-func (c *CloudProvider) IsMachineDrifted(context.Context, *v1alpha1.Machine) (bool, error) {
+func (c *CloudProvider) IsMachineDrifted(context.Context, *v1alpha5.Machine) (bool, error) {
 	return false, nil
 }
 

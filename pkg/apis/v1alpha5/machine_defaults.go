@@ -12,15 +12,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package v1alpha5
 
-import (
-	"context"
+import "context"
 
-	"knative.dev/pkg/apis"
-)
-
-// Validate the Machine
-func (in *Machine) Validate(_ context.Context) *apis.FieldError {
-	return nil
-}
+// SetDefaults for the machine
+func (in *Machine) SetDefaults(_ context.Context) {}

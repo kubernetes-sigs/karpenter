@@ -25,7 +25,6 @@ import (
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -52,9 +51,9 @@ type CloudProvider interface {
 	// callback pattern to enable cloudproviders to batch capacity creation
 	// requests. The callback must be called with a theoretical node object that
 	// is fulfilled by the cloud providers capacity creation request.
-	Create(context.Context, *v1alpha1.Machine) (*v1.Node, error)
+	Create(context.Context, *v1alpha5.Machine) (*v1.Node, error)
 	// Delete node in cloudprovider
-	Delete(context.Context, *v1alpha1.Machine) error
+	Delete(context.Context, *v1alpha5.Machine) error
 	// GetInstanceTypes returns instance types supported by the cloudprovider.
 	// Availability of types or zone may vary by provisioner or over time.  Regardless of
 	// availability, the GetInstanceTypes method should always return all instance types,
@@ -62,7 +61,7 @@ type CloudProvider interface {
 	GetInstanceTypes(context.Context, *v1alpha5.Provisioner) ([]*InstanceType, error)
 	// IsMachineDrifted returns whether a machine has drifted from the provisioning requirements
 	// it is tied to.
-	IsMachineDrifted(context.Context, *v1alpha1.Machine) (bool, error)
+	IsMachineDrifted(context.Context, *v1alpha5.Machine) (bool, error)
 	// Name returns the CloudProvider implementation name.
 	Name() string
 }

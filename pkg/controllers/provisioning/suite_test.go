@@ -33,7 +33,6 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
@@ -786,7 +785,7 @@ var _ = Describe("Provisioning", func() {
 
 			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
 			Expect(cloudProvider.CreateCalls[0].Spec.MachineTemplateRef).To(Equal(
-				&v1.ObjectReference{
+				&v1alpha5.ProviderRef{
 					APIVersion: "cloudprovider.karpenter.sh/v1alpha1",
 					Kind:       "CloudProvider",
 					Name:       "default",
@@ -1158,7 +1157,7 @@ var _ = Describe("Multiple Provisioners", func() {
 	})
 })
 
-func ExpectMachineRequirements(machine *v1alpha1.Machine, requirements ...v1.NodeSelectorRequirement) {
+func ExpectMachineRequirements(machine *v1alpha5.Machine, requirements ...v1.NodeSelectorRequirement) {
 	for _, requirement := range requirements {
 		req, ok := lo.Find(machine.Spec.Requirements, func(r v1.NodeSelectorRequirement) bool {
 			return r.Key == requirement.Key && r.Operator == requirement.Operator
@@ -1172,7 +1171,7 @@ func ExpectMachineRequirements(machine *v1alpha1.Machine, requirements ...v1.Nod
 	}
 }
 
-func ExpectMachineRequests(machine *v1alpha1.Machine, resources v1.ResourceList) {
+func ExpectMachineRequests(machine *v1alpha5.Machine, resources v1.ResourceList) {
 	for name, value := range resources {
 		v := machine.Spec.Resources.Requests[name]
 		ExpectWithOffset(1, v.AsApproximateFloat64()).To(BeNumerically("~", value.AsApproximateFloat64(), 10))

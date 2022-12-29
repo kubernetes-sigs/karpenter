@@ -19,13 +19,13 @@ import (
 
 	"github.com/imdario/mergo"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 )
 
 // Machine creates a test machine with defaults that can be overridden by MachineOptions.
 // Overrides are applied in order, with a last write wins semantic.
-func Machine(overrides ...v1alpha1.Machine) *v1alpha1.Machine {
-	override := v1alpha1.Machine{}
+func Machine(overrides ...v1alpha5.Machine) *v1alpha5.Machine {
+	override := v1alpha5.Machine{}
 	for _, opts := range overrides {
 		if err := mergo.Merge(&override, opts, mergo.WithOverride); err != nil {
 			panic(fmt.Sprintf("failed to merge: %v", err))
@@ -34,7 +34,7 @@ func Machine(overrides ...v1alpha1.Machine) *v1alpha1.Machine {
 	if override.Name == "" {
 		override.Name = RandomName()
 	}
-	return &v1alpha1.Machine{
+	return &v1alpha5.Machine{
 		ObjectMeta: ObjectMeta(override.ObjectMeta),
 		Spec:       override.Spec,
 		Status:     override.Status,

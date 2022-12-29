@@ -100,71 +100,11 @@ type Consolidation struct {
 type Provider = runtime.RawExtension
 
 func ProviderAnnotation(p *Provider) map[string]string {
+	if p == nil {
+		return nil
+	}
 	raw := lo.Must(json.Marshal(p)) // Provider should already have been validated so this shouldn't fail
 	return map[string]string{ProviderCompatabilityAnnotationKey: string(raw)}
-}
-
-type ProviderRef struct {
-	// Kind of the referent; More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds"
-	Kind string `json:"kind,omitempty"`
-	// Name of the referent; More info: http://kubernetes.io/docs/user-guide/identifiers#names
-	Name string `json:"name,omitempty"`
-	// API version of the referent
-	// +optional
-	APIVersion string `json:"apiVersion,omitempty"`
-}
-
-func (in *ProviderRef) ToObjectReference() *v1.ObjectReference {
-	return &v1.ObjectReference{
-		APIVersion: in.APIVersion,
-		Kind:       in.Kind,
-		Name:       in.Name,
-	}
-}
-
-// KubeletConfiguration defines args to be used when configuring kubelet on provisioned nodes.
-// They are a subset of the upstream types, recognizing not all options may be supported.
-// Wherever possible, the types and names should reflect the upstream kubelet types.
-// https://pkg.go.dev/k8s.io/kubelet/config/v1beta1#KubeletConfiguration
-// https://github.com/kubernetes/kubernetes/blob/9f82d81e55cafdedab619ea25cabf5d42736dacf/cmd/kubelet/app/options/options.go#L53
-type KubeletConfiguration struct {
-	// clusterDNS is a list of IP addresses for the cluster DNS server.
-	// Note that not all providers may use all addresses.
-	//+optional
-	ClusterDNS []string `json:"clusterDNS,omitempty"`
-	// ContainerRuntime is the container runtime to be used with your worker nodes.
-	// +optional
-	ContainerRuntime *string `json:"containerRuntime,omitempty"`
-	// MaxPods is an override for the maximum number of pods that can run on
-	// a worker node instance.
-	// +kubebuilder:validation:Minimum:=0
-	// +optional
-	MaxPods *int32 `json:"maxPods,omitempty"`
-	// PodsPerCore is an override for the number of pods that can run on a worker node
-	// instance based on the number of cpu cores. This value cannot exceed MaxPods, so, if
-	// MaxPods is a lower value, that value will be used.
-	// +kubebuilder:validation:Minimum:=0
-	// +optional
-	PodsPerCore *int32 `json:"podsPerCore,omitempty"`
-	// SystemReserved contains resources reserved for OS system daemons and kernel memory.
-	// +optional
-	SystemReserved v1.ResourceList `json:"systemReserved,omitempty"`
-	// KubeReserved contains resources reserved for Kubernetes system components.
-	// +optional
-	KubeReserved v1.ResourceList `json:"kubeReserved,omitempty"`
-	// EvictionHard is the map of signal names to quantities that define hard eviction thresholds
-	// +optional
-	EvictionHard map[string]string `json:"evictionHard,omitempty"`
-	// EvictionSoft is the map of signal names to quantities that define soft eviction thresholds
-	// +optional
-	EvictionSoft map[string]string `json:"evictionSoft,omitempty"`
-	// EvictionSoftGracePeriod is the map of signal names to quantities that define grace periods for each eviction signal
-	// +optional
-	EvictionSoftGracePeriod map[string]metav1.Duration `json:"evictionSoftGracePeriod,omitempty"`
-	// EvictionMaxPodGracePeriod is the maximum allowed grace period (in seconds) to use when terminating pods in
-	// response to soft eviction thresholds being met.
-	// +optional
-	EvictionMaxPodGracePeriod *int32 `json:"evictionMaxPodGracePeriod,omitempty"`
 }
 
 // Provisioner is the Schema for the Provisioners API

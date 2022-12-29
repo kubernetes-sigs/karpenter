@@ -25,7 +25,6 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/utils/functional"
 	"github.com/aws/karpenter-core/pkg/utils/sets"
@@ -35,14 +34,13 @@ var (
 	// Builder includes all types within the apis package
 	Builder = runtime.NewSchemeBuilder(
 		v1alpha5.SchemeBuilder.AddToScheme,
-		v1alpha1.SchemeBuilder.AddToScheme,
 	)
 	// AddToScheme may be used to add all resources defined in the project to a Scheme
 	AddToScheme = Builder.AddToScheme
 	// Resources defined in the project
 	Resources = map[schema.GroupVersionKind]resourcesemantics.GenericCRD{
 		v1alpha5.SchemeGroupVersion.WithKind("Provisioner"): &v1alpha5.Provisioner{},
-		v1alpha1.SchemeGroupVersion.WithKind("Machine"):     &v1alpha1.Machine{},
+		v1alpha5.SchemeGroupVersion.WithKind("Machine"):     &v1alpha5.Machine{},
 	}
 	Settings = sets.New(settings.Registration)
 )
