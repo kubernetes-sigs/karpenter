@@ -22,9 +22,10 @@ import (
 )
 
 const (
-	Group           = "karpenter.sh"
-	ExtensionsGroup = "extensions." + Group
-	TestingGroup    = "testing." + Group // Exclusively used for labeling/discovery in testing
+	Group              = "karpenter.sh"
+	ExtensionsGroup    = "extensions." + Group
+	CompatabilityGroup = "compatibility." + Group
+	TestingGroup       = "testing." + Group // Exclusively used for labeling/discovery in testing
 )
 
 var (
@@ -33,6 +34,8 @@ var (
 		scheme.AddKnownTypes(SchemeGroupVersion,
 			&Provisioner{},
 			&ProvisionerList{},
+			&Machine{},
+			&MachineList{},
 		)
 		metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 		return nil

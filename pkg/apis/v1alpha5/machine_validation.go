@@ -12,26 +12,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package v1alpha5
 
 import (
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	"context"
+
+	"knative.dev/pkg/apis"
 )
 
-const (
-	Group = "karpenter.sh"
-)
-
-var (
-	SchemeGroupVersion = schema.GroupVersion{Group: Group, Version: "v1alpha1"}
-	SchemeBuilder      = runtime.NewSchemeBuilder(func(scheme *runtime.Scheme) error {
-		scheme.AddKnownTypes(SchemeGroupVersion,
-			&Machine{},
-			&MachineList{},
-		)
-		metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
-		return nil
-	})
-)
+// Validate the Machine
+func (in *Machine) Validate(_ context.Context) *apis.FieldError {
+	return nil
+}

@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package v1alpha5
 
 import (
 	v1 "k8s.io/api/core/v1"
@@ -24,9 +24,10 @@ type MachineStatus struct {
 	// ProviderID of the corresponding node object
 	// +optional
 	ProviderID string `json:"providerID,omitempty"`
-	// Allocatable is the allocatable capacity of the machine. This value resolves
-	// to the inflight capacity until the node is launched, at which point, it becomes the
-	// node object's allocatable
+	// Capacity is the estimated full capacity of the machine
+	// +optional
+	Capacity v1.ResourceList `json:"capacity,omitempty"`
+	// Allocatable is the estimated allocatable capacity of the machine
 	// +optional
 	Allocatable v1.ResourceList `json:"allocatable,omitempty"`
 	// Conditions contains signals for health and readiness
@@ -39,15 +40,13 @@ func (in *Machine) StatusConditions() apis.ConditionManager {
 		MachineCreated,
 		MachineRegistered,
 		MachineInitialized,
-		MachineHealthy,
 	).Manage(in)
 }
 
 var (
-	MachineCreated     apis.ConditionType
-	MachineRegistered  apis.ConditionType
-	MachineInitialized apis.ConditionType
-	MachineHealthy     apis.ConditionType
+	MachineCreated     apis.ConditionType = "MachineCreated"
+	MachineRegistered  apis.ConditionType = "MachineRegistered"
+	MachineInitialized apis.ConditionType = "MachineInitialized"
 )
 
 func (in *Machine) GetConditions() apis.Conditions {
