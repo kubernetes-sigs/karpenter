@@ -32,7 +32,9 @@ import (
 	"k8s.io/api/policy/v1beta1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -131,8 +133,9 @@ func ExpectAppliedWithOffset(offset int, ctx context.Context, c client.Client, o
 		ExpectWithOffset(offset+1, c.Status().Update(ctx, statuscopy)).To(Or(Succeed(), MatchError("the server could not find the requested resource"))) // Some objects do not have a status
 
 		// Re-get the object to grab the updated spec and status
-		err := c.Get(ctx, client.ObjectKeyFromObject(object), object)
-		ExpectWithOffset(offset+1, err).ToNot(HaveOccurred())
+		EventuallyWithOffset(1, func(g Gomega) {
+			g.Expect(c.Get(ctx, client.ObjectKeyFromObject(object), object)).To(Succeed())
+		}).Should(Succeed())
 
 		// Set the deletion timestamp by adding a finalizer and deleting
 		if deletionTimestampSet {
@@ -174,18 +177,7 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 	wg := sync.WaitGroup{}
 	namespaces := &v1.NamespaceList{}
 	ExpectWithOffset(1, c.List(ctx, namespaces)).To(Succeed())
-	nodes := &v1.NodeList{}
-	ExpectWithOffset(1, c.List(ctx, nodes)).To(Succeed())
-	for i := range nodes.Items {
-		nodes.Items[i].SetFinalizers([]string{})
-		ExpectWithOffset(1, c.Update(ctx, &nodes.Items[i])).To(Succeed())
-	}
-	pvcList := &v1.PersistentVolumeClaimList{}
-	ExpectWithOffset(1, c.List(ctx, pvcList)).To(Succeed())
-	for i := range pvcList.Items {
-		pvcList.Items[i].SetFinalizers([]string{})
-		ExpectWithOffset(1, c.Update(ctx, &pvcList.Items[i])).To(Succeed())
-	}
+	ExpectFinalizersRemoved(ctx, c, &v1.NodeList{}, &v1alpha5.MachineList{}, &v1.PersistentVolumeClaimList{})
 	for _, object := range []client.Object{
 		&v1.Pod{},
 		&v1.Node{},
@@ -195,6 +187,7 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 		&v1.PersistentVolume{},
 		&storagev1.StorageClass{},
 		&v1alpha5.Provisioner{},
+		&v1alpha5.Machine{},
 	} {
 		for _, namespace := range namespaces.Items {
 			wg.Add(1)
@@ -209,12 +202,44 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 	wg.Wait()
 }
 
-func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objects ...client.Object) {
-	for _, object := range objects {
-		ExpectWithOffset(1, c.Get(ctx, client.ObjectKeyFromObject(object), object)).To(Succeed())
-		mergeFrom := client.MergeFrom(object.DeepCopyObject().(client.Object))
-		object.SetFinalizers([]string{})
-		ExpectWithOffset(1, c.Patch(ctx, object, mergeFrom)).To(Succeed())
+func EventuallyExpectIndexedClientCleanedUp(ctx context.Context, direct test.DirectClient, indexed test.IndexedClient) {
+	ExpectCleanedUp(ctx, direct)
+	wg := sync.WaitGroup{}
+	for _, objectList := range []client.ObjectList{
+		&v1.PodList{},
+		&v1.NodeList{},
+		&appsv1.DaemonSetList{},
+		&v1beta1.PodDisruptionBudgetList{},
+		&v1.PersistentVolumeClaimList{},
+		&v1.PersistentVolumeList{},
+		&storagev1.StorageClassList{},
+		&v1alpha5.ProvisionerList{},
+		&v1alpha5.MachineList{},
+	} {
+		wg.Add(1)
+		go func(ol client.ObjectList) {
+			defer wg.Done()
+			defer GinkgoRecover()
+			EventuallyWithOffset(1, func(g Gomega) {
+				g.Expect(indexed.List(ctx, ol)).Should(Succeed())
+				items, err := meta.ExtractList(ol)
+				g.Expect(err).To(Succeed())
+				g.Expect(len(items)).To(BeZero())
+			}).Should(Succeed())
+		}(objectList)
+	}
+	wg.Wait()
+}
+
+func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objectLists ...client.ObjectList) {
+	for _, list := range objectLists {
+		ExpectWithOffset(1, c.List(ctx, list)).To(Succeed())
+		Expect(meta.EachListItem(list, func(o runtime.Object) error {
+			obj := o.(client.Object)
+			obj.SetFinalizers([]string{})
+			ExpectWithOffset(1, c.Update(ctx, obj)).To(Succeed())
+			return nil
+		})).To(Succeed())
 	}
 }
 

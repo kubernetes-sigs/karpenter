@@ -60,7 +60,7 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
-	env = test.NewEnvironment(scheme.Scheme, apis.CRDs...)
+	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
 
 	cloudProvider := fake.NewCloudProvider()
 	eventRecorder := test.NewEventRecorder()

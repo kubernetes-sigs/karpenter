@@ -59,7 +59,7 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
-	env = test.NewEnvironment(scheme.Scheme, apis.CRDs...)
+	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
 	ctx = settings.ToContext(ctx, test.Settings())
 	cp := fake.NewCloudProvider()
 	cluster := state.NewCluster(ctx, fakeClock, env.Client, cp)
