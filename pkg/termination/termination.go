@@ -37,10 +37,19 @@ import (
 )
 
 type Terminator struct {
-	EvictionQueue *EvictionQueue
-	KubeClient    client.Client
-	CloudProvider cloudprovider.CloudProvider
-	Clock         clock.Clock
+	clock         clock.Clock
+	kubeClient    client.Client
+	cloudProvider cloudprovider.CloudProvider
+	evictionQueue *EvictionQueue
+}
+
+func NewTerminator(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, eq *EvictionQueue) *Terminator {
+	return &Terminator{
+		clock:         clk,
+		kubeClient:    kubeClient,
+		cloudProvider: cloudProvider,
+		evictionQueue: eq,
+	}
 }
 
 type NodeDrainErr error
@@ -50,25 +59,22 @@ func IsNodeDrainErr(err error) bool {
 	return errors.As(err, &nodeDrainErr)
 }
 
-// cordon cordons a node
-func (t *Terminator) cordon(ctx context.Context, node *v1.Node) error {
+// Cordon cordons a node
+func (t *Terminator) Cordon(ctx context.Context, node *v1.Node) error {
 	stored := node.DeepCopy()
 	node.Spec.Unschedulable = true
 	node.Labels = lo.Assign(node.Labels, map[string]string{
 		v1.LabelNodeExcludeBalancers: "karpenter",
 	})
 	if !equality.Semantic.DeepEqual(node, stored) {
-		if err := t.KubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
-			return client.IgnoreNotFound(err)
-		}
 		logging.FromContext(ctx).Infof("cordoned node")
 	}
 	return nil
 }
 
-// drain evicts pods from the node and returns true when all pods are evicted
+// Drain evicts pods from the node and returns true when all pods are evicted
 // https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
-func (t *Terminator) drain(ctx context.Context, node *v1.Node) error {
+func (t *Terminator) Drain(ctx context.Context, node *v1.Node) error {
 	// Get evictable pods
 	pods, err := t.getPods(ctx, node)
 	if err != nil {
@@ -95,8 +101,8 @@ func (t *Terminator) drain(ctx context.Context, node *v1.Node) error {
 	return lo.Ternary(len(podsToEvict) > 0, NodeDrainErr(fmt.Errorf("%d pods are waiting to be evicted", len(podsToEvict))), nil)
 }
 
-// terminate calls cloud provider delete then removes the finalizer to delete the node
-func (t *Terminator) terminate(ctx context.Context, node *v1.Node) error {
+// TerminateNode calls cloud provider delete then removes the finalizer to delete the node
+func (t *Terminator) TerminateNode(ctx context.Context, node *v1.Node) error {
 	stored := node.DeepCopy()
 	// Delete the instance associated with node
 	if err := t.CloudProvider.Delete(ctx, machineutil.NewFromNode(node)); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
@@ -104,9 +110,6 @@ func (t *Terminator) terminate(ctx context.Context, node *v1.Node) error {
 	}
 	controllerutil.RemoveFinalizer(node, v1alpha5.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(node, stored) {
-		if err := t.KubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
-			return client.IgnoreNotFound(err)
-		}
 		logging.FromContext(ctx).Infof("deleted node")
 	}
 	return nil
@@ -115,7 +118,7 @@ func (t *Terminator) terminate(ctx context.Context, node *v1.Node) error {
 // getPods returns a list of evictable pods for the node
 func (t *Terminator) getPods(ctx context.Context, node *v1.Node) ([]*v1.Pod, error) {
 	podList := &v1.PodList{}
-	if err := t.KubeClient.List(ctx, podList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
+	if err := t.kubeClient.List(ctx, podList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
 		return nil, fmt.Errorf("listing pods on node, %w", err)
 	}
 	var pods []*v1.Pod
@@ -149,9 +152,9 @@ func (t *Terminator) evict(pods []*v1.Pod) {
 	}
 	// 2. Evict critical pods if all noncritical are evicted
 	if len(nonCritical) == 0 {
-		t.EvictionQueue.Add(critical)
+		t.evictionQueue.Add(critical)
 	} else {
-		t.EvictionQueue.Add(nonCritical)
+		t.evictionQueue.Add(nonCritical)
 	}
 }
 
@@ -159,5 +162,5 @@ func (t *Terminator) isStuckTerminating(pod *v1.Pod) bool {
 	if pod.DeletionTimestamp == nil {
 		return false
 	}
-	return t.Clock.Now().After(pod.DeletionTimestamp.Time.Add(1 * time.Minute))
+	return t.clock.Now().After(pod.DeletionTimestamp.Time.Add(1 * time.Minute))
 }

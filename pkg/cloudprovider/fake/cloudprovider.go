@@ -119,8 +119,8 @@ func (c *CloudProvider) Get(context.Context, string, string) (*v1alpha5.Machine,
 	return nil, nil
 }
 
-func (c *CloudProvider) Get(context.Context, *v1alpha5.Machine) (bool, error) {
-	return false, nil
+func (c *CloudProvider) Get(context.Context, *v1alpha5.Machine) error {
+	return nil
 }
 
 func (c *CloudProvider) GetInstanceTypes(_ context.Context, _ *v1alpha5.Provisioner) ([]*cloudprovider.InstanceType, error) {

@@ -85,7 +85,7 @@ func (c *Manager) MarkUnknown(t apis.ConditionType, reason, messageFormat string
 func (c *Manager) MarkFalse(t apis.ConditionType, reason, messageFormat string, messageA ...interface{}) {
 	stored := c.GetCondition(t)
 	if stored == nil {
-		c.ConditionManager.MarkUnknown(t, reason, messageFormat, messageA...)
+		c.ConditionManager.MarkFalse(t, reason, messageFormat, messageA...)
 		return
 	}
 
@@ -95,6 +95,6 @@ func (c *Manager) MarkFalse(t apis.ConditionType, reason, messageFormat string, 
 	cond.Message = fmt.Sprintf(messageFormat, messageA...)
 
 	if !equality.Semantic.DeepEqual(stored, cond) {
-		c.ConditionManager.MarkUnknown(t, reason, messageFormat, messageA...)
+		c.ConditionManager.MarkFalse(t, reason, messageFormat, messageA...)
 	}
 }

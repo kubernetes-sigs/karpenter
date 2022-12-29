@@ -32,6 +32,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/termination"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
+	ptermination "github.com/aws/karpenter-core/pkg/termination"
 	"github.com/aws/karpenter-core/pkg/test"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -47,7 +48,7 @@ import (
 
 var ctx context.Context
 var terminationController controller.Controller
-var evictionQueue *termination.EvictionQueue
+var evictionQueue *ptermination.EvictionQueue
 var env *test.Environment
 var defaultOwnerRefs = []metav1.OwnerReference{{Kind: "ReplicaSet", APIVersion: "appsv1", Name: "rs", UID: "1234567890"}}
 var fakeClock *clock.FakeClock
@@ -64,8 +65,8 @@ var _ = BeforeSuite(func() {
 
 	cloudProvider := fake.NewCloudProvider()
 	eventRecorder := test.NewEventRecorder()
-	evictionQueue = termination.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), eventRecorder)
-	terminationController = termination.NewController(fakeClock, env.Client, evictionQueue, eventRecorder, cloudProvider)
+	terminator := ptermination.NewTerminator(fakeClock, env.Client, cloudProvider, ptermination.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), eventRecorder))
+	terminationController = termination.NewController(env.Client, terminator, eventRecorder)
 })
 
 var _ = AfterSuite(func() {
@@ -598,7 +599,7 @@ var _ = Describe("Termination", func() {
 	})
 })
 
-func ExpectNotEnqueuedForEviction(e *termination.EvictionQueue, pods ...*v1.Pod) {
+func ExpectNotEnqueuedForEviction(e *ptermination.EvictionQueue, pods ...*v1.Pod) {
 	for _, pod := range pods {
 		ExpectWithOffset(1, e.Contains(client.ObjectKeyFromObject(pod))).To(BeFalse())
 	}

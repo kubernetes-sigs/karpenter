@@ -38,6 +38,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/termination"
 )
 
 var (
@@ -60,7 +61,7 @@ var _ corecontroller.FinalizingTypedController[*v1.Node] = (*Controller)(nil)
 
 // Controller for the resource
 type Controller struct {
-	Terminator *Terminator
+	Terminator *termination.Terminator
 	KubeClient client.Client
 	Recorder   events.Recorder
 }
@@ -93,17 +94,17 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 	if !controllerutil.ContainsFinalizer(node, v1alpha5.TerminationFinalizer) {
 		return reconcile.Result{}, nil
 	}
-	if err := c.Terminator.cordon(ctx, node); err != nil {
+	if err := c.Terminator.Cordon(ctx, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("cordoning node, %w", err)
 	}
-	if err := c.Terminator.drain(ctx, node); err != nil {
-		if IsNodeDrainErr(err) {
+	if err := c.Terminator.Drain(ctx, node); err != nil {
+		if termination.IsNodeDrainErr(err) {
 			c.Recorder.Publish(events.NodeFailedToDrain(node, err))
 			return reconcile.Result{Requeue: true}, nil
 		}
 		return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 	}
-	if err := c.Terminator.terminate(ctx, node); err != nil {
+	if err := c.Terminator.TerminateNode(ctx, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("terminating node, %w", err)
 	}
 	terminationSummary.Observe(time.Since(node.DeletionTimestamp.Time).Seconds())
