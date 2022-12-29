@@ -18,8 +18,10 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 )
 
@@ -33,6 +35,7 @@ func New(node *v1.Node, provisioner *v1alpha5.Provisioner) *v1alpha5.Machine {
 	machine.Spec.Requirements = provisioner.Spec.Requirements
 	machine.Spec.StartupTaints = provisioner.Spec.StartupTaints
 	machine.Spec.MachineTemplateRef = provisioner.Spec.ProviderRef
+	lo.Must0(controllerutil.SetOwnerReference(provisioner, machine, scheme.Scheme))
 
 	return machine
 }
