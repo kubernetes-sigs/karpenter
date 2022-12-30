@@ -72,7 +72,7 @@ func TestScheduling(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(scheme.Scheme, apis.CRDs...)
+	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
 	ctx = settings.ToContext(ctx, test.Settings())
 	cloudProv = fake.NewCloudProvider()
 	instanceTypes, _ := cloudProv.GetInstanceTypes(ctx, nil)

@@ -49,7 +49,7 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(scheme.Scheme, apis.CRDs...)
+	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
 	cmw = informer.NewInformedWatcher(env.KubernetesInterface, system.Namespace())
 	defaultConfigMap = &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
