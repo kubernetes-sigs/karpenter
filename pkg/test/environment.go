@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/samber/lo"
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/version"
@@ -33,16 +34,10 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/functional"
 )
 
-type DirectClient client.Client
-type IndexedClient client.Client
-
 type Environment struct {
 	envtest.Environment
 
-	Client DirectClient
-	// IndexedClient uses caching to support client.MatchingFields calls
-	// This means that updates will be delayed so use this sparingly since it can cause test flakes without proper use
-	IndexedClient       IndexedClient
+	Client              client.Client
 	KubernetesInterface kubernetes.Interface
 	Version             *version.Version
 	Done                chan struct{}
@@ -86,18 +81,31 @@ func NewEnvironment(scheme *runtime.Scheme, options ...functional.Option[Environ
 	}
 
 	_ = lo.Must(environment.Start())
-	clientCache := lo.Must(cache.New(environment.Config, cache.Options{Scheme: scheme}))
-	for _, index := range opts.fieldIndexers {
-		lo.Must0(index(clientCache))
+	c := lo.Must(client.New(environment.Config, client.Options{Scheme: scheme}))
+
+	// We use a modified client if we need field indexers
+	if len(opts.fieldIndexers) > 0 {
+		cache := lo.Must(cache.New(environment.Config, cache.Options{Scheme: scheme}))
+		for _, index := range opts.fieldIndexers {
+			lo.Must0(index(cache))
+		}
+		lo.Must0(cache.IndexField(ctx, &corev1.Pod{}, "spec.nodeName", func(o client.Object) []string {
+			pod := o.(*corev1.Pod)
+			return []string{pod.Spec.NodeName}
+		}))
+		c = &CacheSyncingClient{
+			Client: lo.Must(client.NewDelegatingClient(client.NewDelegatingClientInput{
+				CacheReader: cache,
+				Client:      c,
+			})),
+		}
+		go func() {
+			lo.Must0(cache.Start(ctx))
+		}()
 	}
-	directClient := lo.Must(client.New(environment.Config, client.Options{Scheme: scheme}))
-	go func() {
-		lo.Must0(clientCache.Start(ctx))
-	}()
 	return &Environment{
 		Environment:         environment,
-		Client:              directClient,
-		IndexedClient:       lo.Must(client.NewDelegatingClient(client.NewDelegatingClientInput{CacheReader: clientCache, Client: directClient})),
+		Client:              c,
 		KubernetesInterface: kubernetes.NewForConfigOrDie(environment.Config),
 		Version:             version,
 		Done:                make(chan struct{}),

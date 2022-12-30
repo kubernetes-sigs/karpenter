@@ -133,9 +133,7 @@ func ExpectAppliedWithOffset(offset int, ctx context.Context, c client.Client, o
 		ExpectWithOffset(offset+1, c.Status().Update(ctx, statuscopy)).To(Or(Succeed(), MatchError("the server could not find the requested resource"))) // Some objects do not have a status
 
 		// Re-get the object to grab the updated spec and status
-		EventuallyWithOffset(1, func(g Gomega) {
-			g.Expect(c.Get(ctx, client.ObjectKeyFromObject(object), object)).To(Succeed())
-		}).Should(Succeed())
+		Expect(c.Get(ctx, client.ObjectKeyFromObject(object), object)).To(Succeed())
 
 		// Set the deletion timestamp by adding a finalizer and deleting
 		if deletionTimestampSet {
@@ -198,35 +196,6 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 					&client.DeleteAllOfOptions{DeleteOptions: client.DeleteOptions{GracePeriodSeconds: ptr.Int64(0)}})).ToNot(HaveOccurred())
 			}(object, namespace.Name)
 		}
-	}
-	wg.Wait()
-}
-
-func EventuallyExpectIndexedClientCleanedUp(ctx context.Context, direct test.DirectClient, indexed test.IndexedClient) {
-	ExpectCleanedUp(ctx, direct)
-	wg := sync.WaitGroup{}
-	for _, objectList := range []client.ObjectList{
-		&v1.PodList{},
-		&v1.NodeList{},
-		&appsv1.DaemonSetList{},
-		&v1beta1.PodDisruptionBudgetList{},
-		&v1.PersistentVolumeClaimList{},
-		&v1.PersistentVolumeList{},
-		&storagev1.StorageClassList{},
-		&v1alpha5.ProvisionerList{},
-		&v1alpha5.MachineList{},
-	} {
-		wg.Add(1)
-		go func(ol client.ObjectList) {
-			defer wg.Done()
-			defer GinkgoRecover()
-			EventuallyWithOffset(1, func(g Gomega) {
-				g.Expect(indexed.List(ctx, ol)).Should(Succeed())
-				items, err := meta.ExtractList(ol)
-				g.Expect(err).To(Succeed())
-				g.Expect(len(items)).To(BeZero())
-			}).Should(Succeed())
-		}(objectList)
 	}
 	wg.Wait()
 }
@@ -357,6 +326,10 @@ func ExpectManualBindingWithOffset(offset int, ctx context.Context, c client.Cli
 			Name: node.Name,
 		},
 	})).To(Succeed())
+	Eventually(func(g Gomega) {
+		g.Expect(c.Get(ctx, client.ObjectKeyFromObject(pod), pod)).To(Succeed())
+		g.Expect(pod.Spec.NodeName).To(Equal(node.Name))
+	}).Should(Succeed())
 }
 
 func ExpectSkew(ctx context.Context, c client.Client, namespace string, constraint *v1.TopologySpreadConstraint) Assertion {

@@ -62,7 +62,3 @@ func Node(overrides ...NodeOptions) *v1.Node {
 		},
 	}
 }
-
-func ProviderID() string {
-	return fmt.Sprintf("fake://%s", RandomName())
-}
