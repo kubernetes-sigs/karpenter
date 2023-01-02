@@ -34,6 +34,7 @@ const (
 const (
 	ProvisionerNameLabelKey = Group + "/provisioner-name"
 	MachineNameLabelKey     = Group + "/machine-name"
+	ClusterNameLabelKey     = Group + "/cluster-name"
 	LabelNodeInitialized    = Group + "/initialized"
 	LabelCapacityType       = Group + "/capacity-type"
 )
@@ -54,12 +55,6 @@ const (
 // Karpenter specific finalizers
 const (
 	TerminationFinalizer = Group + "/termination"
-)
-
-// Tags for infrastructure resources deployed into Cloud Provider's accounts
-const (
-	DiscoveryTagKey = Group + "/discovery"
-	ManagedByTagKey = Group + "/managed-by"
 )
 
 var (
