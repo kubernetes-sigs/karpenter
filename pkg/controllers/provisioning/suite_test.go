@@ -96,7 +96,7 @@ var _ = AfterSuite(func() {
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 	recorder.Reset()
-	cluster.Reset(ctx)
+	cluster.Reset()
 })
 
 var _ = Describe("Provisioning", func() {

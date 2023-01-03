@@ -105,16 +105,16 @@ func (c *consolidation) sortAndFilterCandidates(ctx context.Context, nodes []Can
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes
 func (c *consolidation) ShouldDeprovision(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, _ []*v1.Pod) bool {
-	if val, ok := n.Node.Annotations[v1alpha5.DoNotConsolidateNodeAnnotationKey]; ok {
-		c.reporter.RecordUnconsolidatableReason(ctx, n.Node, fmt.Sprintf("%s annotation exists", v1alpha5.DoNotConsolidateNodeAnnotationKey))
+	if val, ok := n.Node().Annotations[v1alpha5.DoNotConsolidateNodeAnnotationKey]; ok {
+		c.reporter.RecordUnconsolidatableReason(ctx, n.Node(), fmt.Sprintf("%s annotation exists", v1alpha5.DoNotConsolidateNodeAnnotationKey))
 		return val != "true"
 	}
 	if provisioner == nil {
-		c.reporter.RecordUnconsolidatableReason(ctx, n.Node, "provisioner is unknown")
+		c.reporter.RecordUnconsolidatableReason(ctx, n.Node(), "provisioner is unknown")
 		return false
 	}
 	if provisioner.Spec.Consolidation == nil || !ptr.BoolValue(provisioner.Spec.Consolidation.Enabled) {
-		c.reporter.RecordUnconsolidatableReason(ctx, n.Node, fmt.Sprintf("provisioner %s has consolidation disabled", provisioner.Name))
+		c.reporter.RecordUnconsolidatableReason(ctx, n.Node(), fmt.Sprintf("provisioner %s has consolidation disabled", provisioner.Name))
 		return false
 	}
 	return true

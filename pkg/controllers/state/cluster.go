@@ -40,6 +40,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
+const nominationKey = "nominated"
+
 // Cluster maintains cluster state that is often needed but expensive to compute.
 type Cluster struct {
 	kubeClient    client.Client
@@ -47,19 +49,16 @@ type Cluster struct {
 	clock         clock.Clock
 
 	// State: Node Status & Pod -> Node Binding
-	mu       sync.RWMutex
-	nodes    map[string]*Node                // node name -> node
-	bindings map[types.NamespacedName]string // pod namespaced named -> node name
-
-	nominatedNodes   *cache.Cache
-	antiAffinityPods sync.Map // mapping of pod namespaced name to *v1.Pod of pods that have required anti affinities
+	mu                   sync.RWMutex
+	nodes                map[string]*Node                // provider id -> node
+	bindings             map[types.NamespacedName]string // pod namespaced named -> node node
+	nodeNameToProviderID map[string]string               // node name -> provider id
+	antiAffinityPods     sync.Map                        // mapping of pod namespaced name to *v1.Pod of pods that have required anti affinities
 
 	// consolidationState is a number indicating the state of the cluster with respect to consolidation.  If this number
 	// hasn't changed, it indicates that the cluster hasn't changed in a state which would enable consolidation if
 	// it previously couldn't occur.
-	consolidationState   int64
-	lastNodeDeletionTime int64
-	lastNodeCreationTime int64
+	consolidationState int64
 }
 
 func NewCluster(ctx context.Context, clk clock.Clock, client client.Client, cp cloudprovider.CloudProvider) *Cluster {
@@ -87,35 +86,97 @@ func NewCluster(ctx context.Context, clk clock.Clock, client client.Client, cp c
 // compute topology information.
 // +k8s:deepcopy-gen=true
 type Node struct {
-	Node *v1.Node
-	// Capacity is the total resources on the node.
-	Capacity v1.ResourceList
-	// Allocatable is the total amount of resources on the node after os overhead.
-	Allocatable v1.ResourceList
-	// Available is allocatable minus anything allocated to pods.
-	Available v1.ResourceList
-	// Available is the total amount of resources that are available on the node.  This is the Allocatable minus the
-	// resources requested by all pods bound to the node.
-	// DaemonSetRequested is the total amount of resources that have been requested by daemon sets.  This allows users
+	node    *v1.Node
+	machine *v1alpha5.Machine
+
+	// daemonSetRequests is the total amount of resources that have been requested by daemon sets.  This allows users
 	// of the Node to identify the remaining resources that we expect future daemonsets to consume.  This is already
 	// included in the calculation for Available.
-	DaemonSetRequested v1.ResourceList
-	DaemonSetLimits    v1.ResourceList
-	// HostPort usage of all pods that are bound to the node
-	HostPortUsage *scheduling.HostPortUsage
-	VolumeUsage   *scheduling.VolumeLimits
-	VolumeLimits  scheduling.VolumeCount
+	daemonSetRequests map[types.NamespacedName]v1.ResourceList
+	daemonSetLimits   map[types.NamespacedName]v1.ResourceList
 
 	podRequests map[types.NamespacedName]v1.ResourceList
 	podLimits   map[types.NamespacedName]v1.ResourceList
 
-	// PodTotalRequests is the total resources on pods scheduled to this node
-	PodTotalRequests v1.ResourceList
-	// PodTotalLimits is the total resource limits scheduled to this node
-	PodTotalLimits v1.ResourceList
-	// MarkedForDeletion marks this node to say that there is some controller that is
-	// planning to delete this node so consider pods that are present on it available for scheduling
-	MarkedForDeletion bool
+	hostPortUsage *scheduling.HostPortUsage
+	volumeUsage   *scheduling.VolumeLimits
+	volumeLimits  scheduling.VolumeCount
+
+	markedForDeletion bool
+	nominated         *cache.Cache // stores a single key "nominated"
+}
+
+func (n *Node) Node() *v1.Node {
+	// TODO @joinnis: update this to look at both machine and node
+	return n.node
+}
+
+func (n *Node) Initialized() bool {
+	// TODO @joinnis: update this to look at both machine and node
+	return n.node.Labels[v1alpha5.LabelNodeInitialized] == "true"
+}
+
+func (n *Node) Capacity() v1.ResourceList {
+	// TODO @joinnis: update this to look at both machine and node
+	return n.node.Status.Capacity
+}
+
+func (n *Node) Allocatable() v1.ResourceList {
+	// TODO @joinnis: update this to look at both machine and node
+	return n.node.Status.Allocatable
+}
+
+// Available is allocatable minus anything allocated to pods.
+func (n *Node) Available() v1.ResourceList {
+	// TODO @joinnis: update this to look at both machine and node
+	return resources.Subtract(n.Allocatable(), n.PodRequests())
+}
+
+func (n *Node) DaemonSetRequests() v1.ResourceList {
+	return n.daemonSetRequests
+}
+
+func (n *Node) DaemonSetLimits() v1.ResourceList {
+	return n.daemonSetLimits
+}
+
+func (n *Node) HostPortUsage() *scheduling.HostPortUsage {
+	return n.hostPortUsage
+}
+
+func (n *Node) VolumeUsage() *scheduling.VolumeLimits {
+	return n.volumeUsage
+}
+
+func (n *Node) VolumeLimits() scheduling.VolumeCount {
+	return n.volumeLimits
+}
+
+func (n *Node) PodRequests() v1.ResourceList {
+	return resources.Merge(lo.Values(n.podRequests)...)
+}
+
+func (n *Node) PodLimits() v1.ResourceList {
+	return resources.Merge(lo.Values(n.podLimits)...)
+}
+
+func (n *Node) MarkedForDeletion() bool {
+	// TODO: update this to also look at the deletion timestamp
+	return n.markedForDeletion
+}
+
+func (n *Node) Nominate() {
+	n.nominated.SetDefault(nominationKey, true)
+}
+
+func (n *Node) IsNominated() bool {
+	_, ok := n.nominated.Get(nominationKey)
+	return ok
+}
+
+func (n *Node) Owned() bool {
+	// TODO: update this to also look at the deletion timestamp
+	return n.node.Labels[v1alpha5.ProvisionerNameLabelKey] != ""
 }
 
 // ForPodsWithAntiAffinity calls the supplied function once for each pod with required anti affinity terms that is
@@ -150,11 +211,11 @@ func (c *Cluster) ForEachNode(f func(n *Node) bool) {
 	}
 	// sort nodes by creation time so we provide a consistent ordering
 	sort.Slice(nodes, func(a, b int) bool {
-		if nodes[a].Node.CreationTimestamp != nodes[b].Node.CreationTimestamp {
-			return nodes[a].Node.CreationTimestamp.Time.Before(nodes[b].Node.CreationTimestamp.Time)
+		if nodes[a].Node().CreationTimestamp != nodes[b].Node().CreationTimestamp {
+			return nodes[a].Node().CreationTimestamp.Time.Before(nodes[b].Node().CreationTimestamp.Time)
 		}
 		// sometimes we get nodes created in the same second, so sort again by node UID to provide a consistent ordering
-		return nodes[a].Node.UID < nodes[b].Node.UID
+		return nodes[a].Node().UID < nodes[b].Node().UID
 	})
 
 	for _, node := range nodes {
@@ -166,34 +227,42 @@ func (c *Cluster) ForEachNode(f func(n *Node) bool) {
 
 // IsNodeNominated returns true if the given node was expected to have a pod bound to it during a recent scheduling
 // batch
-func (c *Cluster) IsNodeNominated(nodeName string) bool {
-	_, exists := c.nominatedNodes.Get(nodeName)
-	return exists
+func (c *Cluster) IsNodeNominated(name string) bool {
+	if id, ok := c.nodeNameToProviderID[name]; ok {
+		return c.nodes[id].IsNominated()
+	}
+	return false
 }
 
 // NominateNodeForPod records that a node was the target of a pending pod during a scheduling batch
-func (c *Cluster) NominateNodeForPod(nodeName string) {
-	c.nominatedNodes.SetDefault(nodeName, nil)
+func (c *Cluster) NominateNodeForPod(name string) error {
+	if id, ok := c.nodeNameToProviderID[name]; ok {
+		c.nodes[id].Nominate()
+		return nil
+	}
+	return fmt.Errorf("node name doesn't exist in state")
 }
 
 // UnmarkForDeletion removes the marking on the node as a node the controller intends to delete
-func (c *Cluster) UnmarkForDeletion(nodeNames ...string) {
+func (c *Cluster) UnmarkForDeletion(names ...string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for _, nodeName := range nodeNames {
-		if _, ok := c.nodes[nodeName]; ok {
-			c.nodes[nodeName].MarkedForDeletion = false
+
+	for _, name := range names {
+		if id, ok := c.nodeNameToProviderID[name]; ok {
+			c.nodes[id].markedForDeletion = false
 		}
 	}
 }
 
 // MarkForDeletion marks the node as pending deletion in the internal cluster state
-func (c *Cluster) MarkForDeletion(nodeNames ...string) {
+func (c *Cluster) MarkForDeletion(names ...string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for _, nodeName := range nodeNames {
-		if _, ok := c.nodes[nodeName]; ok {
-			c.nodes[nodeName].MarkedForDeletion = true
+
+	for _, name := range names {
+		if id, ok := c.nodeNameToProviderID[name]; ok {
+			c.nodes[id].markedForDeletion = true
 		}
 	}
 }
@@ -201,10 +270,7 @@ func (c *Cluster) MarkForDeletion(nodeNames ...string) {
 // newNode always returns a node, even if some portion of the update has failed
 func (c *Cluster) newNode(ctx context.Context, node *v1.Node) (*Node, error) {
 	n := &Node{
-		Node:              node,
-		Capacity:          v1.ResourceList{},
-		Allocatable:       v1.ResourceList{},
-		Available:         v1.ResourceList{},
+		node:              node,
 		HostPortUsage:     scheduling.NewHostPortUsage(),
 		VolumeUsage:       scheduling.NewVolumeLimits(c.kubeClient),
 		VolumeLimits:      scheduling.VolumeCount{},
@@ -271,36 +337,23 @@ func (c *Cluster) populateResourceRequests(ctx context.Context, node *v1.Node, n
 	if err := c.kubeClient.List(ctx, &pods, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
 		return fmt.Errorf("listing pods, %w", err)
 	}
-	var requested []v1.ResourceList
-	var limits []v1.ResourceList
-	var daemonsetRequested []v1.ResourceList
-	var daemonsetLimits []v1.ResourceList
 	for i := range pods.Items {
 		pod := &pods.Items[i]
 		if podutils.IsTerminal(pod) {
 			continue
 		}
-		requests := resources.RequestsForPods(pod)
-		podLimits := resources.LimitsForPods(pod)
 		podKey := client.ObjectKeyFromObject(pod)
-		n.podRequests[podKey] = requests
-		n.podLimits[podKey] = podLimits
-		c.bindings[podKey] = n.Node.Name
-		if podutils.IsOwnedByDaemonSet(pod) {
-			daemonsetRequested = append(daemonsetRequested, requests)
-			daemonsetLimits = append(daemonsetLimits, podLimits)
-		}
-		requested = append(requested, requests)
-		limits = append(limits, podLimits)
-		n.HostPortUsage.Add(ctx, pod)
-		n.VolumeUsage.Add(ctx, pod)
-	}
 
-	n.DaemonSetRequested = resources.Merge(daemonsetRequested...)
-	n.DaemonSetLimits = resources.Merge(daemonsetLimits...)
-	n.PodTotalRequests = resources.Merge(requested...)
-	n.PodTotalLimits = resources.Merge(limits...)
-	n.Available = resources.Subtract(n.Allocatable, resources.Merge(requested...))
+		n.podRequests[podKey] = resources.RequestsForPods(pod)
+		n.podLimits[podKey] = resources.LimitsForPods(pod)
+		c.bindings[podKey] = pod.Spec.NodeName // TODO @joinnis: Potentially change this later
+		if podutils.IsOwnedByDaemonSet(pod) {
+			n.daemonSetRequests[podKey] = resources.RequestsForPods(pod)
+			n.daemonSetLimits[podKey] = resources.LimitsForPods(pod)
+		}
+		n.hostPortUsage.Add(ctx, pod)
+		n.volumeUsage.Add(ctx, pod)
+	}
 	return nil
 }
 
@@ -309,12 +362,11 @@ func (c *Cluster) populateVolumeLimits(ctx context.Context, node *v1.Node, n *No
 	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: node.Name}, &csiNode); err != nil {
 		return client.IgnoreNotFound(fmt.Errorf("getting CSINode to determine volume limit for %s, %w", node.Name, err))
 	}
-
 	for _, driver := range csiNode.Spec.Drivers {
 		if driver.Allocatable == nil {
 			continue
 		}
-		n.VolumeLimits[driver.Name] = int(ptr.Int32Value(driver.Allocatable.Count))
+		n.volumeLimits[driver.Name] = int(ptr.Int32Value(driver.Allocatable.Count))
 	}
 	return nil
 }
@@ -326,7 +378,7 @@ func (c *Cluster) DeleteNode(nodeName string) {
 	c.recordConsolidationChange()
 }
 
-// updateNode is called for every node reconciliation
+// UpdateNode is called for every node reconciliation
 func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -348,17 +400,6 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 		n.MarkedForDeletion = n.MarkedForDeletion || oldNode.MarkedForDeletion
 	}
 	c.nodes[node.Name] = n
-
-	if node.DeletionTimestamp != nil {
-		nodeDeletionTime := node.DeletionTimestamp.UnixMilli()
-		if nodeDeletionTime > atomic.LoadInt64(&c.lastNodeDeletionTime) {
-			atomic.StoreInt64(&c.lastNodeDeletionTime, nodeDeletionTime)
-		}
-	}
-	nodeCreationTime := node.CreationTimestamp.UnixMilli()
-	if nodeCreationTime > atomic.LoadInt64(&c.lastNodeCreationTime) {
-		atomic.StoreInt64(&c.lastNodeCreationTime, nodeCreationTime)
-	}
 	return nil
 }
 
@@ -377,17 +418,7 @@ func (c *Cluster) ClusterConsolidationState() int64 {
 	return cs
 }
 
-// LastNodeDeletionTime returns the last time that at a node was marked for deletion.
-func (c *Cluster) LastNodeDeletionTime() time.Time {
-	return time.UnixMilli(atomic.LoadInt64(&c.lastNodeDeletionTime))
-}
-
-// LastNodeCreationTime returns the last time that at a node was created.
-func (c *Cluster) LastNodeCreationTime() time.Time {
-	return time.UnixMilli(atomic.LoadInt64(&c.lastNodeCreationTime))
-}
-
-// deletePod is called when the pod has been deleted
+// DeletePod is called when the pod has been deleted
 func (c *Cluster) DeletePod(podKey types.NamespacedName) {
 	c.antiAffinityPods.Delete(podKey)
 	c.updateNodeUsageFromPodCompletion(podKey)
@@ -412,20 +443,17 @@ func (c *Cluster) updateNodeUsageFromPodCompletion(podKey types.NamespacedName) 
 	}
 	// pod has been deleted so our available capacity increases by the resources that had been
 	// requested by the pod
-	n.Available = resources.Merge(n.Available, n.podRequests[podKey])
-	n.PodTotalRequests = resources.Subtract(n.PodTotalRequests, n.podRequests[podKey])
-	n.PodTotalLimits = resources.Subtract(n.PodTotalLimits, n.podLimits[podKey])
 	delete(n.podRequests, podKey)
 	delete(n.podLimits, podKey)
-	n.HostPortUsage.DeletePod(podKey)
-	n.VolumeUsage.DeletePod(podKey)
+	n.hostPortUsage.DeletePod(podKey)
+	n.volumeUsage.DeletePod(podKey)
 
 	// We can't easily track the changes to the DaemonsetRequested here as we no longer have the pod.  We could keep up
 	// with this separately, but if a daemonset pod is being deleted, it usually means the node is going down.  In the
 	// worst case we will resync to correct this.
 }
 
-// updatePod is called every time the pod is reconciled
+// UpdatePod is called every time the pod is reconciled
 func (c *Cluster) UpdatePod(ctx context.Context, pod *v1.Pod) error {
 	var err error
 	if podutils.IsTerminal(pod) {
@@ -474,10 +502,7 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 			// we were tracking the old node, so we need to reduce its capacity by the amount of the pod that has
 			// left it
 			delete(c.bindings, podKey)
-			n.Available = resources.Merge(n.Available, n.podRequests[podKey])
-			n.PodTotalRequests = resources.Subtract(n.PodTotalRequests, n.podRequests[podKey])
-			n.PodTotalLimits = resources.Subtract(n.PodTotalLimits, n.podLimits[podKey])
-			n.HostPortUsage.DeletePod(podKey)
+			n.hostPortUsage.DeletePod(podKey)
 			delete(n.podRequests, podKey)
 			delete(n.podLimits, podKey)
 		}
@@ -506,22 +531,17 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 	}
 
 	// sum the newly bound pod's requests and limits into the existing node and record the binding
-	podRequests := resources.RequestsForPods(pod)
-	podLimits := resources.LimitsForPods(pod)
-	// our available capacity goes down by the amount that the pod had requested
-	n.Available = resources.Subtract(n.Available, podRequests)
-	n.PodTotalRequests = resources.Merge(n.PodTotalRequests, podRequests)
-	n.PodTotalLimits = resources.Merge(n.PodTotalLimits, podLimits)
+	n.podRequests[podKey] = resources.RequestsForPods(pod)
+	n.podLimits[podKey] = resources.LimitsForPods(pod)
+	c.bindings[podKey] = pod.Spec.NodeName // TODO @joinnis: potentially point this to the actual state node
 	// if it's a daemonset, we track what it has requested separately
 	if podutils.IsOwnedByDaemonSet(pod) {
-		n.DaemonSetRequested = resources.Merge(n.DaemonSetRequested, podRequests)
-		n.DaemonSetLimits = resources.Merge(n.DaemonSetRequested, podLimits)
+		n.daemonSetRequests[podKey] = resources.RequestsForPods(pod)
+		n.daemonSetLimits[podKey] = resources.LimitsForPods(pod)
 	}
-	n.HostPortUsage.Add(ctx, pod)
-	n.VolumeUsage.Add(ctx, pod)
-	n.podRequests[podKey] = podRequests
-	n.podLimits[podKey] = podLimits
-	c.bindings[podKey] = n.Node.Name
+	n.hostPortUsage.Add(ctx, pod)
+	n.volumeUsage.Add(ctx, pod)
+
 	return nil
 }
 
@@ -530,7 +550,7 @@ func (c *Cluster) recordConsolidationChange() {
 }
 
 // Reset the cluster state for unit testing
-func (c *Cluster) Reset(ctx context.Context) {
+func (c *Cluster) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.nodes = map[string]*Node{}
