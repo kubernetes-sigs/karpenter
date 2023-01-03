@@ -17,6 +17,7 @@ package cloudprovider
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -140,13 +141,25 @@ func (ofs Offerings) Cheapest() Offering {
 }
 
 // MachineNotFoundError is an error type returned by CloudProviders when the reason for failure is NotFound
-type MachineNotFoundError error
+type MachineNotFoundError struct {
+	Err error
+}
+
+func NewMachineNotFoundError(err error) *MachineNotFoundError {
+	return &MachineNotFoundError{
+		Err: err,
+	}
+}
+
+func (e *MachineNotFoundError) Error() string {
+	return fmt.Sprintf("machine not found, %s", e.Err)
+}
 
 func IsMachineNotFoundError(err error) bool {
 	if err == nil {
 		return false
 	}
-	var mnfErr MachineNotFoundError
+	var mnfErr *MachineNotFoundError
 	return errors.As(err, &mnfErr)
 }
 
