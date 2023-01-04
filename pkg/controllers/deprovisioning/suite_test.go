@@ -135,7 +135,7 @@ var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 	var nodes []client.ObjectKey
 	cluster.ForEachNode(func(n *state.Node) bool {
-		nodes = append(nodes, client.ObjectKeyFromObject(n.Node()))
+		nodes = append(nodes, client.ObjectKeyFromObject(n.Node))
 		return true
 	})
 

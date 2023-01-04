@@ -44,13 +44,12 @@ type Cluster struct {
 	cloudProvider cloudprovider.CloudProvider
 	clock         clock.Clock
 
-	// State: Node Status & Pod -> Node Binding
 	mu               sync.RWMutex
 	nodes            map[string]*Node                // provider id -> node
 	bindings         map[types.NamespacedName]string // pod namespaced named -> node node
 	nameToProviderID map[string]string               // node name -> provider id
 
-	antiAffinityPods sync.Map // mapping of pod namespaced name to *v1.Pod of pods that have required anti affinities
+	antiAffinityPods sync.Map // pod namespaced name -> *v1.Pod of pods that have required anti affinities
 
 	// consolidationState is a number indicating the state of the cluster with respect to consolidation.  If this number
 	// hasn't changed, it indicates that the cluster hasn't changed in a state which would enable consolidation if
@@ -86,7 +85,7 @@ func (c *Cluster) ForPodsWithAntiAffinity(fn func(p *v1.Pod, n *v1.Node) bool) {
 			// if we receive the node deletion event before the pod deletion event, this can happen
 			return true
 		}
-		return fn(pod, node.Node())
+		return fn(pod, node.Node)
 	})
 }
 
@@ -220,6 +219,7 @@ func (c *Cluster) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.nodes = map[string]*Node{}
+	c.nameToProviderID = map[string]string{}
 	c.bindings = map[types.NamespacedName]string{}
 	c.antiAffinityPods = sync.Map{}
 }
@@ -227,11 +227,11 @@ func (c *Cluster) Reset() {
 func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *Node) (*Node, error) {
 	if oldNode == nil {
 		oldNode = &Node{
-			node: &v1.Node{},
+			Node: &v1.Node{},
 		}
 	}
 	n := &Node{
-		node:              node,
+		Node:              node,
 		hostPortUsage:     scheduling.NewHostPortUsage(),
 		volumeUsage:       scheduling.NewVolumeLimits(c.kubeClient),
 		volumeLimits:      scheduling.VolumeCount{},
@@ -259,7 +259,7 @@ func (c *Cluster) populateStartupTaints(ctx context.Context, n *Node) error {
 		return nil
 	}
 	provisioner := &v1alpha5.Provisioner{}
-	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Node().Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
+	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
 		return client.IgnoreNotFound(fmt.Errorf("getting provisioner, %w", err))
 	}
 	n.startupTaints = provisioner.Spec.StartupTaints
@@ -271,7 +271,7 @@ func (c *Cluster) populateInflight(ctx context.Context, n *Node) error {
 		return nil
 	}
 	provisioner := &v1alpha5.Provisioner{}
-	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Node().Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
+	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
 		return client.IgnoreNotFound(fmt.Errorf("getting provisioner, %w", err))
 	}
 	instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, provisioner)
@@ -279,10 +279,10 @@ func (c *Cluster) populateInflight(ctx context.Context, n *Node) error {
 		return err
 	}
 	instanceType, ok := lo.Find(instanceTypes, func(it *cloudprovider.InstanceType) bool {
-		return it.Name == n.Node().Labels[v1.LabelInstanceTypeStable]
+		return it.Name == n.Node.Labels[v1.LabelInstanceTypeStable]
 	})
 	if !ok {
-		return fmt.Errorf("instance type '%s' not found", n.Node().Labels[v1.LabelInstanceTypeStable])
+		return fmt.Errorf("instance type '%s' not found", n.Node.Labels[v1.LabelInstanceTypeStable])
 	}
 	n.inflightCapacity = instanceType.Capacity
 	n.inflightAllocatable = instanceType.Allocatable()
@@ -291,8 +291,8 @@ func (c *Cluster) populateInflight(ctx context.Context, n *Node) error {
 
 func (c *Cluster) populateVolumeLimits(ctx context.Context, n *Node) error {
 	var csiNode storagev1.CSINode
-	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Node().Name}, &csiNode); err != nil {
-		return client.IgnoreNotFound(fmt.Errorf("getting CSINode to determine volume limit for %s, %w", n.Node().Name, err))
+	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Name}, &csiNode); err != nil {
+		return client.IgnoreNotFound(fmt.Errorf("getting CSINode to determine volume limit for %s, %w", n.Node.Name, err))
 	}
 	for _, driver := range csiNode.Spec.Drivers {
 		if driver.Allocatable == nil {
@@ -305,7 +305,7 @@ func (c *Cluster) populateVolumeLimits(ctx context.Context, n *Node) error {
 
 func (c *Cluster) populateResourceRequests(ctx context.Context, n *Node) error {
 	var pods v1.PodList
-	if err := c.kubeClient.List(ctx, &pods, client.MatchingFields{"spec.nodeName": n.Node().Name}); err != nil {
+	if err := c.kubeClient.List(ctx, &pods, client.MatchingFields{"spec.nodeName": n.Node.Name}); err != nil {
 		return fmt.Errorf("listing pods, %w", err)
 	}
 	for i := range pods.Items {

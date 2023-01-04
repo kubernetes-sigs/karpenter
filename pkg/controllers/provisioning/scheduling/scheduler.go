@@ -228,10 +228,10 @@ func (s *Scheduler) calculateExistingMachines(stateNodes []*state.Node, daemonSe
 		// Calculate any daemonsets that should schedule to the inflight node
 		var daemons []*v1.Pod
 		for _, p := range daemonSetPods {
-			if err := scheduling.Taints(node.Node().Spec.Taints).Tolerates(p); err != nil {
+			if err := scheduling.Taints(node.Node.Spec.Taints).Tolerates(p); err != nil {
 				continue
 			}
-			if err := scheduling.NewLabelRequirements(node.Node().Labels).Compatible(scheduling.NewPodRequirements(p)); err != nil {
+			if err := scheduling.NewLabelRequirements(node.Node.Labels).Compatible(scheduling.NewPodRequirements(p)); err != nil {
 				continue
 			}
 			daemons = append(daemons, p)
@@ -241,7 +241,7 @@ func (s *Scheduler) calculateExistingMachines(stateNodes []*state.Node, daemonSe
 		// We don't use the status field and instead recompute the remaining resources to ensure we have a consistent view
 		// of the cluster during scheduling.  Depending on how node creation falls out, this will also work for cases where
 		// we don't create Node resources.
-		s.remainingResources[node.Node().Name] = resources.Subtract(s.remainingResources[node.Node().Name], node.Capacity())
+		s.remainingResources[node.Node.Name] = resources.Subtract(s.remainingResources[node.Node.Name], node.Capacity())
 	}
 }
 

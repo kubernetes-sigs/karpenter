@@ -375,7 +375,7 @@ var _ = Describe("Node Resource Level", func() {
 		cluster.ForEachNode(func(n *state.Node) bool {
 			available := n.Available()
 			requested := n.PodRequests()
-			if n.Node().Name == node1.Name {
+			if n.Node.Name == node1.Name {
 				// not on node1 any longer, so it should be fully free
 				Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 4))
 				Expect(requested.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 0))
@@ -532,6 +532,31 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectNodeExists(ctx, env.Client, node.Name)
 		ExpectNodeDeletionMarked(node)
+	})
+	It("should nominate the node until the nomination time passes", func() {
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
+				},
+				Finalizers: []string{v1alpha5.TerminationFinalizer},
+			},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU: resource.MustParse("4"),
+			}},
+		)
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		cluster.NominateNodeForPod(ctx, node.Name)
+
+		// Expect that the node is now nominated
+		ExpectNodeNominated(node)
+		time.Sleep(time.Second * 5) // nomination window is 10s so it should still be nominated
+		ExpectNodeNominated(node)
+		time.Sleep(time.Second * 6) // past 10s, node should no longer be nominated
+		ExpectNodeNotNominated(node)
 	})
 })
 
@@ -725,7 +750,7 @@ var _ = Describe("Provisioner Spec Updates", func() {
 
 func ExpectNodeResourceRequest(node *v1.Node, resourceName v1.ResourceName, amount string) {
 	cluster.ForEachNode(func(n *state.Node) bool {
-		if n.Node().Name != node.Name {
+		if n.Node.Name != node.Name {
 			return true
 		}
 		nodeRequest := n.PodRequests()[resourceName]
@@ -736,7 +761,7 @@ func ExpectNodeResourceRequest(node *v1.Node, resourceName v1.ResourceName, amou
 }
 func ExpectNodeDaemonSetRequested(node *v1.Node, resourceName v1.ResourceName, amount string) {
 	cluster.ForEachNode(func(n *state.Node) bool {
-		if n.Node().Name != node.Name {
+		if n.Node.Name != node.Name {
 			return true
 		}
 		dsReq := n.DaemonSetRequests()[resourceName]
@@ -745,13 +770,39 @@ func ExpectNodeDaemonSetRequested(node *v1.Node, resourceName v1.ResourceName, a
 		return false
 	})
 }
-
 func ExpectNodeDeletionMarked(node *v1.Node) {
+	found := false
 	cluster.ForEachNode(func(n *state.Node) bool {
-		if n.Node().Name != node.Name {
+		if n.Node.Name != node.Name {
 			return true
 		}
+		found = true
 		Expect(n.MarkedForDeletion()).To(BeTrue())
 		return false
 	})
+	Expect(found).To(BeTrue())
+}
+func ExpectNodeNominated(node *v1.Node) {
+	found := false
+	cluster.ForEachNode(func(n *state.Node) bool {
+		if n.Node.Name != node.Name {
+			return true
+		}
+		found = true
+		Expect(n.Nominated()).To(BeTrue())
+		return false
+	})
+	Expect(found).To(BeTrue())
+}
+func ExpectNodeNotNominated(node *v1.Node) {
+	found := false
+	cluster.ForEachNode(func(n *state.Node) bool {
+		if n.Node.Name != node.Name {
+			return true
+		}
+		found = true
+		Expect(n.Nominated()).To(BeFalse())
+		return false
+	})
+	Expect(found).To(BeTrue())
 }

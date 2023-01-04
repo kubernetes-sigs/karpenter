@@ -36,7 +36,7 @@ import (
 // compute topology information.
 // +k8s:deepcopy-gen=true
 type Node struct {
-	node *v1.Node
+	Node *v1.Node
 
 	inflightAllocatable v1.ResourceList // TODO @joinnis: This can be removed when machine is added
 	inflightCapacity    v1.ResourceList // TODO @joinnis: This can be removed when machine is added
@@ -58,13 +58,6 @@ type Node struct {
 	nominatedUntil    metav1.Time
 }
 
-// Node returns the node object wrapped by this state Node
-// Note: Only use this if you need the object reference, don't access details of this data as there are higher-order
-// functions to handle things like node capacity, available, etc.
-func (in *Node) Node() *v1.Node {
-	return in.node
-}
-
 func (in *Node) Taints() []v1.Taint {
 	ephemeralTaints := []v1.Taint{
 		{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
@@ -76,7 +69,7 @@ func (in *Node) Taints() []v1.Taint {
 	if !in.Initialized() && in.Owned() {
 		ephemeralTaints = append(ephemeralTaints, in.startupTaints...)
 	}
-	return lo.Reject(in.Node().Spec.Taints, func(taint v1.Taint, _ int) bool {
+	return lo.Reject(in.Node.Spec.Taints, func(taint v1.Taint, _ int) bool {
 		_, rejected := lo.Find(ephemeralTaints, func(t v1.Taint) bool {
 			return t.Key == taint.Key && t.Value == taint.Value && t.Effect == taint.Effect
 		})
@@ -85,26 +78,26 @@ func (in *Node) Taints() []v1.Taint {
 }
 
 func (in *Node) Initialized() bool {
-	return in.node.Labels[v1alpha5.LabelNodeInitialized] == "true"
+	return in.Node.Labels[v1alpha5.LabelNodeInitialized] == "true"
 }
 
 func (in *Node) Capacity() v1.ResourceList {
 	if !in.Initialized() && in.Owned() {
 		// Override any zero quantity values in the node status
-		ret := lo.Assign(in.node.Status.Capacity)
+		ret := lo.Assign(in.Node.Status.Capacity)
 		for resourceName, quantity := range in.inflightCapacity {
 			if resources.IsZero(ret[resourceName]) {
 				ret[resourceName] = quantity
 			}
 		}
 	}
-	return in.node.Status.Capacity
+	return in.Node.Status.Capacity
 }
 
 func (in *Node) Allocatable() v1.ResourceList {
 	if !in.Initialized() && in.Owned() {
 		// Override any zero quantity values in the node status
-		ret := lo.Assign(in.node.Status.Allocatable)
+		ret := lo.Assign(in.Node.Status.Allocatable)
 		for resourceName, quantity := range in.inflightAllocatable {
 			if resources.IsZero(ret[resourceName]) {
 				ret[resourceName] = quantity
@@ -112,7 +105,7 @@ func (in *Node) Allocatable() v1.ResourceList {
 		}
 		return ret
 	}
-	return in.node.Status.Allocatable
+	return in.Node.Status.Allocatable
 }
 
 // Available is allocatable minus anything allocated to pods.
@@ -149,7 +142,7 @@ func (in *Node) PodLimits() v1.ResourceList {
 }
 
 func (in *Node) MarkedForDeletion() bool {
-	return in.markedForDeletion || (in.node != nil && !in.node.DeletionTimestamp.IsZero())
+	return in.markedForDeletion || (in.Node != nil && !in.Node.DeletionTimestamp.IsZero())
 }
 
 func (in *Node) Nominate(ctx context.Context) {
@@ -161,7 +154,7 @@ func (in *Node) Nominated() bool {
 }
 
 func (in *Node) Owned() bool {
-	return in.node.Labels[v1alpha5.ProvisionerNameLabelKey] != ""
+	return in.Node.Labels[v1alpha5.ProvisionerNameLabelKey] != ""
 }
 
 func (in *Node) updateForPod(ctx context.Context, pod *v1.Pod) {

@@ -52,12 +52,12 @@ func NewExistingNode(n *state.Node, topology *Topology, daemonResources v1.Resou
 		}
 	}
 	node := &ExistingNode{
-		Node:          n.Node(),
+		Node:          n.Node,
 		available:     n.Available(),
 		taints:        n.Taints(),
 		topology:      topology,
 		requests:      remainingDaemonResources,
-		requirements:  scheduling.NewLabelRequirements(n.Node().Labels),
+		requirements:  scheduling.NewLabelRequirements(n.Node.Labels),
 		hostPortUsage: n.HostPortUsage(),
 		volumeUsage:   n.VolumeUsage(),
 		volumeLimits:  n.VolumeLimits(),
@@ -65,9 +65,9 @@ func NewExistingNode(n *state.Node, topology *Topology, daemonResources v1.Resou
 
 	// If the in-flight node doesn't have a hostname yet, we treat it's unique name as the hostname.  This allows toppology
 	// with hostname keys to schedule correctly.
-	hostname := n.Node().Labels[v1.LabelHostname]
+	hostname := n.Node.Labels[v1.LabelHostname]
 	if hostname == "" {
-		hostname = n.Node().Name
+		hostname = n.Node.Name
 	}
 	node.requirements.Add(scheduling.NewRequirement(v1.LabelHostname, v1.NodeSelectorOpIn, hostname))
 	topology.Register(v1.LabelHostname, hostname)

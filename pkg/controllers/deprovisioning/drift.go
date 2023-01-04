@@ -52,7 +52,7 @@ func (d *Drift) ShouldDeprovision(ctx context.Context, n *state.Node, provisione
 	if !settings.FromContext(ctx).DriftEnabled {
 		return false
 	}
-	return n.Node().Annotations[v1alpha5.VoluntaryDisruptionAnnotationKey] == v1alpha5.VoluntaryDisruptionDriftedAnnotationValue
+	return n.Node.Annotations[v1alpha5.VoluntaryDisruptionAnnotationKey] == v1alpha5.VoluntaryDisruptionDriftedAnnotationValue
 }
 
 // ComputeCommand generates a deprovisioning command given deprovisionable nodes
