@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package state
+package informer
 
 import (
 	"context"
@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/controllers/state"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
@@ -34,10 +35,10 @@ var _ corecontroller.TypedController[*v1alpha5.Provisioner] = (*ProvisionerContr
 // ProvisionerController reconciles provisioners to re-trigger consolidation on change.
 type ProvisionerController struct {
 	kubeClient client.Client
-	cluster    *Cluster
+	cluster    *state.Cluster
 }
 
-func NewProvisionerController(kubeClient client.Client, cluster *Cluster) corecontroller.Controller {
+func NewProvisionerController(kubeClient client.Client, cluster *state.Cluster) corecontroller.Controller {
 	return corecontroller.Typed[*v1alpha5.Provisioner](kubeClient, &ProvisionerController{
 		kubeClient: kubeClient,
 		cluster:    cluster,
@@ -50,7 +51,7 @@ func (c *ProvisionerController) Name() string {
 
 func (c *ProvisionerController) Reconcile(_ context.Context, _ *v1alpha5.Provisioner) (reconcile.Result, error) {
 	// Something changed in the provisioner so we should re-consider consolidation
-	c.cluster.recordConsolidationChange()
+	c.cluster.RecordConsolidationChange()
 	return reconcile.Result{}, nil
 }
 

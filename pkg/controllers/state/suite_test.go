@@ -27,6 +27,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 
@@ -38,8 +39,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/utils/resources"
-
 	"github.com/aws/karpenter-core/pkg/test"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -78,10 +77,10 @@ var _ = BeforeEach(func() {
 	cloudProvider = fake.NewCloudProvider()
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
-	nodeController = state.NewNodeController(env.Client, cluster)
-	podController = state.NewPodController(env.Client, cluster)
-	provisionerController = state.NewProvisionerController(env.Client, cluster)
+	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	nodeController = informer.NewNodeController(env.Client, cluster)
+	podController = informer.NewPodController(env.Client, cluster)
+	provisionerController = informer.NewProvisionerController(env.Client, cluster)
 	provisioner = test.Provisioner(test.ProvisionerOptions{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
 	ExpectApplied(ctx, env.Client, provisioner)
 })
@@ -298,8 +297,8 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
 
 		cluster.ForEachNode(func(n *state.Node) bool {
-			available := n.Available
-			requested := resources.Subtract(n.Node.Status.Allocatable, available)
+			available := n.Available()
+			requested := n.PodRequests()
 			Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 2.5))
 			Expect(requested.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 1.5))
 			return true
@@ -338,8 +337,8 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
 
 		cluster.ForEachNode(func(n *state.Node) bool {
-			available := n.Available
-			requested := resources.Subtract(n.Node.Status.Allocatable, available)
+			available := n.Available()
+			requested := n.PodRequests()
 			Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 2.5))
 			Expect(requested.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 1.5))
 			return true
@@ -370,12 +369,13 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectManualBinding(ctx, env.Client, pod2, node2)
 		// deleted the pod and then recreated it, but simulated only receiving an event on the new pod after it has
 		// bound and not getting the new node event entirely
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node2))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
 
 		cluster.ForEachNode(func(n *state.Node) bool {
-			available := n.Available
-			requested := resources.Subtract(n.Node.Status.Allocatable, available)
-			if n.Node.Name == node1.Name {
+			available := n.Available()
+			requested := n.PodRequests()
+			if n.Node().Name == node1.Name {
 				// not on node1 any longer, so it should be fully free
 				Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 4))
 				Expect(requested.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 0))
@@ -410,6 +410,7 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectApplied(ctx, env.Client, node)
 		ExpectNodeResourceRequest(node, v1.ResourceCPU, "0.0")
 		ExpectNodeResourceRequest(node, v1.ResourcePods, "0")
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 		sum := 0.0
 		podCount := 0
@@ -724,12 +725,10 @@ var _ = Describe("Provisioner Spec Updates", func() {
 
 func ExpectNodeResourceRequest(node *v1.Node, resourceName v1.ResourceName, amount string) {
 	cluster.ForEachNode(func(n *state.Node) bool {
-		if n.Node.Name != node.Name {
+		if n.Node().Name != node.Name {
 			return true
 		}
-		requested := resources.Subtract(n.Node.Status.Allocatable, n.Available)
-
-		nodeRequest := requested[resourceName]
+		nodeRequest := n.PodRequests()[resourceName]
 		expected := resource.MustParse(amount)
 		ExpectWithOffset(1, nodeRequest.AsApproximateFloat64()).To(BeNumerically("~", expected.AsApproximateFloat64(), 0.001))
 		return false
@@ -737,10 +736,10 @@ func ExpectNodeResourceRequest(node *v1.Node, resourceName v1.ResourceName, amou
 }
 func ExpectNodeDaemonSetRequested(node *v1.Node, resourceName v1.ResourceName, amount string) {
 	cluster.ForEachNode(func(n *state.Node) bool {
-		if n.Node.Name != node.Name {
+		if n.Node().Name != node.Name {
 			return true
 		}
-		dsReq := n.DaemonSetRequested[resourceName]
+		dsReq := n.DaemonSetRequests()[resourceName]
 		expected := resource.MustParse(amount)
 		Expect(dsReq.AsApproximateFloat64()).To(BeNumerically("~", expected.AsApproximateFloat64(), 0.001))
 		return false
@@ -749,10 +748,10 @@ func ExpectNodeDaemonSetRequested(node *v1.Node, resourceName v1.ResourceName, a
 
 func ExpectNodeDeletionMarked(node *v1.Node) {
 	cluster.ForEachNode(func(n *state.Node) bool {
-		if n.Node.Name != node.Name {
+		if n.Node().Name != node.Name {
 			return true
 		}
-		Expect(n.MarkedForDeletion).To(BeTrue())
+		Expect(n.MarkedForDeletion()).To(BeTrue())
 		return false
 	})
 }
