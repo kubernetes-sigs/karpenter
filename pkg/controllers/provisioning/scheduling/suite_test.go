@@ -943,6 +943,9 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner, firstNode, secondNode, thirdNode, &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: wrongNamespace}})
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(firstNode))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(secondNode))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(thirdNode))
 			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.Pod(test.PodOptions{NodeName: firstNode.Name}),                                                                                               // ignored, missing labels
 				test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}}),                                                                          // ignored, pending
@@ -1224,6 +1227,9 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner, firstNode, secondNode, thirdNode, &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: wrongNamespace}})
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(firstNode))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(secondNode))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(thirdNode))
 			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.Pod(test.PodOptions{NodeName: firstNode.Name}),                                                                                               // ignored, missing labels
 				test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}}),                                                                          // ignored, pending
@@ -3905,8 +3911,8 @@ var _ = Describe("In-Flight Nodes", func() {
 				dsRequests := f.DaemonSetRequests()
 				available := f.Available()
 				Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 0))
-				// no pods so we have the full 16 CPU
-				Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 16))
+				// no pods so we have the full (16 cpu - 100m overhead)
+				Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 15.9))
 				return true
 			})
 			ExpectManualBinding(ctx, env.Client, dsPod, node1)
@@ -3917,17 +3923,17 @@ var _ = Describe("In-Flight Nodes", func() {
 				available := f.Available()
 				Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 1))
 				// only the DS pod is bound, so available is reduced by one and the DS requested is incremented by one
-				Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 15))
+				Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 14.9))
 				return true
 			})
 
 			opts = test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
 				Limits: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("15"),
+					v1.ResourceCPU: resource.MustParse("14.9"),
 				},
 			}}
 			// this pod should schedule on the existingNodes node as the daemonset pod has already bound, meaning that the
-			// remaining daemonset resources should be zero leaving 15 CPUs for the pod
+			// remaining daemonset resources should be zero leaving 14.9 CPUs for the pod
 			secondPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(opts))
 			node2 := ExpectScheduled(ctx, env.Client, secondPod[0])
 			Expect(node1.Name).To(Equal(node2.Name))
@@ -3991,8 +3997,8 @@ var _ = Describe("In-Flight Nodes", func() {
 				dsRequests := f.DaemonSetRequests()
 				available := f.Available()
 				Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 0))
-				// no pods so we have the full 16 CPU
-				Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 16))
+				// no pods, so we have the full (16 CPU - 100m overhead)
+				Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 15.9))
 				return true
 			})
 			ExpectManualBinding(ctx, env.Client, dsPod, node1)
@@ -4003,7 +4009,7 @@ var _ = Describe("In-Flight Nodes", func() {
 				available := f.Available()
 				Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 1))
 				// only the DS pod is bound, so available is reduced by one and the DS requested is incremented by one
-				Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 15))
+				Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 14.9))
 				return true
 			})
 

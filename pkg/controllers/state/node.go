@@ -71,9 +71,6 @@ func (in *Node) StartupTaints() []v1.Taint {
 }
 
 func (in *Node) Initialized() bool {
-	if in.node == nil {
-		return false
-	}
 	return in.node.Labels[v1alpha5.LabelNodeInitialized] == "true"
 }
 
@@ -145,24 +142,19 @@ func (in *Node) Nominate(ctx context.Context) {
 	in.nominatedUntil = metav1.Time{Time: time.Now().Add(getNominationWindow(ctx))}
 }
 
-func (in *Node) IsNominated() bool {
+func (in *Node) Nominated() bool {
 	return in.nominatedUntil.After(time.Now())
 }
 
 func (in *Node) Owned() bool {
-	if in.node == nil {
-		return false
-	}
 	return in.node.Labels[v1alpha5.ProvisionerNameLabelKey] != ""
 }
 
 func (in *Node) updateForPod(ctx context.Context, pod *v1.Pod) {
 	podKey := client.ObjectKeyFromObject(pod)
 
-	// sum the newly bound pod's requests and limits into the existing node and record the binding
 	in.podRequests[podKey] = resources.RequestsForPods(pod)
 	in.podLimits[podKey] = resources.LimitsForPods(pod)
-	// TODO @joinnis: potentially point this to the actual state node
 	// if it's a daemonset, we track what it has requested separately
 	if podutils.IsOwnedByDaemonSet(pod) {
 		in.daemonSetRequests[podKey] = resources.RequestsForPods(pod)

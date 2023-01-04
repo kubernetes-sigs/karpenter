@@ -47,13 +47,13 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	candidateNodeNames := sets.NewString(lo.Map(nodesToDelete, func(t CandidateNode, i int) string { return t.Name })...)
 	cluster.ForEachNode(func(n *state.Node) bool {
 		// not a candidate node
-		if _, ok := candidateNodeNames[n.Node.Name]; !ok {
-			if !n.MarkedForDeletion {
+		if _, ok := candidateNodeNames[n.Node().Name]; !ok {
+			if !n.MarkedForDeletion() {
 				stateNodes = append(stateNodes, n.DeepCopy())
 			} else {
 				markedForDeletionNodes = append(markedForDeletionNodes, n.DeepCopy())
 			}
-		} else if n.MarkedForDeletion {
+		} else if n.MarkedForDeletion() {
 			// candidate node and marked for deletion
 			candidateNodeIsDeleting = true
 		}
@@ -67,7 +67,7 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	}
 
 	// We get the pods that are on nodes that are deleting
-	deletingNodePods, err := nodeutils.GetNodePods(ctx, kubeClient, lo.Map(markedForDeletionNodes, func(n *state.Node, _ int) *v1.Node { return n.Node })...)
+	deletingNodePods, err := nodeutils.GetNodePods(ctx, kubeClient, lo.Map(markedForDeletionNodes, func(n *state.Node, _ int) *v1.Node { return n.Node() })...)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
 	}
@@ -178,12 +178,12 @@ func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient clie
 	cluster.ForEachNode(func(n *state.Node) bool {
 		var provisioner *v1alpha5.Provisioner
 		var instanceTypeMap map[string]*cloudprovider.InstanceType
-		if provName, ok := n.Node.Labels[v1alpha5.ProvisionerNameLabelKey]; ok {
+		if provName, ok := n.Node().Labels[v1alpha5.ProvisionerNameLabelKey]; ok {
 			provisioner = provisioners[provName]
 			instanceTypeMap = instanceTypesByProvisioner[provName]
 		}
 		// skip any nodes that are already marked for deletion and being handled
-		if n.MarkedForDeletion {
+		if n.MarkedForDeletion() {
 			return true
 		}
 		// skip any nodes where we can't determine the provisioner
@@ -191,33 +191,32 @@ func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient clie
 			return true
 		}
 
-		instanceType, ok := instanceTypeMap[n.Node.Labels[v1.LabelInstanceTypeStable]]
+		instanceType, ok := instanceTypeMap[n.Node().Labels[v1.LabelInstanceTypeStable]]
 		// skip any nodes that we can't determine the instance of
 		if !ok {
 			return true
 		}
 
 		// skip any nodes that we can't determine the capacity type or the topology zone for
-		ct, ok := n.Node.Labels[v1alpha5.LabelCapacityType]
+		ct, ok := n.Node().Labels[v1alpha5.LabelCapacityType]
 		if !ok {
 			return true
 		}
-		az, ok := n.Node.Labels[v1.LabelTopologyZone]
+		az, ok := n.Node().Labels[v1.LabelTopologyZone]
 		if !ok {
 			return true
 		}
 
 		// Skip nodes that aren't initialized
-		if n.Node.Labels[v1alpha5.LabelNodeInitialized] != "true" {
+		if !n.Initialized() {
 			return true
 		}
-
 		// Skip the node if it is nominated by a recent provisioning pass to be the target of a pending pod.
-		if cluster.IsNodeNominated(n.Node.Name) {
+		if n.Nominated() {
 			return true
 		}
 
-		pods, err := nodeutils.GetNodePods(ctx, kubeClient, n.Node)
+		pods, err := nodeutils.GetNodePods(ctx, kubeClient, n.Node())
 		if err != nil {
 			logging.FromContext(ctx).Errorf("Determining node pods, %s", err)
 			return true
@@ -228,7 +227,7 @@ func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient clie
 		}
 
 		cn := CandidateNode{
-			Node:           n.Node,
+			Node:           n.Node(),
 			instanceType:   instanceType,
 			capacityType:   ct,
 			zone:           az,

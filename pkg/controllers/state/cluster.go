@@ -17,7 +17,6 @@ package state
 import (
 	"context"
 	"fmt"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -38,8 +37,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
-const nominationKey = "nominated"
-
 // Cluster maintains cluster state that is often needed but expensive to compute.
 type Cluster struct {
 	kubeClient    client.Client
@@ -47,11 +44,12 @@ type Cluster struct {
 	clock         clock.Clock
 
 	// State: Node Status & Pod -> Node Binding
-	mu                   sync.RWMutex
-	nodes                map[string]*Node                // provider id -> node
-	bindings             map[types.NamespacedName]string // pod namespaced named -> node node
-	nodeNameToProviderID map[string]string               // node name -> provider id
-	antiAffinityPods     sync.Map                        // mapping of pod namespaced name to *v1.Pod of pods that have required anti affinities
+	mu               sync.RWMutex
+	nodes            map[string]*Node                // provider id -> node
+	bindings         map[types.NamespacedName]string // pod namespaced named -> node node
+	nameToProviderID map[string]string               // node name -> provider id
+
+	antiAffinityPods sync.Map // mapping of pod namespaced name to *v1.Pod of pods that have required anti affinities
 
 	// consolidationState is a number indicating the state of the cluster with respect to consolidation.  If this number
 	// hasn't changed, it indicates that the cluster hasn't changed in a state which would enable consolidation if
@@ -61,12 +59,12 @@ type Cluster struct {
 
 func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudProvider) *Cluster {
 	return &Cluster{
-		clock:                clk,
-		kubeClient:           client,
-		cloudProvider:        cp,
-		nodes:                map[string]*Node{},
-		bindings:             map[types.NamespacedName]string{},
-		nodeNameToProviderID: map[string]string{},
+		clock:            clk,
+		kubeClient:       client,
+		cloudProvider:    cp,
+		nodes:            map[string]*Node{},
+		bindings:         map[types.NamespacedName]string{},
+		nameToProviderID: map[string]string{},
 	}
 }
 
@@ -82,7 +80,7 @@ func (c *Cluster) ForPodsWithAntiAffinity(fn func(p *v1.Pod, n *v1.Node) bool) {
 		if !ok {
 			return true
 		}
-		node, ok := c.nodes[c.nodeNameToProviderID[nodeName]]
+		node, ok := c.nodes[c.nameToProviderID[nodeName]]
 		if !ok {
 			// if we receive the node deletion event before the pod deletion event, this can happen
 			return true
@@ -96,20 +94,8 @@ func (c *Cluster) ForPodsWithAntiAffinity(fn func(p *v1.Pod, n *v1.Node) bool) {
 func (c *Cluster) ForEachNode(f func(n *Node) bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	var nodes []*Node
-	for _, node := range c.nodes {
-		nodes = append(nodes, node)
-	}
-	// sort nodes by creation time so we provide a consistent ordering
-	sort.Slice(nodes, func(a, b int) bool {
-		if nodes[a].Node().CreationTimestamp != nodes[b].Node().CreationTimestamp {
-			return nodes[a].Node().CreationTimestamp.Time.Before(nodes[b].Node().CreationTimestamp.Time)
-		}
-		// sometimes we get nodes created in the same second, so sort again by node UID to provide a consistent ordering
-		return nodes[a].Node().UID < nodes[b].Node().UID
-	})
 
-	for _, node := range nodes {
+	for _, node := range c.nodes {
 		if !f(node) {
 			return
 		}
@@ -119,19 +105,23 @@ func (c *Cluster) ForEachNode(f func(n *Node) bool) {
 // IsNodeNominated returns true if the given node was expected to have a pod bound to it during a recent scheduling
 // batch
 func (c *Cluster) IsNodeNominated(name string) bool {
-	if id, ok := c.nodeNameToProviderID[name]; ok {
-		return c.nodes[id].IsNominated()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if id, ok := c.nameToProviderID[name]; ok {
+		return c.nodes[id].Nominated()
 	}
 	return false
 }
 
 // NominateNodeForPod records that a node was the target of a pending pod during a scheduling batch
-func (c *Cluster) NominateNodeForPod(ctx context.Context, name string) error {
-	if id, ok := c.nodeNameToProviderID[name]; ok {
-		c.nodes[id].Nominate(ctx)
-		return nil
+func (c *Cluster) NominateNodeForPod(ctx context.Context, name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if id, ok := c.nameToProviderID[name]; ok {
+		c.nodes[id].Nominate(ctx) // extends nomination window if already nominated
 	}
-	return fmt.Errorf("node name doesn't exist in state")
 }
 
 // UnmarkForDeletion removes the marking on the node as a node the controller intends to delete
@@ -140,7 +130,7 @@ func (c *Cluster) UnmarkForDeletion(names ...string) {
 	defer c.mu.Unlock()
 
 	for _, name := range names {
-		if id, ok := c.nodeNameToProviderID[name]; ok {
+		if id, ok := c.nameToProviderID[name]; ok {
 			c.nodes[id].markedForDeletion = false
 		}
 	}
@@ -152,7 +142,7 @@ func (c *Cluster) MarkForDeletion(names ...string) {
 	defer c.mu.Unlock()
 
 	for _, name := range names {
-		if id, ok := c.nodeNameToProviderID[name]; ok {
+		if id, ok := c.nameToProviderID[name]; ok {
 			c.nodes[id].markedForDeletion = true
 		}
 	}
@@ -166,14 +156,12 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 	if node.Spec.ProviderID == "" {
 		node.Spec.ProviderID = node.Name
 	}
-	oldNode := c.nodes[node.Spec.ProviderID]
-	n, err := c.newStateFromNode(ctx, node, oldNode)
+	n, err := c.newStateFromNode(ctx, node, c.nodes[node.Spec.ProviderID])
 	if err != nil {
 		return err
 	}
-	c.triggerConsolidationOnChange(oldNode, n)
 	c.nodes[node.Spec.ProviderID] = n
-	c.nodeNameToProviderID[node.Name] = node.Spec.ProviderID
+	c.nameToProviderID[node.Name] = node.Spec.ProviderID
 	return nil
 }
 
@@ -181,9 +169,9 @@ func (c *Cluster) DeleteNode(nodeName string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if id := c.nodeNameToProviderID[nodeName]; id != "" {
-		c.cleanupStateFromNode(id)
-		delete(c.nodeNameToProviderID, nodeName)
+	if id := c.nameToProviderID[nodeName]; id != "" {
+		delete(c.nodes, id)
+		delete(c.nameToProviderID, nodeName)
 		c.RecordConsolidationChange()
 	}
 }
@@ -259,15 +247,8 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *
 	); err != nil {
 		return nil, err
 	}
+	c.triggerConsolidationOnChange(oldNode, n)
 	return n, nil
-}
-
-func (c *Cluster) cleanupStateFromNode(id string) {
-	node := c.nodes[id]
-	if node == nil {
-		return
-	}
-	delete(c.nodes, id)
 }
 
 func (c *Cluster) populateStartupTaints(ctx context.Context, n *Node) error {
@@ -329,7 +310,7 @@ func (c *Cluster) populateResourceRequests(ctx context.Context, n *Node) error {
 		if podutils.IsTerminal(pod) {
 			continue
 		}
-		c.cleanupBindingsForPod(pod)
+		c.cleanupOldBindings(pod)
 		n.updateForPod(ctx, pod)
 		c.bindings[client.ObjectKeyFromObject(pod)] = pod.Spec.NodeName // TODO @joinnis: Potentially change this later
 	}
@@ -347,12 +328,12 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	n, ok := c.nodes[c.nodeNameToProviderID[pod.Spec.NodeName]]
+	n, ok := c.nodes[c.nameToProviderID[pod.Spec.NodeName]]
 	if !ok {
 		// the node must exist for us to update the resource requests on the node
 		return fmt.Errorf("node not found in state")
 	}
-	c.cleanupBindingsForPod(pod)
+	c.cleanupOldBindings(pod)
 	n.updateForPod(ctx, pod)
 	c.bindings[client.ObjectKeyFromObject(pod)] = pod.Spec.NodeName
 	return nil
@@ -369,7 +350,7 @@ func (c *Cluster) updateNodeUsageFromPodCompletion(podKey types.NamespacedName) 
 	}
 
 	delete(c.bindings, podKey)
-	n, ok := c.nodes[c.nodeNameToProviderID[nodeName]]
+	n, ok := c.nodes[c.nameToProviderID[nodeName]]
 	if !ok {
 		// we weren't tracking the node yet, so nothing to do
 		return
@@ -377,26 +358,22 @@ func (c *Cluster) updateNodeUsageFromPodCompletion(podKey types.NamespacedName) 
 	n.cleanupForPod(podKey)
 }
 
-func (c *Cluster) cleanupBindingsForPod(pod *v1.Pod) {
-	oldNodeName, bindingKnown := c.bindings[client.ObjectKeyFromObject(pod)]
-	if bindingKnown {
+func (c *Cluster) cleanupOldBindings(pod *v1.Pod) {
+	if oldNodeName, bindingKnown := c.bindings[client.ObjectKeyFromObject(pod)]; bindingKnown {
 		if oldNodeName == pod.Spec.NodeName {
 			// we are already tracking the pod binding, so nothing to update
 			return
 		}
 		// the pod has switched nodes, this can occur if a pod name was re-used, and it was deleted/re-created rapidly,
 		// binding to a different node the second time
-		oldNode, ok := c.nodes[c.nodeNameToProviderID[oldNodeName]]
-		if ok {
+		if oldNode, ok := c.nodes[c.nameToProviderID[oldNodeName]]; ok {
 			// we were tracking the old node, so we need to reduce its capacity by the amount of the pod that left
 			oldNode.cleanupForPod(client.ObjectKeyFromObject(pod))
 			delete(c.bindings, client.ObjectKeyFromObject(pod))
 		}
-		c.RecordConsolidationChange()
-	} else {
-		// new pod binding has occurred
-		c.RecordConsolidationChange()
 	}
+	// new pod binding has occurred
+	c.RecordConsolidationChange()
 }
 
 func (c *Cluster) updatePodAntiAffinities(pod *v1.Pod) {

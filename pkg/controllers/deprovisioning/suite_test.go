@@ -79,7 +79,7 @@ var _ = BeforeSuite(func() {
 	ctx = settings.ToContext(ctx, test.Settings(test.SettingsOptions{DriftEnabled: true}))
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
+	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
 	provisioner = provisioning.NewProvisioner(ctx, env.Client, env.KubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
@@ -135,7 +135,7 @@ var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 	var nodes []client.ObjectKey
 	cluster.ForEachNode(func(n *state.Node) bool {
-		nodes = append(nodes, client.ObjectKeyFromObject(n.Node))
+		nodes = append(nodes, client.ObjectKeyFromObject(n.Node()))
 		return true
 	})
 

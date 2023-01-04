@@ -54,7 +54,7 @@ func (e *Emptiness) ShouldDeprovision(ctx context.Context, n *state.Node, provis
 		return false
 	}
 
-	emptinessTimestamp, hasEmptinessTimestamp := n.Node.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
+	emptinessTimestamp, hasEmptinessTimestamp := n.Node().Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
 	if !hasEmptinessTimestamp {
 		return false
 	}
