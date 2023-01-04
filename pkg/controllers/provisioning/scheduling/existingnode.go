@@ -39,7 +39,7 @@ type ExistingNode struct {
 	volumeLimits  scheduling.VolumeCount
 }
 
-func NewExistingNode(n *state.Node, topology *Topology, startupTaints []v1.Taint, daemonResources v1.ResourceList) *ExistingNode {
+func NewExistingNode(n *state.Node, topology *Topology, daemonResources v1.ResourceList) *ExistingNode {
 	// The state node passed in here must be a deep copy from cluster state as we modify it
 	// the remaining daemonResources to schedule are the total daemonResources minus what has already scheduled
 	remainingDaemonResources := resources.Subtract(daemonResources, n.DaemonSetRequests())
@@ -71,7 +71,7 @@ func NewExistingNode(n *state.Node, topology *Topology, startupTaints []v1.Taint
 	// re-appears on the node for a different reason (e.g. the node is cordoned) we will assume that pods can
 	// schedule against the node in the future incorrectly.
 	if !n.Initialized() {
-		ephemeralTaints = append(ephemeralTaints, startupTaints...)
+		ephemeralTaints = append(ephemeralTaints, n.StartupTaints()...)
 	}
 
 	// Filter out ignored taints

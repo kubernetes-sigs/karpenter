@@ -38,6 +38,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
@@ -73,8 +74,8 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	recorder = test.NewEventRecorder()
 	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
-	nodeController = state.NewNodeController(env.Client, cluster)
+	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	nodeController = informer.NewNodeController(env.Client, cluster)
 	prov = provisioning.NewProvisioner(ctx, env.Client, corev1.NewForConfigOrDie(env.Config), recorder, cloudProvider, cluster)
 	provisioningController = provisioning.NewController(env.Client, prov, recorder)
 	instanceTypes, _ := cloudProvider.GetInstanceTypes(context.Background(), nil)

@@ -31,6 +31,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	metricsstate "github.com/aws/karpenter-core/pkg/controllers/metrics/state"
+	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 
@@ -70,8 +71,8 @@ var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
 	provisioner = test.Provisioner(test.ProvisionerOptions{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
-	nodeController = state.NewNodeController(env.Client, cluster)
-	podController = state.NewPodController(env.Client, cluster)
+	nodeController = informer.NewNodeController(env.Client, cluster)
+	podController = informer.NewPodController(env.Client, cluster)
 	metricsStateController = metricsstate.NewController(cluster)
 	ExpectApplied(ctx, env.Client, provisioner)
 })
