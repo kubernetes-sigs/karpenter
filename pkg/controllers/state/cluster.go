@@ -25,6 +25,8 @@ import (
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/ptr"
@@ -34,7 +36,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
-	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
 // Cluster maintains cluster state that is often needed but expensive to compute.
@@ -225,7 +226,9 @@ func (c *Cluster) Reset() {
 
 func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *Node) (*Node, error) {
 	if oldNode == nil {
-		oldNode = &Node{}
+		oldNode = &Node{
+			node: &v1.Node{},
+		}
 	}
 	n := &Node{
 		node:              node,
@@ -282,7 +285,7 @@ func (c *Cluster) populateInflight(ctx context.Context, n *Node) error {
 		return fmt.Errorf("instance type '%s' not found", n.Node().Labels[v1.LabelInstanceTypeStable])
 	}
 	n.inflightCapacity = instanceType.Capacity
-	n.inflightAllocatable = resources.Subtract(instanceType.Capacity, instanceType.Overhead.Total())
+	n.inflightAllocatable = instanceType.Allocatable()
 	return nil
 }
 
@@ -331,7 +334,7 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 	n, ok := c.nodes[c.nameToProviderID[pod.Spec.NodeName]]
 	if !ok {
 		// the node must exist for us to update the resource requests on the node
-		return fmt.Errorf("node not found in state")
+		return errors.NewNotFound(schema.GroupResource{Resource: "Node"}, pod.Spec.NodeName)
 	}
 	c.cleanupOldBindings(pod)
 	n.updateForPod(ctx, pod)

@@ -61,9 +61,13 @@ func (c *PodController) Reconcile(ctx context.Context, req reconcile.Request) (r
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	if err := c.cluster.UpdatePod(ctx, pod); err != nil {
+		// We requeue here since the NotFound error is from finding the node for the binding
+		if errors.IsNotFound(err) {
+			return reconcile.Result{Requeue: true}, nil
+		}
 		return reconcile.Result{}, err
 	}
-	return reconcile.Result{Requeue: true, RequeueAfter: stateRetryPeriod}, nil
+	return reconcile.Result{RequeueAfter: stateRetryPeriod}, nil
 }
 
 func (c *PodController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {

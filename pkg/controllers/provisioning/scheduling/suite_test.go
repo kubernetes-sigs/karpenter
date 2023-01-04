@@ -4200,7 +4200,7 @@ var _ = Describe("No Pre-Binding", func() {
 	})
 })
 
-var _ = Describe("Volumes", func() {
+var _ = Describe("VolumeUsage", func() {
 	It("should launch multiple newNodes if required due to volume limits", func() {
 		const csiProvider = "fake.csi.provider"
 		cloudProv.InstanceTypes = []*cloudprovider.InstanceType{

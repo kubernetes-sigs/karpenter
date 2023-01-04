@@ -38,13 +38,12 @@ import (
 type Node struct {
 	node *v1.Node
 
-	inflightAllocatable v1.ResourceList
-	inflightCapacity    v1.ResourceList
-	startupTaints       []v1.Taint
+	inflightAllocatable v1.ResourceList // TODO @joinnis: This can be removed when machine is added
+	inflightCapacity    v1.ResourceList // TODO @joinnis: This can be removed when machine is added
+	startupTaints       []v1.Taint      // TODO: @joinnis: This can be removed when machine is added
 
-	// daemonSetRequests is the total amount of resources that have been requested by daemon sets.  This allows users
-	// of the Node to identify the remaining resources that we expect future daemonsets to consume.  This is already
-	// included in the calculation for Available.
+	// daemonSetRequests is the total amount of resources that have been requested by daemon sets. This allows users
+	// of the Node to identify the remaining resources that we expect future daemonsets to consume.
 	daemonSetRequests map[types.NamespacedName]v1.ResourceList
 	daemonSetLimits   map[types.NamespacedName]v1.ResourceList
 
@@ -52,7 +51,7 @@ type Node struct {
 	podLimits   map[types.NamespacedName]v1.ResourceList
 
 	hostPortUsage *scheduling.HostPortUsage
-	volumeUsage   *scheduling.VolumeLimits
+	volumeUsage   *scheduling.VolumeUsage
 	volumeLimits  scheduling.VolumeCount
 
 	markedForDeletion bool
@@ -66,8 +65,23 @@ func (in *Node) Node() *v1.Node {
 	return in.node
 }
 
-func (in *Node) StartupTaints() []v1.Taint {
-	return in.startupTaints
+func (in *Node) Taints() []v1.Taint {
+	ephemeralTaints := []v1.Taint{
+		{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
+		{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
+	}
+	// Only consider startup taints until the node is initialized. Without this, if the startup taint is generic and
+	// re-appears on the node for a different reason (e.g. the node is cordoned) we will assume that pods can
+	// schedule against the node in the future incorrectly.
+	if !in.Initialized() && in.Owned() {
+		ephemeralTaints = append(ephemeralTaints, in.startupTaints...)
+	}
+	return lo.Reject(in.Node().Spec.Taints, func(taint v1.Taint, _ int) bool {
+		_, rejected := lo.Find(ephemeralTaints, func(t v1.Taint) bool {
+			return t.Key == taint.Key && t.Value == taint.Value && t.Effect == taint.Effect
+		})
+		return rejected
+	})
 }
 
 func (in *Node) Initialized() bool {
@@ -118,7 +132,7 @@ func (in *Node) HostPortUsage() *scheduling.HostPortUsage {
 	return in.hostPortUsage
 }
 
-func (in *Node) VolumeUsage() *scheduling.VolumeLimits {
+func (in *Node) VolumeUsage() *scheduling.VolumeUsage {
 	return in.volumeUsage
 }
 
@@ -139,7 +153,7 @@ func (in *Node) MarkedForDeletion() bool {
 }
 
 func (in *Node) Nominate(ctx context.Context) {
-	in.nominatedUntil = metav1.Time{Time: time.Now().Add(getNominationWindow(ctx))}
+	in.nominatedUntil = metav1.Time{Time: time.Now().Add(nominationWindow(ctx))}
 }
 
 func (in *Node) Nominated() bool {
@@ -173,7 +187,7 @@ func (in *Node) cleanupForPod(podKey types.NamespacedName) {
 	delete(in.daemonSetLimits, podKey)
 }
 
-func getNominationWindow(ctx context.Context) time.Duration {
+func nominationWindow(ctx context.Context) time.Duration {
 	nominationPeriod := 2 * settings.FromContext(ctx).BatchMaxDuration.Duration
 	if nominationPeriod < 10*time.Second {
 		nominationPeriod = 10 * time.Second

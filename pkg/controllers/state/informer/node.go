@@ -62,7 +62,7 @@ func (c *NodeController) Reconcile(ctx context.Context, req reconcile.Request) (
 		return reconcile.Result{}, err
 	}
 	// ensure it's aware of any nodes we discover, this is a no-op if the node is already known to our cluster state
-	return reconcile.Result{Requeue: true, RequeueAfter: stateRetryPeriod}, nil
+	return reconcile.Result{RequeueAfter: stateRetryPeriod}, nil
 }
 
 func (c *NodeController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {

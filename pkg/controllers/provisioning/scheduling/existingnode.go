@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -35,7 +34,7 @@ type ExistingNode struct {
 	available     v1.ResourceList
 	taints        []v1.Taint
 	hostPortUsage *scheduling.HostPortUsage
-	volumeUsage   *scheduling.VolumeLimits
+	volumeUsage   *scheduling.VolumeUsage
 	volumeLimits  scheduling.VolumeCount
 }
 
@@ -55,6 +54,7 @@ func NewExistingNode(n *state.Node, topology *Topology, daemonResources v1.Resou
 	node := &ExistingNode{
 		Node:          n.Node(),
 		available:     n.Available(),
+		taints:        n.Taints(),
 		topology:      topology,
 		requests:      remainingDaemonResources,
 		requirements:  scheduling.NewLabelRequirements(n.Node().Labels),
@@ -62,25 +62,6 @@ func NewExistingNode(n *state.Node, topology *Topology, daemonResources v1.Resou
 		volumeUsage:   n.VolumeUsage(),
 		volumeLimits:  n.VolumeLimits(),
 	}
-
-	ephemeralTaints := []v1.Taint{
-		{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
-		{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
-	}
-	// Only consider startup taints until the node is initialized. Without this, if the startup taint is generic and
-	// re-appears on the node for a different reason (e.g. the node is cordoned) we will assume that pods can
-	// schedule against the node in the future incorrectly.
-	if !n.Initialized() {
-		ephemeralTaints = append(ephemeralTaints, n.StartupTaints()...)
-	}
-
-	// Filter out ignored taints
-	node.taints = lo.Reject(n.Node().Spec.Taints, func(taint v1.Taint, _ int) bool {
-		_, rejected := lo.Find(ephemeralTaints, func(t v1.Taint) bool {
-			return t.Key == taint.Key && t.Value == taint.Value && t.Effect == taint.Effect
-		})
-		return rejected
-	})
 
 	// If the in-flight node doesn't have a hostname yet, we treat it's unique name as the hostname.  This allows toppology
 	// with hostname keys to schedule correctly.
