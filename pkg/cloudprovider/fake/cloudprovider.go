@@ -43,6 +43,7 @@ type CloudProvider struct {
 	mu                 sync.Mutex
 	CreateCalls        []*v1alpha5.Machine
 	AllowedCreateCalls int
+	Drifted            bool
 }
 
 var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)
@@ -161,7 +162,7 @@ func (c *CloudProvider) Delete(context.Context, *v1alpha5.Machine) error {
 }
 
 func (c *CloudProvider) IsMachineDrifted(context.Context, *v1alpha5.Machine) (bool, error) {
-	return false, nil
+	return c.Drifted, nil
 }
 
 // Name returns the CloudProvider implementation name.

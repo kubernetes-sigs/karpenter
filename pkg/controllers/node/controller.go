@@ -49,6 +49,7 @@ type Controller struct {
 	initialization *Initialization
 	emptiness      *Emptiness
 	finalizer      *Finalizer
+	drift          *Drift
 }
 
 // NewController constructs a nodeController instance
@@ -58,6 +59,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 		cluster:        cluster,
 		initialization: &Initialization{kubeClient: kubeClient, cloudProvider: cloudProvider},
 		emptiness:      &Emptiness{kubeClient: kubeClient, clock: clk, cluster: cluster},
+		drift:          &Drift{kubeClient: kubeClient, cloudProvider: cloudProvider},
 	})
 }
 
@@ -87,6 +89,7 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Re
 		c.initialization,
 		c.emptiness,
 		c.finalizer,
+		c.drift,
 	} {
 		res, err := reconciler.Reconcile(ctx, provisioner, node)
 		errs = multierr.Append(errs, err)
