@@ -50,6 +50,8 @@ var ctx context.Context
 var nodeController controller.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
+var settingsStore test.SettingsStore
+var cp *fake.CloudProvider
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -61,7 +63,7 @@ var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
 	ctx = settings.ToContext(ctx, test.Settings())
-	cp := fake.NewCloudProvider()
+	cp = fake.NewCloudProvider()
 	cluster := state.NewCluster(ctx, fakeClock, env.Client, cp)
 	nodeController = node.NewController(fakeClock, env.Client, cp, cluster)
 })
@@ -77,11 +79,74 @@ var _ = Describe("Controller", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: test.RandomName()},
 			Spec:       v1alpha5.ProvisionerSpec{},
 		}
+		settingsStore = test.SettingsStore{
+			settings.ContextKey: test.Settings(),
+		}
 	})
 
 	AfterEach(func() {
 		fakeClock.SetTime(time.Now())
 		ExpectCleanedUp(ctx, env.Client)
+	})
+
+	Context("Drift", func() {
+		It("should not detect drift if the feature flag is disabled", func() {
+			cp.Drifted = true
+			settingsStore = test.SettingsStore{
+				settings.ContextKey: test.Settings(test.SettingsOptions{DriftEnabled: false}),
+			}
+			ctx = settingsStore.InjectSettings(ctx)
+			node := test.Node(test.NodeOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       test.RandomName(),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			Expect(node.Annotations).ToNot(HaveKeyWithValue(v1alpha5.VoluntaryDisruptionAnnotationKey, v1alpha5.VoluntaryDisruptionDriftedAnnotationValue))
+		})
+		It("should not detect drift if the provisioner does not exist", func() {
+			cp.Drifted = true
+			settingsStore = test.SettingsStore{
+				settings.ContextKey: test.Settings(test.SettingsOptions{DriftEnabled: true}),
+			}
+			ctx = settingsStore.InjectSettings(ctx)
+			node := test.Node(test.NodeOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       test.RandomName(),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			Expect(node.Annotations).ToNot(HaveKeyWithValue(v1alpha5.VoluntaryDisruptionAnnotationKey, v1alpha5.VoluntaryDisruptionDriftedAnnotationValue))
+		})
+		It("should annotate the node when it has drifted in the cloud provider", func() {
+			cp.Drifted = true
+			settingsStore = test.SettingsStore{
+				settings.ContextKey: test.Settings(test.SettingsOptions{DriftEnabled: true}),
+			}
+			ctx = settingsStore.InjectSettings(ctx)
+			node := test.Node(test.NodeOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       test.RandomName(),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, provisioner, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			Expect(node.Annotations).To(HaveKeyWithValue(v1alpha5.VoluntaryDisruptionAnnotationKey, v1alpha5.VoluntaryDisruptionDriftedAnnotationValue))
+		})
 	})
 
 	Context("Initialization", func() {
