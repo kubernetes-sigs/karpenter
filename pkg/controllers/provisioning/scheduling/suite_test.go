@@ -38,6 +38,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	pscheduling "github.com/aws/karpenter-core/pkg/scheduling"
@@ -79,9 +80,9 @@ var _ = BeforeSuite(func() {
 	// set these on the cloud provider so we can manipulate them if needed
 	cloudProv.InstanceTypes = instanceTypes
 	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProv)
-	nodeStateController = state.NewNodeController(env.Client, cluster)
-	podStateController = state.NewPodController(env.Client, cluster)
+	cluster = state.NewCluster(fakeClock, env.Client, cloudProv)
+	nodeStateController = informer.NewNodeController(env.Client, cluster)
+	podStateController = informer.NewPodController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(ctx, env.Client, env.KubernetesInterface.CoreV1(), recorder, cloudProv, cluster)
 	provisioningController = provisioning.NewController(env.Client, prov, recorder)
@@ -106,7 +107,7 @@ var _ = BeforeEach(func() {
 
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
-	cluster.Reset(ctx)
+	cluster.Reset()
 })
 
 var _ = Describe("Custom Constraints", func() {
@@ -942,6 +943,9 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner, firstNode, secondNode, thirdNode, &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: wrongNamespace}})
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(firstNode))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(secondNode))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(thirdNode))
 			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.Pod(test.PodOptions{NodeName: firstNode.Name}),                                                                                               // ignored, missing labels
 				test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}}),                                                                          // ignored, pending
@@ -1223,6 +1227,9 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}}
 			ExpectApplied(ctx, env.Client, provisioner, firstNode, secondNode, thirdNode, &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: wrongNamespace}})
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(firstNode))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(secondNode))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(thirdNode))
 			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				test.Pod(test.PodOptions{NodeName: firstNode.Name}),                                                                                               // ignored, missing labels
 				test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}}),                                                                          // ignored, pending
@@ -2650,7 +2657,7 @@ var _ = Describe("Topology", func() {
 					ExpectScheduled(ctx, env.Client, pods[i])
 				}
 				ExpectCleanedUp(ctx, env.Client)
-				cluster.Reset(ctx)
+				cluster.Reset()
 			}
 		})
 		It("should fail to schedule pods with unsatisfiable dependencies", func() {
@@ -3901,28 +3908,32 @@ var _ = Describe("In-Flight Nodes", func() {
 
 			ExpectApplied(ctx, env.Client, provisioner, dsPod)
 			cluster.ForEachNode(func(f *state.Node) bool {
-				Expect(f.DaemonSetRequested.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 0))
-				// no pods so we have the full 16 CPU
-				Expect(f.Available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 16))
+				dsRequests := f.DaemonSetRequests()
+				available := f.Available()
+				Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 0))
+				// no pods so we have the full (16 cpu - 100m overhead)
+				Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 15.9))
 				return true
 			})
 			ExpectManualBinding(ctx, env.Client, dsPod, node1)
 			ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(dsPod))
 
 			cluster.ForEachNode(func(f *state.Node) bool {
-				Expect(f.DaemonSetRequested.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 1))
+				dsRequests := f.DaemonSetRequests()
+				available := f.Available()
+				Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 1))
 				// only the DS pod is bound, so available is reduced by one and the DS requested is incremented by one
-				Expect(f.Available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 15))
+				Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 14.9))
 				return true
 			})
 
 			opts = test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
 				Limits: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("15"),
+					v1.ResourceCPU: resource.MustParse("14.9"),
 				},
 			}}
 			// this pod should schedule on the existingNodes node as the daemonset pod has already bound, meaning that the
-			// remaining daemonset resources should be zero leaving 15 CPUs for the pod
+			// remaining daemonset resources should be zero leaving 14.9 CPUs for the pod
 			secondPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(opts))
 			node2 := ExpectScheduled(ctx, env.Client, secondPod[0])
 			Expect(node1.Name).To(Equal(node2.Name))
@@ -3983,18 +3994,22 @@ var _ = Describe("In-Flight Nodes", func() {
 
 			ExpectApplied(ctx, env.Client, provisioner, dsPod)
 			cluster.ForEachNode(func(f *state.Node) bool {
-				Expect(f.DaemonSetRequested.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 0))
-				// no pods so we have the full 16 CPU
-				Expect(f.Available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 16))
+				dsRequests := f.DaemonSetRequests()
+				available := f.Available()
+				Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 0))
+				// no pods, so we have the full (16 CPU - 100m overhead)
+				Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 15.9))
 				return true
 			})
 			ExpectManualBinding(ctx, env.Client, dsPod, node1)
 			ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(dsPod))
 
 			cluster.ForEachNode(func(f *state.Node) bool {
-				Expect(f.DaemonSetRequested.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 1))
+				dsRequests := f.DaemonSetRequests()
+				available := f.Available()
+				Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 1))
 				// only the DS pod is bound, so available is reduced by one and the DS requested is incremented by one
-				Expect(f.Available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 15))
+				Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 14.9))
 				return true
 			})
 
@@ -4047,7 +4062,8 @@ var _ = Describe("In-Flight Nodes", func() {
 		// is that we should only have some spare capacity on our final node
 		nodesWithCPUFree := 0
 		cluster.ForEachNode(func(n *state.Node) bool {
-			if n.Available.Cpu().AsApproximateFloat64() >= 1 {
+			available := n.Available()
+			if available.Cpu().AsApproximateFloat64() >= 1 {
 				nodesWithCPUFree++
 			}
 			return true
@@ -4184,7 +4200,7 @@ var _ = Describe("No Pre-Binding", func() {
 	})
 })
 
-var _ = Describe("Volumes", func() {
+var _ = Describe("VolumeUsage", func() {
 	It("should launch multiple newNodes if required due to volume limits", func() {
 		const csiProvider = "fake.csi.provider"
 		cloudProv.InstanceTypes = []*cloudprovider.InstanceType{

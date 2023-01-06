@@ -27,18 +27,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// VolumeLimits tracks volume limits on a per node basis.  The number of volumes that can be mounted varies by instance
+// VolumeUsage tracks volume limits on a per node basis.  The number of volumes that can be mounted varies by instance
 // type. We need to be aware and track the mounted volume usage to inform our awareness of which pods can schedule to
 // which nodes.
-type VolumeLimits struct {
-	volumes    volumeUsage
-	podVolumes map[types.NamespacedName]volumeUsage
+type VolumeUsage struct {
+	volumes    volumes
+	podVolumes map[types.NamespacedName]volumes
 	kubeClient client.Client
 }
 
-type volumeUsage map[string]sets.String
+type volumes map[string]sets.String
 
-func (u volumeUsage) Add(provisioner string, pvcID string) {
+func (u volumes) Add(provisioner string, pvcID string) {
 	existing, ok := u[provisioner]
 	if !ok {
 		existing = sets.NewString()
@@ -47,12 +47,12 @@ func (u volumeUsage) Add(provisioner string, pvcID string) {
 	existing.Insert(pvcID)
 }
 
-func (u volumeUsage) union(volumes volumeUsage) volumeUsage {
-	cp := volumeUsage{}
+func (u volumes) union(vol volumes) volumes {
+	cp := volumes{}
 	for k, v := range u {
 		cp[k] = sets.NewString(v.List()...)
 	}
-	for k, v := range volumes {
+	for k, v := range vol {
 		existing, ok := cp[k]
 		if !ok {
 			existing = sets.NewString()
@@ -63,7 +63,7 @@ func (u volumeUsage) union(volumes volumeUsage) volumeUsage {
 	return cp
 }
 
-func (u volumeUsage) insert(volumes volumeUsage) {
+func (u volumes) insert(volumes volumes) {
 	for k, v := range volumes {
 		existing, ok := u[k]
 		if !ok {
@@ -74,23 +74,23 @@ func (u volumeUsage) insert(volumes volumeUsage) {
 	}
 }
 
-func (u volumeUsage) copy() volumeUsage {
-	cp := volumeUsage{}
+func (u volumes) copy() volumes {
+	cp := volumes{}
 	for k, v := range u {
 		cp[k] = sets.NewString(v.List()...)
 	}
 	return cp
 }
 
-func NewVolumeLimits(kubeClient client.Client) *VolumeLimits {
-	return &VolumeLimits{
+func NewVolumeLimits(kubeClient client.Client) *VolumeUsage {
+	return &VolumeUsage{
 		kubeClient: kubeClient,
-		volumes:    volumeUsage{},
-		podVolumes: map[types.NamespacedName]volumeUsage{},
+		volumes:    volumes{},
+		podVolumes: map[types.NamespacedName]volumes{},
 	}
 }
 
-func (v *VolumeLimits) Add(ctx context.Context, pod *v1.Pod) {
+func (v *VolumeUsage) Add(ctx context.Context, pod *v1.Pod) {
 	podVolumes, err := v.validate(ctx, pod)
 	if err != nil {
 		logging.FromContext(ctx).Errorf("inconsistent state error adding volume, %s, please file an issue", err)
@@ -130,7 +130,7 @@ func (c VolumeCount) Fits(rhs VolumeCount) bool {
 	return true
 }
 
-func (v *VolumeLimits) Validate(ctx context.Context, pod *v1.Pod) (VolumeCount, error) {
+func (v *VolumeUsage) Validate(ctx context.Context, pod *v1.Pod) (VolumeCount, error) {
 	podVolumes, err := v.validate(ctx, pod)
 	if err != nil {
 		return nil, err
@@ -142,8 +142,8 @@ func (v *VolumeLimits) Validate(ctx context.Context, pod *v1.Pod) (VolumeCount, 
 	return result, nil
 }
 
-func (v *VolumeLimits) validate(ctx context.Context, pod *v1.Pod) (volumeUsage, error) {
-	podPVCs := volumeUsage{}
+func (v *VolumeUsage) validate(ctx context.Context, pod *v1.Pod) (volumes, error) {
+	podPVCs := volumes{}
 	for _, volume := range pod.Spec.Volumes {
 		var pvcID string
 		var storageClassName *string
@@ -189,7 +189,7 @@ func (v *VolumeLimits) validate(ctx context.Context, pod *v1.Pod) (volumeUsage, 
 	return podPVCs, nil
 }
 
-func (v *VolumeLimits) driverFromSC(ctx context.Context, storageClassName *string) (string, error) {
+func (v *VolumeUsage) driverFromSC(ctx context.Context, storageClassName *string) (string, error) {
 	var sc storagev1.StorageClass
 	if err := v.kubeClient.Get(ctx, client.ObjectKey{Name: *storageClassName}, &sc); err != nil {
 		return "", err
@@ -197,7 +197,7 @@ func (v *VolumeLimits) driverFromSC(ctx context.Context, storageClassName *strin
 	return sc.Provisioner, nil
 }
 
-func (v *VolumeLimits) driverFromVolume(ctx context.Context, volumeName string) (string, error) {
+func (v *VolumeUsage) driverFromVolume(ctx context.Context, volumeName string) (string, error) {
 	var pv v1.PersistentVolume
 	if err := v.kubeClient.Get(ctx, client.ObjectKey{Name: volumeName}, &pv); err != nil {
 		return "", err
@@ -208,28 +208,28 @@ func (v *VolumeLimits) driverFromVolume(ctx context.Context, volumeName string) 
 	return "", nil
 }
 
-func (v *VolumeLimits) DeletePod(key types.NamespacedName) {
+func (v *VolumeUsage) DeletePod(key types.NamespacedName) {
 	delete(v.podVolumes, key)
 	// volume names could be duplicated, so we re-create our volumes
-	v.volumes = volumeUsage{}
+	v.volumes = volumes{}
 	for _, c := range v.podVolumes {
 		v.volumes.insert(c)
 	}
 }
 
-func (v *VolumeLimits) DeepCopy() *VolumeLimits {
+func (v *VolumeUsage) DeepCopy() *VolumeUsage {
 	if v == nil {
 		return nil
 	}
-	out := &VolumeLimits{}
+	out := &VolumeUsage{}
 	v.DeepCopyInto(out)
 	return out
 }
 
-func (v *VolumeLimits) DeepCopyInto(out *VolumeLimits) {
+func (v *VolumeUsage) DeepCopyInto(out *VolumeUsage) {
 	out.kubeClient = v.kubeClient
 	out.volumes = v.volumes.copy()
-	out.podVolumes = map[types.NamespacedName]volumeUsage{}
+	out.podVolumes = map[types.NamespacedName]volumes{}
 	for k, v := range v.podVolumes {
 		out.podVolumes[k] = v.copy()
 	}

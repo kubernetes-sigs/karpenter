@@ -159,11 +159,11 @@ func (ns *NodeScraper) Scrape(_ context.Context) {
 	ns.cluster.ForEachNode(func(n *state.Node) bool {
 		for gaugeVec, resourceList := range map[*prometheus.GaugeVec]v1.ResourceList{
 			overheadGaugeVec:       ns.getSystemOverhead(n.Node),
-			podRequestsGaugeVec:    resources.Subtract(n.PodTotalRequests, n.DaemonSetRequested),
-			podLimitsGaugeVec:      resources.Subtract(n.PodTotalLimits, n.DaemonSetLimits),
-			daemonRequestsGaugeVec: n.DaemonSetRequested,
-			daemonLimitsGaugeVec:   n.DaemonSetLimits,
-			allocatableGaugeVec:    n.Node.Status.Allocatable,
+			podRequestsGaugeVec:    resources.Subtract(n.PodRequests(), n.DaemonSetRequests()),
+			podLimitsGaugeVec:      resources.Subtract(n.PodLimits(), n.DaemonSetLimits()),
+			daemonRequestsGaugeVec: n.DaemonSetRequests(),
+			daemonLimitsGaugeVec:   n.DaemonSetLimits(),
+			allocatableGaugeVec:    n.Allocatable(),
 		} {
 			for _, labels := range ns.set(gaugeVec, n.Node, resourceList) {
 				key := labelsToString(labels)

@@ -84,6 +84,10 @@ type InstanceType struct {
 	Overhead *InstanceTypeOverhead
 }
 
+func (i *InstanceType) Allocatable() v1.ResourceList {
+	return resources.Subtract(i.Capacity, i.Overhead.Total())
+}
+
 type InstanceTypeOverhead struct {
 	// KubeReserved returns the default resources allocated to kubernetes system daemons by default
 	KubeReserved v1.ResourceList

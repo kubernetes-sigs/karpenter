@@ -80,7 +80,7 @@ func (c *Controller) resourceCountsFor(provisionerName string) v1.ResourceList {
 	// status immediately upon node creation instead of waiting for the node to become ready.
 	c.cluster.ForEachNode(func(n *state.Node) bool {
 		if n.Node.Labels[v1alpha5.ProvisionerNameLabelKey] == provisionerName {
-			provisioned = append(provisioned, n.Capacity)
+			provisioned = append(provisioned, n.Capacity())
 		}
 		return true
 	})

@@ -31,6 +31,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/node"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
 	"github.com/aws/karpenter-core/pkg/controllers/termination"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
@@ -59,9 +60,9 @@ func NewControllers(
 		metricsstate.NewController(cluster),
 		deprovisioning.NewController(clock, kubeClient, provisioner, cloudProvider, eventRecorder, cluster),
 		provisioning.NewController(kubeClient, provisioner, eventRecorder),
-		state.NewNodeController(kubeClient, cluster),
-		state.NewPodController(kubeClient, cluster),
-		state.NewProvisionerController(kubeClient, cluster),
+		informer.NewNodeController(kubeClient, cluster),
+		informer.NewPodController(kubeClient, cluster),
+		informer.NewProvisionerController(kubeClient, cluster),
 		node.NewController(clock, kubeClient, cloudProvider, cluster),
 		termination.NewController(clock, kubeClient, termination.NewEvictionQueue(ctx, kubernetesInterface.CoreV1(), eventRecorder), eventRecorder, cloudProvider),
 		metricspod.NewController(kubeClient),
