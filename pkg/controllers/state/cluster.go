@@ -148,7 +148,25 @@ func (c *Cluster) MarkForDeletion(names ...string) {
 	}
 }
 
-// UpdateNode is called for every node reconciliation
+func (c *Cluster) UpdateMachine(machine *v1alpha5.Machine) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if machine.Status.ProviderID == "" {
+		return // We can't reconcile machines that don't yet have provider ids
+	}
+	n := c.newStateFromMachine(machine, c.nodes[machine.Status.ProviderID])
+	c.nodes[machine.Status.ProviderID] = n
+	c.nameToProviderID[machine.Name] = machine.Status.ProviderID
+}
+
+func (c *Cluster) DeleteMachine(name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.cleanupMachine(name)
+}
+
 func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -172,7 +190,6 @@ func (c *Cluster) DeleteNode(name string) {
 	c.cleanupNode(name)
 }
 
-// UpdatePod is called every time the pod is reconciled
 func (c *Cluster) UpdatePod(ctx context.Context, pod *v1.Pod) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -187,7 +204,6 @@ func (c *Cluster) UpdatePod(ctx context.Context, pod *v1.Pod) error {
 	return err
 }
 
-// DeletePod is called when the pod has been deleted
 func (c *Cluster) DeletePod(podKey types.NamespacedName) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -231,14 +247,51 @@ func (c *Cluster) Reset() {
 // and explicitly modifying the cluster state. If you do not hold the cluster state lock before calling any of these helpers
 // you will hit race conditions and data corruption
 
+func (c *Cluster) newStateFromMachine(machine *v1alpha5.Machine, oldNode *Node) *Node {
+	if oldNode == nil {
+		oldNode = NewNode()
+	}
+	n := &Node{
+		Node:              oldNode.Node,
+		Machine:           machine,
+		hostPortUsage:     oldNode.hostPortUsage,
+		volumeUsage:       oldNode.volumeUsage,
+		daemonSetRequests: oldNode.daemonSetRequests,
+		daemonSetLimits:   oldNode.daemonSetLimits,
+		podRequests:       oldNode.podRequests,
+		podLimits:         oldNode.podLimits,
+		markedForDeletion: oldNode.markedForDeletion,
+		nominatedUntil:    oldNode.nominatedUntil,
+	}
+	// Cleanup the old machine with its old providerID if its providerID changes
+	// This can happen since nodes don't get created with providerIDs. Rather, CCM picks up the
+	// created node and injects the providerID into the spec.providerID
+	if id, ok := c.nameToProviderID[machine.Name]; ok && id != machine.Status.ProviderID {
+		c.cleanupMachine(machine.Name)
+	}
+	c.triggerConsolidationOnChange(oldNode, n)
+	return n
+}
+
+func (c *Cluster) cleanupMachine(name string) {
+	if id := c.nameToProviderID[name]; id != "" {
+		if c.nodes[id].Node == nil {
+			delete(c.nodes, id)
+		} else {
+			c.nodes[id].Machine = nil
+		}
+		delete(c.nameToProviderID, name)
+		c.RecordConsolidationChange()
+	}
+}
+
 func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *Node) (*Node, error) {
 	if oldNode == nil {
-		oldNode = &Node{
-			Node: &v1.Node{},
-		}
+		oldNode = NewNode()
 	}
 	n := &Node{
 		Node:              node,
+		Machine:           oldNode.Machine,
 		hostPortUsage:     scheduling.NewHostPortUsage(),
 		volumeUsage:       scheduling.NewVolumeLimits(c.kubeClient),
 		volumeLimits:      scheduling.VolumeCount{},
@@ -268,8 +321,12 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *
 }
 
 func (c *Cluster) cleanupNode(name string) {
-	if id, ok := c.nameToProviderID[name]; ok {
-		delete(c.nodes, id)
+	if id := c.nameToProviderID[name]; id != "" {
+		if c.nodes[id].Machine == nil {
+			delete(c.nodes, id)
+		} else {
+			c.nodes[id].Node = nil
+		}
 		delete(c.nameToProviderID, name)
 		c.RecordConsolidationChange()
 	}

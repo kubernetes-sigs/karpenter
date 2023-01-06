@@ -36,7 +36,8 @@ import (
 // compute topology information.
 // +k8s:deepcopy-gen=true
 type Node struct {
-	Node *v1.Node
+	Node    *v1.Node
+	Machine *v1alpha5.Machine
 
 	inflightAllocatable v1.ResourceList // TODO @joinnis: This can be removed when machine is added
 	inflightCapacity    v1.ResourceList // TODO @joinnis: This can be removed when machine is added
@@ -58,6 +59,39 @@ type Node struct {
 	nominatedUntil    metav1.Time
 }
 
+func NewNode() *Node {
+	return &Node{
+		inflightAllocatable: v1.ResourceList{},
+		inflightCapacity:    v1.ResourceList{},
+		startupTaints:       []v1.Taint{},
+		daemonSetRequests:   map[types.NamespacedName]v1.ResourceList{},
+		daemonSetLimits:     map[types.NamespacedName]v1.ResourceList{},
+		podRequests:         map[types.NamespacedName]v1.ResourceList{},
+		podLimits:           map[types.NamespacedName]v1.ResourceList{},
+		hostPortUsage:       &scheduling.HostPortUsage{},
+		volumeUsage:         &scheduling.VolumeUsage{},
+		volumeLimits:        scheduling.VolumeCount{},
+	}
+}
+
+func (in *Node) Annotations() map[string]string {
+	// If the machine exists and the state node isn't initialized
+	// use the machine representation of the annotations
+	if !in.Initialized() && in.Machine != nil {
+		return in.Machine.Annotations
+	}
+	return in.Node.Annotations
+}
+
+func (in *Node) Labels() map[string]string {
+	// If the machine exists and the state node isn't initialized
+	// use the machine representation of the labels
+	if !in.Initialized() && in.Machine != nil {
+		return in.Machine.Labels
+	}
+	return in.Node.Labels
+}
+
 func (in *Node) Taints() []v1.Taint {
 	ephemeralTaints := []v1.Taint{
 		{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
@@ -67,9 +101,20 @@ func (in *Node) Taints() []v1.Taint {
 	// re-appears on the node for a different reason (e.g. the node is cordoned) we will assume that pods can
 	// schedule against the node in the future incorrectly.
 	if !in.Initialized() && in.Owned() {
-		ephemeralTaints = append(ephemeralTaints, in.startupTaints...)
+		if in.Machine != nil {
+			ephemeralTaints = append(ephemeralTaints, in.Machine.Spec.StartupTaints...)
+		} else {
+			ephemeralTaints = append(ephemeralTaints, in.startupTaints...)
+		}
 	}
-	return lo.Reject(in.Node.Spec.Taints, func(taint v1.Taint, _ int) bool {
+
+	var taints []v1.Taint
+	if !in.Initialized() && in.Machine != nil {
+		taints = in.Machine.Spec.Taints
+	} else {
+		taints = in.Node.Spec.Taints
+	}
+	return lo.Reject(taints, func(taint v1.Taint, _ int) bool {
 		_, rejected := lo.Find(ephemeralTaints, func(t v1.Taint) bool {
 			return t.Key == taint.Key && t.Value == taint.Value && t.Effect == taint.Effect
 		})
@@ -78,10 +123,28 @@ func (in *Node) Taints() []v1.Taint {
 }
 
 func (in *Node) Initialized() bool {
+	if in.Machine != nil && in.Machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized) != nil &&
+		in.Machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).Status == v1.ConditionTrue {
+		return true
+	}
 	return in.Node.Labels[v1alpha5.LabelNodeInitialized] == "true"
 }
 
 func (in *Node) Capacity() v1.ResourceList {
+	if !in.Initialized() && in.Machine != nil {
+		// Override any zero quantity values in the node status
+		if in.Node != nil {
+			ret := lo.Assign(in.Node.Status.Capacity)
+			for resourceName, quantity := range in.Machine.Status.Capacity {
+				if resources.IsZero(ret[resourceName]) {
+					ret[resourceName] = quantity
+				}
+			}
+			return ret
+		}
+		return in.Machine.Status.Capacity
+	}
+	// TODO @joinnis: Remove this when machine migration is complete
 	if !in.Initialized() && in.Owned() {
 		// Override any zero quantity values in the node status
 		ret := lo.Assign(in.Node.Status.Capacity)
@@ -96,6 +159,20 @@ func (in *Node) Capacity() v1.ResourceList {
 }
 
 func (in *Node) Allocatable() v1.ResourceList {
+	if !in.Initialized() && in.Machine != nil {
+		// Override any zero quantity values in the node status
+		if in.Node != nil {
+			ret := lo.Assign(in.Node.Status.Allocatable)
+			for resourceName, quantity := range in.Machine.Status.Allocatable {
+				if resources.IsZero(ret[resourceName]) {
+					ret[resourceName] = quantity
+				}
+			}
+			return ret
+		}
+		return in.Machine.Status.Allocatable
+	}
+	// TODO @joinnis: Remove this when machine migration is complete
 	if !in.Initialized() && in.Owned() {
 		// Override any zero quantity values in the node status
 		ret := lo.Assign(in.Node.Status.Allocatable)
@@ -143,7 +220,9 @@ func (in *Node) PodLimits() v1.ResourceList {
 }
 
 func (in *Node) MarkedForDeletion() bool {
-	return in.markedForDeletion || (in.Node != nil && !in.Node.DeletionTimestamp.IsZero())
+	return in.markedForDeletion ||
+		(in.Node != nil && !in.Node.DeletionTimestamp.IsZero()) ||
+		(in.Machine != nil && !in.Machine.DeletionTimestamp.IsZero())
 }
 
 func (in *Node) Nominate(ctx context.Context) {
@@ -155,7 +234,8 @@ func (in *Node) Nominated() bool {
 }
 
 func (in *Node) Owned() bool {
-	return in.Node.Labels[v1alpha5.ProvisionerNameLabelKey] != ""
+	return (in.Node != nil && in.Node.Labels[v1alpha5.ProvisionerNameLabelKey] != "") ||
+		(in.Machine != nil && in.Machine.Labels[v1alpha5.ProvisionerNameLabelKey] != "")
 }
 
 func (in *Node) updateForPod(ctx context.Context, pod *v1.Pod) {
