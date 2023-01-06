@@ -308,27 +308,27 @@ func (p *Provisioner) schedule(ctx context.Context, pods []*v1.Pod, stateNodes [
 	return nodes, err
 }
 
-func (p *Provisioner) launch(ctx context.Context, machine *scheduler.Node, opts ...functional.Option[LaunchOptions]) (string, error) {
+func (p *Provisioner) launch(ctx context.Context, node *scheduler.Node, opts ...functional.Option[LaunchOptions]) (string, error) {
 	// Check limits
-	latest := &v1alpha5.Provisioner{}
-	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: machine.ProvisionerName}, latest); err != nil {
+	provisioner := &v1alpha5.Provisioner{}
+	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: node.ProvisionerName}, provisioner); err != nil {
 		return "", fmt.Errorf("getting current resource usage, %w", err)
 	}
-	if err := latest.Spec.Limits.ExceededBy(latest.Status.Resources); err != nil {
+	if err := provisioner.Spec.Limits.ExceededBy(provisioner.Status.Resources); err != nil {
 		return "", err
 	}
 
-	logging.FromContext(ctx).Infof("launching %s", machine)
+	logging.FromContext(ctx).Infof("launching %s", node)
 	k8sNode, err := p.cloudProvider.Create(
 		logging.WithLogger(ctx, logging.FromContext(ctx).Named("cloudprovider")),
-		machine.ToMachine(latest),
+		node.ToMachine(provisioner).DeepCopy(),
 	)
 	if err != nil {
 		return "", fmt.Errorf("creating cloud provider instance, %w", err)
 	}
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", k8sNode.Name))
 
-	if err := mergo.Merge(k8sNode, machine.ToNode()); err != nil {
+	if err := mergo.Merge(k8sNode, node.ToNode()); err != nil {
 		return "", fmt.Errorf("merging cloud provider node, %w", err)
 	}
 	// ensure we clear out the status
@@ -351,7 +351,7 @@ func (p *Provisioner) launch(ctx context.Context, machine *scheduler.Node, opts 
 	}
 	p.cluster.NominateNodeForPod(ctx, k8sNode.Name)
 	if functional.ResolveOptions(opts...).RecordPodNomination {
-		for _, pod := range machine.Pods {
+		for _, pod := range node.Pods {
 			p.recorder.Publish(events.NominatePod(pod, k8sNode))
 		}
 	}
