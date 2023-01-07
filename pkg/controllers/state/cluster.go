@@ -337,7 +337,7 @@ func (c *Cluster) populateStartupTaints(ctx context.Context, n *Node) error {
 		return nil
 	}
 	provisioner := &v1alpha5.Provisioner{}
-	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
+	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Labels()[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
 		return client.IgnoreNotFound(fmt.Errorf("getting provisioner, %w", err))
 	}
 	n.startupTaints = provisioner.Spec.StartupTaints
@@ -349,7 +349,7 @@ func (c *Cluster) populateInflight(ctx context.Context, n *Node) error {
 		return nil
 	}
 	provisioner := &v1alpha5.Provisioner{}
-	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
+	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Labels()[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
 		return client.IgnoreNotFound(fmt.Errorf("getting provisioner, %w", err))
 	}
 	instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, provisioner)
@@ -357,10 +357,10 @@ func (c *Cluster) populateInflight(ctx context.Context, n *Node) error {
 		return err
 	}
 	instanceType, ok := lo.Find(instanceTypes, func(it *cloudprovider.InstanceType) bool {
-		return it.Name == n.Node.Labels[v1.LabelInstanceTypeStable]
+		return it.Name == n.Labels()[v1.LabelInstanceTypeStable]
 	})
 	if !ok {
-		return fmt.Errorf("instance type '%s' not found", n.Node.Labels[v1.LabelInstanceTypeStable])
+		return fmt.Errorf("instance type '%s' not found", n.Labels()[v1.LabelInstanceTypeStable])
 	}
 	n.inflightCapacity = instanceType.Capacity
 	n.inflightAllocatable = instanceType.Allocatable()

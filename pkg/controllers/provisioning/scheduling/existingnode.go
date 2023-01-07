@@ -27,6 +27,8 @@ import (
 
 type ExistingNode struct {
 	*v1.Node
+	name          string
+	initialized   bool
 	Pods          []*v1.Pod
 	requests      v1.ResourceList
 	topology      *Topology
@@ -52,25 +54,20 @@ func NewExistingNode(n *state.Node, topology *Topology, daemonResources v1.Resou
 		}
 	}
 	node := &ExistingNode{
-		Node:          n.Node,
+		Node:          n.Node, // The real node that
+		name:          n.Name(),
+		initialized:   n.Initialized(),
 		available:     n.Available(),
 		taints:        n.Taints(),
 		topology:      topology,
 		requests:      remainingDaemonResources,
-		requirements:  scheduling.NewLabelRequirements(n.Node.Labels),
+		requirements:  scheduling.NewLabelRequirements(n.Labels()),
 		hostPortUsage: n.HostPortUsage(),
 		volumeUsage:   n.VolumeUsage(),
 		volumeLimits:  n.VolumeLimits(),
 	}
-
-	// If the in-flight node doesn't have a hostname yet, we treat it's unique name as the hostname.  This allows toppology
-	// with hostname keys to schedule correctly.
-	hostname := n.Node.Labels[v1.LabelHostname]
-	if hostname == "" {
-		hostname = n.Node.Name
-	}
-	node.requirements.Add(scheduling.NewRequirement(v1.LabelHostname, v1.NodeSelectorOpIn, hostname))
-	topology.Register(v1.LabelHostname, hostname)
+	node.requirements.Add(scheduling.NewRequirement(v1.LabelHostname, v1.NodeSelectorOpIn, n.HostName()))
+	topology.Register(v1.LabelHostname, n.HostName())
 	return node
 }
 

@@ -107,7 +107,7 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	// to schedule since we want to assume that we can delete a node and its pods will immediately
 	// move to an existing node which won't occur if that node isn't ready.
 	for _, n := range ifn {
-		if n.Node.Labels[v1alpha5.LabelNodeInitialized] != "true" {
+		if n.Labels[v1alpha5.LabelNodeInitialized] != "true" {
 			return nil, false, nil
 		}
 	}
@@ -178,7 +178,7 @@ func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient clie
 	cluster.ForEachNode(func(n *state.Node) bool {
 		var provisioner *v1alpha5.Provisioner
 		var instanceTypeMap map[string]*cloudprovider.InstanceType
-		if provName, ok := n.Node.Labels[v1alpha5.ProvisionerNameLabelKey]; ok {
+		if provName, ok := n.Labels()[v1alpha5.ProvisionerNameLabelKey]; ok {
 			provisioner = provisioners[provName]
 			instanceTypeMap = instanceTypesByProvisioner[provName]
 		}
@@ -191,18 +191,18 @@ func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient clie
 			return true
 		}
 
-		instanceType, ok := instanceTypeMap[n.Node.Labels[v1.LabelInstanceTypeStable]]
+		instanceType, ok := instanceTypeMap[n.Labels()[v1.LabelInstanceTypeStable]]
 		// skip any nodes that we can't determine the instance of
 		if !ok {
 			return true
 		}
 
 		// skip any nodes that we can't determine the capacity type or the topology zone for
-		ct, ok := n.Node.Labels[v1alpha5.LabelCapacityType]
+		ct, ok := n.Labels()[v1alpha5.LabelCapacityType]
 		if !ok {
 			return true
 		}
-		az, ok := n.Node.Labels[v1.LabelTopologyZone]
+		az, ok := n.Labels()[v1.LabelTopologyZone]
 		if !ok {
 			return true
 		}

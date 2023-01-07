@@ -144,7 +144,10 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 			s.cluster.NominateNodeForPod(ctx, node.Name)
 		}
 		for _, pod := range node.Pods {
-			s.recorder.Publish(events.NominatePod(pod, node.Node))
+			// If node is inflight, it won't have a real node to represent it
+			if node.Node != nil {
+				s.recorder.Publish(events.NominatePod(pod, node.Node))
+			}
 		}
 	}
 
@@ -228,10 +231,10 @@ func (s *Scheduler) calculateExistingMachines(stateNodes []*state.Node, daemonSe
 		// Calculate any daemonsets that should schedule to the inflight node
 		var daemons []*v1.Pod
 		for _, p := range daemonSetPods {
-			if err := scheduling.Taints(node.Node.Spec.Taints).Tolerates(p); err != nil {
+			if err := scheduling.Taints(node.Taints()).Tolerates(p); err != nil {
 				continue
 			}
-			if err := scheduling.NewLabelRequirements(node.Node.Labels).Compatible(scheduling.NewPodRequirements(p)); err != nil {
+			if err := scheduling.NewLabelRequirements(node.Labels()).Compatible(scheduling.NewPodRequirements(p)); err != nil {
 				continue
 			}
 			daemons = append(daemons, p)

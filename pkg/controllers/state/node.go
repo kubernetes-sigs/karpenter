@@ -74,6 +74,20 @@ func NewNode() *Node {
 	}
 }
 
+func (in *Node) Name() string {
+	if !in.Initialized() && in.Machine != nil {
+		return in.Machine.Name
+	}
+	return in.Node.Name
+}
+
+func (in *Node) HostName() string {
+	if in.Labels()[v1.LabelHostname] == "" {
+		return in.Name()
+	}
+	return in.Labels()[v1.LabelHostname]
+}
+
 func (in *Node) Annotations() map[string]string {
 	// If the machine exists and the state node isn't initialized
 	// use the machine representation of the annotations
@@ -122,12 +136,21 @@ func (in *Node) Taints() []v1.Taint {
 	})
 }
 
+// Initialized always implies that the node is there. If something is initialized, we are guaranteed that the Node
+// exists inside of cluster state. If the node is not initialized, it is possible that it is represented by a Node or
+// by a Machine inside of cluster state
 func (in *Node) Initialized() bool {
-	if in.Machine != nil && in.Machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized) != nil &&
-		in.Machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).Status == v1.ConditionTrue {
-		return true
+	if in.Machine != nil {
+		if in.Node != nil && in.Machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized) != nil &&
+			in.Machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).Status == v1.ConditionTrue {
+			return true
+		}
+		return false
 	}
-	return in.Node.Labels[v1alpha5.LabelNodeInitialized] == "true"
+	if in.Node != nil {
+		return in.Node.Labels[v1alpha5.LabelNodeInitialized] == "true"
+	}
+	return false
 }
 
 func (in *Node) Capacity() v1.ResourceList {
@@ -234,7 +257,7 @@ func (in *Node) Nominated() bool {
 }
 
 func (in *Node) Owned() bool {
-	return (in.Node != nil && in.Node.Labels[v1alpha5.ProvisionerNameLabelKey] != "") ||
+	return (in.Node != nil && in.Labels()[v1alpha5.ProvisionerNameLabelKey] != "") ||
 		(in.Machine != nil && in.Machine.Labels[v1alpha5.ProvisionerNameLabelKey] != "")
 }
 
