@@ -90,6 +90,7 @@ func (in *Node) Capacity() v1.ResourceList {
 				ret[resourceName] = quantity
 			}
 		}
+		return ret
 	}
 	return in.Node.Status.Capacity
 }
