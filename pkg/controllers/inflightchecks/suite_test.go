@@ -89,7 +89,7 @@ var _ = Describe("Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-						v1.LabelInstanceType:             "gpu-vendor-instance-type",
+						v1.LabelInstanceTypeStable:       "gpu-vendor-instance-type",
 					},
 				},
 			})
@@ -113,7 +113,7 @@ var _ = Describe("Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-						v1.LabelInstanceType:             "default-instance-type",
+						v1.LabelInstanceTypeStable:       "default-instance-type",
 					},
 				},
 			})
@@ -136,7 +136,7 @@ var _ = Describe("Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-						v1.LabelInstanceType:             "default-instance-type",
+						v1.LabelInstanceTypeStable:       "default-instance-type",
 					},
 				},
 			})
@@ -166,7 +166,7 @@ var _ = Describe("Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-						v1.LabelInstanceType:             "arm-instance-type",
+						v1.LabelInstanceTypeStable:       "arm-instance-type",
 						v1alpha5.LabelNodeInitialized:    "true",
 					},
 				},
