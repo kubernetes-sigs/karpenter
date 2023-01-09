@@ -16,10 +16,10 @@ package node
 
 import (
 	"context"
-	"time"
 
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
@@ -69,15 +69,17 @@ func (c *Controller) Name() string {
 
 // Reconcile executes a reallocation control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Result, error) {
-	provisioner := &v1alpha5.Provisioner{}
-	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(err)
-	}
+	stored := node.DeepCopy()
 	if _, ok := node.Labels[v1alpha5.ProvisionerNameLabelKey]; !ok {
 		return reconcile.Result{}, nil
 	}
 	if !node.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, nil
+	}
+
+	provisioner := &v1alpha5.Provisioner{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
 	// Execute Reconcilers
@@ -95,8 +97,11 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Re
 		errs = multierr.Append(errs, err)
 		results = append(results, res)
 	}
-	// Append a short requeue result so that we requeue to check for emptiness when the node nomination time ends
-	results = append(results, reconcile.Result{RequeueAfter: time.Minute})
+	if !equality.Semantic.DeepEqual(stored, node) {
+		if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+			return reconcile.Result{}, err
+		}
+	}
 	return result.Min(results...), errs
 }
 

@@ -18,6 +18,7 @@ import (
 	"context"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
@@ -59,6 +60,7 @@ func (c *Controller) Name() string {
 
 // Reconcile a control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner) (reconcile.Result, error) {
+	stored := provisioner.DeepCopy()
 	nodes := v1.NodeList{}
 	if err := c.kubeClient.List(ctx, &nodes, client.MatchingLabels{v1alpha5.ProvisionerNameLabelKey: provisioner.Name}); err != nil {
 		return reconcile.Result{}, err
@@ -68,8 +70,12 @@ func (c *Controller) Reconcile(ctx context.Context, provisioner *v1alpha5.Provis
 		return reconcile.Result{RequeueAfter: 250 * time.Millisecond}, nil
 	}
 	// Determine resource usage and update provisioner.status.resources
-	resourceCounts := c.resourceCountsFor(provisioner.Name)
-	provisioner.Status.Resources = resourceCounts
+	provisioner.Status.Resources = c.resourceCountsFor(provisioner.Name)
+	if !equality.Semantic.DeepEqual(stored, provisioner) {
+		if err := c.kubeClient.Status().Patch(ctx, provisioner, client.MergeFrom(stored)); err != nil {
+			return reconcile.Result{}, err
+		}
+	}
 	return reconcile.Result{}, nil
 }
 
