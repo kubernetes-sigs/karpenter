@@ -39,6 +39,8 @@ type Node struct {
 	Node    *v1.Node
 	Machine *v1alpha5.Machine
 
+	ProviderID string
+
 	inflightAllocatable v1.ResourceList // TODO @joinnis: This can be removed when machine is added
 	inflightCapacity    v1.ResourceList // TODO @joinnis: This can be removed when machine is added
 	startupTaints       []v1.Taint      // TODO: @joinnis: This can be removed when machine is added
@@ -243,9 +245,13 @@ func (in *Node) PodLimits() v1.ResourceList {
 }
 
 func (in *Node) MarkedForDeletion() bool {
+	// The Node is marked for the Deletion if:
+	//  1. The Node has explicitly MarkedForDeletion
+	//  2. The Node has a Machine counterpart and is actively deleting
+	//  3. The Node has no Machine counterpart and is actively deleting
 	return in.markedForDeletion ||
-		(in.Node != nil && !in.Node.DeletionTimestamp.IsZero()) ||
-		(in.Machine != nil && !in.Machine.DeletionTimestamp.IsZero())
+		(in.Machine != nil && !in.Machine.DeletionTimestamp.IsZero()) ||
+		(in.Node != nil && in.Machine == nil && !in.Node.DeletionTimestamp.IsZero())
 }
 
 func (in *Node) Nominate(ctx context.Context) {
@@ -257,8 +263,7 @@ func (in *Node) Nominated() bool {
 }
 
 func (in *Node) Owned() bool {
-	return (in.Node != nil && in.Labels()[v1alpha5.ProvisionerNameLabelKey] != "") ||
-		(in.Machine != nil && in.Machine.Labels[v1alpha5.ProvisionerNameLabelKey] != "")
+	return in.Labels()[v1alpha5.ProvisionerNameLabelKey] != ""
 }
 
 func (in *Node) updateForPod(ctx context.Context, pod *v1.Pod) {

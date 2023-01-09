@@ -254,6 +254,7 @@ func (c *Cluster) newStateFromMachine(machine *v1alpha5.Machine, oldNode *Node) 
 	n := &Node{
 		Node:              oldNode.Node,
 		Machine:           machine,
+		ProviderID:        machine.Status.ProviderID,
 		hostPortUsage:     oldNode.hostPortUsage,
 		volumeUsage:       oldNode.volumeUsage,
 		daemonSetRequests: oldNode.daemonSetRequests,
@@ -292,6 +293,7 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *
 	n := &Node{
 		Node:              node,
 		Machine:           oldNode.Machine,
+		ProviderID:        node.Spec.ProviderID,
 		hostPortUsage:     scheduling.NewHostPortUsage(),
 		volumeUsage:       scheduling.NewVolumeLimits(c.kubeClient),
 		volumeLimits:      scheduling.VolumeCount{},
