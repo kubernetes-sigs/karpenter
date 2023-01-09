@@ -241,7 +241,9 @@ func (s *Scheduler) calculateExistingMachines(stateNodes []*state.Node, daemonSe
 		// We don't use the status field and instead recompute the remaining resources to ensure we have a consistent view
 		// of the cluster during scheduling.  Depending on how node creation falls out, this will also work for cases where
 		// we don't create Node resources.
-		s.remainingResources[node.Node.Name] = resources.Subtract(s.remainingResources[node.Node.Name], node.Capacity())
+		if _, ok := s.remainingResources[node.Node.Labels[v1alpha5.ProvisionerNameLabelKey]]; ok {
+			s.remainingResources[node.Node.Labels[v1alpha5.ProvisionerNameLabelKey]] = resources.Subtract(s.remainingResources[node.Node.Labels[v1alpha5.ProvisionerNameLabelKey]], node.Capacity())
+		}
 	}
 }
 

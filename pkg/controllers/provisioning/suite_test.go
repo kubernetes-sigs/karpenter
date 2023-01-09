@@ -331,6 +331,30 @@ var _ = Describe("Provisioning", func() {
 			// only available instance type has 2 GPUs which would exceed the limit
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
+		It("should not schedule to a provisioner after a scheduling round if limits would be exceeded", func() {
+			ExpectApplied(ctx, env.Client, test.Provisioner(test.ProvisionerOptions{
+				Limits: v1.ResourceList{v1.ResourceCPU: resource.MustParse("2")},
+			}))
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
+				test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						// requires a 2 CPU node, but leaves room for overhead
+						v1.ResourceCPU: resource.MustParse("1.75"),
+					},
+				}}))[0]
+			// A 2 CPU node can be launched
+			ExpectScheduled(ctx, env.Client, pod)
+
+			// This pod requests over the existing limit (would add to 3.5 CPUs) so this should fail
+			pod = ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
+				test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						// requires a 2 CPU node, but leaves room for overhead
+						v1.ResourceCPU: resource.MustParse("1.75"),
+					},
+				}}))[0]
+			ExpectNotScheduled(ctx, env.Client, pod)
+		})
 	})
 	Context("Daemonsets and Node Overhead", func() {
 		It("should account for overhead", func() {

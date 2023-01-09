@@ -358,6 +358,14 @@ func ExpectSkew(ctx context.Context, c client.Client, namespace string, constrai
 	return ExpectWithOffset(1, skew)
 }
 
+// ExpectResources expects all the resources in expected to exist in real with the same values
+func ExpectResources(expected, real v1.ResourceList) {
+	for k, v := range expected {
+		realV := real[k]
+		ExpectWithOffset(1, v.Value()).To(BeNumerically("~", realV.Value()))
+	}
+}
+
 // ExpectPanic is a function that should be deferred at the beginning of a test like "defer ExpectPanic()"
 // It asserts that the test should panic
 func ExpectPanic() {
