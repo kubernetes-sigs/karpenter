@@ -99,7 +99,7 @@ func (t *Terminator) drain(ctx context.Context, node *v1.Node) error {
 func (t *Terminator) terminate(ctx context.Context, node *v1.Node) error {
 	stored := node.DeepCopy()
 	// Delete the instance associated with node
-	if err := t.CloudProvider.Delete(ctx, machineutil.NewFromNode(node)); err != nil {
+	if err := t.CloudProvider.Delete(ctx, machineutil.NewFromNode(node)); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
 		return fmt.Errorf("terminating cloudprovider instance, %w", err)
 	}
 	controllerutil.RemoveFinalizer(node, v1alpha5.TerminationFinalizer)
