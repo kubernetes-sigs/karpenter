@@ -72,7 +72,7 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 	if err := c.ensureFinalizer(ctx, machine); err != nil {
 		return reconcile.Result{}, fmt.Errorf("ensuring finalizer, %w", err)
 	}
-	err := c.cloudProvider.Get(ctx, machine)
+	retrieved, err := c.cloudProvider.Get(ctx, machine.Name, machine.Labels[v1alpha5.ProvisionerNameLabelKey])
 	if err != nil {
 		if !cloudprovider.IsMachineNotFoundError(err) {
 			return reconcile.Result{}, fmt.Errorf("getting machine, %w", err)
@@ -87,11 +87,14 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 			return reconcile.Result{}, nil
 		}
 		logging.FromContext(ctx).Debugf("launching machine")
-		if _, err = c.cloudProvider.Create(ctx, machine); err != nil {
+		_, err = c.cloudProvider.Create(ctx, machine)
+		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("creating machine, %w", err)
 		}
-		machine.StatusConditions().MarkTrue(v1alpha5.MachineCreated)
 	}
+	populateMachineDetails(machine, retrieved)
+	machine.StatusConditions().MarkTrue(v1alpha5.MachineCreated)
+
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", machine.Status.ProviderID))
 	node, err := c.nodeForMachine(ctx, machine)
 	if err != nil {
@@ -270,4 +273,16 @@ func isExtendedResourceRegistered(node *v1.Node, machine *v1alpha5.Machine) (v1.
 		}
 	}
 	return "", true
+}
+
+func populateMachineDetails(machine, retrieved *v1alpha5.Machine) {
+	for k, v := range retrieved.Labels {
+		machine.Labels[k] = v
+	}
+	for k, v := range retrieved.Annotations {
+		machine.Annotations[k] = v
+	}
+	machine.Status.ProviderID = retrieved.Status.ProviderID
+	machine.Status.Allocatable = retrieved.Status.Allocatable
+	machine.Status.Capacity = retrieved.Status.Capacity
 }
