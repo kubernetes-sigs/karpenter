@@ -22,7 +22,6 @@ import (
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/workqueue"
-	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -34,11 +33,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/termination"
 )
 
 var (
@@ -61,24 +58,17 @@ var _ corecontroller.FinalizingTypedController[*v1.Node] = (*Controller)(nil)
 
 // Controller for the resource
 type Controller struct {
-	Terminator *termination.Terminator
-	KubeClient client.Client
-	Recorder   events.Recorder
+	terminator *Terminator
+	kubeClient client.Client
+	recorder   events.Recorder
 }
 
 // NewController constructs a terminationController instance
-func NewController(clk clock.Clock, kubeClient client.Client, evictionQueue *EvictionQueue,
-	recorder events.Recorder, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
-
+func NewController(kubeClient client.Client, terminator *Terminator, recorder events.Recorder) corecontroller.Controller {
 	return corecontroller.Typed[*v1.Node](kubeClient, &Controller{
-		KubeClient: kubeClient,
-		Terminator: &Terminator{
-			KubeClient:    kubeClient,
-			CloudProvider: cloudProvider,
-			EvictionQueue: evictionQueue,
-			Clock:         clk,
-		},
-		Recorder: recorder,
+		kubeClient: kubeClient,
+		terminator: terminator,
+		recorder:   recorder,
 	})
 }
 
@@ -94,21 +84,17 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 	if !controllerutil.ContainsFinalizer(node, v1alpha5.TerminationFinalizer) {
 		return reconcile.Result{}, nil
 	}
-	if err := c.Terminator.Cordon(ctx, node); err != nil {
+	if err := c.terminator.Cordon(ctx, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("cordoning node, %w", err)
 	}
-	if err := c.Terminator.Drain(ctx, node); err != nil {
-		if termination.IsNodeDrainErr(err) {
-			c.Recorder.Publish(events.NodeFailedToDrain(node, err))
+	if err := c.terminator.Drain(ctx, node); err != nil {
+		if IsNodeDrainError(err) {
+			c.recorder.Publish(events.NodeFailedToDrain(node, err))
 			return reconcile.Result{Requeue: true}, nil
 		}
 		return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 	}
-	if err := c.Terminator.TerminateNode(ctx, node); err != nil {
-		return reconcile.Result{}, fmt.Errorf("terminating node, %w", err)
-	}
-	terminationSummary.Observe(time.Since(node.DeletionTimestamp.Time).Seconds())
-	return reconcile.Result{}, nil
+	return c.terminator.TerminateNode(ctx, node)
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
