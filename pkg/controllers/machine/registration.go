@@ -43,7 +43,7 @@ func (r *Registration) Reconcile(ctx context.Context, machine *v1alpha5.Machine)
 	if err != nil {
 		if IsNodeNotFoundError(err) {
 			machine.StatusConditions().MarkFalse(v1alpha5.MachineRegistered, "NodeNotFound", "Node hasn't registered with cluster")
-			return reconcile.Result{}, nil
+			return reconcile.Result{RequeueAfter: registrationTTL}, nil // Requeue later to check up to registration timeout
 		}
 		if IsDuplicateNodeError(err) {
 			machine.StatusConditions().MarkFalse(v1alpha5.MachineRegistered, "MultipleNodesFound", "Invariant violated, machine matched multiple nodes")

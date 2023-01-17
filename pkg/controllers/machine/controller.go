@@ -49,6 +49,7 @@ type Controller struct {
 	launch         *Launch
 	registration   *Registration
 	initialization *Initialization
+	liveness       *Liveness
 }
 
 // NewController is a constructor for the Machine Controller
@@ -60,6 +61,7 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider},
 		registration:   &Registration{kubeClient: kubeClient},
 		initialization: &Initialization{kubeClient: kubeClient},
+		liveness:       &Liveness{kubeClient: kubeClient},
 	})
 }
 
@@ -74,7 +76,7 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 	controllerutil.AddFinalizer(machine, v1alpha5.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(machine, stored) {
 		if err := c.kubeClient.Patch(ctx, machine, client.MergeFrom(stored)); err != nil {
-			return reconcile.Result{}, err
+			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 	}
 
@@ -87,6 +89,7 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 		c.launch,
 		c.registration,
 		c.initialization,
+		c.liveness,
 	} {
 		res, err := reconciler.Reconcile(ctx, machine)
 		errs = multierr.Append(errs, err)
@@ -95,10 +98,10 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 	if !equality.Semantic.DeepEqual(stored, machine) {
 		statusCopy := machine.DeepCopy()
 		if err := c.kubeClient.Patch(ctx, machine, client.MergeFrom(stored)); err != nil {
-			return reconcile.Result{}, multierr.Append(errs, err)
+			return reconcile.Result{}, client.IgnoreNotFound(multierr.Append(errs, err))
 		}
 		if err := c.kubeClient.Status().Patch(ctx, statusCopy, client.MergeFrom(stored)); err != nil {
-			return reconcile.Result{}, multierr.Append(errs, err)
+			return reconcile.Result{}, client.IgnoreNotFound(multierr.Append(errs, err))
 		}
 	}
 	return result.Min(results...), errs

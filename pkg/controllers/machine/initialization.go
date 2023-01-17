@@ -46,7 +46,7 @@ func (i *Initialization) Reconcile(ctx context.Context, machine *v1alpha5.Machin
 	node, err := NodeForMachine(ctx, i.kubeClient, machine)
 	if err != nil {
 		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "NodeNotFound", "Node hasn't registered with cluster")
-		return reconcile.Result{}, nil
+		return reconcile.Result{}, nil //nolint:nilerr
 	}
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
 	if nodeutil.GetCondition(node, v1.NodeReady).Status != v1.ConditionTrue {
