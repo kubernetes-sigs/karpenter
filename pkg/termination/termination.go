@@ -19,17 +19,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
-	"github.com/samber/lo"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -103,46 +99,21 @@ func (t *Terminator) Drain(ctx context.Context, node *v1.Node) error {
 }
 
 // TerminateNode calls cloud provider delete then removes the finalizer to delete the node
-func (t *Terminator) TerminateNode(ctx context.Context, node *v1.Node) (reconcile.Result, error) {
+func (t *Terminator) TerminateNode(ctx context.Context, node *v1.Node) error {
 	stored := node.DeepCopy()
-	if machineName := node.Labels[v1alpha5.MachineNameLabelKey]; machineName != "" {
-		if err := t.deleteMachine(ctx, machineName); err != nil {
-			return reconcile.Result{}, fmt.Errorf("deleting machine, %w", err)
-		}
-		if !t.isMachineNotFound(ctx, machineName) {
-			return reconcile.Result{Requeue: true}, nil
-		}
-	} else {
-		// Delete the instance associated with node
-		if err := t.cloudProvider.Delete(ctx, machineutil.NewFromNode(node)); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
-			return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
-		}
+	// Delete the instance associated with node
+	if err := t.cloudProvider.Delete(ctx, machineutil.NewFromNode(node)); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
+		return fmt.Errorf("terminating cloudprovider instance, %w", err)
 	}
 	controllerutil.RemoveFinalizer(node, v1alpha5.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(node, stored) {
 		logging.FromContext(ctx).Infof("deleted node")
 		if err := t.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
-			return reconcile.Result{}, err
+			return err
 		}
 		terminationSummary.Observe(time.Since(node.DeletionTimestamp.Time).Seconds())
 	}
-	return reconcile.Result{}, nil
-}
-
-func (t *Terminator) deleteMachine(ctx context.Context, machineName string) error {
-	machine := &v1alpha5.Machine{}
-	if err := t.kubeClient.Get(ctx, types.NamespacedName{Name: machineName}, machine); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		return err
-	}
-	return client.IgnoreNotFound(t.kubeClient.Delete(ctx, machine))
-}
-
-func (t *Terminator) isMachineNotFound(ctx context.Context, machineName string) bool {
-	machine := &v1alpha5.Machine{}
-	return apierrors.IsNotFound(t.kubeClient.Get(ctx, types.NamespacedName{Name: machineName}, machine))
+	return nil
 }
 
 // getPods returns a list of evictable pods for the node

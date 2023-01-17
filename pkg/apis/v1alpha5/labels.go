@@ -34,7 +34,6 @@ const (
 const (
 	ProvisionerNameLabelKey = Group + "/provisioner-name"
 	MachineNameLabelKey     = Group + "/machine-name"
-	ClusterNameLabelKey     = Group + "/cluster-name"
 	LabelNodeInitialized    = Group + "/initialized"
 	LabelCapacityType       = Group + "/capacity-type"
 )

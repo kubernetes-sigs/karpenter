@@ -16,6 +16,7 @@ package machine
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -43,9 +44,9 @@ func (i *Initialization) Reconcile(ctx context.Context, machine *v1alpha5.Machin
 		return reconcile.Result{}, nil
 	}
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", machine.Status.ProviderID))
-	node, err := NodeForMachine(ctx, i.kubeClient, machine)
+	node, err := nodeForMachine(ctx, i.kubeClient, machine)
 	if err != nil {
-		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "NodeNotFound", "Node hasn't registered with cluster")
+		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "NodeNotFound", "Node not registered with cluster")
 		return reconcile.Result{}, nil //nolint:nilerr
 	}
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
@@ -54,11 +55,11 @@ func (i *Initialization) Reconcile(ctx context.Context, machine *v1alpha5.Machin
 		return reconcile.Result{}, nil
 	}
 	if taint, ok := isStartupTaintRemoved(node, machine); !ok {
-		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "StartupTaintsExist", "StartupTaint %s still exists", taint)
+		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "StartupTaintsExist", "StartupTaint '%s' still exists", formatTaint(taint))
 		return reconcile.Result{}, nil
 	}
 	if name, ok := isExtendedResourceRegistered(node, machine); !ok {
-		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "ExtendedResourceNotRegistered", "Extended resource %s not registered", name)
+		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "ExtendedResourceNotRegistered", "Extended resource '%s' not registered", name)
 		return reconcile.Result{}, nil
 	}
 	stored := node.DeepCopy()
@@ -105,4 +106,14 @@ func isExtendedResourceRegistered(node *v1.Node, machine *v1alpha5.Machine) (v1.
 		}
 	}
 	return "", true
+}
+
+func formatTaint(taint *v1.Taint) string {
+	if taint == nil {
+		return "<nil>"
+	}
+	if taint.Value == "" {
+		return fmt.Sprintf("%s:%s", taint.Key, taint.Effect)
+	}
+	return fmt.Sprintf("%s=%s:%s", taint.Key, taint.Value, taint.Effect)
 }

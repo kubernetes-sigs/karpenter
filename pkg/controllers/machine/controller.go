@@ -22,6 +22,7 @@ import (
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -37,14 +38,20 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/termination"
 	"github.com/aws/karpenter-core/pkg/utils/result"
 )
+
+var _ corecontroller.FinalizingTypedController[*v1alpha5.Machine] = (*Controller)(nil)
 
 // Controller is a Machine Controller
 type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
+	recorder      events.Recorder
+	terminator    *termination.Terminator
 
 	launch         *Launch
 	registration   *Registration
@@ -53,15 +60,18 @@ type Controller struct {
 }
 
 // NewController is a constructor for the Machine Controller
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider,
+	terminator *termination.Terminator, recorder events.Recorder) corecontroller.Controller {
 	return corecontroller.Typed[*v1alpha5.Machine](kubeClient, &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 
+		recorder:       recorder,
+		terminator:     terminator,
 		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider},
 		registration:   &Registration{kubeClient: kubeClient},
 		initialization: &Initialization{kubeClient: kubeClient},
-		liveness:       &Liveness{kubeClient: kubeClient},
+		liveness:       &Liveness{clock: clk, kubeClient: kubeClient},
 	})
 }
 
@@ -112,14 +122,20 @@ func (c *Controller) Finalize(ctx context.Context, machine *v1alpha5.Machine) (r
 	if !controllerutil.ContainsFinalizer(machine, v1alpha5.TerminationFinalizer) {
 		return reconcile.Result{}, nil
 	}
+	if err := c.cleanupNodeForMachine(ctx, machine); err != nil {
+		if termination.IsNodeDrainError(err) {
+			return reconcile.Result{Requeue: true}, nil
+		}
+		return reconcile.Result{}, nil
+	}
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", machine.Status.ProviderID))
 	if err := c.cloudProvider.Delete(ctx, machine); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
 		return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
 	}
 	controllerutil.RemoveFinalizer(machine, v1alpha5.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(stored, machine) {
-		if err := c.kubeClient.Patch(ctx, machine, client.MergeFrom(stored)); client.IgnoreNotFound(err) != nil {
-			return reconcile.Result{}, fmt.Errorf("removing machine termination finalizer, %w", err)
+		if err := c.kubeClient.Patch(ctx, machine, client.MergeFrom(stored)); err != nil {
+			return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("removing machine termination finalizer, %w", err))
 		}
 		logging.FromContext(ctx).Infof("deleted machine")
 	}
@@ -148,9 +164,31 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 		WithOptions(controller.Options{MaxConcurrentReconciles: 100}))
 }
 
-func NodeForMachine(ctx context.Context, c client.Client, machine *v1alpha5.Machine) (*v1.Node, error) {
+func (c *Controller) cleanupNodeForMachine(ctx context.Context, machine *v1alpha5.Machine) error {
+	node, err := nodeForMachine(ctx, c.kubeClient, machine)
+	if err != nil {
+		// We don't clean the node if we either don't find a node or have violated the single machine to single node invariant
+		if IsNodeNotFoundError(err) || IsDuplicateNodeError(err) {
+			return nil
+		}
+		return err
+	}
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
+	if err = c.terminator.Cordon(ctx, node); err != nil {
+		if termination.IsNodeDrainError(err) {
+			c.recorder.Publish(events.NodeFailedToDrain(node, err))
+		}
+		return fmt.Errorf("cordoning node, %w", err)
+	}
+	if err = c.terminator.Drain(ctx, node); err != nil {
+		return fmt.Errorf("draining node, %w", err)
+	}
+	return nil
+}
+
+func nodeForMachine(ctx context.Context, c client.Client, machine *v1alpha5.Machine) (*v1.Node, error) {
 	nodeList := v1.NodeList{}
-	if err := c.List(ctx, &nodeList, client.MatchingFields{"spec.providerID": machine.Status.ProviderID}, client.Limit(2)); err != nil {
+	if err := c.List(ctx, &nodeList, client.MatchingFields{"spec.providerID": machine.Status.ProviderID}); err != nil {
 		return nil, fmt.Errorf("listing nodes, %w", err)
 	}
 	if len(nodeList.Items) > 1 {

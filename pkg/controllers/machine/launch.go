@@ -36,11 +36,11 @@ func (l *Launch) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reco
 	if machine.Status.ProviderID != "" {
 		return reconcile.Result{}, nil
 	}
-	updated, err := l.cloudProvider.Get(ctx, machine.Name, machine.Labels[v1alpha5.ProvisionerNameLabelKey])
+	retrieved, err := l.cloudProvider.Get(ctx, machine.Name, machine.Labels[v1alpha5.ProvisionerNameLabelKey])
 	if err != nil {
 		if cloudprovider.IsMachineNotFoundError(err) {
 			logging.FromContext(ctx).Debugf("creating machine")
-			_, err = l.cloudProvider.Create(ctx, machine)
+			retrieved, err = l.cloudProvider.Create(ctx, machine)
 			if err != nil {
 				return reconcile.Result{}, fmt.Errorf("creating machine, %w", err)
 			}
@@ -48,10 +48,7 @@ func (l *Launch) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reco
 			return reconcile.Result{}, fmt.Errorf("getting machine, %w", err)
 		}
 	}
-	if updated == nil {
-		return reconcile.Result{Requeue: true}, nil
-	}
-	populateMachineDetails(machine, updated)
+	populateMachineDetails(machine, retrieved)
 	machine.StatusConditions().MarkTrue(v1alpha5.MachineCreated)
 	return reconcile.Result{}, nil
 }

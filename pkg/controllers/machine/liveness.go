@@ -18,25 +18,24 @@ import (
 	"context"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 )
 
-const registrationTTL = 20 * time.Minute
+const registrationTTL = 10 * time.Minute
 
 type Liveness struct {
+	clock      clock.Clock
 	kubeClient client.Client
 }
 
 func (l *Liveness) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	cond := machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered)
-
 	// Delete the machine if we believe the machine won't register since we haven't seen the node
-	if (cond == nil || cond.Status == v1.ConditionFalse) &&
-		(!machine.CreationTimestamp.IsZero() && machine.CreationTimestamp.Add(registrationTTL).Before(time.Now())) {
+	if !isRegistered(machine) &&
+		(!machine.CreationTimestamp.IsZero() && machine.CreationTimestamp.Add(registrationTTL).Before(l.clock.Now())) {
 		if err := l.kubeClient.Delete(ctx, machine); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}

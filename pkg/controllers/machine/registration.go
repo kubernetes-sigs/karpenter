@@ -39,11 +39,11 @@ func (r *Registration) Reconcile(ctx context.Context, machine *v1alpha5.Machine)
 		return reconcile.Result{}, nil
 	}
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", machine.Status.ProviderID))
-	node, err := NodeForMachine(ctx, r.kubeClient, machine)
+	node, err := nodeForMachine(ctx, r.kubeClient, machine)
 	if err != nil {
 		if IsNodeNotFoundError(err) {
-			machine.StatusConditions().MarkFalse(v1alpha5.MachineRegistered, "NodeNotFound", "Node hasn't registered with cluster")
-			return reconcile.Result{RequeueAfter: registrationTTL}, nil // Requeue later to check up to registration timeout
+			machine.StatusConditions().MarkFalse(v1alpha5.MachineRegistered, "NodeNotFound", "Node not registered with cluster")
+			return reconcile.Result{RequeueAfter: registrationTTL}, nil // Requeue later to check up to the registration timeout
 		}
 		if IsDuplicateNodeError(err) {
 			machine.StatusConditions().MarkFalse(v1alpha5.MachineRegistered, "MultipleNodesFound", "Invariant violated, machine matched multiple nodes")
@@ -55,7 +55,6 @@ func (r *Registration) Reconcile(ctx context.Context, machine *v1alpha5.Machine)
 	if err := r.syncNode(ctx, machine, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("syncing node, %w", err)
 	}
-	lo.Must0(controllerutil.SetOwnerReference(node, machine, scheme.Scheme))
 	machine.StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
 	return reconcile.Result{}, nil
 }
@@ -66,20 +65,12 @@ func (r *Registration) syncNode(ctx context.Context, machine *v1alpha5.Machine, 
 	node.Labels = lo.Assign(node.Labels, machine.Labels)
 	node.Annotations = lo.Assign(node.Annotations, machine.Annotations)
 
-	// TODO @joinnis: Provide a better method for checking taint uniqueness
-	// TODO @joinnis: Figure out how to handle startupTaints in this case
-	for _, taint := range machine.Spec.Taints {
-		matches := false
-		for i := range node.Spec.Taints {
-			if taint.MatchTaint(&node.Spec.Taints[i]) {
-				matches = true
-				break
-			}
-		}
-		if !matches {
-			node.Spec.Taints = append(node.Spec.Taints, taint)
-		}
+	// Sync all taints inside of Machine into the Node taints
+	node.Spec.Taints = mergeTaints(machine.Spec.Taints, node.Spec.Taints)
+	if !isRegistered(machine) {
+		node.Spec.Taints = mergeTaints(machine.Spec.StartupTaints, node.Spec.Taints)
 	}
+	lo.Must0(controllerutil.SetOwnerReference(machine, node, scheme.Scheme))
 	if !equality.Semantic.DeepEqual(stored, node) {
 		if err := r.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 			return fmt.Errorf("syncing node labels, %w", err)
@@ -87,4 +78,26 @@ func (r *Registration) syncNode(ctx context.Context, machine *v1alpha5.Machine, 
 		logging.FromContext(ctx).Debugf("synced node")
 	}
 	return nil
+}
+
+// mergeTaints merges any taints in "from" into the taints in "to" if the taints don't match
+func mergeTaints(from, to []v1.Taint) []v1.Taint {
+	for _, taint := range from {
+		matches := false
+		for i := range to {
+			if taint.MatchTaint(&to[i]) {
+				matches = true
+				break
+			}
+		}
+		if !matches {
+			to = append(to, taint)
+		}
+	}
+	return to
+}
+
+func isRegistered(machine *v1alpha5.Machine) bool {
+	cond := machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered)
+	return cond != nil && cond.Status == v1.ConditionTrue
 }

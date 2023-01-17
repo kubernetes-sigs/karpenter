@@ -36,6 +36,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -266,22 +267,13 @@ func ExpectReconcileSucceeded(ctx context.Context, reconciler reconcile.Reconcil
 	return result
 }
 
-func ExpectReconcileFailed(ctx context.Context, reconciler reconcile.Reconciler, key client.ObjectKey) {
-	result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
-	ExpectWithOffset(1, err).ToNot(Succeed(), fmt.Sprintf("got result, %v", result))
-}
-
-func ExpectMetric(prefix string) *prometheus.MetricFamily {
-	metrics, err := metrics.Registry.Gather()
-	ExpectWithOffset(1, err).To(BeNil())
-	var selected *prometheus.MetricFamily
-	for _, mf := range metrics {
-		if mf.GetName() == prefix {
-			selected = mf
-		}
-	}
-	ExpectWithOffset(1, selected).ToNot(BeNil(), fmt.Sprintf("expected to find a '%s' metric", prefix))
-	return selected
+func ExpectStatusConditionExists(obj apis.ConditionsAccessor, t apis.ConditionType) apis.Condition {
+	conds := obj.GetConditions()
+	cond, ok := lo.Find(conds, func(c apis.Condition) bool {
+		return c.Type == t
+	})
+	ExpectWithOffset(1, ok).To(BeTrue())
+	return cond
 }
 
 // FindMetricWithLabelValues attempts to find a metric with a name with a set of label values

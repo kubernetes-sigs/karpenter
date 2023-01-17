@@ -27,44 +27,25 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
-	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/events"
-	"github.com/aws/karpenter-core/pkg/metrics"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/termination"
 )
-
-var (
-	terminationSummary = prometheus.NewSummary(
-		prometheus.SummaryOpts{
-			Namespace:  "karpenter",
-			Subsystem:  "nodes",
-			Name:       "termination_time_seconds",
-			Help:       "The time taken between a node's deletion request and the removal of its finalizer",
-			Objectives: metrics.SummaryObjectives(),
-		},
-	)
-)
-
-func init() {
-	crmetrics.Registry.MustRegister(terminationSummary)
-}
 
 var _ corecontroller.FinalizingTypedController[*v1.Node] = (*Controller)(nil)
 
 // Controller for the resource
 type Controller struct {
-	terminator *Terminator
+	terminator *termination.Terminator
 	kubeClient client.Client
 	recorder   events.Recorder
 }
 
 // NewController constructs a terminationController instance
-func NewController(kubeClient client.Client, terminator *Terminator, recorder events.Recorder) corecontroller.Controller {
+func NewController(kubeClient client.Client, terminator *termination.Terminator, recorder events.Recorder) corecontroller.Controller {
 	return corecontroller.Typed[*v1.Node](kubeClient, &Controller{
 		kubeClient: kubeClient,
 		terminator: terminator,
@@ -88,13 +69,16 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 		return reconcile.Result{}, fmt.Errorf("cordoning node, %w", err)
 	}
 	if err := c.terminator.Drain(ctx, node); err != nil {
-		if IsNodeDrainError(err) {
+		if termination.IsNodeDrainError(err) {
 			c.recorder.Publish(events.NodeFailedToDrain(node, err))
 			return reconcile.Result{Requeue: true}, nil
 		}
 		return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 	}
-	return c.terminator.TerminateNode(ctx, node)
+	if err := c.terminator.TerminateNode(ctx, node); err != nil {
+		return reconcile.Result{}, fmt.Errorf("terminating node, %w", err)
+	}
+	return reconcile.Result{}, nil
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
