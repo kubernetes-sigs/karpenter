@@ -113,7 +113,7 @@ func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (
 		},
 		Spec: *machine.Spec.DeepCopy(),
 		Status: v1alpha5.MachineStatus{
-			ProviderID:  fmt.Sprintf("fake://%s", name),
+			ProviderID:  test.ProviderID(name),
 			Capacity:    functional.FilterMap(instanceType.Capacity, func(_ v1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
 			Allocatable: functional.FilterMap(instanceType.Allocatable(), func(_ v1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
 		},
@@ -176,8 +176,15 @@ func (c *CloudProvider) GetInstanceTypes(_ context.Context, _ *v1alpha5.Provisio
 	}, nil
 }
 
-func (c *CloudProvider) Delete(context.Context, *v1alpha5.Machine) error {
-	return nil
+func (c *CloudProvider) Delete(_ context.Context, m *v1alpha5.Machine) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if _, ok := c.CreatedMachines[m.Name]; ok {
+		delete(c.CreatedMachines, m.Name)
+		return nil
+	}
+	return cloudprovider.NewMachineNotFoundError(fmt.Errorf("no machine exists with name '%s'", m.Name))
 }
 
 func (c *CloudProvider) IsMachineDrifted(context.Context, *v1alpha5.Machine) (bool, error) {

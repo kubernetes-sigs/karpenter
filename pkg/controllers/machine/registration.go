@@ -28,6 +28,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
+	"github.com/aws/karpenter-core/pkg/scheduling"
 )
 
 type Registration struct {
@@ -52,7 +53,7 @@ func (r *Registration) Reconcile(ctx context.Context, machine *v1alpha5.Machine)
 		return reconcile.Result{}, fmt.Errorf("getting node for machine, %w", err)
 	}
 	logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
-	if err := r.syncNode(ctx, machine, node); err != nil {
+	if err = r.syncNode(ctx, machine, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("syncing node, %w", err)
 	}
 	machine.StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
@@ -66,9 +67,9 @@ func (r *Registration) syncNode(ctx context.Context, machine *v1alpha5.Machine, 
 	node.Annotations = lo.Assign(node.Annotations, machine.Annotations)
 
 	// Sync all taints inside of Machine into the Node taints
-	node.Spec.Taints = mergeTaints(machine.Spec.Taints, node.Spec.Taints)
-	if !isRegistered(machine) {
-		node.Spec.Taints = mergeTaints(machine.Spec.StartupTaints, node.Spec.Taints)
+	node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(machine.Spec.Taints)
+	if !machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
+		node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(machine.Spec.StartupTaints)
 	}
 	lo.Must0(controllerutil.SetOwnerReference(machine, node, scheme.Scheme))
 	if !equality.Semantic.DeepEqual(stored, node) {
@@ -78,26 +79,4 @@ func (r *Registration) syncNode(ctx context.Context, machine *v1alpha5.Machine, 
 		logging.FromContext(ctx).Debugf("synced node")
 	}
 	return nil
-}
-
-// mergeTaints merges any taints in "from" into the taints in "to" if the taints don't match
-func mergeTaints(from, to []v1.Taint) []v1.Taint {
-	for _, taint := range from {
-		matches := false
-		for i := range to {
-			if taint.MatchTaint(&to[i]) {
-				matches = true
-				break
-			}
-		}
-		if !matches {
-			to = append(to, taint)
-		}
-	}
-	return to
-}
-
-func isRegistered(machine *v1alpha5.Machine) bool {
-	cond := machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered)
-	return cond != nil && cond.Status == v1.ConditionTrue
 }

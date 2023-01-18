@@ -267,6 +267,11 @@ func ExpectReconcileSucceeded(ctx context.Context, reconciler reconcile.Reconcil
 	return result
 }
 
+func ExpectReconcileFailed(ctx context.Context, reconciler reconcile.Reconciler, key client.ObjectKey) {
+	_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+	ExpectWithOffset(1, err).To(HaveOccurred())
+}
+
 func ExpectStatusConditionExists(obj apis.ConditionsAccessor, t apis.ConditionType) apis.Condition {
 	conds := obj.GetConditions()
 	cond, ok := lo.Find(conds, func(c apis.Condition) bool {
@@ -274,6 +279,14 @@ func ExpectStatusConditionExists(obj apis.ConditionsAccessor, t apis.ConditionTy
 	})
 	ExpectWithOffset(1, ok).To(BeTrue())
 	return cond
+}
+
+func ExpectOwnerReferenceExists(obj, owner client.Object) metav1.OwnerReference {
+	or, found := lo.Find(obj.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
+		return o.UID == owner.GetUID()
+	})
+	Expect(found).To(BeTrue())
+	return or
 }
 
 // FindMetricWithLabelValues attempts to find a metric with a name with a set of label values

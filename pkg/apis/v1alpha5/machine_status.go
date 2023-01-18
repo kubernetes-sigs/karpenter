@@ -17,8 +17,6 @@ package v1alpha5
 import (
 	v1 "k8s.io/api/core/v1"
 	"knative.dev/pkg/apis"
-
-	"github.com/aws/karpenter-core/pkg/utils/condition"
 )
 
 // MachineStatus defines the observed state of Machine
@@ -38,11 +36,11 @@ type MachineStatus struct {
 }
 
 func (in *Machine) StatusConditions() apis.ConditionManager {
-	return condition.NewManager(apis.NewLivingConditionSet(
+	return apis.NewLivingConditionSet(
 		MachineCreated,
 		MachineRegistered,
 		MachineInitialized,
-	).Manage(in))
+	).Manage(in)
 }
 
 var (

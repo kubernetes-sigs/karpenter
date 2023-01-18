@@ -58,8 +58,8 @@ func (i *Initialization) Reconcile(ctx context.Context, machine *v1alpha5.Machin
 		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "StartupTaintsExist", "StartupTaint '%s' still exists", formatTaint(taint))
 		return reconcile.Result{}, nil
 	}
-	if name, ok := isExtendedResourceRegistered(node, machine); !ok {
-		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "ExtendedResourceNotRegistered", "Extended resource '%s' not registered", name)
+	if name, ok := requestedResourcesRegistered(node, machine); !ok {
+		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "ResourceNotRegistered", "Resource '%s' was requested but not registered", name)
 		return reconcile.Result{}, nil
 	}
 	stored := node.DeepCopy()
@@ -68,7 +68,7 @@ func (i *Initialization) Reconcile(ctx context.Context, machine *v1alpha5.Machin
 		if err = i.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, err
 		}
-		logging.FromContext(ctx).Infof("node initialized")
+		logging.FromContext(ctx).Debugf("node initialized")
 	}
 	machine.StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
 	return reconcile.Result{}, nil
@@ -79,7 +79,7 @@ func (i *Initialization) Reconcile(ctx context.Context, machine *v1alpha5.Machin
 func isStartupTaintRemoved(node *v1.Node, machine *v1alpha5.Machine) (*v1.Taint, bool) {
 	if machine != nil {
 		for _, startupTaint := range machine.Spec.StartupTaints {
-			for i := 0; i < len(node.Spec.Taints); i++ {
+			for i := range node.Spec.Taints {
 				// if the node still has a startup taint applied, it's not ready
 				if startupTaint.MatchTaint(&node.Spec.Taints[i]) {
 					return &node.Spec.Taints[i], false
@@ -90,10 +90,10 @@ func isStartupTaintRemoved(node *v1.Node, machine *v1alpha5.Machine) (*v1.Taint,
 	return nil, true
 }
 
-// isExtendedResourceRegistered returns true if there are no extended resources on the node, or they have all been
+// requestedResourcesRegistered returns true if there are no extended resources on the node, or they have all been
 // registered by device plugins
-func isExtendedResourceRegistered(node *v1.Node, machine *v1alpha5.Machine) (v1.ResourceName, bool) {
-	for resourceName, quantity := range machine.Status.Allocatable {
+func requestedResourcesRegistered(node *v1.Node, machine *v1alpha5.Machine) (v1.ResourceName, bool) {
+	for resourceName, quantity := range machine.Spec.Resources.Requests {
 		if quantity.IsZero() {
 			continue
 		}

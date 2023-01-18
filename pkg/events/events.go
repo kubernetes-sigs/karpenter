@@ -65,16 +65,6 @@ func NodeFailedToDrain(node *v1.Node, err error) Event {
 	}
 }
 
-func NodeMachineDeleting(node *v1.Node, err error) Event {
-	return Event{
-		InvolvedObject: node,
-		Type:           v1.EventTypeNormal,
-		Reason:         "MachineDeleting",
-		Message:        fmt.Sprintf("Machine is deleting, %s", err),
-		DedupeValues:   []string{node.Name},
-	}
-}
-
 func NodeInflightCheck(node *v1.Node, message string) Event {
 	return Event{
 		InvolvedObject: node,

@@ -34,11 +34,10 @@ type Liveness struct {
 
 func (l *Liveness) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
 	// Delete the machine if we believe the machine won't register since we haven't seen the node
-	if !isRegistered(machine) &&
-		(!machine.CreationTimestamp.IsZero() && machine.CreationTimestamp.Add(registrationTTL).Before(l.clock.Now())) {
-		if err := l.kubeClient.Delete(ctx, machine); err != nil {
-			return reconcile.Result{}, client.IgnoreNotFound(err)
-		}
+	if !machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() && !machine.CreationTimestamp.IsZero() &&
+		machine.CreationTimestamp.Add(registrationTTL).Before(l.clock.Now()) {
+
+		return reconcile.Result{}, client.IgnoreNotFound(l.kubeClient.Delete(ctx, machine))
 	}
 	return reconcile.Result{}, nil
 }

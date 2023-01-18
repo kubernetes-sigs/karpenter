@@ -16,13 +16,14 @@ package termination
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	set "github.com/deckarep/golang-set"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/api/policy/v1beta1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -37,6 +38,26 @@ const (
 	evictionQueueBaseDelay = 100 * time.Millisecond
 	evictionQueueMaxDelay  = 10 * time.Second
 )
+
+type NodeDrainError struct {
+	Err error
+}
+
+func (e *NodeDrainError) Error() string {
+	return e.Err.Error()
+}
+
+func NewNodeDrainError(err error) *NodeDrainError {
+	return &NodeDrainError{Err: err}
+}
+
+func IsNodeDrainError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var nodeDrainErr *NodeDrainError
+	return errors.As(err, &nodeDrainErr)
+}
 
 type EvictionQueue struct {
 	workqueue.RateLimitingInterface
@@ -97,10 +118,10 @@ func (e *EvictionQueue) evict(ctx context.Context, nn types.NamespacedName) bool
 	})
 	// status codes for the eviction API are defined here:
 	// https://kubernetes.io/docs/concepts/scheduling-eviction/api-eviction/#how-api-initiated-eviction-works
-	if errors.IsNotFound(err) { // 404
+	if apierrors.IsNotFound(err) { // 404
 		return true
 	}
-	if errors.IsTooManyRequests(err) { // 429 - PDB violation
+	if apierrors.IsTooManyRequests(err) { // 429 - PDB violation
 		e.recorder.Publish(events.NodeFailedToDrain(&v1.Node{ObjectMeta: metav1.ObjectMeta{
 			Name:      nn.Name,
 			Namespace: nn.Namespace,

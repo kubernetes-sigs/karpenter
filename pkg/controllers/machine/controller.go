@@ -44,6 +44,10 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/result"
 )
 
+type machineReconciler interface {
+	Reconcile(context.Context, *v1alpha5.Machine) (reconcile.Result, error)
+}
+
 var _ corecontroller.FinalizingTypedController[*v1alpha5.Machine] = (*Controller)(nil)
 
 // Controller is a Machine Controller
@@ -65,9 +69,9 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 	return corecontroller.Typed[*v1alpha5.Machine](kubeClient, &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
+		recorder:      recorder,
+		terminator:    terminator,
 
-		recorder:       recorder,
-		terminator:     terminator,
 		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider},
 		registration:   &Registration{kubeClient: kubeClient},
 		initialization: &Initialization{kubeClient: kubeClient},
@@ -93,9 +97,7 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 	stored = machine.DeepCopy()
 	var results []reconcile.Result
 	var errs error
-	for _, reconciler := range []interface {
-		Reconcile(context.Context, *v1alpha5.Machine) (reconcile.Result, error)
-	}{
+	for _, reconciler := range []machineReconciler{
 		c.launch,
 		c.registration,
 		c.initialization,
@@ -151,7 +153,7 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 			handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
 				node := o.(*v1.Node)
 				machineList := &v1alpha5.MachineList{}
-				if err := c.kubeClient.List(ctx, machineList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}, client.Limit(1)); err != nil {
+				if err := c.kubeClient.List(ctx, machineList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
 					return []reconcile.Request{}
 				}
 				return lo.Map(machineList.Items, func(m v1alpha5.Machine, _ int) reconcile.Request {
@@ -161,7 +163,7 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 				})
 			}),
 		).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 100}))
+		WithOptions(controller.Options{MaxConcurrentReconciles: 50})) // higher concurrency limit since we want fast reaction to node syncing and launch
 }
 
 func (c *Controller) cleanupNodeForMachine(ctx context.Context, machine *v1alpha5.Machine) error {

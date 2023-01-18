@@ -16,6 +16,7 @@ package test
 
 import (
 	"context"
+	"log"
 	"os"
 	"strings"
 
@@ -102,6 +103,9 @@ func NewEnvironment(scheme *runtime.Scheme, options ...functional.Option[Environ
 		go func() {
 			lo.Must0(cache.Start(ctx))
 		}()
+		if !cache.WaitForCacheSync(ctx) {
+			log.Fatalf("cache failed to sync")
+		}
 	}
 	return &Environment{
 		Environment:         environment,
