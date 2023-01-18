@@ -48,13 +48,13 @@ type Context struct {
 
 // CloudProvider interface is implemented by cloud providers to support provisioning.
 type CloudProvider interface {
-	// Create a node given constraints and instance type options. This API uses a
-	// callback pattern to enable cloudproviders to batch capacity creation
-	// requests. The callback must be called with a theoretical node object that
-	// is fulfilled by the cloud providers capacity creation request.
-	Create(context.Context, *v1alpha5.Machine) (*v1.Node, error)
-	// Delete node in cloudprovider
+	// Create launches a machine with the given resource requests and requirements and returns a hydrated
+	// machine back with resolved machine labels for the launched machine
+	Create(context.Context, *v1alpha5.Machine) (*v1alpha5.Machine, error)
+	// Delete removes a machine from the cloudprovider by its machine name
 	Delete(context.Context, *v1alpha5.Machine) error
+	// Get retrieves a machine from the cloudprovider by its machine name
+	Get(context.Context, string, string) (*v1alpha5.Machine, error)
 	// GetInstanceTypes returns instance types supported by the cloudprovider.
 	// Availability of types or zone may vary by provisioner or over time.  Regardless of
 	// availability, the GetInstanceTypes method should always return all instance types,
