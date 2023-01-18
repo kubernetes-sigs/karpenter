@@ -165,13 +165,17 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 	return nil
 }
 
-func (c *Cluster) DeleteNode(nodeName string) {
+func (c *Cluster) DeleteNode(name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if id := c.nameToProviderID[nodeName]; id != "" {
+	c.cleanupNode(name)
+}
+
+func (c *Cluster) cleanupNode(name string) {
+	if id, ok := c.nameToProviderID[name]; ok {
 		delete(c.nodes, id)
-		delete(c.nameToProviderID, nodeName)
+		delete(c.nameToProviderID, name)
 		c.RecordConsolidationChange()
 	}
 }
@@ -249,6 +253,12 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *
 		c.populateVolumeLimits(ctx, n),
 	); err != nil {
 		return nil, err
+	}
+	// Cleanup the old node with its old providerID if its providerID changes
+	// This can happen since nodes don't get created with providerIDs. Rather, CCM picks up the
+	// created node and injects the providerID into the spec.providerID
+	if id, ok := c.nameToProviderID[node.Name]; ok && id != node.Spec.ProviderID {
+		c.cleanupNode(node.Name)
 	}
 	c.triggerConsolidationOnChange(oldNode, n)
 	return n, nil
