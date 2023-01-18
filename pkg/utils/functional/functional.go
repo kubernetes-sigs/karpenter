@@ -64,3 +64,13 @@ func Unmarshal[T any](raw []byte) (*T, error) {
 	}
 	return &t, nil
 }
+
+func FilterMap[K comparable, V any](m map[K]V, f func(K, V) bool) map[K]V {
+	ret := map[K]V{}
+	for k, v := range m {
+		if f(k, v) {
+			ret[k] = v
+		}
+	}
+	return ret
+}
