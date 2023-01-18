@@ -165,19 +165,18 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 	return nil
 }
 
-func (c *Cluster) DeleteNode(nodeName string) {
+func (c *Cluster) DeleteNode(name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if id := c.nameToProviderID[nodeName]; id != "" {
-		delete(c.nodes, id)
-		delete(c.nameToProviderID, nodeName)
-		c.RecordConsolidationChange()
-	}
+	c.cleanupNode(name)
 }
 
 // UpdatePod is called every time the pod is reconciled
 func (c *Cluster) UpdatePod(ctx context.Context, pod *v1.Pod) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	var err error
 	if podutils.IsTerminal(pod) {
 		c.updateNodeUsageFromPodCompletion(client.ObjectKeyFromObject(pod))
@@ -190,6 +189,9 @@ func (c *Cluster) UpdatePod(ctx context.Context, pod *v1.Pod) error {
 
 // DeletePod is called when the pod has been deleted
 func (c *Cluster) DeletePod(podKey types.NamespacedName) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	c.antiAffinityPods.Delete(podKey)
 	c.updateNodeUsageFromPodCompletion(podKey)
 	c.RecordConsolidationChange()
@@ -224,6 +226,11 @@ func (c *Cluster) Reset() {
 	c.antiAffinityPods = sync.Map{}
 }
 
+// WARNING
+// Everything under this section of code assumes that you have already held a lock when you are calling into these functions
+// and explicitly modifying the cluster state. If you do not hold the cluster state lock before calling any of these helpers
+// you will hit race conditions and data corruption
+
 func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *Node) (*Node, error) {
 	if oldNode == nil {
 		oldNode = &Node{
@@ -250,8 +257,22 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *
 	); err != nil {
 		return nil, err
 	}
+	// Cleanup the old node with its old providerID if its providerID changes
+	// This can happen since nodes don't get created with providerIDs. Rather, CCM picks up the
+	// created node and injects the providerID into the spec.providerID
+	if id, ok := c.nameToProviderID[node.Name]; ok && id != node.Spec.ProviderID {
+		c.cleanupNode(node.Name)
+	}
 	c.triggerConsolidationOnChange(oldNode, n)
 	return n, nil
+}
+
+func (c *Cluster) cleanupNode(name string) {
+	if id, ok := c.nameToProviderID[name]; ok {
+		delete(c.nodes, id)
+		delete(c.nameToProviderID, name)
+		c.RecordConsolidationChange()
+	}
 }
 
 func (c *Cluster) populateStartupTaints(ctx context.Context, n *Node) error {
@@ -315,7 +336,7 @@ func (c *Cluster) populateResourceRequests(ctx context.Context, n *Node) error {
 		}
 		c.cleanupOldBindings(pod)
 		n.updateForPod(ctx, pod)
-		c.bindings[client.ObjectKeyFromObject(pod)] = pod.Spec.NodeName // TODO @joinnis: Potentially change this later
+		c.bindings[client.ObjectKeyFromObject(pod)] = pod.Spec.NodeName
 	}
 	return nil
 }
@@ -327,9 +348,6 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 	if pod.Spec.NodeName == "" {
 		return nil
 	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	n, ok := c.nodes[c.nameToProviderID[pod.Spec.NodeName]]
 	if !ok {
@@ -343,9 +361,6 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 }
 
 func (c *Cluster) updateNodeUsageFromPodCompletion(podKey types.NamespacedName) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	nodeName, bindingKnown := c.bindings[podKey]
 	if !bindingKnown {
 		// we didn't think the pod was bound, so we weren't tracking it and don't need to do anything
