@@ -612,6 +612,22 @@ var _ = Describe("Node Resource Level", func() {
 		time.Sleep(time.Second * 6) // past 10s, node should no longer be nominated
 		Expect(ExpectStateNodeExists(node).Nominated()).To(BeFalse())
 	})
+	It("should handle a node changing from no providerID to registering a providerID", func() {
+		node := test.Node()
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		ExpectStateNodeCount("==", 1)
+		ExpectStateNodeExists(node)
+
+		// Change the providerID; this mocks CCM adding the providerID onto the node after registration
+		node.Spec.ProviderID = fmt.Sprintf("fake://%s", node.Name)
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		ExpectStateNodeCount("==", 1)
+		ExpectStateNodeExists(node)
+	})
 })
 
 var _ = Describe("Pod Anti-Affinity", func() {
@@ -801,6 +817,16 @@ var _ = Describe("Provisioner Spec Updates", func() {
 		Expect(oldConsolidationState).To(BeNumerically("<", cluster.ClusterConsolidationState()))
 	})
 })
+
+func ExpectStateNodeCount(comparator string, count int) int {
+	c := 0
+	cluster.ForEachNode(func(n *state.Node) bool {
+		c++
+		return true
+	})
+	ExpectWithOffset(1, count).To(BeNumerically(comparator, count))
+	return c
+}
 
 func ExpectStateNodeExistsWithOffset(offset int, node *v1.Node) *state.Node {
 	var ret *state.Node

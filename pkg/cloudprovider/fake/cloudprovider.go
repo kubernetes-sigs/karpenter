@@ -32,6 +32,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/test"
+	"github.com/aws/karpenter-core/pkg/utils/functional"
+	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
 var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)
@@ -62,12 +64,12 @@ func (c *CloudProvider) Reset() {
 	c.AllowedCreateCalls = math.MaxInt
 }
 
-func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (*v1.Node, error) {
+func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (*v1alpha5.Machine, error) {
 	c.mu.Lock()
 	c.CreateCalls = append(c.CreateCalls, machine)
 	if len(c.CreateCalls) > c.AllowedCreateCalls {
 		c.mu.Unlock()
-		return &v1.Node{}, fmt.Errorf("erroring as number of AllowedCreateCalls has been exceeded")
+		return &v1alpha5.Machine{}, fmt.Errorf("erroring as number of AllowedCreateCalls has been exceeded")
 	}
 	c.mu.Unlock()
 
@@ -101,16 +103,22 @@ func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (
 		}
 	}
 	name := test.RandomName()
-	n := &v1.Node{
+	return &v1alpha5.Machine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   name,
 			Labels: labels,
 		},
-		Spec: v1.NodeSpec{
-			ProviderID: fmt.Sprintf("fake://%s", name),
+		Spec: *machine.Spec.DeepCopy(),
+		Status: v1alpha5.MachineStatus{
+			ProviderID:  fmt.Sprintf("fake://%s", name),
+			Capacity:    functional.FilterMap(instanceType.Capacity, func(_ v1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
+			Allocatable: functional.FilterMap(instanceType.Allocatable(), func(_ v1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
 		},
-	}
-	return n, nil
+	}, nil
+}
+
+func (c *CloudProvider) Get(context.Context, string, string) (*v1alpha5.Machine, error) {
+	return nil, nil
 }
 
 func (c *CloudProvider) GetInstanceTypes(_ context.Context, _ *v1alpha5.Provisioner) ([]*cloudprovider.InstanceType, error) {

@@ -145,6 +145,7 @@ func (v *VolumeTopology) getPersistentVolumeClaim(ctx context.Context, pod *v1.P
 func (v *VolumeTopology) validatePersistentVolumeClaims(ctx context.Context, pod *v1.Pod) error {
 	for _, volume := range pod.Spec.Volumes {
 		var storageClassName *string
+		var volumeName string
 		if volume.PersistentVolumeClaim != nil {
 			// validate the PVC if it exists
 			pvc, err := v.getPersistentVolumeClaim(ctx, pod, volume)
@@ -154,19 +155,41 @@ func (v *VolumeTopology) validatePersistentVolumeClaims(ctx context.Context, pod
 			// may not have a PVC
 			if pvc == nil {
 				continue
-
 			}
+
 			storageClassName = pvc.Spec.StorageClassName
+			volumeName = pvc.Spec.VolumeName
 		} else if volume.Ephemeral != nil {
 			storageClassName = volume.Ephemeral.VolumeClaimTemplate.Spec.StorageClassName
 		}
 
-		// we have a storage class name, so ensure that it exists
-		if storageClassName != nil && ptr.StringValue(storageClassName) != "" {
-			storageClass := &storagev1.StorageClass{}
-			if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: ptr.StringValue(storageClassName)}, storageClass); err != nil {
-				return err
-			}
+		if err := v.validateStorageClass(ctx, storageClassName); err != nil {
+			return err
+		}
+		if err := v.validateVolume(ctx, volumeName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (v *VolumeTopology) validateVolume(ctx context.Context, volumeName string) error {
+	// we have a volume name, so ensure that it exists
+	if volumeName != "" {
+		pv := &v1.PersistentVolume{}
+		if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: volumeName}, pv); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (v *VolumeTopology) validateStorageClass(ctx context.Context, storageClassName *string) error {
+	// we have a storage class name, so ensure that it exists
+	if ptr.StringValue(storageClassName) != "" {
+		storageClass := &storagev1.StorageClass{}
+		if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: ptr.StringValue(storageClassName)}, storageClass); err != nil {
+			return err
 		}
 	}
 	return nil
