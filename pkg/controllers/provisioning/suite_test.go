@@ -357,6 +357,586 @@ var _ = Describe("Provisioning", func() {
 		})
 	})
 	Context("Daemonsets and Node Overhead", func() {
+		It("should account for LimitRange Containers Default", func() {
+			ExpectApplied(ctx, env.Client, test.Provisioner(), test.DaemonSet(),
+				&v1.LimitRange{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "limitrange",
+						Namespace: "default"},
+					Spec: v1.LimitRangeSpec{
+
+						Limits: []v1.LimitRangeItem{{
+							Type: v1.LimitTypeContainer,
+							Default: v1.ResourceList{
+								v1.ResourceCPU:    resource.MustParse("1"),
+								v1.ResourceMemory: resource.MustParse("1Gi"),
+							}}},
+					},
+				},
+			)
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi")}},
+				},
+			))[0]
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
+		})
+		It("should account for LimitRange Containers DefaultRequest", func() {
+			ExpectApplied(ctx, env.Client, test.Provisioner(), test.DaemonSet(),
+				&v1.LimitRange{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "limitrange",
+						Namespace: "default"},
+					Spec: v1.LimitRangeSpec{
+
+						Limits: []v1.LimitRangeItem{{
+							Type: v1.LimitTypeContainer,
+							DefaultRequest: v1.ResourceList{
+								v1.ResourceCPU:    resource.MustParse("1"),
+								v1.ResourceMemory: resource.MustParse("1Gi"),
+							}}},
+					},
+				},
+			)
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi")}},
+				},
+			))[0]
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
+		})
+		It("should account for LimitRange containers beyond maximum limit", func() {
+			ExpectApplied(ctx, env.Client, test.Provisioner(), test.DaemonSet(
+				test.DaemonSetOptions{PodOptions: test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{Limits: v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+				}}),
+				&v1.LimitRange{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "limitrange",
+						Namespace: "default",
+					},
+					Spec: v1.LimitRangeSpec{
+						Limits: []v1.LimitRangeItem{{
+							Type: v1.LimitTypeContainer,
+							Max: v1.ResourceList{
+								v1.ResourceCPU:    resource.MustParse("1"),
+								v1.ResourceMemory: resource.MustParse("1Gi"),
+							}}},
+					},
+				},
+			)
+
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi")}},
+				},
+			))[0]
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("2")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("2Gi")))
+		})
+		It("should account for LimitRange containers within maximum limit", func() {
+			ExpectApplied(ctx, env.Client, test.Provisioner(), test.DaemonSet(
+				test.DaemonSetOptions{PodOptions: test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{Limits: v1.ResourceList{v1.ResourceCPU: resource.MustParse("900m"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+				}}),
+				&v1.LimitRange{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "limitrange",
+						Namespace: "default",
+					},
+					Spec: v1.LimitRangeSpec{
+						Limits: []v1.LimitRangeItem{{
+							Type: v1.LimitTypeContainer,
+							Max: v1.ResourceList{
+								v1.ResourceCPU:    resource.MustParse("1"),
+								v1.ResourceMemory: resource.MustParse("1Gi"),
+							}}},
+					},
+				},
+			)
+
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi")}},
+				},
+			))[0]
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
+		})
+		It("should account for LimitRange Containers beyond minimum limit", func() {
+			ExpectApplied(ctx, env.Client, test.Provisioner(), test.DaemonSet(
+				test.DaemonSetOptions{PodOptions: test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{Limits: v1.ResourceList{v1.ResourceCPU: resource.MustParse("900m"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+				}}),
+				&v1.LimitRange{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "limitrange",
+						Namespace: "default",
+					},
+					Spec: v1.LimitRangeSpec{
+						Limits: []v1.LimitRangeItem{{
+							Type: v1.LimitTypeContainer,
+							Min: v1.ResourceList{
+								v1.ResourceCPU:    resource.MustParse("1"),
+								v1.ResourceMemory: resource.MustParse("1Gi"),
+							}}},
+					},
+				},
+			)
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi")}},
+				},
+			))[0]
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("2")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("2Gi")))
+		})
+		It("should account for LimitRange Containers within minimum limit", func() {
+			ExpectApplied(ctx, env.Client, test.Provisioner(), test.DaemonSet(
+				test.DaemonSetOptions{PodOptions: test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{Limits: v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+				}}),
+				&v1.LimitRange{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "limitrange",
+						Namespace: "default",
+					},
+					Spec: v1.LimitRangeSpec{
+						Limits: []v1.LimitRangeItem{{
+							Type: v1.LimitTypeContainer,
+							Min: v1.ResourceList{
+								v1.ResourceCPU:    resource.MustParse("1"),
+								v1.ResourceMemory: resource.MustParse("1Gi"),
+							}}},
+					},
+				},
+			)
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi")}},
+				},
+			))[0]
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
+		})
+		It("should account for LimitRange Containers beyond LimitRequestRatio", func() {
+			ExpectApplied(ctx, env.Client, test.Provisioner(), test.DaemonSet(
+				test.DaemonSetOptions{PodOptions: test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("5"),
+							v1.ResourceMemory: resource.MustParse("1Gi"),
+						},
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("2"),
+							v1.ResourceMemory: resource.MustParse("1Gi"),
+						}},
+				}}),
+				&v1.LimitRange{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "limitrange",
+						Namespace: "default"},
+					Spec: v1.LimitRangeSpec{
+						Limits: []v1.LimitRangeItem{{
+							Type: v1.LimitTypeContainer,
+							MaxLimitRequestRatio: v1.ResourceList{
+								v1.ResourceCPU:    resource.MustParse("1"),
+								v1.ResourceMemory: resource.MustParse("1Gi"),
+							}}},
+					},
+				},
+			)
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi")},
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi")}},
+				},
+			))[0]
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("2")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("2Gi")))
+		})
+		It("should account for LimitRange Containers within LimitRequestRatio", func() {
+			ExpectApplied(ctx, env.Client, test.Provisioner(), test.DaemonSet(
+				test.DaemonSetOptions{PodOptions: test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("2"),
+							v1.ResourceMemory: resource.MustParse("1Gi"),
+						},
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi"),
+						}},
+				}}),
+				&v1.LimitRange{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "limitrange",
+						Namespace: "default"},
+					Spec: v1.LimitRangeSpec{
+						Limits: []v1.LimitRangeItem{{
+							Type: v1.LimitTypeContainer,
+							MaxLimitRequestRatio: v1.ResourceList{
+								v1.ResourceCPU:    resource.MustParse("1"),
+								v1.ResourceMemory: resource.MustParse("1Gi"),
+							}}},
+					},
+				},
+			)
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi")},
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi")}},
+				},
+			))[0]
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
+		})
+		It("should account for LimitRange Pod beyond maximum limit", func() {
+			daemonSet := test.DaemonSet(test.DaemonSetOptions{PodOptions: test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Limits: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+			}})
+
+			daemonSet.Spec.Template.Spec.Containers = append(daemonSet.Spec.Template.Spec.Containers, v1.Container{
+				Name:      test.RandomName(),
+				Image:     "public.ecr.aws/eks-distro/kubernetes/pause:3.2",
+				Resources: v1.ResourceRequirements{Limits: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+			})
+
+			ExpectApplied(ctx, env.Client, test.Provisioner(), daemonSet,
+				&v1.LimitRange{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "limitrange",
+						Namespace: "default"},
+					Spec: v1.LimitRangeSpec{
+						Limits: []v1.LimitRangeItem{{
+							Type: v1.LimitTypePod,
+							Max: v1.ResourceList{
+								v1.ResourceCPU:    resource.MustParse("1"),
+								v1.ResourceMemory: resource.MustParse("1Gi"),
+							}}},
+					},
+				},
+			)
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi")},
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi")}},
+				},
+			))[0]
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("2")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("2Gi")))
+		})
+		It("should account for LimitRange Pod beyond within maximum limit", func() {
+			daemonSet := test.DaemonSet(test.DaemonSetOptions{PodOptions: test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Limits: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+			}})
+
+			daemonSet.Spec.Template.Spec.Containers = append(daemonSet.Spec.Template.Spec.Containers, v1.Container{
+				Name:      test.RandomName(),
+				Image:     "public.ecr.aws/eks-distro/kubernetes/pause:3.2",
+				Resources: v1.ResourceRequirements{Limits: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+			})
+
+			ExpectApplied(ctx, env.Client, test.Provisioner(), daemonSet,
+				&v1.LimitRange{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "limitrange",
+						Namespace: "default"},
+					Spec: v1.LimitRangeSpec{
+						Limits: []v1.LimitRangeItem{{
+							Type: v1.LimitTypePod,
+							Max: v1.ResourceList{
+								v1.ResourceCPU:    resource.MustParse("2"),
+								v1.ResourceMemory: resource.MustParse("2Gi"),
+							}}},
+					},
+				},
+			)
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi")},
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi")}},
+				},
+			))[0]
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
+		})
+		It("should account for LimitRange Pod beyond minimum limit", func() {
+			daemonSet := test.DaemonSet(test.DaemonSetOptions{PodOptions: test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Limits: v1.ResourceList{v1.ResourceCPU: resource.MustParse("450m"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+			}})
+
+			daemonSet.Spec.Template.Spec.Containers = append(daemonSet.Spec.Template.Spec.Containers, v1.Container{
+				Name:      test.RandomName(),
+				Image:     "public.ecr.aws/eks-distro/kubernetes/pause:3.2",
+				Resources: v1.ResourceRequirements{Limits: v1.ResourceList{v1.ResourceCPU: resource.MustParse("450m"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+			})
+
+			ExpectApplied(ctx, env.Client, test.Provisioner(), daemonSet,
+				&v1.LimitRange{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "limitrange",
+						Namespace: "default"},
+					Spec: v1.LimitRangeSpec{
+						Limits: []v1.LimitRangeItem{{
+							Type: v1.LimitTypePod,
+							Min: v1.ResourceList{
+								v1.ResourceCPU:    resource.MustParse("1"),
+								v1.ResourceMemory: resource.MustParse("1Gi"),
+							}}},
+					},
+				},
+			)
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi")},
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi")}},
+				},
+			))[0]
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("2")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("2Gi")))
+		})
+		It("should account for LimitRange Pod within minimum limit", func() {
+			daemonSet := test.DaemonSet(test.DaemonSetOptions{PodOptions: test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Limits: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+			}})
+
+			daemonSet.Spec.Template.Spec.Containers = append(daemonSet.Spec.Template.Spec.Containers, v1.Container{
+				Name:      test.RandomName(),
+				Image:     "public.ecr.aws/eks-distro/kubernetes/pause:3.2",
+				Resources: v1.ResourceRequirements{Limits: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+			})
+
+			ExpectApplied(ctx, env.Client, test.Provisioner(), daemonSet,
+				&v1.LimitRange{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "limitrange",
+						Namespace: "default"},
+					Spec: v1.LimitRangeSpec{
+						Limits: []v1.LimitRangeItem{{
+							Type: v1.LimitTypePod,
+							Min: v1.ResourceList{
+								v1.ResourceCPU:    resource.MustParse("1"),
+								v1.ResourceMemory: resource.MustParse("1Gi"),
+							}}},
+					},
+				},
+			)
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi")},
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi")}},
+				},
+			))[0]
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
+		})
+		It("should account for LimitRange Pod beyond LimitRequestRatio", func() {
+			daemonSet := test.DaemonSet(test.DaemonSetOptions{PodOptions: test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{
+					Limits: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("2"),
+						v1.ResourceMemory: resource.MustParse("1Gi"),
+					},
+					Requests: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("1"),
+						v1.ResourceMemory: resource.MustParse("1Gi"),
+					},
+				},
+			}})
+
+			daemonSet.Spec.Template.Spec.Containers = append(daemonSet.Spec.Template.Spec.Containers, v1.Container{
+				Name:  test.RandomName(),
+				Image: "public.ecr.aws/eks-distro/kubernetes/pause:3.2",
+				Resources: v1.ResourceRequirements{
+					Limits: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("2"),
+						v1.ResourceMemory: resource.MustParse("1Gi"),
+					}, Requests: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("1"),
+						v1.ResourceMemory: resource.MustParse("1Gi"),
+					},
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, test.Provisioner(), daemonSet,
+				&v1.LimitRange{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "limitrange",
+						Namespace: "default"},
+					Spec: v1.LimitRangeSpec{
+						Limits: []v1.LimitRangeItem{{
+							Type: v1.LimitTypePod,
+							MaxLimitRequestRatio: v1.ResourceList{
+								v1.ResourceCPU:    resource.MustParse("1"),
+								v1.ResourceMemory: resource.MustParse("1Gi"),
+							}}},
+					},
+				},
+			)
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi")},
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi")}},
+				},
+			))[0]
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("2")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("2Gi")))
+		})
+		It("should account for LimitRange Pod within LimitRequestRatio", func() {
+			daemonSet := test.DaemonSet(test.DaemonSetOptions{PodOptions: test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{
+					Limits: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("1"),
+						v1.ResourceMemory: resource.MustParse("1Gi"),
+					},
+					Requests: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("1"),
+						v1.ResourceMemory: resource.MustParse("1Gi"),
+					},
+				},
+			}})
+
+			daemonSet.Spec.Template.Spec.Containers = append(daemonSet.Spec.Template.Spec.Containers, v1.Container{
+				Name:  test.RandomName(),
+				Image: "public.ecr.aws/eks-distro/kubernetes/pause:3.2",
+				Resources: v1.ResourceRequirements{
+					Limits: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("1"),
+						v1.ResourceMemory: resource.MustParse("1Gi"),
+					}, Requests: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("1"),
+						v1.ResourceMemory: resource.MustParse("1Gi"),
+					},
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, test.Provisioner(), daemonSet,
+				&v1.LimitRange{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "limitrange",
+						Namespace: "default"},
+					Spec: v1.LimitRangeSpec{
+						Limits: []v1.LimitRangeItem{{
+							Type: v1.LimitTypePod,
+							MaxLimitRequestRatio: v1.ResourceList{
+								v1.ResourceCPU:    resource.MustParse("1"),
+								v1.ResourceMemory: resource.MustParse("1Gi"),
+							}}},
+					},
+				},
+			)
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi")},
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceMemory: resource.MustParse("1Gi")}},
+				},
+			))[0]
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
+		})
 		It("should account for overhead", func() {
 			ExpectApplied(ctx, env.Client, test.Provisioner(), test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{

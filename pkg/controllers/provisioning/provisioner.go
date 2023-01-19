@@ -42,6 +42,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/utils/functional"
 	"github.com/aws/karpenter-core/pkg/utils/pretty"
+	"github.com/aws/karpenter-core/pkg/utils/resources"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	scheduler "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
@@ -363,12 +364,183 @@ func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*v1.Pod, error) {
 	if err := p.kubeClient.List(ctx, daemonSetList); err != nil {
 		return nil, fmt.Errorf("listing daemonsets, %w", err)
 	}
+
+	limitRangeList := &v1.LimitRangeList{}
+	if err := p.kubeClient.List(ctx, limitRangeList); err != nil {
+		return nil, fmt.Errorf("listing daemonsets, %w", err)
+	}
+
+	limitRageMap := map[string][]v1.LimitRange{}
+	for _, lr := range limitRangeList.Items {
+		limitRageMap[lr.Namespace] = append(limitRageMap[lr.Namespace], lr)
+	}
+
 	var ret []*v1.Pod
 	for _, daemonSet := range daemonSetList.Items {
-		pod := &v1.Pod{Spec: daemonSet.Spec.Template.Spec}
-		ret = append(ret, pod)
+		pod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: daemonSet.Namespace},
+			Spec: *daemonSet.Spec.Template.Spec.DeepCopy()}
+		if applyLR(limitRageMap, pod) == nil {
+			ret = append(ret, pod)
+		}
 	}
 	return ret, nil
+}
+
+// Check and apply limitRange configuration on DaemonSet
+func applyLR(limitRanges map[string][]v1.LimitRange, pod *v1.Pod) error {
+	namespaceedLimitRanges, namespaceExists := limitRanges[pod.ObjectMeta.Namespace]
+	if !namespaceExists {
+		return nil
+	}
+
+	// LimitRanges for Containers
+	for _, lr := range namespaceedLimitRanges {
+		for _, limtrangeItem := range lr.Spec.Limits {
+			if limtrangeItem.Type == v1.LimitTypePod {
+				if err := applyLRTypePod(lr.Name, limtrangeItem, pod); err != nil {
+					return err
+				}
+			} else {
+				if err := applyLRTypeContainer(lr.Name, limtrangeItem, pod); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// Limit Ranges for Pods
+func applyLRTypePod(name string, LRItem v1.LimitRangeItem, pod *v1.Pod) error {
+	podTotalLimits := resources.LimitsForPods(pod)
+	podTotalRequests := resources.RequestsForPods(pod)
+	delete(podTotalLimits, "pods")
+	delete(podTotalRequests, "pods")
+
+	if !resources.Fits(podTotalLimits, LRItem.Max) && LRItem.Max != nil {
+		return fmt.Errorf("the pod limits are not within the Limit Range Maximum (%s)", name)
+	}
+	if !resourceLRGreater(podTotalLimits, LRItem.Min) && LRItem.Min != nil {
+		return fmt.Errorf("the pod limits are not within the Limit Range Minimum (%s)", name)
+	}
+	if !resourceLRRatio(podTotalLimits, podTotalRequests, LRItem.MaxLimitRequestRatio) && LRItem.MaxLimitRequestRatio != nil {
+		return fmt.Errorf("the pod limits are not within the Limit Request Ratio (%s)", name)
+	}
+
+	return nil
+}
+
+// Limit Ranges for Containers
+func applyLRTypeContainer(name string, LRItem v1.LimitRangeItem, pod *v1.Pod) error {
+	if !checkLRMax(LRItem.Max, pod) {
+		return fmt.Errorf("the pod container limits are not within the Limit Range Maximum (%s)", name)
+	}
+	if !checkLRMin(LRItem.Min, pod) {
+		return fmt.Errorf("the pod container limits are not within the Limit Range Minimum (%s)", name)
+	}
+	if !checkLRMaxLimitRequestRatio(LRItem.MaxLimitRequestRatio, pod) {
+		return fmt.Errorf("the pod container limits are not within the Limit Request Ratio (%s)", name)
+	}
+	applyLRDefualt(LRItem.Default, pod)
+	applyLRDefualtRequest(LRItem.DefaultRequest, pod)
+
+	return nil
+}
+
+func applyLRDefualt(limitrangeDefault v1.ResourceList, pod *v1.Pod) {
+	if limitrangeDefault == nil {
+		return
+	}
+
+	for index := range pod.Spec.Containers {
+		if pod.Spec.Containers[index].Resources.Limits == nil {
+			pod.Spec.Containers[index].Resources.Limits = limitrangeDefault.DeepCopy()
+		}
+	}
+}
+
+func applyLRDefualtRequest(limitrangeDefaultRequest v1.ResourceList, pod *v1.Pod) {
+	if limitrangeDefaultRequest == nil {
+		return
+	}
+
+	for index := range pod.Spec.Containers {
+		if pod.Spec.Containers[index].Resources.Requests == nil {
+			pod.Spec.Containers[index].Resources.Requests = limitrangeDefaultRequest.DeepCopy()
+		}
+	}
+}
+
+func checkLRMax(limitrangeMax v1.ResourceList, pod *v1.Pod) bool {
+	if limitrangeMax == nil {
+		return true
+	}
+
+	for index := range pod.Spec.Containers {
+		if pod.Spec.Containers[index].Resources.Limits != nil {
+			if !resources.Fits(pod.Spec.Containers[index].Resources.Limits, limitrangeMax) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func checkLRMin(limitrangeMin v1.ResourceList, pod *v1.Pod) bool {
+	if limitrangeMin == nil {
+		return true
+	}
+
+	for index := range pod.Spec.Containers {
+		if pod.Spec.Containers[index].Resources.Limits != nil {
+			if !resourceLRGreater(pod.Spec.Containers[index].Resources.Limits, limitrangeMin) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func checkLRMaxLimitRequestRatio(limitrangeRatio v1.ResourceList, pod *v1.Pod) bool {
+	if limitrangeRatio == nil {
+		return true
+	}
+
+	for index := range pod.Spec.Containers {
+		if pod.Spec.Containers[index].Resources.Limits != nil &&
+			pod.Spec.Containers[index].Resources.Requests != nil {
+			if !resourceLRRatio(
+				pod.Spec.Containers[index].Resources.Limits,
+				pod.Spec.Containers[index].Resources.Requests,
+				limitrangeRatio) {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+func resourceLRGreater(limitResources v1.ResourceList, limitRange v1.ResourceList) bool {
+	for resourceName, quantity := range limitResources {
+		if resources.Cmp(quantity, limitRange[resourceName]) < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func resourceLRRatio(limitResources v1.ResourceList, requestResources v1.ResourceList, ratio v1.ResourceList) bool {
+	diffResource := resources.Subtract(limitResources, requestResources)
+	for resourceName, quantity := range diffResource {
+		ratioQuantity := ratio[resourceName]
+		if int(quantity.Value()) > int(ratioQuantity.Value()) {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *Provisioner) Validate(ctx context.Context, pod *v1.Pod) error {
