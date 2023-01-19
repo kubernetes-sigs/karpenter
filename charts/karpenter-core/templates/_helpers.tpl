@@ -64,15 +64,6 @@ Create the name of the service account to use
 {{- end }}
 {{- end }}
 
-{{/* Get PodDisruptionBudget API Version */}}
-{{- define "karpenter.pdb.apiVersion" -}}
-{{- if and (.Capabilities.APIVersions.Has "policy/v1") (semverCompare ">= 1.21-0" .Capabilities.KubeVersion.Version) -}}
-{{- print "policy/v1" -}}
-{{- else -}}
-{{- print "policy/v1beta1" -}}
-{{- end -}}
-{{- end -}}
-
 {{/*
 Flatten Values Map using "." syntax
 */}}
@@ -92,4 +83,26 @@ Flatten Values Map using "." syntax
   {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+Flatten the stdout logging outputs from args provided
+*/}}
+{{- define "karpenter.controller.outputPathsList" -}}
+{{ $paths := list -}}
+{{- range .Values.controller.outputPaths -}}
+    {{- $paths = printf "%s" . | quote  | append $paths -}}
+{{- end -}}
+{{ $paths | join ", " }}
+{{- end -}}
+
+{{/*
+Flatten the stderr logging outputs from args provided
+*/}}
+{{- define "karpenter.controller.errorOutputPathsList" -}}
+{{ $paths := list -}}
+{{- range .Values.controller.errorOutputPaths -}}
+    {{- $paths = printf "%s" . | quote  | append $paths -}}
+{{- end -}}
+{{ $paths | join ", " }}
 {{- end -}}
