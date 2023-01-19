@@ -397,13 +397,13 @@ func applyLR(limitRanges map[string][]v1.LimitRange, pod *v1.Pod) error {
 
 	// LimitRanges for Containers
 	for _, lr := range namespaceedLimitRanges {
-		for _, limtrangeItem := range lr.Spec.Limits {
-			if limtrangeItem.Type == v1.LimitTypePod {
-				if err := applyLRTypePod(lr.Name, limtrangeItem, pod); err != nil {
+		for _, limitrangeItem := range lr.Spec.Limits {
+			if limitrangeItem.Type == v1.LimitTypePod {
+				if err := applyLRTypePod(lr.Name, limitrangeItem, pod); err != nil {
 					return err
 				}
 			} else {
-				if err := applyLRTypeContainer(lr.Name, limtrangeItem, pod); err != nil {
+				if err := applyLRTypeContainer(lr.Name, limitrangeItem, pod); err != nil {
 					return err
 				}
 			}
@@ -443,13 +443,13 @@ func applyLRTypeContainer(name string, LRItem v1.LimitRangeItem, pod *v1.Pod) er
 	if !checkLRMaxLimitRequestRatio(LRItem.MaxLimitRequestRatio, pod) {
 		return fmt.Errorf("the pod container limits are not within the Limit Request Ratio (%s)", name)
 	}
-	applyLRDefualt(LRItem.Default, pod)
-	applyLRDefualtRequest(LRItem.DefaultRequest, pod)
+	applyLRDefault(LRItem.Default, pod)
+	applyLRDefaultRequest(LRItem.DefaultRequest, pod)
 
 	return nil
 }
 
-func applyLRDefualt(limitrangeDefault v1.ResourceList, pod *v1.Pod) {
+func applyLRDefault(limitrangeDefault v1.ResourceList, pod *v1.Pod) {
 	if limitrangeDefault == nil {
 		return
 	}
@@ -461,7 +461,7 @@ func applyLRDefualt(limitrangeDefault v1.ResourceList, pod *v1.Pod) {
 	}
 }
 
-func applyLRDefualtRequest(limitrangeDefaultRequest v1.ResourceList, pod *v1.Pod) {
+func applyLRDefaultRequest(limitrangeDefaultRequest v1.ResourceList, pod *v1.Pod) {
 	if limitrangeDefaultRequest == nil {
 		return
 	}
