@@ -320,12 +320,21 @@ func (p *Provisioner) launch(ctx context.Context, machine *scheduler.Node, opts 
 	}
 
 	logging.FromContext(ctx).Infof("launching %s", machine)
-	k8sNode, err := p.cloudProvider.Create(
+	created, err := p.cloudProvider.Create(
 		logging.WithLogger(ctx, logging.FromContext(ctx).Named("cloudprovider")),
 		machine.ToMachine(latest),
 	)
 	if err != nil {
 		return "", fmt.Errorf("creating cloud provider instance, %w", err)
+	}
+	k8sNode := &v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   created.Name,
+			Labels: created.Labels,
+		},
+		Spec: v1.NodeSpec{
+			ProviderID: created.Status.ProviderID,
+		},
 	}
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", k8sNode.Name))
 

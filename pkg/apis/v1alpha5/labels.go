@@ -56,12 +56,6 @@ const (
 	TerminationFinalizer = Group + "/termination"
 )
 
-// Tags for infrastructure resources deployed into Cloud Provider's accounts
-const (
-	DiscoveryTagKey = Group + "/discovery"
-	ManagedByTagKey = Group + "/managed-by"
-)
-
 var (
 	// RestrictedLabelDomains are either prohibited by the kubelet or reserved by karpenter
 	RestrictedLabelDomains = sets.NewString(

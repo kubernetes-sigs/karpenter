@@ -18,7 +18,6 @@ import (
 	"context"
 
 	"github.com/prometheus/client_golang/prometheus"
-	v1 "k8s.io/api/core/v1"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
@@ -67,7 +66,7 @@ func Decorate(cloudProvider cloudprovider.CloudProvider) cloudprovider.CloudProv
 	return &decorator{cloudProvider}
 }
 
-func (d *decorator) Create(ctx context.Context, machine *v1alpha5.Machine) (*v1.Node, error) {
+func (d *decorator) Create(ctx context.Context, machine *v1alpha5.Machine) (*v1alpha5.Machine, error) {
 	defer metrics.Measure(methodDurationHistogramVec.WithLabelValues(injection.GetControllerName(ctx), "Create", d.Name()))()
 	return d.CloudProvider.Create(ctx, machine)
 }
@@ -75,6 +74,11 @@ func (d *decorator) Create(ctx context.Context, machine *v1alpha5.Machine) (*v1.
 func (d *decorator) Delete(ctx context.Context, machine *v1alpha5.Machine) error {
 	defer metrics.Measure(methodDurationHistogramVec.WithLabelValues(injection.GetControllerName(ctx), "Delete", d.Name()))()
 	return d.CloudProvider.Delete(ctx, machine)
+}
+
+func (d *decorator) Get(ctx context.Context, machineName, provisionerName string) (*v1alpha5.Machine, error) {
+	defer metrics.Measure(methodDurationHistogramVec.WithLabelValues(injection.GetControllerName(ctx), "Get", d.Name()))()
+	return d.CloudProvider.Get(ctx, machineName, provisionerName)
 }
 
 func (d *decorator) GetInstanceTypes(ctx context.Context, provisioner *v1alpha5.Provisioner) ([]*cloudprovider.InstanceType, error) {
