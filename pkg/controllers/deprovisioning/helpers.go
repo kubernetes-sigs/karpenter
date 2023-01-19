@@ -28,7 +28,6 @@ import (
 	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/scheduling"
-	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
 
 	v1 "k8s.io/api/core/v1"
@@ -40,45 +39,36 @@ import (
 
 //nolint:gocyclo
 func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
-	nodesToDelete ...CandidateNode) (newNodes []*pscheduling.Node, allPodsScheduled bool, err error) {
-	var stateNodes []*state.Node
-	var markedForDeletionNodes []*state.Node
-	candidateNodeIsDeleting := false
-	candidateNodeNames := sets.NewString(lo.Map(nodesToDelete, func(t CandidateNode, i int) string { return t.Name })...)
-	cluster.ForEachNode(func(n *state.Node) bool {
-		// not a candidate node
-		if _, ok := candidateNodeNames[n.Node.Name]; !ok {
-			if !n.MarkedForDeletion() {
-				stateNodes = append(stateNodes, n.DeepCopy())
-			} else {
-				markedForDeletionNodes = append(markedForDeletionNodes, n.DeepCopy())
-			}
-		} else if n.MarkedForDeletion() {
-			// candidate node and marked for deletion
-			candidateNodeIsDeleting = true
-		}
-		return true
+	candidateNodes ...CandidateNode) (newNodes []*pscheduling.Node, allPodsScheduled bool, err error) {
+
+	candidateNodeNames := sets.NewString(lo.Map(candidateNodes, func(t CandidateNode, i int) string { return t.Name })...)
+	allNodes := cluster.Nodes()
+	deletingNodes := allNodes.DeletingNodes()
+	stateNodes := lo.Filter(allNodes, func(n *state.Node, _ int) bool {
+		return !candidateNodeNames.Has(n.Name())
 	})
+
 	// We do one final check to ensure that the node that we are attempting to consolidate isn't
 	// already handled for deletion by some other controller. This could happen if the node was markedForDeletion
 	// between returning the candidateNodes and getting the stateNodes above
-	if candidateNodeIsDeleting {
+	if _, ok := lo.Find(deletingNodes, func(n *state.Node) bool {
+		return candidateNodeNames.Has(n.Name())
+	}); ok {
 		return nil, false, errCandidateNodeDeleting
 	}
 
 	// We get the pods that are on nodes that are deleting
-	deletingNodePods, err := nodeutils.GetNodePods(ctx, kubeClient, lo.Map(markedForDeletionNodes, func(n *state.Node, _ int) *v1.Node { return n.Node })...)
+	deletingNodePods, err := deletingNodes.Pods(ctx, kubeClient)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
 	}
-
 	// start by getting all pending pods
 	pods, err := provisioner.GetPendingPods(ctx)
 	if err != nil {
 		return nil, false, fmt.Errorf("determining pending pods, %w", err)
 	}
 
-	for _, n := range nodesToDelete {
+	for _, n := range candidateNodes {
 		pods = append(pods, n.pods...)
 	}
 	pods = append(pods, deletingNodePods...)
@@ -107,7 +97,7 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	// to schedule since we want to assume that we can delete a node and its pods will immediately
 	// move to an existing node which won't occur if that node isn't ready.
 	for _, n := range ifn {
-		if n.Labels[v1alpha5.LabelNodeInitialized] != "true" {
+		if !n.Initialized() {
 			return nil, false, nil
 		}
 	}
@@ -208,6 +198,7 @@ func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient clie
 		}
 
 		// Skip nodes that aren't initialized
+		// This also means that the real Node doesn't exist for it
 		if !n.Initialized() {
 			return true
 		}
@@ -216,18 +207,16 @@ func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient clie
 			return true
 		}
 
-		pods, err := nodeutils.GetNodePods(ctx, kubeClient, n.Node)
+		pods, err := n.Pods(ctx, kubeClient)
 		if err != nil {
 			logging.FromContext(ctx).Errorf("Determining node pods, %s", err)
 			return true
 		}
-
 		if !shouldDeprovision(ctx, n, provisioner, pods) {
 			return true
 		}
-
 		cn := CandidateNode{
-			Node:           n.Node,
+			Node:           n.Node.DeepCopy(),
 			instanceType:   instanceType,
 			capacityType:   ct,
 			zone:           az,

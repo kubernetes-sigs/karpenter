@@ -141,12 +141,12 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 
 	for _, node := range s.existingNodes {
 		if len(node.Pods) > 0 {
-			s.cluster.NominateNodeForPod(ctx, node.Name)
+			s.cluster.NominateNodeForPod(ctx, node.Name())
 		}
 		for _, pod := range node.Pods {
 			// If node is inflight, it won't have a real node to represent it
-			if node.Node != nil {
-				s.recorder.Publish(events.NominatePod(pod, node.Node))
+			if node.Node.Node != nil {
+				s.recorder.Publish(events.NominatePod(pod, node.Node.Node))
 			}
 		}
 	}
@@ -244,8 +244,8 @@ func (s *Scheduler) calculateExistingMachines(stateNodes []*state.Node, daemonSe
 		// We don't use the status field and instead recompute the remaining resources to ensure we have a consistent view
 		// of the cluster during scheduling.  Depending on how node creation falls out, this will also work for cases where
 		// we don't create Node resources.
-		if _, ok := s.remainingResources[node.Node.Labels[v1alpha5.ProvisionerNameLabelKey]]; ok {
-			s.remainingResources[node.Node.Labels[v1alpha5.ProvisionerNameLabelKey]] = resources.Subtract(s.remainingResources[node.Node.Labels[v1alpha5.ProvisionerNameLabelKey]], node.Capacity())
+		if _, ok := s.remainingResources[node.Labels()[v1alpha5.ProvisionerNameLabelKey]]; ok {
+			s.remainingResources[node.Labels()[v1alpha5.ProvisionerNameLabelKey]] = resources.Subtract(s.remainingResources[node.Labels()[v1alpha5.ProvisionerNameLabelKey]], node.Capacity())
 		}
 	}
 }

@@ -157,13 +157,16 @@ func (ns *NodeScraper) Scrape(_ context.Context) {
 
 	// Populate metrics
 	ns.cluster.ForEachNode(func(n *state.Node) bool {
+		if n.Node == nil {
+			return true
+		}
 		for gaugeVec, resourceList := range map[*prometheus.GaugeVec]v1.ResourceList{
-			overheadGaugeVec:       ns.getSystemOverhead(n),
+			overheadGaugeVec:       ns.getSystemOverhead(n.Node),
 			podRequestsGaugeVec:    resources.Subtract(n.PodRequests(), n.DaemonSetRequests()),
 			podLimitsGaugeVec:      resources.Subtract(n.PodLimits(), n.DaemonSetLimits()),
 			daemonRequestsGaugeVec: n.DaemonSetRequests(),
 			daemonLimitsGaugeVec:   n.DaemonSetLimits(),
-			allocatableGaugeVec:    n.Allocatable(),
+			allocatableGaugeVec:    n.Node.Status.Allocatable,
 		} {
 			for _, labels := range ns.set(gaugeVec, n.Node, resourceList) {
 				key := labelsToString(labels)
@@ -199,12 +202,12 @@ func (ns *NodeScraper) set(gaugeVec *prometheus.GaugeVec, node *v1.Node, resourc
 	return gaugeLabels
 }
 
-func (ns *NodeScraper) getSystemOverhead(n *state.Node) v1.ResourceList {
+func (ns *NodeScraper) getSystemOverhead(node *v1.Node) v1.ResourceList {
 	systemOverhead := v1.ResourceList{}
-	if len(n.Allocatable()) > 0 {
+	if len(node.Status.Allocatable) > 0 {
 		// calculating system daemons overhead
-		for resourceName, quantity := range n.Allocatable() {
-			overhead := n.Capacity()[resourceName]
+		for resourceName, quantity := range node.Status.Allocatable {
+			overhead := node.Status.Capacity[resourceName]
 			overhead.Sub(quantity)
 			systemOverhead[resourceName] = overhead
 		}

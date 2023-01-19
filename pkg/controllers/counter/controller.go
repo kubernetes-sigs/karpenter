@@ -81,6 +81,9 @@ func (c *Controller) resourceCountsFor(provisionerName string) v1.ResourceList {
 	// is accurately reported even for nodes that haven't fully started yet. This allows us to update our provisioner
 	// status immediately upon node creation instead of waiting for the node to become ready.
 	c.cluster.ForEachNode(func(n *state.Node) bool {
+		if n.MarkedForDeletion() {
+			return true
+		}
 		if n.Labels()[v1alpha5.ProvisionerNameLabelKey] == provisionerName {
 			res = resources.Merge(res, n.Capacity())
 		}

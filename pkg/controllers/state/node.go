@@ -27,9 +27,40 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/scheduling"
+	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
 	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
+
+// Nodes is a typed version of a list of *Node
+type Nodes []*Node
+
+// ActiveNodes filters nodes that are not in a MarkedForDeletion state
+func (n Nodes) ActiveNodes() Nodes {
+	return lo.Filter(n, func(node *Node, _ int) bool {
+		return !node.MarkedForDeletion()
+	})
+}
+
+// DeletingNodes filters nodes that are in a MarkedForDeletion state
+func (n Nodes) DeletingNodes() Nodes {
+	return lo.Filter(n, func(node *Node, _ int) bool {
+		return node.MarkedForDeletion()
+	})
+}
+
+// Pods gets the pods assigned to all Nodes based on the kubernetes api-server bindings
+func (n Nodes) Pods(ctx context.Context, c client.Client) ([]*v1.Pod, error) {
+	var pods []*v1.Pod
+	for _, node := range n {
+		p, err := node.Pods(ctx, c)
+		if err != nil {
+			return nil, err
+		}
+		pods = append(pods, p...)
+	}
+	return pods, nil
+}
 
 // Node is a cached version of a node in the cluster that maintains state which is expensive to compute every time it's
 // needed.  This currently contains node utilization across all the allocatable resources, but will soon be used to
@@ -38,8 +69,6 @@ import (
 type Node struct {
 	Node    *v1.Node
 	Machine *v1alpha5.Machine
-
-	ProviderID string
 
 	inflightAllocatable v1.ResourceList // TODO @joinnis: This can be removed when machine is added
 	inflightCapacity    v1.ResourceList // TODO @joinnis: This can be removed when machine is added
@@ -81,6 +110,14 @@ func (in *Node) Name() string {
 		return in.Machine.Name
 	}
 	return in.Node.Name
+}
+
+// Pods gets the pods assigned to the Node based on the kubernetes api-server bindings
+func (in *Node) Pods(ctx context.Context, c client.Client) ([]*v1.Pod, error) {
+	if in.Node == nil {
+		return nil, nil
+	}
+	return nodeutils.GetNodePods(ctx, c, in.Node)
 }
 
 func (in *Node) HostName() string {

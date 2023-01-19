@@ -215,6 +215,9 @@ var _ = Describe("Inflight Nodes", func() {
 					Name: "default",
 				},
 			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.ProviderID(),
+			},
 		})
 		ExpectApplied(ctx, env.Client, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
@@ -474,26 +477,38 @@ var _ = Describe("Inflight Nodes", func() {
 		}, ExpectStateNodeExistsForMachine(machine).Allocatable())
 	})
 	It("should continue node nomination when an inflight node becomes a real node", func() {
-		machine := test.Machine()
+		machine := test.Machine(v1alpha5.Machine{
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.ProviderID(),
+			},
+		})
 		ExpectApplied(ctx, env.Client, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 		cluster.NominateNodeForPod(ctx, machine.Name)
 		Expect(ExpectStateNodeExistsForMachine(machine).Nominated()).To(BeTrue())
 
-		node := test.Node()
+		node := test.Node(test.NodeOptions{
+			ProviderID: machine.Status.ProviderID,
+		})
 		node.Spec.ProviderID = machine.Status.ProviderID
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		Expect(ExpectStateNodeExists(node).Nominated()).To(BeTrue())
 	})
 	It("should continue MarkedForDeletion when an inflight node becomes a real node", func() {
-		machine := test.Machine()
+		machine := test.Machine(v1alpha5.Machine{
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.ProviderID(),
+			},
+		})
 		ExpectApplied(ctx, env.Client, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 		cluster.MarkForDeletion(machine.Name)
 		Expect(ExpectStateNodeExistsForMachine(machine).MarkedForDeletion()).To(BeTrue())
 
-		node := test.Node()
+		node := test.Node(test.NodeOptions{
+			ProviderID: machine.Status.ProviderID,
+		})
 		node.Spec.ProviderID = machine.Status.ProviderID
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
@@ -1201,7 +1216,7 @@ func ExpectStateNodeCount(comparator string, count int) int {
 func ExpectStateNodeExistsWithOffset(offset int, node *v1.Node) *state.Node {
 	var ret *state.Node
 	cluster.ForEachNode(func(n *state.Node) bool {
-		if n.ProviderID != node.Spec.ProviderID {
+		if n.Node.Name != node.Name {
 			return true
 		}
 		ret = n.DeepCopy()
@@ -1218,7 +1233,7 @@ func ExpectStateNodeExists(node *v1.Node) *state.Node {
 func ExpectStateNodeExistsForMachine(machine *v1alpha5.Machine) *state.Node {
 	var ret *state.Node
 	cluster.ForEachNode(func(n *state.Node) bool {
-		if n.ProviderID != machine.Status.ProviderID {
+		if n.Machine.Name != machine.Name {
 			return true
 		}
 		ret = n.DeepCopy()
@@ -1231,7 +1246,7 @@ func ExpectStateNodeExistsForMachine(machine *v1alpha5.Machine) *state.Node {
 func ExpectStateNodeNotFoundForMachine(machine *v1alpha5.Machine) *state.Node {
 	var ret *state.Node
 	cluster.ForEachNode(func(n *state.Node) bool {
-		if n.ProviderID != machine.Status.ProviderID {
+		if n.Machine.Name != machine.Name {
 			return true
 		}
 		ret = n.DeepCopy()

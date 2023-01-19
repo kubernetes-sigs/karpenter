@@ -81,7 +81,7 @@ func (c *Cluster) ForPodsWithAntiAffinity(fn func(p *v1.Pod, n *v1.Node) bool) {
 			return true
 		}
 		node, ok := c.nodes[c.nameToProviderID[nodeName]]
-		if !ok {
+		if !ok || node.Node == nil {
 			// if we receive the node deletion event before the pod deletion event, this can happen
 			return true
 		}
@@ -100,6 +100,17 @@ func (c *Cluster) ForEachNode(f func(n *Node) bool) {
 			return
 		}
 	}
+}
+
+// Nodes creates a DeepCopy of all state nodes.
+// NOTE: This is very inefficient so this should only be used when DeepCopying is absolutely necessary
+func (c *Cluster) Nodes() Nodes {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return lo.Map(lo.Values(c.nodes), func(n *Node, _ int) *Node {
+		return n.DeepCopy()
+	})
 }
 
 // IsNodeNominated returns true if the given node was expected to have a pod bound to it during a recent scheduling
@@ -254,7 +265,6 @@ func (c *Cluster) newStateFromMachine(machine *v1alpha5.Machine, oldNode *Node) 
 	n := &Node{
 		Node:              oldNode.Node,
 		Machine:           machine,
-		ProviderID:        machine.Status.ProviderID,
 		hostPortUsage:     oldNode.hostPortUsage,
 		volumeUsage:       oldNode.volumeUsage,
 		daemonSetRequests: oldNode.daemonSetRequests,
@@ -293,7 +303,6 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *
 	n := &Node{
 		Node:              node,
 		Machine:           oldNode.Machine,
-		ProviderID:        node.Spec.ProviderID,
 		hostPortUsage:     scheduling.NewHostPortUsage(),
 		volumeUsage:       scheduling.NewVolumeLimits(c.kubeClient),
 		volumeLimits:      scheduling.VolumeCount{},
