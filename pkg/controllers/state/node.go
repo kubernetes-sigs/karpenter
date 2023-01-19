@@ -16,57 +16,175 @@ package state
 
 import (
 	"context"
+	"time"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"knative.dev/pkg/logging"
-	controllerruntime "sigs.k8s.io/controller-runtime"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/apis/config/settings"
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/scheduling"
+	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
+	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
-// NodeController reconciles nodes for the purpose of maintaining state regarding nodes that is expensive to compute.
-type NodeController struct {
-	kubeClient client.Client
-	cluster    *Cluster
+// Node is a cached version of a node in the cluster that maintains state which is expensive to compute every time it's
+// needed.  This currently contains node utilization across all the allocatable resources, but will soon be used to
+// compute topology information.
+// +k8s:deepcopy-gen=true
+type Node struct {
+	Node *v1.Node
+
+	inflightAllocatable v1.ResourceList // TODO @joinnis: This can be removed when machine is added
+	inflightCapacity    v1.ResourceList // TODO @joinnis: This can be removed when machine is added
+	startupTaints       []v1.Taint      // TODO: @joinnis: This can be removed when machine is added
+
+	// daemonSetRequests is the total amount of resources that have been requested by daemon sets. This allows users
+	// of the Node to identify the remaining resources that we expect future daemonsets to consume.
+	daemonSetRequests map[types.NamespacedName]v1.ResourceList
+	daemonSetLimits   map[types.NamespacedName]v1.ResourceList
+
+	podRequests map[types.NamespacedName]v1.ResourceList
+	podLimits   map[types.NamespacedName]v1.ResourceList
+
+	hostPortUsage *scheduling.HostPortUsage
+	volumeUsage   *scheduling.VolumeUsage
+	volumeLimits  scheduling.VolumeCount
+
+	markedForDeletion bool
+	nominatedUntil    metav1.Time
 }
 
-// NewNodeController constructs a controller instance
-func NewNodeController(kubeClient client.Client, cluster *Cluster) corecontroller.Controller {
-	return &NodeController{
-		kubeClient: kubeClient,
-		cluster:    cluster,
+func (in *Node) Taints() []v1.Taint {
+	ephemeralTaints := []v1.Taint{
+		{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
+		{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
 	}
+	// Only consider startup taints until the node is initialized. Without this, if the startup taint is generic and
+	// re-appears on the node for a different reason (e.g. the node is cordoned) we will assume that pods can
+	// schedule against the node in the future incorrectly.
+	if !in.Initialized() && in.Owned() {
+		ephemeralTaints = append(ephemeralTaints, in.startupTaints...)
+	}
+	return lo.Reject(in.Node.Spec.Taints, func(taint v1.Taint, _ int) bool {
+		_, rejected := lo.Find(ephemeralTaints, func(t v1.Taint) bool {
+			return t.Key == taint.Key && t.Value == taint.Value && t.Effect == taint.Effect
+		})
+		return rejected
+	})
 }
 
-func (c *NodeController) Name() string {
-	return "node-state"
+func (in *Node) Initialized() bool {
+	return in.Node.Labels[v1alpha5.LabelNodeInitialized] == "true"
 }
 
-func (c *NodeController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("node", req.NamespacedName.Name))
-	node := &v1.Node{}
-	if err := c.kubeClient.Get(ctx, req.NamespacedName, node); err != nil {
-		if errors.IsNotFound(err) {
-			// notify cluster state of the node deletion
-			c.cluster.DeleteNode(req.Name)
+func (in *Node) Capacity() v1.ResourceList {
+	if !in.Initialized() && in.Owned() {
+		// Override any zero quantity values in the node status
+		ret := lo.Assign(in.Node.Status.Capacity)
+		for resourceName, quantity := range in.inflightCapacity {
+			if resources.IsZero(ret[resourceName]) {
+				ret[resourceName] = quantity
+			}
 		}
-		return reconcile.Result{}, client.IgnoreNotFound(err)
+		return ret
 	}
-	if err := c.cluster.UpdateNode(ctx, node); err != nil {
-		return reconcile.Result{}, err
-	}
-	// ensure it's aware of any nodes we discover, this is a no-op if the node is already known to our cluster state
-	return reconcile.Result{Requeue: true, RequeueAfter: stateRetryPeriod}, nil
+	return in.Node.Status.Capacity
 }
 
-func (c *NodeController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(controllerruntime.
-		NewControllerManagedBy(m).
-		For(&v1.Node{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))
+func (in *Node) Allocatable() v1.ResourceList {
+	if !in.Initialized() && in.Owned() {
+		// Override any zero quantity values in the node status
+		ret := lo.Assign(in.Node.Status.Allocatable)
+		for resourceName, quantity := range in.inflightAllocatable {
+			if resources.IsZero(ret[resourceName]) {
+				ret[resourceName] = quantity
+			}
+		}
+		return ret
+	}
+	return in.Node.Status.Allocatable
+}
+
+// Available is allocatable minus anything allocated to pods.
+func (in *Node) Available() v1.ResourceList {
+	return resources.Subtract(in.Allocatable(), in.PodRequests())
+}
+
+func (in *Node) DaemonSetRequests() v1.ResourceList {
+	return resources.Merge(lo.Values(in.daemonSetRequests)...)
+}
+
+func (in *Node) DaemonSetLimits() v1.ResourceList {
+	return resources.Merge(lo.Values(in.daemonSetLimits)...)
+}
+
+func (in *Node) HostPortUsage() *scheduling.HostPortUsage {
+	return in.hostPortUsage
+}
+
+func (in *Node) VolumeUsage() *scheduling.VolumeUsage {
+	return in.volumeUsage
+}
+
+func (in *Node) VolumeLimits() scheduling.VolumeCount {
+	return in.volumeLimits
+}
+
+func (in *Node) PodRequests() v1.ResourceList {
+	return resources.Merge(lo.Values(in.podRequests)...)
+}
+
+func (in *Node) PodLimits() v1.ResourceList {
+	return resources.Merge(lo.Values(in.podLimits)...)
+}
+
+func (in *Node) MarkedForDeletion() bool {
+	return in.markedForDeletion || (in.Node != nil && !in.Node.DeletionTimestamp.IsZero())
+}
+
+func (in *Node) Nominate(ctx context.Context) {
+	in.nominatedUntil = metav1.Time{Time: time.Now().Add(nominationWindow(ctx))}
+}
+
+func (in *Node) Nominated() bool {
+	return in.nominatedUntil.After(time.Now())
+}
+
+func (in *Node) Owned() bool {
+	return in.Node.Labels[v1alpha5.ProvisionerNameLabelKey] != ""
+}
+
+func (in *Node) updateForPod(ctx context.Context, pod *v1.Pod) {
+	podKey := client.ObjectKeyFromObject(pod)
+
+	in.podRequests[podKey] = resources.RequestsForPods(pod)
+	in.podLimits[podKey] = resources.LimitsForPods(pod)
+	// if it's a daemonset, we track what it has requested separately
+	if podutils.IsOwnedByDaemonSet(pod) {
+		in.daemonSetRequests[podKey] = resources.RequestsForPods(pod)
+		in.daemonSetLimits[podKey] = resources.LimitsForPods(pod)
+	}
+	in.hostPortUsage.Add(ctx, pod)
+	in.volumeUsage.Add(ctx, pod)
+}
+
+func (in *Node) cleanupForPod(podKey types.NamespacedName) {
+	in.hostPortUsage.DeletePod(podKey)
+	in.volumeUsage.DeletePod(podKey)
+	delete(in.podRequests, podKey)
+	delete(in.podLimits, podKey)
+	delete(in.daemonSetRequests, podKey)
+	delete(in.daemonSetLimits, podKey)
+}
+
+func nominationWindow(ctx context.Context) time.Duration {
+	nominationPeriod := 2 * settings.FromContext(ctx).BatchMaxDuration.Duration
+	if nominationPeriod < 10*time.Second {
+		nominationPeriod = 10 * time.Second
+	}
+	return nominationPeriod
 }

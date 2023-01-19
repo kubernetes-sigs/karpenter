@@ -17,10 +17,8 @@ package controller_test
 import (
 	"context"
 
-	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -61,29 +59,6 @@ var _ = Describe("Typed", func() {
 		typedController := controller.Typed[*v1.Node](env.Client, fakeController)
 		ExpectReconcileSucceeded(ctx, typedController, client.ObjectKeyFromObject(node))
 	})
-	It("should modify the node when updated in the reconcile", func() {
-		node := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: "default",
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, node)
-		fakeController := &FakeTypedController[*v1.Node]{
-			ReconcileAssertions: []TypedReconcileAssertion[*v1.Node]{
-				func(ctx context.Context, n *v1.Node) {
-					n.Labels = lo.Assign(n.Labels, map[string]string{
-						"custom-key": "custom-value",
-					})
-				},
-			},
-		}
-		typedController := controller.Typed[*v1.Node](env.Client, fakeController)
-		ExpectReconcileSucceeded(ctx, typedController, client.ObjectKeyFromObject(node))
-		node = ExpectNodeExists(ctx, env.Client, node.Name)
-		Expect(node.Labels).To(HaveKeyWithValue("custom-key", "custom-value"))
-	})
 	It("should call finalizer func when finalizing", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -109,31 +84,6 @@ var _ = Describe("Typed", func() {
 		typedController := controller.Typed[*v1.Node](env.Client, fakeController)
 		ExpectReconcileSucceeded(ctx, typedController, client.ObjectKeyFromObject(node))
 		Expect(called).To(BeTrue())
-	})
-	It("should update and remove the finalizer when finalizing", func() {
-		node := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: "default",
-				},
-				Finalizers: []string{
-					v1alpha5.TestingGroup + "/finalizer",
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, node)
-		Expect(env.Client.Delete(ctx, node)).To(Succeed())
-		fakeController := &FakeTypedController[*v1.Node]{
-			FinalizeAssertions: []TypedReconcileAssertion[*v1.Node]{
-				func(ctx context.Context, node *v1.Node) {
-					controllerutil.RemoveFinalizer(node, v1alpha5.TestingGroup+"/finalizer")
-				},
-			},
-		}
-		typedController := controller.Typed[*v1.Node](env.Client, fakeController)
-		ExpectExists(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, typedController, client.ObjectKeyFromObject(node))
-		ExpectNotFound(ctx, env.Client, node)
 	})
 })
 

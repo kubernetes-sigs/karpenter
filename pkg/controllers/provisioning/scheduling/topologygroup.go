@@ -19,11 +19,11 @@ import (
 	"math"
 
 	"github.com/mitchellh/hashstructure/v2"
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/runtime"
 	utilsets "k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -135,7 +135,7 @@ func (t *TopologyGroup) IsOwnedBy(key types.UID) bool {
 // Hash is used so we can track single topologies that affect multiple groups of pods.  If a deployment has 100x pods
 // with self anti-affinity, we track that as a single topology with 100 owners instead of 100x topologies.
 func (t *TopologyGroup) Hash() uint64 {
-	hash, err := hashstructure.Hash(struct {
+	return lo.Must(hashstructure.Hash(struct {
 		TopologyKey   string
 		Type          TopologyType
 		Namespaces    utilsets.String
@@ -149,9 +149,7 @@ func (t *TopologyGroup) Hash() uint64 {
 		LabelSelector: t.selector,
 		MaxSkew:       t.maxSkew,
 		NodeFilter:    t.nodeFilter,
-	}, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
-	runtime.Must(err)
-	return hash
+	}, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true}))
 }
 
 func (t *TopologyGroup) nextDomainTopologySpread(pod *v1.Pod, podDomains, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
@@ -247,7 +245,8 @@ func (t *TopologyGroup) nextDomainAntiAffinity(domains *scheduling.Requirement) 
 // selects returns true if the given pod is selected by this topology
 func (t *TopologyGroup) selects(pod *v1.Pod) bool {
 	selector, err := metav1.LabelSelectorAsSelector(t.selector)
-	runtime.Must(err)
-	return t.namespaces.Has(pod.Namespace) &&
-		selector.Matches(labels.Set(pod.Labels))
+	if err != nil {
+		selector = labels.Nothing()
+	}
+	return t.namespaces.Has(pod.Namespace) && selector.Matches(labels.Set(pod.Labels))
 }

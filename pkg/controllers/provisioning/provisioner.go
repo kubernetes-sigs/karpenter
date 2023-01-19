@@ -50,7 +50,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/utils/node"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
-	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
 // LaunchOptions are the set of options that can be used to trigger certain
@@ -109,13 +108,6 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 	if triggered := p.batcher.Wait(ctx); !triggered {
 		return reconcile.Result{}, nil
 	}
-	// If the provisioning loop fails for any reason, retrigger it,
-	// since pod watch events have already been processed
-	defer func() {
-		if err != nil {
-			p.Trigger()
-		}
-	}()
 
 	// We collect the nodes with their used capacities before we get the list of pending pods. This ensures that
 	// the node capacities we schedule against are always >= what the actual capacity is at any given instance. This
@@ -128,7 +120,7 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 		// We don't consider the nodes that are MarkedForDeletion since this capacity shouldn't be considered
 		// as persistent capacity for the cluster (since it will soon be removed). Additionally, we are scheduling for
 		// the pods that are on these nodes so the MarkedForDeletion node capacity can't be considered.
-		if !node.MarkedForDeletion {
+		if !node.MarkedForDeletion() {
 			stateNodes = append(stateNodes, node.DeepCopy())
 		} else {
 			markedForDeletionNodes = append(markedForDeletionNodes, node.DeepCopy())
@@ -214,23 +206,31 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*v1.Pod, error) {
 			continue
 		}
 
-		// We have pending pods that have preferred anti-affinity or topology spread constraints.  These can interact
-		// unexpectedly with consolidation so we warn once per hour when we see these pods.
-		if po.Spec.Affinity != nil && po.Spec.Affinity.PodAntiAffinity != nil {
-			if len(po.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) != 0 {
-				if p.cm.HasChanged(string(po.UID), "pod-antiaffinity") {
-					logging.FromContext(ctx).Infof("pod %s has a preferred Anti-Affinity which can prevent consolidation", client.ObjectKeyFromObject(&po))
-				}
-			}
-		}
-		for _, tsc := range po.Spec.TopologySpreadConstraints {
-			if tsc.WhenUnsatisfiable == v1.ScheduleAnyway {
-				logging.FromContext(ctx).Infof("pod %s has a preferred TopologySpreadConstraint which can prevent consolidation", client.ObjectKeyFromObject(&po))
-			}
-		}
+		p.consolidationWarnings(ctx, po)
 		pods = append(pods, &po)
 	}
 	return pods, nil
+}
+
+// consolidationWarnings potentially writes logs warning about possible unexpected interactions between scheduling
+// constraints and consolidation
+func (p *Provisioner) consolidationWarnings(ctx context.Context, po v1.Pod) {
+	// We have pending pods that have preferred anti-affinity or topology spread constraints.  These can interact
+	// unexpectedly with consolidation so we warn once per hour when we see these pods.
+	if po.Spec.Affinity != nil && po.Spec.Affinity.PodAntiAffinity != nil {
+		if len(po.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) != 0 {
+			if p.cm.HasChanged(string(po.UID), "pod-antiaffinity") {
+				logging.FromContext(ctx).Infof("pod %s has a preferred Anti-Affinity which can prevent consolidation", client.ObjectKeyFromObject(&po))
+			}
+		}
+	}
+	for _, tsc := range po.Spec.TopologySpreadConstraints {
+		if tsc.WhenUnsatisfiable == v1.ScheduleAnyway {
+			if p.cm.HasChanged(string(po.UID), "pod-topology-spread") {
+				logging.FromContext(ctx).Infof("pod %s has a preferred TopologySpreadConstraint which can prevent consolidation", client.ObjectKeyFromObject(&po))
+			}
+		}
+	}
 }
 
 // nolint: gocyclo
@@ -288,12 +288,11 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 		return nil, fmt.Errorf("tracking topology counts, %w", err)
 	}
 
-	// Calculate daemon overhead
-	daemonOverhead, err := p.getDaemonOverhead(ctx, machines)
+	daemonSetPods, err := p.getDaemonSetPods(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("getting daemon overhead, %w", err)
+		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
-	return scheduler.NewScheduler(ctx, p.kubeClient, machines, provisionerList.Items, p.cluster, stateNodes, topology, instanceTypes, daemonOverhead, p.recorder, opts), nil
+	return scheduler.NewScheduler(ctx, p.kubeClient, machines, provisionerList.Items, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, opts), nil
 }
 
 func (p *Provisioner) schedule(ctx context.Context, pods []*v1.Pod, stateNodes []*state.Node) ([]*scheduler.Node, error) {
@@ -320,12 +319,21 @@ func (p *Provisioner) launch(ctx context.Context, machine *scheduler.Node, opts 
 	}
 
 	logging.FromContext(ctx).Infof("launching %s", machine)
-	k8sNode, err := p.cloudProvider.Create(
+	created, err := p.cloudProvider.Create(
 		logging.WithLogger(ctx, logging.FromContext(ctx).Named("cloudprovider")),
 		machine.ToMachine(latest),
 	)
 	if err != nil {
 		return "", fmt.Errorf("creating cloud provider instance, %w", err)
+	}
+	k8sNode := &v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   created.Name,
+			Labels: created.Labels,
+		},
+		Spec: v1.NodeSpec{
+			ProviderID: created.Status.ProviderID,
+		},
 	}
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", k8sNode.Name))
 
@@ -347,11 +355,11 @@ func (p *Provisioner) launch(ctx context.Context, machine *scheduler.Node, opts 
 			return "", fmt.Errorf("creating node %s, %w", k8sNode.Name, err)
 		}
 	}
-	p.cluster.NominateNodeForPod(k8sNode.Name)
 	if err := p.cluster.UpdateNode(ctx, k8sNode); err != nil {
 		return "", fmt.Errorf("updating cluster state, %w", err)
 	}
-	if functional.ResolveOptions[LaunchOptions](opts...).RecordPodNomination {
+	p.cluster.NominateNodeForPod(ctx, k8sNode.Name)
+	if functional.ResolveOptions(opts...).RecordPodNomination {
 		for _, pod := range machine.Pods {
 			p.recorder.Publish(events.NominatePod(pod, k8sNode))
 		}
@@ -359,30 +367,17 @@ func (p *Provisioner) launch(ctx context.Context, machine *scheduler.Node, opts 
 	return k8sNode.Name, nil
 }
 
-func (p *Provisioner) getDaemonOverhead(ctx context.Context, nodeTemplates []*scheduler.MachineTemplate) (map[*scheduler.MachineTemplate]v1.ResourceList, error) {
-	overhead := map[*scheduler.MachineTemplate]v1.ResourceList{}
-
+func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*v1.Pod, error) {
 	daemonSetList := &appsv1.DaemonSetList{}
 	if err := p.kubeClient.List(ctx, daemonSetList); err != nil {
 		return nil, fmt.Errorf("listing daemonsets, %w", err)
 	}
-
-	for _, nodeTemplate := range nodeTemplates {
-		var daemons []*v1.Pod
-		for _, daemonSet := range daemonSetList.Items {
-			p := &v1.Pod{Spec: daemonSet.Spec.Template.Spec}
-			if err := nodeTemplate.Taints.Tolerates(p); err != nil {
-				continue
-			}
-			if err := nodeTemplate.Requirements.Compatible(scheduling.NewPodRequirements(p)); err != nil {
-				continue
-			}
-			daemons = append(daemons, p)
-		}
-		overhead[nodeTemplate] = resources.RequestsForPods(daemons...)
+	var ret []*v1.Pod
+	for _, daemonSet := range daemonSetList.Items {
+		pod := &v1.Pod{Spec: daemonSet.Spec.Template.Spec}
+		ret = append(ret, pod)
 	}
-
-	return overhead, nil
+	return ret, nil
 }
 
 func (p *Provisioner) Validate(ctx context.Context, pod *v1.Pod) error {

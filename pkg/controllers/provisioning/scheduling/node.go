@@ -145,7 +145,7 @@ func compatible(instanceType *cloudprovider.InstanceType, requirements schedulin
 }
 
 func fits(instanceType *cloudprovider.InstanceType, requests v1.ResourceList) bool {
-	return resources.Fits(resources.Merge(requests, instanceType.Overhead.Total()), instanceType.Capacity)
+	return resources.Fits(requests, instanceType.Allocatable())
 }
 
 func hasOffering(instanceType *cloudprovider.InstanceType, requirements scheduling.Requirements) bool {

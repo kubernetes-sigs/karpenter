@@ -48,12 +48,12 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	cluster.ForEachNode(func(n *state.Node) bool {
 		// not a candidate node
 		if _, ok := candidateNodeNames[n.Node.Name]; !ok {
-			if !n.MarkedForDeletion {
+			if !n.MarkedForDeletion() {
 				stateNodes = append(stateNodes, n.DeepCopy())
 			} else {
 				markedForDeletionNodes = append(markedForDeletionNodes, n.DeepCopy())
 			}
-		} else if n.MarkedForDeletion {
+		} else if n.MarkedForDeletion() {
 			// candidate node and marked for deletion
 			candidateNodeIsDeleting = true
 		}
@@ -183,7 +183,7 @@ func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient clie
 			instanceTypeMap = instanceTypesByProvisioner[provName]
 		}
 		// skip any nodes that are already marked for deletion and being handled
-		if n.MarkedForDeletion {
+		if n.MarkedForDeletion() {
 			return true
 		}
 		// skip any nodes where we can't determine the provisioner
@@ -208,12 +208,11 @@ func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient clie
 		}
 
 		// Skip nodes that aren't initialized
-		if n.Node.Labels[v1alpha5.LabelNodeInitialized] != "true" {
+		if !n.Initialized() {
 			return true
 		}
-
 		// Skip the node if it is nominated by a recent provisioning pass to be the target of a pending pod.
-		if cluster.IsNodeNominated(n.Node.Name) {
+		if n.Nominated() {
 			return true
 		}
 

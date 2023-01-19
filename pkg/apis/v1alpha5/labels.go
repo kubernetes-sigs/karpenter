@@ -40,11 +40,12 @@ const (
 
 // Karpenter specific annotations
 const (
-	DoNotEvictPodAnnotationKey         = Group + "/do-not-evict"
-	DoNotConsolidateNodeAnnotationKey  = Group + "/do-not-consolidate"
-	EmptinessTimestampAnnotationKey    = Group + "/emptiness-timestamp"
-	ProviderCompatabilityAnnotationKey = Group + "/compatibility/provider"
-	VoluntaryDisruptionAnnotationKey   = Group + "/voluntary-disruption"
+	DoNotEvictPodAnnotationKey        = Group + "/do-not-evict"
+	DoNotConsolidateNodeAnnotationKey = Group + "/do-not-consolidate"
+	EmptinessTimestampAnnotationKey   = Group + "/emptiness-timestamp"
+	VoluntaryDisruptionAnnotationKey  = Group + "/voluntary-disruption"
+
+	ProviderCompatabilityAnnotationKey = CompatabilityGroup + "/provider"
 
 	// Karpenter specific annotation values
 	VoluntaryDisruptionDriftedAnnotationValue = "drifted"
@@ -53,12 +54,6 @@ const (
 // Karpenter specific finalizers
 const (
 	TerminationFinalizer = Group + "/termination"
-)
-
-// Tags for infrastructure resources deployed into Cloud Provider's accounts
-const (
-	DiscoveryTagKey = Group + "/discovery"
-	ManagedByTagKey = Group + "/managed-by"
 )
 
 var (

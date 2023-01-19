@@ -29,10 +29,10 @@ import (
 // to the node must be unique. We need to track this to keep an accurate concept of what pods can potentially schedule
 // together.
 type HostPortUsage struct {
-	reserved []entry
+	reserved map[types.NamespacedName][]entry
 }
+
 type entry struct {
-	podName  types.NamespacedName
 	ip       net.IP
 	port     int32
 	protocol v1.Protocol
@@ -49,17 +49,17 @@ func (e entry) matches(rhs entry) bool {
 	if e.port != rhs.port {
 		return false
 	}
-
 	// If IPs are unequal, they don't match unless one is an unspecified address "0.0.0.0" or the IPv6 address "::".
 	if !e.ip.Equal(rhs.ip) && !e.ip.IsUnspecified() && !rhs.ip.IsUnspecified() {
 		return false
 	}
-
 	return true
 }
 
 func NewHostPortUsage() *HostPortUsage {
-	return &HostPortUsage{}
+	return &HostPortUsage{
+		reserved: map[types.NamespacedName][]entry{},
+	}
 }
 
 // Add adds a port to the HostPortUsage, returning an error in the case of a conflict
@@ -68,7 +68,7 @@ func (u *HostPortUsage) Add(ctx context.Context, pod *v1.Pod) {
 	if err != nil {
 		logging.FromContext(ctx).Errorf("invariant violated registering host port usage, %s, please file an issue", err)
 	}
-	u.reserved = append(u.reserved, newUsage...)
+	u.reserved[client.ObjectKeyFromObject(pod)] = newUsage
 }
 
 // Validate performs host port conflict validation to allow for determining if we can schedule the pod to the node
@@ -81,9 +81,11 @@ func (u *HostPortUsage) Validate(pod *v1.Pod) error {
 func (u *HostPortUsage) validate(pod *v1.Pod) ([]entry, error) {
 	newUsage := getHostPorts(pod)
 	for _, newEntry := range newUsage {
-		for _, existing := range u.reserved {
-			if newEntry.matches(existing) {
-				return nil, fmt.Errorf("%s conflicts with existing HostPort configuration %s", newEntry, existing)
+		for podKey, entries := range u.reserved {
+			for _, existing := range entries {
+				if newEntry.matches(existing) && podKey != client.ObjectKeyFromObject(pod) {
+					return nil, fmt.Errorf("%s conflicts with existing HostPort configuration %s", newEntry, existing)
+				}
 			}
 		}
 	}
@@ -92,13 +94,7 @@ func (u *HostPortUsage) validate(pod *v1.Pod) ([]entry, error) {
 
 // DeletePod deletes all host port usage from the HostPortUsage that were created by the pod with the given name.
 func (u *HostPortUsage) DeletePod(key types.NamespacedName) {
-	var remaining []entry
-	for _, e := range u.reserved {
-		if e.podName != key {
-			remaining = append(remaining, e)
-		}
-	}
-	u.reserved = remaining
+	delete(u.reserved, key)
 }
 
 func (u *HostPortUsage) DeepCopy() *HostPortUsage {
@@ -111,20 +107,20 @@ func (u *HostPortUsage) DeepCopy() *HostPortUsage {
 }
 
 func (u *HostPortUsage) DeepCopyInto(out *HostPortUsage) {
-	out.reserved = nil
-	for _, v := range u.reserved {
-		out.reserved = append(out.reserved, entry{
-			podName:  v.podName,
-			ip:       v.ip,
-			port:     v.port,
-			protocol: v.protocol,
-		})
+	out.reserved = map[types.NamespacedName][]entry{}
+	for k, v := range u.reserved {
+		for _, e := range v {
+			out.reserved[k] = append(out.reserved[k], entry{
+				ip:       e.ip,
+				port:     e.port,
+				protocol: e.protocol,
+			})
+		}
 	}
 }
 
 func getHostPorts(pod *v1.Pod) []entry {
 	var usage []entry
-	podName := client.ObjectKeyFromObject(pod)
 	for _, c := range pod.Spec.Containers {
 		for _, p := range c.Ports {
 			if p.HostPort == 0 {
@@ -138,7 +134,6 @@ func getHostPorts(pod *v1.Pod) []entry {
 				hostIP = "0.0.0.0"
 			}
 			usage = append(usage, entry{
-				podName:  podName,
 				ip:       net.ParseIP(hostIP),
 				port:     p.HostPort,
 				protocol: p.Protocol,

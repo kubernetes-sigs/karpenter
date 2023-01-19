@@ -29,6 +29,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
+	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
@@ -40,7 +41,7 @@ type SchedulerOptions struct {
 
 func NewScheduler(ctx context.Context, kubeClient client.Client, machines []*MachineTemplate,
 	provisioners []v1alpha5.Provisioner, cluster *state.Cluster, stateNodes []*state.Node, topology *Topology,
-	instanceTypes map[string][]*cloudprovider.InstanceType, daemonOverhead map[*MachineTemplate]v1.ResourceList,
+	instanceTypes map[string][]*cloudprovider.InstanceType, daemonSetPods []*v1.Pod,
 	recorder events.Recorder, opts SchedulerOptions) *Scheduler {
 
 	// if any of the provisioners add a taint with a prefer no schedule effect, we add a toleration for the taint
@@ -61,24 +62,18 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, machines []*Mac
 		topology:           topology,
 		cluster:            cluster,
 		instanceTypes:      instanceTypes,
-		daemonOverhead:     daemonOverhead,
+		daemonOverhead:     getDaemonOverhead(machines, daemonSetPods),
 		recorder:           recorder,
 		opts:               opts,
 		preferences:        &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
 		remainingResources: map[string]v1.ResourceList{},
 	}
-
-	namedNodeTemplates := lo.KeyBy(s.machineTemplates, func(nodeTemplate *MachineTemplate) string {
-		return nodeTemplate.Requirements.Get(v1alpha5.ProvisionerNameLabelKey).Values()[0]
-	})
-
 	for _, provisioner := range provisioners {
 		if provisioner.Spec.Limits != nil {
 			s.remainingResources[provisioner.Name] = provisioner.Spec.Limits.Resources
 		}
 	}
-
-	s.calculateExistingMachines(namedNodeTemplates, stateNodes)
+	s.calculateExistingMachines(stateNodes, daemonSetPods)
 	return s
 }
 
@@ -146,7 +141,7 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 
 	for _, node := range s.existingNodes {
 		if len(node.Pods) > 0 {
-			s.cluster.NominateNodeForPod(node.Node.Name)
+			s.cluster.NominateNodeForPod(ctx, node.Name)
 		}
 		for _, pod := range node.Pods {
 			s.recorder.Publish(events.NominatePod(pod, node.Node))
@@ -223,26 +218,52 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 	return errs
 }
 
-func (s *Scheduler) calculateExistingMachines(namedNodeTemplates map[string]*MachineTemplate, stateNodes []*state.Node) {
+func (s *Scheduler) calculateExistingMachines(stateNodes []*state.Node, daemonSetPods []*v1.Pod) {
 	// create our existing nodes
 	for _, node := range stateNodes {
-		name, ok := node.Node.Labels[v1alpha5.ProvisionerNameLabelKey]
-		if !ok {
+		if !node.Owned() {
 			// ignoring this node as it wasn't launched by us
 			continue
 		}
-		nodeTemplate, ok := namedNodeTemplates[name]
-		if !ok {
-			// ignoring this node as it wasn't launched by a provisioner that we recognize
-			continue
+		// Calculate any daemonsets that should schedule to the inflight node
+		var daemons []*v1.Pod
+		for _, p := range daemonSetPods {
+			if err := scheduling.Taints(node.Node.Spec.Taints).Tolerates(p); err != nil {
+				continue
+			}
+			if err := scheduling.NewLabelRequirements(node.Node.Labels).Compatible(scheduling.NewPodRequirements(p)); err != nil {
+				continue
+			}
+			daemons = append(daemons, p)
 		}
-		s.existingNodes = append(s.existingNodes, NewExistingNode(node, s.topology, nodeTemplate.StartupTaints, s.daemonOverhead[nodeTemplate]))
+		s.existingNodes = append(s.existingNodes, NewExistingNode(node, s.topology, resources.RequestsForPods(daemons...)))
 
 		// We don't use the status field and instead recompute the remaining resources to ensure we have a consistent view
 		// of the cluster during scheduling.  Depending on how node creation falls out, this will also work for cases where
 		// we don't create Node resources.
-		s.remainingResources[name] = resources.Subtract(s.remainingResources[name], node.Capacity)
+		if _, ok := s.remainingResources[node.Node.Labels[v1alpha5.ProvisionerNameLabelKey]]; ok {
+			s.remainingResources[node.Node.Labels[v1alpha5.ProvisionerNameLabelKey]] = resources.Subtract(s.remainingResources[node.Node.Labels[v1alpha5.ProvisionerNameLabelKey]], node.Capacity())
+		}
 	}
+}
+
+func getDaemonOverhead(nodeTemplates []*MachineTemplate, daemonSetPods []*v1.Pod) map[*MachineTemplate]v1.ResourceList {
+	overhead := map[*MachineTemplate]v1.ResourceList{}
+
+	for _, nodeTemplate := range nodeTemplates {
+		var daemons []*v1.Pod
+		for _, p := range daemonSetPods {
+			if err := nodeTemplate.Taints.Tolerates(p); err != nil {
+				continue
+			}
+			if err := nodeTemplate.Requirements.Compatible(scheduling.NewPodRequirements(p)); err != nil {
+				continue
+			}
+			daemons = append(daemons, p)
+		}
+		overhead[nodeTemplate] = resources.RequestsForPods(daemons...)
+	}
+	return overhead
 }
 
 // subtractMax returns the remaining resources after subtracting the max resource quantity per instance type. To avoid

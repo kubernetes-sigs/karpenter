@@ -28,11 +28,12 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/test"
+	"github.com/aws/karpenter-core/pkg/utils/functional"
+	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
 var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)
@@ -42,8 +43,9 @@ type CloudProvider struct {
 
 	// CreateCalls contains the arguments for every create call that was made since it was cleared
 	mu                 sync.Mutex
-	CreateCalls        []*v1alpha1.Machine
+	CreateCalls        []*v1alpha5.Machine
 	AllowedCreateCalls int
+	Drifted            bool
 }
 
 var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)
@@ -58,16 +60,16 @@ func NewCloudProvider() *CloudProvider {
 func (c *CloudProvider) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.CreateCalls = []*v1alpha1.Machine{}
+	c.CreateCalls = []*v1alpha5.Machine{}
 	c.AllowedCreateCalls = math.MaxInt
 }
 
-func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha1.Machine) (*v1.Node, error) {
+func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (*v1alpha5.Machine, error) {
 	c.mu.Lock()
 	c.CreateCalls = append(c.CreateCalls, machine)
 	if len(c.CreateCalls) > c.AllowedCreateCalls {
 		c.mu.Unlock()
-		return &v1.Node{}, fmt.Errorf("erroring as number of AllowedCreateCalls has been exceeded")
+		return &v1alpha5.Machine{}, fmt.Errorf("erroring as number of AllowedCreateCalls has been exceeded")
 	}
 	c.mu.Unlock()
 
@@ -101,16 +103,22 @@ func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha1.Machine) (
 		}
 	}
 	name := test.RandomName()
-	n := &v1.Node{
+	return &v1alpha5.Machine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   name,
 			Labels: labels,
 		},
-		Spec: v1.NodeSpec{
-			ProviderID: fmt.Sprintf("fake://%s", name),
+		Spec: *machine.Spec.DeepCopy(),
+		Status: v1alpha5.MachineStatus{
+			ProviderID:  fmt.Sprintf("fake://%s", name),
+			Capacity:    functional.FilterMap(instanceType.Capacity, func(_ v1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
+			Allocatable: functional.FilterMap(instanceType.Allocatable(), func(_ v1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
 		},
-	}
-	return n, nil
+	}, nil
+}
+
+func (c *CloudProvider) Get(context.Context, string, string) (*v1alpha5.Machine, error) {
+	return nil, nil
 }
 
 func (c *CloudProvider) GetInstanceTypes(_ context.Context, _ *v1alpha5.Provisioner) ([]*cloudprovider.InstanceType, error) {
@@ -157,12 +165,12 @@ func (c *CloudProvider) GetInstanceTypes(_ context.Context, _ *v1alpha5.Provisio
 	}, nil
 }
 
-func (c *CloudProvider) Delete(context.Context, *v1.Node) error {
+func (c *CloudProvider) Delete(context.Context, *v1alpha5.Machine) error {
 	return nil
 }
 
-func (c *CloudProvider) IsMachineDrifted(context.Context, *v1alpha1.Machine) (bool, error) {
-	return false, nil
+func (c *CloudProvider) IsMachineDrifted(context.Context, *v1alpha5.Machine) (bool, error) {
+	return c.Drifted, nil
 }
 
 // Name returns the CloudProvider implementation name.

@@ -33,12 +33,12 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
@@ -69,13 +69,13 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(scheme.Scheme, apis.CRDs...)
+	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
 	ctx = settings.ToContext(ctx, test.Settings())
 	cloudProvider = fake.NewCloudProvider()
 	recorder = test.NewEventRecorder()
 	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(ctx, fakeClock, env.Client, cloudProvider)
-	nodeController = state.NewNodeController(env.Client, cluster)
+	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	nodeController = informer.NewNodeController(env.Client, cluster)
 	prov = provisioning.NewProvisioner(ctx, env.Client, corev1.NewForConfigOrDie(env.Config), recorder, cloudProvider, cluster)
 	provisioningController = provisioning.NewController(env.Client, prov, recorder)
 	instanceTypes, _ := cloudProvider.GetInstanceTypes(context.Background(), nil)
@@ -97,7 +97,7 @@ var _ = AfterSuite(func() {
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 	recorder.Reset()
-	cluster.Reset(ctx)
+	cluster.Reset()
 })
 
 var _ = Describe("Provisioning", func() {
@@ -112,7 +112,9 @@ var _ = Describe("Provisioning", func() {
 		}
 	})
 	It("should ignore provisioners that are deleting", func() {
-		ExpectApplied(ctx, env.Client, test.Provisioner(test.ProvisionerOptions{ObjectMeta: metav1.ObjectMeta{DeletionTimestamp: &metav1.Time{Time: time.Now()}}}))
+		provisioner := test.Provisioner()
+		ExpectApplied(ctx, env.Client, provisioner)
+		ExpectDeletionTimestampSet(ctx, env.Client, provisioner)
 		pods := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod())
 		nodes := &v1.NodeList{}
 		Expect(env.Client.List(ctx, nodes)).To(Succeed())
@@ -327,6 +329,30 @@ var _ = Describe("Provisioning", func() {
 					},
 				}}))[0]
 			// only available instance type has 2 GPUs which would exceed the limit
+			ExpectNotScheduled(ctx, env.Client, pod)
+		})
+		It("should not schedule to a provisioner after a scheduling round if limits would be exceeded", func() {
+			ExpectApplied(ctx, env.Client, test.Provisioner(test.ProvisionerOptions{
+				Limits: v1.ResourceList{v1.ResourceCPU: resource.MustParse("2")},
+			}))
+			pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
+				test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						// requires a 2 CPU node, but leaves room for overhead
+						v1.ResourceCPU: resource.MustParse("1.75"),
+					},
+				}}))[0]
+			// A 2 CPU node can be launched
+			ExpectScheduled(ctx, env.Client, pod)
+
+			// This pod requests over the existing limit (would add to 3.5 CPUs) so this should fail
+			pod = ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(
+				test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						// requires a 2 CPU node, but leaves room for overhead
+						v1.ResourceCPU: resource.MustParse("1.75"),
+					},
+				}}))[0]
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 	})
@@ -784,7 +810,7 @@ var _ = Describe("Provisioning", func() {
 
 			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
 			Expect(cloudProvider.CreateCalls[0].Spec.MachineTemplateRef).To(Equal(
-				&v1.ObjectReference{
+				&v1alpha5.ProviderRef{
 					APIVersion: "cloudprovider.karpenter.sh/v1alpha1",
 					Kind:       "CloudProvider",
 					Name:       "default",
@@ -906,6 +932,17 @@ var _ = Describe("Volume Topology Requirements", func() {
 	It("should schedule valid pods when a pod with an invalid pvc is encountered (storage class)", func() {
 		invalidStorageClass := "invalid-storage-class"
 		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{StorageClassName: &invalidStorageClass})
+		ExpectApplied(ctx, env.Client, test.Provisioner(), persistentVolumeClaim)
+		invalidPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(test.PodOptions{
+			PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+		}))[0]
+		pod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(test.PodOptions{}))[0]
+		ExpectNotScheduled(ctx, env.Client, invalidPod)
+		ExpectScheduled(ctx, env.Client, pod)
+	})
+	It("should schedule valid pods when a pod with an invalid pvc is encountered (volume name)", func() {
+		invalidVolumeName := "invalid-volume-name"
+		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{VolumeName: invalidVolumeName})
 		ExpectApplied(ctx, env.Client, test.Provisioner(), persistentVolumeClaim)
 		invalidPod := ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov, test.UnschedulablePod(test.PodOptions{
 			PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
@@ -1156,7 +1193,7 @@ var _ = Describe("Multiple Provisioners", func() {
 	})
 })
 
-func ExpectMachineRequirements(machine *v1alpha1.Machine, requirements ...v1.NodeSelectorRequirement) {
+func ExpectMachineRequirements(machine *v1alpha5.Machine, requirements ...v1.NodeSelectorRequirement) {
 	for _, requirement := range requirements {
 		req, ok := lo.Find(machine.Spec.Requirements, func(r v1.NodeSelectorRequirement) bool {
 			return r.Key == requirement.Key && r.Operator == requirement.Operator
@@ -1170,7 +1207,7 @@ func ExpectMachineRequirements(machine *v1alpha1.Machine, requirements ...v1.Nod
 	}
 }
 
-func ExpectMachineRequests(machine *v1alpha1.Machine, resources v1.ResourceList) {
+func ExpectMachineRequests(machine *v1alpha5.Machine, resources v1.ResourceList) {
 	for name, value := range resources {
 		v := machine.Spec.Resources.Requests[name]
 		ExpectWithOffset(1, v.AsApproximateFloat64()).To(BeNumerically("~", value.AsApproximateFloat64(), 10))

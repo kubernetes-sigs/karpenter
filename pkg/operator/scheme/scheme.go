@@ -16,10 +16,11 @@ package scheme
 
 import (
 	"k8s.io/apimachinery/pkg/runtime"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/samber/lo"
+
+	"github.com/aws/karpenter-core/pkg/apis"
 )
 
 var (
@@ -27,6 +28,6 @@ var (
 )
 
 func init() {
-	utilruntime.Must(clientgoscheme.AddToScheme(Scheme))
-	utilruntime.Must(v1alpha5.SchemeBuilder.AddToScheme(Scheme))
+	lo.Must0(clientgoscheme.AddToScheme(Scheme))
+	lo.Must0(apis.AddToScheme(Scheme))
 }

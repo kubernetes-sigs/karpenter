@@ -19,29 +19,25 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/operator/injection"
-
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
 var (
@@ -60,6 +56,8 @@ func init() {
 	crmetrics.Registry.MustRegister(terminationSummary)
 }
 
+var _ corecontroller.FinalizingTypedController[*v1.Node] = (*Controller)(nil)
+
 // Controller for the resource
 type Controller struct {
 	Terminator *Terminator
@@ -71,7 +69,7 @@ type Controller struct {
 func NewController(clk clock.Clock, kubeClient client.Client, evictionQueue *EvictionQueue,
 	recorder events.Recorder, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
 
-	return &Controller{
+	return corecontroller.Typed[*v1.Node](kubeClient, &Controller{
 		KubeClient: kubeClient,
 		Terminator: &Terminator{
 			KubeClient:    kubeClient,
@@ -80,20 +78,20 @@ func NewController(clk clock.Clock, kubeClient client.Client, evictionQueue *Evi
 			Clock:         clk,
 		},
 		Recorder: recorder,
-	}
+	})
 }
 
 func (c *Controller) Name() string {
 	return "termination"
 }
 
-func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("node", req.Name))
-	ctx = injection.WithControllerName(ctx, c.Name())
+func (c *Controller) Reconcile(_ context.Context, _ *v1.Node) (reconcile.Result, error) {
+	return reconcile.Result{}, nil
+}
 
-	node := &v1.Node{}
-	if err := c.KubeClient.Get(ctx, req.NamespacedName, node); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(err)
+func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Result, error) {
+	if !controllerutil.ContainsFinalizer(node, v1alpha5.TerminationFinalizer) {
+		return reconcile.Result{}, nil
 	}
 	if err := c.Terminator.cordon(ctx, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("cordoning node, %w", err)
@@ -125,11 +123,5 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontrolle
 				),
 				MaxConcurrentReconciles: 10,
 			},
-		).
-		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
-			return !obj.GetDeletionTimestamp().IsZero()
-		})).
-		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
-			return lo.Contains(obj.GetFinalizers(), v1alpha5.TerminationFinalizer)
-		})))
+		))
 }

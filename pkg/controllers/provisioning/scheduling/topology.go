@@ -28,7 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/runtime"
 	utilsets "k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -333,7 +332,9 @@ func (t *Topology) buildNamespaceList(ctx context.Context, namespace string, nam
 	}
 	var namespaceList v1.NamespaceList
 	labelSelector, err := metav1.LabelSelectorAsSelector(selector)
-	runtime.Must(err)
+	if err != nil {
+		return nil, fmt.Errorf("parsing selector, %w", err)
+	}
 	if err := t.kubeClient.List(ctx, &namespaceList, &client.ListOptions{LabelSelector: labelSelector}); err != nil {
 		return nil, fmt.Errorf("listing namespaces, %w", err)
 	}
@@ -369,12 +370,16 @@ func TopologyListOptions(namespace string, labelSelector *metav1.LabelSelector) 
 	}
 	for key, value := range labelSelector.MatchLabels {
 		requirement, err := labels.NewRequirement(key, selection.Equals, []string{value})
-		runtime.Must(err)
+		if err != nil {
+			return &client.ListOptions{Namespace: namespace, LabelSelector: labels.Nothing()}
+		}
 		selector = selector.Add(*requirement)
 	}
 	for _, expression := range labelSelector.MatchExpressions {
 		requirement, err := labels.NewRequirement(expression.Key, mapOperator(expression.Operator), expression.Values)
-		runtime.Must(err)
+		if err != nil {
+			return &client.ListOptions{Namespace: namespace, LabelSelector: labels.Nothing()}
+		}
 		selector = selector.Add(*requirement)
 	}
 	return &client.ListOptions{Namespace: namespace, LabelSelector: selector}

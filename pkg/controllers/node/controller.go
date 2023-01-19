@@ -19,17 +19,15 @@ import (
 
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
@@ -51,6 +49,7 @@ type Controller struct {
 	initialization *Initialization
 	emptiness      *Emptiness
 	finalizer      *Finalizer
+	drift          *Drift
 }
 
 // NewController constructs a nodeController instance
@@ -60,6 +59,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 		cluster:        cluster,
 		initialization: &Initialization{kubeClient: kubeClient, cloudProvider: cloudProvider},
 		emptiness:      &Emptiness{kubeClient: kubeClient, clock: clk, cluster: cluster},
+		drift:          &Drift{kubeClient: kubeClient, cloudProvider: cloudProvider},
 	})
 }
 
@@ -69,6 +69,14 @@ func (c *Controller) Name() string {
 
 // Reconcile executes a reallocation control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Result, error) {
+	stored := node.DeepCopy()
+	if _, ok := node.Labels[v1alpha5.ProvisionerNameLabelKey]; !ok {
+		return reconcile.Result{}, nil
+	}
+	if !node.DeletionTimestamp.IsZero() {
+		return reconcile.Result{}, nil
+	}
+
 	provisioner := &v1alpha5.Provisioner{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
@@ -83,23 +91,21 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Re
 		c.initialization,
 		c.emptiness,
 		c.finalizer,
+		c.drift,
 	} {
 		res, err := reconciler.Reconcile(ctx, provisioner, node)
 		errs = multierr.Append(errs, err)
 		results = append(results, res)
 	}
+	if !equality.Semantic.DeepEqual(stored, node) {
+		if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+			return reconcile.Result{}, err
+		}
+	}
 	return result.Min(results...), errs
 }
 
 func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontroller.Builder {
-	// Enqueues a reconcile request when nominated node expiration is triggered
-	ch := make(chan event.GenericEvent, 300)
-	c.cluster.AddNominatedNodeEvictionObserver(func(nodeName string) {
-		ch <- event.GenericEvent{Object: &v1.Node{
-			ObjectMeta: metav1.ObjectMeta{Name: nodeName},
-		}}
-	})
-
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1.Node{}).
@@ -128,13 +134,5 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 				}
 				return requests
 			}),
-		).
-		Watches(&source.Channel{Source: ch}, &handler.EnqueueRequestForObject{}).
-		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
-			_, ok := obj.GetLabels()[v1alpha5.ProvisionerNameLabelKey]
-			return ok
-		})).
-		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
-			return obj.GetDeletionTimestamp().IsZero()
-		})))
+		))
 }

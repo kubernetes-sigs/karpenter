@@ -60,7 +60,7 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
-	env = test.NewEnvironment(scheme.Scheme, apis.CRDs...)
+	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
 
 	cloudProvider := fake.NewCloudProvider()
 	eventRecorder := test.NewEventRecorder()
@@ -500,6 +500,7 @@ var _ = Describe("Termination", func() {
 			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should not evict static pods", func() {
+			ExpectApplied(ctx, env.Client, node)
 			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
 			ExpectApplied(ctx, env.Client, node, podEvict)
 

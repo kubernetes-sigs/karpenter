@@ -15,14 +15,11 @@ limitations under the License.
 package scheduling
 
 import (
-	"encoding/json"
-
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
@@ -77,38 +74,26 @@ func (i *MachineTemplate) ToNode() *v1.Node {
 	}
 }
 
-func (i *MachineTemplate) ToMachine(owner *v1alpha5.Provisioner) *v1alpha1.Machine {
+func (i *MachineTemplate) ToMachine(owner *v1alpha5.Provisioner) *v1alpha5.Machine {
 	i.Requirements.Add(scheduling.NewRequirement(v1.LabelInstanceTypeStable, v1.NodeSelectorOpIn, lo.Map(i.InstanceTypeOptions, func(i *cloudprovider.InstanceType, _ int) string {
 		return i.Name
 	})...))
-	m := &v1alpha1.Machine{
+	m := &v1alpha5.Machine{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: i.ProvisionerName,
-			Annotations:  i.Annotations,
+			Annotations:  lo.Assign(i.Annotations, v1alpha5.ProviderAnnotation(i.Provider)),
 			Labels:       i.Labels,
 		},
-		Spec: v1alpha1.MachineSpec{
+		Spec: v1alpha5.MachineSpec{
 			Taints:        i.Taints,
 			StartupTaints: i.StartupTaints,
 			Requirements:  i.Requirements.NodeSelectorRequirements(),
 			Kubelet:       i.Kubelet,
-			Resources: v1alpha1.ResourceRequirements{
+			Resources: v1alpha5.ResourceRequirements{
 				Requests: i.Requests,
 			},
+			MachineTemplateRef: i.ProviderRef,
 		},
-	}
-	if i.Provider != nil {
-		raw := lo.Must(json.Marshal(i.Provider)) // Provider should already have been validated so this shouldn't fail
-		m.Annotations = lo.Assign(m.Annotations, map[string]string{
-			v1alpha5.ProviderCompatabilityAnnotationKey: string(raw),
-		})
-	}
-	if i.ProviderRef != nil {
-		m.Spec.MachineTemplateRef = &v1.ObjectReference{
-			APIVersion: i.ProviderRef.APIVersion,
-			Kind:       i.ProviderRef.Kind,
-			Name:       i.ProviderRef.Name,
-		}
 	}
 	lo.Must0(controllerutil.SetOwnerReference(owner, m, scheme.Scheme))
 	return m

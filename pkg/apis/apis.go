@@ -48,7 +48,10 @@ var (
 var (
 	//go:embed crds/karpenter.sh_provisioners.yaml
 	ProvisionerCRD []byte
-	CRDs           = []*v1.CustomResourceDefinition{
+	//go:embed crds/karpenter.sh_machines.yaml
+	MachineCRD []byte
+	CRDs       = []*v1.CustomResourceDefinition{
 		lo.Must(functional.Unmarshal[v1.CustomResourceDefinition](ProvisionerCRD)),
+		lo.Must(functional.Unmarshal[v1.CustomResourceDefinition](MachineCRD)),
 	}
 )

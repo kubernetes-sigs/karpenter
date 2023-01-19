@@ -27,7 +27,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha1"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
@@ -491,7 +490,7 @@ var _ = Describe("Instance Type Selection", func() {
 		// these values are constructed so that three of these pods can always fit on at least one of our instance types
 		for _, cpu := range []float64{0.1, 1.0, 2, 2.5, 4, 8, 16} {
 			for _, mem := range []float64{0.1, 1.0, 2, 4, 8, 16, 32} {
-				cluster.Reset(ctx)
+				cluster.Reset()
 				cloudProv.CreateCalls = nil
 				opts := test.PodOptions{
 					ResourceRequirements: v1.ResourceRequirements{Requests: map[v1.ResourceName]resource.Quantity{
@@ -570,7 +569,7 @@ var _ = Describe("Instance Type Selection", func() {
 	})
 })
 
-func supportedInstanceTypes(machine *v1alpha1.Machine) (res []*cloudprovider.InstanceType) {
+func supportedInstanceTypes(machine *v1alpha5.Machine) (res []*cloudprovider.InstanceType) {
 	reqs := scheduling.NewNodeSelectorRequirements(machine.Spec.Requirements...)
 	return lo.Filter(cloudProv.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
 		return reqs.Get(v1.LabelInstanceTypeStable).Has(i.Name)

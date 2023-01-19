@@ -73,7 +73,8 @@ func (r *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 		logging.FromContext(ctx).Infof("added TTL to empty node")
 	}
 
-	return reconcile.Result{}, nil
+	// Short requeue result so that we requeue to check for emptiness when the node nomination time ends
+	return reconcile.Result{RequeueAfter: time.Minute}, nil
 }
 
 func (r *Emptiness) isEmpty(ctx context.Context, n *v1.Node) (bool, error) {
