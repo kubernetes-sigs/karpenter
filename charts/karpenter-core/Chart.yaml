@@ -16,5 +16,5 @@ sources:
   - https://github.com/aws/karpenter-core/
 dependencies:
   - name: karpenter-core-crd
-    version: "v0.0.2"
+    version: "v0.101.186"
     repository: "oci://ghcr.io/aws/karpenter-core"
