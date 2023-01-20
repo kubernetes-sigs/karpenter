@@ -3,7 +3,7 @@ kind: MutatingWebhookConfiguration
 metadata:
   name: defaulting.webhook.karpenter.sh
   labels:
-    {{- include "karpenter.labels" . | nindent 4 }}
+    {{- include "karpenter-core.labels" . | nindent 4 }}
   {{- with .Values.additionalAnnotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -13,7 +13,7 @@ webhooks:
     admissionReviewVersions: ["v1"]
     clientConfig:
       service:
-        name: {{ include "karpenter.fullname" . }}
+        name: {{ include "karpenter-core.fullname" . }}
         namespace: {{ .Release.Namespace }}
     failurePolicy: Fail
     sideEffects: None
@@ -34,13 +34,17 @@ kind: ValidatingWebhookConfiguration
 metadata:
   name: validation.webhook.karpenter.sh
   labels:
-    {{- include "karpenter.labels" . | nindent 4 }}
+    {{- include "karpenter-core.labels" . | nindent 4 }}
+  {{- with .Values.additionalAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 webhooks:
   - name: validation.webhook.karpenter.sh
     admissionReviewVersions: ["v1"]
     clientConfig:
       service:
-        name: {{ include "karpenter.fullname" . }}
+        name: {{ include "karpenter-core.fullname" . }}
         namespace: {{ .Release.Namespace }}
     failurePolicy: Fail
     sideEffects: None
@@ -62,16 +66,20 @@ kind: ValidatingWebhookConfiguration
 metadata:
   name: validation.webhook.config.karpenter.sh
   labels:
-    {{- include "karpenter.labels" . | nindent 4 }}
+    {{- include "karpenter-core.labels" . | nindent 4 }}
+  {{- with .Values.additionalAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 webhooks:
   - name: validation.webhook.config.karpenter.sh
     admissionReviewVersions: ["v1"]
     clientConfig:
       service:
-        name: {{ include "karpenter.fullname" . }}
+        name: {{ include "karpenter-core.fullname" . }}
         namespace: {{ .Release.Namespace }}
     failurePolicy: Fail
     sideEffects: None
     objectSelector:
       matchLabels:
-        app.kubernetes.io/part-of: {{ template "karpenter.name" . }}
+        app.kubernetes.io/part-of: {{ template "karpenter-core.name" . }}

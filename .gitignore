@@ -5,6 +5,10 @@ coverage.html
 *.cpuprofile
 *.heapprofile
 
+# Helm dependency cache and history
+charts/karpenter-core/charts
+charts/karpenter-core/chart.lock
+
 # Common in OSs and IDEs
 .idea
 .vscode

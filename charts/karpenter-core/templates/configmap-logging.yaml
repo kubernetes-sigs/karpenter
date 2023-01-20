@@ -4,7 +4,7 @@ metadata:
   name: config-logging
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "karpenter.labels" . | nindent 4 }}
+    {{- include "karpenter-core.labels" . | nindent 4 }}
   {{- with .Values.additionalAnnotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -21,8 +21,8 @@ data:
         "initial": 100,
         "thereafter": 100
       },
-      "outputPaths": ["stdout"],
-      "errorOutputPaths": ["stderr"],
+      "outputPaths": [{{ include "karpenter-core.controller.outputPathsList" . }}],
+      "errorOutputPaths": [{{ include "karpenter-core.controller.errorOutputPathsList" . }}],
       "encoding": "{{ .Values.logEncoding }}",
       "encoderConfig": {
         "timeKey": "time",

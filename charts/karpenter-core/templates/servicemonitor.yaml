@@ -2,10 +2,10 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: {{ include "karpenter.fullname" . }}
+  name: {{ include "karpenter-core.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "karpenter.labels" . | nindent 4 }}
+    {{- include "karpenter-core.labels" . | nindent 4 }}
   {{- with .Values.serviceMonitor.additionalLabels }}
     {{- toYaml . | nindent 4 }}
   {{- end }}
@@ -19,7 +19,7 @@ spec:
       - {{ .Release.Namespace }}
   selector:
     matchLabels:
-      {{- include "karpenter.selectorLabels" . | nindent 6 }}
+      {{- include "karpenter-core.selectorLabels" . | nindent 6 }}
   endpoints:
     - port: http-metrics
       path: /metrics

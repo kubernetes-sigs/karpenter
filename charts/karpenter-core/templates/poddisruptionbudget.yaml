@@ -1,10 +1,14 @@
-apiVersion: {{ include "karpenter.pdb.apiVersion" . }}
+apiVersion: {{ include "karpenter-core.pdb.apiVersion" . }}
 kind: PodDisruptionBudget
 metadata:
   name: {{ .Values.podDisruptionBudget.name }}
   namespace: {{ .Release.Namespace }}
+  {{- with .Values.additionalAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
   selector:
     matchLabels:
-    {{- include "karpenter.selectorLabels" . | nindent 6 }}
+    {{- include "karpenter-core.selectorLabels" . | nindent 6 }}

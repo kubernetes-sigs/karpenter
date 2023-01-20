@@ -4,7 +4,7 @@ metadata:
   name: karpenter-global-settings
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "karpenter.labels" . | nindent 4 }}
+    {{- include "karpenter-core.labels" . | nindent 4 }}
   {{- with .Values.additionalAnnotations }}
   annotations:
     {{- toYaml . | nindent 4 }}

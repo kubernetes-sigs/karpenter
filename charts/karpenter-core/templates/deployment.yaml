@@ -1,10 +1,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "karpenter.fullname" . }}
+  name: {{ include "karpenter-core.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "karpenter.labels" . | nindent 4 }}
+    {{- include "karpenter-core.labels" . | nindent 4 }}
   {{- with .Values.additionalAnnotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -18,11 +18,11 @@ spec:
   {{- end }}
   selector:
     matchLabels:
-      {{- include "karpenter.selectorLabels" . | nindent 6 }}
+      {{- include "karpenter-core.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "karpenter.selectorLabels" . | nindent 8 }}
+        {{- include "karpenter-core.selectorLabels" . | nindent 8 }}
       {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -35,7 +35,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "karpenter.serviceAccountName" . }}
+      serviceAccountName: {{ include "karpenter-core.serviceAccountName" . }}
       {{- with .Values.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
@@ -68,7 +68,7 @@ spec:
             - name: KUBERNETES_MIN_VERSION
               value: "1.19.0-0"
             - name: KARPENTER_SERVICE
-              value: {{ include "karpenter.fullname" . }}
+              value: {{ include "karpenter-core.fullname" . }}
             - name: WEBHOOK_PORT
               value: "{{ .Values.webhook.port }}"
             - name: SYSTEM_NAMESPACE
@@ -113,6 +113,12 @@ spec:
           volumeMounts:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+        {{- with .Values.controller.sidecarContainer }}
+          {{- with .Values.controller.extraVolumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -136,6 +142,6 @@ spec:
         {{- toYaml $constraint | nindent 10 }}
           labelSelector:
             matchLabels:
-            {{- include "karpenter.selectorLabels" $ | nindent 14 -}}
+            {{- include "karpenter-core.selectorLabels" $ | nindent 14 -}}
         {{- end }}
       {{- end }}
