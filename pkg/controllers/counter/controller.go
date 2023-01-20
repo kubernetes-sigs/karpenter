@@ -61,10 +61,6 @@ func (c *Controller) Name() string {
 // Reconcile a control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner) (reconcile.Result, error) {
 	stored := provisioner.DeepCopy()
-	nodes := v1.NodeList{}
-	if err := c.kubeClient.List(ctx, &nodes, client.MatchingLabels{v1alpha5.ProvisionerNameLabelKey: provisioner.Name}); err != nil {
-		return reconcile.Result{}, err
-	}
 	// Determine resource usage and update provisioner.status.resources
 	provisioner.Status.Resources = c.resourceCountsFor(provisioner.Name)
 	if !equality.Semantic.DeepEqual(stored, provisioner) {
@@ -81,6 +77,8 @@ func (c *Controller) resourceCountsFor(provisionerName string) v1.ResourceList {
 	// is accurately reported even for nodes that haven't fully started yet. This allows us to update our provisioner
 	// status immediately upon node creation instead of waiting for the node to become ready.
 	c.cluster.ForEachNode(func(n *state.Node) bool {
+		// Don't count nodes that we are planning to delete. This is to ensure that we are consistent throughout
+		// our provisioning and deprovisioning loops
 		if n.MarkedForDeletion() {
 			return true
 		}

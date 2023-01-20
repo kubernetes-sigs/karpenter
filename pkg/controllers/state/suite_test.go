@@ -101,6 +101,8 @@ var _ = Describe("Inflight Nodes", func() {
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		ExpectStateNodeCount("==", 1)
 		ExpectResources(instanceType.Allocatable(), ExpectStateNodeExists(node).Allocatable())
 		ExpectResources(instanceType.Capacity, ExpectStateNodeExists(node).Capacity())
 	})
@@ -120,6 +122,8 @@ var _ = Describe("Inflight Nodes", func() {
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		ExpectStateNodeCount("==", 1)
 		ExpectResources(v1.ResourceList{
 			v1.ResourceMemory:           resource.MustParse("100Mi"), // pulled from the node's real allocatable
 			v1.ResourceCPU:              *instanceType.Capacity.Cpu(),
@@ -222,6 +226,7 @@ var _ = Describe("Inflight Nodes", func() {
 		ExpectApplied(ctx, env.Client, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 
+		ExpectStateNodeCount("==", 1)
 		stateNode := ExpectStateNodeExistsForMachine(machine)
 		Expect(stateNode.Labels()).To(HaveKeyWithValue(v1alpha5.ProvisionerNameLabelKey, "default"))
 		Expect(stateNode.Labels()).To(HaveKeyWithValue(v1.LabelInstanceTypeStable, cloudProvider.InstanceTypes[0].Name))
@@ -268,6 +273,8 @@ var _ = Describe("Inflight Nodes", func() {
 		})
 		ExpectApplied(ctx, env.Client, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+
+		ExpectStateNodeCount("==", 1)
 		ExpectResources(v1.ResourceList{
 			v1.ResourceCPU:              resource.MustParse("2"),
 			v1.ResourceMemory:           resource.MustParse("32Gi"),
@@ -314,6 +321,8 @@ var _ = Describe("Inflight Nodes", func() {
 		})
 		ExpectApplied(ctx, env.Client, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+
+		ExpectStateNodeCount("==", 1)
 		ExpectResources(v1.ResourceList{
 			v1.ResourceCPU:              resource.MustParse("2"),
 			v1.ResourceMemory:           resource.MustParse("32Gi"),
@@ -339,6 +348,8 @@ var _ = Describe("Inflight Nodes", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, node)
+
+		ExpectStateNodeCount("==", 1)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 		// Update machine to be initialized
@@ -346,6 +357,7 @@ var _ = Describe("Inflight Nodes", func() {
 		ExpectApplied(ctx, env.Client, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 
+		ExpectStateNodeCount("==", 1)
 		ExpectStateNodeExistsForMachine(machine)
 		ExpectResources(v1.ResourceList{
 			v1.ResourceCPU:              resource.MustParse("1800m"),
@@ -357,60 +369,6 @@ var _ = Describe("Inflight Nodes", func() {
 			v1.ResourceMemory:           resource.MustParse("29250Mi"),
 			v1.ResourceEphemeralStorage: resource.MustParse("17800Mi"),
 		}, ExpectStateNodeExists(node).Allocatable())
-	})
-	It("should not update the inflight capacity util the node is initialized", func() {
-		machine := test.Machine(v1alpha5.Machine{
-			Spec: v1alpha5.MachineSpec{
-				Requirements: []v1.NodeSelectorRequirement{
-					{
-						Key:      v1.LabelInstanceTypeStable,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{cloudProvider.InstanceTypes[0].Name},
-					},
-					{
-						Key:      v1.LabelTopologyZone,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{"test-zone-1"},
-					},
-				},
-				MachineTemplateRef: &v1alpha5.ProviderRef{
-					Name: "default",
-				},
-			},
-			Status: v1alpha5.MachineStatus{
-				ProviderID: test.ProviderID(),
-				Capacity: v1.ResourceList{
-					v1.ResourceCPU:              resource.MustParse("2"),
-					v1.ResourceMemory:           resource.MustParse("32Gi"),
-					v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
-				},
-				Allocatable: v1.ResourceList{
-					v1.ResourceCPU:              resource.MustParse("1"),
-					v1.ResourceMemory:           resource.MustParse("30Gi"),
-					v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-
-		node := test.Node(test.NodeOptions{
-			ProviderID: machine.Status.ProviderID,
-		})
-		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-
-		// Machine isn't initialized yet so the resources should remain as the in-flight resources
-		ExpectResources(v1.ResourceList{
-			v1.ResourceCPU:              resource.MustParse("2"),
-			v1.ResourceMemory:           resource.MustParse("32Gi"),
-			v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
-		}, ExpectStateNodeExistsForMachine(machine).Capacity())
-		ExpectResources(v1.ResourceList{
-			v1.ResourceCPU:              resource.MustParse("1"),
-			v1.ResourceMemory:           resource.MustParse("30Gi"),
-			v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
-		}, ExpectStateNodeExistsForMachine(machine).Allocatable())
 	})
 	It("should combine the inflight capacity with node while node isn't initialized", func() {
 		machine := test.Machine(v1alpha5.Machine{
@@ -447,6 +405,7 @@ var _ = Describe("Inflight Nodes", func() {
 		})
 		ExpectApplied(ctx, env.Client, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectStateNodeCount("==", 1)
 
 		node := test.Node(test.NodeOptions{
 			ProviderID: machine.Status.ProviderID,
@@ -463,6 +422,7 @@ var _ = Describe("Inflight Nodes", func() {
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectStateNodeCount("==", 1)
 
 		// Machine isn't initialized yet so the resources should remain as the in-flight resources
 		ExpectResources(v1.ResourceList{
@@ -484,6 +444,7 @@ var _ = Describe("Inflight Nodes", func() {
 		})
 		ExpectApplied(ctx, env.Client, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectStateNodeCount("==", 1)
 		cluster.NominateNodeForPod(ctx, machine.Name)
 		Expect(ExpectStateNodeExistsForMachine(machine).Nominated()).To(BeTrue())
 
@@ -493,6 +454,7 @@ var _ = Describe("Inflight Nodes", func() {
 		node.Spec.ProviderID = machine.Status.ProviderID
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectStateNodeCount("==", 1)
 		Expect(ExpectStateNodeExists(node).Nominated()).To(BeTrue())
 	})
 	It("should continue MarkedForDeletion when an inflight node becomes a real node", func() {
@@ -503,6 +465,7 @@ var _ = Describe("Inflight Nodes", func() {
 		})
 		ExpectApplied(ctx, env.Client, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectStateNodeCount("==", 1)
 		cluster.MarkForDeletion(machine.Name)
 		Expect(ExpectStateNodeExistsForMachine(machine).MarkedForDeletion()).To(BeTrue())
 
@@ -512,6 +475,7 @@ var _ = Describe("Inflight Nodes", func() {
 		node.Spec.ProviderID = machine.Status.ProviderID
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectStateNodeCount("==", 1)
 		Expect(ExpectStateNodeExists(node).MarkedForDeletion()).To(BeTrue())
 	})
 })
@@ -966,10 +930,70 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectApplied(ctx, env.Client, node)
 
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectStateNodeCount("==", 1)
+
 		Expect(env.Client.Delete(ctx, node)).To(Succeed())
 
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectNodeExists(ctx, env.Client, node.Name)
+		Expect(ExpectStateNodeExists(node).MarkedForDeletion()).To(BeTrue())
+	})
+	It("should mark node for deletion when machine is deleted", func() {
+		machine := test.Machine(v1alpha5.Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Finalizers: []string{v1alpha5.TerminationFinalizer},
+			},
+			Spec: v1alpha5.MachineSpec{
+				Requirements: []v1.NodeSelectorRequirement{
+					{
+						Key:      v1.LabelInstanceTypeStable,
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{cloudProvider.InstanceTypes[0].Name},
+					},
+					{
+						Key:      v1.LabelTopologyZone,
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{"test-zone-1"},
+					},
+				},
+				MachineTemplateRef: &v1alpha5.ProviderRef{
+					Name: "default",
+				},
+			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.ProviderID(),
+				Capacity: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("2"),
+					v1.ResourceMemory:           resource.MustParse("32Gi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+				},
+				Allocatable: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("1"),
+					v1.ResourceMemory:           resource.MustParse("30Gi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+				},
+			},
+		})
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
+				},
+				Finalizers: []string{v1alpha5.TerminationFinalizer},
+			},
+			ProviderID: machine.Status.ProviderID,
+		})
+		ExpectApplied(ctx, env.Client, machine, node)
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectStateNodeCount("==", 1)
+
+		Expect(env.Client.Delete(ctx, machine)).To(Succeed())
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectExists(ctx, env.Client, machine)
+
+		Expect(ExpectStateNodeExistsForMachine(machine).MarkedForDeletion()).To(BeTrue())
 		Expect(ExpectStateNodeExists(node).MarkedForDeletion()).To(BeTrue())
 	})
 	It("should nominate the node until the nomination time passes", func() {
@@ -1200,6 +1224,159 @@ var _ = Describe("Provisioner Spec Updates", func() {
 		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
 
 		Expect(oldConsolidationState).To(BeNumerically("<", cluster.ClusterConsolidationState()))
+	})
+})
+
+var _ = Describe("Cluster State Sync", func() {
+	It("should consider the cluster state synced when all nodes are tracked", func() {
+		// Deploy 1000 nodes and sync them all with the cluster
+		for i := 0; i < 1000; i++ {
+			node := test.Node(test.NodeOptions{
+				ProviderID: test.ProviderID(),
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		}
+		Expect(cluster.Synced(ctx)).To(BeTrue())
+	})
+	It("should consider the cluster state synced when nodes don't have provider id", func() {
+		// Deploy 1000 nodes and sync them all with the cluster
+		for i := 0; i < 1000; i++ {
+			node := test.Node()
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		}
+		Expect(cluster.Synced(ctx)).To(BeTrue())
+	})
+	It("should consider the cluster state synced when nodes register provider id", func() {
+		// Deploy 1000 nodes and sync them all with the cluster
+		var nodes []*v1.Node
+		for i := 0; i < 1000; i++ {
+			nodes = append(nodes, test.Node())
+			ExpectApplied(ctx, env.Client, nodes[i])
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodes[i]))
+		}
+		Expect(cluster.Synced(ctx)).To(BeTrue())
+		for i := 0; i < 1000; i++ {
+			nodes[i].Spec.ProviderID = test.ProviderID()
+			ExpectApplied(ctx, env.Client, nodes[i])
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodes[i]))
+		}
+		Expect(cluster.Synced(ctx)).To(BeTrue())
+	})
+	It("should consider the cluster state synced when all machines are tracked", func() {
+		// Deploy 1000 machines and sync them all with the cluster
+		for i := 0; i < 1000; i++ {
+			machine := test.Machine(v1alpha5.Machine{
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.ProviderID(),
+				},
+			})
+			ExpectApplied(ctx, env.Client, machine)
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		}
+		Expect(cluster.Synced(ctx)).To(BeTrue())
+	})
+	It("should consider the cluster state synced when a combination of machines and nodes are tracked", func() {
+		// Deploy 250 nodes to the cluster that also have machines
+		for i := 0; i < 250; i++ {
+			node := test.Node(test.NodeOptions{
+				ProviderID: test.ProviderID(),
+			})
+			machine := test.Machine(v1alpha5.Machine{
+				Status: v1alpha5.MachineStatus{
+					ProviderID: node.Spec.ProviderID,
+				},
+			})
+			ExpectApplied(ctx, env.Client, node, machine)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		}
+		// Deploy 250 nodes to the cluster
+		for i := 0; i < 250; i++ {
+			node := test.Node(test.NodeOptions{
+				ProviderID: test.ProviderID(),
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		}
+		// Deploy 500 machines and sync them all with the cluster
+		for i := 0; i < 500; i++ {
+			machine := test.Machine(v1alpha5.Machine{
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.ProviderID(),
+				},
+			})
+			ExpectApplied(ctx, env.Client, machine)
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		}
+		Expect(cluster.Synced(ctx)).To(BeTrue())
+	})
+	It("should consider the cluster state synced when the representation of nodes is the same", func() {
+		// Deploy 500 machines to the cluster, apply the linked nodes, but don't sync them
+		for i := 0; i < 500; i++ {
+			machine := test.Machine(v1alpha5.Machine{
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.ProviderID(),
+				},
+			})
+			node := test.Node(test.NodeOptions{
+				ProviderID: machine.Status.ProviderID,
+			})
+			ExpectApplied(ctx, env.Client, machine)
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		}
+		Expect(cluster.Synced(ctx)).To(BeTrue())
+	})
+	It("shouldn't consider the cluster state synced if a machine hasn't resolved its provider id", func() {
+		// Deploy 1000 machines and sync them all with the cluster
+		for i := 0; i < 1000; i++ {
+			machine := test.Machine(v1alpha5.Machine{
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.ProviderID(),
+				},
+			})
+			// One of them doesn't have its providerID
+			if i == 900 {
+				machine.Status.ProviderID = ""
+			}
+			ExpectApplied(ctx, env.Client, machine)
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		}
+		Expect(cluster.Synced(ctx)).To(BeFalse())
+	})
+	It("shouldn't consider the cluster state synced if a machine isn't tracked", func() {
+		// Deploy 1000 machines and sync them all with the cluster
+		for i := 0; i < 1000; i++ {
+			machine := test.Machine(v1alpha5.Machine{
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.ProviderID(),
+				},
+			})
+			ExpectApplied(ctx, env.Client, machine)
+
+			// One of them doesn't get synced with the reconciliation
+			if i != 900 {
+				ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+			}
+		}
+		Expect(cluster.Synced(ctx)).To(BeFalse())
+	})
+	It("shouldn't consider the cluster state synced if a node isn't tracked", func() {
+		// Deploy 1000 nodes and sync them all with the cluster
+		for i := 0; i < 1000; i++ {
+			node := test.Node(test.NodeOptions{
+				ProviderID: test.ProviderID(),
+			})
+			ExpectApplied(ctx, env.Client, node)
+
+			// One of them doesn't get synced with the reconciliation
+			if i != 900 {
+				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			}
+		}
+		Expect(cluster.Synced(ctx)).To(BeFalse())
 	})
 })
 
