@@ -316,7 +316,6 @@ func (kc *KubeletConfiguration) validateImageGCHighThresholdPercent() (errs *api
 	if ptr.Int32Value(kc.ImageGCHighThresholdPercent) > 100 {
 		return errs.Also(apis.ErrInvalidValue("cannot be greater than 100", "imageGCHighThresholdPercent"))
 	}
-
 	if kc.ImageGCHighThresholdPercent != nil && ptr.Int32Value(kc.ImageGCHighThresholdPercent) < ptr.Int32Value(kc.ImageGCLowThresholdPercent) {
 		return errs.Also(apis.ErrInvalidValue("must be greater than imageGCLowThresholdPercent", "imageGCHighThresholdPercent"))
 	}
@@ -332,7 +331,6 @@ func (kc *KubeletConfiguration) validateImageGCLowThresholdPercent() (errs *apis
 	if ptr.Int32Value(kc.ImageGCLowThresholdPercent) > 100 {
 		return errs.Also(apis.ErrInvalidValue("cannot be greater than 100", "imageGCLowThresholdPercent"))
 	}
-
 	if kc.ImageGCHighThresholdPercent != nil && ptr.Int32Value(kc.ImageGCLowThresholdPercent) > ptr.Int32Value(kc.ImageGCHighThresholdPercent) {
 		return errs.Also(apis.ErrInvalidValue("must be less than imageGCHighThresholdPercent", "imageGCLowThresholdPercent"))
 	}
