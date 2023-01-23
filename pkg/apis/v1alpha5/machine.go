@@ -90,6 +90,8 @@ type KubeletConfiguration struct {
 	// garbage collection is always run. The percent is calculated by dividing this
 	// field value by 100, so this field must be between 0 and 100, inclusive.
 	// When specified, the value must be greater than ImageGCLowThresholdPercent.
+	// +kubebuilder:validation:Minimum:=1
+	// +kubebuilder:validation:Maximum:=100
 	// +optional
 	ImageGCHighThresholdPercent *int32 `json:"imageGCHighThresholdPercent,omitempty"`
 	// ImageGCLowThresholdPercent is the percent of disk usage before which image
