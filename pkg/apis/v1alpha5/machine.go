@@ -84,6 +84,19 @@ type KubeletConfiguration struct {
 	// response to soft eviction thresholds being met.
 	// +optional
 	EvictionMaxPodGracePeriod *int32 `json:"evictionMaxPodGracePeriod,omitempty"`
+	// ImageGCHighThresholdPercent is the percent of disk usage after which image
+	// garbage collection is always run. The percent is calculated by dividing this
+	// field value by 100, so this field must be between 0 and 100, inclusive.
+	// When specified, the value must be greater than ImageGCLowThresholdPercent.
+	// +optional
+	ImageGCHighThresholdPercent *int32 `json:"imageGCHighThresholdPercent,omitempty"`
+	// ImageGCLowThresholdPercent is the percent of disk usage before which image
+	// garbage collection is never run. Lowest disk usage to garbage collect to.
+	// The percent is calculated by dividing this field value by 100,
+	// so the field value must be between 0 and 100, inclusive.
+	// When specified, the value must be less than imageGCHighThresholdPercent
+	// +optional
+	ImageGCLowThresholdPercent *int32 `json:"imageGCLowThresholdPercent,omitempty"`
 }
 
 type ProviderRef struct {
