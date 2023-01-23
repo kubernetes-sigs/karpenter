@@ -671,11 +671,11 @@ var _ = Describe("Provisioning", func() {
 				test.DaemonSetOptions{PodOptions: test.PodOptions{
 					ResourceRequirements: v1.ResourceRequirements{
 						Limits: v1.ResourceList{
-							v1.ResourceCPU:    resource.MustParse("2"),
+							v1.ResourceCPU:    resource.MustParse("3"),
 							v1.ResourceMemory: resource.MustParse("1Gi"),
 						},
 						Requests: v1.ResourceList{
-							v1.ResourceCPU:    resource.MustParse("1"),
+							v1.ResourceCPU:    resource.MustParse("2"),
 							v1.ResourceMemory: resource.MustParse("1Gi"),
 						}},
 				}}),
@@ -687,7 +687,7 @@ var _ = Describe("Provisioning", func() {
 						Limits: []v1.LimitRangeItem{{
 							Type: v1.LimitTypeContainer,
 							MaxLimitRequestRatio: v1.ResourceList{
-								v1.ResourceCPU:    resource.MustParse("1"),
+								v1.ResourceCPU:    resource.MustParse("2"),
 								v1.ResourceMemory: resource.MustParse("1Gi"),
 							}}},
 					},
