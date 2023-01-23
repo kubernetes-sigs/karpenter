@@ -82,6 +82,8 @@ type KubeletConfiguration struct {
 	EvictionSoftGracePeriod map[string]metav1.Duration `json:"evictionSoftGracePeriod,omitempty"`
 	// EvictionMaxPodGracePeriod is the maximum allowed grace period (in seconds) to use when terminating pods in
 	// response to soft eviction thresholds being met.
+	// +kubebuilder:validation:Minimum:=1
+	// +kubebuilder:validation:Maximum:=100
 	// +optional
 	EvictionMaxPodGracePeriod *int32 `json:"evictionMaxPodGracePeriod,omitempty"`
 	// ImageGCHighThresholdPercent is the percent of disk usage after which image
@@ -95,6 +97,8 @@ type KubeletConfiguration struct {
 	// The percent is calculated by dividing this field value by 100,
 	// so the field value must be between 0 and 100, inclusive.
 	// When specified, the value must be less than imageGCHighThresholdPercent
+	// +kubebuilder:validation:Minimum:=1
+	// +kubebuilder:validation:Maximum:=100
 	// +optional
 	ImageGCLowThresholdPercent *int32 `json:"imageGCLowThresholdPercent,omitempty"`
 }

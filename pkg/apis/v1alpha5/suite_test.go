@@ -417,18 +417,6 @@ var _ = Describe("Validation", func() {
 					}
 					Expect(provisioner.Validate(ctx)).To(Succeed())
 				})
-				It("should fail when imageGCHighThresholdPercent is less than 0", func() {
-					provisioner.Spec.KubeletConfiguration = &KubeletConfiguration{
-						ImageGCHighThresholdPercent: ptr.Int32(-1),
-					}
-					Expect(provisioner.Validate(ctx)).ToNot(Succeed())
-				})
-				It("should fail when imageGCHighThresholdPercent is greather than 100", func() {
-					provisioner.Spec.KubeletConfiguration = &KubeletConfiguration{
-						ImageGCHighThresholdPercent: ptr.Int32(101),
-					}
-					Expect(provisioner.Validate(ctx)).ToNot(Succeed())
-				})
 				It("should fail when imageGCHighThresholdPercent is less than imageGCLowThresholdPercent", func() {
 					provisioner.Spec.KubeletConfiguration = &KubeletConfiguration{
 						ImageGCHighThresholdPercent: ptr.Int32(50),
@@ -443,18 +431,6 @@ var _ = Describe("Validation", func() {
 						ImageGCLowThresholdPercent: ptr.Int32(10),
 					}
 					Expect(provisioner.Validate(ctx)).To(Succeed())
-				})
-				It("should fail when imageGCLowThresholdPercent is less than 0", func() {
-					provisioner.Spec.KubeletConfiguration = &KubeletConfiguration{
-						ImageGCLowThresholdPercent: ptr.Int32(-1),
-					}
-					Expect(provisioner.Validate(ctx)).ToNot(Succeed())
-				})
-				It("should fail when imageGCLowThresholdPercent is greather than 100", func() {
-					provisioner.Spec.KubeletConfiguration = &KubeletConfiguration{
-						ImageGCLowThresholdPercent: ptr.Int32(101),
-					}
-					Expect(provisioner.Validate(ctx)).ToNot(Succeed())
 				})
 				It("should fail when imageGCLowThresholdPercent is greather than imageGCHighThresheldPercent", func() {
 					provisioner.Spec.KubeletConfiguration = &KubeletConfiguration{
