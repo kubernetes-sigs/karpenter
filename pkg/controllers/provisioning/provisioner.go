@@ -265,16 +265,23 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 
 		// Construct Topology Domains
 		for _, instanceType := range instanceTypeOptions {
-			for key, requirement := range instanceType.Requirements {
+			// We need to intersect the instance type requirements with the current provisioner requirements.  This
+			// ensures that something like zones from an instance type don't expand the universe of valid domains.
+			requirements := scheduling.NewNodeSelectorRequirements(provisioner.Spec.Requirements...)
+			requirements.Add(instanceType.Requirements.Values()...)
+
+			for key, requirement := range requirements {
 				domains[key] = domains[key].Union(sets.NewString(requirement.Values()...))
 			}
 		}
+
 		for key, requirement := range scheduling.NewNodeSelectorRequirements(provisioner.Spec.Requirements...) {
 			if requirement.Operator() == v1.NodeSelectorOpIn {
 				domains[key] = domains[key].Union(sets.NewString(requirement.Values()...))
 			}
 		}
 	}
+
 	if len(machines) == 0 {
 		return nil, fmt.Errorf("no provisioners found")
 	}
