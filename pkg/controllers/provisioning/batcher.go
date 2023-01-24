@@ -18,7 +18,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/aws/karpenter-core/pkg/apis/config/settings"
+	"github.com/aws/karpenter-core/pkg/apis/settings"
 )
 
 // Batcher separates a stream of Trigger() calls into windowed slices. The

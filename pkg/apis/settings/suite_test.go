@@ -24,9 +24,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	. "knative.dev/pkg/logging/testing"
 
-	. "github.com/aws/karpenter-core/pkg/test/expectations"
-
-	"github.com/aws/karpenter-core/pkg/apis/config/settings"
+	"github.com/aws/karpenter-core/pkg/apis/settings"
 )
 
 var ctx context.Context
@@ -42,7 +40,9 @@ var _ = Describe("Validation", func() {
 		cm := &v1.ConfigMap{
 			Data: map[string]string{},
 		}
-		s, _ := settings.NewSettingsFromConfigMap(cm)
+		ctx, err := (&settings.Settings{}).Inject(ctx, cm)
+		Expect(err).ToNot(HaveOccurred())
+		s := settings.FromContext(ctx)
 		Expect(s.BatchMaxDuration.Duration).To(Equal(time.Second * 10))
 		Expect(s.BatchIdleDuration.Duration).To(Equal(time.Second))
 		Expect(s.DriftEnabled).To(BeFalse())
@@ -55,36 +55,38 @@ var _ = Describe("Validation", func() {
 				"featureGates.driftEnabled": "true",
 			},
 		}
-		s, _ := settings.NewSettingsFromConfigMap(cm)
+		ctx, err := (&settings.Settings{}).Inject(ctx, cm)
+		Expect(err).ToNot(HaveOccurred())
+		s := settings.FromContext(ctx)
 		Expect(s.BatchMaxDuration.Duration).To(Equal(time.Second * 30))
 		Expect(s.BatchIdleDuration.Duration).To(Equal(time.Second * 5))
 		Expect(s.DriftEnabled).To(BeTrue())
 	})
 	It("should fail validation with panic when batchMaxDuration is negative", func() {
-		defer ExpectPanic()
 		cm := &v1.ConfigMap{
 			Data: map[string]string{
 				"batchMaxDuration": "-10s",
 			},
 		}
-		_, _ = settings.NewSettingsFromConfigMap(cm)
+		_, err := (&settings.Settings{}).Inject(ctx, cm)
+		Expect(err).To(HaveOccurred())
 	})
 	It("should fail validation with panic when batchIdleDuration is negative", func() {
-		defer ExpectPanic()
 		cm := &v1.ConfigMap{
 			Data: map[string]string{
 				"batchIdleDuration": "-1s",
 			},
 		}
-		_, _ = settings.NewSettingsFromConfigMap(cm)
+		_, err := (&settings.Settings{}).Inject(ctx, cm)
+		Expect(err).To(HaveOccurred())
 	})
 	It("should fail validation with panic when driftEnabled is not a valid boolean value", func() {
-		defer ExpectPanic()
 		cm := &v1.ConfigMap{
 			Data: map[string]string{
 				"featureGates.driftEnabled": "foobar",
 			},
 		}
-		_, _ = settings.NewSettingsFromConfigMap(cm)
+		_, err := (&settings.Settings{}).Inject(ctx, cm)
+		Expect(err).To(HaveOccurred())
 	})
 })

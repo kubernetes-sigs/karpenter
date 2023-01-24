@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
+	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 
@@ -38,6 +39,10 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/utils/result"
 )
+
+type nodeReconciler interface {
+	Reconcile(context.Context, *v1alpha5.Provisioner, *v1.Node) (reconcile.Result, error)
+}
 
 var _ corecontroller.TypedController[*v1.Node] = (*Controller)(nil)
 
@@ -85,14 +90,16 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Re
 	// Execute Reconcilers
 	var results []reconcile.Result
 	var errs error
-	for _, reconciler := range []interface {
-		Reconcile(context.Context, *v1alpha5.Provisioner, *v1.Node) (reconcile.Result, error)
-	}{
+
+	reconcilers := []nodeReconciler{
 		c.initialization,
 		c.emptiness,
 		c.finalizer,
-		c.drift,
-	} {
+	}
+	if settings.FromContext(ctx).DriftEnabled {
+		reconcilers = append(reconcilers, c.drift)
+	}
+	for _, reconciler := range reconcilers {
 		res, err := reconciler.Reconcile(ctx, provisioner, node)
 		errs = multierr.Append(errs, err)
 		results = append(results, res)

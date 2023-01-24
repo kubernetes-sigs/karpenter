@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package settingsstore_test
+package injection_test
 
 import (
 	"context"
@@ -21,13 +21,12 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"knative.dev/pkg/configmap/informer"
 	"knative.dev/pkg/system"
 
-	"github.com/aws/karpenter-core/pkg/apis/config/settings"
+	"github.com/aws/karpenter-core/pkg/apis/settings"
+	"github.com/aws/karpenter-core/pkg/operator/injection"
+	"github.com/aws/karpenter-core/pkg/operator/injection/fake"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
-	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
-	"github.com/aws/karpenter-core/pkg/operator/settingsstore/fake"
 	"github.com/aws/karpenter-core/pkg/test"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -39,19 +38,16 @@ import (
 
 var ctx context.Context
 var env *test.Environment
-var cmw *informer.InformedWatcher
-var ss settingsstore.Store
 var defaultConfigMap *v1.ConfigMap
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "SettingsStore")
+	RunSpecs(t, "Injection")
 }
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme)
-	cmw = informer.NewInformedWatcher(env.KubernetesInterface, system.Namespace())
 	defaultConfigMap = &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "karpenter-global-settings",
@@ -59,8 +55,6 @@ var _ = BeforeSuite(func() {
 		},
 	}
 	ExpectApplied(ctx, env.Client, defaultConfigMap)
-	ss = settingsstore.NewWatcherOrDie(ctx, env.KubernetesInterface, cmw, settings.Registration, fake.SettingsRegistration)
-	Expect(cmw.Start(env.Done)).To(Succeed())
 })
 
 var _ = AfterSuite(func() {
@@ -81,11 +75,11 @@ var _ = AfterEach(func() {
 	ExpectDeleted(ctx, env.Client, defaultConfigMap.DeepCopy())
 })
 
-var _ = Describe("SettingsStore", func() {
+var _ = Describe("Settings", func() {
 	Context("Operator Settings", func() {
 		It("should have default values", func() {
 			Eventually(func(g Gomega) {
-				testCtx := ss.InjectSettings(ctx)
+				testCtx := injection.WithSettingsOrDie(ctx, env.KubernetesInterface, &settings.Settings{})
 				s := settings.FromContext(testCtx)
 				g.Expect(s.BatchIdleDuration.Duration).To(Equal(1 * time.Second))
 				g.Expect(s.BatchMaxDuration.Duration).To(Equal(10 * time.Second))
@@ -93,7 +87,7 @@ var _ = Describe("SettingsStore", func() {
 		})
 		It("should update if values are changed", func() {
 			Eventually(func(g Gomega) {
-				testCtx := ss.InjectSettings(ctx)
+				testCtx := injection.WithSettingsOrDie(ctx, env.KubernetesInterface, &settings.Settings{})
 				s := settings.FromContext(testCtx)
 				g.Expect(s.BatchIdleDuration.Duration).To(Equal(1 * time.Second))
 				g.Expect(s.BatchMaxDuration.Duration).To(Equal(10 * time.Second))
@@ -106,7 +100,7 @@ var _ = Describe("SettingsStore", func() {
 			ExpectApplied(ctx, env.Client, cm)
 
 			Eventually(func(g Gomega) {
-				testCtx := ss.InjectSettings(ctx)
+				testCtx := injection.WithSettingsOrDie(ctx, env.KubernetesInterface, &settings.Settings{})
 				s := settings.FromContext(testCtx)
 				g.Expect(s.BatchIdleDuration.Duration).To(Equal(2 * time.Second))
 				g.Expect(s.BatchMaxDuration.Duration).To(Equal(15 * time.Second))
@@ -116,8 +110,8 @@ var _ = Describe("SettingsStore", func() {
 	Context("Multiple Settings", func() {
 		It("should get operator settings and features from same configMap", func() {
 			Eventually(func(g Gomega) {
-				testCtx := ss.InjectSettings(ctx)
-				s := fake.SettingsFromContext(testCtx)
+				testCtx := injection.WithSettingsOrDie(ctx, env.KubernetesInterface, &settings.Settings{}, &fake.Settings{})
+				s := fake.FromContext(testCtx)
 				g.Expect(s.TestArg).To(Equal("default"))
 			}).Should(Succeed())
 		})
@@ -131,9 +125,9 @@ var _ = Describe("SettingsStore", func() {
 			ExpectApplied(ctx, env.Client, cm)
 
 			Eventually(func(g Gomega) {
-				testCtx := ss.InjectSettings(ctx)
+				testCtx := injection.WithSettingsOrDie(ctx, env.KubernetesInterface, &settings.Settings{}, &fake.Settings{})
 				s := settings.FromContext(testCtx)
-				fs := fake.SettingsFromContext(testCtx)
+				fs := fake.FromContext(testCtx)
 				g.Expect(s.BatchIdleDuration.Duration).To(Equal(2 * time.Second))
 				g.Expect(s.BatchMaxDuration.Duration).To(Equal(15 * time.Second))
 				g.Expect(fs.TestArg).To(Equal("my-value"))
