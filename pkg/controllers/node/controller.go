@@ -31,7 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
-	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 
@@ -49,22 +48,19 @@ var _ corecontroller.TypedController[*v1.Node] = (*Controller)(nil)
 // Controller manages a set of properties on karpenter provisioned nodes, such as
 // taints, labels, finalizers.
 type Controller struct {
-	kubeClient     client.Client
-	cluster        *state.Cluster
-	initialization *Initialization
-	emptiness      *Emptiness
-	finalizer      *Finalizer
-	drift          *Drift
+	kubeClient client.Client
+	cluster    *state.Cluster
+	emptiness  *Emptiness
+	drift      *Drift
 }
 
 // NewController constructs a nodeController instance
 func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) corecontroller.Controller {
 	return corecontroller.Typed[*v1.Node](kubeClient, &Controller{
-		kubeClient:     kubeClient,
-		cluster:        cluster,
-		initialization: &Initialization{kubeClient: kubeClient, cloudProvider: cloudProvider},
-		emptiness:      &Emptiness{kubeClient: kubeClient, clock: clk, cluster: cluster},
-		drift:          &Drift{kubeClient: kubeClient, cloudProvider: cloudProvider},
+		kubeClient: kubeClient,
+		cluster:    cluster,
+		emptiness:  &Emptiness{kubeClient: kubeClient, clock: clk, cluster: cluster},
+		drift:      &Drift{kubeClient: kubeClient, cloudProvider: cloudProvider},
 	})
 }
 
@@ -90,16 +86,12 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Re
 	// Execute Reconcilers
 	var results []reconcile.Result
 	var errs error
-
-	reconcilers := []nodeReconciler{
-		c.initialization,
+	for _, reconciler := range []interface {
+		Reconcile(context.Context, *v1alpha5.Provisioner, *v1.Node) (reconcile.Result, error)
+	}{
 		c.emptiness,
-		c.finalizer,
-	}
-	if settings.FromContext(ctx).DriftEnabled {
-		reconcilers = append(reconcilers, c.drift)
-	}
-	for _, reconciler := range reconcilers {
+		c.drift,
+	} {
 		res, err := reconciler.Reconcile(ctx, provisioner, node)
 		errs = multierr.Append(errs, err)
 		results = append(results, res)

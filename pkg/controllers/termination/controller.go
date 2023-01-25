@@ -16,7 +16,6 @@ package termination
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -65,18 +64,14 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 	if !controllerutil.ContainsFinalizer(node, v1alpha5.TerminationFinalizer) {
 		return reconcile.Result{}, nil
 	}
-	if err := c.terminator.Cordon(ctx, node); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("cordoning node, %w", err))
+	machineList := &v1alpha5.MachineList{}
+	if err := c.kubeClient.List(ctx, machineList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
+		return reconcile.Result{}, nil
 	}
-	if err := c.terminator.Drain(ctx, node); err != nil {
-		if terminator.IsNodeDrainError(err) {
-			c.recorder.Publish(events.NodeFailedToDrain(node, err))
-			return reconcile.Result{Requeue: true}, nil
+	for i := range machineList.Items {
+		if err := c.kubeClient.Delete(ctx, &machineList.Items[i]); err != nil {
+			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
-		return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("draining node, %w", err))
-	}
-	if err := c.terminator.TerminateNode(ctx, node); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("terminating node, %w", err))
 	}
 	return reconcile.Result{}, nil
 }
