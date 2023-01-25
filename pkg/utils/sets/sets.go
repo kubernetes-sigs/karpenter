@@ -141,6 +141,18 @@ func (s Set[T]) IsSuperset(s2 Set[T]) bool {
 	return true
 }
 
+func (s Set[T]) Equal(s2 Set[T]) bool {
+	if s.Len() != s2.Len() {
+		return false
+	}
+	for item := range s2 {
+		if !s.Has(item) {
+			return false
+		}
+	}
+	return true
+}
+
 // List returns the slice with contents in random order.
 func (s Set[T]) List() []T {
 	res := make([]T, 0, len(s))

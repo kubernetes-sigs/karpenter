@@ -27,16 +27,48 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/scheduling"
+	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
 	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
+
+// Nodes is a typed version of a list of *Node
+type Nodes []*Node
+
+// ActiveNodes filters nodes that are not in a MarkedForDeletion state
+func (n Nodes) ActiveNodes() Nodes {
+	return lo.Filter(n, func(node *Node, _ int) bool {
+		return !node.MarkedForDeletion()
+	})
+}
+
+// DeletingNodes filters nodes that are in a MarkedForDeletion state
+func (n Nodes) DeletingNodes() Nodes {
+	return lo.Filter(n, func(node *Node, _ int) bool {
+		return node.MarkedForDeletion()
+	})
+}
+
+// Pods gets the pods assigned to all Nodes based on the kubernetes api-server bindings
+func (n Nodes) Pods(ctx context.Context, c client.Client) ([]*v1.Pod, error) {
+	var pods []*v1.Pod
+	for _, node := range n {
+		p, err := node.Pods(ctx, c)
+		if err != nil {
+			return nil, err
+		}
+		pods = append(pods, p...)
+	}
+	return pods, nil
+}
 
 // Node is a cached version of a node in the cluster that maintains state which is expensive to compute every time it's
 // needed.  This currently contains node utilization across all the allocatable resources, but will soon be used to
 // compute topology information.
 // +k8s:deepcopy-gen=true
 type Node struct {
-	Node *v1.Node
+	Node    *v1.Node
+	Machine *v1alpha5.Machine
 
 	inflightAllocatable v1.ResourceList // TODO @joinnis: This can be removed when machine is added
 	inflightCapacity    v1.ResourceList // TODO @joinnis: This can be removed when machine is added
@@ -58,6 +90,61 @@ type Node struct {
 	nominatedUntil    metav1.Time
 }
 
+func NewNode() *Node {
+	return &Node{
+		inflightAllocatable: v1.ResourceList{},
+		inflightCapacity:    v1.ResourceList{},
+		startupTaints:       []v1.Taint{},
+		daemonSetRequests:   map[types.NamespacedName]v1.ResourceList{},
+		daemonSetLimits:     map[types.NamespacedName]v1.ResourceList{},
+		podRequests:         map[types.NamespacedName]v1.ResourceList{},
+		podLimits:           map[types.NamespacedName]v1.ResourceList{},
+		hostPortUsage:       &scheduling.HostPortUsage{},
+		volumeUsage:         &scheduling.VolumeUsage{},
+		volumeLimits:        scheduling.VolumeCount{},
+	}
+}
+
+func (in *Node) Name() string {
+	if !in.Initialized() && in.Machine != nil {
+		return in.Machine.Name
+	}
+	return in.Node.Name
+}
+
+// Pods gets the pods assigned to the Node based on the kubernetes api-server bindings
+func (in *Node) Pods(ctx context.Context, c client.Client) ([]*v1.Pod, error) {
+	if in.Node == nil {
+		return nil, nil
+	}
+	return nodeutils.GetNodePods(ctx, c, in.Node)
+}
+
+func (in *Node) HostName() string {
+	if in.Labels()[v1.LabelHostname] == "" {
+		return in.Name()
+	}
+	return in.Labels()[v1.LabelHostname]
+}
+
+func (in *Node) Annotations() map[string]string {
+	// If the machine exists and the state node isn't initialized
+	// use the machine representation of the annotations
+	if !in.Initialized() && in.Machine != nil {
+		return in.Machine.Annotations
+	}
+	return in.Node.Annotations
+}
+
+func (in *Node) Labels() map[string]string {
+	// If the machine exists and the state node isn't initialized
+	// use the machine representation of the labels
+	if !in.Initialized() && in.Machine != nil {
+		return in.Machine.Labels
+	}
+	return in.Node.Labels
+}
+
 func (in *Node) Taints() []v1.Taint {
 	ephemeralTaints := []v1.Taint{
 		{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
@@ -67,9 +154,20 @@ func (in *Node) Taints() []v1.Taint {
 	// re-appears on the node for a different reason (e.g. the node is cordoned) we will assume that pods can
 	// schedule against the node in the future incorrectly.
 	if !in.Initialized() && in.Owned() {
-		ephemeralTaints = append(ephemeralTaints, in.startupTaints...)
+		if in.Machine != nil {
+			ephemeralTaints = append(ephemeralTaints, in.Machine.Spec.StartupTaints...)
+		} else {
+			ephemeralTaints = append(ephemeralTaints, in.startupTaints...)
+		}
 	}
-	return lo.Reject(in.Node.Spec.Taints, func(taint v1.Taint, _ int) bool {
+
+	var taints []v1.Taint
+	if !in.Initialized() && in.Machine != nil {
+		taints = in.Machine.Spec.Taints
+	} else {
+		taints = in.Node.Spec.Taints
+	}
+	return lo.Reject(taints, func(taint v1.Taint, _ int) bool {
 		_, rejected := lo.Find(ephemeralTaints, func(t v1.Taint) bool {
 			return t.Key == taint.Key && t.Value == taint.Value && t.Effect == taint.Effect
 		})
@@ -77,11 +175,38 @@ func (in *Node) Taints() []v1.Taint {
 	})
 }
 
+// Initialized always implies that the node is there. If something is initialized, we are guaranteed that the Node
+// exists inside of cluster state. If the node is not initialized, it is possible that it is represented by a Node or
+// by a Machine inside of cluster state
 func (in *Node) Initialized() bool {
-	return in.Node.Labels[v1alpha5.LabelNodeInitialized] == "true"
+	if in.Machine != nil {
+		if in.Node != nil && in.Machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized) != nil &&
+			in.Machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).Status == v1.ConditionTrue {
+			return true
+		}
+		return false
+	}
+	if in.Node != nil {
+		return in.Node.Labels[v1alpha5.LabelNodeInitialized] == "true"
+	}
+	return false
 }
 
 func (in *Node) Capacity() v1.ResourceList {
+	if !in.Initialized() && in.Machine != nil {
+		// Override any zero quantity values in the node status
+		if in.Node != nil {
+			ret := lo.Assign(in.Node.Status.Capacity)
+			for resourceName, quantity := range in.Machine.Status.Capacity {
+				if resources.IsZero(ret[resourceName]) {
+					ret[resourceName] = quantity
+				}
+			}
+			return ret
+		}
+		return in.Machine.Status.Capacity
+	}
+	// TODO @joinnis: Remove this when machine migration is complete
 	if !in.Initialized() && in.Owned() {
 		// Override any zero quantity values in the node status
 		ret := lo.Assign(in.Node.Status.Capacity)
@@ -96,6 +221,20 @@ func (in *Node) Capacity() v1.ResourceList {
 }
 
 func (in *Node) Allocatable() v1.ResourceList {
+	if !in.Initialized() && in.Machine != nil {
+		// Override any zero quantity values in the node status
+		if in.Node != nil {
+			ret := lo.Assign(in.Node.Status.Allocatable)
+			for resourceName, quantity := range in.Machine.Status.Allocatable {
+				if resources.IsZero(ret[resourceName]) {
+					ret[resourceName] = quantity
+				}
+			}
+			return ret
+		}
+		return in.Machine.Status.Allocatable
+	}
+	// TODO @joinnis: Remove this when machine migration is complete
 	if !in.Initialized() && in.Owned() {
 		// Override any zero quantity values in the node status
 		ret := lo.Assign(in.Node.Status.Allocatable)
@@ -143,7 +282,13 @@ func (in *Node) PodLimits() v1.ResourceList {
 }
 
 func (in *Node) MarkedForDeletion() bool {
-	return in.markedForDeletion || (in.Node != nil && !in.Node.DeletionTimestamp.IsZero())
+	// The Node is marked for the Deletion if:
+	//  1. The Node has explicitly MarkedForDeletion
+	//  2. The Node has a Machine counterpart and is actively deleting
+	//  3. The Node has no Machine counterpart and is actively deleting
+	return in.markedForDeletion ||
+		(in.Machine != nil && !in.Machine.DeletionTimestamp.IsZero()) ||
+		(in.Node != nil && in.Machine == nil && !in.Node.DeletionTimestamp.IsZero())
 }
 
 func (in *Node) Nominate(ctx context.Context) {
@@ -155,7 +300,7 @@ func (in *Node) Nominated() bool {
 }
 
 func (in *Node) Owned() bool {
-	return in.Node.Labels[v1alpha5.ProvisionerNameLabelKey] != ""
+	return in.Labels()[v1alpha5.ProvisionerNameLabelKey] != ""
 }
 
 func (in *Node) updateForPod(ctx context.Context, pod *v1.Pod) {
