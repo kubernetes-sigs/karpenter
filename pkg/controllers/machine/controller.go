@@ -38,9 +38,9 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
 	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/termination"
 	"github.com/aws/karpenter-core/pkg/utils/result"
 )
 
@@ -55,7 +55,7 @@ type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	recorder      events.Recorder
-	terminator    *termination.Terminator
+	terminator    *terminator.Terminator
 
 	launch         *Launch
 	registration   *Registration
@@ -65,7 +65,7 @@ type Controller struct {
 
 // NewController is a constructor for the Machine Controller
 func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider,
-	terminator *termination.Terminator, recorder events.Recorder) corecontroller.Controller {
+	terminator *terminator.Terminator, recorder events.Recorder) corecontroller.Controller {
 	return corecontroller.Typed[*v1alpha5.Machine](kubeClient, &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
@@ -125,7 +125,7 @@ func (c *Controller) Finalize(ctx context.Context, machine *v1alpha5.Machine) (r
 		return reconcile.Result{}, nil
 	}
 	if err := c.cleanupNodeForMachine(ctx, machine); err != nil {
-		if termination.IsNodeDrainError(err) {
+		if terminator.IsNodeDrainError(err) {
 			return reconcile.Result{Requeue: true}, nil
 		}
 		return reconcile.Result{}, nil
@@ -177,7 +177,7 @@ func (c *Controller) cleanupNodeForMachine(ctx context.Context, machine *v1alpha
 	}
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
 	if err = c.terminator.Cordon(ctx, node); err != nil {
-		if termination.IsNodeDrainError(err) {
+		if terminator.IsNodeDrainError(err) {
 			c.recorder.Publish(events.NodeFailedToDrain(node, err))
 		}
 		return fmt.Errorf("cordoning node, %w", err)
@@ -190,7 +190,7 @@ func (c *Controller) cleanupNodeForMachine(ctx context.Context, machine *v1alpha
 
 func nodeForMachine(ctx context.Context, c client.Client, machine *v1alpha5.Machine) (*v1.Node, error) {
 	nodeList := v1.NodeList{}
-	if err := c.List(ctx, &nodeList, client.MatchingFields{"spec.providerID": machine.Status.ProviderID}); err != nil {
+	if err := c.List(ctx, &nodeList, client.MatchingFields{"spec.providerID": machine.Status.ProviderID}, client.Limit(2)); err != nil {
 		return nil, fmt.Errorf("listing nodes, %w", err)
 	}
 	if len(nodeList.Items) > 1 {

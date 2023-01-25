@@ -35,9 +35,9 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/machine"
+	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
-	ptermination "github.com/aws/karpenter-core/pkg/termination"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 
 	"github.com/aws/karpenter-core/pkg/test"
@@ -66,7 +66,7 @@ var _ = BeforeSuite(func() {
 
 	cloudProvider = fake.NewCloudProvider()
 	recorder := test.NewEventRecorder()
-	terminator := ptermination.NewTerminator(fakeClock, env.Client, cloudProvider, ptermination.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), recorder))
+	terminator := terminator.NewTerminator(fakeClock, env.Client, cloudProvider, terminator.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), recorder))
 	machineController = machine.NewController(fakeClock, env.Client, cloudProvider, terminator, recorder)
 })
 

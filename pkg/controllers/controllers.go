@@ -25,6 +25,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/counter"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/inflightchecks"
+	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
 	metricspod "github.com/aws/karpenter-core/pkg/controllers/metrics/pod"
 	metricsprovisioner "github.com/aws/karpenter-core/pkg/controllers/metrics/provisioner"
 	metricsstate "github.com/aws/karpenter-core/pkg/controllers/metrics/state"
@@ -36,7 +37,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
-	ptermination "github.com/aws/karpenter-core/pkg/termination"
 )
 
 func init() {
@@ -54,7 +54,7 @@ func NewControllers(
 ) []controller.Controller {
 
 	provisioner := provisioning.NewProvisioner(ctx, kubeClient, kubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
-	terminator := ptermination.NewTerminator(clock, kubeClient, cloudProvider, ptermination.NewEvictionQueue(ctx, kubernetesInterface.CoreV1(), recorder))
+	terminator := terminator.NewTerminator(clock, kubeClient, cloudProvider, terminator.NewEvictionQueue(ctx, kubernetesInterface.CoreV1(), recorder))
 	return []controller.Controller{
 		provisioner,
 		metricsstate.NewController(cluster),

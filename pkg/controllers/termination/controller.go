@@ -30,22 +30,22 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
 	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/termination"
 )
 
 var _ corecontroller.FinalizingTypedController[*v1.Node] = (*Controller)(nil)
 
 // Controller for the resource
 type Controller struct {
-	terminator *termination.Terminator
+	terminator *terminator.Terminator
 	kubeClient client.Client
 	recorder   events.Recorder
 }
 
-// NewController constructs a terminationController instance
-func NewController(kubeClient client.Client, terminator *termination.Terminator, recorder events.Recorder) corecontroller.Controller {
+// NewController constructs a controller instance
+func NewController(kubeClient client.Client, terminator *terminator.Terminator, recorder events.Recorder) corecontroller.Controller {
 	return corecontroller.Typed[*v1.Node](kubeClient, &Controller{
 		kubeClient: kubeClient,
 		terminator: terminator,
@@ -69,7 +69,7 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 		return reconcile.Result{}, fmt.Errorf("cordoning node, %w", err)
 	}
 	if err := c.terminator.Drain(ctx, node); err != nil {
-		if termination.IsNodeDrainError(err) {
+		if terminator.IsNodeDrainError(err) {
 			c.recorder.Publish(events.NodeFailedToDrain(node, err))
 			return reconcile.Result{Requeue: true}, nil
 		}

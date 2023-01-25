@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package termination
+package terminator
 
 import (
 	"context"
@@ -40,15 +40,11 @@ const (
 )
 
 type NodeDrainError struct {
-	Err error
-}
-
-func (e *NodeDrainError) Error() string {
-	return e.Err.Error()
+	error
 }
 
 func NewNodeDrainError(err error) *NodeDrainError {
-	return &NodeDrainError{Err: err}
+	return &NodeDrainError{error: err}
 }
 
 func IsNodeDrainError(err error) bool {
