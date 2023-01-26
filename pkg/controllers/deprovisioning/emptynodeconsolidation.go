@@ -20,7 +20,6 @@ import (
 	"fmt"
 
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -42,7 +41,7 @@ func NewEmptyNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClie
 }
 
 // ComputeCommand generates a deprovisioning command given deprovisionable nodes
-func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...CandidateNode) (Command, error) {
+func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...*CandidateNode) (Command, error) {
 	if c.cluster.Consolidated() {
 		return Command{action: actionDoNothing}, nil
 	}
@@ -52,13 +51,13 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 	}
 
 	// select the entirely empty nodes
-	emptyNodes := lo.Filter(candidates, func(n CandidateNode, _ int) bool { return len(n.pods) == 0 })
+	emptyNodes := lo.Filter(candidates, func(n *CandidateNode, _ int) bool { return len(n.pods) == 0 })
 	if len(emptyNodes) == 0 {
 		return Command{action: actionDoNothing}, nil
 	}
 
 	cmd := Command{
-		nodesToRemove: lo.Map(emptyNodes, func(n CandidateNode, _ int) *v1.Node { return n.Node }),
+		nodesToRemove: emptyNodes,
 		action:        actionDelete,
 	}
 
@@ -75,12 +74,12 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 		logging.FromContext(ctx).Errorf("computing validation candidates %s", err)
 		return Command{}, err
 	}
-	nodesToDelete := mapNodes(cmd.nodesToRemove, validationCandidates)
+	nodesToDelete := filterValidNodes(cmd.nodesToRemove, validationCandidates)
 
 	// the deletion of empty nodes is easy to validate, we just ensure that all the nodesToDelete are still empty and that
 	// the node isn't a target of a recent scheduling simulation
 	for _, n := range nodesToDelete {
-		if len(n.pods) != 0 && !c.cluster.IsNodeNominated(n.Name) {
+		if len(n.pods) != 0 && !c.cluster.IsNodeNominated(n.Name()) {
 			return Command{action: actionRetry}, nil
 		}
 	}

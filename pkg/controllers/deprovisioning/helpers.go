@@ -39,9 +39,9 @@ import (
 
 //nolint:gocyclo
 func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
-	candidateNodes ...CandidateNode) (newNodes []*pscheduling.Machine, allPodsScheduled bool, err error) {
+	candidateNodes ...*CandidateNode) (newNodes []*pscheduling.Machine, allPodsScheduled bool, err error) {
 
-	candidateNodeNames := sets.NewString(lo.Map(candidateNodes, func(t CandidateNode, i int) string { return t.Name })...)
+	candidateNodeNames := sets.NewString(lo.Map(candidateNodes, func(t *CandidateNode, i int) string { return t.Name() })...)
 	nodes := cluster.Nodes()
 	deletingNodes := nodes.Deleting()
 	stateNodes := lo.Filter(nodes.Active(), func(n *state.Node, _ int) bool {
@@ -154,87 +154,18 @@ func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
 	return cost
 }
 
-type CandidateFilter func(context.Context, *state.Node, *v1alpha5.Provisioner, []*v1.Pod) bool
+type CandidateFilter func(context.Context, *CandidateNode) bool
 
 // candidateNodes returns nodes that appear to be currently deprovisionable based off of their provisioner
 // nolint:gocyclo
-func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, clk clock.Clock, cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter) ([]CandidateNode, error) {
-	provisioners, instanceTypesByProvisioner, err := buildProvisionerMap(ctx, kubeClient, cloudProvider)
+func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, clk clock.Clock, cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter) ([]*CandidateNode, error) {
+	provisionerMap, provisionerToInstanceTypes, err := buildProvisionerMap(ctx, kubeClient, cloudProvider)
 	if err != nil {
 		return nil, err
 	}
-
-	var nodes []CandidateNode
-	cluster.ForEachNode(func(n *state.Node) bool {
-		var provisioner *v1alpha5.Provisioner
-		var instanceTypeMap map[string]*cloudprovider.InstanceType
-		if provName, ok := n.Labels()[v1alpha5.ProvisionerNameLabelKey]; ok {
-			provisioner = provisioners[provName]
-			instanceTypeMap = instanceTypesByProvisioner[provName]
-		}
-		// skip any nodes that are already marked for deletion and being handled
-		if n.MarkedForDeletion() {
-			return true
-		}
-		// skip any nodes where we can't determine the provisioner
-		if provisioner == nil || instanceTypeMap == nil {
-			return true
-		}
-
-		instanceType, ok := instanceTypeMap[n.Labels()[v1.LabelInstanceTypeStable]]
-		// skip any nodes that we can't determine the instance of
-		if !ok {
-			return true
-		}
-
-		// skip any nodes that we can't determine the capacity type or the topology zone for
-		ct, ok := n.Labels()[v1alpha5.LabelCapacityType]
-		if !ok {
-			return true
-		}
-		az, ok := n.Labels()[v1.LabelTopologyZone]
-		if !ok {
-			return true
-		}
-
-		// Skip nodes that aren't initialized
-		// This also means that the real Machine doesn't exist for it
-		if !n.Initialized() {
-			return true
-		}
-		// Skip the node if it is nominated by a recent provisioning pass to be the target of a pending pod.
-		if n.Nominated() {
-			return true
-		}
-
-		pods, err := n.Pods(ctx, kubeClient)
-		if err != nil {
-			logging.FromContext(ctx).Errorf("Determining node pods, %s", err)
-			return true
-		}
-		if !shouldDeprovision(ctx, n, provisioner, pods) {
-			return true
-		}
-		cn := CandidateNode{
-			Node:           n.Node.DeepCopy(),
-			instanceType:   instanceType,
-			capacityType:   ct,
-			zone:           az,
-			provisioner:    provisioner,
-			pods:           pods,
-			disruptionCost: disruptionCost(ctx, pods),
-		}
-		// lifetimeRemaining is the fraction of node lifetime remaining in the range [0.0, 1.0].  If the TTLSecondsUntilExpired
-		// is non-zero, we use it to scale down the disruption costs of nodes that are going to expire.  Just after creation, the
-		// disruption cost is highest and it approaches zero as the node ages towards its expiration time.
-		lifetimeRemaining := calculateLifetimeRemaining(cn, clk)
-		cn.disruptionCost *= lifetimeRemaining
-
-		nodes = append(nodes, cn)
-		return true
-	})
-
-	return nodes, nil
+	return lo.Reject(lo.Map(cluster.Nodes(), func(n *state.Node, _ int) *CandidateNode {
+		return NewCandidateNode(ctx, kubeClient, clk, n, provisionerMap, provisionerToInstanceTypes)
+	}), func(c *CandidateNode, _ int) bool { return c == nil || !shouldDeprovision(ctx, c) }), nil
 }
 
 // buildProvisionerMap builds a provName -> provisioner map and a provName -> instanceName -> instance type map
@@ -259,20 +190,6 @@ func buildProvisionerMap(ctx context.Context, kubeClient client.Client, cloudPro
 		}
 	}
 	return provisioners, instanceTypesByProvisioner, nil
-}
-
-// calculateLifetimeRemaining calculates the fraction of node lifetime remaining in the range [0.0, 1.0].  If the TTLSecondsUntilExpired
-// is non-zero, we use it to scale down the disruption costs of nodes that are going to expire.  Just after creation, the
-// disruption cost is highest and it approaches zero as the node ages towards its expiration time.
-func calculateLifetimeRemaining(node CandidateNode, clock clock.Clock) float64 {
-	remaining := 1.0
-	if node.provisioner.Spec.TTLSecondsUntilExpired != nil {
-		ageInSeconds := clock.Since(node.CreationTimestamp.Time).Seconds()
-		totalLifetimeSeconds := float64(*node.provisioner.Spec.TTLSecondsUntilExpired)
-		lifetimeRemainingSeconds := totalLifetimeSeconds - ageInSeconds
-		remaining = clamp(0.0, lifetimeRemainingSeconds/totalLifetimeSeconds, 1.0)
-	}
-	return remaining
 }
 
 // worstLaunchPrice gets the worst-case launch price from the offerings that are offered
@@ -313,19 +230,7 @@ func clamp(min, val, max float64) float64 {
 	return val
 }
 
-// mapNodes maps from a list of *v1.Machine to candidateNode
-func mapNodes(nodes []*v1.Node, candidateNodes []CandidateNode) []CandidateNode {
-	verifyNodeNames := sets.NewString(lo.Map(nodes, func(t *v1.Node, i int) string { return t.Name })...)
-	var ret []CandidateNode
-	for _, c := range candidateNodes {
-		if verifyNodeNames.Has(c.Name) {
-			ret = append(ret, c)
-		}
-	}
-	return ret
-}
-
-func hasDoNotEvictPod(cn CandidateNode) (*v1.Pod, bool) {
+func hasDoNotEvictPod(cn *CandidateNode) (*v1.Pod, bool) {
 	return lo.Find(cn.pods, func(p *v1.Pod) bool {
 		if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
 			return false

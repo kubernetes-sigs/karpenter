@@ -41,7 +41,7 @@ func NewSingleNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeCli
 // ComputeCommand generates a deprovisioning command given deprovisionable nodes
 //
 //nolint:gocyclo
-func (c *SingleNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...CandidateNode) (Command, error) {
+func (c *SingleNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...*CandidateNode) (Command, error) {
 	if c.cluster.Consolidated() {
 		return Command{action: actionDoNothing}, nil
 	}

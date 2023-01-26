@@ -150,7 +150,7 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 
 	reason := fmt.Sprintf("%s/%s", d, command.action)
 	if command.action == actionReplace {
-		if err := c.launchReplacementNodes(ctx, command, reason); err != nil {
+		if err := c.launchReplacementMachines(ctx, command, reason); err != nil {
 			// If we failed to launch the replacement, don't deprovision.  If this is some permanent failure,
 			// we don't want to disrupt workloads with no way to provision new nodes for them.
 			return fmt.Errorf("launching replacement node, %w", err)
@@ -158,13 +158,13 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 	}
 
 	for _, oldNode := range command.nodesToRemove {
-		c.recorder.Publish(deprovisioningevents.TerminatingNode(oldNode, command.String()))
-		if err := c.kubeClient.Delete(ctx, oldNode); client.IgnoreNotFound(err) != nil {
-			logging.FromContext(ctx).Errorf("Deleting node, %s", err)
+		c.recorder.Publish(deprovisioningevents.TerminatingMachine(oldNode.Machine, command.String()))
+		if err := c.kubeClient.Delete(ctx, oldNode.Machine); client.IgnoreNotFound(err) != nil {
+			logging.FromContext(ctx).Errorf("Deleting machine, %s", err)
 		} else {
-			metrics.NodesTerminatedCounter.With(prometheus.Labels{
+			metrics.MachinesTerminatedCounter.With(prometheus.Labels{
 				metrics.ReasonLabel:      reason,
-				metrics.ProvisionerLabel: oldNode.Labels[v1alpha5.ProvisionerNameLabelKey],
+				metrics.ProvisionerLabel: oldNode.Labels()[v1alpha5.ProvisionerNameLabelKey],
 			}).Inc()
 		}
 	}
@@ -172,24 +172,24 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 	// We wait for nodes to delete to ensure we don't start another round of deprovisioning until this node is fully
 	// deleted.
 	for _, oldnode := range command.nodesToRemove {
-		c.waitForDeletion(ctx, oldnode)
+		c.waitForDeletion(ctx, oldnode.Machine)
 	}
 	return nil
 }
 
 // waitForDeletion waits for the specified node to be removed from the API server. This deletion can take some period
-// of time if there are PDBs that govern pods on the node as we need to  wait until the node drains before
+// of time if there are PDBs that govern pods on the node as we need to wait until the node drains before
 // it's actually deleted.
-func (c *Controller) waitForDeletion(ctx context.Context, node *v1.Node) {
+func (c *Controller) waitForDeletion(ctx context.Context, machine *v1alpha5.Machine) {
 	if err := retry.Do(func() error {
-		var n v1.Node
-		nerr := c.kubeClient.Get(ctx, client.ObjectKey{Name: node.Name}, &n)
+		m := &v1alpha5.Machine{}
+		nerr := c.kubeClient.Get(ctx, client.ObjectKeyFromObject(machine), m)
 		// We expect the not node found error, at which point we know the node is deleted.
 		if errors.IsNotFound(nerr) {
 			return nil
 		}
 		// make the user aware of why deprovisioning is paused
-		c.recorder.Publish(deprovisioningevents.WaitingOnDeletion(node))
+		c.recorder.Publish(deprovisioningevents.WaitingOnDeletion(machine))
 		if nerr != nil {
 			return fmt.Errorf("expected node to be not found, %w", nerr)
 		}
@@ -201,49 +201,47 @@ func (c *Controller) waitForDeletion(ctx context.Context, node *v1.Node) {
 	}
 }
 
-// launchReplacementNodes launches replacement nodes and blocks until it is ready
+// launchReplacementMachines launches replacement machines and blocks until it is ready
 // nolint:gocyclo
-func (c *Controller) launchReplacementNodes(ctx context.Context, action Command, reason string) error {
+func (c *Controller) launchReplacementMachines(ctx context.Context, action Command, reason string) error {
 	defer metrics.Measure(deprovisioningReplacementNodeInitializedHistogram)()
-	nodeNamesToRemove := lo.Map(action.nodesToRemove, func(n *v1.Node, _ int) string { return n.Name })
+
 	// cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
-	if err := c.setNodesUnschedulable(ctx, true, nodeNamesToRemove...); err != nil {
+	if err := c.setNodesUnschedulable(ctx, true, action.nodesToRemove...); err != nil {
 		return fmt.Errorf("cordoning nodes, %w", err)
 	}
 
-	nodeNames, err := c.provisioner.LaunchMachines(ctx, action.replacementNodes, provisioning.WithReason(reason))
+	machineNames, err := c.provisioner.LaunchMachines(ctx, action.replacementMachines, provisioning.WithReason(reason))
 	if err != nil {
 		// uncordon the nodes as the launch may fail (e.g. ICE or incompatible AMI)
-		err = multierr.Append(err, c.setNodesUnschedulable(ctx, false, nodeNamesToRemove...))
+		err = multierr.Append(err, c.setNodesUnschedulable(ctx, false, action.nodesToRemove...))
 		return err
 	}
-
-	if len(nodeNames) != len(action.replacementNodes) {
+	if len(machineNames) != len(action.replacementMachines) {
 		// shouldn't ever occur since a partially failed LaunchMachines should return an error
-		return fmt.Errorf("expected %d node names, got %d", len(action.replacementNodes), len(nodeNames))
+		return fmt.Errorf("expected %d machines, got %d", len(action.replacementMachines), len(machineNames))
 	}
 
 	// We have the new nodes created at the API server so mark the old nodes for deletion
-	c.cluster.MarkForDeletion(nodeNamesToRemove...)
+	c.cluster.MarkForDeletion(lo.Map(action.nodesToRemove, func(c *CandidateNode, _ int) string { return c.Name() })...)
 	// Wait for nodes to be ready
 	// TODO @njtran: Allow to bypass this check for certain deprovisioners
-	errs := make([]error, len(nodeNames))
-	workqueue.ParallelizeUntil(ctx, len(nodeNames), len(nodeNames), func(i int) {
-		var k8Node v1.Node
+	errs := make([]error, len(machineNames))
+	workqueue.ParallelizeUntil(ctx, len(machineNames), len(machineNames), func(i int) {
 		// Wait for the node to be ready
 		var once sync.Once
-		if err := retry.Do(func() error {
-			if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: nodeNames[i]}, &k8Node); err != nil {
+		machine := &v1alpha5.Machine{}
+		if err = retry.Do(func() error {
+			if err = c.kubeClient.Get(ctx, client.ObjectKey{Name: machineNames[i]}, machine); err != nil {
 				return fmt.Errorf("getting node, %w", err)
 			}
 			once.Do(func() {
-				c.recorder.Publish(deprovisioningevents.LaunchingNode(&k8Node, action.String()))
+				c.recorder.Publish(deprovisioningevents.LaunchingMachine(machine, action.String()))
 			})
-
-			if _, ok := k8Node.Labels[v1alpha5.LabelNodeInitialized]; !ok {
+			if !machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).IsTrue() {
 				// make the user aware of why deprovisioning is paused
-				c.recorder.Publish(deprovisioningevents.WaitingOnReadiness(&k8Node))
-				return fmt.Errorf("node is not initialized")
+				c.recorder.Publish(deprovisioningevents.WaitingOnReadiness(machine))
+				return fmt.Errorf("machine is not initialized")
 			}
 			return nil
 		}, waitRetryOptions...); err != nil {
@@ -253,18 +251,18 @@ func (c *Controller) launchReplacementNodes(ctx context.Context, action Command,
 	})
 	multiErr := multierr.Combine(errs...)
 	if multiErr != nil {
-		c.cluster.UnmarkForDeletion(nodeNamesToRemove...)
-		return multierr.Combine(c.setNodesUnschedulable(ctx, false, nodeNamesToRemove...),
+		c.cluster.UnmarkForDeletion(lo.Map(action.nodesToRemove, func(c *CandidateNode, _ int) string { return c.Name() })...)
+		return multierr.Combine(c.setNodesUnschedulable(ctx, false, action.nodesToRemove...),
 			fmt.Errorf("timed out checking node readiness, %w", multiErr))
 	}
 	return nil
 }
 
-func (c *Controller) setNodesUnschedulable(ctx context.Context, isUnschedulable bool, nodeNames ...string) error {
+func (c *Controller) setNodesUnschedulable(ctx context.Context, isUnschedulable bool, nodes ...*CandidateNode) error {
 	var multiErr error
-	for _, nodeName := range nodeNames {
-		var node v1.Node
-		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: nodeName}, &node); err != nil {
+	for _, n := range nodes {
+		node := &v1.Node{}
+		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Node.Name}, node); err != nil {
 			multiErr = multierr.Append(multiErr, fmt.Errorf("getting node, %w", err))
 		}
 
@@ -278,9 +276,9 @@ func (c *Controller) setNodesUnschedulable(ctx context.Context, isUnschedulable 
 			continue
 		}
 
-		persisted := node.DeepCopy()
+		stored := node.DeepCopy()
 		node.Spec.Unschedulable = isUnschedulable
-		if err := c.kubeClient.Patch(ctx, &node, client.MergeFrom(persisted)); err != nil {
+		if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 			multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
 		}
 	}

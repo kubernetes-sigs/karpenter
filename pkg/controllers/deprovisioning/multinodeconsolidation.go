@@ -19,10 +19,12 @@ import (
 	"fmt"
 	"math"
 
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
@@ -39,7 +41,7 @@ func NewMultiNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClie
 	return &MultiNodeConsolidation{makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
 }
 
-func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...CandidateNode) (Command, error) {
+func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...*CandidateNode) (Command, error) {
 	if m.cluster.Consolidated() {
 		return Command{action: actionDoNothing}, nil
 	}
@@ -72,7 +74,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 
 // firstNNodeConsolidationOption looks at the first N nodes to determine if they can all be consolidated at once.  The
 // nodes are sorted by increasing disruption order which correlates to likelihood if being able to consolidate the node
-func (m *MultiNodeConsolidation) firstNNodeConsolidationOption(ctx context.Context, candidates []CandidateNode, max int) (Command, error) {
+func (m *MultiNodeConsolidation) firstNNodeConsolidationOption(ctx context.Context, candidates []*CandidateNode, max int) (Command, error) {
 	// we always operate on at least two nodes at once, for single nodes standard consolidation will find all solutions
 	if len(candidates) < 2 {
 		return Command{action: actionDoNothing}, nil
@@ -97,8 +99,8 @@ func (m *MultiNodeConsolidation) firstNNodeConsolidationOption(ctx context.Conte
 		// ensure that the action is sensical for replacements, see explanation on filterOutSameType for why this is
 		// required
 		if action.action == actionReplace {
-			action.replacementNodes[0].InstanceTypeOptions = filterOutSameType(action.replacementNodes[0], nodesToConsolidate)
-			if len(action.replacementNodes[0].InstanceTypeOptions) == 0 {
+			action.replacementMachines[0].InstanceTypeOptions = filterOutSameType(action.replacementMachines[0], nodesToConsolidate)
+			if len(action.replacementMachines[0].InstanceTypeOptions) == 0 {
 				action.action = actionDoNothing
 			}
 		}
@@ -130,14 +132,14 @@ func (m *MultiNodeConsolidation) firstNNodeConsolidationOption(ctx context.Conte
 // This code sees that t3a.small is the cheapest type in both lists and filters it and anything more expensive out
 // leaving the valid consolidation:
 // nodes=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.nano
-func filterOutSameType(newNode *scheduling.Machine, consolidate []CandidateNode) []*cloudprovider.InstanceType {
+func filterOutSameType(newNode *scheduling.Machine, consolidate []*CandidateNode) []*cloudprovider.InstanceType {
 	existingInstanceTypes := sets.NewString()
 	nodePricesByInstanceType := map[string]float64{}
 
 	// get the price of the cheapest node that we currently are considering deleting indexed by instance type
 	for _, n := range consolidate {
 		existingInstanceTypes.Insert(n.instanceType.Name)
-		of, ok := n.instanceType.Offerings.Get(n.capacityType, n.zone)
+		of, ok := n.instanceType.Offerings.Get(n.Labels()[v1alpha5.LabelCapacityType], n.Labels()[v1.LabelTopologyZone])
 		if !ok {
 			continue
 		}

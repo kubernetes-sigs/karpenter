@@ -18,6 +18,7 @@ import (
 	"fmt"
 
 	"github.com/imdario/mergo"
+	"github.com/samber/lo"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 )
@@ -34,9 +35,18 @@ func Machine(overrides ...v1alpha5.Machine) *v1alpha5.Machine {
 	if override.Name == "" {
 		override.Name = RandomName()
 	}
+	override.ObjectMeta.Labels = lo.Assign(override.ObjectMeta.Labels, map[string]string{
+		v1alpha5.MachineNameLabelKey: override.Name,
+	})
 	return &v1alpha5.Machine{
 		ObjectMeta: ObjectMeta(override.ObjectMeta),
 		Spec:       override.Spec,
 		Status:     override.Status,
 	}
+}
+
+func MarkMachineReady(machine *v1alpha5.Machine) {
+	machine.StatusConditions().MarkTrue(v1alpha5.MachineCreated)
+	machine.StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
+	machine.StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
 }

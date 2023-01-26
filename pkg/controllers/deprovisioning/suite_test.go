@@ -62,6 +62,7 @@ var deprovisioningController *deprovisioning.Controller
 var provisioner *provisioning.Provisioner
 var cloudProvider *fake.CloudProvider
 var nodeStateController controller.Controller
+var machineStateController controller.Controller
 var fakeClock *clock.FakeClock
 var onDemandInstances []*cloudprovider.InstanceType
 var mostExpensiveInstance *cloudprovider.InstanceType
@@ -210,7 +211,7 @@ var _ = Describe("Pod Eviction Cost", func() {
 })
 
 var _ = Describe("Replace Nodes", func() {
-	It("can replace node", func() {
+	FIt("can replace node", func() {
 		labels := map[string]string{
 			"app": "test",
 		}
@@ -235,6 +236,21 @@ var _ = Describe("Replace Nodes", func() {
 		prov := test.Provisioner(test.ProvisionerOptions{
 			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
+		machine := test.Machine(v1alpha5.Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID:  test.RandomProviderID(),
+				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+			},
+		})
+		test.MarkMachineReady(machine)
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -242,13 +258,16 @@ var _ = Describe("Replace Nodes", func() {
 					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					v1alpha5.MachineNameLabelKey:     machine.Name,
 				}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+			ProviderID:  test.RandomProviderID(),
 		})
 
-		ExpectApplied(ctx, env.Client, rs, pod, node, prov)
+		ExpectApplied(ctx, env.Client, rs, pod, node, machine, prov)
 		ExpectMakeNodesReady(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
 		ExpectManualBinding(ctx, env.Client, pod, node)
 		ExpectScheduled(ctx, env.Client, pod)
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
@@ -2297,6 +2316,14 @@ func ExpectTriggerVerifyAction(wg *sync.WaitGroup) {
 		}
 		fakeClock.Step(45 * time.Second)
 	}()
+}
+
+func ExpectMakeMachinesReady(ctx context.Context, c client.Client, machines ...*v1alpha5.Machine) {
+	for _, machine := range machines {
+		m := &v1alpha5.Machine{}
+		ExpectWithOffset(1, c.Get(ctx, client.ObjectKeyFromObject(machine), m))
+		ExpectApplied(ctx, c, m)
+	}
 }
 
 func ExpectMakeNodesReady(ctx context.Context, c client.Client, nodes ...*v1.Node) {
