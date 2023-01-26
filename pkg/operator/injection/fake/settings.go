@@ -16,22 +16,17 @@ package fake
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
-	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"knative.dev/pkg/configmap"
-
-	"github.com/aws/karpenter-core/pkg/apis/config"
 )
 
-var SettingsRegistration = &config.Registration{
-	ConfigMapName: "karpenter-global-settings",
-	Constructor:   NewFakeSettingsFromConfigMap,
-}
+type settingsKeyType struct{}
 
-var defaultSettings = Settings{
+var ContextKey = settingsKeyType{}
+
+var defaultSettings = &Settings{
 	TestArg: "default",
 }
 
@@ -39,32 +34,30 @@ type Settings struct {
 	TestArg string `json:"testArg"`
 }
 
-func (s Settings) Data() (map[string]string, error) {
-	d := map[string]string{}
-
-	if err := json.Unmarshal(lo.Must(json.Marshal(defaultSettings)), &d); err != nil {
-		return d, err
-	}
-	return d, nil
+func (*Settings) ConfigMap() string {
+	return "karpenter-global-settings"
 }
 
-func NewFakeSettingsFromConfigMap(cm *v1.ConfigMap) (Settings, error) {
+func (*Settings) Inject(ctx context.Context, cm *v1.ConfigMap) (context.Context, error) {
 	s := defaultSettings
 
 	if err := configmap.Parse(cm.Data,
 		configmap.AsString("testArg", &s.TestArg),
 	); err != nil {
-		// Failing to parse means that there is some error in the Settings, so we should crash
-		panic(fmt.Sprintf("parsing config data, %v", err))
+		return ctx, fmt.Errorf("parsing config data, %w", err)
 	}
-	return s, nil
+	return ToContext(ctx, s), nil
 }
 
-func SettingsFromContext(ctx context.Context) Settings {
-	data := ctx.Value(SettingsRegistration)
+func ToContext(ctx context.Context, s *Settings) context.Context {
+	return context.WithValue(ctx, ContextKey, s)
+}
+
+func FromContext(ctx context.Context) *Settings {
+	data := ctx.Value(ContextKey)
 	if data == nil {
 		// This is developer error if this happens, so we should panic
 		panic("settings doesn't exist in context")
 	}
-	return data.(Settings)
+	return data.(*Settings)
 }

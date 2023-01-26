@@ -24,10 +24,9 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/aws/karpenter-core/pkg/apis/config/settings"
+	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/utils/functional"
-	"github.com/aws/karpenter-core/pkg/utils/sets"
 )
 
 var (
@@ -41,7 +40,7 @@ var (
 	Resources = map[schema.GroupVersionKind]resourcesemantics.GenericCRD{
 		v1alpha5.SchemeGroupVersion.WithKind("Provisioner"): &v1alpha5.Provisioner{},
 	}
-	Settings = sets.New(settings.Registration)
+	Settings = []settings.Injectable{&settings.Settings{}}
 )
 
 //go:generate controller-gen crd object:headerFile="../../hack/boilerplate.go.txt" paths="./..." output:crd:artifacts:config=crds

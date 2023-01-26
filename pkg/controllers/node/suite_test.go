@@ -33,7 +33,7 @@ import (
 	. "knative.dev/pkg/logging/testing"
 
 	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/config/settings"
+	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
@@ -50,7 +50,6 @@ var ctx context.Context
 var nodeController controller.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
-var settingsStore test.SettingsStore
 var cp *fake.CloudProvider
 
 func TestAPIs(t *testing.T) {
@@ -79,9 +78,7 @@ var _ = Describe("Controller", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: test.RandomName()},
 			Spec:       v1alpha5.ProvisionerSpec{},
 		}
-		settingsStore = test.SettingsStore{
-			settings.ContextKey: test.Settings(),
-		}
+		ctx = settings.ToContext(ctx, test.Settings(test.SettingsOptions{DriftEnabled: true}))
 	})
 
 	AfterEach(func() {
@@ -92,10 +89,7 @@ var _ = Describe("Controller", func() {
 	Context("Drift", func() {
 		It("should not detect drift if the feature flag is disabled", func() {
 			cp.Drifted = true
-			settingsStore = test.SettingsStore{
-				settings.ContextKey: test.Settings(test.SettingsOptions{DriftEnabled: false}),
-			}
-			ctx = settingsStore.InjectSettings(ctx)
+			ctx = settings.ToContext(ctx, test.Settings(test.SettingsOptions{DriftEnabled: false}))
 			node := test.Node(test.NodeOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -111,10 +105,6 @@ var _ = Describe("Controller", func() {
 		})
 		It("should not detect drift if the provisioner does not exist", func() {
 			cp.Drifted = true
-			settingsStore = test.SettingsStore{
-				settings.ContextKey: test.Settings(test.SettingsOptions{DriftEnabled: true}),
-			}
-			ctx = settingsStore.InjectSettings(ctx)
 			node := test.Node(test.NodeOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -130,10 +120,6 @@ var _ = Describe("Controller", func() {
 		})
 		It("should annotate the node when it has drifted in the cloud provider", func() {
 			cp.Drifted = true
-			settingsStore = test.SettingsStore{
-				settings.ContextKey: test.Settings(test.SettingsOptions{DriftEnabled: true}),
-			}
-			ctx = settingsStore.InjectSettings(ctx)
 			node := test.Node(test.NodeOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{

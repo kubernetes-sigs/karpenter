@@ -15,41 +15,27 @@ limitations under the License.
 package test
 
 import (
-	"context"
 	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/imdario/mergo"
 
-	"github.com/aws/karpenter-core/pkg/apis/config/settings"
-	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
+	"github.com/aws/karpenter-core/pkg/apis/settings"
 )
-
-var _ settingsstore.Store = SettingsStore{}
-
-// SettingsStore is a map from ContextKey to settings/config data
-type SettingsStore map[interface{}]interface{}
-
-func (ss SettingsStore) InjectSettings(ctx context.Context) context.Context {
-	for k, v := range ss {
-		ctx = context.WithValue(ctx, k, v)
-	}
-	return ctx
-}
 
 type SettingsOptions struct {
 	DriftEnabled bool
 }
 
-func Settings(overrides ...SettingsOptions) settings.Settings {
+func Settings(overrides ...SettingsOptions) *settings.Settings {
 	options := SettingsOptions{}
 	for _, opts := range overrides {
 		if err := mergo.Merge(&options, opts, mergo.WithOverride); err != nil {
 			panic(fmt.Sprintf("Failed to merge pod options: %s", err))
 		}
 	}
-	return settings.Settings{
+	return &settings.Settings{
 		BatchMaxDuration:  metav1.Duration{},
 		BatchIdleDuration: metav1.Duration{},
 		DriftEnabled:      options.DriftEnabled,
