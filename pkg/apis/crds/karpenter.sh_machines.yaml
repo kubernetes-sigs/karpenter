@@ -17,7 +17,14 @@ spec:
     singular: machine
   scope: Cluster
   versions:
-  - name: v1alpha5
+  - additionalPrinterColumns:
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha5
     schema:
       openAPIV3Schema:
         description: Machine is the Schema for the Machines API

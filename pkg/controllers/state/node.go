@@ -180,8 +180,7 @@ func (in *Node) Taints() []v1.Taint {
 // by a Machine inside of cluster state
 func (in *Node) Initialized() bool {
 	if in.Machine != nil {
-		if in.Node != nil && in.Machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized) != nil &&
-			in.Machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).Status == v1.ConditionTrue {
+		if in.Node != nil && in.Machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).IsTrue() {
 			return true
 		}
 		return false

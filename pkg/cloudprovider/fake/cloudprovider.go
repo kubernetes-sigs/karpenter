@@ -42,17 +42,17 @@ type CloudProvider struct {
 	InstanceTypes []*cloudprovider.InstanceType
 
 	// CreateCalls contains the arguments for every create call that was made since it was cleared
-	mu                 sync.Mutex
+	mu                 sync.RWMutex
 	CreateCalls        []*v1alpha5.Machine
 	AllowedCreateCalls int
+	CreatedMachines    map[string]*v1alpha5.Machine
 	Drifted            bool
 }
-
-var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)
 
 func NewCloudProvider() *CloudProvider {
 	return &CloudProvider{
 		AllowedCreateCalls: math.MaxInt,
+		CreatedMachines:    map[string]*v1alpha5.Machine{},
 	}
 }
 
@@ -61,26 +61,29 @@ func (c *CloudProvider) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.CreateCalls = []*v1alpha5.Machine{}
+	c.CreatedMachines = map[string]*v1alpha5.Machine{}
 	c.AllowedCreateCalls = math.MaxInt
 }
 
 func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (*v1alpha5.Machine, error) {
 	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	c.CreateCalls = append(c.CreateCalls, machine)
 	if len(c.CreateCalls) > c.AllowedCreateCalls {
-		c.mu.Unlock()
 		return &v1alpha5.Machine{}, fmt.Errorf("erroring as number of AllowedCreateCalls has been exceeded")
 	}
-	c.mu.Unlock()
 
-	requirements := scheduling.NewNodeSelectorRequirements(machine.Spec.Requirements...)
+	reqs := scheduling.NewNodeSelectorRequirements(machine.Spec.Requirements...)
 	instanceTypes := lo.Filter(lo.Must(c.GetInstanceTypes(ctx, &v1alpha5.Provisioner{})), func(i *cloudprovider.InstanceType, _ int) bool {
-		return requirements.Get(v1.LabelInstanceTypeStable).Has(i.Name)
+		return reqs.Compatible(i.Requirements) == nil &&
+			len(i.Offerings.Requirements(reqs).Available()) > 0 &&
+			resources.Fits(resources.Merge(machine.Spec.Resources.Requests, i.Overhead.Total()), i.Capacity)
 	})
 	// Order instance types so that we get the cheapest instance types of the available offerings
 	sort.Slice(instanceTypes, func(i, j int) bool {
-		iOfferings := instanceTypes[i].Offerings.Available().Requirements(requirements)
-		jOfferings := instanceTypes[j].Offerings.Available().Requirements(requirements)
+		iOfferings := instanceTypes[i].Offerings.Available().Requirements(reqs)
+		jOfferings := instanceTypes[j].Offerings.Available().Requirements(reqs)
 		return iOfferings.Cheapest().Price < jOfferings.Cheapest().Price
 	})
 	instanceType := instanceTypes[0]
@@ -93,7 +96,7 @@ func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (
 	}
 	// Find Offering
 	for _, o := range instanceType.Offerings.Available() {
-		if requirements.Compatible(scheduling.NewRequirements(
+		if reqs.Compatible(scheduling.NewRequirements(
 			scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, o.Zone),
 			scheduling.NewRequirement(v1alpha5.LabelCapacityType, v1.NodeSelectorOpIn, o.CapacityType),
 		)) == nil {
@@ -103,22 +106,30 @@ func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (
 		}
 	}
 	name := test.RandomName()
-	return &v1alpha5.Machine{
+	created := &v1alpha5.Machine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   name,
 			Labels: labels,
 		},
 		Spec: *machine.Spec.DeepCopy(),
 		Status: v1alpha5.MachineStatus{
-			ProviderID:  fmt.Sprintf("fake://%s", name),
+			ProviderID:  test.ProviderID(name),
 			Capacity:    functional.FilterMap(instanceType.Capacity, func(_ v1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
 			Allocatable: functional.FilterMap(instanceType.Allocatable(), func(_ v1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
 		},
-	}, nil
+	}
+	c.CreatedMachines[machine.Name] = created
+	return created, nil
 }
 
-func (c *CloudProvider) Get(context.Context, string, string) (*v1alpha5.Machine, error) {
-	return nil, nil
+func (c *CloudProvider) Get(_ context.Context, machineName string, _ string) (*v1alpha5.Machine, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if machine, ok := c.CreatedMachines[machineName]; ok {
+		return machine.DeepCopy(), nil
+	}
+	return nil, cloudprovider.NewMachineNotFoundError(fmt.Errorf("no machine exists with name '%s'", machineName))
 }
 
 func (c *CloudProvider) GetInstanceTypes(_ context.Context, _ *v1alpha5.Provisioner) ([]*cloudprovider.InstanceType, error) {
@@ -165,8 +176,15 @@ func (c *CloudProvider) GetInstanceTypes(_ context.Context, _ *v1alpha5.Provisio
 	}, nil
 }
 
-func (c *CloudProvider) Delete(context.Context, *v1alpha5.Machine) error {
-	return nil
+func (c *CloudProvider) Delete(_ context.Context, m *v1alpha5.Machine) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if _, ok := c.CreatedMachines[m.Name]; ok {
+		delete(c.CreatedMachines, m.Name)
+		return nil
+	}
+	return cloudprovider.NewMachineNotFoundError(fmt.Errorf("no machine exists with name '%s'", m.Name))
 }
 
 func (c *CloudProvider) IsMachineDrifted(context.Context, *v1alpha5.Machine) (bool, error) {

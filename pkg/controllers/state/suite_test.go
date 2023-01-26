@@ -220,7 +220,7 @@ var _ = Describe("Inflight Nodes", func() {
 				},
 			},
 			Status: v1alpha5.MachineStatus{
-				ProviderID: test.ProviderID(),
+				ProviderID: test.RandomProviderID(),
 			},
 		})
 		ExpectApplied(ctx, env.Client, machine)
@@ -258,7 +258,7 @@ var _ = Describe("Inflight Nodes", func() {
 				},
 			},
 			Status: v1alpha5.MachineStatus{
-				ProviderID: test.ProviderID(),
+				ProviderID: test.RandomProviderID(),
 				Capacity: v1.ResourceList{
 					v1.ResourceCPU:              resource.MustParse("2"),
 					v1.ResourceMemory:           resource.MustParse("32Gi"),
@@ -306,7 +306,7 @@ var _ = Describe("Inflight Nodes", func() {
 				},
 			},
 			Status: v1alpha5.MachineStatus{
-				ProviderID: test.ProviderID(),
+				ProviderID: test.RandomProviderID(),
 				Capacity: v1.ResourceList{
 					v1.ResourceCPU:              resource.MustParse("2"),
 					v1.ResourceMemory:           resource.MustParse("32Gi"),
@@ -390,7 +390,7 @@ var _ = Describe("Inflight Nodes", func() {
 				},
 			},
 			Status: v1alpha5.MachineStatus{
-				ProviderID: test.ProviderID(),
+				ProviderID: test.RandomProviderID(),
 				Capacity: v1.ResourceList{
 					v1.ResourceCPU:              resource.MustParse("2"),
 					v1.ResourceMemory:           resource.MustParse("32Gi"),
@@ -439,7 +439,7 @@ var _ = Describe("Inflight Nodes", func() {
 	It("should continue node nomination when an inflight node becomes a real node", func() {
 		machine := test.Machine(v1alpha5.Machine{
 			Status: v1alpha5.MachineStatus{
-				ProviderID: test.ProviderID(),
+				ProviderID: test.RandomProviderID(),
 			},
 		})
 		ExpectApplied(ctx, env.Client, machine)
@@ -460,7 +460,7 @@ var _ = Describe("Inflight Nodes", func() {
 	It("should continue MarkedForDeletion when an inflight node becomes a real node", func() {
 		machine := test.Machine(v1alpha5.Machine{
 			Status: v1alpha5.MachineStatus{
-				ProviderID: test.ProviderID(),
+				ProviderID: test.RandomProviderID(),
 			},
 		})
 		ExpectApplied(ctx, env.Client, machine)
@@ -961,7 +961,7 @@ var _ = Describe("Node Resource Level", func() {
 				},
 			},
 			Status: v1alpha5.MachineStatus{
-				ProviderID: test.ProviderID(),
+				ProviderID: test.RandomProviderID(),
 				Capacity: v1.ResourceList{
 					v1.ResourceCPU:              resource.MustParse("2"),
 					v1.ResourceMemory:           resource.MustParse("32Gi"),
@@ -1232,7 +1232,7 @@ var _ = Describe("Cluster State Sync", func() {
 		// Deploy 1000 nodes and sync them all with the cluster
 		for i := 0; i < 1000; i++ {
 			node := test.Node(test.NodeOptions{
-				ProviderID: test.ProviderID(),
+				ProviderID: test.RandomProviderID(),
 			})
 			ExpectApplied(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
@@ -1258,7 +1258,7 @@ var _ = Describe("Cluster State Sync", func() {
 		}
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 		for i := 0; i < 1000; i++ {
-			nodes[i].Spec.ProviderID = test.ProviderID()
+			nodes[i].Spec.ProviderID = test.RandomProviderID()
 			ExpectApplied(ctx, env.Client, nodes[i])
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodes[i]))
 		}
@@ -1269,7 +1269,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for i := 0; i < 1000; i++ {
 			machine := test.Machine(v1alpha5.Machine{
 				Status: v1alpha5.MachineStatus{
-					ProviderID: test.ProviderID(),
+					ProviderID: test.RandomProviderID(),
 				},
 			})
 			ExpectApplied(ctx, env.Client, machine)
@@ -1281,7 +1281,7 @@ var _ = Describe("Cluster State Sync", func() {
 		// Deploy 250 nodes to the cluster that also have machines
 		for i := 0; i < 250; i++ {
 			node := test.Node(test.NodeOptions{
-				ProviderID: test.ProviderID(),
+				ProviderID: test.RandomProviderID(),
 			})
 			machine := test.Machine(v1alpha5.Machine{
 				Status: v1alpha5.MachineStatus{
@@ -1295,7 +1295,7 @@ var _ = Describe("Cluster State Sync", func() {
 		// Deploy 250 nodes to the cluster
 		for i := 0; i < 250; i++ {
 			node := test.Node(test.NodeOptions{
-				ProviderID: test.ProviderID(),
+				ProviderID: test.RandomProviderID(),
 			})
 			ExpectApplied(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
@@ -1304,7 +1304,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for i := 0; i < 500; i++ {
 			machine := test.Machine(v1alpha5.Machine{
 				Status: v1alpha5.MachineStatus{
-					ProviderID: test.ProviderID(),
+					ProviderID: test.RandomProviderID(),
 				},
 			})
 			ExpectApplied(ctx, env.Client, machine)
@@ -1317,7 +1317,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for i := 0; i < 500; i++ {
 			machine := test.Machine(v1alpha5.Machine{
 				Status: v1alpha5.MachineStatus{
-					ProviderID: test.ProviderID(),
+					ProviderID: test.RandomProviderID(),
 				},
 			})
 			node := test.Node(test.NodeOptions{
@@ -1334,7 +1334,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for i := 0; i < 1000; i++ {
 			machine := test.Machine(v1alpha5.Machine{
 				Status: v1alpha5.MachineStatus{
-					ProviderID: test.ProviderID(),
+					ProviderID: test.RandomProviderID(),
 				},
 			})
 			// One of them doesn't have its providerID
@@ -1351,7 +1351,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for i := 0; i < 1000; i++ {
 			machine := test.Machine(v1alpha5.Machine{
 				Status: v1alpha5.MachineStatus{
-					ProviderID: test.ProviderID(),
+					ProviderID: test.RandomProviderID(),
 				},
 			})
 			ExpectApplied(ctx, env.Client, machine)
@@ -1367,7 +1367,7 @@ var _ = Describe("Cluster State Sync", func() {
 		// Deploy 1000 nodes and sync them all with the cluster
 		for i := 0; i < 1000; i++ {
 			node := test.Node(test.NodeOptions{
-				ProviderID: test.ProviderID(),
+				ProviderID: test.RandomProviderID(),
 			})
 			ExpectApplied(ctx, env.Client, node)
 

@@ -25,6 +25,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/counter"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/inflightchecks"
+	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
 	metricspod "github.com/aws/karpenter-core/pkg/controllers/metrics/pod"
 	metricsprovisioner "github.com/aws/karpenter-core/pkg/controllers/metrics/provisioner"
 	metricsstate "github.com/aws/karpenter-core/pkg/controllers/metrics/state"
@@ -36,7 +37,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
 )
 
 func init() {
@@ -49,25 +49,25 @@ func NewControllers(
 	kubeClient client.Client,
 	kubernetesInterface kubernetes.Interface,
 	cluster *state.Cluster,
-	eventRecorder events.Recorder,
-	settingsStore settingsstore.Store,
+	recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider,
 ) []controller.Controller {
-	provisioner := provisioning.NewProvisioner(ctx, kubeClient, kubernetesInterface.CoreV1(), eventRecorder, cloudProvider, cluster)
 
+	provisioner := provisioning.NewProvisioner(ctx, kubeClient, kubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
+	terminator := terminator.NewTerminator(clock, kubeClient, cloudProvider, terminator.NewEvictionQueue(ctx, kubernetesInterface.CoreV1(), recorder))
 	return []controller.Controller{
 		provisioner,
 		metricsstate.NewController(cluster),
-		deprovisioning.NewController(clock, kubeClient, provisioner, cloudProvider, eventRecorder, cluster),
-		provisioning.NewController(kubeClient, provisioner, eventRecorder),
+		deprovisioning.NewController(clock, kubeClient, provisioner, cloudProvider, recorder, cluster),
+		provisioning.NewController(kubeClient, provisioner, recorder),
 		informer.NewNodeController(kubeClient, cluster),
 		informer.NewPodController(kubeClient, cluster),
 		informer.NewProvisionerController(kubeClient, cluster),
 		node.NewController(clock, kubeClient, cloudProvider, cluster),
-		termination.NewController(clock, kubeClient, termination.NewEvictionQueue(ctx, kubernetesInterface.CoreV1(), eventRecorder), eventRecorder, cloudProvider),
+		termination.NewController(kubeClient, terminator, recorder),
 		metricspod.NewController(kubeClient),
 		metricsprovisioner.NewController(kubeClient),
 		counter.NewController(kubeClient, cluster),
-		inflightchecks.NewController(clock, kubeClient, eventRecorder, cloudProvider),
+		inflightchecks.NewController(clock, kubeClient, recorder, cloudProvider),
 	}
 }
