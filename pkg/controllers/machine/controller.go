@@ -43,6 +43,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
 	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 	"github.com/aws/karpenter-core/pkg/utils/result"
 )
 
@@ -174,10 +175,10 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 }
 
 func (c *Controller) cleanupNodeForMachine(ctx context.Context, machine *v1alpha5.Machine) error {
-	node, err := nodeForMachine(ctx, c.kubeClient, machine)
+	node, err := machineutil.NodeForMachine(ctx, c.kubeClient, machine)
 	if err != nil {
 		// We don't clean the node if we either don't find a node or have violated the single machine to single node invariant
-		if IsNodeNotFoundError(err) || IsDuplicateNodeError(err) {
+		if machineutil.IsNodeNotFoundError(err) || machineutil.IsDuplicateNodeError(err) {
 			return nil
 		}
 		return err
@@ -193,18 +194,4 @@ func (c *Controller) cleanupNodeForMachine(ctx context.Context, machine *v1alpha
 		return fmt.Errorf("draining node, %w", err)
 	}
 	return nil
-}
-
-func nodeForMachine(ctx context.Context, c client.Client, machine *v1alpha5.Machine) (*v1.Node, error) {
-	nodeList := v1.NodeList{}
-	if err := c.List(ctx, &nodeList, client.MatchingFields{"spec.providerID": machine.Status.ProviderID}, client.Limit(2)); err != nil {
-		return nil, fmt.Errorf("listing nodes, %w", err)
-	}
-	if len(nodeList.Items) > 1 {
-		return nil, &DuplicateNodeError{ProviderID: machine.Status.ProviderID}
-	}
-	if len(nodeList.Items) == 0 {
-		return nil, &NodeNotFoundError{ProviderID: machine.Status.ProviderID}
-	}
-	return &nodeList.Items[0], nil
 }

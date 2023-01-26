@@ -20,6 +20,7 @@ import (
 
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/client-go/util/workqueue"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -66,11 +67,21 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 	}
 	machineList := &v1alpha5.MachineList{}
 	if err := c.kubeClient.List(ctx, machineList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
+		return reconcile.Result{}, err
+	}
+	if len(machineList.Items) == 0 {
+		stored := node.DeepCopy()
+		controllerutil.RemoveFinalizer(node, v1alpha5.TerminationFinalizer)
+		if !equality.Semantic.DeepEqual(stored, node) {
+			if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+				return reconcile.Result{}, client.IgnoreNotFound(err)
+			}
+		}
 		return reconcile.Result{}, nil
 	}
 	for i := range machineList.Items {
 		if err := c.kubeClient.Delete(ctx, &machineList.Items[i]); err != nil {
-			return reconcile.Result{}, client.IgnoreNotFound(err)
+			return reconcile.Result{}, err
 		}
 	}
 	return reconcile.Result{}, nil

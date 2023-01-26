@@ -24,6 +24,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 )
 
 type GarbageCollect struct {
@@ -37,7 +38,7 @@ func (e *GarbageCollect) Reconcile(ctx context.Context, machine *v1alpha5.Machin
 		return reconcile.Result{}, nil
 	}
 	// If there is no node representation for the machine, then check if there is a representation at the cloudprovider
-	if _, err := nodeForMachine(ctx, e.kubeClient, machine); err == nil || !IsNodeNotFoundError(err) {
+	if _, err := machineutil.NodeForMachine(ctx, e.kubeClient, machine); err == nil || !machineutil.IsNodeNotFoundError(err) {
 		return reconcile.Result{}, nil
 	}
 	if _, expireTime, ok := e.lastChecked.GetWithExpiration(client.ObjectKeyFromObject(machine).String()); ok {

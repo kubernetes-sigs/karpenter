@@ -15,15 +15,80 @@ limitations under the License.
 package machine
 
 import (
+	"context"
+	"errors"
+	"fmt"
+
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 )
+
+type NodeNotFoundError struct {
+	ProviderID string
+}
+
+func (e *NodeNotFoundError) Error() string {
+	return fmt.Sprintf("no nodes found for provider id '%s'", e.ProviderID)
+}
+
+func IsNodeNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	nnfErr := &NodeNotFoundError{}
+	return errors.As(err, &nnfErr)
+}
+
+func IgnoreNodeNotFoundError(err error) error {
+	if !IsNodeNotFoundError(err) {
+		return err
+	}
+	return nil
+}
+
+type DuplicateNodeError struct {
+	ProviderID string
+}
+
+func (e *DuplicateNodeError) Error() string {
+	return fmt.Sprintf("multiple found for provider id '%s'", e.ProviderID)
+}
+
+func IsDuplicateNodeError(err error) bool {
+	if err == nil {
+		return false
+	}
+	dnErr := &DuplicateNodeError{}
+	return errors.As(err, &dnErr)
+}
+
+func IgnoreDuplicateNodeError(err error) error {
+	if !IsDuplicateNodeError(err) {
+		return err
+	}
+	return nil
+}
+
+func NodeForMachine(ctx context.Context, c client.Client, machine *v1alpha5.Machine) (*v1.Node, error) {
+	nodeList := v1.NodeList{}
+	if err := c.List(ctx, &nodeList, client.MatchingFields{"spec.providerID": machine.Status.ProviderID}, client.Limit(2)); err != nil {
+		return nil, fmt.Errorf("listing nodes, %w", err)
+	}
+	if len(nodeList.Items) > 1 {
+		return nil, &DuplicateNodeError{ProviderID: machine.Status.ProviderID}
+	}
+	if len(nodeList.Items) == 0 {
+		return nil, &NodeNotFoundError{ProviderID: machine.Status.ProviderID}
+	}
+	return &nodeList.Items[0], nil
+}
 
 // New converts a node into a Machine using known values from the node and provisioner spec values
 // Deprecated: This Machine generator function can be removed when v1alpha6 migration has completed.

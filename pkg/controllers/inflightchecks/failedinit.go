@@ -19,14 +19,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
-	"github.com/aws/karpenter-core/pkg/controllers/node"
+	machine2 "github.com/aws/karpenter-core/pkg/controllers/machine"
 )
 
 // initFailureTime is the time after which we start reporting a node as having failed to initialize. This is set
@@ -44,48 +43,26 @@ func NewFailedInit(clk clock.Clock, provider cloudprovider.CloudProvider) Check 
 	return &FailedInit{clock: clk, provider: provider}
 }
 
-func (f FailedInit) Check(ctx context.Context, n *v1.Node, provisioner *v1alpha5.Provisioner, pdbs *deprovisioning.PDBLimits) ([]Issue, error) {
-	// ignore nodes that are deleting
-	if !n.DeletionTimestamp.IsZero() {
+func (f FailedInit) Check(ctx context.Context, node *v1.Node, machine *v1alpha5.Machine, provisioner *v1alpha5.Provisioner, pdbs *deprovisioning.PDBLimits) ([]Issue, error) {
+	// ignore machines that are deleting
+	if !machine.DeletionTimestamp.IsZero() {
 		return nil, nil
 	}
-
-	nodeAge := f.clock.Since(n.CreationTimestamp.Time)
-	// n is already initialized or not old enough
-	if n.Labels[v1alpha5.LabelNodeInitialized] == "true" || nodeAge < initFailureTime {
+	// machine is already initialized or isn't old enough
+	if machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).IsTrue() ||
+		machine.CreationTimestamp.Time.Add(initFailureTime).Before(f.clock.Now()) {
 		return nil, nil
-	}
-
-	instanceTypes, err := f.provider.GetInstanceTypes(ctx, provisioner)
-	if err != nil {
-		return nil, err
-	}
-
-	instanceType, ok := lo.Find(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.Name == n.Labels[v1.LabelInstanceTypeStable] })
-	if !ok {
-		return []Issue{{
-			node:    n,
-			message: fmt.Sprintf("Instance Type %q not found", n.Labels[v1.LabelInstanceTypeStable]),
-		}}, nil
 	}
 
 	// detect startup taints which should be removed
 	var result []Issue
-	if taint, ok := node.IsStartupTaintRemoved(n, provisioner); !ok {
-		result = append(result, Issue{
-			node:    n,
-			message: fmt.Sprintf("Startup taint %q is still on the node", formatTaint(taint)),
-		})
+	if taint, ok := machine2.IsStartupTaintRemoved(node, machine); !ok {
+		result = append(result, Issue(fmt.Sprintf("Startup taint %q is still on the node", formatTaint(taint))))
 	}
-
 	// and extended resources which never registered
-	if resource, ok := node.IsExtendedResourceRegistered(n, instanceType); !ok {
-		result = append(result, Issue{
-			node:    n,
-			message: fmt.Sprintf("Expected resource %q didn't register on the node", resource),
-		})
+	if resource, ok := machine2.RequestedResourcesRegistered(node, machine); !ok {
+		result = append(result, Issue(fmt.Sprintf("Expected resource %q didn't register on the node", resource)))
 	}
-
 	return result, nil
 }
 
