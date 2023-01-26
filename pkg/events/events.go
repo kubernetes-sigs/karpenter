@@ -19,6 +19,8 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/flowcontrol"
+
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 )
 
 // PodNominationRateLimiter is a pointer so it rate-limits across events
@@ -31,6 +33,17 @@ func NominatePod(pod *v1.Pod, node *v1.Node) Event {
 		Reason:         "Nominated",
 		Message:        fmt.Sprintf("Pod should schedule on %s", node.Name),
 		DedupeValues:   []string{string(pod.UID), node.Name},
+		RateLimiter:    PodNominationRateLimiter,
+	}
+}
+
+func NominatePodForMachine(pod *v1.Pod, machine *v1alpha5.Machine) Event {
+	return Event{
+		InvolvedObject: pod,
+		Type:           v1.EventTypeNormal,
+		Reason:         "Nominated",
+		Message:        fmt.Sprintf("Pod should schedule on node associated with %s", machine.Name),
+		DedupeValues:   []string{string(pod.UID), machine.Name},
 		RateLimiter:    PodNominationRateLimiter,
 	}
 }
@@ -72,5 +85,15 @@ func NodeInflightCheck(node *v1.Node, message string) Event {
 		Reason:         "FailedInflightCheck",
 		Message:        message,
 		DedupeValues:   []string{node.Name, message},
+	}
+}
+
+func MachineInflightCheck(machine *v1alpha5.Machine, message string) Event {
+	return Event{
+		InvolvedObject: machine,
+		Type:           v1.EventTypeWarning,
+		Reason:         "FailedInflightCheck",
+		Message:        message,
+		DedupeValues:   []string{machine.Name, message},
 	}
 }

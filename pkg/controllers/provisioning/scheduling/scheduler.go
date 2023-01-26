@@ -148,6 +148,9 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 			if node.Node.Node != nil {
 				s.recorder.Publish(events.NominatePod(pod, node.Node.Node))
 			}
+			if node.Machine != nil {
+				s.recorder.Publish(events.NominatePodForMachine(pod, node.Machine))
+			}
 		}
 	}
 

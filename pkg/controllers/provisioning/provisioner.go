@@ -322,12 +322,16 @@ func (p *Provisioner) Launch(ctx context.Context, m *scheduler.Machine, opts ...
 	if err := p.kubeClient.Create(ctx, machine); err != nil {
 		return "", err
 	}
-	// TODO @joinnis: Consider storing pod nomination events on the machine
 	p.cluster.NominateNodeForPod(ctx, machine.Name)
 	metrics.MachinesCreatedCounter.With(prometheus.Labels{
 		metrics.ReasonLabel:      options.Reason,
 		metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
 	}).Inc()
+	if functional.ResolveOptions(opts...).RecordPodNomination {
+		for _, pod := range m.Pods {
+			p.recorder.Publish(events.NominatePodForMachine(pod, machine))
+		}
+	}
 	return machine.Name, nil
 }
 

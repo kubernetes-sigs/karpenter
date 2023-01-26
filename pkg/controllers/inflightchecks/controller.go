@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/patrickmn/go-cache"
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
@@ -26,8 +27,10 @@ import (
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -101,6 +104,7 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 		return reconcile.Result{}, err
 	}
 
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name, "provisioner", provisioner.Name))
 	pdbs, err := deprovisioning.NewPDBLimits(ctx, c.kubeClient)
 	if err != nil {
 		return reconcile.Result{}, err
@@ -113,17 +117,33 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 		}
 		allIssues = append(allIssues, issues...)
 	}
-	for _, iss := range allIssues {
-		logging.FromContext(ctx).Infof("Inflight check failed for node, %s", iss)
-		c.recorder.Publish(events.NodeInflightCheck(node, string(iss)))
+	for _, issue := range allIssues {
+		logging.FromContext(ctx).Infof("inflight check failed, %s", issue)
+		c.recorder.Publish(events.NodeInflightCheck(node, string(issue)))
+		c.recorder.Publish(events.MachineInflightCheck(machine, string(issue)))
 	}
 	return reconcile.Result{RequeueAfter: scanPeriod}, nil
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
+func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontroller.Builder {
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1alpha5.Machine{}).
+		Watches(
+			&source.Kind{Type: &v1.Node{}},
+			handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
+				node := o.(*v1.Node)
+				machineList := &v1alpha5.MachineList{}
+				if err := c.kubeClient.List(ctx, machineList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
+					return []reconcile.Request{}
+				}
+				return lo.Map(machineList.Items, func(m v1alpha5.Machine, _ int) reconcile.Request {
+					return reconcile.Request{
+						NamespacedName: client.ObjectKeyFromObject(&m),
+					}
+				})
+			}),
+		).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
 	)
 }

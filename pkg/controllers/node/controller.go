@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
+	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 
@@ -50,7 +51,9 @@ var _ corecontroller.TypedController[*v1.Node] = (*Controller)(nil)
 type Controller struct {
 	kubeClient client.Client
 	cluster    *state.Cluster
-	emptiness  *Emptiness
+
+	emptiness *Emptiness
+	drift     *Drift
 }
 
 // NewController constructs a nodeController instance
@@ -58,7 +61,9 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 	return corecontroller.Typed[*v1.Node](kubeClient, &Controller{
 		kubeClient: kubeClient,
 		cluster:    cluster,
-		emptiness:  &Emptiness{kubeClient: kubeClient, clock: clk, cluster: cluster},
+
+		emptiness: &Emptiness{kubeClient: kubeClient, clock: clk, cluster: cluster},
+		drift:     &Drift{kubeClient: kubeClient, cloudProvider: cloudProvider},
 	})
 }
 
@@ -80,13 +85,19 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Re
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", provisioner.Name))
+
+	reconcilers := []nodeReconciler{
+		c.emptiness,
+	}
+	if settings.FromContext(ctx).DriftEnabled {
+		reconcilers = append(reconcilers, c.drift)
+	}
 
 	// Execute Reconcilers
 	var results []reconcile.Result
 	var errs error
-	for _, reconciler := range []nodeReconciler{
-		c.emptiness,
-	} {
+	for _, reconciler := range reconcilers {
 		res, err := reconciler.Reconcile(ctx, provisioner, node)
 		errs = multierr.Append(errs, err)
 		results = append(results, res)

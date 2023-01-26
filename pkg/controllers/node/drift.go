@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package machine
+package node
 
 import (
 	"context"
@@ -20,14 +20,15 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/types"
+	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 )
 
 type Drift struct {
@@ -35,16 +36,17 @@ type Drift struct {
 	cloudProvider cloudprovider.CloudProvider
 }
 
-func (d *Drift) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	if !settings.FromContext(ctx).DriftEnabled {
-		return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
-	}
-	node, err := machineutil.NodeForMachine(ctx, d.kubeClient, machine)
-	if err != nil {
-		return reconcile.Result{}, nil //nolint:nilerr
-	}
+func (d *Drift) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner, node *v1.Node) (reconcile.Result, error) {
 	if _, ok := node.Annotations[v1alpha5.VoluntaryDisruptionAnnotationKey]; ok {
 		return reconcile.Result{}, nil
+	}
+	machineName, ok := node.Labels[v1alpha5.MachineNameLabelKey]
+	if !ok {
+		return reconcile.Result{}, nil
+	}
+	machine := &v1alpha5.Machine{}
+	if err := d.kubeClient.Get(ctx, types.NamespacedName{Name: machineName}, machine); err != nil {
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	// TODO: Add Provisioner Drift
 	drifted, err := d.cloudProvider.IsMachineDrifted(ctx, machine)
@@ -60,6 +62,7 @@ func (d *Drift) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (recon
 			if err = d.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 				return reconcile.Result{}, err
 			}
+			logging.FromContext(ctx).Debugf("node drifted")
 		}
 	}
 	// Requeue after 5 minutes for the cache TTL
