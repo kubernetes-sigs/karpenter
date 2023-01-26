@@ -36,6 +36,7 @@ var defaultSettings = &Settings{
 	DriftEnabled:      false,
 }
 
+// +k8s:deepcopy-gen=true
 type Settings struct {
 	BatchMaxDuration  metav1.Duration
 	BatchIdleDuration metav1.Duration
@@ -49,7 +50,7 @@ func (*Settings) ConfigMap() string {
 
 // Inject creates a Settings from the supplied ConfigMap
 func (*Settings) Inject(ctx context.Context, cm *v1.ConfigMap) (context.Context, error) {
-	s := defaultSettings
+	s := defaultSettings.DeepCopy()
 
 	if err := configmap.Parse(cm.Data,
 		AsMetaDuration("batchMaxDuration", &s.BatchMaxDuration),
@@ -70,15 +71,15 @@ func (*Settings) Inject(ctx context.Context, cm *v1.ConfigMap) (context.Context,
 //	type ExampleStruct struct {
 //	    Example  metav1.Duration `json:"example" validate:"required,min=10m"`
 //	}
-func (s *Settings) Validate() (err error) {
+func (in *Settings) Validate() (err error) {
 	validate := validator.New()
-	if s.BatchMaxDuration.Duration <= 0 {
+	if in.BatchMaxDuration.Duration <= 0 {
 		err = multierr.Append(err, fmt.Errorf("batchMaxDuration cannot be negative"))
 	}
-	if s.BatchIdleDuration.Duration <= 0 {
+	if in.BatchIdleDuration.Duration <= 0 {
 		err = multierr.Append(err, fmt.Errorf("batchMaxDuration cannot be negative"))
 	}
-	return multierr.Append(err, validate.Struct(s))
+	return multierr.Append(err, validate.Struct(in))
 }
 
 // AsMetaDuration parses the value at key as a time.Duration into the target, if it exists.
