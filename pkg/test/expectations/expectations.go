@@ -377,18 +377,8 @@ func ExpectResources(expected, real v1.ResourceList) {
 	}
 }
 
-type gomegaKeyType struct{}
-
-var gomegaKey = gomegaKeyType{}
-
-func GomegaWithContext(ctx context.Context, g Gomega) context.Context {
-	return context.WithValue(ctx, gomegaKey, g)
-}
-
-func GomegaFromContext(ctx context.Context) Gomega {
-	data := ctx.Value(gomegaKey)
-	if data == nil {
-		panic("Gomega not defined in context")
-	}
-	return data.(Gomega)
+func ExpectMachineCount(ctx context.Context, c client.Client, comparator string, count int) {
+	machineList := &v1alpha5.MachineList{}
+	ExpectWithOffset(1, c.List(ctx, machineList)).To(Succeed())
+	ExpectWithOffset(1, len(machineList.Items)).To(BeNumerically(comparator, count))
 }

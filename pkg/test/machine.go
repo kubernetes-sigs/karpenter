@@ -19,6 +19,7 @@ import (
 
 	"github.com/imdario/mergo"
 	"github.com/samber/lo"
+	v1 "k8s.io/api/core/v1"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 )
@@ -45,8 +46,7 @@ func Machine(overrides ...v1alpha5.Machine) *v1alpha5.Machine {
 	}
 }
 
-func MarkMachineReady(machine *v1alpha5.Machine) {
-	machine.StatusConditions().MarkTrue(v1alpha5.MachineCreated)
-	machine.StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
-	machine.StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
+func MachineAndNode(overrides ...v1alpha5.Machine) (*v1alpha5.Machine, *v1.Node) {
+	m := Machine(overrides...)
+	return m, MachineLinkedNode(m)
 }

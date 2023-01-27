@@ -105,6 +105,9 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) controller.Bu
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
+	if !c.cluster.Synced(ctx) {
+		return reconcile.Result{RequeueAfter: time.Second}, nil
+	}
 	// Attempt different deprovisioning methods. We'll only let one method perform an action
 	isConsolidated := c.cluster.Consolidated()
 	for _, d := range c.deprovisioners {
