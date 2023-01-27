@@ -39,7 +39,7 @@ func NewMultiNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClie
 }
 
 func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...CandidateNode) (Command, error) {
-	if !m.ShouldAttemptConsolidation() {
+	if m.cluster.Consolidated() {
 		return Command{action: actionDoNothing}, nil
 	}
 	candidates, err := m.sortAndFilterCandidates(ctx, candidates)

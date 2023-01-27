@@ -53,10 +53,10 @@ type Cluster struct {
 
 	antiAffinityPods sync.Map // pod namespaced name -> *v1.Pod of pods that have required anti affinities
 
-	// consolidationState is a number indicating the state of the cluster with respect to consolidation.  If this number
-	// hasn't changed, it indicates that the cluster hasn't changed in a state which would enable consolidation if
-	// it previously couldn't occur.
-	consolidationState int64
+	// consolidated is a dirty bit that indicates that the cluster hasn't
+	// changed since last consolidation and avoids recomputation.
+	consolidated   atomic.Bool
+	consolidatedAt atomic.Int64
 }
 
 func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudProvider) *Cluster {
@@ -263,26 +263,26 @@ func (c *Cluster) DeletePod(podKey types.NamespacedName) {
 
 	c.antiAffinityPods.Delete(podKey)
 	c.updateNodeUsageFromPodCompletion(podKey)
-	c.RecordConsolidationChange()
+	c.SetConsolidated(false)
 }
 
-func (c *Cluster) RecordConsolidationChange() {
-	atomic.StoreInt64(&c.consolidationState, c.clock.Now().UnixMilli())
+func (c *Cluster) SetConsolidated(consolidated bool) {
+	c.consolidated.Store(consolidated)
+	c.consolidatedAt.Store(c.clock.Now().UnixMilli())
 }
 
 // ClusterConsolidationState returns a number representing the state of the cluster with respect to consolidation.  If
 // consolidation can't occur and this number hasn't changed, there is no point in re-attempting consolidation. This
 // allows reducing overall CPU utilization by pausing consolidation when the cluster is in a static state.
-func (c *Cluster) ClusterConsolidationState() int64 {
-	cs := atomic.LoadInt64(&c.consolidationState)
+func (c *Cluster) Consolidated() bool {
+	consolidatedAt := time.UnixMilli(c.consolidatedAt.Load())
 	// If 5 minutes elapsed since the last time the consolidation state was changed, we change the state anyway. This
 	// ensures that at least once every 5 minutes we consider consolidating our cluster in case something else has
 	// changed (e.g. instance type availability) that we can't detect which would allow consolidation to occur.
-	if c.clock.Now().After(time.UnixMilli(cs).Add(5 * time.Minute)) {
-		c.RecordConsolidationChange()
-		return atomic.LoadInt64(&c.consolidationState)
+	if c.clock.Now().After(consolidatedAt.Add(5 * time.Minute)) {
+		c.SetConsolidated(false)
 	}
-	return cs
+	return c.consolidated.Load()
 }
 
 // Reset the cluster state for unit testing
@@ -334,7 +334,7 @@ func (c *Cluster) cleanupMachine(name string) {
 			c.nodes[id].Machine = nil
 		}
 		delete(c.nameToProviderID, name)
-		c.RecordConsolidationChange()
+		c.SetConsolidated(false)
 	}
 }
 
@@ -381,7 +381,7 @@ func (c *Cluster) cleanupNode(name string) {
 			c.nodes[id].Node = nil
 		}
 		delete(c.nameToProviderID, name)
-		c.RecordConsolidationChange()
+		c.SetConsolidated(false)
 	}
 }
 
@@ -501,7 +501,7 @@ func (c *Cluster) cleanupOldBindings(pod *v1.Pod) {
 		}
 	}
 	// new pod binding has occurred
-	c.RecordConsolidationChange()
+	c.SetConsolidated(false)
 }
 
 func (c *Cluster) updatePodAntiAffinities(pod *v1.Pod) {
@@ -518,15 +518,15 @@ func (c *Cluster) updatePodAntiAffinities(pod *v1.Pod) {
 
 func (c *Cluster) triggerConsolidationOnChange(old, new *Node) {
 	if old == nil || new == nil {
-		c.RecordConsolidationChange()
+		c.SetConsolidated(false)
 		return
 	}
 	if old.Initialized() != new.Initialized() {
-		c.RecordConsolidationChange()
+		c.SetConsolidated(false)
 		return
 	}
 	if old.MarkedForDeletion() != new.MarkedForDeletion() {
-		c.RecordConsolidationChange()
+		c.SetConsolidated(false)
 		return
 	}
 }

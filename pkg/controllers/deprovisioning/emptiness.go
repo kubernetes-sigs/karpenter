@@ -23,7 +23,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/ptr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/samber/lo"
 
@@ -35,16 +34,12 @@ import (
 // Emptiness is a subreconciler that deletes empty nodes.
 // Emptiness will respect TTLSecondsAfterEmpty
 type Emptiness struct {
-	clock      clock.Clock
-	kubeClient client.Client
-	cluster    *state.Cluster
+	clock clock.Clock
 }
 
-func NewEmptiness(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster) *Emptiness {
+func NewEmptiness(clk clock.Clock) *Emptiness {
 	return &Emptiness{
-		clock:      clk,
-		kubeClient: kubeClient,
-		cluster:    cluster,
+		clock: clk,
 	}
 }
 

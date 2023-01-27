@@ -1217,13 +1217,12 @@ var _ = Describe("Pod Anti-Affinity", func() {
 
 var _ = Describe("Provisioner Spec Updates", func() {
 	It("should cause consolidation state to change when a provisioner is updated", func() {
-		oldConsolidationState := cluster.ClusterConsolidationState()
+		cluster.SetConsolidated(true)
 		fakeClock.Step(time.Minute)
 		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: ptr.Bool(true)}
 		ExpectApplied(ctx, env.Client, provisioner)
 		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
-
-		Expect(oldConsolidationState).To(BeNumerically("<", cluster.ClusterConsolidationState()))
+		Expect(cluster.Consolidated()).To(BeFalse())
 	})
 })
 

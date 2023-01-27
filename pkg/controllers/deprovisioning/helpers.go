@@ -42,9 +42,9 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	candidateNodes ...CandidateNode) (newNodes []*pscheduling.Node, allPodsScheduled bool, err error) {
 
 	candidateNodeNames := sets.NewString(lo.Map(candidateNodes, func(t CandidateNode, i int) string { return t.Name })...)
-	allNodes := cluster.Nodes()
-	deletingNodes := allNodes.DeletingNodes()
-	stateNodes := lo.Filter(allNodes, func(n *state.Node, _ int) bool {
+	nodes := cluster.Nodes()
+	deletingNodes := nodes.Deleting()
+	stateNodes := lo.Filter(nodes.Active(), func(n *state.Node, _ int) bool {
 		return !candidateNodeNames.Has(n.Name())
 	})
 
