@@ -68,8 +68,8 @@ spec:
                       with your worker nodes.
                     type: string
                   cpuCFSQuota:
-                    description: 'CpuCFSQuota enables CPU CFS quota enforcement for
-                      containers that specify CPU limits. Default: true'
+                    description: CPUCFSQuota enables CPU CFS quota enforcement for
+                      containers that specify CPU limits.
                     type: boolean
                   evictionHard:
                     additionalProperties:
