@@ -101,6 +101,9 @@ type KubeletConfiguration struct {
 	// +kubebuilder:validation:Maximum:=100
 	// +optional
 	ImageGCLowThresholdPercent *int32 `json:"imageGCLowThresholdPercent,omitempty"`
+	// CpuCFSQuota enables CPU CFS quota enforcement for containers that specify CPU limits. Default: true
+	// +optional
+	CPUCFSQuota bool `json:"cpuCFSQuota,omitempty"`
 }
 
 type ProviderRef struct {
