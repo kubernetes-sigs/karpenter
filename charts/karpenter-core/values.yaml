@@ -134,3 +134,8 @@ settings:
   # faster than this time, the batching window will be extended up to the maxDuration. If they arrive slower, the pods
   # will be batched separately.
   batchIdleDuration: 1s
+  # -- The maximum length of time to wait for the machine to register to the cluster before terminating the machine.
+  # Generally, the default of 15m should be sufficient but raising or lowering this may be needed based on how slowly or quickly
+  # nodes join the cluster on average
+  # Setting this value to an empty string disables the ttlAfterNotRegistered deprovisioning
+  ttlAfterNotRegistered: 15m

@@ -31,15 +31,17 @@ type settingsKeyType struct{}
 var ContextKey = settingsKeyType{}
 
 var defaultSettings = &Settings{
-	BatchMaxDuration:  metav1.Duration{Duration: time.Second * 10},
-	BatchIdleDuration: metav1.Duration{Duration: time.Second * 1},
-	DriftEnabled:      false,
+	BatchMaxDuration:      &metav1.Duration{Duration: time.Second * 10},
+	BatchIdleDuration:     &metav1.Duration{Duration: time.Second * 1},
+	TTLAfterNotRegistered: &metav1.Duration{Duration: time.Minute * 15},
+	DriftEnabled:          false,
 }
 
 // +k8s:deepcopy-gen=true
 type Settings struct {
-	BatchMaxDuration  metav1.Duration
-	BatchIdleDuration metav1.Duration
+	BatchMaxDuration      *metav1.Duration `validate:"required"`
+	BatchIdleDuration     *metav1.Duration `validate:"required"`
+	TTLAfterNotRegistered *metav1.Duration
 	// This feature flag is temporary and will be removed in the near future.
 	DriftEnabled bool
 }
@@ -55,6 +57,7 @@ func (*Settings) Inject(ctx context.Context, cm *v1.ConfigMap) (context.Context,
 	if err := configmap.Parse(cm.Data,
 		AsMetaDuration("batchMaxDuration", &s.BatchMaxDuration),
 		AsMetaDuration("batchIdleDuration", &s.BatchIdleDuration),
+		AsMetaDuration("ttlAfterNotRegistered", &s.TTLAfterNotRegistered),
 		configmap.AsBool("featureGates.driftEnabled", &s.DriftEnabled),
 	); err != nil {
 		return ctx, fmt.Errorf("parsing settings, %w", err)
@@ -79,18 +82,24 @@ func (in *Settings) Validate() (err error) {
 	if in.BatchIdleDuration.Duration <= 0 {
 		err = multierr.Append(err, fmt.Errorf("batchMaxDuration cannot be negative"))
 	}
+	if in.TTLAfterNotRegistered.Duration <= 0 {
+		err = multierr.Append(err, fmt.Errorf("ttlAfterNotRegistered cannot be negative"))
+	}
 	return multierr.Append(err, validate.Struct(in))
 }
 
 // AsMetaDuration parses the value at key as a time.Duration into the target, if it exists.
-func AsMetaDuration(key string, target *metav1.Duration) configmap.ParseFunc {
+func AsMetaDuration(key string, target **metav1.Duration) configmap.ParseFunc {
 	return func(data map[string]string) error {
 		if raw, ok := data[key]; ok {
+			if raw == "" {
+				return nil
+			}
 			val, err := time.ParseDuration(raw)
 			if err != nil {
 				return fmt.Errorf("failed to parse %q: %w", key, err)
 			}
-			*target = metav1.Duration{Duration: val}
+			*target = &metav1.Duration{Duration: val}
 		}
 		return nil
 	}

@@ -78,7 +78,7 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
-	ctx = settings.ToContext(ctx, test.Settings(test.SettingsOptions{DriftEnabled: true}))
+	ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: true}))
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
@@ -129,7 +129,7 @@ var _ = BeforeEach(func() {
 	fakeClock.SetTime(time.Now())
 	deprovisioningController = deprovisioning.NewController(fakeClock, env.Client, provisioner, cloudProvider, events.NewRecorder(&record.FakeRecorder{}), cluster)
 	// Reset Feature Flags to test defaults
-	ctx = settings.ToContext(ctx, test.Settings(test.SettingsOptions{DriftEnabled: true}))
+	ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: true}))
 })
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
