@@ -42,7 +42,7 @@ func NewEmptyNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClie
 
 // ComputeCommand generates a deprovisioning command given deprovisionable nodes
 func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...CandidateNode) (Command, error) {
-	if !c.ShouldAttemptConsolidation() {
+	if c.cluster.Consolidated() {
 		return Command{action: actionDoNothing}, nil
 	}
 	candidates, err := c.sortAndFilterCandidates(ctx, candidates)

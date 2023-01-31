@@ -117,8 +117,7 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 	// We don't consider the nodes that are MarkedForDeletion since this capacity shouldn't be considered
 	// as persistent capacity for the cluster (since it will soon be removed). Additionally, we are scheduling for
 	// the pods that are on these nodes so the MarkedForDeletion node capacity can't be considered.
-	allNodes := p.cluster.Nodes()
-	stateNodes := allNodes.ActiveNodes()
+	nodes := p.cluster.Nodes()
 
 	// Get pods, exit if nothing to do
 	pendingPods, err := p.GetPendingPods(ctx)
@@ -129,7 +128,7 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 	// We do this after getting the pending pods so that we undershoot if pods are
 	// actively migrating from a node that is being deleted
 	// NOTE: The assumption is that these nodes are cordoned and no additional pods will schedule to them
-	deletingNodePods, err := allNodes.DeletingNodes().Pods(ctx, p.kubeClient)
+	deletingNodePods, err := nodes.Deleting().Pods(ctx, p.kubeClient)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
@@ -139,15 +138,15 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 	}
 
 	// Schedule pods to potential nodes, exit if nothing to do
-	nodes, err := p.schedule(ctx, pods, stateNodes)
+	machines, err := p.schedule(ctx, pods, nodes.Active())
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	if len(nodes) == 0 {
+	if len(machines) == 0 {
 		return reconcile.Result{}, nil
 	}
 
-	nodeNames, err := p.LaunchMachines(ctx, nodes, RecordPodNomination)
+	nodeNames, err := p.LaunchMachines(ctx, machines, RecordPodNomination)
 
 	// Any successfully created node is going to have the nodeName value filled in the slice
 	successfullyCreatedNodeCount := lo.CountBy(nodeNames, func(name string) bool { return name != "" })

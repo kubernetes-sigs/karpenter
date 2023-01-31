@@ -35,15 +35,15 @@ import (
 // Nodes is a typed version of a list of *Node
 type Nodes []*Node
 
-// ActiveNodes filters nodes that are not in a MarkedForDeletion state
-func (n Nodes) ActiveNodes() Nodes {
+// Active filters nodes that are not in a MarkedForDeletion state
+func (n Nodes) Active() Nodes {
 	return lo.Filter(n, func(node *Node, _ int) bool {
 		return !node.MarkedForDeletion()
 	})
 }
 
-// DeletingNodes filters nodes that are in a MarkedForDeletion state
-func (n Nodes) DeletingNodes() Nodes {
+// Deleting filters nodes that are in a MarkedForDeletion state
+func (n Nodes) Deleting() Nodes {
 	return lo.Filter(n, func(node *Node, _ int) bool {
 		return node.MarkedForDeletion()
 	})

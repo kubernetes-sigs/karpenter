@@ -51,7 +51,7 @@ func (c *ProvisionerController) Name() string {
 
 func (c *ProvisionerController) Reconcile(_ context.Context, _ *v1alpha5.Provisioner) (reconcile.Result, error) {
 	// Something changed in the provisioner so we should re-consider consolidation
-	c.cluster.RecordConsolidationChange()
+	c.cluster.SetConsolidated(false)
 	return reconcile.Result{}, nil
 }
 
