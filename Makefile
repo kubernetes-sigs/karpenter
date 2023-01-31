@@ -11,6 +11,15 @@ test: ## Run tests
 		--ginkgo.focus="${FOCUS}" \
 		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
 
+deflake: ## Run randomized, racing tests until the test fails to catch flakes
+	ginkgo \
+		--race \
+		--focus="${FOCUS}" \
+		--randomize-all \
+		--until-it-fails \
+		-v \
+		./pkg/...
+
 verify: ## Verify code. Includes codegen, dependencies, linting, formatting, etc
 	go mod tidy
 	go generate ./...
