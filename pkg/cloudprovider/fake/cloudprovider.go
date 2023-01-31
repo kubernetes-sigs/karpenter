@@ -78,7 +78,7 @@ func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (
 	instanceTypes := lo.Filter(lo.Must(c.GetInstanceTypes(ctx, &v1alpha5.Provisioner{})), func(i *cloudprovider.InstanceType, _ int) bool {
 		return reqs.Compatible(i.Requirements) == nil &&
 			len(i.Offerings.Requirements(reqs).Available()) > 0 &&
-			resources.Fits(resources.Merge(machine.Spec.Resources.Requests, i.Overhead.Total()), i.Capacity)
+			resources.Fits(machine.Spec.Resources.Requests, i.Allocatable())
 	})
 	// Order instance types so that we get the cheapest instance types of the available offerings
 	sort.Slice(instanceTypes, func(i, j int) bool {
