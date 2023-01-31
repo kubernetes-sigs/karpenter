@@ -52,7 +52,7 @@ var cloudProvider *fake.CloudProvider
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Node")
+	RunSpecs(t, "Machine")
 }
 
 var _ = BeforeSuite(func() {
