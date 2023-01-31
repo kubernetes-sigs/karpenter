@@ -22,8 +22,10 @@ import (
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
+	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -171,7 +173,14 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 				})
 			}),
 		).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 50})) // higher concurrency limit since we want fast reaction to node syncing and launch
+		WithOptions(controller.Options{
+			RateLimiter: workqueue.NewMaxOfRateLimiter(
+				workqueue.NewItemExponentialFailureRateLimiter(100*time.Millisecond, 10*time.Second),
+				// 10 qps, 100 bucket size
+				&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
+			),
+			MaxConcurrentReconciles: 50, // higher concurrency limit since we want fast reaction to node syncing and launch
+		}))
 }
 
 func (c *Controller) cleanupNodeForMachine(ctx context.Context, machine *v1alpha5.Machine) error {

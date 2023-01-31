@@ -16,13 +16,11 @@ package termination
 
 import (
 	"context"
-	"time"
 
 	"github.com/samber/lo"
-	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/client-go/util/workqueue"
+	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -72,6 +70,7 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 	if err := c.kubeClient.List(ctx, machineList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
 		return reconcile.Result{}, err
 	}
+	// If there is no longer a machine for this node, remove the finalizer and delete the node
 	if len(machineList.Items) == 0 {
 		stored := node.DeepCopy()
 		controllerutil.RemoveFinalizer(node, v1alpha5.TerminationFinalizer)
@@ -79,6 +78,7 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 			if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 				return reconcile.Result{}, client.IgnoreNotFound(err)
 			}
+			logging.FromContext(ctx).Infof("deleted node")
 		}
 		return reconcile.Result{}, nil
 	}
@@ -114,11 +114,6 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 		).
 		WithOptions(
 			controller.Options{
-				RateLimiter: workqueue.NewMaxOfRateLimiter(
-					workqueue.NewItemExponentialFailureRateLimiter(100*time.Millisecond, 10*time.Second),
-					// 10 qps, 100 bucket size
-					&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
-				),
 				MaxConcurrentReconciles: 10,
 			},
 		))

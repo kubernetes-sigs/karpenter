@@ -82,6 +82,9 @@ func (c *Controller) Name() string {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
+	if machine.Status.ProviderID == "" {
+		return reconcile.Result{}, nil
+	}
 	// If we get an event before we should check for inflight checks, we ignore and wait
 	if lastTime, ok := c.lastScanned.Get(client.ObjectKeyFromObject(machine).String()); ok {
 		if lastTime, ok := lastTime.(time.Time); ok {
@@ -100,8 +103,7 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 	}
 	node, err := machineutil.NodeForMachine(ctx, c.kubeClient, machine)
 	if err != nil {
-		// TODO @joinnis: Figure out how to handle this error better
-		return reconcile.Result{}, err
+		return reconcile.Result{}, machineutil.IgnoreDuplicateNodeError(machineutil.IgnoreNodeNotFoundError(err))
 	}
 
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name, "provisioner", provisioner.Name))
