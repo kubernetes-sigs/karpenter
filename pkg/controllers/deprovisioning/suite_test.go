@@ -1960,6 +1960,10 @@ var _ = Describe("Parallelization", func() {
 		ExpectApplied(ctx, env.Client, rs, prov)
 		ExpectProvisionedNoBinding(ctx, env.Client, provisioner, lo.Map(pods, func(p *v1.Pod, _ int) *v1.Pod { return p.DeepCopy() })...)
 
+		machineList := &v1alpha5.MachineList{}
+		Expect(env.Client.List(ctx, machineList))
+		Expect(machineList.Items).To(HaveLen(1))
+
 		nodeList := &v1.NodeList{}
 		Expect(env.Client.List(ctx, nodeList)).To(Succeed())
 		Expect(len(nodeList.Items)).To(Equal(1))

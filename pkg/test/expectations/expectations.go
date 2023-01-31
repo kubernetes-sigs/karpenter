@@ -405,10 +405,3 @@ func ExpectMachineCount(ctx context.Context, c client.Client, comparator string,
 	ExpectWithOffset(1, c.List(ctx, machineList)).To(Succeed())
 	ExpectWithOffset(1, len(machineList.Items)).To(BeNumerically(comparator, count))
 }
-
-func ignoreConflictError(err error) error {
-	if errors.IsConflict(err) {
-		return nil
-	}
-	return err
-}
