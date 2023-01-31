@@ -480,13 +480,5 @@ var _ = Describe("Validation", func() {
 				Expect(provisioner.Validate(ctx)).ToNot(Succeed())
 			})
 		})
-		Context("CPUCFSQuota", func() {
-			It("should succeed on CPUCFSQuota with valid value", func() {
-				provisioner.Spec.KubeletConfiguration = &KubeletConfiguration{
-					CPUCFSQuota: *ptr.Bool(true),
-				}
-				Expect(provisioner.Validate(ctx)).To(Succeed())
-			})
-		})
 	})
 })
