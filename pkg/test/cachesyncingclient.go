@@ -37,8 +37,8 @@ type CacheSyncingClient struct {
 // If we timeout on polling, the assumption is that the cache updated to a newer version
 // and we missed the current WRITE operation that we just performed
 var pollingOptions = []retry.Option{
-	retry.Attempts(100), // This whole poll should take ~1s
-	retry.Delay(time.Millisecond * 10),
+	retry.Attempts(100), // This whole poll should take ~10s
+	retry.Delay(time.Millisecond * 100),
 	retry.DelayType(retry.FixedDelay),
 }
 

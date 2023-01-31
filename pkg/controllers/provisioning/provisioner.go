@@ -126,7 +126,6 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 		return reconcile.Result{}, nil
 	}
 	_, err = p.LaunchMachines(ctx, machines, WithReason(metrics.ProvisioningReason), RecordPodNomination)
-
 	return reconcile.Result{}, err
 }
 

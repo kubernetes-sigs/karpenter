@@ -79,7 +79,7 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, machines []*Mac
 
 type Scheduler struct {
 	ctx                context.Context
-	newNodes           []*Machine
+	newMachines        []*Machine
 	existingNodes      []*ExistingNode
 	machineTemplates   []*MachineTemplate
 	remainingResources map[string]v1.ResourceList // provisioner name -> remaining resources for that provisioner
@@ -123,13 +123,13 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) ([]*Machine, []*E
 		}
 	}
 
-	for _, n := range s.newNodes {
-		n.FinalizeScheduling()
+	for _, m := range s.newMachines {
+		m.FinalizeScheduling()
 	}
 	if !s.opts.SimulationMode {
 		s.recordSchedulingResults(ctx, pods, q.List(), errors)
 	}
-	return s.newNodes, s.existingNodes, nil
+	return s.newMachines, s.existingNodes, nil
 }
 
 func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod, failedToSchedule []*v1.Pod, errors map[*v1.Pod]error) {
@@ -156,14 +156,14 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 
 	// Report new nodes, or exit to avoid log spam
 	newCount := 0
-	for _, node := range s.newNodes {
-		newCount += len(node.Pods)
+	for _, machine := range s.newMachines {
+		newCount += len(machine.Pods)
 	}
 	if newCount == 0 {
 		return
 	}
 	logging.FromContext(ctx).With("pods", len(pods)).Infof("found provisionable pod(s)")
-	logging.FromContext(ctx).With("nodes", len(s.newNodes), "pods", newCount).Infof("computed new node(s) to fit pod(s)")
+	logging.FromContext(ctx).With("machines", len(s.newMachines), "pods", newCount).Infof("computed new machine(s) to fit pod(s)")
 	// Report in flight newNodes, or exit to avoid log spam
 	inflightCount := 0
 	existingCount := 0
@@ -186,39 +186,39 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 	}
 
 	// Consider using https://pkg.go.dev/container/heap
-	sort.Slice(s.newNodes, func(a, b int) bool { return len(s.newNodes[a].Pods) < len(s.newNodes[b].Pods) })
+	sort.Slice(s.newMachines, func(a, b int) bool { return len(s.newMachines[a].Pods) < len(s.newMachines[b].Pods) })
 
 	// Pick existing node that we are about to create
-	for _, node := range s.newNodes {
-		if err := node.Add(ctx, pod); err == nil {
+	for _, machine := range s.newMachines {
+		if err := machine.Add(ctx, pod); err == nil {
 			return nil
 		}
 	}
 
 	// Create new node
 	var errs error
-	for _, nodeTemplate := range s.machineTemplates {
-		instanceTypes := s.instanceTypes[nodeTemplate.ProvisionerName]
+	for _, machineTemplate := range s.machineTemplates {
+		instanceTypes := s.instanceTypes[machineTemplate.ProvisionerName]
 		// if limits have been applied to the provisioner, ensure we filter instance types to avoid violating those limits
-		if remaining, ok := s.remainingResources[nodeTemplate.ProvisionerName]; ok {
-			instanceTypes = filterByRemainingResources(s.instanceTypes[nodeTemplate.ProvisionerName], remaining)
+		if remaining, ok := s.remainingResources[machineTemplate.ProvisionerName]; ok {
+			instanceTypes = filterByRemainingResources(s.instanceTypes[machineTemplate.ProvisionerName], remaining)
 			if len(instanceTypes) == 0 {
 				errs = multierr.Append(errs, fmt.Errorf("all available instance types exceed provisioner limits"))
 				continue
-			} else if len(s.instanceTypes[nodeTemplate.ProvisionerName]) != len(instanceTypes) && !s.opts.SimulationMode {
+			} else if len(s.instanceTypes[machineTemplate.ProvisionerName]) != len(instanceTypes) && !s.opts.SimulationMode {
 				logging.FromContext(ctx).Debugf("%d out of %d instance types were excluded because they would breach provisioner limits",
-					len(s.instanceTypes[nodeTemplate.ProvisionerName])-len(instanceTypes), len(s.instanceTypes[nodeTemplate.ProvisionerName]))
+					len(s.instanceTypes[machineTemplate.ProvisionerName])-len(instanceTypes), len(s.instanceTypes[machineTemplate.ProvisionerName]))
 			}
 		}
 
-		node := NewMachine(nodeTemplate, s.topology, s.daemonOverhead[nodeTemplate], instanceTypes)
-		if err := node.Add(ctx, pod); err != nil {
-			errs = multierr.Append(errs, fmt.Errorf("incompatible with provisioner %q, %w", nodeTemplate.ProvisionerName, err))
+		machine := NewMachine(machineTemplate, s.topology, s.daemonOverhead[machineTemplate], instanceTypes)
+		if err := machine.Add(ctx, pod); err != nil {
+			errs = multierr.Append(errs, fmt.Errorf("incompatible with provisioner %q, %w", machineTemplate.ProvisionerName, err))
 			continue
 		}
-		// we will launch this node and need to track its maximum possible resource usage against our remaining resources
-		s.newNodes = append(s.newNodes, node)
-		s.remainingResources[nodeTemplate.ProvisionerName] = subtractMax(s.remainingResources[nodeTemplate.ProvisionerName], node.InstanceTypeOptions)
+		// we will launch this machine and need to track its maximum possible resource usage against our remaining resources
+		s.newMachines = append(s.newMachines, machine)
+		s.remainingResources[machineTemplate.ProvisionerName] = subtractMax(s.remainingResources[machineTemplate.ProvisionerName], machine.InstanceTypeOptions)
 		return nil
 	}
 	return errs

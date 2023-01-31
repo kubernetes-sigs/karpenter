@@ -96,6 +96,13 @@ func ExpectNotFoundWithOffset(offset int, ctx context.Context, c client.Client, 
 	}
 }
 
+func ExpectMachineScheduled(recorder *test.EventRecorder, pod *v1.Pod) *v1alpha5.Machine {
+	binding := recorder.GetBinding(pod)
+	ExpectWithOffset(1, binding).ToNot(BeNil())
+	ExpectWithOffset(1, binding.Machine).ToNot(BeNil())
+	return binding.Machine
+}
+
 func ExpectScheduled(ctx context.Context, c client.Client, pod *v1.Pod) *v1.Node {
 	p := ExpectPodExistsWithOffset(1, ctx, c, pod.Name, pod.Namespace)
 	ExpectWithOffset(1, p.Spec.NodeName).ToNot(BeEmpty(), fmt.Sprintf("expected %s/%s to be scheduled", pod.Namespace, pod.Name))
@@ -267,6 +274,16 @@ func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c cli
 	return bindings
 }
 
+func ExpectMachineLaunched(ctx context.Context, c client.Client, machineController, nodeStateController, machineStateController corecontroller.Controller, machine *v1alpha5.Machine) {
+	ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+	machine = ExpectExists(ctx, c, machine)
+	node := test.MachineLinkedNode(machine)
+	ExpectAppliedWithOffset(1, ctx, c, node)
+	ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+	ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+	ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
+}
+
 func ExpectReconcileSucceeded(ctx context.Context, reconciler reconcile.Reconciler, key client.ObjectKey) reconcile.Result {
 	result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 	ExpectWithOffset(1, err).ToNot(HaveOccurred())
@@ -326,7 +343,7 @@ func ExpectManualBinding(ctx context.Context, c client.Client, pod *v1.Pod, node
 }
 
 func ExpectManualBindingWithOffset(offset int, ctx context.Context, c client.Client, pod *v1.Pod, node *v1.Node) {
-	ExpectWithOffset(offset+1, c.Create(ctx, &v1.Binding{
+	err := c.Create(ctx, &v1.Binding{
 		TypeMeta: pod.TypeMeta,
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pod.ObjectMeta.Name,
@@ -336,7 +353,13 @@ func ExpectManualBindingWithOffset(offset int, ctx context.Context, c client.Cli
 		Target: v1.ObjectReference{
 			Name: node.Name,
 		},
-	})).To(Succeed())
+	})
+	// This happens when we are scheduling deleting pods. The new pod will eventually go on the new node,
+	// but we are currently modeling the pod that exists on the deleting node
+	if errors.IsConflict(err) {
+		return
+	}
+	ExpectWithOffset(offset+1, err).To(Succeed())
 	Eventually(func(g Gomega) {
 		g.Expect(c.Get(ctx, client.ObjectKeyFromObject(pod), pod)).To(Succeed())
 		g.Expect(pod.Spec.NodeName).To(Equal(node.Name))
@@ -381,4 +404,11 @@ func ExpectMachineCount(ctx context.Context, c client.Client, comparator string,
 	machineList := &v1alpha5.MachineList{}
 	ExpectWithOffset(1, c.List(ctx, machineList)).To(Succeed())
 	ExpectWithOffset(1, len(machineList.Items)).To(BeNumerically(comparator, count))
+}
+
+func ignoreConflictError(err error) error {
+	if errors.IsConflict(err) {
+		return nil
+	}
+	return err
 }
