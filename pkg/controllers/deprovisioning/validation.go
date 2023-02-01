@@ -100,7 +100,7 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes
 func (v *Validation) ShouldDeprovision(_ context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, _ []*v1.Pod) bool {
-	if val, ok := n.Node.Annotations[v1alpha5.DoNotConsolidateNodeAnnotationKey]; ok {
+	if val, ok := n.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey]; ok {
 		return val != "true"
 	}
 	return provisioner != nil && provisioner.Spec.Consolidation != nil && ptr.BoolValue(provisioner.Spec.Consolidation.Enabled)

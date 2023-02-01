@@ -201,6 +201,8 @@ func (s *ProvisionerSpec) validateKubeletConfiguration() (errs *apis.FieldError)
 		validateEvictionThresholds(s.KubeletConfiguration.EvictionSoft, "evictionSoft"),
 		validateReservedResources(s.KubeletConfiguration.KubeReserved, "kubeReserved"),
 		validateReservedResources(s.KubeletConfiguration.SystemReserved, "systemReserved"),
+		s.KubeletConfiguration.validateImageGCHighThresholdPercent(),
+		s.KubeletConfiguration.validateImageGCLowThresholdPercent(),
 		s.KubeletConfiguration.validateEvictionSoftGracePeriod(),
 		s.KubeletConfiguration.validateEvictionSoftPairs(),
 	)
@@ -303,5 +305,23 @@ func ValidateRequirement(requirement v1.NodeSelectorRequirement) error { //nolin
 			}
 		}
 	}
+	return errs
+}
+
+// Validate validateImageGCHighThresholdPercent
+func (kc *KubeletConfiguration) validateImageGCHighThresholdPercent() (errs *apis.FieldError) {
+	if kc.ImageGCHighThresholdPercent != nil && ptr.Int32Value(kc.ImageGCHighThresholdPercent) < ptr.Int32Value(kc.ImageGCLowThresholdPercent) {
+		return errs.Also(apis.ErrInvalidValue("must be greater than imageGCLowThresholdPercent", "imageGCHighThresholdPercent"))
+	}
+
+	return errs
+}
+
+// Validate imageGCLowThresholdPercent
+func (kc *KubeletConfiguration) validateImageGCLowThresholdPercent() (errs *apis.FieldError) {
+	if kc.ImageGCHighThresholdPercent != nil && ptr.Int32Value(kc.ImageGCLowThresholdPercent) > ptr.Int32Value(kc.ImageGCHighThresholdPercent) {
+		return errs.Also(apis.ErrInvalidValue("must be less than imageGCHighThresholdPercent", "imageGCLowThresholdPercent"))
+	}
+
 	return errs
 }

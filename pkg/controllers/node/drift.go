@@ -25,7 +25,6 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/aws/karpenter-core/pkg/apis/config/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/utils/machine"
@@ -37,10 +36,6 @@ type Drift struct {
 }
 
 func (d *Drift) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner, node *v1.Node) (reconcile.Result, error) {
-	if !settings.FromContext(ctx).DriftEnabled {
-		return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
-	}
-
 	if _, ok := node.Annotations[v1alpha5.VoluntaryDisruptionAnnotationKey]; ok {
 		return reconcile.Result{}, nil
 	}

@@ -29,14 +29,14 @@ import (
 // Deprecated: This Machine generator function can be removed when v1alpha6 migration has completed.
 func New(node *v1.Node, provisioner *v1alpha5.Provisioner) *v1alpha5.Machine {
 	machine := NewFromNode(node)
-	machine.Annotations = lo.Assign(machine.Annotations, v1alpha5.ProviderAnnotation(provisioner.Spec.Provider))
+	machine.Annotations = lo.Assign(provisioner.Annotations, v1alpha5.ProviderAnnotation(provisioner.Spec.Provider))
+	machine.Labels = lo.Assign(provisioner.Labels, map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name})
 	machine.Spec.Kubelet = provisioner.Spec.KubeletConfiguration
 	machine.Spec.Taints = provisioner.Spec.Taints
-	machine.Spec.Requirements = provisioner.Spec.Requirements
 	machine.Spec.StartupTaints = provisioner.Spec.StartupTaints
+	machine.Spec.Requirements = provisioner.Spec.Requirements
 	machine.Spec.MachineTemplateRef = provisioner.Spec.ProviderRef
 	lo.Must0(controllerutil.SetOwnerReference(provisioner, machine, scheme.Scheme))
-
 	return machine
 }
 

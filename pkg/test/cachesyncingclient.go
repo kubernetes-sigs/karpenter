@@ -149,11 +149,11 @@ func (c *cacheSyncingStatusWriter) Patch(ctx context.Context, obj client.Object,
 }
 
 func objectSynced(ctx context.Context, c client.Client, obj client.Object) error {
-	stored := obj.DeepCopyObject().(client.Object)
-	if err := c.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
+	temp := obj.DeepCopyObject().(client.Object)
+	if err := c.Get(ctx, client.ObjectKeyFromObject(obj), temp); err != nil {
 		return fmt.Errorf("getting object, %w", err)
 	}
-	if obj.GetResourceVersion() != stored.GetResourceVersion() {
+	if obj.GetResourceVersion() != temp.GetResourceVersion() {
 		return fmt.Errorf("object hasn't updated")
 	}
 	return nil

@@ -46,7 +46,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 	"github.com/aws/karpenter-core/pkg/operator/options"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
-	"github.com/aws/karpenter-core/pkg/operator/settingsstore"
 )
 
 const (
@@ -59,7 +58,6 @@ type Operator struct {
 
 	RESTConfig          *rest.Config
 	KubernetesInterface kubernetes.Interface
-	SettingsStore       settingsstore.Store
 	EventRecorder       events.Recorder
 	Clock               clock.Clock
 
@@ -95,17 +93,14 @@ func NewOperator() (context.Context, *Operator) {
 	// Client
 	kubernetesInterface := kubernetes.NewForConfigOrDie(config)
 	configMapWatcher := informer.NewInformedWatcher(kubernetesInterface, system.Namespace())
+	lo.Must0(configMapWatcher.Start(ctx.Done()))
 
 	// Logging
 	logger := NewLogger(ctx, component, config, configMapWatcher)
 	ctx = logging.WithLogger(ctx, logger)
 
-	// Create the settingsStore for settings injection
-	settingsStore := settingsstore.NewWatcherOrDie(ctx, kubernetesInterface, configMapWatcher, apis.Settings.List()...)
-
-	// Inject settings after starting the ConfigMapWatcher
-	lo.Must0(configMapWatcher.Start(ctx.Done()))
-	ctx = settingsStore.InjectSettings(ctx)
+	// Inject settings from the ConfigMap(s) into the context
+	ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
 
 	// Manager
 	manager, err := controllerruntime.NewManager(config, controllerruntime.Options{
@@ -119,6 +114,7 @@ func NewOperator() (context.Context, *Operator) {
 		BaseContext: func() context.Context {
 			ctx := context.Background()
 			ctx = logging.WithLogger(ctx, logger)
+			ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
 			ctx = injection.WithConfig(ctx, config)
 			ctx = injection.WithOptions(ctx, *opts)
 			return ctx
@@ -136,7 +132,6 @@ func NewOperator() (context.Context, *Operator) {
 		Manager:             manager,
 		RESTConfig:          config,
 		KubernetesInterface: kubernetesInterface,
-		SettingsStore:       settingsStore,
 		EventRecorder:       events.NewRecorder(manager.GetEventRecorderFor(appName)),
 		Clock:               clock.RealClock{},
 	}
@@ -144,9 +139,6 @@ func NewOperator() (context.Context, *Operator) {
 
 func (o *Operator) WithControllers(ctx context.Context, controllers ...corecontroller.Controller) *Operator {
 	for _, c := range controllers {
-		// Wrap the controllers with any decorators
-		c = corecontroller.InjectSettings(c, o.SettingsStore)
-
 		lo.Must0(c.Builder(ctx, o.Manager).Complete(c), "failed to register controller")
 	}
 	lo.Must0(o.AddHealthzCheck("healthz", healthz.Ping), "failed to setup liveness probe")

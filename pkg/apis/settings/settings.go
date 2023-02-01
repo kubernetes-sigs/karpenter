@@ -24,23 +24,19 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/configmap"
-
-	"github.com/aws/karpenter-core/pkg/apis/config"
 )
 
-var ContextKey = Registration
+type settingsKeyType struct{}
 
-var Registration = &config.Registration{
-	ConfigMapName: "karpenter-global-settings",
-	Constructor:   NewSettingsFromConfigMap,
-}
+var ContextKey = settingsKeyType{}
 
-var defaultSettings = Settings{
+var defaultSettings = &Settings{
 	BatchMaxDuration:  metav1.Duration{Duration: time.Second * 10},
 	BatchIdleDuration: metav1.Duration{Duration: time.Second * 1},
 	DriftEnabled:      false,
 }
 
+// +k8s:deepcopy-gen=true
 type Settings struct {
 	BatchMaxDuration  metav1.Duration
 	BatchIdleDuration metav1.Duration
@@ -48,23 +44,25 @@ type Settings struct {
 	DriftEnabled bool
 }
 
-// NewSettingsFromConfigMap creates a Settings from the supplied ConfigMap
-func NewSettingsFromConfigMap(cm *v1.ConfigMap) (Settings, error) {
-	s := defaultSettings
+func (*Settings) ConfigMap() string {
+	return "karpenter-global-settings"
+}
+
+// Inject creates a Settings from the supplied ConfigMap
+func (*Settings) Inject(ctx context.Context, cm *v1.ConfigMap) (context.Context, error) {
+	s := defaultSettings.DeepCopy()
 
 	if err := configmap.Parse(cm.Data,
 		AsMetaDuration("batchMaxDuration", &s.BatchMaxDuration),
 		AsMetaDuration("batchIdleDuration", &s.BatchIdleDuration),
 		configmap.AsBool("featureGates.driftEnabled", &s.DriftEnabled),
 	); err != nil {
-		// Failing to parse means that there is some error in the Settings, so we should crash
-		panic(fmt.Sprintf("parsing settings, %v", err))
+		return ctx, fmt.Errorf("parsing settings, %w", err)
 	}
 	if err := s.Validate(); err != nil {
-		// Failing to validate means that there is some error in the Settings, so we should crash
-		panic(fmt.Sprintf("validating settings, %v", err))
+		return ctx, fmt.Errorf("validating settings, %w", err)
 	}
-	return s, nil
+	return ToContext(ctx, s), nil
 }
 
 // Validate leverages struct tags with go-playground/validator so you can define a struct with custom
@@ -73,15 +71,15 @@ func NewSettingsFromConfigMap(cm *v1.ConfigMap) (Settings, error) {
 //	type ExampleStruct struct {
 //	    Example  metav1.Duration `json:"example" validate:"required,min=10m"`
 //	}
-func (s Settings) Validate() (err error) {
+func (in *Settings) Validate() (err error) {
 	validate := validator.New()
-	if s.BatchMaxDuration.Duration <= 0 {
+	if in.BatchMaxDuration.Duration <= 0 {
 		err = multierr.Append(err, fmt.Errorf("batchMaxDuration cannot be negative"))
 	}
-	if s.BatchIdleDuration.Duration <= 0 {
+	if in.BatchIdleDuration.Duration <= 0 {
 		err = multierr.Append(err, fmt.Errorf("batchMaxDuration cannot be negative"))
 	}
-	return multierr.Append(err, validate.Struct(s))
+	return multierr.Append(err, validate.Struct(in))
 }
 
 // AsMetaDuration parses the value at key as a time.Duration into the target, if it exists.
@@ -98,15 +96,15 @@ func AsMetaDuration(key string, target *metav1.Duration) configmap.ParseFunc {
 	}
 }
 
-func ToContext(ctx context.Context, s Settings) context.Context {
+func ToContext(ctx context.Context, s *Settings) context.Context {
 	return context.WithValue(ctx, ContextKey, s)
 }
 
-func FromContext(ctx context.Context) Settings {
+func FromContext(ctx context.Context) *Settings {
 	data := ctx.Value(ContextKey)
 	if data == nil {
 		// This is developer error if this happens, so we should panic
 		panic("settings doesn't exist in context")
 	}
-	return data.(Settings)
+	return data.(*Settings)
 }

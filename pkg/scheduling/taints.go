@@ -17,6 +17,7 @@ package scheduling
 import (
 	"fmt"
 
+	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 )
@@ -37,4 +38,19 @@ func (ts Taints) Tolerates(pod *v1.Pod) (errs error) {
 		}
 	}
 	return errs
+}
+
+// Merge merges in taints with the passed in taints.
+func (ts Taints) Merge(with Taints) Taints {
+	res := lo.Map(ts, func(t v1.Taint, _ int) v1.Taint {
+		return t
+	})
+	for _, taint := range with {
+		if _, ok := lo.Find(res, func(t v1.Taint) bool {
+			return taint.MatchTaint(&t)
+		}); !ok {
+			res = append(res, taint)
+		}
+	}
+	return res
 }

@@ -141,10 +141,13 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 
 	for _, node := range s.existingNodes {
 		if len(node.Pods) > 0 {
-			s.cluster.NominateNodeForPod(ctx, node.Name)
+			s.cluster.NominateNodeForPod(ctx, node.Name())
 		}
 		for _, pod := range node.Pods {
-			s.recorder.Publish(events.NominatePod(pod, node.Node))
+			// If node is inflight, it won't have a real node to represent it
+			if node.Node.Node != nil {
+				s.recorder.Publish(events.NominatePod(pod, node.Node.Node))
+			}
 		}
 	}
 
@@ -157,7 +160,7 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 		return
 	}
 	logging.FromContext(ctx).With("pods", len(pods)).Infof("found provisionable pod(s)")
-	logging.FromContext(ctx).With("newNodes", len(s.newNodes), "pods", newCount).Infof("computed new node(s) to fit pod(s)")
+	logging.FromContext(ctx).With("nodes", len(s.newNodes), "pods", newCount).Infof("computed new node(s) to fit pod(s)")
 	// Report in flight newNodes, or exit to avoid log spam
 	inflightCount := 0
 	existingCount := 0
@@ -228,10 +231,10 @@ func (s *Scheduler) calculateExistingMachines(stateNodes []*state.Node, daemonSe
 		// Calculate any daemonsets that should schedule to the inflight node
 		var daemons []*v1.Pod
 		for _, p := range daemonSetPods {
-			if err := scheduling.Taints(node.Node.Spec.Taints).Tolerates(p); err != nil {
+			if err := scheduling.Taints(node.Taints()).Tolerates(p); err != nil {
 				continue
 			}
-			if err := scheduling.NewLabelRequirements(node.Node.Labels).Compatible(scheduling.NewPodRequirements(p)); err != nil {
+			if err := scheduling.NewLabelRequirements(node.Labels()).Compatible(scheduling.NewPodRequirements(p)); err != nil {
 				continue
 			}
 			daemons = append(daemons, p)
@@ -241,8 +244,8 @@ func (s *Scheduler) calculateExistingMachines(stateNodes []*state.Node, daemonSe
 		// We don't use the status field and instead recompute the remaining resources to ensure we have a consistent view
 		// of the cluster during scheduling.  Depending on how node creation falls out, this will also work for cases where
 		// we don't create Node resources.
-		if _, ok := s.remainingResources[node.Node.Labels[v1alpha5.ProvisionerNameLabelKey]]; ok {
-			s.remainingResources[node.Node.Labels[v1alpha5.ProvisionerNameLabelKey]] = resources.Subtract(s.remainingResources[node.Node.Labels[v1alpha5.ProvisionerNameLabelKey]], node.Capacity())
+		if _, ok := s.remainingResources[node.Labels()[v1alpha5.ProvisionerNameLabelKey]]; ok {
+			s.remainingResources[node.Labels()[v1alpha5.ProvisionerNameLabelKey]] = resources.Subtract(s.remainingResources[node.Labels()[v1alpha5.ProvisionerNameLabelKey]], node.Capacity())
 		}
 	}
 }

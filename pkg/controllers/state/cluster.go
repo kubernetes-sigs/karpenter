@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
+	"knative.dev/pkg/logging"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -36,6 +37,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
+	"github.com/aws/karpenter-core/pkg/utils/sets"
 )
 
 // Cluster maintains cluster state that is often needed but expensive to compute.
@@ -51,10 +53,10 @@ type Cluster struct {
 
 	antiAffinityPods sync.Map // pod namespaced name -> *v1.Pod of pods that have required anti affinities
 
-	// consolidationState is a number indicating the state of the cluster with respect to consolidation.  If this number
-	// hasn't changed, it indicates that the cluster hasn't changed in a state which would enable consolidation if
-	// it previously couldn't occur.
-	consolidationState int64
+	// consolidated is a dirty bit that indicates that the cluster hasn't
+	// changed since last consolidation and avoids recomputation.
+	consolidated   atomic.Bool
+	consolidatedAt atomic.Int64
 }
 
 func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudProvider) *Cluster {
@@ -66,6 +68,46 @@ func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudPro
 		bindings:         map[types.NamespacedName]string{},
 		nameToProviderID: map[string]string{},
 	}
+}
+
+// Synced validates that the Machines and the Nodes that are stored in the apiserver
+// have the same representation in the cluster state. This is to ensure that our view
+// of the cluster is as close to correct as it can be when we begin to perform operations
+// utilizing the cluster state as our source of truth
+func (c *Cluster) Synced(ctx context.Context) bool {
+	machineList := &v1alpha5.MachineList{}
+	if err := c.kubeClient.List(ctx, machineList); err != nil {
+		logging.FromContext(ctx).Errorf("checking cluster state sync, %v", err)
+		return false
+	}
+	nodeList := &v1.NodeList{}
+	if err := c.kubeClient.List(ctx, nodeList); err != nil {
+		logging.FromContext(ctx).Errorf("checking cluster state sync, %v", err)
+		return false
+	}
+	c.mu.RLock()
+	stateProviderIDs := sets.New(lo.Keys(c.nodes)...)
+	c.mu.RUnlock()
+
+	providerIDs := sets.New[string]()
+	for _, machine := range machineList.Items {
+		// If the machine hasn't resolved its provider id, then it hasn't resolved its status
+		if machine.Status.ProviderID == "" {
+			return false
+		}
+		providerIDs.Insert(machine.Status.ProviderID)
+	}
+	for _, node := range nodeList.Items {
+		if node.Spec.ProviderID == "" {
+			node.Spec.ProviderID = node.Name
+		}
+		providerIDs.Insert(node.Spec.ProviderID)
+	}
+	// The provider ids tracked in-memory should at least have all the data that is in the api-server
+	// This doesn't ensure that the two states are exactly aligned (we could still not be tracking a node
+	// that exists on the apiserver but not in the cluster state) but it ensures that we have a state
+	// representation for every node/machine that exists on the apiserver
+	return stateProviderIDs.IsSuperset(providerIDs)
 }
 
 // ForPodsWithAntiAffinity calls the supplied function once for each pod with required anti affinity terms that is
@@ -81,7 +123,7 @@ func (c *Cluster) ForPodsWithAntiAffinity(fn func(p *v1.Pod, n *v1.Node) bool) {
 			return true
 		}
 		node, ok := c.nodes[c.nameToProviderID[nodeName]]
-		if !ok {
+		if !ok || node.Node == nil {
 			// if we receive the node deletion event before the pod deletion event, this can happen
 			return true
 		}
@@ -100,6 +142,17 @@ func (c *Cluster) ForEachNode(f func(n *Node) bool) {
 			return
 		}
 	}
+}
+
+// Nodes creates a DeepCopy of all state nodes.
+// NOTE: This is very inefficient so this should only be used when DeepCopying is absolutely necessary
+func (c *Cluster) Nodes() Nodes {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return lo.Map(lo.Values(c.nodes), func(n *Node, _ int) *Node {
+		return n.DeepCopy()
+	})
 }
 
 // IsNodeNominated returns true if the given node was expected to have a pod bound to it during a recent scheduling
@@ -148,7 +201,25 @@ func (c *Cluster) MarkForDeletion(names ...string) {
 	}
 }
 
-// UpdateNode is called for every node reconciliation
+func (c *Cluster) UpdateMachine(machine *v1alpha5.Machine) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if machine.Status.ProviderID == "" {
+		return // We can't reconcile machines that don't yet have provider ids
+	}
+	n := c.newStateFromMachine(machine, c.nodes[machine.Status.ProviderID])
+	c.nodes[machine.Status.ProviderID] = n
+	c.nameToProviderID[machine.Name] = machine.Status.ProviderID
+}
+
+func (c *Cluster) DeleteMachine(name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.cleanupMachine(name)
+}
+
 func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -172,7 +243,6 @@ func (c *Cluster) DeleteNode(name string) {
 	c.cleanupNode(name)
 }
 
-// UpdatePod is called every time the pod is reconciled
 func (c *Cluster) UpdatePod(ctx context.Context, pod *v1.Pod) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -187,33 +257,32 @@ func (c *Cluster) UpdatePod(ctx context.Context, pod *v1.Pod) error {
 	return err
 }
 
-// DeletePod is called when the pod has been deleted
 func (c *Cluster) DeletePod(podKey types.NamespacedName) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	c.antiAffinityPods.Delete(podKey)
 	c.updateNodeUsageFromPodCompletion(podKey)
-	c.RecordConsolidationChange()
+	c.SetConsolidated(false)
 }
 
-func (c *Cluster) RecordConsolidationChange() {
-	atomic.StoreInt64(&c.consolidationState, c.clock.Now().UnixMilli())
+func (c *Cluster) SetConsolidated(consolidated bool) {
+	c.consolidated.Store(consolidated)
+	c.consolidatedAt.Store(c.clock.Now().UnixMilli())
 }
 
 // ClusterConsolidationState returns a number representing the state of the cluster with respect to consolidation.  If
 // consolidation can't occur and this number hasn't changed, there is no point in re-attempting consolidation. This
 // allows reducing overall CPU utilization by pausing consolidation when the cluster is in a static state.
-func (c *Cluster) ClusterConsolidationState() int64 {
-	cs := atomic.LoadInt64(&c.consolidationState)
+func (c *Cluster) Consolidated() bool {
+	consolidatedAt := time.UnixMilli(c.consolidatedAt.Load())
 	// If 5 minutes elapsed since the last time the consolidation state was changed, we change the state anyway. This
 	// ensures that at least once every 5 minutes we consider consolidating our cluster in case something else has
 	// changed (e.g. instance type availability) that we can't detect which would allow consolidation to occur.
-	if c.clock.Now().After(time.UnixMilli(cs).Add(5 * time.Minute)) {
-		c.RecordConsolidationChange()
-		return atomic.LoadInt64(&c.consolidationState)
+	if c.clock.Now().After(consolidatedAt.Add(5 * time.Minute)) {
+		c.SetConsolidated(false)
 	}
-	return cs
+	return c.consolidated.Load()
 }
 
 // Reset the cluster state for unit testing
@@ -231,14 +300,51 @@ func (c *Cluster) Reset() {
 // and explicitly modifying the cluster state. If you do not hold the cluster state lock before calling any of these helpers
 // you will hit race conditions and data corruption
 
+func (c *Cluster) newStateFromMachine(machine *v1alpha5.Machine, oldNode *Node) *Node {
+	if oldNode == nil {
+		oldNode = NewNode()
+	}
+	n := &Node{
+		Node:              oldNode.Node,
+		Machine:           machine,
+		hostPortUsage:     oldNode.hostPortUsage,
+		volumeUsage:       oldNode.volumeUsage,
+		daemonSetRequests: oldNode.daemonSetRequests,
+		daemonSetLimits:   oldNode.daemonSetLimits,
+		podRequests:       oldNode.podRequests,
+		podLimits:         oldNode.podLimits,
+		markedForDeletion: oldNode.markedForDeletion,
+		nominatedUntil:    oldNode.nominatedUntil,
+	}
+	// Cleanup the old machine with its old providerID if its providerID changes
+	// This can happen since nodes don't get created with providerIDs. Rather, CCM picks up the
+	// created node and injects the providerID into the spec.providerID
+	if id, ok := c.nameToProviderID[machine.Name]; ok && id != machine.Status.ProviderID {
+		c.cleanupMachine(machine.Name)
+	}
+	c.triggerConsolidationOnChange(oldNode, n)
+	return n
+}
+
+func (c *Cluster) cleanupMachine(name string) {
+	if id := c.nameToProviderID[name]; id != "" {
+		if c.nodes[id].Node == nil {
+			delete(c.nodes, id)
+		} else {
+			c.nodes[id].Machine = nil
+		}
+		delete(c.nameToProviderID, name)
+		c.SetConsolidated(false)
+	}
+}
+
 func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *Node) (*Node, error) {
 	if oldNode == nil {
-		oldNode = &Node{
-			Node: &v1.Node{},
-		}
+		oldNode = NewNode()
 	}
 	n := &Node{
 		Node:              node,
+		Machine:           oldNode.Machine,
 		hostPortUsage:     scheduling.NewHostPortUsage(),
 		volumeUsage:       scheduling.NewVolumeLimits(c.kubeClient),
 		volumeLimits:      scheduling.VolumeCount{},
@@ -268,10 +374,14 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *
 }
 
 func (c *Cluster) cleanupNode(name string) {
-	if id, ok := c.nameToProviderID[name]; ok {
-		delete(c.nodes, id)
+	if id := c.nameToProviderID[name]; id != "" {
+		if c.nodes[id].Machine == nil {
+			delete(c.nodes, id)
+		} else {
+			c.nodes[id].Node = nil
+		}
 		delete(c.nameToProviderID, name)
-		c.RecordConsolidationChange()
+		c.SetConsolidated(false)
 	}
 }
 
@@ -280,7 +390,7 @@ func (c *Cluster) populateStartupTaints(ctx context.Context, n *Node) error {
 		return nil
 	}
 	provisioner := &v1alpha5.Provisioner{}
-	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
+	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Labels()[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
 		return client.IgnoreNotFound(fmt.Errorf("getting provisioner, %w", err))
 	}
 	n.startupTaints = provisioner.Spec.StartupTaints
@@ -292,7 +402,7 @@ func (c *Cluster) populateInflight(ctx context.Context, n *Node) error {
 		return nil
 	}
 	provisioner := &v1alpha5.Provisioner{}
-	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
+	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Labels()[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
 		return client.IgnoreNotFound(fmt.Errorf("getting provisioner, %w", err))
 	}
 	instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, provisioner)
@@ -300,10 +410,10 @@ func (c *Cluster) populateInflight(ctx context.Context, n *Node) error {
 		return err
 	}
 	instanceType, ok := lo.Find(instanceTypes, func(it *cloudprovider.InstanceType) bool {
-		return it.Name == n.Node.Labels[v1.LabelInstanceTypeStable]
+		return it.Name == n.Labels()[v1.LabelInstanceTypeStable]
 	})
 	if !ok {
-		return fmt.Errorf("instance type '%s' not found", n.Node.Labels[v1.LabelInstanceTypeStable])
+		return fmt.Errorf("instance type '%s' not found", n.Labels()[v1.LabelInstanceTypeStable])
 	}
 	n.inflightCapacity = instanceType.Capacity
 	n.inflightAllocatable = instanceType.Allocatable()
@@ -391,7 +501,7 @@ func (c *Cluster) cleanupOldBindings(pod *v1.Pod) {
 		}
 	}
 	// new pod binding has occurred
-	c.RecordConsolidationChange()
+	c.SetConsolidated(false)
 }
 
 func (c *Cluster) updatePodAntiAffinities(pod *v1.Pod) {
@@ -408,15 +518,15 @@ func (c *Cluster) updatePodAntiAffinities(pod *v1.Pod) {
 
 func (c *Cluster) triggerConsolidationOnChange(old, new *Node) {
 	if old == nil || new == nil {
-		c.RecordConsolidationChange()
+		c.SetConsolidated(false)
 		return
 	}
 	if old.Initialized() != new.Initialized() {
-		c.RecordConsolidationChange()
+		c.SetConsolidated(false)
 		return
 	}
 	if old.MarkedForDeletion() != new.MarkedForDeletion() {
-		c.RecordConsolidationChange()
+		c.SetConsolidated(false)
 		return
 	}
 }

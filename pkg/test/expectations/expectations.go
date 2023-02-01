@@ -36,6 +36,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -268,21 +269,25 @@ func ExpectReconcileSucceeded(ctx context.Context, reconciler reconcile.Reconcil
 }
 
 func ExpectReconcileFailed(ctx context.Context, reconciler reconcile.Reconciler, key client.ObjectKey) {
-	result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
-	ExpectWithOffset(1, err).ToNot(Succeed(), fmt.Sprintf("got result, %v", result))
+	_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+	ExpectWithOffset(1, err).To(HaveOccurred())
 }
 
-func ExpectMetric(prefix string) *prometheus.MetricFamily {
-	metrics, err := metrics.Registry.Gather()
-	ExpectWithOffset(1, err).To(BeNil())
-	var selected *prometheus.MetricFamily
-	for _, mf := range metrics {
-		if mf.GetName() == prefix {
-			selected = mf
-		}
-	}
-	ExpectWithOffset(1, selected).ToNot(BeNil(), fmt.Sprintf("expected to find a '%s' metric", prefix))
-	return selected
+func ExpectStatusConditionExists(obj apis.ConditionsAccessor, t apis.ConditionType) apis.Condition {
+	conds := obj.GetConditions()
+	cond, ok := lo.Find(conds, func(c apis.Condition) bool {
+		return c.Type == t
+	})
+	ExpectWithOffset(1, ok).To(BeTrue())
+	return cond
+}
+
+func ExpectOwnerReferenceExists(obj, owner client.Object) metav1.OwnerReference {
+	or, found := lo.Find(obj.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
+		return o.UID == owner.GetUID()
+	})
+	Expect(found).To(BeTrue())
+	return or
 }
 
 // FindMetricWithLabelValues attempts to find a metric with a name with a set of label values
@@ -365,12 +370,6 @@ func ExpectResources(expected, real v1.ResourceList) {
 		realV := real[k]
 		ExpectWithOffset(1, v.Value()).To(BeNumerically("~", realV.Value()))
 	}
-}
-
-// ExpectPanic is a function that should be deferred at the beginning of a test like "defer ExpectPanic()"
-// It asserts that the test should panic
-func ExpectPanic() {
-	ExpectWithOffset(1, recover()).ToNot(BeNil())
 }
 
 type gomegaKeyType struct{}

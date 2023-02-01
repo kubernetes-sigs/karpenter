@@ -41,7 +41,7 @@ func NewSingleNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeCli
 //
 //nolint:gocyclo
 func (c *SingleNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...CandidateNode) (Command, error) {
-	if !c.ShouldAttemptConsolidation() {
+	if c.cluster.Consolidated() {
 		return Command{action: actionDoNothing}, nil
 	}
 	candidates, err := c.sortAndFilterCandidates(ctx, candidates)
@@ -58,7 +58,7 @@ func (c *SingleNodeConsolidation) ComputeCommand(ctx context.Context, candidates
 			logging.FromContext(ctx).Errorf("computing consolidation %s", err)
 			continue
 		}
-		if cmd.action == actionDoNothing || cmd.action == actionRetry || cmd.action == actionFailed {
+		if cmd.action == actionDoNothing || cmd.action == actionRetry {
 			continue
 		}
 

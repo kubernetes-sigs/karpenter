@@ -84,6 +84,26 @@ type KubeletConfiguration struct {
 	// response to soft eviction thresholds being met.
 	// +optional
 	EvictionMaxPodGracePeriod *int32 `json:"evictionMaxPodGracePeriod,omitempty"`
+	// ImageGCHighThresholdPercent is the percent of disk usage after which image
+	// garbage collection is always run. The percent is calculated by dividing this
+	// field value by 100, so this field must be between 0 and 100, inclusive.
+	// When specified, the value must be greater than ImageGCLowThresholdPercent.
+	// +kubebuilder:validation:Minimum:=0
+	// +kubebuilder:validation:Maximum:=100
+	// +optional
+	ImageGCHighThresholdPercent *int32 `json:"imageGCHighThresholdPercent,omitempty"`
+	// ImageGCLowThresholdPercent is the percent of disk usage before which image
+	// garbage collection is never run. Lowest disk usage to garbage collect to.
+	// The percent is calculated by dividing this field value by 100,
+	// so the field value must be between 0 and 100, inclusive.
+	// When specified, the value must be less than imageGCHighThresholdPercent
+	// +kubebuilder:validation:Minimum:=0
+	// +kubebuilder:validation:Maximum:=100
+	// +optional
+	ImageGCLowThresholdPercent *int32 `json:"imageGCLowThresholdPercent,omitempty"`
+	// CPUCFSQuota enables CPU CFS quota enforcement for containers that specify CPU limits.
+	// +optional
+	CPUCFSQuota bool `json:"cpuCFSQuota,omitempty"`
 }
 
 type ProviderRef struct {
@@ -108,6 +128,8 @@ type ResourceRequirements struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=machines,scope=Cluster,categories=karpenter
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type==\"Ready\")].status",description=""
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description=""
 type Machine struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

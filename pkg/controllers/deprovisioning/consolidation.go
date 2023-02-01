@@ -68,18 +68,6 @@ func (c *consolidation) String() string {
 	return metrics.ConsolidationReason
 }
 
-// RecordLastState is used to record the last state that the consolidation implementation failed to work in to allow
-// skipping future consolidation attempts until the state changes.
-func (c *consolidation) RecordLastState(currentState int64) {
-	c.lastConsolidationState = currentState
-}
-
-func (c *consolidation) ShouldAttemptConsolidation() bool {
-	// the last cluster consolidation wasn't able to improve things and nothing has changed regarding
-	// the cluster that makes us think we would be successful now
-	return c.lastConsolidationState != c.cluster.ClusterConsolidationState()
-}
-
 // sortAndFilterCandidates orders deprovisionable nodes by the disruptionCost, removing any that we already know won't
 // be viable consolidation options.
 func (c *consolidation) sortAndFilterCandidates(ctx context.Context, nodes []CandidateNode) ([]CandidateNode, error) {
@@ -105,7 +93,7 @@ func (c *consolidation) sortAndFilterCandidates(ctx context.Context, nodes []Can
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes
 func (c *consolidation) ShouldDeprovision(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, _ []*v1.Pod) bool {
-	if val, ok := n.Node.Annotations[v1alpha5.DoNotConsolidateNodeAnnotationKey]; ok {
+	if val, ok := n.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey]; ok {
 		c.reporter.RecordUnconsolidatableReason(ctx, n.Node, fmt.Sprintf("%s annotation exists", v1alpha5.DoNotConsolidateNodeAnnotationKey))
 		return val != "true"
 	}

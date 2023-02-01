@@ -121,6 +121,25 @@ var _ = Describe("Topology", func() {
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 2))
 		})
+		It("should respect provisioner zonal constraints (subset)", func() {
+			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}
+			topology := []v1.TopologySpreadConstraint{{
+				TopologyKey:       v1.LabelTopologyZone,
+				WhenUnsatisfiable: v1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+			}}
+			ExpectApplied(ctx, env.Client, provisioner)
+			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
+				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
+				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
+				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
+				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
+			)
+			// should spread the two pods evenly across the only valid zones in our universe (the two zones from our single provisioner)
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 2))
+		})
 		It("should respect provisioner zonal constraints (existing pod)", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
 			// need enough resource requests that the first node we create fills a node and can't act as an in-flight
@@ -782,7 +801,7 @@ var _ = Describe("Topology", func() {
 	})
 
 	Context("Combined Hostname and Zonal Topology", func() {
-		It("should spread pods while respecting both constraints", func() {
+		It("should spread pods while respecting both constraints (hostname and zonal)", func() {
 			topology := []v1.TopologySpreadConstraint{{
 				TopologyKey:       v1.LabelTopologyZone,
 				WhenUnsatisfiable: v1.DoNotSchedule,
@@ -876,9 +895,7 @@ var _ = Describe("Topology", func() {
 				MaxSkew:           1,
 			}).To(ConsistOf(4, 16))
 		})
-	})
 
-	Context("Combined Hostname and Zonal Topology", func() {
 		It("should spread pods while respecting both constraints", func() {
 			topology := []v1.TopologySpreadConstraint{{
 				TopologyKey:       v1.LabelTopologyZone,
@@ -894,19 +911,27 @@ var _ = Describe("Topology", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}
 
-			ExpectApplied(ctx, env.Client, provisioner)
+			// create a second provisioner that can't provision at all
+			provisionerB := test.Provisioner()
+			provisionerB.Spec.Requirements = []v1.NodeSelectorRequirement{
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-3"}}}
+			provisionerB.Spec.Limits = &v1alpha5.Limits{
+				Resources: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU: resource.MustParse("0"),
+				},
+			}
+
+			ExpectApplied(ctx, env.Client, provisioner, provisionerB)
 			ExpectProvisioned(ctx, env.Client, cluster, recorder, provisioningController, prov,
 				MakePods(10, test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology})...,
 			)
 
-			// should get one pod per zone, can't schedule to test-zone-3
+			// should get one pod per zone, can't schedule to test-zone-3 since that provisioner is effectively disabled
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1))
 			// and one pod per node
 			ExpectSkew(ctx, env.Client, "default", &topology[1]).To(ConsistOf(1, 1))
 		})
-	})
 
-	Context("Combined Hostname and Capacity Type Topology", func() {
 		It("should spread pods while respecting both constraints", func() {
 			topology := []v1.TopologySpreadConstraint{{
 				TopologyKey:       v1alpha5.LabelCapacityType,

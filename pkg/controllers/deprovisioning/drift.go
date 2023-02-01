@@ -23,7 +23,7 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/config/settings"
+	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -52,7 +52,7 @@ func (d *Drift) ShouldDeprovision(ctx context.Context, n *state.Node, provisione
 	if !settings.FromContext(ctx).DriftEnabled {
 		return false
 	}
-	return n.Node.Annotations[v1alpha5.VoluntaryDisruptionAnnotationKey] == v1alpha5.VoluntaryDisruptionDriftedAnnotationValue
+	return n.Annotations()[v1alpha5.VoluntaryDisruptionAnnotationKey] == v1alpha5.VoluntaryDisruptionDriftedAnnotationValue
 }
 
 // ComputeCommand generates a deprovisioning command given deprovisionable nodes

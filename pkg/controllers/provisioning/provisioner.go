@@ -48,7 +48,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
-	"github.com/aws/karpenter-core/pkg/utils/node"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
@@ -114,19 +113,11 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 	// prevents over-provisioning at the cost of potentially under-provisioning which will self-heal during the next
 	// scheduling loop when we launch a new node.  When this order is reversed, our node capacity may be reduced by pods
 	// that have bound which we then provision new un-needed capacity for.
-	var stateNodes []*state.Node
-	var markedForDeletionNodes []*state.Node
-	p.cluster.ForEachNode(func(node *state.Node) bool {
-		// We don't consider the nodes that are MarkedForDeletion since this capacity shouldn't be considered
-		// as persistent capacity for the cluster (since it will soon be removed). Additionally, we are scheduling for
-		// the pods that are on these nodes so the MarkedForDeletion node capacity can't be considered.
-		if !node.MarkedForDeletion() {
-			stateNodes = append(stateNodes, node.DeepCopy())
-		} else {
-			markedForDeletionNodes = append(markedForDeletionNodes, node.DeepCopy())
-		}
-		return true
-	})
+	// -------
+	// We don't consider the nodes that are MarkedForDeletion since this capacity shouldn't be considered
+	// as persistent capacity for the cluster (since it will soon be removed). Additionally, we are scheduling for
+	// the pods that are on these nodes so the MarkedForDeletion node capacity can't be considered.
+	nodes := p.cluster.Nodes()
 
 	// Get pods, exit if nothing to do
 	pendingPods, err := p.GetPendingPods(ctx)
@@ -137,7 +128,7 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 	// We do this after getting the pending pods so that we undershoot if pods are
 	// actively migrating from a node that is being deleted
 	// NOTE: The assumption is that these nodes are cordoned and no additional pods will schedule to them
-	deletingNodePods, err := node.GetNodePods(ctx, p.kubeClient, lo.Map(markedForDeletionNodes, func(n *state.Node, _ int) *v1.Node { return n.Node })...)
+	deletingNodePods, err := nodes.Deleting().Pods(ctx, p.kubeClient)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
@@ -147,15 +138,15 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 	}
 
 	// Schedule pods to potential nodes, exit if nothing to do
-	nodes, err := p.schedule(ctx, pods, stateNodes)
+	machines, err := p.schedule(ctx, pods, nodes.Active())
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	if len(nodes) == 0 {
+	if len(machines) == 0 {
 		return reconcile.Result{}, nil
 	}
 
-	nodeNames, err := p.LaunchMachines(ctx, nodes, RecordPodNomination)
+	nodeNames, err := p.LaunchMachines(ctx, machines, RecordPodNomination)
 
 	// Any successfully created node is going to have the nodeName value filled in the slice
 	successfullyCreatedNodeCount := lo.CountBy(nodeNames, func(name string) bool { return name != "" })
@@ -265,16 +256,23 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 
 		// Construct Topology Domains
 		for _, instanceType := range instanceTypeOptions {
-			for key, requirement := range instanceType.Requirements {
+			// We need to intersect the instance type requirements with the current provisioner requirements.  This
+			// ensures that something like zones from an instance type don't expand the universe of valid domains.
+			requirements := scheduling.NewNodeSelectorRequirements(provisioner.Spec.Requirements...)
+			requirements.Add(instanceType.Requirements.Values()...)
+
+			for key, requirement := range requirements {
 				domains[key] = domains[key].Union(sets.NewString(requirement.Values()...))
 			}
 		}
+
 		for key, requirement := range scheduling.NewNodeSelectorRequirements(provisioner.Spec.Requirements...) {
 			if requirement.Operator() == v1.NodeSelectorOpIn {
 				domains[key] = domains[key].Union(sets.NewString(requirement.Values()...))
 			}
 		}
 	}
+
 	if len(machines) == 0 {
 		return nil, fmt.Errorf("no provisioners found")
 	}

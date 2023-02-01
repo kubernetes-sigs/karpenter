@@ -12,23 +12,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package termination
+package terminator
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/utils/clock"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-
-	v1 "k8s.io/api/core/v1"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/samber/lo"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -37,38 +34,40 @@ import (
 )
 
 type Terminator struct {
-	EvictionQueue *EvictionQueue
-	KubeClient    client.Client
-	CloudProvider cloudprovider.CloudProvider
-	Clock         clock.Clock
+	clock         clock.Clock
+	kubeClient    client.Client
+	cloudProvider cloudprovider.CloudProvider
+	evictionQueue *EvictionQueue
 }
 
-type NodeDrainErr error
-
-func IsNodeDrainErr(err error) bool {
-	var nodeDrainErr NodeDrainErr
-	return errors.As(err, &nodeDrainErr)
+func NewTerminator(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, eq *EvictionQueue) *Terminator {
+	return &Terminator{
+		clock:         clk,
+		kubeClient:    kubeClient,
+		cloudProvider: cloudProvider,
+		evictionQueue: eq,
+	}
 }
 
-// cordon cordons a node
-func (t *Terminator) cordon(ctx context.Context, node *v1.Node) error {
+// Cordon cordons a node
+func (t *Terminator) Cordon(ctx context.Context, node *v1.Node) error {
 	stored := node.DeepCopy()
 	node.Spec.Unschedulable = true
 	node.Labels = lo.Assign(node.Labels, map[string]string{
 		v1.LabelNodeExcludeBalancers: "karpenter",
 	})
 	if !equality.Semantic.DeepEqual(node, stored) {
-		if err := t.KubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
-			return client.IgnoreNotFound(err)
-		}
 		logging.FromContext(ctx).Infof("cordoned node")
+		if err := t.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-// drain evicts pods from the node and returns true when all pods are evicted
+// Drain evicts pods from the node and returns true when all pods are evicted
 // https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
-func (t *Terminator) drain(ctx context.Context, node *v1.Node) error {
+func (t *Terminator) Drain(ctx context.Context, node *v1.Node) error {
 	// Get evictable pods
 	pods, err := t.getPods(ctx, node)
 	if err != nil {
@@ -78,7 +77,7 @@ func (t *Terminator) drain(ctx context.Context, node *v1.Node) error {
 	// Skip node due to pods that are not able to be evicted
 	for _, p := range pods {
 		if podutil.HasDoNotEvict(p) {
-			return NodeDrainErr(fmt.Errorf("pod %s/%s has do-not-evict annotation", p.Namespace, p.Name))
+			return NewNodeDrainError(fmt.Errorf("pod %s/%s has do-not-evict annotation", p.Namespace, p.Name))
 		}
 		// Ignore if unschedulable is tolerated, since they will reschedule
 		if podutil.ToleratesUnschedulableTaint(p) {
@@ -92,22 +91,27 @@ func (t *Terminator) drain(ctx context.Context, node *v1.Node) error {
 	}
 	// Enqueue for eviction
 	t.evict(podsToEvict)
-	return lo.Ternary(len(podsToEvict) > 0, NodeDrainErr(fmt.Errorf("%d pods are waiting to be evicted", len(podsToEvict))), nil)
+
+	if len(podsToEvict) > 0 {
+		return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", len(podsToEvict)))
+	}
+	return nil
 }
 
-// terminate calls cloud provider delete then removes the finalizer to delete the node
-func (t *Terminator) terminate(ctx context.Context, node *v1.Node) error {
+// TerminateNode calls cloud provider delete then removes the finalizer to delete the node
+func (t *Terminator) TerminateNode(ctx context.Context, node *v1.Node) error {
 	stored := node.DeepCopy()
 	// Delete the instance associated with node
-	if err := t.CloudProvider.Delete(ctx, machineutil.NewFromNode(node)); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
+	if err := t.cloudProvider.Delete(ctx, machineutil.NewFromNode(node)); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
 		return fmt.Errorf("terminating cloudprovider instance, %w", err)
 	}
 	controllerutil.RemoveFinalizer(node, v1alpha5.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(node, stored) {
-		if err := t.KubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
-			return client.IgnoreNotFound(err)
-		}
 		logging.FromContext(ctx).Infof("deleted node")
+		if err := t.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+			return err
+		}
+		terminationSummary.Observe(time.Since(node.DeletionTimestamp.Time).Seconds())
 	}
 	return nil
 }
@@ -115,7 +119,7 @@ func (t *Terminator) terminate(ctx context.Context, node *v1.Node) error {
 // getPods returns a list of evictable pods for the node
 func (t *Terminator) getPods(ctx context.Context, node *v1.Node) ([]*v1.Pod, error) {
 	podList := &v1.PodList{}
-	if err := t.KubeClient.List(ctx, podList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
+	if err := t.kubeClient.List(ctx, podList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
 		return nil, fmt.Errorf("listing pods on node, %w", err)
 	}
 	var pods []*v1.Pod
@@ -149,9 +153,9 @@ func (t *Terminator) evict(pods []*v1.Pod) {
 	}
 	// 2. Evict critical pods if all noncritical are evicted
 	if len(nonCritical) == 0 {
-		t.EvictionQueue.Add(critical)
+		t.evictionQueue.Add(critical)
 	} else {
-		t.EvictionQueue.Add(nonCritical)
+		t.evictionQueue.Add(nonCritical)
 	}
 }
 
@@ -159,5 +163,5 @@ func (t *Terminator) isStuckTerminating(pod *v1.Pod) bool {
 	if pod.DeletionTimestamp == nil {
 		return false
 	}
-	return t.Clock.Now().After(pod.DeletionTimestamp.Time.Add(1 * time.Minute))
+	return t.clock.Now().After(pod.DeletionTimestamp.Time.Add(1 * time.Minute))
 }

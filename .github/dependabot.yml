@@ -1,0 +1,17 @@
+# See https://docs.github.com/en/github/administering-a-repository/configuration-options-for-dependency-updates#package-ecosystem
+version: 2
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    # Interdependent, only get the PR from one (k8s.io/api), so we are aware of the K8s client updates
+    ignore:
+      - dependency-name: "k8s.io/apimachinery"
+      - dependency-name: "k8s.io/client-go"
+      - dependency-name: "sigs.k8s.io/controller-runtime"
+      - dependency-name: "k8s.io/apiextensions-apiserver"
+  - package-ecosystem: "github-actions"
+    directory: "/.github"
+    schedule:
+      interval: "monthly"

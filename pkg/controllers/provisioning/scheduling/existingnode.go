@@ -26,16 +26,12 @@ import (
 )
 
 type ExistingNode struct {
-	*v1.Node
-	Pods          []*v1.Pod
-	requests      v1.ResourceList
-	topology      *Topology
-	requirements  scheduling.Requirements
-	available     v1.ResourceList
-	taints        []v1.Taint
-	hostPortUsage *scheduling.HostPortUsage
-	volumeUsage   *scheduling.VolumeUsage
-	volumeLimits  scheduling.VolumeCount
+	*state.Node
+
+	Pods         []*v1.Pod
+	topology     *Topology
+	requests     v1.ResourceList
+	requirements scheduling.Requirements
 }
 
 func NewExistingNode(n *state.Node, topology *Topology, daemonResources v1.ResourceList) *ExistingNode {
@@ -52,44 +48,33 @@ func NewExistingNode(n *state.Node, topology *Topology, daemonResources v1.Resou
 		}
 	}
 	node := &ExistingNode{
-		Node:          n.Node,
-		available:     n.Available(),
-		taints:        n.Taints(),
-		topology:      topology,
-		requests:      remainingDaemonResources,
-		requirements:  scheduling.NewLabelRequirements(n.Node.Labels),
-		hostPortUsage: n.HostPortUsage(),
-		volumeUsage:   n.VolumeUsage(),
-		volumeLimits:  n.VolumeLimits(),
-	}
+		Node: n,
 
-	// If the in-flight node doesn't have a hostname yet, we treat it's unique name as the hostname.  This allows toppology
-	// with hostname keys to schedule correctly.
-	hostname := n.Node.Labels[v1.LabelHostname]
-	if hostname == "" {
-		hostname = n.Node.Name
+		topology:     topology,
+		requests:     remainingDaemonResources,
+		requirements: scheduling.NewLabelRequirements(n.Labels()),
 	}
-	node.requirements.Add(scheduling.NewRequirement(v1.LabelHostname, v1.NodeSelectorOpIn, hostname))
-	topology.Register(v1.LabelHostname, hostname)
+	node.requirements.Add(scheduling.NewRequirement(v1.LabelHostname, v1.NodeSelectorOpIn, n.HostName()))
+	topology.Register(v1.LabelHostname, n.HostName())
 	return node
 }
 
 func (n *ExistingNode) Add(ctx context.Context, pod *v1.Pod) error {
 	// Check Taints
-	if err := scheduling.Taints(n.taints).Tolerates(pod); err != nil {
+	if err := scheduling.Taints(n.Taints()).Tolerates(pod); err != nil {
 		return err
 	}
 
-	if err := n.hostPortUsage.Validate(pod); err != nil {
+	if err := n.HostPortUsage().Validate(pod); err != nil {
 		return err
 	}
 
 	// determine the number of volumes that will be mounted if the pod schedules
-	mountedVolumeCount, err := n.volumeUsage.Validate(ctx, pod)
+	mountedVolumeCount, err := n.VolumeUsage().Validate(ctx, pod)
 	if err != nil {
 		return err
 	}
-	if mountedVolumeCount.Exceeds(n.volumeLimits) {
+	if mountedVolumeCount.Exceeds(n.VolumeLimits()) {
 		return fmt.Errorf("would exceed node volume limits")
 	}
 
@@ -97,14 +82,14 @@ func (n *ExistingNode) Add(ctx context.Context, pod *v1.Pod) error {
 	// node, which at this point can't be increased in size
 	requests := resources.Merge(n.requests, resources.RequestsForPods(pod))
 
-	if !resources.Fits(requests, n.available) {
+	if !resources.Fits(requests, n.Available()) {
 		return fmt.Errorf("exceeds node resources")
 	}
 
 	nodeRequirements := scheduling.NewRequirements(n.requirements.Values()...)
 	podRequirements := scheduling.NewPodRequirements(pod)
 	// Check Node Affinity Requirements
-	if err := nodeRequirements.Compatible(podRequirements); err != nil {
+	if err = nodeRequirements.Compatible(podRequirements); err != nil {
 		return err
 	}
 	nodeRequirements.Add(podRequirements.Values()...)
@@ -124,7 +109,7 @@ func (n *ExistingNode) Add(ctx context.Context, pod *v1.Pod) error {
 	n.requests = requests
 	n.requirements = nodeRequirements
 	n.topology.Record(pod, nodeRequirements)
-	n.hostPortUsage.Add(ctx, pod)
-	n.volumeUsage.Add(ctx, pod)
+	n.HostPortUsage().Add(ctx, pod)
+	n.VolumeUsage().Add(ctx, pod)
 	return nil
 }

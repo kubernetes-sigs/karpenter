@@ -36,9 +36,10 @@ import (
 	. "knative.dev/pkg/logging/testing"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/config/settings"
+	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
@@ -145,676 +146,6 @@ var _ = AfterEach(func() {
 	}
 })
 
-var _ = Describe("Drift", func() {
-	It("should ignore drifted nodes if the feature flag is disabled", func() {
-		ctx = settings.ToContext(ctx, test.Settings(test.SettingsOptions{DriftEnabled: false}))
-		prov := test.Provisioner()
-		node := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-				},
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:  resource.MustParse("32"),
-				v1.ResourcePods: resource.MustParse("100"),
-			}},
-		)
-
-		ExpectApplied(ctx, env.Client, node, prov)
-		ExpectMakeNodesReady(ctx, env.Client, node)
-
-		// inform cluster state about the nodes
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
-		Expect(err).ToNot(HaveOccurred())
-
-		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
-		ExpectExists(ctx, env.Client, node)
-	})
-	It("should ignore nodes with the drift label, but not the drifted value", func() {
-		prov := test.Provisioner()
-		node := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-				},
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: "wrong-value",
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:  resource.MustParse("32"),
-				v1.ResourcePods: resource.MustParse("100"),
-			}},
-		)
-
-		ExpectApplied(ctx, env.Client, node, prov)
-		ExpectMakeNodesReady(ctx, env.Client, node)
-
-		// inform cluster state about the nodes
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
-		Expect(err).ToNot(HaveOccurred())
-
-		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
-		ExpectExists(ctx, env.Client, node)
-	})
-	It("should ignore nodes without the drift label", func() {
-		prov := test.Provisioner()
-		node := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
-		})
-
-		ExpectApplied(ctx, env.Client, node, prov)
-		ExpectMakeNodesReady(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
-
-		// inform cluster state about the nodes
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		fakeClock.Step(10 * time.Minute)
-		_, err := deprovisioningController.ProcessCluster(ctx)
-		Expect(err).ToNot(HaveOccurred())
-
-		// we don't need a new node
-		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
-		// and can't delete the node since node is not drifted
-		ExpectNodeExists(ctx, env.Client, node.Name)
-	})
-	It("can delete drifted nodes", func() {
-		prov := test.Provisioner()
-		node := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-				},
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:  resource.MustParse("32"),
-				v1.ResourcePods: resource.MustParse("100"),
-			}},
-		)
-
-		ExpectApplied(ctx, env.Client, node, prov)
-		ExpectMakeNodesReady(ctx, env.Client, node)
-
-		// inform cluster state about the nodes
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
-		Expect(err).ToNot(HaveOccurred())
-
-		// we don't need a new node, but we should evict everything off one of node2 which only has a single pod
-		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
-		// and delete the old one
-		ExpectNotFound(ctx, env.Client, node)
-	})
-	It("can replace drifted nodes", func() {
-		labels := map[string]string{
-			"app": "test",
-		}
-		// create our RS so we can link a pod to it
-		rs := test.ReplicaSet()
-		ExpectApplied(ctx, env.Client, rs)
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
-
-		pod := test.Pod(test.PodOptions{
-			ObjectMeta: metav1.ObjectMeta{Labels: labels,
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion:         "apps/v1",
-						Kind:               "ReplicaSet",
-						Name:               rs.Name,
-						UID:                rs.UID,
-						Controller:         ptr.Bool(true),
-						BlockOwnerDeletion: ptr.Bool(true),
-					},
-				}}})
-
-		prov := test.Provisioner()
-		node := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-				},
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
-		})
-		ExpectApplied(ctx, env.Client, rs, pod, node, prov)
-		ExpectMakeNodesReady(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		ExpectManualBinding(ctx, env.Client, pod, node)
-		ExpectScheduled(ctx, env.Client, pod)
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
-
-		// deprovisioning won't delete the old node until the new node is ready
-		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, node)
-		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
-		Expect(err).ToNot(HaveOccurred())
-		wg.Wait()
-
-		Expect(cloudProvider.CreateCalls).To(HaveLen(1))
-
-		ExpectNotFound(ctx, env.Client, node)
-	})
-	It("can replace drifted nodes with multiple nodes", func() {
-		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-			Name: "current-on-demand",
-			Offerings: []cloudprovider.Offering{
-				{
-					CapacityType: v1alpha5.CapacityTypeOnDemand,
-					Zone:         "test-zone-1a",
-					Price:        0.5,
-					Available:    false,
-				},
-			},
-		})
-		replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-			Name: "replacement-on-demand",
-			Offerings: []cloudprovider.Offering{
-				{
-					CapacityType: v1alpha5.CapacityTypeOnDemand,
-					Zone:         "test-zone-1a",
-					Price:        0.3,
-					Available:    true,
-				},
-			},
-			Resources: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("3")},
-		})
-		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-			currentInstance,
-			replacementInstance,
-		}
-
-		labels := map[string]string{
-			"app": "test",
-		}
-		// create our RS so we can link a pod to it
-		rs := test.ReplicaSet()
-		ExpectApplied(ctx, env.Client, rs)
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
-
-		pods := test.Pods(3, test.PodOptions{
-			ObjectMeta: metav1.ObjectMeta{Labels: labels,
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion:         "apps/v1",
-						Kind:               "ReplicaSet",
-						Name:               rs.Name,
-						UID:                rs.UID,
-						Controller:         ptr.Bool(true),
-						BlockOwnerDeletion: ptr.Bool(true),
-					},
-				}},
-			// Make each pod request about a third of the allocatable on the node
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("2")},
-			},
-		})
-
-		prov := test.Provisioner()
-		node := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       currentInstance.Name,
-					v1alpha5.LabelCapacityType:       currentInstance.Offerings[0].CapacityType,
-					v1.LabelTopologyZone:             currentInstance.Offerings[0].Zone,
-				},
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("8")},
-		})
-		ExpectApplied(ctx, env.Client, rs, node, prov, pods[0], pods[1], pods[2])
-		ExpectMakeNodesReady(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		ExpectManualBinding(ctx, env.Client, pods[0], node)
-		ExpectManualBinding(ctx, env.Client, pods[1], node)
-		ExpectManualBinding(ctx, env.Client, pods[2], node)
-		ExpectScheduled(ctx, env.Client, pods[0])
-		ExpectScheduled(ctx, env.Client, pods[1])
-		ExpectScheduled(ctx, env.Client, pods[2])
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
-
-		// deprovisioning won't delete the old node until the new node is ready
-		wg := ExpectMakeNewNodesReady(ctx, env.Client, 3, node)
-		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
-		Expect(err).ToNot(HaveOccurred())
-		wg.Wait()
-
-		Expect(cloudProvider.CreateCalls).To(HaveLen(3))
-
-		ExpectNotFound(ctx, env.Client, node)
-	})
-	It("should delete one drifted node at a time", func() {
-		prov := test.Provisioner()
-		node1 := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-				},
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
-		})
-		node2 := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-				},
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
-		})
-		ExpectApplied(ctx, env.Client, node1, prov, node2)
-		ExpectMakeNodesReady(ctx, env.Client, node1, node2)
-
-		// inform cluster state about the nodes
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
-		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
-		Expect(err).ToNot(HaveOccurred())
-
-		// we don't need a new node, but we should evict everything off one of node2 which only has a single pod
-		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
-
-		// Expect one of the nodes to be deleted
-		nodes := &v1.NodeList{}
-		Expect(env.Client.List(ctx, nodes)).To(Succeed())
-		Expect(len(nodes.Items)).To(Equal(1))
-	})
-})
-
-var _ = Describe("Expiration", func() {
-	It("should ignore nodes without TTLSecondsUntilExpired", func() {
-		prov := test.Provisioner()
-		node := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
-		})
-
-		ExpectApplied(ctx, env.Client, node, prov)
-		ExpectMakeNodesReady(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
-
-		// inform cluster state about the nodes
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		fakeClock.Step(10 * time.Minute)
-		_, err := deprovisioningController.ProcessCluster(ctx)
-		Expect(err).ToNot(HaveOccurred())
-
-		// we don't need a new node
-		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
-		// and can't delete the node since expiry is not enabled
-		ExpectNodeExists(ctx, env.Client, node.Name)
-	})
-	It("can delete expired nodes", func() {
-		prov := test.Provisioner(test.ProvisionerOptions{
-			TTLSecondsUntilExpired: ptr.Int64(60),
-		})
-		node := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:  resource.MustParse("32"),
-				v1.ResourcePods: resource.MustParse("100"),
-			}},
-		)
-
-		ExpectApplied(ctx, env.Client, node, prov)
-		ExpectMakeNodesReady(ctx, env.Client, node)
-
-		// inform cluster state about the nodes
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
-		Expect(err).ToNot(HaveOccurred())
-
-		// we don't need a new node, but we should evict everything off one of node2 which only has a single pod
-		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
-		// and delete the old one
-		ExpectNotFound(ctx, env.Client, node)
-	})
-	It("should expire one node at a time, starting with most expired", func() {
-		expireProv := test.Provisioner(test.ProvisionerOptions{
-			TTLSecondsUntilExpired: ptr.Int64(100),
-		})
-		nodeToExpire := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: expireProv.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
-		})
-		prov := test.Provisioner(test.ProvisionerOptions{
-			TTLSecondsUntilExpired: ptr.Int64(500),
-		})
-		nodeNotExpire := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
-		})
-
-		ExpectApplied(ctx, env.Client, nodeToExpire, expireProv, nodeNotExpire, prov)
-		ExpectMakeNodesReady(ctx, env.Client, nodeToExpire, nodeNotExpire)
-
-		// inform cluster state about the nodes
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodeToExpire))
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodeNotExpire))
-		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
-		Expect(err).ToNot(HaveOccurred())
-
-		// we don't need a new node, but we should evict everything off one of node2 which only has a single pod
-		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
-		// and delete the old one
-		ExpectNotFound(ctx, env.Client, nodeToExpire)
-	})
-	It("can replace node for expiration", func() {
-		labels := map[string]string{
-			"app": "test",
-		}
-		// create our RS so we can link a pod to it
-		rs := test.ReplicaSet()
-		ExpectApplied(ctx, env.Client, rs)
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
-
-		pod := test.Pod(test.PodOptions{
-			ObjectMeta: metav1.ObjectMeta{Labels: labels,
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion:         "apps/v1",
-						Kind:               "ReplicaSet",
-						Name:               rs.Name,
-						UID:                rs.UID,
-						Controller:         ptr.Bool(true),
-						BlockOwnerDeletion: ptr.Bool(true),
-					},
-				}}})
-
-		prov := test.Provisioner(test.ProvisionerOptions{
-			TTLSecondsUntilExpired: ptr.Int64(30),
-		})
-		node := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
-		})
-		ExpectApplied(ctx, env.Client, rs, pod, node, prov)
-		ExpectMakeNodesReady(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		ExpectManualBinding(ctx, env.Client, pod, node)
-		ExpectScheduled(ctx, env.Client, pod)
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
-
-		// deprovisioning won't delete the old node until the new node is ready
-		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, node)
-		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
-		Expect(err).ToNot(HaveOccurred())
-		wg.Wait()
-
-		Expect(cloudProvider.CreateCalls).To(HaveLen(1))
-
-		ExpectNotFound(ctx, env.Client, node)
-	})
-	It("should uncordon nodes when expiration replacement partially fails", func() {
-		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-			Name: "current-on-demand",
-			Offerings: []cloudprovider.Offering{
-				{
-					CapacityType: v1alpha5.CapacityTypeOnDemand,
-					Zone:         "test-zone-1a",
-					Price:        0.5,
-					Available:    false,
-				},
-			},
-		})
-		replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-			Name: "replacement-on-demand",
-			Offerings: []cloudprovider.Offering{
-				{
-					CapacityType: v1alpha5.CapacityTypeOnDemand,
-					Zone:         "test-zone-1a",
-					Price:        0.3,
-					Available:    true,
-				},
-			},
-			Resources: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("3")},
-		})
-		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-			currentInstance,
-			replacementInstance,
-		}
-		cloudProvider.AllowedCreateCalls = 2
-
-		labels := map[string]string{
-			"app": "test",
-		}
-		// create our RS so we can link a pod to it
-		rs := test.ReplicaSet()
-		ExpectApplied(ctx, env.Client, rs)
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
-
-		pods := test.Pods(3, test.PodOptions{
-			ObjectMeta: metav1.ObjectMeta{Labels: labels,
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion:         "apps/v1",
-						Kind:               "ReplicaSet",
-						Name:               rs.Name,
-						UID:                rs.UID,
-						Controller:         ptr.Bool(true),
-						BlockOwnerDeletion: ptr.Bool(true),
-					},
-				}},
-			// Make each pod request about a third of the allocatable on the node
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("2")},
-			},
-		})
-
-		prov := test.Provisioner(test.ProvisionerOptions{
-			TTLSecondsUntilExpired: ptr.Int64(30),
-		})
-		node := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       currentInstance.Name,
-					v1alpha5.LabelCapacityType:       currentInstance.Offerings[0].CapacityType,
-					v1.LabelTopologyZone:             currentInstance.Offerings[0].Zone,
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("7")},
-		})
-		ExpectApplied(ctx, env.Client, rs, node, prov, pods[0], pods[1], pods[2])
-		ExpectMakeNodesReady(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		ExpectManualBinding(ctx, env.Client, pods[0], node)
-		ExpectManualBinding(ctx, env.Client, pods[1], node)
-		ExpectManualBinding(ctx, env.Client, pods[2], node)
-		ExpectScheduled(ctx, env.Client, pods[0])
-		ExpectScheduled(ctx, env.Client, pods[1])
-		ExpectScheduled(ctx, env.Client, pods[2])
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
-
-		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
-		Expect(err).To(HaveOccurred())
-
-		// Expiration should try to make 3 calls but fail for the third.
-		Expect(cloudProvider.CreateCalls).To(HaveLen(3))
-
-		node = ExpectNodeExists(ctx, env.Client, node.Name)
-		Expect(node.Spec.Unschedulable).To(BeFalse())
-	})
-	It("can replace node for expiration with multiple nodes", func() {
-		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-			Name: "current-on-demand",
-			Offerings: []cloudprovider.Offering{
-				{
-					CapacityType: v1alpha5.CapacityTypeOnDemand,
-					Zone:         "test-zone-1a",
-					Price:        0.5,
-					Available:    false,
-				},
-			},
-		})
-		replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-			Name: "replacement-on-demand",
-			Offerings: []cloudprovider.Offering{
-				{
-					CapacityType: v1alpha5.CapacityTypeOnDemand,
-					Zone:         "test-zone-1a",
-					Price:        0.3,
-					Available:    true,
-				},
-			},
-			Resources: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("3")},
-		})
-		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-			currentInstance,
-			replacementInstance,
-		}
-
-		labels := map[string]string{
-			"app": "test",
-		}
-		// create our RS so we can link a pod to it
-		rs := test.ReplicaSet()
-		ExpectApplied(ctx, env.Client, rs)
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
-
-		pods := test.Pods(3, test.PodOptions{
-			ObjectMeta: metav1.ObjectMeta{Labels: labels,
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion:         "apps/v1",
-						Kind:               "ReplicaSet",
-						Name:               rs.Name,
-						UID:                rs.UID,
-						Controller:         ptr.Bool(true),
-						BlockOwnerDeletion: ptr.Bool(true),
-					},
-				}},
-			// Make each pod request about a third of the allocatable on the node
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("2")},
-			},
-		})
-
-		prov := test.Provisioner(test.ProvisionerOptions{
-			TTLSecondsUntilExpired: ptr.Int64(200),
-		})
-		node := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       currentInstance.Name,
-					v1alpha5.LabelCapacityType:       currentInstance.Offerings[0].CapacityType,
-					v1.LabelTopologyZone:             currentInstance.Offerings[0].Zone,
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("8")},
-		})
-		ExpectApplied(ctx, env.Client, rs, node, prov, pods[0], pods[1], pods[2])
-		ExpectMakeNodesReady(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		ExpectManualBinding(ctx, env.Client, pods[0], node)
-		ExpectManualBinding(ctx, env.Client, pods[1], node)
-		ExpectManualBinding(ctx, env.Client, pods[2], node)
-		ExpectScheduled(ctx, env.Client, pods[0])
-		ExpectScheduled(ctx, env.Client, pods[1])
-		ExpectScheduled(ctx, env.Client, pods[2])
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
-
-		// deprovisioning won't delete the old node until the new node is ready
-		wg := ExpectMakeNewNodesReady(ctx, env.Client, 3, node)
-		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
-		Expect(err).ToNot(HaveOccurred())
-		wg.Wait()
-
-		Expect(cloudProvider.CreateCalls).To(HaveLen(3))
-
-		ExpectNotFound(ctx, env.Client, node)
-	})
-})
-
 var _ = Describe("Pod Eviction Cost", func() {
 	const standardPodCost = 1.0
 	It("should have a standard disruptionCost for a pod with no priority or disruptionCost specified", func() {
@@ -918,7 +249,7 @@ var _ = Describe("Replace Nodes", func() {
 		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, node)
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 		wg.Wait()
 
@@ -993,8 +324,9 @@ var _ = Describe("Replace Nodes", func() {
 		// inform cluster state about the nodes
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 		fakeClock.Step(10 * time.Minute)
-		_, err := deprovisioningController.ProcessCluster(ctx)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
+		Expect(cluster.Consolidated()).To(BeTrue())
 
 		// we don't need a new node
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
@@ -1063,7 +395,7 @@ var _ = Describe("Replace Nodes", func() {
 		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, node)
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 		wg.Wait()
 
@@ -1145,7 +477,7 @@ var _ = Describe("Replace Nodes", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(annotatedNode))
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
@@ -1235,7 +567,8 @@ var _ = Describe("Replace Nodes", func() {
 
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
+		Expect(cluster.Consolidated()).To(BeTrue())
 		Expect(err).ToNot(HaveOccurred())
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
 		ExpectNodeExists(ctx, env.Client, node.Name)
@@ -1338,7 +671,8 @@ var _ = Describe("Replace Nodes", func() {
 
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
+		Expect(cluster.Consolidated()).To(BeTrue())
 		Expect(err).ToNot(HaveOccurred())
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
 		ExpectNodeExists(ctx, env.Client, node.Name)
@@ -1393,8 +727,9 @@ var _ = Describe("Replace Nodes", func() {
 		var consolidationFinished atomic.Bool
 		go triggerVerifyAction()
 		go func() {
-			_, err := deprovisioningController.ProcessCluster(ctx)
+			_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 			Expect(err).ToNot(HaveOccurred())
+			Expect(cluster.Consolidated()).To(BeFalse())
 			consolidationFinished.Store(true)
 		}()
 		wg.Wait()
@@ -1486,7 +821,7 @@ var _ = Describe("Delete Node", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 
 		// we don't need a new node, but we should evict everything off one of node2 which only has a single pod
@@ -1578,7 +913,7 @@ var _ = Describe("Delete Node", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 
 		// we don't need a new node
@@ -1656,7 +991,7 @@ var _ = Describe("Delete Node", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 
 		// we don't need a new node
@@ -1731,7 +1066,7 @@ var _ = Describe("Delete Node", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 
 		// we don't need a new node
@@ -1814,7 +1149,7 @@ var _ = Describe("Node Lifetime Consideration", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
 		fakeClock.SetTime(time.Now())
 		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 
 		// the second node has more pods so it would normally not be picked for consolidation, except it very little
@@ -1912,7 +1247,7 @@ var _ = Describe("Topology Consideration", func() {
 		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, zone1Node, zone2Node, zone3Node)
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 		wg.Wait()
 
@@ -2014,7 +1349,7 @@ var _ = Describe("Topology Consideration", func() {
 		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, zone1Node, zone2Node, zone3Node)
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 		wg.Wait()
 
@@ -2053,7 +1388,7 @@ var _ = Describe("Empty Nodes", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 
 		// we don't need any new nodes
@@ -2097,7 +1432,7 @@ var _ = Describe("Empty Nodes", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 
 		// we don't need any new nodes
@@ -2131,7 +1466,7 @@ var _ = Describe("Empty Nodes", func() {
 
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 
 		// we don't need any new nodes
@@ -2180,7 +1515,7 @@ var _ = Describe("Empty Nodes", func() {
 
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 
 		// we don't need any new nodes and consolidation should notice the huge pending pod that needs the large
@@ -2221,7 +1556,7 @@ var _ = Describe("consolidation TTL", func() {
 		go func() {
 			defer wg.Done()
 			defer finished.Store(true)
-			_, err := deprovisioningController.ProcessCluster(ctx)
+			_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 			Expect(err).ToNot(HaveOccurred())
 		}()
 
@@ -2313,7 +1648,7 @@ var _ = Describe("consolidation TTL", func() {
 		go func() {
 			defer wg.Done()
 			defer finished.Store(true)
-			_, err := deprovisioningController.ProcessCluster(ctx)
+			_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 			Expect(err).ToNot(HaveOccurred())
 		}()
 
@@ -2366,7 +1701,7 @@ var _ = Describe("consolidation TTL", func() {
 		go func() {
 			defer wg.Done()
 			defer finished.Store(true)
-			_, err := deprovisioningController.ProcessCluster(ctx)
+			_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 			Expect(err).ToNot(HaveOccurred())
 		}()
 
@@ -2445,7 +1780,7 @@ var _ = Describe("Parallelization", func() {
 		// Run the processing loop in parallel in the background with environment context
 		go triggerVerifyAction()
 		go func() {
-			_, err := deprovisioningController.ProcessCluster(ctx)
+			_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 			Expect(err).ToNot(HaveOccurred())
 		}()
 
@@ -2545,9 +1880,9 @@ var _ = Describe("Parallelization", func() {
 		// Trigger a reconciliation run which should take into account the deleting node
 		// cnsolidation shouldn't trigger additional actions
 		fakeClock.Step(10 * time.Minute)
-		result, err := deprovisioningController.ProcessCluster(ctx)
+		result, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
-		Expect(result).To(Equal(deprovisioning.ResultNothingToDo))
+		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 	})
 })
 
@@ -2630,7 +1965,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		fakeClock.Step(10 * time.Minute)
 		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, node1, node2, node3)
 		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 		wg.Wait()
 
@@ -2704,7 +2039,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
 		fakeClock.Step(10 * time.Minute)
 		go triggerVerifyAction()
-		_, err := deprovisioningController.ProcessCluster(ctx)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 
 		// We have [cheap-node, cheap-node] which multi-node consolidation could consolidate via
@@ -2789,7 +2124,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		go func() {
 			defer wg.Done()
 			defer finished.Store(true)
-			_, err := deprovisioningController.ProcessCluster(ctx)
+			_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 			Expect(err).ToNot(HaveOccurred())
 		}()
 

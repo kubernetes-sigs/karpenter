@@ -22,62 +22,34 @@ import (
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/workqueue"
-	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/prometheus/client_golang/prometheus"
-
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
 	"github.com/aws/karpenter-core/pkg/events"
-	"github.com/aws/karpenter-core/pkg/metrics"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
-
-var (
-	terminationSummary = prometheus.NewSummary(
-		prometheus.SummaryOpts{
-			Namespace:  "karpenter",
-			Subsystem:  "nodes",
-			Name:       "termination_time_seconds",
-			Help:       "The time taken between a node's deletion request and the removal of its finalizer",
-			Objectives: metrics.SummaryObjectives(),
-		},
-	)
-)
-
-func init() {
-	crmetrics.Registry.MustRegister(terminationSummary)
-}
 
 var _ corecontroller.FinalizingTypedController[*v1.Node] = (*Controller)(nil)
 
 // Controller for the resource
 type Controller struct {
-	Terminator *Terminator
-	KubeClient client.Client
-	Recorder   events.Recorder
+	terminator *terminator.Terminator
+	kubeClient client.Client
+	recorder   events.Recorder
 }
 
-// NewController constructs a terminationController instance
-func NewController(clk clock.Clock, kubeClient client.Client, evictionQueue *EvictionQueue,
-	recorder events.Recorder, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
-
+// NewController constructs a controller instance
+func NewController(kubeClient client.Client, terminator *terminator.Terminator, recorder events.Recorder) corecontroller.Controller {
 	return corecontroller.Typed[*v1.Node](kubeClient, &Controller{
-		KubeClient: kubeClient,
-		Terminator: &Terminator{
-			KubeClient:    kubeClient,
-			CloudProvider: cloudProvider,
-			EvictionQueue: evictionQueue,
-			Clock:         clk,
-		},
-		Recorder: recorder,
+		kubeClient: kubeClient,
+		terminator: terminator,
+		recorder:   recorder,
 	})
 }
 
@@ -93,20 +65,19 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 	if !controllerutil.ContainsFinalizer(node, v1alpha5.TerminationFinalizer) {
 		return reconcile.Result{}, nil
 	}
-	if err := c.Terminator.cordon(ctx, node); err != nil {
+	if err := c.terminator.Cordon(ctx, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("cordoning node, %w", err)
 	}
-	if err := c.Terminator.drain(ctx, node); err != nil {
-		if IsNodeDrainErr(err) {
-			c.Recorder.Publish(events.NodeFailedToDrain(node, err))
+	if err := c.terminator.Drain(ctx, node); err != nil {
+		if terminator.IsNodeDrainError(err) {
+			c.recorder.Publish(events.NodeFailedToDrain(node, err))
 			return reconcile.Result{Requeue: true}, nil
 		}
 		return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 	}
-	if err := c.Terminator.terminate(ctx, node); err != nil {
+	if err := c.terminator.TerminateNode(ctx, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("terminating node, %w", err)
 	}
-	terminationSummary.Observe(time.Since(node.DeletionTimestamp.Time).Seconds())
 	return reconcile.Result{}, nil
 }
 

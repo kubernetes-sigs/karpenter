@@ -23,13 +23,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/env"
 )
 
-type AWSNodeNameConvention string
-
-const (
-	IPName       AWSNodeNameConvention = "ip-name"
-	ResourceName AWSNodeNameConvention = "resource-name"
-)
-
 // Options for running this binary
 type Options struct {
 	*flag.FlagSet
