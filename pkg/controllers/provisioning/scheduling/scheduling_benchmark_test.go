@@ -29,6 +29,7 @@ import (
 
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/clock"
 
 	"github.com/aws/karpenter-core/pkg/apis/settings"
@@ -36,6 +37,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/test"
 
 	"go.uber.org/zap"
@@ -122,7 +124,7 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	scheduler := scheduling.NewScheduler(ctx, nil, []*scheduling.MachineTemplate{scheduling.NewMachineTemplate(provisioner)},
 		nil, state.NewCluster(&clock.RealClock{}, nil, cloudProv), nil, &scheduling.Topology{},
 		map[string][]*cloudprovider.InstanceType{provisioner.Name: instanceTypes}, nil,
-		test.NewEventRecorder(),
+		events.NewRecorder(&record.FakeRecorder{}),
 		scheduling.SchedulerOptions{})
 
 	pods := makeDiversePods(podCount)

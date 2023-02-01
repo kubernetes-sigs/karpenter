@@ -16,12 +16,14 @@ package events_test
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/util/flowcontrol"
 
@@ -29,8 +31,39 @@ import (
 	"github.com/aws/karpenter-core/pkg/test"
 )
 
-var internalRecorder *test.InternalRecorder
 var eventRecorder events.Recorder
+var internalRecorder *InternalRecorder
+
+type InternalRecorder struct {
+	mu    sync.RWMutex
+	calls map[string]int
+}
+
+func NewInternalRecorder() *InternalRecorder {
+	return &InternalRecorder{
+		calls: map[string]int{},
+	}
+}
+
+func (i *InternalRecorder) Event(_ runtime.Object, _, reason, _ string) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.calls[reason]++
+}
+
+func (i *InternalRecorder) Eventf(object runtime.Object, eventtype, reason, messageFmt string, _ ...interface{}) {
+	i.Event(object, eventtype, reason, messageFmt)
+}
+
+func (i *InternalRecorder) AnnotatedEventf(object runtime.Object, _ map[string]string, eventtype, reason, messageFmt string, _ ...interface{}) {
+	i.Event(object, eventtype, reason, messageFmt)
+}
+
+func (i *InternalRecorder) Calls(reason string) int {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.calls[reason]
+}
 
 func TestRecorder(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -38,7 +71,7 @@ func TestRecorder(t *testing.T) {
 }
 
 var _ = BeforeEach(func() {
-	internalRecorder = test.NewInternalRecorder()
+	internalRecorder = NewInternalRecorder()
 	eventRecorder = events.NewRecorder(internalRecorder)
 	events.PodNominationRateLimiter = flowcontrol.NewTokenBucketRateLimiter(5, 10)
 })

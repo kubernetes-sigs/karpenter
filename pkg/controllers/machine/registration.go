@@ -43,7 +43,7 @@ func (r *Registration) Reconcile(ctx context.Context, machine *v1alpha5.Machine)
 	node, err := nodeForMachine(ctx, r.kubeClient, machine)
 	if err != nil {
 		if IsNodeNotFoundError(err) {
-			machine.StatusConditions().MarkFalse(v1alpha5.MachineRegistered, "NodeNotFound", "Node not registered with cluster")
+			machine.StatusConditions().MarkFalse(v1alpha5.MachineRegistered, "NodeNotFound", "Machine not registered with cluster")
 			return reconcile.Result{RequeueAfter: registrationTTL}, nil // Requeue later to check up to the registration timeout
 		}
 		if IsDuplicateNodeError(err) {
@@ -66,7 +66,7 @@ func (r *Registration) syncNode(ctx context.Context, machine *v1alpha5.Machine, 
 	node.Labels = lo.Assign(node.Labels, machine.Labels)
 	node.Annotations = lo.Assign(node.Annotations, machine.Annotations)
 
-	// Sync all taints inside of Machine into the Node taints
+	// Sync all taints inside of Machine into the Machine taints
 	node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(machine.Spec.Taints)
 	if !machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
 		node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(machine.Spec.StartupTaints)

@@ -63,7 +63,7 @@ func (a action) String() string {
 type Command struct {
 	nodesToRemove    []*v1.Node
 	action           action
-	replacementNodes []*scheduling.Node
+	replacementNodes []*scheduling.Machine
 }
 
 func (o Command) String() string {
