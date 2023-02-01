@@ -18,7 +18,7 @@ require (
 	github.com/prometheus/client_model v0.3.0
 	github.com/samber/lo v1.37.0
 	go.uber.org/multierr v1.9.0
-	go.uber.org/zap v1.23.0
+	go.uber.org/zap v1.24.0
 	golang.org/x/time v0.0.0-20220609170525-579cf78fd858
 	k8s.io/api v0.25.4
 	k8s.io/apiextensions-apiserver v0.25.4
