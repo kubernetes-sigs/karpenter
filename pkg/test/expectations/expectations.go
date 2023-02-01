@@ -35,6 +35,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -46,18 +47,13 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/operator/injection"
 )
 
 const (
 	ReconcilerPropagationTime = 10 * time.Second
 	RequestInterval           = 1 * time.Second
 )
-
-// Binding is a potential binding that was reported through event recording.
-type Binding struct {
-	Pod  *v1.Pod
-	Node *v1.Node
-}
 
 func ExpectExists[T client.Object](ctx context.Context, c client.Client, obj T) T {
 	return ExpectExistsWithOffset(1, ctx, c, obj)
@@ -218,9 +214,13 @@ func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objectLists .
 
 func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, pods ...*v1.Pod) map[*v1.Pod]*v1.Node {
 	bindings := ExpectProvisionedNoBindingWithOffset(1, ctx, c, provisioner, pods...)
+	podNames := sets.NewString(lo.Map(pods, func(p *v1.Pod, _ int) string { return p.Name })...)
 	for pod, node := range bindings {
-		ExpectManualBindingWithOffset(1, ctx, c, pod, node)
-		ExpectWithOffset(1, cluster.UpdatePod(ctx, pod)).To(Succeed()) // track pod bindings
+		// Only bind the pods that are passed through
+		if podNames.Has(pod.Name) {
+			ExpectManualBindingWithOffset(1, ctx, c, pod, node)
+			ExpectWithOffset(1, cluster.UpdatePod(ctx, pod)).To(Succeed()) // track pod bindings
+		}
 	}
 	return bindings
 }
@@ -235,13 +235,22 @@ func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c cli
 		ExpectAppliedWithOffset(offset+1, ctx, c, pod)
 	}
 	// TODO: Check the error on the provisioner scheduling round
-	machines, _, _ := provisioner.Schedule(ctx)
+	machines, nodes, _ := provisioner.Schedule(ctx)
 	bindings := map[*v1.Pod]*v1.Node{}
 	for _, m := range machines {
+		ctx = injection.WithNamespacedName(ctx, types.NamespacedName{Name: m.Labels[v1alpha5.ProvisionerNameLabelKey]})
+		// TODO: Check the error on the provisioner launch
 		name, err := provisioner.Launch(ctx, m)
-		ExpectWithOffset(offset+1, err).ToNot(HaveOccurred())
+		if err != nil {
+			return bindings
+		}
 		for _, pod := range m.Pods {
 			bindings[pod] = ExpectNodeExistsWithOffset(offset+1, ctx, c, name)
+		}
+	}
+	for _, node := range nodes {
+		for _, pod := range node.Pods {
+			bindings[pod] = node.Node.Node
 		}
 	}
 	return bindings

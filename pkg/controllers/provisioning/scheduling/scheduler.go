@@ -208,7 +208,7 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 			}
 		}
 
-		node := NewNode(nodeTemplate, s.topology, s.daemonOverhead[nodeTemplate], instanceTypes)
+		node := NewMachine(nodeTemplate, s.topology, s.daemonOverhead[nodeTemplate], instanceTypes)
 		if err := node.Add(ctx, pod); err != nil {
 			errs = multierr.Append(errs, fmt.Errorf("incompatible with provisioner %q, %w", nodeTemplate.ProvisionerName, err))
 			continue
@@ -243,7 +243,7 @@ func (s *Scheduler) calculateExistingMachines(stateNodes []*state.Node, daemonSe
 
 		// We don't use the status field and instead recompute the remaining resources to ensure we have a consistent view
 		// of the cluster during scheduling.  Depending on how node creation falls out, this will also work for cases where
-		// we don't create Machine resources.
+		// we don't create Node resources.
 		if _, ok := s.remainingResources[node.Labels()[v1alpha5.ProvisionerNameLabelKey]]; ok {
 			s.remainingResources[node.Labels()[v1alpha5.ProvisionerNameLabelKey]] = resources.Subtract(s.remainingResources[node.Labels()[v1alpha5.ProvisionerNameLabelKey]], node.Capacity())
 		}

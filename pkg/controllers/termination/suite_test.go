@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
 
 	"github.com/samber/lo"
@@ -31,6 +32,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
 	"github.com/aws/karpenter-core/pkg/controllers/termination"
+	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
@@ -64,9 +66,8 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
 
 	cloudProvider := fake.NewCloudProvider()
-	eventRecorder := test.NewEventRecorder()
-	evictionQueue = terminator.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), eventRecorder)
-	terminationController = termination.NewController(env.Client, terminator.NewTerminator(fakeClock, env.Client, cloudProvider, evictionQueue), eventRecorder)
+	evictionQueue = terminator.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}))
+	terminationController = termination.NewController(env.Client, terminator.NewTerminator(fakeClock, env.Client, cloudProvider, evictionQueue), events.NewRecorder(&record.FakeRecorder{}))
 })
 
 var _ = AfterSuite(func() {

@@ -281,10 +281,10 @@ func (in *Node) PodLimits() v1.ResourceList {
 }
 
 func (in *Node) MarkedForDeletion() bool {
-	// The Machine is marked for the Deletion if:
-	//  1. The Machine has explicitly MarkedForDeletion
-	//  2. The Machine has a Machine counterpart and is actively deleting
-	//  3. The Machine has no Machine counterpart and is actively deleting
+	// The Node is marked for the Deletion if:
+	//  1. The Node has explicitly MarkedForDeletion
+	//  2. The Node has a Machine counterpart and is actively deleting
+	//  3. The Node has no Machine counterpart and is actively deleting
 	return in.markedForDeletion ||
 		(in.Machine != nil && !in.Machine.DeletionTimestamp.IsZero()) ||
 		(in.Node != nil && in.Machine == nil && !in.Node.DeletionTimestamp.IsZero())

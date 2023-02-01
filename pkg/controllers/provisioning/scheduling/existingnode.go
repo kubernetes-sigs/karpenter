@@ -88,7 +88,7 @@ func (n *ExistingNode) Add(ctx context.Context, pod *v1.Pod) error {
 
 	nodeRequirements := scheduling.NewRequirements(n.requirements.Values()...)
 	podRequirements := scheduling.NewPodRequirements(pod)
-	// Check Machine Affinity Requirements
+	// Check Node Affinity Requirements
 	if err = nodeRequirements.Compatible(podRequirements); err != nil {
 		return err
 	}

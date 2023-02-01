@@ -41,7 +41,7 @@ type Machine struct {
 
 var nodeID int64
 
-func NewNode(machineTemplate *MachineTemplate, topology *Topology, daemonResources v1.ResourceList, instanceTypes []*cloudprovider.InstanceType) *Machine {
+func NewMachine(machineTemplate *MachineTemplate, topology *Topology, daemonResources v1.ResourceList, instanceTypes []*cloudprovider.InstanceType) *Machine {
 	// Copy the template, and add hostname
 	hostname := fmt.Sprintf("hostname-placeholder-%04d", atomic.AddInt64(&nodeID, 1))
 	topology.Register(v1.LabelHostname, hostname)
@@ -70,38 +70,38 @@ func (m *Machine) Add(ctx context.Context, pod *v1.Pod) error {
 		return err
 	}
 
-	nodeRequirements := scheduling.NewRequirements(m.Requirements.Values()...)
+	machineRequirements := scheduling.NewRequirements(m.Requirements.Values()...)
 	podRequirements := scheduling.NewPodRequirements(pod)
 
 	// Check Machine Affinity Requirements
-	if err := nodeRequirements.Compatible(podRequirements); err != nil {
+	if err := machineRequirements.Compatible(podRequirements); err != nil {
 		return fmt.Errorf("incompatible requirements, %w", err)
 	}
-	nodeRequirements.Add(podRequirements.Values()...)
+	machineRequirements.Add(podRequirements.Values()...)
 
 	// Check Topology Requirements
-	topologyRequirements, err := m.topology.AddRequirements(podRequirements, nodeRequirements, pod)
+	topologyRequirements, err := m.topology.AddRequirements(podRequirements, machineRequirements, pod)
 	if err != nil {
 		return err
 	}
-	if err = nodeRequirements.Compatible(topologyRequirements); err != nil {
+	if err = machineRequirements.Compatible(topologyRequirements); err != nil {
 		return err
 	}
-	nodeRequirements.Add(topologyRequirements.Values()...)
+	machineRequirements.Add(topologyRequirements.Values()...)
 
 	// Check instance type combinations
 	requests := resources.Merge(m.Requests, resources.RequestsForPods(pod))
-	instanceTypes := filterInstanceTypesByRequirements(m.InstanceTypeOptions, nodeRequirements, requests)
+	instanceTypes := filterInstanceTypesByRequirements(m.InstanceTypeOptions, machineRequirements, requests)
 	if len(instanceTypes) == 0 {
-		return fmt.Errorf("no instance type satisfied resources %s and requirements %s", resources.String(resources.RequestsForPods(pod)), nodeRequirements)
+		return fmt.Errorf("no instance type satisfied resources %s and requirements %s", resources.String(resources.RequestsForPods(pod)), machineRequirements)
 	}
 
 	// Update node
 	m.Pods = append(m.Pods, pod)
 	m.InstanceTypeOptions = instanceTypes
 	m.Requests = requests
-	m.Requirements = nodeRequirements
-	m.topology.Record(pod, nodeRequirements)
+	m.Requirements = machineRequirements
+	m.topology.Record(pod, machineRequirements)
 	m.hostPortUsage.Add(ctx, pod)
 	return nil
 }
@@ -115,7 +115,7 @@ func (m *Machine) FinalizeScheduling() {
 }
 
 func (m *Machine) String() string {
-	return fmt.Sprintf("node with %d pods requesting %s from types %s", len(m.Pods), resources.String(m.Requests),
+	return fmt.Sprintf("machine with %d pods requesting %s from types %s", len(m.Pods), resources.String(m.Requests),
 		InstanceTypeList(m.InstanceTypeOptions))
 }
 

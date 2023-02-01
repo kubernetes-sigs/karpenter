@@ -194,6 +194,7 @@ func (p *Provisioner) consolidationWarnings(ctx context.Context, po v1.Pod) {
 	}
 }
 
+//nolint:gocyclo
 func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNodes []*state.Node, opts scheduler.SchedulerOptions) (*scheduler.Scheduler, error) {
 	// Build node templates
 	var machines []*scheduler.MachineTemplate
