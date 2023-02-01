@@ -29,9 +29,9 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
-// Node is a set of constraints, compatible pods, and possible instance types that could fulfill these constraints. This
+// Machine is a set of constraints, compatible pods, and possible instance types that could fulfill these constraints. This
 // will be turned into one or more actual node instances within the cluster after bin packing.
-type Node struct {
+type Machine struct {
 	MachineTemplate
 
 	Pods          []*v1.Pod
@@ -41,7 +41,7 @@ type Node struct {
 
 var nodeID int64
 
-func NewNode(machineTemplate *MachineTemplate, topology *Topology, daemonResources v1.ResourceList, instanceTypes []*cloudprovider.InstanceType) *Node {
+func NewNode(machineTemplate *MachineTemplate, topology *Topology, daemonResources v1.ResourceList, instanceTypes []*cloudprovider.InstanceType) *Machine {
 	// Copy the template, and add hostname
 	hostname := fmt.Sprintf("hostname-placeholder-%04d", atomic.AddInt64(&nodeID, 1))
 	topology.Register(v1.LabelHostname, hostname)
@@ -52,14 +52,14 @@ func NewNode(machineTemplate *MachineTemplate, topology *Topology, daemonResourc
 	template.InstanceTypeOptions = instanceTypes
 	template.Requests = daemonResources
 
-	return &Node{
+	return &Machine{
 		MachineTemplate: template,
 		hostPortUsage:   scheduling.NewHostPortUsage(),
 		topology:        topology,
 	}
 }
 
-func (m *Node) Add(ctx context.Context, pod *v1.Pod) error {
+func (m *Machine) Add(ctx context.Context, pod *v1.Pod) error {
 	// Check Taints
 	if err := m.Taints.Tolerates(pod); err != nil {
 		return err
@@ -73,7 +73,7 @@ func (m *Node) Add(ctx context.Context, pod *v1.Pod) error {
 	nodeRequirements := scheduling.NewRequirements(m.Requirements.Values()...)
 	podRequirements := scheduling.NewPodRequirements(pod)
 
-	// Check Node Affinity Requirements
+	// Check Machine Affinity Requirements
 	if err := nodeRequirements.Compatible(podRequirements); err != nil {
 		return fmt.Errorf("incompatible requirements, %w", err)
 	}
@@ -108,13 +108,13 @@ func (m *Node) Add(ctx context.Context, pod *v1.Pod) error {
 
 // FinalizeScheduling is called once all scheduling has completed and allows the node to perform any cleanup
 // necessary before its requirements are used for instance launching
-func (m *Node) FinalizeScheduling() {
+func (m *Machine) FinalizeScheduling() {
 	// We need nodes to have hostnames for topology purposes, but we don't want to pass that node name on to consumers
 	// of the node as it will be displayed in error messages
 	delete(m.Requirements, v1.LabelHostname)
 }
 
-func (m *Node) String() string {
+func (m *Machine) String() string {
 	return fmt.Sprintf("node with %d pods requesting %s from types %s", len(m.Pods), resources.String(m.Requests),
 		InstanceTypeList(m.InstanceTypeOptions))
 }

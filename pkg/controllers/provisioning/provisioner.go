@@ -108,48 +108,18 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 		return reconcile.Result{}, nil
 	}
 
-	// We collect the nodes with their used capacities before we get the list of pending pods. This ensures that
-	// the node capacities we schedule against are always >= what the actual capacity is at any given instance. This
-	// prevents over-provisioning at the cost of potentially under-provisioning which will self-heal during the next
-	// scheduling loop when we launch a new node.  When this order is reversed, our node capacity may be reduced by pods
-	// that have bound which we then provision new un-needed capacity for.
-	// -------
-	// We don't consider the nodes that are MarkedForDeletion since this capacity shouldn't be considered
-	// as persistent capacity for the cluster (since it will soon be removed). Additionally, we are scheduling for
-	// the pods that are on these nodes so the MarkedForDeletion node capacity can't be considered.
-	nodes := p.cluster.Nodes()
-
-	// Get pods, exit if nothing to do
-	pendingPods, err := p.GetPendingPods(ctx)
-	if err != nil {
-		return reconcile.Result{}, err
-	}
-	// Get pods from nodes that are preparing for deletion
-	// We do this after getting the pending pods so that we undershoot if pods are
-	// actively migrating from a node that is being deleted
-	// NOTE: The assumption is that these nodes are cordoned and no additional pods will schedule to them
-	deletingNodePods, err := nodes.Deleting().Pods(ctx, p.kubeClient)
-	if err != nil {
-		return reconcile.Result{}, err
-	}
-	pods := append(pendingPods, deletingNodePods...)
-	if len(pods) == 0 {
-		return reconcile.Result{}, nil
-	}
-
 	// Schedule pods to potential nodes, exit if nothing to do
-	machines, err := p.schedule(ctx, pods, nodes.Active())
+	machines, _, err := p.Schedule(ctx)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
 	if len(machines) == 0 {
 		return reconcile.Result{}, nil
 	}
-
-	nodeNames, err := p.LaunchMachines(ctx, machines, RecordPodNomination)
+	machineNames, err := p.LaunchMachines(ctx, machines, RecordPodNomination)
 
 	// Any successfully created node is going to have the nodeName value filled in the slice
-	successfullyCreatedNodeCount := lo.CountBy(nodeNames, func(name string) bool { return name != "" })
+	successfullyCreatedNodeCount := lo.CountBy(machineNames, func(name string) bool { return name != "" })
 	metrics.NodesCreatedCounter.WithLabelValues(metrics.ProvisioningReason).Add(float64(successfullyCreatedNodeCount))
 
 	return reconcile.Result{}, err
@@ -157,7 +127,7 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 
 // LaunchMachines launches nodes passed into the function in parallel. It returns a slice of the successfully created node
 // names as well as a multierr of any errors that occurred while launching nodes
-func (p *Provisioner) LaunchMachines(ctx context.Context, machines []*scheduler.Node, opts ...functional.Option[LaunchOptions]) ([]string, error) {
+func (p *Provisioner) LaunchMachines(ctx context.Context, machines []*scheduler.Machine, opts ...functional.Option[LaunchOptions]) ([]string, error) {
 	// Launch capacity and bind pods
 	errs := make([]error, len(machines))
 	machineNames := make([]string, len(machines))
@@ -167,7 +137,7 @@ func (p *Provisioner) LaunchMachines(ctx context.Context, machines []*scheduler.
 		// register the provisioner on the context so we can pull it off for tagging purposes
 		// TODO: rethink this, maybe just pass the provisioner down instead of hiding it in the context?
 		ctx = injection.WithNamespacedName(ctx, types.NamespacedName{Name: machines[i].Labels[v1alpha5.ProvisionerNameLabelKey]})
-		if machineName, err := p.launch(ctx, machines[i], opts...); err != nil {
+		if machineName, err := p.Launch(ctx, machines[i], opts...); err != nil {
 			errs[i] = fmt.Errorf("launching machine, %w", err)
 		} else {
 			machineNames[i] = machineName
@@ -224,7 +194,6 @@ func (p *Provisioner) consolidationWarnings(ctx context.Context, po v1.Pod) {
 	}
 }
 
-// nolint: gocyclo
 func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNodes []*state.Node, opts scheduler.SchedulerOptions) (*scheduler.Scheduler, error) {
 	// Build node templates
 	var machines []*scheduler.MachineTemplate
@@ -293,20 +262,45 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	return scheduler.NewScheduler(ctx, p.kubeClient, machines, provisionerList.Items, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, opts), nil
 }
 
-func (p *Provisioner) schedule(ctx context.Context, pods []*v1.Pod, stateNodes []*state.Node) ([]*scheduler.Node, error) {
+func (p *Provisioner) Schedule(ctx context.Context) ([]*scheduler.Machine, []*scheduler.ExistingNode, error) {
 	defer metrics.Measure(schedulingDuration.WithLabelValues(injection.GetNamespacedName(ctx).Name))()
 
-	scheduler, err := p.NewScheduler(ctx, pods, stateNodes, scheduler.SchedulerOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("creating scheduler, %w", err)
-	}
+	// We collect the nodes with their used capacities before we get the list of pending pods. This ensures that
+	// the node capacities we schedule against are always >= what the actual capacity is at any given instance. This
+	// prevents over-provisioning at the cost of potentially under-provisioning which will self-heal during the next
+	// scheduling loop when we Launch a new node.  When this order is reversed, our node capacity may be reduced by pods
+	// that have bound which we then provision new un-needed capacity for.
+	// -------
+	// We don't consider the nodes that are MarkedForDeletion since this capacity shouldn't be considered
+	// as persistent capacity for the cluster (since it will soon be removed). Additionally, we are scheduling for
+	// the pods that are on these nodes so the MarkedForDeletion node capacity can't be considered.
+	nodes := p.cluster.Nodes()
 
-	// don't care about inflight scheduling results in this context
-	nodes, _, err := scheduler.Solve(ctx, pods)
-	return nodes, err
+	// Get pods, exit if nothing to do
+	pendingPods, err := p.GetPendingPods(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Get pods from nodes that are preparing for deletion
+	// We do this after getting the pending pods so that we undershoot if pods are
+	// actively migrating from a node that is being deleted
+	// NOTE: The assumption is that these nodes are cordoned and no additional pods will schedule to them
+	deletingNodePods, err := nodes.Deleting().Pods(ctx, p.kubeClient)
+	if err != nil {
+		return nil, nil, err
+	}
+	pods := append(pendingPods, deletingNodePods...)
+	if len(pods) == 0 {
+		return nil, nil, nil
+	}
+	scheduler, err := p.NewScheduler(ctx, pods, nodes.Active(), scheduler.SchedulerOptions{})
+	if err != nil {
+		return nil, nil, fmt.Errorf("creating scheduler, %w", err)
+	}
+	return scheduler.Solve(ctx, pods)
 }
 
-func (p *Provisioner) launch(ctx context.Context, machine *scheduler.Node, opts ...functional.Option[LaunchOptions]) (string, error) {
+func (p *Provisioner) Launch(ctx context.Context, machine *scheduler.Machine, opts ...functional.Option[LaunchOptions]) (string, error) {
 	// Check limits
 	latest := &v1alpha5.Provisioner{}
 	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: machine.ProvisionerName}, latest); err != nil {

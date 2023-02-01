@@ -39,7 +39,7 @@ import (
 
 //nolint:gocyclo
 func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
-	candidateNodes ...CandidateNode) (newNodes []*pscheduling.Node, allPodsScheduled bool, err error) {
+	candidateNodes ...CandidateNode) (newNodes []*pscheduling.Machine, allPodsScheduled bool, err error) {
 
 	candidateNodeNames := sets.NewString(lo.Map(candidateNodes, func(t CandidateNode, i int) string { return t.Name })...)
 	nodes := cluster.Nodes()
@@ -198,7 +198,7 @@ func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient clie
 		}
 
 		// Skip nodes that aren't initialized
-		// This also means that the real Node doesn't exist for it
+		// This also means that the real Machine doesn't exist for it
 		if !n.Initialized() {
 			return true
 		}
@@ -313,7 +313,7 @@ func clamp(min, val, max float64) float64 {
 	return val
 }
 
-// mapNodes maps from a list of *v1.Node to candidateNode
+// mapNodes maps from a list of *v1.Machine to candidateNode
 func mapNodes(nodes []*v1.Node, candidateNodes []CandidateNode) []CandidateNode {
 	verifyNodeNames := sets.NewString(lo.Map(nodes, func(t *v1.Node, i int) string { return t.Name })...)
 	var ret []CandidateNode

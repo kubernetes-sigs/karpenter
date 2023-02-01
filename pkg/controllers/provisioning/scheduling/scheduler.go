@@ -79,7 +79,7 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, machines []*Mac
 
 type Scheduler struct {
 	ctx                context.Context
-	newNodes           []*Node
+	newNodes           []*Machine
 	existingNodes      []*ExistingNode
 	machineTemplates   []*MachineTemplate
 	remainingResources map[string]v1.ResourceList // provisioner name -> remaining resources for that provisioner
@@ -93,7 +93,7 @@ type Scheduler struct {
 	kubeClient         client.Client
 }
 
-func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) ([]*Node, []*ExistingNode, error) {
+func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) ([]*Machine, []*ExistingNode, error) {
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
 	// issues including pods with affinity to another pod in the batch. We could topo-sort to solve this, but it wouldn't
 	// solve the problem of scheduling pods where a particular order is needed to prevent a max-skew violation. E.g. if we
@@ -243,7 +243,7 @@ func (s *Scheduler) calculateExistingMachines(stateNodes []*state.Node, daemonSe
 
 		// We don't use the status field and instead recompute the remaining resources to ensure we have a consistent view
 		// of the cluster during scheduling.  Depending on how node creation falls out, this will also work for cases where
-		// we don't create Node resources.
+		// we don't create Machine resources.
 		if _, ok := s.remainingResources[node.Labels()[v1alpha5.ProvisionerNameLabelKey]]; ok {
 			s.remainingResources[node.Labels()[v1alpha5.ProvisionerNameLabelKey]] = resources.Subtract(s.remainingResources[node.Labels()[v1alpha5.ProvisionerNameLabelKey]], node.Capacity())
 		}
