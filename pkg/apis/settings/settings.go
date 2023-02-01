@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/go-playground/validator/v10"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -39,8 +38,8 @@ var defaultSettings = &Settings{
 
 // +k8s:deepcopy-gen=true
 type Settings struct {
-	BatchMaxDuration      *metav1.Duration `validate:"required"`
-	BatchIdleDuration     *metav1.Duration `validate:"required"`
+	BatchMaxDuration      *metav1.Duration
+	BatchIdleDuration     *metav1.Duration
 	TTLAfterNotRegistered *metav1.Duration
 	// This feature flag is temporary and will be removed in the near future.
 	DriftEnabled bool
@@ -68,24 +67,21 @@ func (*Settings) Inject(ctx context.Context, cm *v1.ConfigMap) (context.Context,
 	return ToContext(ctx, s), nil
 }
 
-// Validate leverages struct tags with go-playground/validator so you can define a struct with custom
-// validation on fields i.e.
-//
-//	type ExampleStruct struct {
-//	    Example  metav1.Duration `json:"example" validate:"required,min=10m"`
-//	}
 func (in *Settings) Validate() (err error) {
-	validate := validator.New()
-	if in.BatchMaxDuration.Duration <= 0 {
+	if in.BatchMaxDuration == nil {
+		err = multierr.Append(err, fmt.Errorf("batchMaxDuration is required"))
+	} else if in.BatchMaxDuration.Duration <= 0 {
 		err = multierr.Append(err, fmt.Errorf("batchMaxDuration cannot be negative"))
 	}
-	if in.BatchIdleDuration.Duration <= 0 {
-		err = multierr.Append(err, fmt.Errorf("batchMaxDuration cannot be negative"))
+	if in.BatchIdleDuration == nil {
+		err = multierr.Append(err, fmt.Errorf("batchIdleDuration is required"))
+	} else if in.BatchIdleDuration.Duration <= 0 {
+		err = multierr.Append(err, fmt.Errorf("batchIdleDuration cannot be negative"))
 	}
-	if in.TTLAfterNotRegistered.Duration <= 0 {
+	if in.TTLAfterNotRegistered != nil && in.TTLAfterNotRegistered.Duration <= 0 {
 		err = multierr.Append(err, fmt.Errorf("ttlAfterNotRegistered cannot be negative"))
 	}
-	return multierr.Append(err, validate.Struct(in))
+	return err
 }
 
 // AsMetaDuration parses the value at key as a time.Duration into the target, if it exists.
@@ -93,6 +89,7 @@ func AsMetaDuration(key string, target **metav1.Duration) configmap.ParseFunc {
 	return func(data map[string]string) error {
 		if raw, ok := data[key]; ok {
 			if raw == "" {
+				*target = nil
 				return nil
 			}
 			val, err := time.ParseDuration(raw)
