@@ -191,11 +191,12 @@ var _ = Describe("Expiration", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
 
+		fakeClock.Step(10 * time.Minute)
+
 		// deprovisioning won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, nodeStateController, machineStateController, cloudProvider, 1, machine)
-		fakeClock.Step(10 * time.Minute)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1, machine)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
@@ -290,12 +291,12 @@ var _ = Describe("Expiration", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
 
-		// deprovisioning won't delete the old node until the new node is ready
+		fakeClock.Step(10 * time.Minute)
+
+		// deprovisioning won't delete the old machine until the new machine is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, nodeStateController, machineStateController, cloudProvider, 3, machine)
-		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 3, machine)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 

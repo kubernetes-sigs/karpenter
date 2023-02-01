@@ -181,7 +181,7 @@ var _ = Describe("Drift", func() {
 		// deprovisioning won't delete the old machine until the new machine is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, nodeStateController, machineStateController, cloudProvider, 1, machine)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1, machine)
 		fakeClock.Step(10 * time.Minute)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
@@ -285,7 +285,7 @@ var _ = Describe("Drift", func() {
 		// deprovisioning won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, nodeStateController, machineStateController, cloudProvider, 3, machine)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 3, machine)
 		fakeClock.Step(10 * time.Minute)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()

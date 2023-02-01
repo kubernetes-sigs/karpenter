@@ -67,12 +67,12 @@ func (l *Launch) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reco
 		}
 	}
 	l.cache.SetDefault(client.ObjectKeyFromObject(machine).String(), created)
-	populateMachineDetails(machine, created)
+	PopulateMachineDetails(machine, created)
 	machine.StatusConditions().MarkTrue(v1alpha5.MachineCreated)
 	return reconcile.Result{}, nil
 }
 
-func populateMachineDetails(machine, retrieved *v1alpha5.Machine) {
+func PopulateMachineDetails(machine, retrieved *v1alpha5.Machine) {
 	machine.Labels = lo.Assign(
 		scheduling.NewNodeSelectorRequirements(machine.Spec.Requirements...).Labels(),
 		machine.Labels,

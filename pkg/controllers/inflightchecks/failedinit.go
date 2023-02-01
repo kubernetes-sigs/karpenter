@@ -25,7 +25,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
-	machine2 "github.com/aws/karpenter-core/pkg/controllers/machine"
+	"github.com/aws/karpenter-core/pkg/controllers/machine"
 )
 
 // initFailureTime is the time after which we start reporting a node as having failed to initialize. This is set
@@ -43,24 +43,24 @@ func NewFailedInit(clk clock.Clock, provider cloudprovider.CloudProvider) Check 
 	return &FailedInit{clock: clk, provider: provider}
 }
 
-func (f FailedInit) Check(ctx context.Context, node *v1.Node, machine *v1alpha5.Machine, provisioner *v1alpha5.Provisioner, pdbs *deprovisioning.PDBLimits) ([]Issue, error) {
+func (f FailedInit) Check(ctx context.Context, node *v1.Node, m *v1alpha5.Machine, provisioner *v1alpha5.Provisioner, pdbs *deprovisioning.PDBLimits) ([]Issue, error) {
 	// ignore machines that are deleting
-	if !machine.DeletionTimestamp.IsZero() {
+	if !m.DeletionTimestamp.IsZero() {
 		return nil, nil
 	}
 	// machine is already initialized or isn't old enough
-	if machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).IsTrue() ||
-		machine.CreationTimestamp.Time.Add(initFailureTime).Before(f.clock.Now()) {
+	if m.StatusConditions().GetCondition(v1alpha5.MachineInitialized).IsTrue() ||
+		f.clock.Now().Before(m.CreationTimestamp.Time.Add(initFailureTime)) {
 		return nil, nil
 	}
 
 	// detect startup taints which should be removed
 	var result []Issue
-	if taint, ok := machine2.IsStartupTaintRemoved(node, machine); !ok {
+	if taint, ok := machine.IsStartupTaintRemoved(node, m); !ok {
 		result = append(result, Issue(fmt.Sprintf("Startup taint %q is still on the node", formatTaint(taint))))
 	}
 	// and extended resources which never registered
-	if resource, ok := machine2.RequestedResourcesRegistered(node, machine); !ok {
+	if resource, ok := machine.RequestedResourcesRegistered(node, m); !ok {
 		result = append(result, Issue(fmt.Sprintf("Expected resource %q didn't register on the node", resource)))
 	}
 	return result, nil

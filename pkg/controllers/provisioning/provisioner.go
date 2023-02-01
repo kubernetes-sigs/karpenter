@@ -255,7 +255,6 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	if err != nil {
 		return nil, fmt.Errorf("tracking topology counts, %w", err)
 	}
-
 	daemonSetPods, err := p.getDaemonSetPods(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("getting daemon pods, %w", err)

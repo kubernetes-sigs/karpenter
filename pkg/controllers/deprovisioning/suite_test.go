@@ -82,10 +82,11 @@ func TestAPIs(t *testing.T) {
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
 	ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: true}))
-	cloudProvider = fake.NewCloudProvider()
+	cloudProvider = fake.NewCloudProvider(env.Client)
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
+	machineStateController = informer.NewMachineController(env.Client, cluster)
 	provisioner = provisioning.NewProvisioner(ctx, env.Client, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster)
 })
 
@@ -262,7 +263,7 @@ var _ = Describe("Replace Nodes", func() {
 		// consolidation won't delete the old machine until the new machine is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, nodeStateController, machineStateController, cloudProvider, 1, machine)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1, machine)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		wg.Wait()
 
@@ -431,7 +432,7 @@ var _ = Describe("Replace Nodes", func() {
 		// consolidation won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, nodeStateController, machineStateController, cloudProvider, 1, machine)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1, machine)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		wg.Wait()
 
@@ -812,7 +813,7 @@ var _ = Describe("Replace Nodes", func() {
 		// consolidation won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, nodeStateController, machineStateController, cloudProvider, 1, machine)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1, machine)
 
 		var consolidationFinished atomic.Bool
 		go func() {
@@ -828,11 +829,11 @@ var _ = Describe("Replace Nodes", func() {
 		// and consolidation should still be running waiting on the node's deletion
 		Expect(consolidationFinished.Load()).To(BeFalse())
 
-		// fetch the latest node object and remove the finalizer
-		node = ExpectExists(ctx, env.Client, node)
-		ExpectFinalizersRemoved(ctx, env.Client, node)
+		// fetch the latest machine object and remove the finalizer
+		machine = ExpectExists(ctx, env.Client, machine)
+		ExpectFinalizersRemoved(ctx, env.Client, machine)
 
-		// consolidation should complete now that the finalizer on the node is gone and it can
+		// consolidation should complete now that the finalizer on the machine is gone and it can
 		// was actually deleted
 		Eventually(consolidationFinished.Load, 10*time.Second).Should(BeTrue())
 		ExpectNotFound(ctx, env.Client, machine)
@@ -1336,7 +1337,7 @@ var _ = Describe("Topology Consideration", func() {
 		// consolidation won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, nodeStateController, machineStateController, cloudProvider, 1, zone1Machine, zone2Machine, zone3Machine)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1, zone1Machine, zone2Machine, zone3Machine)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		wg.Wait()
 
@@ -1906,15 +1907,18 @@ var _ = Describe("Parallelization", func() {
 
 		// Run the processing loop in parallel in the background with environment context
 		var wg sync.WaitGroup
-		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, nodeStateController, machineStateController, cloudProvider, 1, machine)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1, machine)
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+		go func() {
+			defer GinkgoRecover()
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+		}()
 		wg.Wait()
 		ExpectMachineCount(ctx, env.Client, "==", 2)
 
 		// Add a new pending pod that should schedule while node is not yet deleted
 		pod = test.UnschedulablePod()
-		ExpectProvisioned(ctx, env.Client, cluster, provisioner, pod)
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, provisioner, pod)
 		nodes := &v1.NodeList{}
 		Expect(env.Client.List(ctx, nodes)).To(Succeed())
 		Expect(len(nodes.Items)).To(Equal(2))
@@ -1958,7 +1962,7 @@ var _ = Describe("Parallelization", func() {
 			pods = append(pods, pod)
 		}
 		ExpectApplied(ctx, env.Client, rs, prov)
-		ExpectProvisionedNoBinding(ctx, env.Client, provisioner, lo.Map(pods, func(p *v1.Pod, _ int) *v1.Pod { return p.DeepCopy() })...)
+		ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, provisioner, lo.Map(pods, func(p *v1.Pod, _ int) *v1.Pod { return p.DeepCopy() })...)
 
 		machineList := &v1alpha5.MachineList{}
 		Expect(env.Client.List(ctx, machineList))
@@ -1974,7 +1978,7 @@ var _ = Describe("Parallelization", func() {
 		// Mark the node for deletion and re-trigger reconciliation
 		oldNodeName := nodeList.Items[0].Name
 		cluster.MarkForDeletion(nodeList.Items[0].Name)
-		ExpectProvisionedNoBinding(ctx, env.Client, provisioner, lo.Map(pods, func(p *v1.Pod, _ int) *v1.Pod { return p.DeepCopy() })...)
+		ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, provisioner, lo.Map(pods, func(p *v1.Pod, _ int) *v1.Pod { return p.DeepCopy() })...)
 
 		// Make sure that the cluster state is aware of the current node state
 		Expect(env.Client.List(ctx, nodeList)).To(Succeed())
@@ -2112,7 +2116,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, nodeStateController, machineStateController, cloudProvider, 1, machine1, machine2, machine3)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1, machine1, machine2, machine3)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		wg.Wait()
 
@@ -2239,7 +2243,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine2))
 
 		var wg sync.WaitGroup
-		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, nodeStateController, machineStateController, cloudProvider, 1, machine1, machine2)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1, machine1, machine2)
 		ExpectTriggerVerifyAction(&wg)
 
 		wg.Add(1)
@@ -2317,7 +2321,7 @@ func fromInt(i int) *intstr.IntOrString {
 	return &v
 }
 
-func ExpectMakeNewMachinesReady(ctx context.Context, c client.Client, wg *sync.WaitGroup, nodeStateController, machineStateController controller.Controller,
+func ExpectMakeNewMachinesReady(ctx context.Context, c client.Client, wg *sync.WaitGroup, cluster *state.Cluster,
 	cloudProvider cloudprovider.CloudProvider, numNewMachines int, existingMachines ...*v1alpha5.Machine) {
 
 	existingMachineNames := sets.NewString(lo.Map(existingMachines, func(m *v1alpha5.Machine, _ int) string {
@@ -2343,24 +2347,8 @@ func ExpectMakeNewMachinesReady(ctx context.Context, c client.Client, wg *sync.W
 					if existingMachineNames.Has(m.Name) {
 						continue
 					}
-					resolved, err := cloudProvider.Create(ctx, m)
-					if err != nil {
-						continue
-					}
-
-					// Make the machine ready in the status conditions
-					m.Labels = lo.Assign(m.Labels, resolved.Labels)
-					m.Annotations = lo.Assign(m.Annotations, resolved.Annotations)
-					m.Status = resolved.Status
-					m.StatusConditions().MarkTrue(v1alpha5.MachineCreated)
-					m.StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
-					m.StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
-
-					// Mock the machine launch and node joining at the apiserver
-					node := test.MachineLinkedNode(m)
-					ExpectApplied(ctx, c, m)
-					ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-					ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(m))
+					ExpectMachineDeployedWithOffset(1, ctx, c, cluster, cloudProvider, m)
+					ExpectMakeMachinesReadyWithOffset(1, ctx, c, m)
 
 					machinesMadeReady++
 					existingMachineNames.Insert(m.Name)
@@ -2388,41 +2376,6 @@ func ExpectTriggerVerifyAction(wg *sync.WaitGroup) {
 		}
 		fakeClock.Step(45 * time.Second)
 	}()
-}
-
-func ExpectMakeMachinesReady(ctx context.Context, c client.Client, machines ...*v1alpha5.Machine) {
-	for _, machine := range machines {
-		m := &v1alpha5.Machine{}
-		ExpectWithOffset(1, c.Get(ctx, client.ObjectKeyFromObject(machine), m))
-
-		m.StatusConditions().MarkTrue(v1alpha5.MachineCreated)
-		m.StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
-		m.StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
-		ExpectApplied(ctx, env.Client, m)
-	}
-}
-
-func ExpectMakeNodesReady(ctx context.Context, c client.Client, nodes ...*v1.Node) {
-	for _, node := range nodes {
-		var n v1.Node
-		Expect(c.Get(ctx, client.ObjectKeyFromObject(node), &n)).To(Succeed())
-		n.Status.Phase = v1.NodeRunning
-		n.Status.Conditions = []v1.NodeCondition{
-			{
-				Type:               v1.NodeReady,
-				Status:             v1.ConditionTrue,
-				LastHeartbeatTime:  metav1.Now(),
-				LastTransitionTime: metav1.Now(),
-				Reason:             "KubeletReady",
-			},
-		}
-		if n.Labels == nil {
-			n.Labels = map[string]string{}
-		}
-		n.Labels[v1alpha5.LabelNodeInitialized] = "true"
-		n.Spec.Taints = nil
-		ExpectApplied(ctx, c, &n)
-	}
 }
 
 // cheapestOffering grabs the cheapest offering from the passed offerings

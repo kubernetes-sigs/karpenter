@@ -56,7 +56,7 @@ var _ = Describe("Liveness", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, machine)
+		ExpectApplied(ctx, env.Client, provisioner, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 		machine = ExpectExists(ctx, env.Client, machine)
 
@@ -87,7 +87,7 @@ var _ = Describe("Liveness", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, machine)
+		ExpectApplied(ctx, env.Client, provisioner, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 		machine = ExpectExists(ctx, env.Client, machine)
 

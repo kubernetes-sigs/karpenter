@@ -64,7 +64,7 @@ func IsOwnedByDaemonSet(pod *v1.Pod) bool {
 // IsOwnedByNode returns true if the pod is a static pod owned by a specific node
 func IsOwnedByNode(pod *v1.Pod) bool {
 	return IsOwnedBy(pod, []schema.GroupVersionKind{
-		{Version: "v1", Kind: "Machine"},
+		{Version: "v1", Kind: "Node"},
 	})
 }
 

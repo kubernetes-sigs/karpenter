@@ -66,7 +66,7 @@ var _ = BeforeSuite(func() {
 	}))
 	ctx = settings.ToContext(ctx, test.Settings())
 
-	cloudProvider = fake.NewCloudProvider()
+	cloudProvider = fake.NewCloudProvider(env.Client)
 	term = terminator.NewTerminator(fakeClock, env.Client, cloudProvider, terminator.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{})))
 	machineController = machine.NewController(fakeClock, env.Client, cloudProvider, term, events.NewRecorder(&record.FakeRecorder{}))
 })
@@ -95,7 +95,7 @@ var _ = Describe("Finalizer", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, machine)
+		ExpectApplied(ctx, env.Client, provisioner, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)

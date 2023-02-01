@@ -233,8 +233,8 @@ func (c *Controller) launchReplacementMachines(ctx context.Context, action Comma
 	workqueue.ParallelizeUntil(ctx, len(machineNames), len(machineNames), func(i int) {
 		// Wait for the node to be ready
 		var once sync.Once
-		machine := &v1alpha5.Machine{}
 		if err = retry.Do(func() error {
+			machine := &v1alpha5.Machine{}
 			if err = c.kubeClient.Get(ctx, client.ObjectKey{Name: machineNames[i]}, machine); err != nil {
 				return fmt.Errorf("getting node, %w", err)
 			}

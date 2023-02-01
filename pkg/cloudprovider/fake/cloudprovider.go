@@ -25,7 +25,9 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -38,6 +40,7 @@ import (
 var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)
 
 type CloudProvider struct {
+	kubeClient    client.Client
 	InstanceTypes []*cloudprovider.InstanceType
 
 	mu sync.RWMutex
@@ -49,8 +52,9 @@ type CloudProvider struct {
 	Drifted            bool
 }
 
-func NewCloudProvider() *CloudProvider {
+func NewCloudProvider(kubeClient client.Client) *CloudProvider {
 	return &CloudProvider{
+		kubeClient:         kubeClient,
 		AllowedCreateCalls: math.MaxInt,
 		CreatedMachines:    map[string]*v1alpha5.Machine{},
 	}
@@ -81,8 +85,12 @@ func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (
 		return &v1alpha5.Machine{}, fmt.Errorf("erroring as number of AllowedCreateCalls has been exceeded")
 	}
 
+	provisioner := &v1alpha5.Provisioner{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: machine.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
+		return nil, fmt.Errorf("getting provisioner to generate instance types, %w", err)
+	}
 	reqs := scheduling.NewNodeSelectorRequirements(machine.Spec.Requirements...)
-	instanceTypes := lo.Filter(lo.Must(c.GetInstanceTypes(ctx, &v1alpha5.Provisioner{})), func(i *cloudprovider.InstanceType, _ int) bool {
+	instanceTypes := lo.Filter(lo.Must(c.GetInstanceTypes(ctx, provisioner)), func(i *cloudprovider.InstanceType, _ int) bool {
 		return reqs.Compatible(i.Requirements) == nil &&
 			len(i.Offerings.Requirements(reqs).Available()) > 0 &&
 			resources.Fits(machine.Spec.Resources.Requests, i.Allocatable())
@@ -112,15 +120,15 @@ func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (
 			break
 		}
 	}
-	name := test.RandomName()
 	created := &v1alpha5.Machine{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   name,
-			Labels: labels,
+			Name:        machine.Name,
+			Labels:      lo.Assign(labels, machine.Labels),
+			Annotations: machine.Annotations,
 		},
 		Spec: *machine.Spec.DeepCopy(),
 		Status: v1alpha5.MachineStatus{
-			ProviderID:  test.ProviderID(name),
+			ProviderID:  test.RandomProviderID(),
 			Capacity:    functional.FilterMap(instanceType.Capacity, func(_ v1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
 			Allocatable: functional.FilterMap(instanceType.Allocatable(), func(_ v1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
 		},

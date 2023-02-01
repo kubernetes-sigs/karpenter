@@ -106,7 +106,7 @@ func NewNode() *Node {
 }
 
 func (in *Node) Name() string {
-	if !in.Initialized() && in.Machine != nil {
+	if in.Machine != nil && !in.Machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
 		return in.Machine.Name
 	}
 	return in.Node.Name
@@ -130,7 +130,7 @@ func (in *Node) HostName() string {
 func (in *Node) Annotations() map[string]string {
 	// If the machine exists and the state node isn't initialized
 	// use the machine representation of the annotations
-	if !in.Initialized() && in.Machine != nil {
+	if in.Machine != nil && !in.Machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
 		return in.Machine.Annotations
 	}
 	return in.Node.Annotations
@@ -139,7 +139,7 @@ func (in *Node) Annotations() map[string]string {
 func (in *Node) Labels() map[string]string {
 	// If the machine exists and the state node isn't initialized
 	// use the machine representation of the labels
-	if !in.Initialized() && in.Machine != nil {
+	if in.Machine != nil && !in.Machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
 		return in.Machine.Labels
 	}
 	return in.Node.Labels
@@ -175,9 +175,6 @@ func (in *Node) Taints() []v1.Taint {
 	})
 }
 
-// Initialized always implies that the node is there. If something is initialized, we are guaranteed that the Node
-// exists inside of cluster state. If the node is not initialized, it is possible that it is represented by a Node or
-// by a Machine inside of cluster state
 func (in *Node) Initialized() bool {
 	if in.Machine != nil {
 		if in.Node != nil && in.Machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).IsTrue() {

@@ -66,7 +66,7 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
 
 	ctx = settings.ToContext(ctx, test.Settings())
-	cloudProvider = fake.NewCloudProvider()
+	cloudProvider = fake.NewCloudProvider(env.Client)
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)

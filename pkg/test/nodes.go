@@ -72,6 +72,7 @@ func MachineLinkedNode(machine *v1alpha5.Machine) *v1.Node {
 				Labels:      machine.Labels,
 				Annotations: machine.Annotations,
 			},
+			Taints:      append(machine.Spec.Taints, machine.Spec.StartupTaints...),
 			Capacity:    machine.Status.Capacity,
 			Allocatable: machine.Status.Allocatable,
 			ProviderID:  machine.Status.ProviderID,
