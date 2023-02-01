@@ -36,7 +36,6 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/operator/injection"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/utils/functional"
 	"github.com/aws/karpenter-core/pkg/utils/pretty"
@@ -138,9 +137,6 @@ func (p *Provisioner) LaunchMachines(ctx context.Context, machines []*scheduler.
 	workqueue.ParallelizeUntil(ctx, len(machines), len(machines), func(i int) {
 		// create a new context to avoid a data race on the ctx variable
 		ctx := logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", machines[i].Labels[v1alpha5.ProvisionerNameLabelKey]))
-		// register the provisioner on the context so we can pull it off for tagging purposes
-		// TODO: rethink this, maybe just pass the provisioner down instead of hiding it in the context?
-		ctx = injection.WithNamespacedName(ctx, types.NamespacedName{Name: machines[i].Labels[v1alpha5.ProvisionerNameLabelKey]})
 		if machineName, err := p.Launch(ctx, machines[i], opts...); err != nil {
 			errs[i] = fmt.Errorf("launching machine, %w", err)
 		} else {
@@ -268,7 +264,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) ([]*scheduler.Machine, []*scheduler.ExistingNode, error) {
-	defer metrics.Measure(schedulingDuration.WithLabelValues(injection.GetNamespacedName(ctx).Name))()
+	defer metrics.Measure(schedulingDuration)()
 
 	// We collect the nodes with their used capacities before we get the list of pending pods. This ensures that
 	// the node capacities we schedule against are always >= what the actual capacity is at any given instance. This
@@ -410,7 +406,7 @@ func validateNodeSelectorTerm(term v1.NodeSelectorTerm) (errs error) {
 	return errs
 }
 
-var schedulingDuration = prometheus.NewHistogramVec(
+var schedulingDuration = prometheus.NewHistogram(
 	prometheus.HistogramOpts{
 		Namespace: metrics.Namespace,
 		Subsystem: "provisioner",
@@ -418,7 +414,6 @@ var schedulingDuration = prometheus.NewHistogramVec(
 		Help:      "Duration of scheduling process in seconds. Broken down by provisioner and error.",
 		Buckets:   metrics.DurationBuckets(),
 	},
-	[]string{metrics.ProvisionerLabel},
 )
 
 func init() {

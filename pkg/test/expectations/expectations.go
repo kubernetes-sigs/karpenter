@@ -48,7 +48,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/metrics"
-	"github.com/aws/karpenter-core/pkg/operator/injection"
 )
 
 const (
@@ -94,13 +93,6 @@ func ExpectNotFoundWithOffset(offset int, ctx context.Context, c client.Client, 
 			return fmt.Sprintf("expected %s to be deleted, but it still exists", client.ObjectKeyFromObject(object))
 		})
 	}
-}
-
-func ExpectMachineScheduled(recorder *test.EventRecorder, pod *v1.Pod) *v1alpha5.Machine {
-	binding := recorder.GetBinding(pod)
-	ExpectWithOffset(1, binding).ToNot(BeNil())
-	ExpectWithOffset(1, binding.Machine).ToNot(BeNil())
-	return binding.Machine
 }
 
 func ExpectScheduled(ctx context.Context, c client.Client, pod *v1.Pod) *v1.Node {
@@ -256,7 +248,6 @@ func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c cli
 	machines, nodes, _ := provisioner.Schedule(ctx)
 	bindings := map[*v1.Pod]*v1.Node{}
 	for _, m := range machines {
-		ctx = injection.WithNamespacedName(ctx, types.NamespacedName{Name: m.Labels[v1alpha5.ProvisionerNameLabelKey]})
 		// TODO: Check the error on the provisioner launch
 		name, err := provisioner.Launch(ctx, m, provisioning.WithReason(metrics.ProvisioningReason))
 		if err != nil {
@@ -272,16 +263,6 @@ func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c cli
 		}
 	}
 	return bindings
-}
-
-func ExpectMachineLaunched(ctx context.Context, c client.Client, machineController, nodeStateController, machineStateController corecontroller.Controller, machine *v1alpha5.Machine) {
-	ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-	machine = ExpectExists(ctx, c, machine)
-	node := test.MachineLinkedNode(machine)
-	ExpectAppliedWithOffset(1, ctx, c, node)
-	ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-	ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-	ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
 }
 
 func ExpectReconcileSucceeded(ctx context.Context, reconciler reconcile.Reconciler, key client.ObjectKey) reconcile.Result {
