@@ -79,7 +79,7 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, machines []*Mac
 
 type Scheduler struct {
 	ctx                context.Context
-	newNodes           []*Node
+	newNodes           []*Machine
 	existingNodes      []*ExistingNode
 	machineTemplates   []*MachineTemplate
 	remainingResources map[string]v1.ResourceList // provisioner name -> remaining resources for that provisioner
@@ -93,7 +93,7 @@ type Scheduler struct {
 	kubeClient         client.Client
 }
 
-func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) ([]*Node, []*ExistingNode, error) {
+func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) ([]*Machine, []*ExistingNode, error) {
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
 	// issues including pods with affinity to another pod in the batch. We could topo-sort to solve this, but it wouldn't
 	// solve the problem of scheduling pods where a particular order is needed to prevent a max-skew violation. E.g. if we
@@ -208,7 +208,7 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 			}
 		}
 
-		node := NewNode(nodeTemplate, s.topology, s.daemonOverhead[nodeTemplate], instanceTypes)
+		node := NewMachine(nodeTemplate, s.topology, s.daemonOverhead[nodeTemplate], instanceTypes)
 		if err := node.Add(ctx, pod); err != nil {
 			errs = multierr.Append(errs, fmt.Errorf("incompatible with provisioner %q, %w", nodeTemplate.ProvisionerName, err))
 			continue
