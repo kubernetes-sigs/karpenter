@@ -32,7 +32,7 @@ func (l *Limits) ExceededBy(resources v1.ResourceList) error {
 	}
 	for resourceName, usage := range resources {
 		if limit, ok := l.Resources[resourceName]; ok {
-			if usage.Cmp(limit) >= 0 {
+			if usage.Cmp(limit) > 0 {
 				return fmt.Errorf("%s resource usage of %v exceeds limit of %v", resourceName, usage.AsDec(), limit.AsDec())
 			}
 		}
