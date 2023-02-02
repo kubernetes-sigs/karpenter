@@ -110,7 +110,8 @@ type ProviderRef struct {
 	// Kind of the referent; More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds"
 	Kind string `json:"kind,omitempty"`
 	// Name of the referent; More info: http://kubernetes.io/docs/user-guide/identifiers#names
-	Name string `json:"name,omitempty"`
+	// +required
+	Name string `json:"name"`
 	// API version of the referent
 	// +optional
 	APIVersion string `json:"apiVersion,omitempty"`
