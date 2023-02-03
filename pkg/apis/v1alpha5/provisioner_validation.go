@@ -185,9 +185,13 @@ func (s *ProvisionerSpec) validateRequirements() (errs *apis.FieldError) {
 	return errs
 }
 
+// validateProvider checks if exactly one of provider and providerRef are set
 func (s *ProvisionerSpec) validateProvider() *apis.FieldError {
 	if s.Provider != nil && s.ProviderRef != nil {
 		return apis.ErrMultipleOneOf(providerPath, providerRefPath)
+	}
+	if s.Provider == nil && s.ProviderRef == nil {
+		return apis.ErrMissingOneOf(providerPath, providerRefPath)
 	}
 	return nil
 }
