@@ -36,7 +36,7 @@ import (
 
 var _ = Describe("Drift", func() {
 	It("should ignore drifted nodes if the feature flag is disabled", func() {
-		ctx = settings.ToContext(ctx, test.Settings(test.SettingsOptions{DriftEnabled: false}))
+		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
 		prov := test.Provisioner()
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{

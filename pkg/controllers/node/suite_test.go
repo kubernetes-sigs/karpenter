@@ -78,7 +78,7 @@ var _ = Describe("Controller", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: test.RandomName()},
 			Spec:       v1alpha5.ProvisionerSpec{},
 		}
-		ctx = settings.ToContext(ctx, test.Settings(test.SettingsOptions{DriftEnabled: true}))
+		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: true}))
 	})
 
 	AfterEach(func() {
@@ -89,7 +89,7 @@ var _ = Describe("Controller", func() {
 	Context("Drift", func() {
 		It("should not detect drift if the feature flag is disabled", func() {
 			cp.Drifted = true
-			ctx = settings.ToContext(ctx, test.Settings(test.SettingsOptions{DriftEnabled: false}))
+			ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
 			node := test.Node(test.NodeOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{

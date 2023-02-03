@@ -46,6 +46,7 @@ var _ = Describe("Validation", func() {
 		Expect(s.BatchMaxDuration.Duration).To(Equal(time.Second * 10))
 		Expect(s.BatchIdleDuration.Duration).To(Equal(time.Second))
 		Expect(s.DriftEnabled).To(BeFalse())
+		Expect(s.TTLAfterNotRegistered.Duration).To(Equal(time.Minute * 15))
 	})
 	It("should succeed to set custom values", func() {
 		cm := &v1.ConfigMap{
@@ -53,6 +54,7 @@ var _ = Describe("Validation", func() {
 				"batchMaxDuration":          "30s",
 				"batchIdleDuration":         "5s",
 				"featureGates.driftEnabled": "true",
+				"ttlAfterNotRegistered":     "30m",
 			},
 		}
 		ctx, err := (&settings.Settings{}).Inject(ctx, cm)
@@ -61,8 +63,26 @@ var _ = Describe("Validation", func() {
 		Expect(s.BatchMaxDuration.Duration).To(Equal(time.Second * 30))
 		Expect(s.BatchIdleDuration.Duration).To(Equal(time.Second * 5))
 		Expect(s.DriftEnabled).To(BeTrue())
+		Expect(s.TTLAfterNotRegistered.Duration).To(Equal(time.Minute * 30))
 	})
-	It("should fail validation with panic when batchMaxDuration is negative", func() {
+	It("should succeed to disable ttlAfterNotRegistered", func() {
+		cm := &v1.ConfigMap{
+			Data: map[string]string{
+				"batchMaxDuration":          "30s",
+				"batchIdleDuration":         "5s",
+				"featureGates.driftEnabled": "true",
+				"ttlAfterNotRegistered":     "",
+			},
+		}
+		ctx, err := (&settings.Settings{}).Inject(ctx, cm)
+		Expect(err).ToNot(HaveOccurred())
+		s := settings.FromContext(ctx)
+		Expect(s.BatchMaxDuration.Duration).To(Equal(time.Second * 30))
+		Expect(s.BatchIdleDuration.Duration).To(Equal(time.Second * 5))
+		Expect(s.DriftEnabled).To(BeTrue())
+		Expect(s.TTLAfterNotRegistered).To(BeNil())
+	})
+	It("should fail validation when batchMaxDuration is negative", func() {
 		cm := &v1.ConfigMap{
 			Data: map[string]string{
 				"batchMaxDuration": "-10s",
@@ -71,7 +91,16 @@ var _ = Describe("Validation", func() {
 		_, err := (&settings.Settings{}).Inject(ctx, cm)
 		Expect(err).To(HaveOccurred())
 	})
-	It("should fail validation with panic when batchIdleDuration is negative", func() {
+	It("should fail validation when batchMaxDuration is set to empty", func() {
+		cm := &v1.ConfigMap{
+			Data: map[string]string{
+				"batchMaxDuration": "",
+			},
+		}
+		_, err := (&settings.Settings{}).Inject(ctx, cm)
+		Expect(err).To(HaveOccurred())
+	})
+	It("should fail validation when batchIdleDuration is negative", func() {
 		cm := &v1.ConfigMap{
 			Data: map[string]string{
 				"batchIdleDuration": "-1s",
@@ -80,10 +109,28 @@ var _ = Describe("Validation", func() {
 		_, err := (&settings.Settings{}).Inject(ctx, cm)
 		Expect(err).To(HaveOccurred())
 	})
-	It("should fail validation with panic when driftEnabled is not a valid boolean value", func() {
+	It("should fail validation when batchIdleDuration is set to empty", func() {
+		cm := &v1.ConfigMap{
+			Data: map[string]string{
+				"batchMaxDuration": "",
+			},
+		}
+		_, err := (&settings.Settings{}).Inject(ctx, cm)
+		Expect(err).To(HaveOccurred())
+	})
+	It("should fail validation when driftEnabled is not a valid boolean value", func() {
 		cm := &v1.ConfigMap{
 			Data: map[string]string{
 				"featureGates.driftEnabled": "foobar",
+			},
+		}
+		_, err := (&settings.Settings{}).Inject(ctx, cm)
+		Expect(err).To(HaveOccurred())
+	})
+	It("should fail validation when ttlAfterNotRegistered is negative", func() {
+		cm := &v1.ConfigMap{
+			Data: map[string]string{
+				"ttlAfterNotRegistered": "-10s",
 			},
 		}
 		_, err := (&settings.Settings{}).Inject(ctx, cm)
