@@ -17,6 +17,7 @@ package inflightchecks_test
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -47,7 +48,7 @@ var inflightController controller.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
 var cp *fake.CloudProvider
-var recorder *test.EventRecorder
+var recorder *FakeEventRecorder
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -60,7 +61,7 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
 	ctx = settings.ToContext(ctx, test.Settings())
 	cp = &fake.CloudProvider{}
-	recorder = test.NewEventRecorder()
+	recorder = NewFakeEventRecorder()
 	inflightController = inflightchecks.NewController(fakeClock, env.Client, recorder, cp)
 })
 
@@ -182,6 +183,49 @@ var _ = Describe("Controller", func() {
 		})
 	})
 })
+
+var _ events.Recorder = (*FakeEventRecorder)(nil)
+
+// FakeEventRecorder is a mock event recorder that is used to facilitate testing.
+type FakeEventRecorder struct {
+	mu     sync.RWMutex
+	calls  map[string]int
+	events []events.Event
+}
+
+func NewFakeEventRecorder() *FakeEventRecorder {
+	return &FakeEventRecorder{
+		calls: map[string]int{},
+	}
+}
+
+func (e *FakeEventRecorder) Publish(evt events.Event) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.events = append(e.events, evt)
+	e.calls[evt.Reason]++
+}
+
+func (e *FakeEventRecorder) Calls(reason string) int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.calls[reason]
+}
+
+func (e *FakeEventRecorder) Reset() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.events = nil
+	e.calls = map[string]int{}
+}
+
+func (e *FakeEventRecorder) ForEachEvent(f func(evt events.Event)) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	for _, e := range e.events {
+		f(e)
+	}
+}
 
 func ExpectDetectedEvent(msg string) {
 	foundEvent := false

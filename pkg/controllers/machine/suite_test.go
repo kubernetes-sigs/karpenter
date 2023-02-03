@@ -25,6 +25,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
 	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -36,6 +37,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/machine"
 	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
+	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
@@ -65,9 +67,8 @@ var _ = BeforeSuite(func() {
 	ctx = settings.ToContext(ctx, test.Settings())
 
 	cloudProvider = fake.NewCloudProvider()
-	recorder := test.NewEventRecorder()
-	terminator := terminator.NewTerminator(fakeClock, env.Client, cloudProvider, terminator.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), recorder))
-	machineController = machine.NewController(fakeClock, env.Client, cloudProvider, terminator, recorder)
+	terminator := terminator.NewTerminator(fakeClock, env.Client, cloudProvider, terminator.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{})))
+	machineController = machine.NewController(fakeClock, env.Client, cloudProvider, terminator, events.NewRecorder(&record.FakeRecorder{}))
 })
 
 var _ = AfterSuite(func() {

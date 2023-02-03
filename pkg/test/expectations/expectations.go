@@ -18,7 +18,6 @@ package expectations
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"reflect"
 	"sync"
 	"time"
@@ -36,6 +35,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -47,8 +47,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/test"
+	"github.com/aws/karpenter-core/pkg/operator/injection"
 )
 
 const (
@@ -214,52 +213,48 @@ func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objectLists .
 	}
 }
 
-func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Cluster, recorder *test.EventRecorder, controller corecontroller.Controller,
-	provisioner *provisioning.Provisioner, pods ...*v1.Pod) (result []*v1.Pod) {
-
-	ExpectProvisionedNoBindingWithOffset(1, ctx, c, controller, provisioner, pods...)
-
-	recorder.ForEachBinding(func(pod *v1.Pod, node *v1.Node) {
-		ExpectManualBindingWithOffset(1, ctx, c, pod, node)
-	})
-	// reset bindings, so we don't try to bind these same pods again if a new provisioning is performed in the same test
-	recorder.ResetBindings()
-
-	// Update objects after reconciling
-	for _, pod := range pods {
-		result = append(result, ExpectPodExistsWithOffset(1, ctx, c, pod.GetName(), pod.GetNamespace()))
-		Expect(cluster.UpdatePod(ctx, result[len(result)-1])).WithOffset(1).To(Succeed()) // track pod bindings
+func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, pods ...*v1.Pod) map[*v1.Pod]*v1.Node {
+	bindings := ExpectProvisionedNoBindingWithOffset(1, ctx, c, provisioner, pods...)
+	podNames := sets.NewString(lo.Map(pods, func(p *v1.Pod, _ int) string { return p.Name })...)
+	for pod, node := range bindings {
+		// Only bind the pods that are passed through
+		if podNames.Has(pod.Name) {
+			ExpectManualBindingWithOffset(1, ctx, c, pod, node)
+			ExpectWithOffset(1, cluster.UpdatePod(ctx, pod)).To(Succeed()) // track pod bindings
+		}
 	}
-	return
+	return bindings
 }
 
-func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, controller corecontroller.Controller, provisioner *provisioning.Provisioner, pods ...*v1.Pod) (result []*v1.Pod) {
-	return ExpectProvisionedNoBindingWithOffset(1, ctx, c, controller, provisioner, pods...)
+func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, provisioner *provisioning.Provisioner, pods ...*v1.Pod) map[*v1.Pod]*v1.Node {
+	return ExpectProvisionedNoBindingWithOffset(1, ctx, c, provisioner, pods...)
 }
 
-func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c client.Client, controller corecontroller.Controller, provisioner *provisioning.Provisioner, pods ...*v1.Pod) (result []*v1.Pod) {
+func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c client.Client, provisioner *provisioning.Provisioner, pods ...*v1.Pod) map[*v1.Pod]*v1.Node {
 	// Persist objects
 	for _, pod := range pods {
 		ExpectAppliedWithOffset(offset+1, ctx, c, pod)
 	}
-
-	// shuffle the pods to try to detect any issues where we rely on pod order within a batch, we shuffle a copy of
-	// the slice so we can return the provisioned pods in the same order that the test supplied them for consistency
-	unorderedPods := append([]*v1.Pod{}, pods...)
-	r := rand.New(rand.NewSource(GinkgoRandomSeed())) //nolint
-	r.Shuffle(len(unorderedPods), func(i, j int) { unorderedPods[i], unorderedPods[j] = unorderedPods[j], unorderedPods[i] })
-	for _, pod := range unorderedPods {
-		_, _ = controller.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(pod)})
+	// TODO: Check the error on the provisioner scheduling round
+	machines, nodes, _ := provisioner.Schedule(ctx)
+	bindings := map[*v1.Pod]*v1.Node{}
+	for _, m := range machines {
+		ctx = injection.WithNamespacedName(ctx, types.NamespacedName{Name: m.Labels[v1alpha5.ProvisionerNameLabelKey]})
+		// TODO: Check the error on the provisioner launch
+		name, err := provisioner.Launch(ctx, m)
+		if err != nil {
+			return bindings
+		}
+		for _, pod := range m.Pods {
+			bindings[pod] = ExpectNodeExistsWithOffset(offset+1, ctx, c, name)
+		}
 	}
-
-	// TODO: Check the error on the provisioner reconcile
-	_, _ = provisioner.Reconcile(ctx, reconcile.Request{})
-
-	// Update objects after reconciling
-	for _, pod := range pods {
-		result = append(result, ExpectPodExistsWithOffset(offset+1, ctx, c, pod.GetName(), pod.GetNamespace()))
+	for _, node := range nodes {
+		for _, pod := range node.Pods {
+			bindings[pod] = node.Node.Node
+		}
 	}
-	return
+	return bindings
 }
 
 func ExpectReconcileSucceeded(ctx context.Context, reconciler reconcile.Reconciler, key client.ObjectKey) reconcile.Result {

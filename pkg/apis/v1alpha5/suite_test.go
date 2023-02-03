@@ -482,3 +482,33 @@ var _ = Describe("Validation", func() {
 		})
 	})
 })
+
+var _ = Describe("Limits", func() {
+	var provisioner *Provisioner
+
+	BeforeEach(func() {
+		provisioner = &Provisioner{
+			ObjectMeta: metav1.ObjectMeta{Name: strings.ToLower(randomdata.SillyName())},
+			Spec: ProvisionerSpec{
+				Limits: &Limits{
+					Resources: v1.ResourceList{
+						"cpu": resource.MustParse("16"),
+					},
+				},
+			},
+		}
+	})
+
+	It("should work when usage is lower than limit", func() {
+		provisioner.Status.Resources = v1.ResourceList{"cpu": resource.MustParse("15")}
+		Expect(provisioner.Spec.Limits.ExceededBy(provisioner.Status.Resources)).To(Succeed())
+	})
+	It("should work when usage is equal to limit", func() {
+		provisioner.Status.Resources = v1.ResourceList{"cpu": resource.MustParse("16")}
+		Expect(provisioner.Spec.Limits.ExceededBy(provisioner.Status.Resources)).To(Succeed())
+	})
+	It("should fail when usage is higher than limit", func() {
+		provisioner.Status.Resources = v1.ResourceList{"cpu": resource.MustParse("17")}
+		Expect(provisioner.Spec.Limits.ExceededBy(provisioner.Status.Resources)).To(MatchError("cpu resource usage of 17 exceeds limit of 16"))
+	})
+})

@@ -462,7 +462,7 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 	n, ok := c.nodes[c.nameToProviderID[pod.Spec.NodeName]]
 	if !ok {
 		// the node must exist for us to update the resource requests on the node
-		return errors.NewNotFound(schema.GroupResource{Resource: "Node"}, pod.Spec.NodeName)
+		return errors.NewNotFound(schema.GroupResource{Resource: "Machine"}, pod.Spec.NodeName)
 	}
 	c.cleanupOldBindings(pod)
 	n.updateForPod(ctx, pod)

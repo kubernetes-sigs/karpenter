@@ -11,14 +11,14 @@ require (
 	github.com/go-playground/validator/v10 v10.11.2
 	github.com/imdario/mergo v0.3.13
 	github.com/mitchellh/hashstructure/v2 v2.0.2
-	github.com/onsi/ginkgo/v2 v2.7.0
+	github.com/onsi/ginkgo/v2 v2.8.0
 	github.com/onsi/gomega v1.26.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/prometheus/client_golang v1.14.0
 	github.com/prometheus/client_model v0.3.0
-	github.com/samber/lo v1.34.0
+	github.com/samber/lo v1.37.0
 	go.uber.org/multierr v1.9.0
-	go.uber.org/zap v1.23.0
+	go.uber.org/zap v1.24.0
 	golang.org/x/time v0.0.0-20220609170525-579cf78fd858
 	k8s.io/api v0.25.4
 	k8s.io/apiextensions-apiserver v0.25.4

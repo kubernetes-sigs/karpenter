@@ -32,6 +32,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
 	. "knative.dev/pkg/logging/testing"
 	"knative.dev/pkg/ptr"
@@ -47,6 +48,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
+	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
@@ -60,7 +62,6 @@ var deprovisioningController *deprovisioning.Controller
 var provisioningController controller.Controller
 var provisioner *provisioning.Provisioner
 var cloudProvider *fake.CloudProvider
-var recorder *test.EventRecorder
 var nodeStateController controller.Controller
 var fakeClock *clock.FakeClock
 var onDemandInstances []*cloudprovider.InstanceType
@@ -82,9 +83,8 @@ var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
-	recorder = test.NewEventRecorder()
-	provisioner = provisioning.NewProvisioner(ctx, env.Client, env.KubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
-	provisioningController = provisioning.NewController(env.Client, provisioner, recorder)
+	provisioner = provisioning.NewProvisioner(ctx, env.Client, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster)
+	provisioningController = provisioning.NewController(env.Client, provisioner, events.NewRecorder(&record.FakeRecorder{}))
 })
 
 var _ = AfterSuite(func() {
@@ -122,13 +122,12 @@ var _ = BeforeEach(func() {
 	mostExpensiveInstance = onDemandInstances[len(onDemandInstances)-1]
 	mostExpensiveOffering = mostExpensiveInstance.Offerings[0]
 
-	recorder.Reset()
 	// ensure any waiters on our clock are allowed to proceed before resetting our clock time
 	for fakeClock.HasWaiters() {
 		fakeClock.Step(1 * time.Minute)
 	}
 	fakeClock.SetTime(time.Now())
-	deprovisioningController = deprovisioning.NewController(fakeClock, env.Client, provisioner, cloudProvider, recorder, cluster)
+	deprovisioningController = deprovisioning.NewController(fakeClock, env.Client, provisioner, cloudProvider, events.NewRecorder(&record.FakeRecorder{}), cluster)
 	// Reset Feature Flags to test defaults
 	ctx = settings.ToContext(ctx, test.Settings(test.SettingsOptions{DriftEnabled: true}))
 })
@@ -1793,11 +1792,12 @@ var _ = Describe("Parallelization", func() {
 		}, time.Second*10).Should(Succeed())
 		wg.Wait()
 		// Add a new pending pod that should schedule while node is not yet deleted
-		pods := ExpectProvisionedNoBinding(ctx, env.Client, provisioningController, provisioner, test.UnschedulablePod())
+		pod = test.UnschedulablePod()
+		ExpectProvisioned(ctx, env.Client, cluster, provisioner, pod)
 		nodes := &v1.NodeList{}
 		Expect(env.Client.List(ctx, nodes)).To(Succeed())
 		Expect(len(nodes.Items)).To(Equal(2))
-		Expect(pods[0].Spec.NodeName).NotTo(Equal(node.Name))
+		ExpectScheduled(ctx, env.Client, pod)
 	})
 	It("should not consolidate a node that is launched for pods on a deleting node", func() {
 		labels := map[string]string{
@@ -1838,7 +1838,7 @@ var _ = Describe("Parallelization", func() {
 			pods = append(pods, pod)
 		}
 		ExpectApplied(ctx, env.Client, rs, prov)
-		ExpectProvisionedNoBinding(ctx, env.Client, provisioningController, provisioner, lo.Map(pods, func(p *v1.Pod, _ int) *v1.Pod { return p.DeepCopy() })...)
+		ExpectProvisionedNoBinding(ctx, env.Client, provisioner, lo.Map(pods, func(p *v1.Pod, _ int) *v1.Pod { return p.DeepCopy() })...)
 
 		nodeList := &v1.NodeList{}
 		Expect(env.Client.List(ctx, nodeList)).To(Succeed())
@@ -1847,13 +1847,10 @@ var _ = Describe("Parallelization", func() {
 		// Update cluster state with new node
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(&nodeList.Items[0]))
 
-		// Reset the bindings so we can re-record bindings
-		recorder.ResetBindings()
-
 		// Mark the node for deletion and re-trigger reconciliation
 		oldNodeName := nodeList.Items[0].Name
 		cluster.MarkForDeletion(nodeList.Items[0].Name)
-		ExpectProvisionedNoBinding(ctx, env.Client, provisioningController, provisioner, lo.Map(pods, func(p *v1.Pod, _ int) *v1.Pod { return p.DeepCopy() })...)
+		ExpectProvisionedNoBinding(ctx, env.Client, provisioner, lo.Map(pods, func(p *v1.Pod, _ int) *v1.Pod { return p.DeepCopy() })...)
 
 		// Make sure that the cluster state is aware of the current node state
 		Expect(env.Client.List(ctx, nodeList)).To(Succeed())
