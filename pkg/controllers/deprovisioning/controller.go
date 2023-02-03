@@ -26,6 +26,7 @@ import (
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
@@ -227,15 +228,17 @@ func (c *Controller) launchReplacementMachines(ctx context.Context, action Comma
 
 	// We have the new nodes created at the API server so mark the old nodes for deletion
 	c.cluster.MarkForDeletion(lo.Map(action.nodesToRemove, func(c *CandidateNode, _ int) string { return c.Name() })...)
+
 	// Wait for nodes to be ready
 	// TODO @njtran: Allow to bypass this check for certain deprovisioners
+	// TODO @joinnis: Figure out why there is a data-race here
 	errs := make([]error, len(machineNames))
 	workqueue.ParallelizeUntil(ctx, len(machineNames), len(machineNames), func(i int) {
-		// Wait for the node to be ready
+		// Wait for the machine to be initialized
 		var once sync.Once
-		if err = retry.Do(func() error {
+		if err := retry.Do(func() error {
 			machine := &v1alpha5.Machine{}
-			if err = c.kubeClient.Get(ctx, client.ObjectKey{Name: machineNames[i]}, machine); err != nil {
+			if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: machineNames[i]}, machine); err != nil {
 				return fmt.Errorf("getting node, %w", err)
 			}
 			once.Do(func() {

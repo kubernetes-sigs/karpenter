@@ -16,43 +16,38 @@ package termination_test
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
-
-	"github.com/samber/lo"
+	. "knative.dev/pkg/logging/testing"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
 	"github.com/aws/karpenter-core/pkg/controllers/termination"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
-
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
-	. "knative.dev/pkg/logging/testing"
-
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
 var ctx context.Context
 var terminationController controller.Controller
-var evictionQueue *terminator.EvictionQueue
 var env *test.Environment
-var defaultOwnerRefs = []metav1.OwnerReference{{Kind: "ReplicaSet", APIVersion: "appsv1", Name: "rs", UID: "1234567890"}}
 var fakeClock *clock.FakeClock
+var defaultOwnerRefs = []metav1.OwnerReference{{Kind: "ReplicaSet", APIVersion: "appsv1", Name: "rs", UID: "1234567890"}}
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -62,11 +57,14 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
-	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
-
-	cloudProvider := fake.NewCloudProvider(env.Client)
-	evictionQueue = terminator.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}))
-	terminationController = termination.NewController(env.Client, terminator.NewTerminator(fakeClock, env.Client, cloudProvider, evictionQueue), events.NewRecorder(&record.FakeRecorder{}))
+	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...), test.WithFieldIndexers(func(c cache.Cache) error {
+		return c.IndexField(ctx, &v1alpha5.Machine{}, "status.providerID", func(obj client.Object) []string {
+			return []string{obj.(*v1alpha5.Machine).Status.ProviderID}
+		})
+	}))
+	evictionQueue := terminator.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}))
+	terminator := terminator.NewTerminator(fakeClock, env.Client, evictionQueue)
+	terminationController = termination.NewController(env.Client, terminator, events.NewRecorder(&record.FakeRecorder{}))
 })
 
 var _ = AfterSuite(func() {
@@ -74,26 +72,33 @@ var _ = AfterSuite(func() {
 })
 
 var _ = Describe("Termination", func() {
+	var machine *v1alpha5.Machine
 	var node *v1.Node
 
 	BeforeEach(func() {
-		node = test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1alpha5.TerminationFinalizer}}})
+		machine = test.Machine(v1alpha5.Machine{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1alpha5.TerminationFinalizer}}, Status: v1alpha5.MachineStatus{ProviderID: test.RandomProviderID()}})
+		node = test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1alpha5.TerminationFinalizer}}, ProviderID: machine.Status.ProviderID})
 	})
-
 	AfterEach(func() {
 		ExpectCleanedUp(ctx, env.Client)
 		fakeClock.SetTime(time.Now())
 	})
-
 	Context("Reconciliation", func() {
-		It("should delete nodes", func() {
+		It("should not delete node if machine still exists", func() {
+			ExpectApplied(ctx, env.Client, machine, node)
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectExists(ctx, env.Client, node)
+		})
+		It("should delete nodes if machine doesn't exist", func() {
 			ExpectApplied(ctx, env.Client, node)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 			ExpectNotFound(ctx, env.Client, node)
 		})
-		It("should not race if deleting nodes in parallel", func() {
+		It("should not race if deleting nodes in parallel if machines don't exist", func() {
 			var nodes []*v1.Node
 			for i := 0; i < 10; i++ {
 				node = test.Node(test.NodeOptions{
@@ -382,27 +387,3 @@ var _ = Describe("Termination", func() {
 		})
 	})
 })
-
-func ExpectNotEnqueuedForEviction(e *terminator.EvictionQueue, pods ...*v1.Pod) {
-	for _, pod := range pods {
-		ExpectWithOffset(1, e.Contains(client.ObjectKeyFromObject(pod))).To(BeFalse())
-	}
-}
-
-func ExpectEvicted(c client.Client, pods ...*v1.Pod) {
-	for _, pod := range pods {
-		EventuallyWithOffset(1, func() bool {
-			return ExpectPodExists(ctx, c, pod.Name, pod.Namespace).GetDeletionTimestamp().IsZero()
-		}, ReconcilerPropagationTime, RequestInterval).Should(BeFalse(), func() string {
-			return fmt.Sprintf("expected %s/%s to be evicting, but it isn't", pod.Namespace, pod.Name)
-		})
-	}
-}
-
-func ExpectNodeDraining(c client.Client, nodeName string) *v1.Node {
-	node := ExpectNodeExistsWithOffset(1, ctx, c, nodeName)
-	ExpectWithOffset(1, node.Spec.Unschedulable).To(BeTrue())
-	ExpectWithOffset(1, lo.Contains(node.Finalizers, v1alpha5.TerminationFinalizer)).To(BeTrue())
-	ExpectWithOffset(1, node.DeletionTimestamp.IsZero()).To(BeFalse())
-	return node
-}

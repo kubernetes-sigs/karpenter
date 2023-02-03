@@ -25,26 +25,20 @@ import (
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 	podutil "github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
 type Terminator struct {
 	clock         clock.Clock
 	kubeClient    client.Client
-	cloudProvider cloudprovider.CloudProvider
 	evictionQueue *EvictionQueue
 }
 
-func NewTerminator(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, eq *EvictionQueue) *Terminator {
+func NewTerminator(clk clock.Clock, kubeClient client.Client, eq *EvictionQueue) *Terminator {
 	return &Terminator{
 		clock:         clk,
 		kubeClient:    kubeClient,
-		cloudProvider: cloudProvider,
 		evictionQueue: eq,
 	}
 }
@@ -91,25 +85,6 @@ func (t *Terminator) Drain(ctx context.Context, node *v1.Node) error {
 
 	if len(podsToEvict) > 0 {
 		return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", len(podsToEvict)))
-	}
-	return nil
-}
-
-// TerminateNode calls cloud provider delete then removes the finalizer to delete the node
-func (t *Terminator) TerminateNode(ctx context.Context, node *v1.Node) error {
-	stored := node.DeepCopy()
-	// Delete the instance associated with node
-	if err := t.cloudProvider.Delete(ctx, machineutil.NewFromNode(node)); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
-		return fmt.Errorf("terminating cloudprovider instance, %w", err)
-	}
-	controllerutil.RemoveFinalizer(node, v1alpha5.TerminationFinalizer)
-	if !equality.Semantic.DeepEqual(node, stored) {
-		logging.FromContext(ctx).Infof("deleted node")
-		if err := t.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
-			return err
-		}
-		// We use stored.DeletionTimestamp since the api-server may give back a node after the patch without a deletionTimestamp
-		terminationSummary.Observe(time.Since(stored.DeletionTimestamp.Time).Seconds())
 	}
 	return nil
 }

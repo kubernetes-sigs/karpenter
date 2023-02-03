@@ -16,6 +16,7 @@ package termination
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -40,8 +41,8 @@ var _ corecontroller.FinalizingTypedController[*v1.Node] = (*Controller)(nil)
 
 // Controller for the resource
 type Controller struct {
-	terminator *terminator.Terminator
 	kubeClient client.Client
+	terminator *terminator.Terminator
 	recorder   events.Recorder
 }
 
@@ -72,6 +73,20 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 	}
 	// If there is no longer a machine for this node, remove the finalizer and delete the node
 	if len(machineList.Items) == 0 {
+		// TODO @joinnis: Remove this section after v1beta1 migration is completed
+		// We need to keep the full termination flow in here during the migration timeframe
+		// This is because there is a short time where a node with the karpenter.sh/termination finalizer
+		// may not have a machine owner and we should still terminate gracefully
+		if err := c.terminator.Cordon(ctx, node); err != nil {
+			if terminator.IsNodeDrainError(err) {
+				c.recorder.Publish(events.NodeFailedToDrain(node, err))
+				return reconcile.Result{Requeue: true}, nil
+			}
+			return reconcile.Result{}, fmt.Errorf("cordoning node, %w", err)
+		}
+		if err := c.terminator.Drain(ctx, node); err != nil {
+			return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
+		}
 		stored := node.DeepCopy()
 		controllerutil.RemoveFinalizer(node, v1alpha5.TerminationFinalizer)
 		if !equality.Semantic.DeepEqual(stored, node) {

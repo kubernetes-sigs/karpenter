@@ -80,7 +80,6 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Re
 	if !node.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, nil
 	}
-
 	provisioner := &v1alpha5.Provisioner{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)

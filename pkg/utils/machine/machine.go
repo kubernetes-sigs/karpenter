@@ -91,7 +91,7 @@ func NodeForMachine(ctx context.Context, c client.Client, machine *v1alpha5.Mach
 }
 
 // New converts a node into a Machine using known values from the node and provisioner spec values
-// Deprecated: This Machine generator function can be removed when v1alpha6 migration has completed.
+// Deprecated: This Machine generator function can be removed when v1beta1 migration has completed.
 func New(node *v1.Node, provisioner *v1alpha5.Provisioner) *v1alpha5.Machine {
 	machine := NewFromNode(node)
 	machine.Annotations = lo.Assign(provisioner.Annotations, v1alpha5.ProviderAnnotation(provisioner.Spec.Provider))
@@ -106,7 +106,7 @@ func New(node *v1.Node, provisioner *v1alpha5.Provisioner) *v1alpha5.Machine {
 }
 
 // NewFromNode converts a node into a pseudo-Machine using known values from the node
-// Deprecated: This Machine generator function can be removed when v1alpha6 migration has completed.
+// Deprecated: This Machine generator function can be removed when v1beta1 migration has completed.
 func NewFromNode(node *v1.Node) *v1alpha5.Machine {
 	m := &v1alpha5.Machine{
 		ObjectMeta: metav1.ObjectMeta{
