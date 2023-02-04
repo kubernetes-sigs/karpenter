@@ -378,17 +378,12 @@ func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*v1.Pod, error) {
 
 	var ret []*v1.Pod
 	for _, daemonSet := range daemonSetList.Items {
-		pod := &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      daemonSet.ObjectMeta.Name + `-pod`,
-				Namespace: daemonSet.ObjectMeta.Namespace,
-			},
-			Spec: *daemonSet.Spec.Template.Spec.DeepCopy()}
-		dryrunClient := client.NewDryRunClient(p.kubeClient)
-		err := dryrunClient.Create(ctx, pod)
-		if err == nil {
-			ret = append(ret, pod)
+		cachedPod, err := p.cluster.GetDaemonSetCache(&daemonSet)
+		if err != nil {
+			continue
 		}
+		pod := &v1.Pod{Spec: *cachedPod.Spec.DeepCopy()}
+		ret = append(ret, pod)
 	}
 	return ret, nil
 }
