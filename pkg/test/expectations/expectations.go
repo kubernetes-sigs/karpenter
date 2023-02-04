@@ -204,10 +204,11 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objectLists ...client.ObjectList) {
 	for _, list := range objectLists {
 		ExpectWithOffset(1, c.List(ctx, list)).To(Succeed())
-		Expect(meta.EachListItem(list, func(o runtime.Object) error {
+		ExpectWithOffset(1, meta.EachListItem(list, func(o runtime.Object) error {
 			obj := o.(client.Object)
+			stored := obj.DeepCopyObject().(client.Object)
 			obj.SetFinalizers([]string{})
-			ExpectWithOffset(1, c.Update(ctx, obj)).To(Succeed())
+			Expect(client.IgnoreNotFound(c.Patch(ctx, obj, client.MergeFrom(stored)))).To(Succeed())
 			return nil
 		})).To(Succeed())
 	}

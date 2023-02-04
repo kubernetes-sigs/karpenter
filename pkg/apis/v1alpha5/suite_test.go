@@ -47,7 +47,12 @@ var _ = Describe("Validation", func() {
 	BeforeEach(func() {
 		provisioner = &Provisioner{
 			ObjectMeta: metav1.ObjectMeta{Name: strings.ToLower(randomdata.SillyName())},
-			Spec:       ProvisionerSpec{},
+			Spec: ProvisionerSpec{
+				ProviderRef: &ProviderRef{
+					Kind: "NodeTemplate",
+					Name: "default",
+				},
+			},
 		}
 	})
 
@@ -102,6 +107,10 @@ var _ = Describe("Validation", func() {
 		It("should not allow provider and providerRef", func() {
 			provisioner.Spec.Provider = &Provider{}
 			provisioner.Spec.ProviderRef = &ProviderRef{Name: "providerRef"}
+			Expect(provisioner.Validate(ctx)).ToNot(Succeed())
+		})
+		It("should require at least one of provider and providerRef", func() {
+			provisioner.Spec.ProviderRef = nil
 			Expect(provisioner.Validate(ctx)).ToNot(Succeed())
 		})
 	})

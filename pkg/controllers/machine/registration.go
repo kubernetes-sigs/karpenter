@@ -43,8 +43,8 @@ func (r *Registration) Reconcile(ctx context.Context, machine *v1alpha5.Machine)
 	node, err := nodeForMachine(ctx, r.kubeClient, machine)
 	if err != nil {
 		if IsNodeNotFoundError(err) {
-			machine.StatusConditions().MarkFalse(v1alpha5.MachineRegistered, "NodeNotFound", "Machine not registered with cluster")
-			return reconcile.Result{RequeueAfter: registrationTTL}, nil // Requeue later to check up to the registration timeout
+			machine.StatusConditions().MarkFalse(v1alpha5.MachineRegistered, "NodeNotFound", "Node not registered with cluster")
+			return reconcile.Result{}, nil
 		}
 		if IsDuplicateNodeError(err) {
 			machine.StatusConditions().MarkFalse(v1alpha5.MachineRegistered, "MultipleNodesFound", "Invariant violated, machine matched multiple nodes")

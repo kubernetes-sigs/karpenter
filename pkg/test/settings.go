@@ -16,6 +16,7 @@ package test
 
 import (
 	"fmt"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -24,20 +25,26 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 )
 
-type SettingsOptions struct {
-	DriftEnabled bool
-}
-
-func Settings(overrides ...SettingsOptions) *settings.Settings {
-	options := SettingsOptions{}
+func Settings(overrides ...settings.Settings) *settings.Settings {
+	options := settings.Settings{}
 	for _, opts := range overrides {
 		if err := mergo.Merge(&options, opts, mergo.WithOverride); err != nil {
 			panic(fmt.Sprintf("Failed to merge pod options: %s", err))
 		}
 	}
+	if options.BatchMaxDuration == nil {
+		options.BatchMaxDuration = &metav1.Duration{}
+	}
+	if options.BatchIdleDuration == nil {
+		options.BatchIdleDuration = &metav1.Duration{}
+	}
+	if options.TTLAfterNotRegistered == nil {
+		options.TTLAfterNotRegistered = &metav1.Duration{Duration: time.Minute * 15}
+	}
 	return &settings.Settings{
-		BatchMaxDuration:  metav1.Duration{},
-		BatchIdleDuration: metav1.Duration{},
-		DriftEnabled:      options.DriftEnabled,
+		BatchMaxDuration:      options.BatchMaxDuration,
+		BatchIdleDuration:     options.BatchIdleDuration,
+		TTLAfterNotRegistered: options.TTLAfterNotRegistered,
+		DriftEnabled:          options.DriftEnabled,
 	}
 }
