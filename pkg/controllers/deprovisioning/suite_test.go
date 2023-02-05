@@ -59,7 +59,6 @@ var ctx context.Context
 var env *test.Environment
 var cluster *state.Cluster
 var deprovisioningController *deprovisioning.Controller
-var provisioningController controller.Controller
 var provisioner *provisioning.Provisioner
 var cloudProvider *fake.CloudProvider
 var nodeStateController controller.Controller
@@ -84,22 +83,11 @@ var _ = BeforeSuite(func() {
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	provisioner = provisioning.NewProvisioner(ctx, env.Client, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster)
-	provisioningController = provisioning.NewController(env.Client, provisioner, events.NewRecorder(&record.FakeRecorder{}))
 })
 
 var _ = AfterSuite(func() {
 	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
 })
-
-func triggerVerifyAction() {
-	for i := 0; i < 10; i++ {
-		time.Sleep(250 * time.Millisecond)
-		if fakeClock.HasWaiters() {
-			break
-		}
-	}
-	fakeClock.Step(45 * time.Second)
-}
 
 var _ = BeforeEach(func() {
 	cloudProvider.CreateCalls = nil
@@ -128,6 +116,7 @@ var _ = BeforeEach(func() {
 	}
 	fakeClock.SetTime(time.Now())
 	deprovisioningController = deprovisioning.NewController(fakeClock, env.Client, provisioner, cloudProvider, events.NewRecorder(&record.FakeRecorder{}), cluster)
+
 	// Reset Feature Flags to test defaults
 	ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: true}))
 })
@@ -245,9 +234,11 @@ var _ = Describe("Replace Nodes", func() {
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
 
 		// consolidation won't delete the old node until the new node is ready
-		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, node)
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1, node)
+
 		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 		wg.Wait()
@@ -391,9 +382,11 @@ var _ = Describe("Replace Nodes", func() {
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
 
 		// consolidation won't delete the old node until the new node is ready
-		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, node)
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1, node)
+
 		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 		wg.Wait()
@@ -475,9 +468,12 @@ var _ = Describe("Replace Nodes", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(regularNode))
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(annotatedNode))
 		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
+
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
 
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
 		// we should delete the non-annotated node
@@ -565,8 +561,11 @@ var _ = Describe("Replace Nodes", func() {
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
 
 		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
+		wg.Wait()
+
 		Expect(cluster.Consolidated()).To(BeTrue())
 		Expect(err).ToNot(HaveOccurred())
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
@@ -669,8 +668,11 @@ var _ = Describe("Replace Nodes", func() {
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
 
 		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
+		wg.Wait()
+
 		Expect(cluster.Consolidated()).To(BeTrue())
 		Expect(err).ToNot(HaveOccurred())
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
@@ -720,11 +722,13 @@ var _ = Describe("Replace Nodes", func() {
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
 
 		// consolidation won't delete the old node until the new node is ready
-		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, node)
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1, node)
+
 		fakeClock.Step(10 * time.Minute)
 
 		var consolidationFinished atomic.Bool
-		go triggerVerifyAction()
 		go func() {
 			_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 			Expect(err).ToNot(HaveOccurred())
@@ -740,8 +744,7 @@ var _ = Describe("Replace Nodes", func() {
 
 		// fetch the latest node object and remove the finalizer
 		node = ExpectExists(ctx, env.Client, node)
-		node.SetFinalizers([]string{})
-		ExpectApplied(ctx, env.Client, node)
+		ExpectFinalizersRemoved(ctx, env.Client, node)
 
 		// consolidation should complete now that the finalizer on the node is gone and it can
 		// was actually deleted
@@ -818,10 +821,13 @@ var _ = Describe("Delete Node", func() {
 		// inform cluster state about the nodes
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
+
 		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
 
 		// we don't need a new node, but we should evict everything off one of node2 which only has a single pod
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
@@ -910,10 +916,14 @@ var _ = Describe("Delete Node", func() {
 		// inform cluster state about the nodes
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
+
 		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
+
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
 
 		// we don't need a new node
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
@@ -988,10 +998,13 @@ var _ = Describe("Delete Node", func() {
 		// inform cluster state about the nodes
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
+
 		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
 
 		// we don't need a new node
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
@@ -1063,10 +1076,13 @@ var _ = Describe("Delete Node", func() {
 		// inform cluster state about the nodes
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
+
 		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
 
 		// we don't need a new node
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
@@ -1146,10 +1162,13 @@ var _ = Describe("Node Lifetime Consideration", func() {
 		// inform cluster state about the nodes
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
+
 		fakeClock.SetTime(time.Now())
-		go triggerVerifyAction()
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
 
 		// the second node has more pods so it would normally not be picked for consolidation, except it very little
 		// lifetime remaining so it should be deleted
@@ -1243,9 +1262,11 @@ var _ = Describe("Topology Consideration", func() {
 		ExpectSkew(ctx, env.Client, "default", &tsc).To(ConsistOf(1, 1, 1))
 
 		// consolidation won't delete the old node until the new node is ready
-		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, zone1Node, zone2Node, zone3Node)
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1, zone1Node, zone2Node, zone3Node)
+
 		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 		wg.Wait()
@@ -1345,9 +1366,11 @@ var _ = Describe("Topology Consideration", func() {
 		ExpectScheduled(ctx, env.Client, pods[1])
 		ExpectScheduled(ctx, env.Client, pods[2])
 
-		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, zone1Node, zone2Node, zone3Node)
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1, zone1Node, zone2Node, zone3Node)
+
 		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 		wg.Wait()
@@ -1386,9 +1409,12 @@ var _ = Describe("Empty Nodes", func() {
 		// inform cluster state about the nodes
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
+
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
 
 		// we don't need any new nodes
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
@@ -1429,10 +1455,13 @@ var _ = Describe("Empty Nodes", func() {
 		// inform cluster state about the nodes
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
+
 		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
 
 		// we don't need any new nodes
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
@@ -1464,9 +1493,11 @@ var _ = Describe("Empty Nodes", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 
 		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
 
 		// we don't need any new nodes
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
@@ -1513,9 +1544,11 @@ var _ = Describe("Empty Nodes", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
 		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
 
 		// we don't need any new nodes and consolidation should notice the huge pending pod that needs the large
 		// node to schedule, which prevents the large expensive node from being replaced
@@ -1673,7 +1706,6 @@ var _ = Describe("consolidation TTL", func() {
 		prov := test.Provisioner(test.ProvisionerOptions{
 			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
-
 		node1 := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -1777,13 +1809,15 @@ var _ = Describe("Parallelization", func() {
 		fakeClock.Step(10 * time.Minute)
 
 		// Run the processing loop in parallel in the background with environment context
-		go triggerVerifyAction()
 		go func() {
 			_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 			Expect(err).ToNot(HaveOccurred())
 		}()
 
-		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, node)
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1, node)
+
 		Eventually(func(g Gomega) {
 			// should create a new node as there is a cheaper one that can hold the pod
 			nodes := &v1.NodeList{}
@@ -1959,9 +1993,12 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node3))
+
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1, node1, node2, node3)
+
 		fakeClock.Step(10 * time.Minute)
-		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, node1, node2, node3)
-		go triggerVerifyAction()
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 		wg.Wait()
@@ -2034,10 +2071,13 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		// inform cluster state about the nodes
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
+
 		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
 
 		// We have [cheap-node, cheap-node] which multi-node consolidation could consolidate via
 		// [delete cheap-node, delete cheap-node, launch cheap-node]. This isn't the best method though
@@ -2087,7 +2127,6 @@ var _ = Describe("Multi-Node Consolidation", func() {
 				v1.ResourceCPU:  resource.MustParse("32"),
 				v1.ResourcePods: resource.MustParse("100"),
 			}})
-
 		node2 := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -2114,8 +2153,11 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		// inform cluster state about the nodes
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
-		ExpectMakeNewNodesReady(ctx, env.Client, 1, node1, node2)
+
 		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1, node1, node2)
+
 		wg.Add(1)
 		finished := atomic.Bool{}
 		go func() {
@@ -2180,9 +2222,7 @@ func fromInt(i int) *intstr.IntOrString {
 	return &v
 }
 
-func ExpectMakeNewNodesReady(ctx context.Context, client client.Client, numNewNodes int, existingNodes ...*v1.Node) *sync.WaitGroup {
-	var wg sync.WaitGroup
-
+func ExpectMakeNewNodesReady(ctx context.Context, client client.Client, wg *sync.WaitGroup, numNewNodes int, existingNodes ...*v1.Node) {
 	existingNodeNames := sets.NewString()
 	for _, existing := range existingNodes {
 		existingNodeNames.Insert(existing.Name)
@@ -2222,7 +2262,20 @@ func ExpectMakeNewNodesReady(ctx context.Context, client client.Client, numNewNo
 			}
 		}
 	}()
-	return &wg
+}
+
+func ExpectTriggerVerifyAction(wg *sync.WaitGroup) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 10; i++ {
+			time.Sleep(250 * time.Millisecond)
+			if fakeClock.HasWaiters() {
+				break
+			}
+		}
+		fakeClock.Step(45 * time.Second)
+	}()
 }
 
 func ExpectMakeNodesReady(ctx context.Context, c client.Client, nodes ...*v1.Node) {
