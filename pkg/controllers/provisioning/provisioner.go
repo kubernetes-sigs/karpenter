@@ -366,16 +366,6 @@ func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*v1.Pod, error) {
 		return nil, fmt.Errorf("listing daemonsets, %w", err)
 	}
 
-	limitRangeList := &v1.LimitRangeList{}
-	if err := p.kubeClient.List(ctx, limitRangeList); err != nil {
-		return nil, fmt.Errorf("listing limit ranges, %w", err)
-	}
-
-	limitRangeMap := map[string][]v1.LimitRange{}
-	for _, lr := range limitRangeList.Items {
-		limitRangeMap[lr.Namespace] = append(limitRangeMap[lr.Namespace], lr)
-	}
-
 	var ret []*v1.Pod
 	for index := range daemonSetList.Items {
 		cachedPod, err := p.cluster.GetDaemonSetCache(&daemonSetList.Items[index])
