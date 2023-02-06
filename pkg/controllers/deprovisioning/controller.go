@@ -52,7 +52,6 @@ type Controller struct {
 	clock          clock.Clock
 	cloudProvider  cloudprovider.CloudProvider
 	deprovisioners []Deprovisioner
-	reporter       *Reporter
 }
 
 // pollingPeriod that we inspect cluster to look for opportunities to deprovision
@@ -73,14 +72,12 @@ var waitRetryOptions = []retry.Option{
 func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
 	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster) *Controller {
 
-	reporter := NewReporter(recorder)
 	return &Controller{
 		clock:         clk,
 		kubeClient:    kubeClient,
 		cluster:       cluster,
 		provisioner:   provisioner,
 		recorder:      recorder,
-		reporter:      reporter,
 		cloudProvider: cp,
 		deprovisioners: []Deprovisioner{
 			// Expire any nodes that must be deleted, allowing their pods to potentially land on currently
@@ -90,11 +87,11 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 			// Delete any remaining empty nodes as there is zero cost in terms of dirsuption.  Emptiness and
 			// emptyNodeConsolidation are mutually exclusive, only one of these will operate
 			NewEmptiness(clk),
-			NewEmptyNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, reporter),
+			NewEmptyNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
 			// Attempt to identify multiple nodes that we can consolidate simultaneously to reduce pod churn
-			NewMultiNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, reporter),
+			NewMultiNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
 			// And finally fall back our single node consolidation to further reduce cluster cost.
-			NewSingleNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, reporter),
+			NewSingleNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
 		},
 	}
 }

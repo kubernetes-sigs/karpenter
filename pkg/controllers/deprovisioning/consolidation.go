@@ -29,8 +29,10 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 )
@@ -43,19 +45,19 @@ type consolidation struct {
 	kubeClient             client.Client
 	provisioner            *provisioning.Provisioner
 	cloudProvider          cloudprovider.CloudProvider
-	reporter               *Reporter
+	recorder               events.Recorder
 	lastConsolidationState int64
 }
 
 func makeConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cloudProvider cloudprovider.CloudProvider, reporter *Reporter) consolidation {
+	cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) consolidation {
 	return consolidation{
 		clock:                  clock,
 		cluster:                cluster,
 		kubeClient:             kubeClient,
 		provisioner:            provisioner,
 		cloudProvider:          cloudProvider,
-		reporter:               reporter,
+		recorder:               recorder,
 		lastConsolidationState: 0,
 	}
 }
@@ -79,7 +81,7 @@ func (c *consolidation) sortAndFilterCandidates(ctx context.Context, nodes []Can
 	// filter out nodes that can't be terminated
 	nodes = lo.Filter(nodes, func(cn CandidateNode, _ int) bool {
 		if reason, canTerminate := canBeTerminated(cn, pdbs); !canTerminate {
-			c.reporter.RecordUnconsolidatableReason(ctx, cn.Node, reason)
+			c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(cn.Node, reason))
 			return false
 		}
 		return true
@@ -94,15 +96,15 @@ func (c *consolidation) sortAndFilterCandidates(ctx context.Context, nodes []Can
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes
 func (c *consolidation) ShouldDeprovision(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, _ []*v1.Pod) bool {
 	if val, ok := n.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey]; ok {
-		c.reporter.RecordUnconsolidatableReason(ctx, n.Node, fmt.Sprintf("%s annotation exists", v1alpha5.DoNotConsolidateNodeAnnotationKey))
+		c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(n.Node, fmt.Sprintf("%s annotation exists", v1alpha5.DoNotConsolidateNodeAnnotationKey)))
 		return val != "true"
 	}
 	if provisioner == nil {
-		c.reporter.RecordUnconsolidatableReason(ctx, n.Node, "provisioner is unknown")
+		c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(n.Node, "provisioner is unknown"))
 		return false
 	}
 	if provisioner.Spec.Consolidation == nil || !ptr.BoolValue(provisioner.Spec.Consolidation.Enabled) {
-		c.reporter.RecordUnconsolidatableReason(ctx, n.Node, fmt.Sprintf("provisioner %s has consolidation disabled", provisioner.Name))
+		c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(n.Node, fmt.Sprintf("provisioner %s has consolidation disabled", provisioner.Name)))
 		return false
 	}
 	return true
@@ -191,7 +193,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, nodes ...Candi
 	if !allPodsScheduled {
 		// This method is used by multi-node consolidation as well, so we'll only report in the single node case
 		if len(nodes) == 1 {
-			c.reporter.RecordUnconsolidatableReason(ctx, nodes[0].Node, "not all pods would schedule")
+			c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(nodes[0].Node, "not all pods would schedule"))
 		}
 		return Command{action: actionDoNothing}, nil
 	}
@@ -207,7 +209,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, nodes ...Candi
 	// we're not going to turn a single node into multiple nodes
 	if len(newNodes) != 1 {
 		if len(nodes) == 1 {
-			c.reporter.RecordUnconsolidatableReason(ctx, nodes[0].Node, fmt.Sprintf("can't remove without creating %d nodes", len(newNodes)))
+			c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(nodes[0].Node, fmt.Sprintf("can't remove without creating %d nodes", len(newNodes))))
 		}
 		return Command{action: actionDoNothing}, nil
 	}
@@ -221,7 +223,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, nodes ...Candi
 	newNodes[0].InstanceTypeOptions = filterByPrice(newNodes[0].InstanceTypeOptions, newNodes[0].Requirements, nodesPrice)
 	if len(newNodes[0].InstanceTypeOptions) == 0 {
 		if len(nodes) == 1 {
-			c.reporter.RecordUnconsolidatableReason(ctx, nodes[0].Node, "can't replace with a cheaper node")
+			c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(nodes[0].Node, "can't replace with a cheaper node"))
 		}
 		// no instance types remain after filtering by price
 		return Command{action: actionDoNothing}, nil
@@ -240,7 +242,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, nodes ...Candi
 	if allExistingAreSpot &&
 		newNodes[0].Requirements.Get(v1alpha5.LabelCapacityType).Has(v1alpha5.CapacityTypeSpot) {
 		if len(nodes) == 1 {
-			c.reporter.RecordUnconsolidatableReason(ctx, nodes[0].Node, "can't replace a spot node with a spot node")
+			c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(nodes[0].Node, "can't replace a spot node with a spot node"))
 		}
 		return Command{action: actionDoNothing}, nil
 	}

@@ -25,6 +25,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/events"
 )
 
 // SingleNodeConsolidation is the consolidation controller that performs single node consolidation.
@@ -33,8 +34,8 @@ type SingleNodeConsolidation struct {
 }
 
 func NewSingleNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cp cloudprovider.CloudProvider, reporter *Reporter) *SingleNodeConsolidation {
-	return &SingleNodeConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, reporter)}
+	cp cloudprovider.CloudProvider, recorder events.Recorder) *SingleNodeConsolidation {
+	return &SingleNodeConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
 }
 
 // ComputeCommand generates a deprovisioning command given deprovisionable nodes
