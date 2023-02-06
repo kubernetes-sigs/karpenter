@@ -17,12 +17,16 @@ package state
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/mitchellh/hashstructure/v2"
+	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -50,6 +54,7 @@ type Cluster struct {
 	nodes            map[string]*Node                // provider id -> node
 	bindings         map[types.NamespacedName]string // pod namespaced named -> node node
 	nameToProviderID map[string]string               // node name -> provider id
+	daemonSetCache   *cache.Cache
 
 	antiAffinityPods sync.Map // pod namespaced name -> *v1.Pod of pods that have required anti affinities
 
@@ -66,6 +71,7 @@ func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudPro
 		cloudProvider:    cp,
 		nodes:            map[string]*Node{},
 		bindings:         map[types.NamespacedName]string{},
+		daemonSetCache:   cache.New(time.Minute, 10*time.Minute),
 		nameToProviderID: map[string]string{},
 	}
 }
@@ -293,6 +299,37 @@ func (c *Cluster) Reset() {
 	c.nameToProviderID = map[string]string{}
 	c.bindings = map[types.NamespacedName]string{}
 	c.antiAffinityPods = sync.Map{}
+	c.daemonSetCache.Flush()
+}
+
+func (c *Cluster) GetDaemonSetCache(daemonset *appsv1.DaemonSet) (*v1.Pod, error) {
+	filter := map[string]string{
+		"UID":        string(daemonset.UID),
+		"Generation": strconv.FormatInt(daemonset.GetGeneration(), 10),
+	}
+	hash, err := hashstructure.Hash(filter, hashstructure.FormatV2, nil)
+	if err != nil {
+		return nil, err
+	}
+	if oldPod, ok := c.daemonSetCache.Get(fmt.Sprint(hash)); ok {
+		return oldPod.(*v1.Pod), nil
+	}
+	return &v1.Pod{Spec: *daemonset.Spec.Template.Spec.DeepCopy()}, nil
+}
+
+func (c *Cluster) UpdateDaemonSetCache(daemonset *appsv1.DaemonSet, pod *v1.Pod) {
+	filter := map[string]string{
+		"UID":        string(daemonset.UID),
+		"Generation": strconv.FormatInt(daemonset.GetGeneration(), 10),
+	}
+	hash, err := hashstructure.Hash(filter, hashstructure.FormatV2, nil)
+	if err != nil {
+		return
+	}
+	if _, ok := c.daemonSetCache.Get(fmt.Sprint(hash)); ok {
+		return
+	}
+	c.daemonSetCache.SetDefault(fmt.Sprint(hash), pod)
 }
 
 // WARNING

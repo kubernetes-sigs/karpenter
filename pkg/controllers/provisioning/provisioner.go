@@ -377,8 +377,8 @@ func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*v1.Pod, error) {
 	}
 
 	var ret []*v1.Pod
-	for _, daemonSet := range daemonSetList.Items {
-		cachedPod, err := p.cluster.GetDaemonSetCache(&daemonSet)
+	for index := range daemonSetList.Items {
+		cachedPod, err := p.cluster.GetDaemonSetCache(&daemonSetList.Items[index])
 		if err != nil {
 			continue
 		}
