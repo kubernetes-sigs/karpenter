@@ -161,14 +161,16 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 		}
 	}
 
-	for _, oldNode := range command.nodesToRemove {
-		c.recorder.Publish(deprovisioningevents.TerminatingMachine(oldNode.Machine, command.String()))
-		if err := c.kubeClient.Delete(ctx, oldNode.Machine); client.IgnoreNotFound(err) != nil {
+	for _, node := range command.nodesToRemove {
+		c.recorder.Publish(deprovisioningevents.TerminatingNode(node.Node.Node, command.String()))
+		c.recorder.Publish(deprovisioningevents.TerminatingMachine(node.Machine, command.String()))
+
+		if err := c.kubeClient.Delete(ctx, node.Machine); err != nil {
 			logging.FromContext(ctx).Errorf("Deleting machine, %s", err)
 		} else {
 			metrics.MachinesTerminatedCounter.With(prometheus.Labels{
 				metrics.ReasonLabel:      reason,
-				metrics.ProvisionerLabel: oldNode.Labels()[v1alpha5.ProvisionerNameLabelKey],
+				metrics.ProvisionerLabel: node.Labels()[v1alpha5.ProvisionerNameLabelKey],
 			}).Inc()
 		}
 	}

@@ -38,7 +38,7 @@ func TerminatingNode(node *v1.Node, reason string) events.Event {
 	return events.Event{
 		InvolvedObject: node,
 		Type:           v1.EventTypeNormal,
-		Reason:         "DeprovisioningTerminating",
+		Reason:         "DeprovisioningTerminatingNode",
 		Message:        fmt.Sprintf("Deprovisioning node via %s", reason),
 		DedupeValues:   []string{node.Name, reason},
 	}
@@ -91,6 +91,17 @@ func UnconsolidatableReason(node *v1.Node, reason string) events.Event {
 		Reason:         "Unconsolidatable",
 		Message:        reason,
 		DedupeValues:   []string{node.Name},
+		DedupeTimeout:  time.Minute * 15,
+	}
+}
+
+func UnconsolidatableReasonMachine(machine *v1alpha5.Machine, reason string) events.Event {
+	return events.Event{
+		InvolvedObject: machine,
+		Type:           v1.EventTypeNormal,
+		Reason:         "Unconsolidatable",
+		Message:        reason,
+		DedupeValues:   []string{machine.Name},
 		DedupeTimeout:  time.Minute * 15,
 	}
 }
