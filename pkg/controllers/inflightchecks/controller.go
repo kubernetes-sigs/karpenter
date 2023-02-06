@@ -35,6 +35,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
+	inflightchecksevents "github.com/aws/karpenter-core/pkg/controllers/inflightchecks/events"
 	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
@@ -121,8 +122,8 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 	}
 	for _, issue := range allIssues {
 		logging.FromContext(ctx).Infof("inflight check failed, %s", issue)
-		c.recorder.Publish(events.NodeInflightCheck(node, string(issue)))
-		c.recorder.Publish(events.MachineInflightCheck(machine, string(issue)))
+		c.recorder.Publish(inflightchecksevents.NodeInflightCheck(node, string(issue)))
+		c.recorder.Publish(inflightchecksevents.MachineInflightCheck(machine, string(issue)))
 	}
 	return reconcile.Result{RequeueAfter: scanPeriod}, nil
 }

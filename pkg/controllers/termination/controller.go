@@ -33,6 +33,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
+	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/machine/terminator/events"
 	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
@@ -79,7 +80,7 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 		// may not have a machine owner and we should still terminate gracefully
 		if err := c.terminator.Cordon(ctx, node); err != nil {
 			if terminator.IsNodeDrainError(err) {
-				c.recorder.Publish(events.NodeFailedToDrain(node, err))
+				c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
 				return reconcile.Result{Requeue: true}, nil
 			}
 			return reconcile.Result{}, fmt.Errorf("cordoning node, %w", err)

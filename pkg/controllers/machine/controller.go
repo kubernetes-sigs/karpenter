@@ -43,6 +43,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
+	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/machine/terminator/events"
 	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
@@ -136,7 +137,7 @@ func (c *Controller) Finalize(ctx context.Context, machine *v1alpha5.Machine) (r
 		if terminator.IsNodeDrainError(err) {
 			return reconcile.Result{Requeue: true}, nil
 		}
-		return reconcile.Result{}, nil
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", machine.Status.ProviderID))
 	if machine.Status.ProviderID != "" {
@@ -146,8 +147,8 @@ func (c *Controller) Finalize(ctx context.Context, machine *v1alpha5.Machine) (r
 	}
 	controllerutil.RemoveFinalizer(machine, v1alpha5.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(stored, machine) {
-		if err := c.kubeClient.Patch(ctx, machine, client.MergeFrom(stored)); err != nil {
-			return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("removing machine termination finalizer, %w", err))
+		if err := c.kubeClient.Patch(ctx, machine, client.MergeFrom(stored)); client.IgnoreNotFound(err) != nil {
+			return reconcile.Result{}, fmt.Errorf("removing machine termination finalizer, %w", err)
 		}
 		logging.FromContext(ctx).Infof("deleted machine")
 	}
@@ -179,7 +180,7 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 				// 10 qps, 100 bucket size
 				&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
 			),
-			MaxConcurrentReconciles: 50, // higher concurrency limit since we want fast reaction to node syncing and launch
+			MaxConcurrentReconciles: 100, // higher concurrency limit since we want fast reaction to node syncing and launch
 		}))
 }
 
@@ -195,7 +196,7 @@ func (c *Controller) cleanupNodeForMachine(ctx context.Context, machine *v1alpha
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
 	if err = c.terminator.Cordon(ctx, node); err != nil {
 		if terminator.IsNodeDrainError(err) {
-			c.recorder.Publish(events.NodeFailedToDrain(node, err))
+			c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
 		}
 		return fmt.Errorf("cordoning node, %w", err)
 	}

@@ -31,6 +31,7 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/machine/terminator/events"
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
@@ -118,7 +119,7 @@ func (e *EvictionQueue) evict(ctx context.Context, nn types.NamespacedName) bool
 		return true
 	}
 	if apierrors.IsTooManyRequests(err) { // 429 - PDB violation
-		e.recorder.Publish(events.NodeFailedToDrain(&v1.Node{ObjectMeta: metav1.ObjectMeta{
+		e.recorder.Publish(terminatorevents.NodeFailedToDrain(&v1.Node{ObjectMeta: metav1.ObjectMeta{
 			Name:      nn.Name,
 			Namespace: nn.Namespace,
 		}}, fmt.Errorf("evicting pod %s/%s violates a PDB", nn.Namespace, nn.Name)))
@@ -128,6 +129,6 @@ func (e *EvictionQueue) evict(ctx context.Context, nn types.NamespacedName) bool
 		logging.FromContext(ctx).Errorf("evicting pod, %s", err)
 		return false
 	}
-	e.recorder.Publish(events.EvictPod(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: nn.Name, Namespace: nn.Namespace}}))
+	e.recorder.Publish(terminatorevents.EvictPod(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: nn.Name, Namespace: nn.Namespace}}))
 	return true
 }

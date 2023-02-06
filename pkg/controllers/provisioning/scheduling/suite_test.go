@@ -84,7 +84,7 @@ var _ = BeforeSuite(func() {
 	machineStateController = informer.NewMachineController(env.Client, cluster)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	podStateController = informer.NewPodController(env.Client, cluster)
-	prov = provisioning.NewProvisioner(ctx, env.Client, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster)
+	prov = provisioning.NewProvisioner(env.Client, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster)
 
 })
 

@@ -54,7 +54,7 @@ func NewControllers(
 	cloudProvider cloudprovider.CloudProvider,
 ) []controller.Controller {
 
-	provisioner := provisioning.NewProvisioner(ctx, kubeClient, kubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
+	provisioner := provisioning.NewProvisioner(kubeClient, kubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
 	terminator := terminator.NewTerminator(clock, kubeClient, terminator.NewEvictionQueue(ctx, kubernetesInterface.CoreV1(), recorder))
 	return []controller.Controller{
 		provisioner,

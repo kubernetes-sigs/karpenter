@@ -31,10 +31,10 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	schedulingevents "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/utils/functional"
@@ -74,20 +74,20 @@ type Provisioner struct {
 	kubeClient     client.Client
 	coreV1Client   corev1.CoreV1Interface
 	batcher        *Batcher
-	volumeTopology *VolumeTopology
+	volumeTopology *scheduler.VolumeTopology
 	cluster        *state.Cluster
 	recorder       events.Recorder
 	cm             *pretty.ChangeMonitor
 }
 
-func NewProvisioner(ctx context.Context, kubeClient client.Client, coreV1Client corev1.CoreV1Interface,
+func NewProvisioner(kubeClient client.Client, coreV1Client corev1.CoreV1Interface,
 	recorder events.Recorder, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Provisioner {
 	p := &Provisioner{
 		batcher:        NewBatcher(),
 		cloudProvider:  cloudProvider,
 		kubeClient:     kubeClient,
 		coreV1Client:   coreV1Client,
-		volumeTopology: NewVolumeTopology(kubeClient),
+		volumeTopology: scheduler.NewVolumeTopology(kubeClient),
 		cluster:        cluster,
 		recorder:       recorder,
 		cm:             pretty.NewChangeMonitor(),
@@ -136,17 +136,13 @@ func (p *Provisioner) LaunchMachines(ctx context.Context, machines []*scheduler.
 	machineNames := make([]string, len(machines))
 	workqueue.ParallelizeUntil(ctx, len(machines), len(machines), func(i int) {
 		// create a new context to avoid a data race on the ctx variable
-		ctx := logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", machines[i].Labels[v1alpha5.ProvisionerNameLabelKey]))
 		if machineName, err := p.Launch(ctx, machines[i], opts...); err != nil {
 			errs[i] = fmt.Errorf("launching machine, %w", err)
 		} else {
 			machineNames[i] = machineName
 		}
 	})
-	if err := multierr.Combine(errs...); err != nil {
-		return machineNames, err
-	}
-	return machineNames, nil
+	return machineNames, multierr.Combine(errs...)
 }
 
 func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*v1.Pod, error) {
@@ -301,6 +297,8 @@ func (p *Provisioner) Schedule(ctx context.Context) ([]*scheduler.Machine, []*sc
 }
 
 func (p *Provisioner) Launch(ctx context.Context, m *scheduler.Machine, opts ...functional.Option[LaunchOptions]) (string, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", m.Labels[v1alpha5.ProvisionerNameLabelKey]))
+
 	// Check limits
 	latest := &v1alpha5.Provisioner{}
 	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: m.ProvisionerName}, latest); err != nil {
@@ -323,7 +321,7 @@ func (p *Provisioner) Launch(ctx context.Context, m *scheduler.Machine, opts ...
 	}).Inc()
 	if functional.ResolveOptions(opts...).RecordPodNomination {
 		for _, pod := range m.Pods {
-			p.recorder.Publish(events.NominatePodForMachine(pod, machine))
+			p.recorder.Publish(schedulingevents.NominatePodForMachine(pod, machine))
 		}
 	}
 	return machine.Name, nil
@@ -348,7 +346,7 @@ func (p *Provisioner) Validate(ctx context.Context, pod *v1.Pod) error {
 	return multierr.Combine(
 		validateProvisionerNameCanExist(pod),
 		validateAffinity(pod),
-		p.volumeTopology.validatePersistentVolumeClaims(ctx, pod),
+		p.volumeTopology.ValidatePersistentVolumeClaims(ctx, pod),
 	)
 }
 
@@ -403,18 +401,4 @@ func validateNodeSelectorTerm(term v1.NodeSelectorTerm) (errs error) {
 		}
 	}
 	return errs
-}
-
-var schedulingDuration = prometheus.NewHistogram(
-	prometheus.HistogramOpts{
-		Namespace: metrics.Namespace,
-		Subsystem: "provisioner",
-		Name:      "scheduling_duration_seconds",
-		Help:      "Duration of scheduling process in seconds. Broken down by provisioner and error.",
-		Buckets:   metrics.DurationBuckets(),
-	},
-)
-
-func init() {
-	crmetrics.Registry.MustRegister(schedulingDuration)
 }

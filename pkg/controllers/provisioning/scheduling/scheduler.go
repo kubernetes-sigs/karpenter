@@ -27,6 +27,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	schedulingevents "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling/events"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -136,7 +137,7 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 	// Report failures and nominations
 	for _, pod := range failedToSchedule {
 		logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(pod)).Errorf("Could not schedule pod, %s", errors[pod])
-		s.recorder.Publish(events.PodFailedToSchedule(pod, errors[pod]))
+		s.recorder.Publish(schedulingevents.PodFailedToSchedule(pod, errors[pod]))
 	}
 
 	for _, node := range s.existingNodes {
@@ -146,10 +147,10 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 		for _, pod := range node.Pods {
 			// If node is inflight, it won't have a real node to represent it
 			if node.Node.Node != nil {
-				s.recorder.Publish(events.NominatePod(pod, node.Node.Node))
+				s.recorder.Publish(schedulingevents.NominatePod(pod, node.Node.Node))
 			}
 			if node.Machine != nil {
-				s.recorder.Publish(events.NominatePodForMachine(pod, node.Machine))
+				s.recorder.Publish(schedulingevents.NominatePodForMachine(pod, node.Machine))
 			}
 		}
 	}
