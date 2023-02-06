@@ -103,6 +103,22 @@ var _ = Describe("Dedupe", func() {
 		}
 		Expect(internalRecorder.Calls(events.EvictPod(PodWithUID()).Reason)).To(Equal(1))
 	})
+	It("should allow the dedupe timeout to be overridden", func() {
+		pod := PodWithUID()
+		evt := events.EvictPod(pod)
+		evt.DedupeTimeout = time.Second * 2
+
+		// Generate a set of events within the dedupe timeout
+		for i := 0; i < 10; i++ {
+			eventRecorder.Publish(evt)
+		}
+		Expect(internalRecorder.Calls(events.EvictPod(PodWithUID()).Reason)).To(Equal(1))
+
+		// Wait until after the overridden dedupe timeout
+		time.Sleep(time.Second * 3)
+		eventRecorder.Publish(evt)
+		Expect(internalRecorder.Calls(events.EvictPod(PodWithUID()).Reason)).To(Equal(2))
+	})
 	It("should allow events with different entities to be created", func() {
 		for i := 0; i < 100; i++ {
 			eventRecorder.Publish(events.EvictPod(PodWithUID()))

@@ -31,6 +31,7 @@ type Event struct {
 	Reason         string
 	Message        string
 	DedupeValues   []string
+	DedupeTimeout  time.Duration
 	RateLimiter    flowcontrol.RateLimiter
 }
 
@@ -50,17 +51,24 @@ type recorder struct {
 	cache *cache.Cache
 }
 
+const defaultDedupeTimeout = 2 * time.Minute
+
 func NewRecorder(r record.EventRecorder) Recorder {
 	return &recorder{
 		rec:   r,
-		cache: cache.New(120*time.Second, 10*time.Second),
+		cache: cache.New(defaultDedupeTimeout, 10*time.Second),
 	}
 }
 
 // Publish creates a Kubernetes event using the passed event struct
 func (r *recorder) Publish(evt Event) {
+	// Override the timeout if one is set for an event
+	timeout := defaultDedupeTimeout
+	if evt.DedupeTimeout != 0 {
+		timeout = evt.DedupeTimeout
+	}
 	// Dedupe same events that involve the same object and are close together
-	if len(evt.DedupeValues) > 0 && !r.shouldCreateEvent(evt.dedupeKey()) {
+	if len(evt.DedupeValues) > 0 && !r.shouldCreateEvent(evt.dedupeKey(), timeout) {
 		return
 	}
 	// If the event is rate-limited, then validate we should create the event
@@ -70,10 +78,10 @@ func (r *recorder) Publish(evt Event) {
 	r.rec.Event(evt.InvolvedObject, evt.Type, evt.Reason, evt.Message)
 }
 
-func (r *recorder) shouldCreateEvent(key string) bool {
+func (r *recorder) shouldCreateEvent(key string, timeout time.Duration) bool {
 	if _, exists := r.cache.Get(key); exists {
 		return false
 	}
-	r.cache.SetDefault(key, nil)
+	r.cache.Set(key, nil, timeout)
 	return true
 }
