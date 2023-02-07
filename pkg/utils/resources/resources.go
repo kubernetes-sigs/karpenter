@@ -51,6 +51,9 @@ func Merge(resources ...v1.ResourceList) v1.ResourceList {
 	result := make(v1.ResourceList, len(resources[0]))
 	for _, resourceList := range resources {
 		for resourceName, quantity := range resourceList {
+			if resourceName == "hugepages-2Mi" || resourceName == "hugepages-1Gi" {
+				continue
+			}
 			current := result[resourceName]
 			current.Add(quantity)
 			result[resourceName] = current
@@ -93,6 +96,9 @@ func MaxResources(resources ...v1.ResourceList) v1.ResourceList {
 	resourceList := v1.ResourceList{}
 	for _, resource := range resources {
 		for resourceName, quantity := range resource {
+			if resourceName == "hugepages-2Mi" || resourceName == "hugepages-1Gi" {
+				continue
+			}
 			if value, ok := resourceList[resourceName]; !ok || quantity.Cmp(value) > 0 {
 				resourceList[resourceName] = quantity
 			}
