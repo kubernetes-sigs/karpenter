@@ -87,9 +87,8 @@ var _ = Describe("DaemonSet Controller", func() {
 		)
 		ExpectApplied(ctx, env.Client, daemonset)
 		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
-		daemonsetPod, err := cluster.GetDaemonSetCache(daemonset)
-		Expect(err).To(BeNil())
-		Expect(daemonset.Spec.Template.Spec).To(Equal(daemonsetPod.Spec))
+		daemonsetPod := cluster.GetDaemonSetCache(daemonset)
+		Expect(daemonsetPod).To(BeNil())
 	})
 	It("should update daemonsetCache when daemonset pod is created", func() {
 		daemonset := test.DaemonSet(
@@ -117,8 +116,7 @@ var _ = Describe("DaemonSet Controller", func() {
 		ExpectApplied(ctx, env.Client, daemonsetPod)
 		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
 
-		storedPod, err := cluster.GetDaemonSetCache(daemonset)
-		Expect(err).To(BeNil())
+		storedPod := cluster.GetDaemonSetCache(daemonset)
 		Expect(storedPod).To(Equal(daemonsetPod))
 	})
 	It("should not update daemonsetCache with the same daemonset pod spec", func() {
@@ -147,8 +145,7 @@ var _ = Describe("DaemonSet Controller", func() {
 		ExpectApplied(ctx, env.Client, daemonsetPod1)
 		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
 
-		storedPod, err := cluster.GetDaemonSetCache(daemonset)
-		Expect(err).To(BeNil())
+		storedPod := cluster.GetDaemonSetCache(daemonset)
 		Expect(storedPod).To(Equal(daemonsetPod1))
 		daemonsetPod2 := test.UnschedulablePod(
 			test.PodOptions{
@@ -169,12 +166,11 @@ var _ = Describe("DaemonSet Controller", func() {
 		ExpectApplied(ctx, env.Client, daemonsetPod1)
 		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
 
-		storedPod, err = cluster.GetDaemonSetCache(daemonset)
-		Expect(err).To(BeNil())
+		storedPod = cluster.GetDaemonSetCache(daemonset)
 		Expect(storedPod).To(Equal(daemonsetPod1))
 		Expect(storedPod).To(Not(Equal(daemonsetPod2)))
 	})
-	It("should update when daemonsetCache when daemonset is updated", func() {
+	It("should delete daemonset in cache when daemonset is deleted", func() {
 		daemonset := test.DaemonSet(
 			test.DaemonSetOptions{PodOptions: test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
@@ -200,34 +196,13 @@ var _ = Describe("DaemonSet Controller", func() {
 		ExpectApplied(ctx, env.Client, daemonsetPod1)
 		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
 
-		storedPod, err := cluster.GetDaemonSetCache(daemonset)
-		Expect(err).To(BeNil())
+		storedPod := cluster.GetDaemonSetCache(daemonset)
 		Expect(storedPod).To(Equal(daemonsetPod1))
 
-		daemonset.Spec.Template.Spec.Containers[0].Resources.Requests = v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")}
-		ExpectApplied(ctx, env.Client, daemonset)
-		daemonsetPod2 := test.UnschedulablePod(
-			test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Generation: daemonset.Generation,
-					OwnerReferences: []metav1.OwnerReference{
-						{
-							APIVersion:         "apps/v1",
-							Kind:               "DaemonSet",
-							Name:               daemonset.Name,
-							UID:                daemonset.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
-						},
-					},
-				},
-			})
-		daemonsetPod2.Spec = daemonset.Spec.Template.Spec
-		ExpectApplied(ctx, env.Client, daemonsetPod2)
+		ExpectDeleted(ctx, env.Client, daemonset, daemonsetPod1)
 		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
 
-		storedPod, err = cluster.GetDaemonSetCache(daemonset)
-		Expect(err).To(BeNil())
-		Expect(storedPod).To(Equal(daemonsetPod2))
+		storedPod = cluster.GetDaemonSetCache(daemonset)
+		Expect(storedPod).To(BeNil())
 	})
 })

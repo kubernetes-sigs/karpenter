@@ -31,8 +31,6 @@ import (
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
-var _ corecontroller.TypedController[*appsv1.DaemonSet] = (*Controller)(nil)
-
 // Controller for the resource
 type Controller struct {
 	kubeClient client.Client
@@ -41,10 +39,10 @@ type Controller struct {
 
 // NewController constructs a controller instance
 func NewController(kubeClient client.Client, cluster *state.Cluster) corecontroller.Controller {
-	return corecontroller.Typed[*appsv1.DaemonSet](kubeClient, &Controller{
+	return &Controller{
 		kubeClient: kubeClient,
 		cluster:    cluster,
-	})
+	}
 }
 
 func (c *Controller) Name() string {
@@ -52,16 +50,21 @@ func (c *Controller) Name() string {
 }
 
 // Reconcile the resource
-func (c *Controller) Reconcile(ctx context.Context, daemonSet *appsv1.DaemonSet) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	pods := &v1.PodList{}
+	var daemonSet appsv1.DaemonSet
 	err := c.kubeClient.List(ctx, pods)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
 
+	if err = c.kubeClient.Get(ctx, req.NamespacedName, &daemonSet); err != nil {
+		c.cluster.DeleteDaemonSetPod(req.NamespacedName)
+	}
+
 	for index := range pods.Items {
 		if containsOwnerRef(&pods.Items[index], daemonSet.UID) {
-			c.cluster.UpdateDaemonSetCache(daemonSet, &pods.Items[index])
+			c.cluster.UpdateDaemonSetCache(&daemonSet, &pods.Items[index])
 		}
 	}
 

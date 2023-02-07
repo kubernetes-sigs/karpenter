@@ -17,13 +17,10 @@ package state
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/mitchellh/hashstructure/v2"
-	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -51,10 +48,10 @@ type Cluster struct {
 	clock         clock.Clock
 
 	mu               sync.RWMutex
-	nodes            map[string]*Node                // provider id -> node
-	bindings         map[types.NamespacedName]string // pod namespaced named -> node node
-	nameToProviderID map[string]string               // node name -> provider id
-	daemonSetCache   *cache.Cache
+	nodes            map[string]*Node                 // provider id -> node
+	bindings         map[types.NamespacedName]string  // pod namespaced named -> node node
+	nameToProviderID map[string]string                // node name -> provider id
+	daemonSetCache   map[types.NamespacedName]*v1.Pod // daemonSet -> existing pod
 
 	antiAffinityPods sync.Map // pod namespaced name -> *v1.Pod of pods that have required anti affinities
 
@@ -71,7 +68,7 @@ func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudPro
 		cloudProvider:    cp,
 		nodes:            map[string]*Node{},
 		bindings:         map[types.NamespacedName]string{},
-		daemonSetCache:   cache.New(time.Minute, 10*time.Minute),
+		daemonSetCache:   map[types.NamespacedName]*v1.Pod{},
 		nameToProviderID: map[string]string{},
 	}
 }
@@ -299,37 +296,37 @@ func (c *Cluster) Reset() {
 	c.nameToProviderID = map[string]string{}
 	c.bindings = map[types.NamespacedName]string{}
 	c.antiAffinityPods = sync.Map{}
-	c.daemonSetCache.Flush()
+	c.daemonSetCache = map[types.NamespacedName]*v1.Pod{}
 }
 
-func (c *Cluster) GetDaemonSetCache(daemonset *appsv1.DaemonSet) (*v1.Pod, error) {
-	filter := map[string]string{
-		"UID":        string(daemonset.UID),
-		"Generation": strconv.FormatInt(daemonset.GetGeneration(), 10),
+func (c *Cluster) GetDaemonSetCache(daemonset *appsv1.DaemonSet) *v1.Pod {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	key := types.NamespacedName{Name: daemonset.Name, Namespace: daemonset.Namespace}
+	if pod, ok := c.daemonSetCache[key]; ok {
+		return pod
 	}
-	hash, err := hashstructure.Hash(filter, hashstructure.FormatV2, nil)
-	if err != nil {
-		return nil, err
-	}
-	if oldPod, ok := c.daemonSetCache.Get(fmt.Sprint(hash)); ok {
-		return oldPod.(*v1.Pod), nil
-	}
-	return &v1.Pod{Spec: *daemonset.Spec.Template.Spec.DeepCopy()}, nil
+
+	return nil
 }
 
 func (c *Cluster) UpdateDaemonSetCache(daemonset *appsv1.DaemonSet, pod *v1.Pod) {
-	filter := map[string]string{
-		"UID":        string(daemonset.UID),
-		"Generation": strconv.FormatInt(daemonset.GetGeneration(), 10),
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	key := types.NamespacedName{Name: daemonset.Name, Namespace: daemonset.Namespace}
+	c.daemonSetCache[key] = pod
+}
+
+func (c *Cluster) DeleteDaemonSetPod(key types.NamespacedName) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	_, ok := c.daemonSetCache[key]
+	if ok {
+		delete(c.daemonSetCache, key)
 	}
-	hash, err := hashstructure.Hash(filter, hashstructure.FormatV2, nil)
-	if err != nil {
-		return
-	}
-	if _, ok := c.daemonSetCache.Get(fmt.Sprint(hash)); ok {
-		return
-	}
-	c.daemonSetCache.SetDefault(fmt.Sprint(hash), pod)
 }
 
 // WARNING
