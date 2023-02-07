@@ -66,17 +66,17 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 		return reconcile.Result{}, nil
 	}
 	if err := c.terminator.Cordon(ctx, node); err != nil {
-		return reconcile.Result{}, fmt.Errorf("cordoning node, %w", err)
+		return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("cordoning node, %w", err))
 	}
 	if err := c.terminator.Drain(ctx, node); err != nil {
 		if terminator.IsNodeDrainError(err) {
 			c.recorder.Publish(events.NodeFailedToDrain(node, err))
 			return reconcile.Result{Requeue: true}, nil
 		}
-		return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
+		return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("draining node, %w", err))
 	}
 	if err := c.terminator.TerminateNode(ctx, node); err != nil {
-		return reconcile.Result{}, fmt.Errorf("terminating node, %w", err)
+		return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("terminating node, %w", err))
 	}
 	return reconcile.Result{}, nil
 }
