@@ -59,12 +59,12 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	if err = c.kubeClient.Get(ctx, req.NamespacedName, &daemonSet); err != nil {
-		c.cluster.DeleteDaemonSetPod(req.NamespacedName)
+		c.cluster.DeleteDaemonSetPods(req.NamespacedName)
 	}
 
 	for index := range pods.Items {
 		if containsOwnerRef(&pods.Items[index], daemonSet.UID) {
-			c.cluster.UpdateDaemonSetCache(&daemonSet, &pods.Items[index])
+			c.cluster.UpdateDaemonSetPods(&daemonSet, &pods.Items[index])
 		}
 	}
 

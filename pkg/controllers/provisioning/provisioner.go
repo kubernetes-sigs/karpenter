@@ -368,7 +368,7 @@ func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*v1.Pod, error) {
 
 	var ret []*v1.Pod
 	for index := range daemonSetList.Items {
-		cachedPod := p.cluster.GetDaemonSetCache(&daemonSetList.Items[index])
+		cachedPod := p.cluster.GetDaemonSetPods(&daemonSetList.Items[index])
 		var pod *v1.Pod
 		if cachedPod != nil {
 			pod = &v1.Pod{Spec: *cachedPod.Spec.DeepCopy()}

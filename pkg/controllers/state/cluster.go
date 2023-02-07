@@ -51,7 +51,7 @@ type Cluster struct {
 	nodes            map[string]*Node                 // provider id -> node
 	bindings         map[types.NamespacedName]string  // pod namespaced named -> node node
 	nameToProviderID map[string]string                // node name -> provider id
-	daemonSetCache   map[types.NamespacedName]*v1.Pod // daemonSet -> existing pod
+	daemonSetPods    map[types.NamespacedName]*v1.Pod // daemonSet -> existing pod
 
 	antiAffinityPods sync.Map // pod namespaced name -> *v1.Pod of pods that have required anti affinities
 
@@ -68,7 +68,7 @@ func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudPro
 		cloudProvider:    cp,
 		nodes:            map[string]*Node{},
 		bindings:         map[types.NamespacedName]string{},
-		daemonSetCache:   map[types.NamespacedName]*v1.Pod{},
+		daemonSetPods:    map[types.NamespacedName]*v1.Pod{},
 		nameToProviderID: map[string]string{},
 	}
 }
@@ -296,36 +296,36 @@ func (c *Cluster) Reset() {
 	c.nameToProviderID = map[string]string{}
 	c.bindings = map[types.NamespacedName]string{}
 	c.antiAffinityPods = sync.Map{}
-	c.daemonSetCache = map[types.NamespacedName]*v1.Pod{}
+	c.daemonSetPods = map[types.NamespacedName]*v1.Pod{}
 }
 
-func (c *Cluster) GetDaemonSetCache(daemonset *appsv1.DaemonSet) *v1.Pod {
+func (c *Cluster) GetDaemonSetPods(daemonset *appsv1.DaemonSet) *v1.Pod {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	key := types.NamespacedName{Name: daemonset.Name, Namespace: daemonset.Namespace}
-	if pod, ok := c.daemonSetCache[key]; ok {
+	if pod, ok := c.daemonSetPods[key]; ok {
 		return pod
 	}
 
 	return nil
 }
 
-func (c *Cluster) UpdateDaemonSetCache(daemonset *appsv1.DaemonSet, pod *v1.Pod) {
+func (c *Cluster) UpdateDaemonSetPods(daemonset *appsv1.DaemonSet, pod *v1.Pod) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	key := types.NamespacedName{Name: daemonset.Name, Namespace: daemonset.Namespace}
-	c.daemonSetCache[key] = pod
+	c.daemonSetPods[key] = pod
 }
 
-func (c *Cluster) DeleteDaemonSetPod(key types.NamespacedName) {
+func (c *Cluster) DeleteDaemonSetPods(key types.NamespacedName) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	_, ok := c.daemonSetCache[key]
+	_, ok := c.daemonSetPods[key]
 	if ok {
-		delete(c.daemonSetCache, key)
+		delete(c.daemonSetPods, key)
 	}
 }
 
