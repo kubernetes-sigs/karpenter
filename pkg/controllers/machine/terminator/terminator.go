@@ -111,7 +111,8 @@ func (t *Terminator) TerminateNode(ctx context.Context, node *v1.Node) error {
 		if err := t.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 			return err
 		}
-		terminationSummary.Observe(time.Since(node.DeletionTimestamp.Time).Seconds())
+		// We use stored.DeletionTimestamp since the api-server may give back a node after the patch without a deletionTimestamp
+		terminationSummary.Observe(time.Since(stored.DeletionTimestamp.Time).Seconds())
 	}
 	return nil
 }
