@@ -176,7 +176,7 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 		).
 		WithOptions(controller.Options{
 			RateLimiter: workqueue.NewMaxOfRateLimiter(
-				workqueue.NewItemExponentialFailureRateLimiter(100*time.Millisecond, 10*time.Second),
+				workqueue.NewItemExponentialFailureRateLimiter(time.Second, time.Minute),
 				// 10 qps, 100 bucket size
 				&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
 			),
@@ -203,5 +203,5 @@ func (c *Controller) cleanupNodeForMachine(ctx context.Context, machine *v1alpha
 	if err = c.terminator.Drain(ctx, node); err != nil {
 		return fmt.Errorf("draining node, %w", err)
 	}
-	return nil
+	return client.IgnoreNotFound(c.kubeClient.Delete(ctx, node))
 }

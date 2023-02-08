@@ -58,7 +58,7 @@ func (r *Registration) Reconcile(ctx context.Context, machine *v1alpha5.Machine)
 		}
 		return reconcile.Result{}, fmt.Errorf("getting node for machine, %w", err)
 	}
-	logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
 	if err = r.syncNode(ctx, machine, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("syncing node, %w", err)
 	}

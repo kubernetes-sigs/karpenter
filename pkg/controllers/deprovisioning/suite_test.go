@@ -2244,7 +2244,6 @@ var _ = Describe("Multi-Node Consolidation", func() {
 
 		var wg sync.WaitGroup
 		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1, machine1, machine2)
-		ExpectTriggerVerifyAction(&wg)
 
 		wg.Add(1)
 		finished := atomic.Bool{}

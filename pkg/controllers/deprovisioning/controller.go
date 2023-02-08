@@ -233,7 +233,6 @@ func (c *Controller) launchReplacementMachines(ctx context.Context, action Comma
 
 	// Wait for nodes to be ready
 	// TODO @njtran: Allow to bypass this check for certain deprovisioners
-	// TODO @joinnis: Figure out why there is a data-race here
 	errs := make([]error, len(machineNames))
 	workqueue.ParallelizeUntil(ctx, len(machineNames), len(machineNames), func(i int) {
 		// Wait for the machine to be initialized

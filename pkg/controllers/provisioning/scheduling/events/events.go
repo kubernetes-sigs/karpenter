@@ -35,7 +35,7 @@ func NominatePod(pod *v1.Pod, node *v1.Node) events.Event {
 		InvolvedObject: pod,
 		Type:           v1.EventTypeNormal,
 		Reason:         "Nominated",
-		Message:        fmt.Sprintf("Pod should schedule on: %s", node.Name),
+		Message:        fmt.Sprintf("Pod should schedule on node: %s", node.Name),
 		DedupeValues:   []string{string(pod.UID), node.Name},
 		RateLimiter:    PodNominationRateLimiter,
 	}

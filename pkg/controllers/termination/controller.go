@@ -35,6 +35,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
 	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/machine/terminator/events"
 	"github.com/aws/karpenter-core/pkg/events"
+	"github.com/aws/karpenter-core/pkg/metrics"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
@@ -94,13 +95,14 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 			if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 				return reconcile.Result{}, client.IgnoreNotFound(err)
 			}
+			metrics.NodesTerminatedCounter.Inc()
 			logging.FromContext(ctx).Infof("deleted node")
 		}
 		return reconcile.Result{}, nil
 	}
 	for i := range machineList.Items {
 		if err := c.kubeClient.Delete(ctx, &machineList.Items[i]); err != nil {
-			return reconcile.Result{}, err
+			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 	}
 	return reconcile.Result{}, nil

@@ -46,6 +46,7 @@ type CandidateNode struct {
 	pods           []*v1.Pod
 }
 
+//nolint:gocyclo
 func NewCandidateNode(ctx context.Context, kubeClient client.Client, clk clock.Clock, node *state.Node,
 	provisionerMap map[string]*v1alpha5.Provisioner, provisionerToInstanceTypes map[string]map[string]*cloudprovider.InstanceType) *CandidateNode {
 
@@ -53,7 +54,6 @@ func NewCandidateNode(ctx context.Context, kubeClient client.Client, clk clock.C
 	for _, label := range []string{
 		v1alpha5.LabelCapacityType,
 		v1.LabelTopologyZone,
-		v1alpha5.MachineNameLabelKey,
 		v1alpha5.ProvisionerNameLabelKey,
 	} {
 		if _, ok := node.Labels()[label]; !ok {
@@ -85,6 +85,9 @@ func NewCandidateNode(ctx context.Context, kubeClient client.Client, clk clock.C
 	}
 	// skip the node if it is nominated by a recent provisioning pass to be the target of a pending pod.
 	if node.Nominated() {
+		return nil
+	}
+	if node.Node == nil || node.Machine == nil {
 		return nil
 	}
 

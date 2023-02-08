@@ -44,6 +44,12 @@ var (
 			ProvisionerLabel,
 		},
 	)
+	NodesTerminatedCounter = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: Namespace,
+		Subsystem: "nodes",
+		Name:      "terminated",
+		Help:      "Number of nodes terminated in total by Karpenter.",
+	})
 )
 
 func MustRegister() {

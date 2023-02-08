@@ -53,9 +53,9 @@ type CloudProvider interface {
 	// Create launches a machine with the given resource requests and requirements and returns a hydrated
 	// machine back with resolved machine labels for the launched machine
 	Create(context.Context, *v1alpha5.Machine) (*v1alpha5.Machine, error)
-	// Delete removes a machine from the cloudprovider by its machine name
+	// Delete removes a machine from the cloudprovider by its provider id
 	Delete(context.Context, *v1alpha5.Machine) error
-	// Get retrieves a machine from the cloudprovider by its machine name
+	// Get retrieves a machine from the cloudprovider by its provider id
 	Get(context.Context, string) (*v1alpha5.Machine, error)
 	// GetInstanceTypes returns instance types supported by the cloudprovider.
 	// Availability of types or zone may vary by provisioner or over time.  Regardless of

@@ -106,7 +106,13 @@ func NewNode() *Node {
 }
 
 func (in *Node) Name() string {
-	if in.Machine != nil && !in.Machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
+	if in.Node == nil {
+		return in.Machine.Name
+	}
+	if in.Machine == nil {
+		return in.Node.Name
+	}
+	if !in.Machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
 		return in.Machine.Name
 	}
 	return in.Node.Name
@@ -130,7 +136,13 @@ func (in *Node) HostName() string {
 func (in *Node) Annotations() map[string]string {
 	// If the machine exists and the state node isn't initialized
 	// use the machine representation of the annotations
-	if in.Machine != nil && !in.Machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
+	if in.Node == nil {
+		return in.Machine.Annotations
+	}
+	if in.Machine == nil {
+		return in.Node.Annotations
+	}
+	if !in.Machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
 		return in.Machine.Annotations
 	}
 	return in.Node.Annotations
@@ -139,7 +151,13 @@ func (in *Node) Annotations() map[string]string {
 func (in *Node) Labels() map[string]string {
 	// If the machine exists and the state node isn't initialized
 	// use the machine representation of the labels
-	if in.Machine != nil && !in.Machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
+	if in.Node == nil {
+		return in.Machine.Labels
+	}
+	if in.Machine == nil {
+		return in.Node.Labels
+	}
+	if !in.Machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
 		return in.Machine.Labels
 	}
 	return in.Node.Labels

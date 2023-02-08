@@ -199,7 +199,7 @@ func (c *CloudProvider) Delete(_ context.Context, m *v1alpha5.Machine) error {
 		delete(c.CreatedMachines, m.Status.ProviderID)
 		return nil
 	}
-	return cloudprovider.NewMachineNotFoundError(fmt.Errorf("no machine exists with name '%s'", m.Name))
+	return cloudprovider.NewMachineNotFoundError(fmt.Errorf("no machine exists with provider id '%s'", m.Status.ProviderID))
 }
 
 func (c *CloudProvider) IsMachineDrifted(context.Context, *v1alpha5.Machine) (bool, error) {
