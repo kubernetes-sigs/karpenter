@@ -48,10 +48,10 @@ type Cluster struct {
 	clock         clock.Clock
 
 	mu               sync.RWMutex
-	nodes            map[string]*Node                 // provider id -> node
-	bindings         map[types.NamespacedName]string  // pod namespaced named -> node node
-	nameToProviderID map[string]string                // node name -> provider id
-	daemonSetPods    map[types.NamespacedName]*v1.Pod // daemonSet -> existing pod
+	nodes            map[string]*Node                // provider id -> node
+	bindings         map[types.NamespacedName]string // pod namespaced named -> node node
+	nameToProviderID map[string]string               // node name -> provider id
+	daemonSetPods    sync.Map                        // daemonSet -> existing pod
 
 	antiAffinityPods sync.Map // pod namespaced name -> *v1.Pod of pods that have required anti affinities
 
@@ -68,7 +68,7 @@ func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudPro
 		cloudProvider:    cp,
 		nodes:            map[string]*Node{},
 		bindings:         map[types.NamespacedName]string{},
-		daemonSetPods:    map[types.NamespacedName]*v1.Pod{},
+		daemonSetPods:    sync.Map{},
 		nameToProviderID: map[string]string{},
 	}
 }
@@ -296,16 +296,15 @@ func (c *Cluster) Reset() {
 	c.nameToProviderID = map[string]string{}
 	c.bindings = map[types.NamespacedName]string{}
 	c.antiAffinityPods = sync.Map{}
-	c.daemonSetPods = map[types.NamespacedName]*v1.Pod{}
+	c.daemonSetPods = sync.Map{}
 }
 
 func (c *Cluster) GetDaemonSetPods(daemonset *appsv1.DaemonSet) *v1.Pod {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	key := types.NamespacedName{Name: daemonset.Name, Namespace: daemonset.Namespace}
-	if pod, ok := c.daemonSetPods[key]; ok {
-		return pod
+	if pod, ok := c.daemonSetPods.Load(client.ObjectKeyFromObject(daemonset)); ok {
+		return pod.(*v1.Pod)
 	}
 
 	return nil
@@ -315,17 +314,16 @@ func (c *Cluster) UpdateDaemonSetPods(daemonset *appsv1.DaemonSet, pod *v1.Pod) 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	key := types.NamespacedName{Name: daemonset.Name, Namespace: daemonset.Namespace}
-	c.daemonSetPods[key] = pod
+	c.daemonSetPods.Store(client.ObjectKeyFromObject(daemonset), pod)
 }
 
 func (c *Cluster) DeleteDaemonSetPods(key types.NamespacedName) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	_, ok := c.daemonSetPods[key]
+	_, ok := c.daemonSetPods.Load(key)
 	if ok {
-		delete(c.daemonSetPods, key)
+		c.daemonSetPods.Delete(key)
 	}
 }
 

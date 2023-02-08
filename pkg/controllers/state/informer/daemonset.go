@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package daemonset
+package informer
 
 import (
 	"context"
@@ -20,7 +20,8 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -38,7 +39,7 @@ type Controller struct {
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client, cluster *state.Cluster) corecontroller.Controller {
+func NewDaemonSetController(kubeClient client.Client, cluster *state.Cluster) corecontroller.Controller {
 	return &Controller{
 		kubeClient: kubeClient,
 		cluster:    cluster,
@@ -51,21 +52,19 @@ func (c *Controller) Name() string {
 
 // Reconcile the resource
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	pods := &v1.PodList{}
+	// pods := &v1.PodList{}
 	var daemonSet appsv1.DaemonSet
-	err := c.kubeClient.List(ctx, pods)
+	if err := c.kubeClient.Get(ctx, req.NamespacedName, &daemonSet); err != nil {
+		if errors.IsNotFound(err) {
+			// notify cluster state of the daemonset deletion
+			c.cluster.DeleteDaemonSetPods(req.NamespacedName)
+		}
+		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
+
+	err := c.updateDaemonset(ctx, &daemonSet)
 	if err != nil {
 		return reconcile.Result{}, err
-	}
-
-	if err = c.kubeClient.Get(ctx, req.NamespacedName, &daemonSet); err != nil {
-		c.cluster.DeleteDaemonSetPods(req.NamespacedName)
-	}
-
-	for index := range pods.Items {
-		if containsOwnerRef(&pods.Items[index], daemonSet.UID) {
-			c.cluster.UpdateDaemonSetPods(&daemonSet, &pods.Items[index])
-		}
 	}
 
 	return reconcile.Result{RequeueAfter: time.Minute}, nil
@@ -79,11 +78,17 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontrolle
 	)
 }
 
-func containsOwnerRef(pod *v1.Pod, matchUID types.UID) bool {
-	for _, owner := range pod.OwnerReferences {
-		if owner.UID == matchUID {
-			return true
+func (c *Controller) updateDaemonset(ctx context.Context, daemonset *appsv1.DaemonSet) error {
+	pods := &v1.PodList{}
+	err := c.kubeClient.List(ctx, pods, client.InNamespace(daemonset.Namespace))
+	if err != nil {
+		return err
+	}
+
+	for index := range pods.Items {
+		if metav1.IsControlledBy(&pods.Items[index], daemonset) {
+			c.cluster.UpdateDaemonSetPods(daemonset, &pods.Items[index])
 		}
 	}
-	return false
+	return nil
 }

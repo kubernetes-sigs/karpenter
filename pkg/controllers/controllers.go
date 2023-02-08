@@ -23,7 +23,6 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/counter"
-	"github.com/aws/karpenter-core/pkg/controllers/daemonset"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/inflightchecks"
 	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
@@ -58,10 +57,10 @@ func NewControllers(
 	terminator := terminator.NewTerminator(clock, kubeClient, cloudProvider, terminator.NewEvictionQueue(ctx, kubernetesInterface.CoreV1(), recorder))
 	return []controller.Controller{
 		provisioner,
-		daemonset.NewController(kubeClient, cluster),
 		metricsstate.NewController(cluster),
 		deprovisioning.NewController(clock, kubeClient, provisioner, cloudProvider, recorder, cluster),
 		provisioning.NewController(kubeClient, provisioner, recorder),
+		informer.NewDaemonSetController(kubeClient, cluster),
 		informer.NewNodeController(kubeClient, cluster),
 		informer.NewPodController(kubeClient, cluster),
 		informer.NewProvisionerController(kubeClient, cluster),
