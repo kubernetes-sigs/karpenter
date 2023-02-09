@@ -93,9 +93,7 @@ spec:
     - Rebalance
 ```
 
-This provides a solution to time-based deprovisioning blocking. Relying users to vend their own solution with a CronJob fails unsafe, which could result in unexpected application disruptions and node churn. Karpenter should always be able to correctly consider when to Provision or Deprovision nodes without relying on other independent moving parts to modify the functionality.
-
-This has the downside of being another API that users must have to learn. While Maintenance Windows
+This provides a solution to time-based deprovisioning blocking. Relying users to vend their own solution with a CronJob fails unsafe, which could result in unexpected application disruptions and node churn. Karpenter should always be able to correctly consider when to provision or deprovision nodes without relying on other independent moving parts to modify the functionality. This has the downside of being another API that users must have to learn, and another Custom Resource that Karpenter must manage.
 
 ### ProvisionerSpec API Reorganization - Pain Points (2, 3)
 

@@ -27,7 +27,7 @@ Following this semantic, the `ProviderRef`/`in-line Provider` struct will be inc
 
 ## How does this relate to Drift?
 
-A machine will be drifted if the machine’s in-memory template matches the by the `ProvisionerSpec.Template` and `Provider.Spec` fields.
+A machine will be drifted if the machine’s template does not match the `ProvisionerSpec.Template` and `Provider.Spec` fields.
 
 ### What about the other behavioral specs?
 
