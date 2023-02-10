@@ -19,9 +19,7 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -57,12 +55,12 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, &daemonSet); err != nil {
 		if errors.IsNotFound(err) {
 			// notify cluster state of the daemonset deletion
-			c.cluster.DeleteDaemonSetPods(req.NamespacedName)
+			c.cluster.DeleteDaemonSetPod(req.NamespacedName)
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	err := c.updateDaemonset(ctx, &daemonSet)
+	err := c.cluster.UpdateDaemonSetPods(ctx, &daemonSet)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
@@ -76,19 +74,4 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontrolle
 		For(&appsv1.DaemonSet{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
 	)
-}
-
-func (c *Controller) updateDaemonset(ctx context.Context, daemonset *appsv1.DaemonSet) error {
-	pods := &v1.PodList{}
-	err := c.kubeClient.List(ctx, pods, client.InNamespace(daemonset.Namespace))
-	if err != nil {
-		return err
-	}
-
-	for index := range pods.Items {
-		if metav1.IsControlledBy(&pods.Items[index], daemonset) {
-			c.cluster.UpdateDaemonSetPods(daemonset, &pods.Items[index])
-		}
-	}
-	return nil
 }

@@ -27,6 +27,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
@@ -299,32 +300,32 @@ func (c *Cluster) Reset() {
 	c.daemonSetPods = sync.Map{}
 }
 
-func (c *Cluster) GetDaemonSetPods(daemonset *appsv1.DaemonSet) *v1.Pod {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
+func (c *Cluster) GetDaemonSetPod(daemonset *appsv1.DaemonSet) *v1.Pod {
 	if pod, ok := c.daemonSetPods.Load(client.ObjectKeyFromObject(daemonset)); ok {
-		return pod.(*v1.Pod)
+		return pod.(*v1.Pod).DeepCopy()
 	}
 
 	return nil
 }
 
-func (c *Cluster) UpdateDaemonSetPods(daemonset *appsv1.DaemonSet, pod *v1.Pod) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func (c *Cluster) UpdateDaemonSetPods(ctx context.Context, daemonset *appsv1.DaemonSet) error {
+	pods := &v1.PodList{}
+	err := c.kubeClient.List(ctx, pods, client.InNamespace(daemonset.Namespace))
+	if err != nil {
+		return err
+	}
 
-	c.daemonSetPods.Store(client.ObjectKeyFromObject(daemonset), pod)
+	for index := range pods.Items {
+		if metav1.IsControlledBy(&pods.Items[index], daemonset) {
+			c.daemonSetPods.Store(client.ObjectKeyFromObject(daemonset), &pods.Items[index])
+		}
+	}
+
+	return nil
 }
 
-func (c *Cluster) DeleteDaemonSetPods(key types.NamespacedName) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	_, ok := c.daemonSetPods.Load(key)
-	if ok {
-		c.daemonSetPods.Delete(key)
-	}
+func (c *Cluster) DeleteDaemonSetPod(key types.NamespacedName) {
+	c.daemonSetPods.Delete(key)
 }
 
 // WARNING
