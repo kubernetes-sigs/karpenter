@@ -9,6 +9,7 @@ test: ## Run tests
 	go test ./... \
 		-race \
 		--ginkgo.focus="${FOCUS}" \
+		--ginkgo.v \
 		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
 
 deflake: ## Run randomized, racing tests until the test fails to catch flakes
