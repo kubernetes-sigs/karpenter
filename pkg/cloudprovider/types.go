@@ -146,17 +146,17 @@ func (ofs Offerings) Cheapest() Offering {
 
 // MachineNotFoundError is an error type returned by CloudProviders when the reason for failure is NotFound
 type MachineNotFoundError struct {
-	Err error
+	error
 }
 
 func NewMachineNotFoundError(err error) *MachineNotFoundError {
 	return &MachineNotFoundError{
-		Err: err,
+		error: err,
 	}
 }
 
 func (e *MachineNotFoundError) Error() string {
-	return fmt.Sprintf("machine not found, %s", e.Err)
+	return fmt.Sprintf("machine not found, %s", e.error)
 }
 
 func IsMachineNotFoundError(err error) bool {
@@ -169,6 +169,36 @@ func IsMachineNotFoundError(err error) bool {
 
 func IgnoreMachineNotFoundError(err error) error {
 	if IsMachineNotFoundError(err) {
+		return nil
+	}
+	return err
+}
+
+// InsufficientCapacityError is an error type returned by CloudProviders when a launch fails due to a lack of capacity from machine requirements
+type InsufficientCapacityError struct {
+	error
+}
+
+func NewInsufficientCapacityError(err error) *InsufficientCapacityError {
+	return &InsufficientCapacityError{
+		error: err,
+	}
+}
+
+func (e *InsufficientCapacityError) Error() string {
+	return fmt.Sprintf("insufficient capacity, %s", e.error)
+}
+
+func IsInsufficientCapacityError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var icErr *InsufficientCapacityError
+	return errors.As(err, &icErr)
+}
+
+func IgnoreInsufficientCapacityError(err error) error {
+	if IsInsufficientCapacityError(err) {
 		return nil
 	}
 	return err
