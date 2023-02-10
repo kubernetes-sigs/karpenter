@@ -39,6 +39,9 @@ func (r *Registration) Reconcile(ctx context.Context, machine *v1alpha5.Machine)
 	if machine.Status.ProviderID == "" {
 		return reconcile.Result{}, nil
 	}
+	if machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
+		return reconcile.Result{}, nil
+	}
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", machine.Status.ProviderID))
 	node, err := nodeForMachine(ctx, r.kubeClient, machine)
 	if err != nil {

@@ -198,7 +198,7 @@ func (c *CloudProvider) Delete(_ context.Context, m *v1alpha5.Machine) error {
 func (c *CloudProvider) IsMachineDrifted(context.Context, *v1alpha5.Machine) (bool, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	return c.Drifted, nil
 }
 
