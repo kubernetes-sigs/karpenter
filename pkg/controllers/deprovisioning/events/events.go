@@ -16,6 +16,7 @@ package events
 
 import (
 	"fmt"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 
@@ -69,5 +70,6 @@ func UnconsolidatableReason(node *v1.Node, reason string) events.Event {
 		Reason:         "Unconsolidatable",
 		Message:        reason,
 		DedupeValues:   []string{node.Name},
+		DedupeTimeout:  time.Minute * 15,
 	}
 }
