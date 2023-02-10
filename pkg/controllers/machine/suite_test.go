@@ -16,6 +16,7 @@ package machine_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/machine"
 	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
@@ -157,6 +159,15 @@ var _ = Describe("Controller", func() {
 
 			machine = ExpectExists(ctx, env.Client, machine)
 			Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineCreated).Status).To(Equal(v1.ConditionTrue))
+		})
+		It("should delete the machine if InsufficientCapacity is returned from the cloudprovider", func() {
+			cloudProvider.NextCreateErr = cloudprovider.NewInsufficientCapacityError(fmt.Errorf("all instance types were unavailable"))
+			machine := test.Machine()
+			ExpectApplied(ctx, env.Client, machine)
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine)) // Reconcile again to handle termination flow
+
+			ExpectNotFound(ctx, env.Client, machine)
 		})
 	})
 	Context("Registration", func() {

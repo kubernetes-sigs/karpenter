@@ -41,10 +41,11 @@ var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)
 type CloudProvider struct {
 	InstanceTypes []*cloudprovider.InstanceType
 
+	mu sync.RWMutex
 	// CreateCalls contains the arguments for every create call that was made since it was cleared
-	mu                 sync.RWMutex
 	CreateCalls        []*v1alpha5.Machine
 	AllowedCreateCalls int
+	NextCreateErr      error
 	CreatedMachines    map[string]*v1alpha5.Machine
 	Drifted            bool
 }
@@ -63,11 +64,18 @@ func (c *CloudProvider) Reset() {
 	c.CreateCalls = []*v1alpha5.Machine{}
 	c.CreatedMachines = map[string]*v1alpha5.Machine{}
 	c.AllowedCreateCalls = math.MaxInt
+	c.NextCreateErr = nil
 }
 
 func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (*v1alpha5.Machine, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if c.NextCreateErr != nil {
+		temp := c.NextCreateErr
+		c.NextCreateErr = nil
+		return nil, temp
+	}
 
 	c.CreateCalls = append(c.CreateCalls, machine)
 	if len(c.CreateCalls) > c.AllowedCreateCalls {
@@ -188,6 +196,9 @@ func (c *CloudProvider) Delete(_ context.Context, m *v1alpha5.Machine) error {
 }
 
 func (c *CloudProvider) IsMachineDrifted(context.Context, *v1alpha5.Machine) (bool, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	
 	return c.Drifted, nil
 }
 

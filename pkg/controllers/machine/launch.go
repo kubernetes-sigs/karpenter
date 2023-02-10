@@ -42,6 +42,10 @@ func (l *Launch) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reco
 			logging.FromContext(ctx).Debugf("creating machine")
 			retrieved, err = l.cloudProvider.Create(ctx, machine)
 			if err != nil {
+				if cloudprovider.IsInsufficientCapacityError(err) {
+					logging.FromContext(ctx).Error(err)
+					return reconcile.Result{}, client.IgnoreNotFound(l.kubeClient.Delete(ctx, machine))
+				}
 				return reconcile.Result{}, fmt.Errorf("creating machine, %w", err)
 			}
 		} else {
