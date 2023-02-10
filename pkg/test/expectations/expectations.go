@@ -175,7 +175,7 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 	wg := sync.WaitGroup{}
 	namespaces := &v1.NamespaceList{}
 	ExpectWithOffset(1, c.List(ctx, namespaces)).To(Succeed())
-	ExpectFinalizersRemoved(ctx, c, &v1.NodeList{}, &v1alpha5.MachineList{}, &v1.PersistentVolumeClaimList{})
+	ExpectFinalizersRemovedFromList(ctx, c, &v1.NodeList{}, &v1alpha5.MachineList{}, &v1.PersistentVolumeClaimList{})
 	for _, object := range []client.Object{
 		&v1.Pod{},
 		&v1.Node{},
@@ -200,7 +200,7 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 	wg.Wait()
 }
 
-func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objectLists ...client.ObjectList) {
+func ExpectFinalizersRemovedFromList(ctx context.Context, c client.Client, objectLists ...client.ObjectList) {
 	for _, list := range objectLists {
 		ExpectWithOffset(1, c.List(ctx, list)).To(Succeed())
 		ExpectWithOffset(1, meta.EachListItem(list, func(o runtime.Object) error {
@@ -210,6 +210,15 @@ func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objectLists .
 			Expect(client.IgnoreNotFound(c.Patch(ctx, obj, client.MergeFrom(stored)))).To(Succeed())
 			return nil
 		})).To(Succeed())
+	}
+}
+
+func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objs ...client.Object) {
+	for _, obj := range objs {
+		ExpectWithOffset(1, c.Get(ctx, client.ObjectKeyFromObject(obj), obj)).To(Succeed())
+		stored := obj.DeepCopyObject().(client.Object)
+		obj.SetFinalizers([]string{})
+		ExpectWithOffset(1, client.IgnoreNotFound(c.Patch(ctx, obj, client.MergeFrom(stored)))).To(Succeed())
 	}
 }
 

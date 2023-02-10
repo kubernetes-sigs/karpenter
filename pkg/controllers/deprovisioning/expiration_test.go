@@ -15,6 +15,7 @@ limitations under the License.
 package deprovisioning_test
 
 import (
+	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -86,10 +87,14 @@ var _ = Describe("Expiration", func() {
 
 		// inform cluster state about the nodes
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
 		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
+
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
 
 		// we don't need a new node, but we should evict everything off one of node2 which only has a single pod
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
@@ -130,10 +135,13 @@ var _ = Describe("Expiration", func() {
 		// inform cluster state about the nodes
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodeToExpire))
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodeNotExpire))
+
 		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
 
 		// we don't need a new node, but we should evict everything off one of node2 which only has a single pod
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
@@ -183,9 +191,11 @@ var _ = Describe("Expiration", func() {
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
 
 		// deprovisioning won't delete the old node until the new node is ready
-		wg := ExpectMakeNewNodesReady(ctx, env.Client, 1, node)
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1, node)
+
 		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 		wg.Wait()
@@ -275,9 +285,11 @@ var _ = Describe("Expiration", func() {
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
 
 		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).To(HaveOccurred())
+		wg.Wait()
 
 		// Expiration should try to make 3 calls but fail for the third.
 		Expect(cloudProvider.CreateCalls).To(HaveLen(3))
@@ -365,9 +377,11 @@ var _ = Describe("Expiration", func() {
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
 
 		// deprovisioning won't delete the old node until the new node is ready
-		wg := ExpectMakeNewNodesReady(ctx, env.Client, 3, node)
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 3, node)
+
 		fakeClock.Step(10 * time.Minute)
-		go triggerVerifyAction()
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 		wg.Wait()
