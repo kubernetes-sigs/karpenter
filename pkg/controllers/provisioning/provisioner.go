@@ -366,15 +366,13 @@ func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*v1.Pod, error) {
 		return nil, fmt.Errorf("listing daemonsets, %w", err)
 	}
 
-	ret := lo.Map(daemonSetList.Items, func(d appsv1.DaemonSet, _ int) *v1.Pod {
+	return lo.Map(daemonSetList.Items, func(d appsv1.DaemonSet, _ int) *v1.Pod {
 		pod := p.cluster.GetDaemonSetPod(&d)
 		if pod == nil {
 			pod = &v1.Pod{Spec: d.Spec.Template.Spec}
 		}
 		return pod
-	})
-
-	return ret, nil
+	}), nil
 }
 
 func (p *Provisioner) Validate(ctx context.Context, pod *v1.Pod) error {

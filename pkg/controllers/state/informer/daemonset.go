@@ -50,8 +50,7 @@ func (c *Controller) Name() string {
 
 // Reconcile the resource
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	// pods := &v1.PodList{}
-	var daemonSet appsv1.DaemonSet
+	daemonSet := appsv1.DaemonSet{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, &daemonSet); err != nil {
 		if errors.IsNotFound(err) {
 			// notify cluster state of the daemonset deletion
@@ -60,12 +59,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	err := c.cluster.UpdateDaemonSet(ctx, &daemonSet)
-	if err != nil {
-		return reconcile.Result{}, err
-	}
-
-	return reconcile.Result{RequeueAfter: time.Minute}, nil
+	return reconcile.Result{RequeueAfter: time.Minute}, c.cluster.UpdateDaemonSet(ctx, &daemonSet)
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {

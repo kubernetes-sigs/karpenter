@@ -59,6 +59,7 @@ var nodeController controller.Controller
 var cloudProvider *fake.CloudProvider
 var prov *provisioning.Provisioner
 var provisioningController controller.Controller
+var daemonsetController controller.Controller
 var env *test.Environment
 var instanceTypeMap map[string]*cloudprovider.InstanceType
 
@@ -76,6 +77,7 @@ var _ = BeforeSuite(func() {
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	prov = provisioning.NewProvisioner(ctx, env.Client, corev1.NewForConfigOrDie(env.Config), events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster)
+	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
 	provisioningController = provisioning.NewController(env.Client, prov, events.NewRecorder(&record.FakeRecorder{}))
 	instanceTypes, _ := cloudProvider.GetInstanceTypes(context.Background(), nil)
 	instanceTypeMap = map[string]*cloudprovider.InstanceType{}
@@ -367,6 +369,42 @@ var _ = Describe("Provisioning", func() {
 		})
 	})
 	Context("Daemonsets and Node Overhead", func() {
+		It("should schedule pods with a daemonset", func() {
+			provisioner := test.Provisioner()
+			daemonset := test.DaemonSet(
+				test.DaemonSetOptions{PodOptions: test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+				}},
+			)
+			ExpectApplied(ctx, env.Client, provisioner, daemonset)
+			daemonsetPod := test.UnschedulablePod(
+				test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								APIVersion:         "apps/v1",
+								Kind:               "DaemonSet",
+								Name:               daemonset.Name,
+								UID:                daemonset.UID,
+								Controller:         ptr.Bool(true),
+								BlockOwnerDeletion: ptr.Bool(true),
+							},
+						},
+					},
+				})
+			daemonsetPod.Spec = daemonset.Spec.Template.Spec
+			ExpectApplied(ctx, env.Client, provisioner, daemonsetPod)
+			ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
+			pod := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+				NodeSelector:         map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name}})
+			ExpectProvisioned(ctx, env.Client, cluster, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
+		})
 		It("should account for overhead", func() {
 			ExpectApplied(ctx, env.Client, test.Provisioner(), test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{

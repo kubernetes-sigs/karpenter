@@ -320,9 +320,9 @@ func (c *Cluster) UpdateDaemonSet(ctx context.Context, daemonset *appsv1.DaemonS
 		return pods.Items[i].CreationTimestamp.Unix() > pods.Items[j].CreationTimestamp.Unix()
 	})
 
-	for index := range pods.Items {
-		if metav1.IsControlledBy(&pods.Items[index], daemonset) {
-			c.daemonSetPods.Store(client.ObjectKeyFromObject(daemonset), &pods.Items[index])
+	for i := range pods.Items {
+		if metav1.IsControlledBy(&pods.Items[i], daemonset) {
+			c.daemonSetPods.Store(client.ObjectKeyFromObject(daemonset), &pods.Items[i])
 			break
 		}
 	}
