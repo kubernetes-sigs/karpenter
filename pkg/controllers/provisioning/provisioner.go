@@ -366,18 +366,14 @@ func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*v1.Pod, error) {
 		return nil, fmt.Errorf("listing daemonsets, %w", err)
 	}
 
-	var ret []*v1.Pod
-	for index := range daemonSetList.Items {
-		cachedPod := p.cluster.GetDaemonSetPod(&daemonSetList.Items[index])
-		var pod *v1.Pod
-		if cachedPod != nil {
-			pod = &v1.Pod{Spec: *cachedPod.Spec.DeepCopy()}
-		} else {
-			pod = &v1.Pod{Spec: daemonSetList.Items[index].Spec.Template.Spec}
+	ret := lo.Map(daemonSetList.Items, func(d appsv1.DaemonSet, _ int) *v1.Pod {
+		pod := p.cluster.GetDaemonSetPod(&d)
+		if pod == nil {
+			pod = &v1.Pod{Spec: d.Spec.Template.Spec}
 		}
+		return pod
+	})
 
-		ret = append(ret, pod)
-	}
 	return ret, nil
 }
 

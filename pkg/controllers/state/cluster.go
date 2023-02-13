@@ -17,6 +17,7 @@ package state
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -308,23 +309,28 @@ func (c *Cluster) GetDaemonSetPod(daemonset *appsv1.DaemonSet) *v1.Pod {
 	return nil
 }
 
-func (c *Cluster) UpdateDaemonSetPods(ctx context.Context, daemonset *appsv1.DaemonSet) error {
+func (c *Cluster) UpdateDaemonSet(ctx context.Context, daemonset *appsv1.DaemonSet) error {
 	pods := &v1.PodList{}
 	err := c.kubeClient.List(ctx, pods, client.InNamespace(daemonset.Namespace))
 	if err != nil {
 		return err
 	}
 
+	sort.Slice(pods.Items, func(i, j int) bool {
+		return pods.Items[i].CreationTimestamp.Unix() > pods.Items[j].CreationTimestamp.Unix()
+	})
+
 	for index := range pods.Items {
 		if metav1.IsControlledBy(&pods.Items[index], daemonset) {
 			c.daemonSetPods.Store(client.ObjectKeyFromObject(daemonset), &pods.Items[index])
+			break
 		}
 	}
 
 	return nil
 }
 
-func (c *Cluster) DeleteDaemonSetPod(key types.NamespacedName) {
+func (c *Cluster) DeleteDaemonSet(key types.NamespacedName) {
 	c.daemonSetPods.Delete(key)
 }
 

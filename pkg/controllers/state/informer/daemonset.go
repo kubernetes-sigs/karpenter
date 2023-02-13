@@ -55,12 +55,12 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, &daemonSet); err != nil {
 		if errors.IsNotFound(err) {
 			// notify cluster state of the daemonset deletion
-			c.cluster.DeleteDaemonSetPod(req.NamespacedName)
+			c.cluster.DeleteDaemonSet(req.NamespacedName)
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	err := c.cluster.UpdateDaemonSetPods(ctx, &daemonSet)
+	err := c.cluster.UpdateDaemonSet(ctx, &daemonSet)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
