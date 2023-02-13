@@ -34,6 +34,7 @@ const (
 const (
 	ProvisionerNameLabelKey = Group + "/provisioner-name"
 	MachineNameLabelKey     = Group + "/machine-name"
+	ManagedByLabelKey       = Group + "/managed-by"
 	LabelNodeInitialized    = Group + "/initialized"
 	LabelCapacityType       = Group + "/capacity-type"
 )
@@ -44,6 +45,7 @@ const (
 	DoNotConsolidateNodeAnnotationKey = Group + "/do-not-consolidate"
 	EmptinessTimestampAnnotationKey   = Group + "/emptiness-timestamp"
 	VoluntaryDisruptionAnnotationKey  = Group + "/voluntary-disruption"
+	MachineLinkedAnnotationKey        = Group + "/linked"
 
 	ProviderCompatabilityAnnotationKey = CompatabilityGroup + "/provider"
 

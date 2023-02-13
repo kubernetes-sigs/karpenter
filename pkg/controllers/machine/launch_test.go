@@ -49,12 +49,14 @@ var _ = Describe("Launch", func() {
 		ExpectApplied(ctx, env.Client, provisioner, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 
+		machine = ExpectExists(ctx, env.Client, machine)
+
 		Expect(cloudProvider.CreateCalls).To(HaveLen(1))
 		Expect(cloudProvider.CreatedMachines).To(HaveLen(1))
-		_, err := cloudProvider.Get(ctx, machine.Name, "")
+		_, err := cloudProvider.Get(ctx, machine.Status.ProviderID)
 		Expect(err).ToNot(HaveOccurred())
 	})
-	It("should get an instance and hydrate the Machine when the Machine is already created", func() {
+	It("should add the MachineCreated status condition after creating the Machine", func() {
 		machine := test.Machine(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -63,9 +65,14 @@ var _ = Describe("Launch", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, provisioner, machine)
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+
+		machine = ExpectExists(ctx, env.Client, machine)
+		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineCreated).Status).To(Equal(v1.ConditionTrue))
+	})
+	It("should link an instance with the karpenter.sh/linked annotation", func() {
 		cloudProviderMachine := &v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: machine.Name,
 				Labels: map[string]string{
 					v1.LabelInstanceTypeStable: "small-instance-type",
 					v1.LabelTopologyZone:       "test-zone-1a",
@@ -87,7 +94,18 @@ var _ = Describe("Launch", func() {
 				},
 			},
 		}
-		cloudProvider.CreatedMachines[machine.Name] = cloudProviderMachine
+		cloudProvider.CreatedMachines[cloudProviderMachine.Status.ProviderID] = cloudProviderMachine
+		machine := test.Machine(v1alpha5.Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1alpha5.MachineLinkedAnnotationKey: cloudProviderMachine.Status.ProviderID,
+				},
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, provisioner, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
@@ -100,20 +118,6 @@ var _ = Describe("Launch", func() {
 		Expect(machine.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-1a"))
 		Expect(machine.Labels).To(HaveKeyWithValue(v1.LabelTopologyRegion, "test-zone"))
 		Expect(machine.Labels).To(HaveKeyWithValue(v1alpha5.LabelCapacityType, v1alpha5.CapacityTypeSpot))
-	})
-	It("should add the MachineCreated status condition after creating the Machine", func() {
-		machine := test.Machine(v1alpha5.Machine{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-
-		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineCreated).Status).To(Equal(v1.ConditionTrue))
 	})
 	It("should delete the machine if InsufficientCapacity is returned from the cloudprovider", func() {
 		cloudProvider.NextCreateErr = cloudprovider.NewInsufficientCapacityError(fmt.Errorf("all instance types were unavailable"))
