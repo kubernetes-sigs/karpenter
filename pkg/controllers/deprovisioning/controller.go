@@ -164,11 +164,10 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 			logging.FromContext(ctx).Errorf("Deleting node, %s", err)
 		} else {
 			reason := fmt.Sprintf("%s/%s", d, command.action)
-			metrics.NodesTerminatedPerProvisionerCounter.With(prometheus.Labels{
+			metrics.NodesTerminatedCounter.With(prometheus.Labels{
 				metrics.ReasonLabel:      reason,
 				metrics.ProvisionerLabel: owningProvisioner,
 			}).Inc()
-			metrics.NodesTerminatedCounter.WithLabelValues(reason).Inc()
 		}
 	}
 

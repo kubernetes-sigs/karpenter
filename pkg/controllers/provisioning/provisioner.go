@@ -123,7 +123,6 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 
 func (p *Provisioner) UpdateLaunchMetrics(nodes []*v1.Node, reason string) {
 	perProvisionerSuccessfullyAdded := map[string]int{}
-	totalSuccessfullyAdded := 0
 
 	for _, node := range nodes {
 		if node == nil {
@@ -134,17 +133,14 @@ func (p *Provisioner) UpdateLaunchMetrics(nodes []*v1.Node, reason string) {
 		} else {
 			perProvisionerSuccessfullyAdded["N/A"]++
 		}
-		totalSuccessfullyAdded++
 	}
 
 	for provisioner, nodeCount := range perProvisionerSuccessfullyAdded {
-		metrics.NodesCreatedPerProvisionerCounter.With(prometheus.Labels{
+		metrics.NodesCreatedCounter.With(prometheus.Labels{
 			metrics.ReasonLabel:      reason,
 			metrics.ProvisionerLabel: provisioner,
 		}).Add(float64(nodeCount))
 	}
-
-	metrics.NodesCreatedCounter.WithLabelValues(reason).Add(float64(totalSuccessfullyAdded))
 }
 
 // LaunchMachines launches nodes passed into the function in parallel. It returns a slice of the successfully created node

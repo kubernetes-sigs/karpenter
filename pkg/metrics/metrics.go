@@ -29,17 +29,6 @@ var (
 			Namespace: Namespace,
 			Subsystem: nodeSubsystem,
 			Name:      "created",
-			Help:      "Number of nodes created in total by Karpenter. Labeled by reason the node was created.",
-		},
-		[]string{
-			ReasonLabel,
-		},
-	)
-	NodesCreatedPerProvisionerCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: Namespace,
-			Subsystem: nodeSubsystem,
-			Name:      "created_provisioner",
 			Help:      "Number of nodes created by the given provisoner in total by Karpenter. Labeled by reason the node was created and the owning provisioner.",
 		},
 		[]string{
@@ -52,17 +41,6 @@ var (
 			Namespace: Namespace,
 			Subsystem: nodeSubsystem,
 			Name:      "terminated",
-			Help:      "Number of nodes terminated in total by Karpenter. Labeled by reason the node was terminated.",
-		},
-		[]string{
-			ReasonLabel,
-		},
-	)
-	NodesTerminatedPerProvisionerCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: Namespace,
-			Subsystem: nodeSubsystem,
-			Name:      "terminated_provisioner",
 			Help:      "Number of nodes terminated from the given provisoner in total by Karpenter. Labeled by reason the node was terminated and the owning provisioner.",
 		},
 		[]string{
@@ -73,5 +51,5 @@ var (
 )
 
 func MustRegister() {
-	crmetrics.Registry.MustRegister(NodesCreatedCounter, NodesCreatedPerProvisionerCounter, NodesTerminatedCounter, NodesTerminatedPerProvisionerCounter)
+	crmetrics.Registry.MustRegister(NodesCreatedCounter, NodesTerminatedCounter)
 }
