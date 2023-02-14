@@ -373,7 +373,7 @@ var _ = Describe("Provisioning", func() {
 			provisioner := test.Provisioner()
 			daemonset := test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{
-					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4"), v1.ResourceMemory: resource.MustParse("4Gi")}},
 				}},
 			)
 			ExpectApplied(ctx, env.Client, provisioner, daemonset)
@@ -391,8 +391,8 @@ var _ = Describe("Provisioning", func() {
 							},
 						},
 					},
+					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
 				})
-			daemonsetPod.Spec = daemonset.Spec.Template.Spec
 			ExpectApplied(ctx, env.Client, provisioner, daemonsetPod)
 			ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
 			pod := test.UnschedulablePod(test.PodOptions{
