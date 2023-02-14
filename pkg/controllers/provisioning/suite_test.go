@@ -371,12 +371,14 @@ var _ = Describe("Provisioning", func() {
 	Context("Daemonsets and Node Overhead", func() {
 		It("should schedule pods with a daemonset", func() {
 			provisioner := test.Provisioner()
+			// Create a daemonset with large resource requests
 			daemonset := test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{
 					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4"), v1.ResourceMemory: resource.MustParse("4Gi")}},
 				}},
 			)
 			ExpectApplied(ctx, env.Client, provisioner, daemonset)
+			// Create the actual daemonSet pod with lower resource requests and expect to use the pod
 			daemonsetPod := test.UnschedulablePod(
 				test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
@@ -401,6 +403,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectProvisioned(ctx, env.Client, cluster, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
 
+			// We expect a smaller instance since the daemonset pod is smaller then daemonset spec
 			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
