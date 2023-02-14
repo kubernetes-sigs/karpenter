@@ -31,7 +31,7 @@ import (
 // for fields like Requirements to be able to be stored more efficiently.
 type MachineTemplate struct {
 	ProvisionerName     string
-	InstanceTypeOptions []*cloudprovider.InstanceType
+	InstanceTypeOptions cloudprovider.InstanceTypes
 	Provider            *v1alpha5.Provider
 	ProviderRef         *v1alpha5.ProviderRef
 	Annotations         map[string]string
@@ -75,7 +75,9 @@ func (i *MachineTemplate) ToNode() *v1.Node {
 }
 
 func (i *MachineTemplate) ToMachine(owner *v1alpha5.Provisioner) *v1alpha5.Machine {
-	i.Requirements.Add(scheduling.NewRequirement(v1.LabelInstanceTypeStable, v1.NodeSelectorOpIn, lo.Map(i.InstanceTypeOptions, func(i *cloudprovider.InstanceType, _ int) string {
+	// Order the instance types by price and only take the first 100 of them to decrease the instance type size in the requirements
+	instanceTypes := lo.Slice(i.InstanceTypeOptions.OrderByPrice(i.Requirements), 0, 100)
+	i.Requirements.Add(scheduling.NewRequirement(v1.LabelInstanceTypeStable, v1.NodeSelectorOpIn, lo.Map(instanceTypes, func(i *cloudprovider.InstanceType, _ int) string {
 		return i.Name
 	})...))
 	m := &v1alpha5.Machine{

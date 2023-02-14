@@ -18,6 +18,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"sort"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -65,6 +67,27 @@ type CloudProvider interface {
 	IsMachineDrifted(context.Context, *v1alpha5.Machine) (bool, error)
 	// Name returns the CloudProvider implementation name.
 	Name() string
+}
+
+type InstanceTypes []*InstanceType
+
+func (its InstanceTypes) OrderByPrice(reqs scheduling.Requirements) InstanceTypes {
+	// Order instance types so that we get the cheapest instance types of the available offerings
+	sort.Slice(its, func(i, j int) bool {
+		iPrice := math.MaxFloat64
+		jPrice := math.MaxFloat64
+		if len(its[i].Offerings.Available().Requirements(reqs)) > 0 {
+			iPrice = its[i].Offerings.Available().Requirements(reqs).Cheapest().Price
+		}
+		if len(its[j].Offerings.Available().Requirements(reqs)) > 0 {
+			jPrice = its[j].Offerings.Available().Requirements(reqs).Cheapest().Price
+		}
+		if iPrice == jPrice {
+			return its[i].Name < its[j].Name
+		}
+		return iPrice < jPrice
+	})
+	return its
 }
 
 // InstanceType describes the properties of a potential node (either concrete attributes of an instance of this type
