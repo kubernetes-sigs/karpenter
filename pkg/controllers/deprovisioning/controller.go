@@ -153,11 +153,22 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 	}
 
 	for _, oldNode := range command.nodesToRemove {
+		owningProvisioner := "N/A"
+
+		if provisioner, ok := oldNode.Labels[v1alpha5.ProvisionerNameLabelKey]; ok {
+			owningProvisioner = provisioner
+		}
+
 		c.recorder.Publish(deprovisioningevents.TerminatingNode(oldNode, command.String()))
 		if err := c.kubeClient.Delete(ctx, oldNode); err != nil {
 			logging.FromContext(ctx).Errorf("Deleting node, %s", err)
 		} else {
-			metrics.NodesTerminatedCounter.WithLabelValues(fmt.Sprintf("%s/%s", d, command.action)).Inc()
+			reason := fmt.Sprintf("%s/%s", d, command.action)
+			metrics.NodesTerminatedPerProvisionerCounter.With(prometheus.Labels{
+				metrics.ReasonLabel:      reason,
+				metrics.ProvisionerLabel: owningProvisioner,
+			}).Inc()
+			metrics.NodesTerminatedCounter.WithLabelValues(reason).Inc()
 		}
 	}
 
@@ -203,29 +214,33 @@ func (c *Controller) launchReplacementNodes(ctx context.Context, action Command)
 		return fmt.Errorf("cordoning nodes, %w", err)
 	}
 
-	nodeNames, err := c.provisioner.LaunchMachines(ctx, action.replacementNodes)
+	nodes, err := c.provisioner.LaunchMachines(ctx, action.replacementNodes)
 	if err != nil {
 		// uncordon the nodes as the launch may fail (e.g. ICE or incompatible AMI)
 		err = multierr.Append(err, c.setNodesUnschedulable(ctx, false, nodeNamesToRemove...))
 		return err
 	}
-	if len(nodeNames) != len(action.replacementNodes) {
+
+	nodes = lo.Reject(nodes, func(n *v1.Node, idx int) bool { return n == nil })
+
+	if len(nodes) != len(action.replacementNodes) {
 		// shouldn't ever occur since a partially failed LaunchMachines should return an error
-		return fmt.Errorf("expected %d node names, got %d", len(action.replacementNodes), len(nodeNames))
+		return fmt.Errorf("expected %d nodes, got %d", len(action.replacementNodes), len(nodes))
 	}
-	metrics.NodesCreatedCounter.WithLabelValues(metrics.DeprovisioningReason).Add(float64(len(nodeNames)))
+
+	c.provisioner.UpdateLaunchMetrics(nodes, metrics.DeprovisioningReason)
 
 	// We have the new nodes created at the API server so mark the old nodes for deletion
 	c.cluster.MarkForDeletion(nodeNamesToRemove...)
 	// Wait for nodes to be ready
 	// TODO @njtran: Allow to bypass this check for certain deprovisioners
-	errs := make([]error, len(nodeNames))
-	workqueue.ParallelizeUntil(ctx, len(nodeNames), len(nodeNames), func(i int) {
+	errs := make([]error, len(nodes))
+	workqueue.ParallelizeUntil(ctx, len(nodes), len(nodes), func(i int) {
 		var k8Node v1.Node
 		// Wait for the node to be ready
 		var once sync.Once
 		if err := retry.Do(func() error {
-			if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: nodeNames[i]}, &k8Node); err != nil {
+			if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: nodes[i].Name}, &k8Node); err != nil {
 				return fmt.Errorf("getting node, %w", err)
 			}
 			once.Do(func() {

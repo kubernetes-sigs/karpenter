@@ -26,6 +26,7 @@ const (
 
 	ErrorLabel       = "error"
 	ProvisionerLabel = "provisioner"
+	ReasonLabel      = "reason"
 
 	// Reasons for CREATE/DELETE shared metrics
 	DeprovisioningReason = "deprovisioning"

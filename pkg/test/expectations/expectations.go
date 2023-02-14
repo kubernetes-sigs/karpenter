@@ -250,12 +250,12 @@ func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c cli
 	for _, m := range machines {
 		ctx = injection.WithNamespacedName(ctx, types.NamespacedName{Name: m.Labels[v1alpha5.ProvisionerNameLabelKey]})
 		// TODO: Check the error on the provisioner launch
-		name, err := provisioner.Launch(ctx, m)
+		node, err := provisioner.Launch(ctx, m)
 		if err != nil {
 			return bindings
 		}
 		for _, pod := range m.Pods {
-			bindings[pod] = ExpectNodeExistsWithOffset(offset+1, ctx, c, name)
+			bindings[pod] = ExpectNodeExistsWithOffset(offset+1, ctx, c, node.Name)
 		}
 	}
 	for _, node := range nodes {

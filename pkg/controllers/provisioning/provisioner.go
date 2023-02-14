@@ -20,7 +20,6 @@ import (
 
 	"github.com/imdario/mergo"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
@@ -116,37 +115,60 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 	if len(machines) == 0 {
 		return reconcile.Result{}, nil
 	}
-	machineNames, err := p.LaunchMachines(ctx, machines, RecordPodNomination)
-
-	// Any successfully created node is going to have the nodeName value filled in the slice
-	successfullyCreatedNodeCount := lo.CountBy(machineNames, func(name string) bool { return name != "" })
-	metrics.NodesCreatedCounter.WithLabelValues(metrics.ProvisioningReason).Add(float64(successfullyCreatedNodeCount))
+	nodes, err := p.LaunchMachines(ctx, machines, RecordPodNomination)
+	p.UpdateLaunchMetrics(nodes, metrics.ProvisioningReason)
 
 	return reconcile.Result{}, err
 }
 
+func (p *Provisioner) UpdateLaunchMetrics(nodes []*v1.Node, reason string) {
+	perProvisionerSuccessfullyAdded := map[string]int{}
+	totalSuccessfullyAdded := 0
+
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		if provisioner, ok := node.Labels[v1alpha5.ProvisionerNameLabelKey]; ok {
+			perProvisionerSuccessfullyAdded[provisioner]++
+		} else {
+			perProvisionerSuccessfullyAdded["N/A"]++
+		}
+		totalSuccessfullyAdded++
+	}
+
+	for provisioner, nodeCount := range perProvisionerSuccessfullyAdded {
+		metrics.NodesCreatedPerProvisionerCounter.With(prometheus.Labels{
+			metrics.ReasonLabel:      reason,
+			metrics.ProvisionerLabel: provisioner,
+		}).Add(float64(nodeCount))
+	}
+
+	metrics.NodesCreatedCounter.WithLabelValues(reason).Add(float64(totalSuccessfullyAdded))
+}
+
 // LaunchMachines launches nodes passed into the function in parallel. It returns a slice of the successfully created node
 // names as well as a multierr of any errors that occurred while launching nodes
-func (p *Provisioner) LaunchMachines(ctx context.Context, machines []*scheduler.Machine, opts ...functional.Option[LaunchOptions]) ([]string, error) {
+func (p *Provisioner) LaunchMachines(ctx context.Context, machines []*scheduler.Machine, opts ...functional.Option[LaunchOptions]) ([]*v1.Node, error) {
 	// Launch capacity and bind pods
 	errs := make([]error, len(machines))
-	machineNames := make([]string, len(machines))
+	k8sNodes := make([]*v1.Node, len(machines))
 	workqueue.ParallelizeUntil(ctx, len(machines), len(machines), func(i int) {
 		// create a new context to avoid a data race on the ctx variable
 		ctx := logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", machines[i].Labels[v1alpha5.ProvisionerNameLabelKey]))
 		// register the provisioner on the context so we can pull it off for tagging purposes
 		// TODO: rethink this, maybe just pass the provisioner down instead of hiding it in the context?
 		ctx = injection.WithNamespacedName(ctx, types.NamespacedName{Name: machines[i].Labels[v1alpha5.ProvisionerNameLabelKey]})
-		if machineName, err := p.Launch(ctx, machines[i], opts...); err != nil {
+		if k8sNode, err := p.Launch(ctx, machines[i], opts...); err != nil {
 			errs[i] = fmt.Errorf("launching machine, %w", err)
 		} else {
-			machineNames[i] = machineName
+			k8sNodes[i] = k8sNode
 		}
 	})
 	if err := multierr.Combine(errs...); err != nil {
-		return machineNames, err
+		return k8sNodes, err
 	}
-	return machineNames, nil
+	return k8sNodes, nil
 }
 
 func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*v1.Pod, error) {
@@ -301,14 +323,14 @@ func (p *Provisioner) Schedule(ctx context.Context) ([]*scheduler.Machine, []*sc
 	return scheduler.Solve(ctx, pods)
 }
 
-func (p *Provisioner) Launch(ctx context.Context, machine *scheduler.Machine, opts ...functional.Option[LaunchOptions]) (string, error) {
+func (p *Provisioner) Launch(ctx context.Context, machine *scheduler.Machine, opts ...functional.Option[LaunchOptions]) (*v1.Node, error) {
 	// Check limits
 	latest := &v1alpha5.Provisioner{}
 	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: machine.ProvisionerName}, latest); err != nil {
-		return "", fmt.Errorf("getting current resource usage, %w", err)
+		return nil, fmt.Errorf("getting current resource usage, %w", err)
 	}
 	if err := latest.Spec.Limits.ExceededBy(latest.Status.Resources); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	logging.FromContext(ctx).Infof("launching %s", machine)
@@ -317,7 +339,7 @@ func (p *Provisioner) Launch(ctx context.Context, machine *scheduler.Machine, op
 		machine.ToMachine(latest),
 	)
 	if err != nil {
-		return "", fmt.Errorf("creating cloud provider instance, %w", err)
+		return nil, fmt.Errorf("creating cloud provider instance, %w", err)
 	}
 	k8sNode := &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
@@ -331,7 +353,7 @@ func (p *Provisioner) Launch(ctx context.Context, machine *scheduler.Machine, op
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", k8sNode.Name))
 
 	if err := mergo.Merge(k8sNode, machine.ToNode()); err != nil {
-		return "", fmt.Errorf("merging cloud provider node, %w", err)
+		return nil, fmt.Errorf("merging cloud provider node, %w", err)
 	}
 	// ensure we clear out the status
 	k8sNode.Status = v1.NodeStatus{}
@@ -345,11 +367,11 @@ func (p *Provisioner) Launch(ctx context.Context, machine *scheduler.Machine, op
 		if errors.IsAlreadyExists(err) {
 			logging.FromContext(ctx).Debugf("node already registered")
 		} else {
-			return "", fmt.Errorf("creating node %s, %w", k8sNode.Name, err)
+			return nil, fmt.Errorf("creating node %s, %w", k8sNode.Name, err)
 		}
 	}
 	if err := p.cluster.UpdateNode(ctx, k8sNode); err != nil {
-		return "", fmt.Errorf("updating cluster state, %w", err)
+		return nil, fmt.Errorf("updating cluster state, %w", err)
 	}
 	p.cluster.NominateNodeForPod(ctx, k8sNode.Name)
 	if functional.ResolveOptions(opts...).RecordPodNomination {
@@ -357,7 +379,7 @@ func (p *Provisioner) Launch(ctx context.Context, machine *scheduler.Machine, op
 			p.recorder.Publish(events.NominatePod(pod, k8sNode))
 		}
 	}
-	return k8sNode.Name, nil
+	return k8sNode, nil
 }
 
 func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*v1.Pod, error) {
