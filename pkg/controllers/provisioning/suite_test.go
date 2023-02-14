@@ -369,7 +369,7 @@ var _ = Describe("Provisioning", func() {
 		})
 	})
 	Context("Daemonsets and Node Overhead", func() {
-		It("should schedule pods with a daemonset", func() {
+		It("should schedule pods with a daemonset pod spec instead of daemonset spec, when daemonset pod is present", func() {
 			provisioner := test.Provisioner()
 			// Create a daemonset with large resource requests
 			daemonset := test.DaemonSet(
