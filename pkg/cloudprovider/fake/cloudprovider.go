@@ -126,18 +126,18 @@ func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (
 			Allocatable: functional.FilterMap(instanceType.Allocatable(), func(_ v1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
 		},
 	}
-	c.CreatedMachines[machine.Name] = created
+	c.CreatedMachines[created.Status.ProviderID] = created
 	return created, nil
 }
 
-func (c *CloudProvider) Get(_ context.Context, machineName string, _ string) (*v1alpha5.Machine, error) {
+func (c *CloudProvider) Get(_ context.Context, id string) (*v1alpha5.Machine, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if machine, ok := c.CreatedMachines[machineName]; ok {
+	if machine, ok := c.CreatedMachines[id]; ok {
 		return machine.DeepCopy(), nil
 	}
-	return nil, cloudprovider.NewMachineNotFoundError(fmt.Errorf("no machine exists with name '%s'", machineName))
+	return nil, cloudprovider.NewMachineNotFoundError(fmt.Errorf("no machine exists with id '%s'", id))
 }
 
 func (c *CloudProvider) GetInstanceTypes(_ context.Context, _ *v1alpha5.Provisioner) ([]*cloudprovider.InstanceType, error) {
@@ -188,8 +188,8 @@ func (c *CloudProvider) Delete(_ context.Context, m *v1alpha5.Machine) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if _, ok := c.CreatedMachines[m.Name]; ok {
-		delete(c.CreatedMachines, m.Name)
+	if _, ok := c.CreatedMachines[m.Status.ProviderID]; ok {
+		delete(c.CreatedMachines, m.Status.ProviderID)
 		return nil
 	}
 	return cloudprovider.NewMachineNotFoundError(fmt.Errorf("no machine exists with name '%s'", m.Name))

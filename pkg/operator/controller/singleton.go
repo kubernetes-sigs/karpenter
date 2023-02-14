@@ -16,6 +16,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -68,7 +69,7 @@ func newSingletonMetrics(name string) *singletonMetrics {
 		reconcileDuration: prometheus.NewHistogram(
 			prometheus.HistogramOpts{
 				Namespace: metrics.Namespace,
-				Subsystem: name,
+				Subsystem: strings.ReplaceAll(name, ".", "_"),
 				Name:      "reconcile_time_seconds",
 				Help:      "Length of time per reconcile.",
 				Buckets:   metrics.DurationBuckets(),
@@ -77,7 +78,7 @@ func newSingletonMetrics(name string) *singletonMetrics {
 		reconcileErrors: prometheus.NewCounter(
 			prometheus.CounterOpts{
 				Namespace: metrics.Namespace,
-				Subsystem: name,
+				Subsystem: strings.ReplaceAll(name, ".", "_"),
 				Name:      "reconcile_errors_total",
 				Help:      "Total number of reconcile errors.",
 			},

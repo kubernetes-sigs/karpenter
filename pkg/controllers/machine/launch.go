@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -25,42 +26,61 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	"github.com/aws/karpenter-core/pkg/scheduling"
 )
 
 type Launch struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
+	cache         *cache.Cache // exists due to eventual consistency on the cache
 }
 
 func (l *Launch) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
 	if machine.Status.ProviderID != "" {
 		return reconcile.Result{}, nil
 	}
-	retrieved, err := l.cloudProvider.Get(ctx, machine.Name, machine.Labels[v1alpha5.ProvisionerNameLabelKey])
-	if err != nil {
-		if cloudprovider.IsMachineNotFoundError(err) {
-			logging.FromContext(ctx).Debugf("creating machine")
-			retrieved, err = l.cloudProvider.Create(ctx, machine)
-			if err != nil {
-				if cloudprovider.IsInsufficientCapacityError(err) {
-					logging.FromContext(ctx).Error(err)
-					return reconcile.Result{}, client.IgnoreNotFound(l.kubeClient.Delete(ctx, machine))
+	var err error
+	var created *v1alpha5.Machine
+	if ret, ok := l.cache.Get(client.ObjectKeyFromObject(machine).String()); ok {
+		created = ret.(*v1alpha5.Machine)
+	} else if id, ok := machine.Annotations[v1alpha5.MachineLinkedAnnotationKey]; ok {
+		logging.FromContext(ctx).Debugf("linking machine")
+		created, err = l.cloudProvider.Get(ctx, id)
+		if err != nil {
+			if cloudprovider.IsMachineNotFoundError(err) {
+				if err = l.kubeClient.Delete(ctx, machine); err != nil {
+					return reconcile.Result{}, client.IgnoreNotFound(err)
 				}
-				return reconcile.Result{}, fmt.Errorf("creating machine, %w", err)
+				return reconcile.Result{}, nil
 			}
-		} else {
-			return reconcile.Result{}, fmt.Errorf("getting machine, %w", err)
+			return reconcile.Result{}, fmt.Errorf("linking machine, %w", err)
+		}
+	} else {
+		logging.FromContext(ctx).Debugf("creating machine")
+		created, err = l.cloudProvider.Create(ctx, machine)
+		if err != nil {
+			if cloudprovider.IsInsufficientCapacityError(err) {
+				logging.FromContext(ctx).Error(err)
+				return reconcile.Result{}, client.IgnoreNotFound(l.kubeClient.Delete(ctx, machine))
+			}
+			return reconcile.Result{}, fmt.Errorf("creating machine, %w", err)
 		}
 	}
-	populateMachineDetails(machine, retrieved)
+	l.cache.SetDefault(client.ObjectKeyFromObject(machine).String(), created)
+	populateMachineDetails(machine, created)
 	machine.StatusConditions().MarkTrue(v1alpha5.MachineCreated)
 	return reconcile.Result{}, nil
 }
 
 func populateMachineDetails(machine, retrieved *v1alpha5.Machine) {
-	machine.Labels = lo.Assign(machine.Labels, retrieved.Labels, map[string]string{
-		v1alpha5.MachineNameLabelKey: machine.Name,
-	})
+	machine.Labels = lo.Assign(
+		scheduling.NewNodeSelectorRequirements(machine.Spec.Requirements...).Labels(),
+		machine.Labels,
+		retrieved.Labels,
+		map[string]string{
+			v1alpha5.MachineNameLabelKey: machine.Name,
+		},
+	)
 	machine.Annotations = lo.Assign(machine.Annotations, retrieved.Annotations)
 	machine.Status.ProviderID = retrieved.Status.ProviderID
 	machine.Status.Allocatable = retrieved.Status.Allocatable
