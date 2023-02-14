@@ -160,7 +160,7 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 		}
 
 		c.recorder.Publish(deprovisioningevents.TerminatingNode(oldNode, command.String()))
-		if err := c.kubeClient.Delete(ctx, oldNode); err != nil {
+		if err := c.kubeClient.Delete(ctx, oldNode); client.IgnoreNotFound(err) != nil {
 			logging.FromContext(ctx).Errorf("Deleting node, %s", err)
 		} else {
 			reason := fmt.Sprintf("%s/%s", d, command.action)

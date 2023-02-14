@@ -43,7 +43,7 @@ func (e *GarbageCollect) Reconcile(ctx context.Context, machine *v1alpha5.Machin
 	if _, expireTime, ok := e.lastChecked.GetWithExpiration(client.ObjectKeyFromObject(machine).String()); ok {
 		return reconcile.Result{RequeueAfter: time.Until(expireTime)}, nil
 	}
-	if _, err := e.cloudProvider.Get(ctx, machine.Name, machine.Labels[v1alpha5.ProvisionerNameLabelKey]); cloudprovider.IsMachineNotFoundError(err) {
+	if _, err := e.cloudProvider.Get(ctx, machine.Status.ProviderID); cloudprovider.IsMachineNotFoundError(err) {
 		return reconcile.Result{}, client.IgnoreNotFound(e.kubeClient.Delete(ctx, machine))
 	}
 	e.lastChecked.SetDefault(client.ObjectKeyFromObject(machine).String(), nil)

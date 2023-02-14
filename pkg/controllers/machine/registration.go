@@ -21,6 +21,7 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -42,6 +43,7 @@ func (r *Registration) Reconcile(ctx context.Context, machine *v1alpha5.Machine)
 	if machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
 		return reconcile.Result{}, nil
 	}
+
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", machine.Status.ProviderID))
 	node, err := nodeForMachine(ctx, r.kubeClient, machine)
 	if err != nil {
@@ -66,15 +68,24 @@ func (r *Registration) Reconcile(ctx context.Context, machine *v1alpha5.Machine)
 func (r *Registration) syncNode(ctx context.Context, machine *v1alpha5.Machine, node *v1.Node) error {
 	stored := node.DeepCopy()
 	controllerutil.AddFinalizer(node, v1alpha5.TerminationFinalizer)
-	node.Labels = lo.Assign(node.Labels, machine.Labels)
-	node.Annotations = lo.Assign(node.Annotations, machine.Annotations)
+	lo.Must0(controllerutil.SetOwnerReference(machine, node, scheme.Scheme))
+	// Remove any provisioner owner references since we own them
+	node.OwnerReferences = lo.Reject(node.OwnerReferences, func(o metav1.OwnerReference, _ int) bool {
+		return o.Kind == "Provisioner"
+	})
 
-	// Sync all taints inside of Machine into the Machine taints
-	node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(machine.Spec.Taints)
+	// If the machine isn't registered as linked, then sync it
+	// This prevents us from messing with nodes that already exist and are scheduled
+	if _, ok := machine.Annotations[v1alpha5.MachineLinkedAnnotationKey]; !ok {
+		node.Labels = lo.Assign(node.Labels, machine.Labels)
+		node.Annotations = lo.Assign(node.Annotations, machine.Annotations)
+		// Sync all taints inside of Machine into the Machine taints
+		node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(machine.Spec.Taints)
+	}
+	node.Labels[v1alpha5.MachineNameLabelKey] = machine.Labels[v1alpha5.MachineNameLabelKey]
 	if !machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
 		node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(machine.Spec.StartupTaints)
 	}
-	lo.Must0(controllerutil.SetOwnerReference(machine, node, scheme.Scheme))
 	if !equality.Semantic.DeepEqual(stored, node) {
 		if err := r.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 			return fmt.Errorf("syncing node labels, %w", err)

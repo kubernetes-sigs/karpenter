@@ -75,8 +75,8 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 		recorder:      recorder,
 		terminator:    terminator,
 
-		garbageCollect: &GarbageCollect{kubeClient: kubeClient, cloudProvider: cloudProvider, lastChecked: cache.New(time.Minute*10, 1*time.Minute)},
-		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider},
+		garbageCollect: &GarbageCollect{kubeClient: kubeClient, cloudProvider: cloudProvider, lastChecked: cache.New(time.Minute*10, time.Second*10)},
+		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Minute, time.Second*10)},
 		registration:   &Registration{kubeClient: kubeClient},
 		initialization: &Initialization{kubeClient: kubeClient},
 		liveness:       &Liveness{clock: clk, kubeClient: kubeClient},
@@ -136,8 +136,10 @@ func (c *Controller) Finalize(ctx context.Context, machine *v1alpha5.Machine) (r
 		return reconcile.Result{}, nil
 	}
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", machine.Status.ProviderID))
-	if err := c.cloudProvider.Delete(ctx, machine); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
-		return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
+	if machine.Status.ProviderID != "" {
+		if err := c.cloudProvider.Delete(ctx, machine); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
+			return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
+		}
 	}
 	controllerutil.RemoveFinalizer(machine, v1alpha5.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(stored, machine) {
