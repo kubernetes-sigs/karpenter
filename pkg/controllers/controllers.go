@@ -60,6 +60,7 @@ func NewControllers(
 		metricsstate.NewController(cluster),
 		deprovisioning.NewController(clock, kubeClient, provisioner, cloudProvider, recorder, cluster),
 		provisioning.NewController(kubeClient, provisioner, recorder),
+		informer.NewDaemonSetController(kubeClient, cluster),
 		informer.NewNodeController(kubeClient, cluster),
 		informer.NewPodController(kubeClient, cluster),
 		informer.NewProvisionerController(kubeClient, cluster),

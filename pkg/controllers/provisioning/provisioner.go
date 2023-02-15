@@ -365,12 +365,14 @@ func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*v1.Pod, error) {
 	if err := p.kubeClient.List(ctx, daemonSetList); err != nil {
 		return nil, fmt.Errorf("listing daemonsets, %w", err)
 	}
-	var ret []*v1.Pod
-	for _, daemonSet := range daemonSetList.Items {
-		pod := &v1.Pod{Spec: daemonSet.Spec.Template.Spec}
-		ret = append(ret, pod)
-	}
-	return ret, nil
+
+	return lo.Map(daemonSetList.Items, func(d appsv1.DaemonSet, _ int) *v1.Pod {
+		pod := p.cluster.GetDaemonSetPod(&d)
+		if pod == nil {
+			pod = &v1.Pod{Spec: d.Spec.Template.Spec}
+		}
+		return pod
+	}), nil
 }
 
 func (p *Provisioner) Validate(ctx context.Context, pod *v1.Pod) error {

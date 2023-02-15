@@ -17,15 +17,18 @@ package state
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
@@ -50,6 +53,7 @@ type Cluster struct {
 	nodes            map[string]*Node                // provider id -> node
 	bindings         map[types.NamespacedName]string // pod namespaced named -> node node
 	nameToProviderID map[string]string               // node name -> provider id
+	daemonSetPods    sync.Map                        // daemonSet -> existing pod
 
 	antiAffinityPods sync.Map // pod namespaced name -> *v1.Pod of pods that have required anti affinities
 
@@ -66,6 +70,7 @@ func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudPro
 		cloudProvider:    cp,
 		nodes:            map[string]*Node{},
 		bindings:         map[types.NamespacedName]string{},
+		daemonSetPods:    sync.Map{},
 		nameToProviderID: map[string]string{},
 	}
 }
@@ -293,6 +298,40 @@ func (c *Cluster) Reset() {
 	c.nameToProviderID = map[string]string{}
 	c.bindings = map[types.NamespacedName]string{}
 	c.antiAffinityPods = sync.Map{}
+	c.daemonSetPods = sync.Map{}
+}
+
+func (c *Cluster) GetDaemonSetPod(daemonset *appsv1.DaemonSet) *v1.Pod {
+	if pod, ok := c.daemonSetPods.Load(client.ObjectKeyFromObject(daemonset)); ok {
+		return pod.(*v1.Pod).DeepCopy()
+	}
+
+	return nil
+}
+
+func (c *Cluster) UpdateDaemonSet(ctx context.Context, daemonset *appsv1.DaemonSet) error {
+	pods := &v1.PodList{}
+	err := c.kubeClient.List(ctx, pods, client.InNamespace(daemonset.Namespace))
+	if err != nil {
+		return err
+	}
+
+	sort.Slice(pods.Items, func(i, j int) bool {
+		return pods.Items[i].CreationTimestamp.Unix() > pods.Items[j].CreationTimestamp.Unix()
+	})
+
+	for i := range pods.Items {
+		if metav1.IsControlledBy(&pods.Items[i], daemonset) {
+			c.daemonSetPods.Store(client.ObjectKeyFromObject(daemonset), &pods.Items[i])
+			break
+		}
+	}
+
+	return nil
+}
+
+func (c *Cluster) DeleteDaemonSet(key types.NamespacedName) {
+	c.daemonSetPods.Delete(key)
 }
 
 // WARNING
