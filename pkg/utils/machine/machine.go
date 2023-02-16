@@ -24,11 +24,46 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 )
+
+func EventHandler(ctx context.Context, c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
+		machine := o.(*v1alpha5.Machine)
+		nodeList := &v1.NodeList{}
+		if machine.Status.ProviderID == "" {
+			return nil
+		}
+		if err := c.List(ctx, nodeList, client.MatchingFields{"spec.providerID": machine.Status.ProviderID}); err != nil {
+			return nil
+		}
+		return lo.Map(nodeList.Items, func(n v1.Node, _ int) reconcile.Request {
+			return reconcile.Request{
+				NamespacedName: client.ObjectKeyFromObject(&n),
+			}
+		})
+	})
+}
+
+func NodeEventHandler(ctx context.Context, c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
+		node := o.(*v1.Node)
+		machineList := &v1alpha5.MachineList{}
+		if err := c.List(ctx, machineList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
+			return []reconcile.Request{}
+		}
+		return lo.Map(machineList.Items, func(m v1alpha5.Machine, _ int) reconcile.Request {
+			return reconcile.Request{
+				NamespacedName: client.ObjectKeyFromObject(&m),
+			}
+		})
+	})
+}
 
 type NodeNotFoundError struct {
 	ProviderID string
@@ -100,7 +135,7 @@ func New(node *v1.Node, provisioner *v1alpha5.Provisioner) *v1alpha5.Machine {
 	machine.Spec.Taints = provisioner.Spec.Taints
 	machine.Spec.StartupTaints = provisioner.Spec.StartupTaints
 	machine.Spec.Requirements = provisioner.Spec.Requirements
-	machine.Spec.MachineTemplateRef = provisioner.Spec.ProviderRef
+	machine.Spec.ProviderRef = provisioner.Spec.ProviderRef
 	lo.Must0(controllerutil.SetOwnerReference(provisioner, machine, scheme.Scheme))
 	return machine
 }

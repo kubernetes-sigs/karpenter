@@ -19,11 +19,14 @@ import (
 	"time"
 
 	"github.com/patrickmn/go-cache"
+	"github.com/prometheus/client_golang/prometheus"
+	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	"github.com/aws/karpenter-core/pkg/metrics"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 )
 
@@ -33,20 +36,28 @@ type GarbageCollect struct {
 	lastChecked   *cache.Cache
 }
 
-func (e *GarbageCollect) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
+func (g *GarbageCollect) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
 	if !machine.StatusConditions().GetCondition(v1alpha5.MachineCreated).IsTrue() {
 		return reconcile.Result{}, nil
 	}
 	// If there is no node representation for the machine, then check if there is a representation at the cloudprovider
-	if _, err := machineutil.NodeForMachine(ctx, e.kubeClient, machine); err == nil || !machineutil.IsNodeNotFoundError(err) {
+	if _, err := machineutil.NodeForMachine(ctx, g.kubeClient, machine); err == nil || !machineutil.IsNodeNotFoundError(err) {
 		return reconcile.Result{}, nil
 	}
-	if _, expireTime, ok := e.lastChecked.GetWithExpiration(client.ObjectKeyFromObject(machine).String()); ok {
+	if _, expireTime, ok := g.lastChecked.GetWithExpiration(client.ObjectKeyFromObject(machine).String()); ok {
 		return reconcile.Result{RequeueAfter: time.Until(expireTime)}, nil
 	}
-	if _, err := e.cloudProvider.Get(ctx, machine.Status.ProviderID); cloudprovider.IsMachineNotFoundError(err) {
-		return reconcile.Result{}, client.IgnoreNotFound(e.kubeClient.Delete(ctx, machine))
+	if _, err := g.cloudProvider.Get(ctx, machine.Status.ProviderID); cloudprovider.IsMachineNotFoundError(err) {
+		if err = g.kubeClient.Delete(ctx, machine); err != nil {
+			return reconcile.Result{}, client.IgnoreNotFound(err)
+		}
+		logging.FromContext(ctx).Debugf("garbage collecting machine with no cloudprovider representation")
+		metrics.MachinesTerminatedCounter.With(prometheus.Labels{
+			metrics.ReasonLabel:      "garbage_collected",
+			metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
+		})
+		return reconcile.Result{}, nil
 	}
-	e.lastChecked.SetDefault(client.ObjectKeyFromObject(machine).String(), nil)
+	g.lastChecked.SetDefault(client.ObjectKeyFromObject(machine).String(), nil)
 	return reconcile.Result{}, nil
 }

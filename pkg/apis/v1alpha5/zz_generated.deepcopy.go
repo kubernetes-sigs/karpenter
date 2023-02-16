@@ -242,8 +242,8 @@ func (in *MachineSpec) DeepCopyInto(out *MachineSpec) {
 		*out = new(KubeletConfiguration)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.MachineTemplateRef != nil {
-		in, out := &in.MachineTemplateRef, &out.MachineTemplateRef
+	if in.ProviderRef != nil {
+		in, out := &in.ProviderRef, &out.ProviderRef
 		*out = new(ProviderRef)
 		**out = **in
 	}

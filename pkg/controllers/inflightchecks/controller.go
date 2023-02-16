@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/patrickmn/go-cache"
-	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
@@ -27,7 +26,6 @@ import (
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
@@ -134,18 +132,7 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 		For(&v1alpha5.Machine{}).
 		Watches(
 			&source.Kind{Type: &v1.Node{}},
-			handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
-				node := o.(*v1.Node)
-				machineList := &v1alpha5.MachineList{}
-				if err := c.kubeClient.List(ctx, machineList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
-					return []reconcile.Request{}
-				}
-				return lo.Map(machineList.Items, func(m v1alpha5.Machine, _ int) reconcile.Request {
-					return reconcile.Request{
-						NamespacedName: client.ObjectKeyFromObject(&m),
-					}
-				})
-			}),
+			machineutil.NodeEventHandler(ctx, c.kubeClient),
 		).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
 	)

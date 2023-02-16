@@ -19,6 +19,7 @@ import (
 	"fmt"
 
 	"github.com/patrickmn/go-cache"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 )
 
@@ -44,19 +46,23 @@ func (l *Launch) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reco
 	if ret, ok := l.cache.Get(client.ObjectKeyFromObject(machine).String()); ok {
 		created = ret.(*v1alpha5.Machine)
 	} else if id, ok := machine.Annotations[v1alpha5.MachineLinkedAnnotationKey]; ok {
-		logging.FromContext(ctx).Debugf("linking machine")
 		created, err = l.cloudProvider.Get(ctx, id)
 		if err != nil {
 			if cloudprovider.IsMachineNotFoundError(err) {
 				if err = l.kubeClient.Delete(ctx, machine); err != nil {
 					return reconcile.Result{}, client.IgnoreNotFound(err)
 				}
+				logging.FromContext(ctx).Debugf("garbage collected machine with no cloudprovider representation")
+				metrics.MachinesTerminatedCounter.With(prometheus.Labels{
+					metrics.ReasonLabel:      "garbage_collected",
+					metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
+				})
 				return reconcile.Result{}, nil
 			}
 			return reconcile.Result{}, fmt.Errorf("linking machine, %w", err)
 		}
+		logging.FromContext(ctx).Debugf("linked machine")
 	} else {
-		logging.FromContext(ctx).Debugf("creating machine")
 		created, err = l.cloudProvider.Create(ctx, machine)
 		if err != nil {
 			if cloudprovider.IsInsufficientCapacityError(err) {
@@ -65,6 +71,7 @@ func (l *Launch) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reco
 			}
 			return reconcile.Result{}, fmt.Errorf("creating machine, %w", err)
 		}
+		logging.FromContext(ctx).Debugf("created machine")
 	}
 	l.cache.SetDefault(client.ObjectKeyFromObject(machine).String(), created)
 	PopulateMachineDetails(machine, created)

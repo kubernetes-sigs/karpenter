@@ -126,8 +126,12 @@ var _ = Describe("Controller", func() {
 						v1.LabelInstanceTypeStable:       test.RandomName(),
 					},
 				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+				},
 			})
 			ExpectApplied(ctx, env.Client, provisioner, machine, node)
+			ExpectMakeMachinesReady(ctx, env.Client, machine)
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			Expect(node.Annotations).To(HaveKeyWithValue(v1alpha5.VoluntaryDisruptionAnnotationKey, v1alpha5.VoluntaryDisruptionDriftedAnnotationValue))

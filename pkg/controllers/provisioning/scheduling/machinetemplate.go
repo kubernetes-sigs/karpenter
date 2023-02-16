@@ -96,7 +96,7 @@ func (i *MachineTemplate) ToMachine(owner *v1alpha5.Provisioner) *v1alpha5.Machi
 			Resources: v1alpha5.ResourceRequirements{
 				Requests: i.Requests,
 			},
-			MachineTemplateRef: i.ProviderRef,
+			ProviderRef: i.ProviderRef,
 		},
 	}
 	lo.Must0(controllerutil.SetOwnerReference(owner, m, scheme.Scheme))

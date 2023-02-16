@@ -166,7 +166,7 @@ var _ = Describe("Inflight Nodes", func() {
 						v1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
 					},
 				},
-				MachineTemplateRef: &v1alpha5.ProviderRef{
+				ProviderRef: &v1alpha5.ProviderRef{
 					Name: "default",
 				},
 			},
@@ -217,7 +217,7 @@ var _ = Describe("Inflight Nodes", func() {
 						v1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
 					},
 				},
-				MachineTemplateRef: &v1alpha5.ProviderRef{
+				ProviderRef: &v1alpha5.ProviderRef{
 					Name: "default",
 				},
 			},
@@ -255,7 +255,7 @@ var _ = Describe("Inflight Nodes", func() {
 						Values:   []string{"test-zone-1"},
 					},
 				},
-				MachineTemplateRef: &v1alpha5.ProviderRef{
+				ProviderRef: &v1alpha5.ProviderRef{
 					Name: "default",
 				},
 			},
@@ -303,7 +303,7 @@ var _ = Describe("Inflight Nodes", func() {
 						Values:   []string{"test-zone-1"},
 					},
 				},
-				MachineTemplateRef: &v1alpha5.ProviderRef{
+				ProviderRef: &v1alpha5.ProviderRef{
 					Name: "default",
 				},
 			},
@@ -387,7 +387,7 @@ var _ = Describe("Inflight Nodes", func() {
 						Values:   []string{"test-zone-1"},
 					},
 				},
-				MachineTemplateRef: &v1alpha5.ProviderRef{
+				ProviderRef: &v1alpha5.ProviderRef{
 					Name: "default",
 				},
 			},
@@ -958,7 +958,7 @@ var _ = Describe("Node Resource Level", func() {
 						Values:   []string{"test-zone-1"},
 					},
 				},
-				MachineTemplateRef: &v1alpha5.ProviderRef{
+				ProviderRef: &v1alpha5.ProviderRef{
 					Name: "default",
 				},
 			},

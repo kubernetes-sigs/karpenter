@@ -148,8 +148,8 @@ spec:
                       system daemons and kernel memory.
                     type: object
                 type: object
-              machineTemplateRef:
-                description: MachineTemplateRef is a reference to an object that defines
+              providerRef:
+                description: ProviderRef is a reference to an object that defines
                   provider specific configuration
                 properties:
                   apiVersion:

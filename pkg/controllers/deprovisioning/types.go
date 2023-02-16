@@ -156,7 +156,7 @@ type Command struct {
 
 func (o Command) String() string {
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "%s, terminating %d machine ", o.action, len(o.nodesToRemove))
+	fmt.Fprintf(&buf, "%s, terminating %d machines ", o.action, len(o.nodesToRemove))
 	for i, old := range o.nodesToRemove {
 		if i != 0 {
 			fmt.Fprint(&buf, ", ")

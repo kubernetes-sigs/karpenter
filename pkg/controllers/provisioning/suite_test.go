@@ -869,7 +869,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 
 			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
-			Expect(cloudProvider.CreateCalls[0].Spec.MachineTemplateRef).To(Equal(
+			Expect(cloudProvider.CreateCalls[0].Spec.ProviderRef).To(Equal(
 				&v1alpha5.ProviderRef{
 					APIVersion: "cloudprovider.karpenter.sh/v1alpha1",
 					Kind:       "CloudProvider",

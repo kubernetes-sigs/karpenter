@@ -72,6 +72,7 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
 
 		fakeClock.Step(10 * time.Minute)
+
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
@@ -94,6 +95,7 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
 
 		fakeClock.Step(10 * time.Minute)
+
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
@@ -113,6 +115,7 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
 
 		fakeClock.Step(10 * time.Minute)
+
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 
 		// Expect to not create or delete more machines
@@ -132,6 +135,7 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
 
 		fakeClock.Step(10 * time.Minute)
+
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
@@ -178,11 +182,12 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
 
+		fakeClock.Step(10 * time.Minute)
+
 		// deprovisioning won't delete the old machine until the new machine is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1, machine)
-		fakeClock.Step(10 * time.Minute)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
@@ -282,12 +287,13 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
 
+		fakeClock.Step(10 * time.Minute)
+
 		// deprovisioning won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 3, machine)
-		fakeClock.Step(10 * time.Minute)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		wg.Wait()
 
 		// expect that drift provisioned three nodes, one for each pod
@@ -340,6 +346,7 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine2))
 
 		fakeClock.Step(10 * time.Minute)
+
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})

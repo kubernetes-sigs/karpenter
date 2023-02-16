@@ -46,7 +46,6 @@ var ctx context.Context
 var terminationController controller.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
-var defaultOwnerRefs = []metav1.OwnerReference{{Kind: "ReplicaSet", APIVersion: "appsv1", Name: "rs", UID: "1234567890"}}
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)

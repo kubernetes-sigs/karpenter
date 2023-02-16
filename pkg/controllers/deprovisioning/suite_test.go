@@ -2351,7 +2351,7 @@ func ExpectMakeNewMachinesReady(ctx context.Context, c client.Client, wg *sync.W
 
 					machinesMadeReady++
 					existingMachineNames.Insert(m.Name)
-					// did we make all of the nodes ready that we expected?
+					// did we make all the nodes ready that we expected?
 					if machinesMadeReady == numNewMachines {
 						return
 					}

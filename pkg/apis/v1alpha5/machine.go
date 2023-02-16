@@ -37,8 +37,8 @@ type MachineSpec struct {
 	// Kubelet are options passed to the kubelet when provisioning nodes
 	// +optional
 	Kubelet *KubeletConfiguration `json:"kubelet,omitempty"`
-	// MachineTemplateRef is a reference to an object that defines provider specific configuration
-	MachineTemplateRef *ProviderRef `json:"machineTemplateRef,omitempty"`
+	// ProviderRef is a reference to an object that defines provider specific configuration
+	ProviderRef *ProviderRef `json:"providerRef,omitempty"`
 }
 
 // KubeletConfiguration defines args to be used when configuring kubelet on provisioned nodes.

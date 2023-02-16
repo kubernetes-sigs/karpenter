@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"knative.dev/pkg/logging"
@@ -26,7 +25,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
@@ -37,6 +35,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 )
 
 var _ corecontroller.FinalizingTypedController[*v1.Node] = (*Controller)(nil)
@@ -114,21 +113,7 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 		For(&v1.Node{}).
 		Watches(
 			&source.Kind{Type: &v1alpha5.Machine{}},
-			handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
-				machine := o.(*v1alpha5.Machine)
-				nodeList := &v1.NodeList{}
-				if machine.Status.ProviderID == "" {
-					return nil
-				}
-				if err := c.kubeClient.List(ctx, nodeList, client.MatchingFields{"spec.providerID": machine.Status.ProviderID}); err != nil {
-					return nil
-				}
-				return lo.Map(nodeList.Items, func(n v1.Node, _ int) reconcile.Request {
-					return reconcile.Request{
-						NamespacedName: client.ObjectKeyFromObject(&n),
-					}
-				})
-			}),
+			machineutil.EventHandler(ctx, c.kubeClient),
 		).
 		WithOptions(
 			controller.Options{
