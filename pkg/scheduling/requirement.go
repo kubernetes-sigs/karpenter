@@ -19,7 +19,6 @@ import (
 	"math"
 	"math/rand"
 	"strconv"
-	"time"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -27,10 +26,6 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 )
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
 
 // Requirement is an efficient represenatation of v1.NodeSelectorRequirement
 type Requirement struct {
