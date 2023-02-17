@@ -20,7 +20,8 @@ import (
 )
 
 const (
-	nodeSubsystem = "nodes"
+	nodeSubsystem    = "nodes"
+	machineSubsystem = "machines"
 )
 
 var (
@@ -46,6 +47,28 @@ var (
 		[]string{
 			ReasonLabel,
 			ProvisionerLabel,
+		},
+	)
+	MachinesCreatedCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: machineSubsystem,
+			Name:      "created",
+			Help:      "Number of machines created in total by Karpenter. Labeled by reason the machine was created.",
+		},
+		[]string{
+			"reason",
+		},
+	)
+	MachinesTerminatedCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: machineSubsystem,
+			Name:      "terminated",
+			Help:      "Number of machines terminated in total by Karpenter. Labeled by reason the machine was terminated.",
+		},
+		[]string{
+			"reason",
 		},
 	)
 )

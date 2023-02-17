@@ -56,6 +56,7 @@ var machineController controller.Controller
 var nodeController controller.Controller
 var podController controller.Controller
 var provisionerController controller.Controller
+var daemonsetController controller.Controller
 var cloudProvider *fake.CloudProvider
 var provisioner *v1alpha5.Provisioner
 
@@ -83,6 +84,7 @@ var _ = BeforeEach(func() {
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	podController = informer.NewPodController(env.Client, cluster)
 	provisionerController = informer.NewProvisionerController(env.Client, cluster)
+	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
 	provisioner = test.Provisioner(test.ProvisionerOptions{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
 	ExpectApplied(ctx, env.Client, provisioner)
 })
@@ -1376,6 +1378,130 @@ var _ = Describe("Cluster State Sync", func() {
 			}
 		}
 		Expect(cluster.Synced(ctx)).To(BeFalse())
+	})
+})
+
+var _ = Describe("DaemonSet Controller", func() {
+	It("should not update daemonsetCache when daemonset pod is not present", func() {
+		daemonset := test.DaemonSet(
+			test.DaemonSetOptions{PodOptions: test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+			}},
+		)
+		ExpectApplied(ctx, env.Client, daemonset)
+		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
+		daemonsetPod := cluster.GetDaemonSetPod(daemonset)
+		Expect(daemonsetPod).To(BeNil())
+	})
+	It("should update daemonsetCache when daemonset pod is created", func() {
+		daemonset := test.DaemonSet(
+			test.DaemonSetOptions{PodOptions: test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+			}},
+		)
+		ExpectApplied(ctx, env.Client, daemonset)
+		daemonsetPod := test.UnschedulablePod(
+			test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "DaemonSet",
+							Name:               daemonset.Name,
+							UID:                daemonset.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					},
+				},
+			})
+		daemonsetPod.Spec = daemonset.Spec.Template.Spec
+		ExpectApplied(ctx, env.Client, daemonsetPod)
+		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
+
+		Expect(cluster.GetDaemonSetPod(daemonset)).To(Equal(daemonsetPod))
+	})
+	It("should update daemonsetCache with the newest created pod", func() {
+		daemonset := test.DaemonSet(
+			test.DaemonSetOptions{PodOptions: test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+			}},
+		)
+		ExpectApplied(ctx, env.Client, daemonset)
+		daemonsetPod1 := test.UnschedulablePod(
+			test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "DaemonSet",
+							Name:               daemonset.Name,
+							UID:                daemonset.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					},
+				},
+			})
+		daemonsetPod1.Spec = daemonset.Spec.Template.Spec
+		ExpectApplied(ctx, env.Client, daemonsetPod1)
+		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
+
+		Expect(cluster.GetDaemonSetPod(daemonset)).To(Equal(daemonsetPod1))
+
+		daemonsetPod2 := test.UnschedulablePod(
+			test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "DaemonSet",
+							Name:               daemonset.Name,
+							UID:                daemonset.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					},
+				},
+			})
+		time.Sleep(time.Second) // Making sure the two pods have different creationTime
+		daemonsetPod2.Spec = daemonset.Spec.Template.Spec
+		ExpectApplied(ctx, env.Client, daemonsetPod2)
+		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
+		Expect(cluster.GetDaemonSetPod(daemonset)).To(Equal(daemonsetPod2))
+	})
+	It("should delete daemonset in cache when daemonset is deleted", func() {
+		daemonset := test.DaemonSet(
+			test.DaemonSetOptions{PodOptions: test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+			}},
+		)
+		ExpectApplied(ctx, env.Client, daemonset)
+		daemonsetPod := test.UnschedulablePod(
+			test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "DaemonSet",
+							Name:               daemonset.Name,
+							UID:                daemonset.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					},
+				},
+			})
+		daemonsetPod.Spec = daemonset.Spec.Template.Spec
+		ExpectApplied(ctx, env.Client, daemonsetPod)
+		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
+
+		Expect(cluster.GetDaemonSetPod(daemonset)).To(Equal(daemonsetPod))
+
+		ExpectDeleted(ctx, env.Client, daemonset, daemonsetPod)
+		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
+
+		Expect(cluster.GetDaemonSetPod(daemonset)).To(BeNil())
 	})
 })
 

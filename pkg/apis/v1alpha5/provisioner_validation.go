@@ -22,6 +22,7 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -61,6 +62,13 @@ const (
 	providerPath    = "provider"
 	providerRefPath = "providerRef"
 )
+
+func (p *Provisioner) SupportedVerbs() []admissionregistrationv1.OperationType {
+	return []admissionregistrationv1.OperationType{
+		admissionregistrationv1.Create,
+		admissionregistrationv1.Update,
+	}
+}
 
 func (p *Provisioner) Validate(ctx context.Context) (errs *apis.FieldError) {
 	return errs.Also(

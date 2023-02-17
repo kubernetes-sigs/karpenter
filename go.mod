@@ -1,6 +1,6 @@
 module github.com/aws/karpenter-core
 
-go 1.19
+go 1.20
 
 require (
 	github.com/Pallinder/go-randomdata v1.2.0
@@ -27,6 +27,8 @@ require (
 	knative.dev/pkg v0.0.0-20221123154742-05b694ec4d3a
 	sigs.k8s.io/controller-runtime v0.13.0
 )
+
+replace golang.org/x/net => golang.org/x/net v0.7.0 // Replaced due to https://pkg.go.dev/vuln/GO-2023-1571
 
 require (
 	contrib.go.opencensus.io/exporter/ocagent v0.7.1-0.20200907061046-05415f1de66d // indirect
@@ -78,9 +80,9 @@ require (
 	golang.org/x/net v0.5.0 // indirect
 	golang.org/x/oauth2 v0.0.0-20220223155221-ee480838109b // indirect
 	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4 // indirect
-	golang.org/x/sys v0.4.0 // indirect
-	golang.org/x/term v0.4.0 // indirect
-	golang.org/x/text v0.6.0 // indirect
+	golang.org/x/sys v0.5.0 // indirect
+	golang.org/x/term v0.5.0 // indirect
+	golang.org/x/text v0.7.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.2.0 // indirect
 	google.golang.org/api v0.61.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
