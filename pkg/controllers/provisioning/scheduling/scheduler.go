@@ -16,11 +16,11 @@ package scheduling
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
 	"github.com/samber/lo"
-	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -200,7 +200,7 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 		if remaining, ok := s.remainingResources[nodeTemplate.ProvisionerName]; ok {
 			instanceTypes = filterByRemainingResources(s.instanceTypes[nodeTemplate.ProvisionerName], remaining)
 			if len(instanceTypes) == 0 {
-				errs = multierr.Append(errs, fmt.Errorf("all available instance types exceed provisioner limits"))
+				errs = errors.Join(errs, fmt.Errorf("all available instance types exceed provisioner limits"))
 				continue
 			} else if len(s.instanceTypes[nodeTemplate.ProvisionerName]) != len(instanceTypes) && !s.opts.SimulationMode {
 				logging.FromContext(ctx).Debugf("%d out of %d instance types were excluded because they would breach provisioner limits",
@@ -210,7 +210,7 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 
 		node := NewMachine(nodeTemplate, s.topology, s.daemonOverhead[nodeTemplate], instanceTypes)
 		if err := node.Add(ctx, pod); err != nil {
-			errs = multierr.Append(errs, fmt.Errorf("incompatible with provisioner %q, %w", nodeTemplate.ProvisionerName, err))
+			errs = errors.Join(errs, fmt.Errorf("incompatible with provisioner %q, %w", nodeTemplate.ProvisionerName, err))
 			continue
 		}
 		// we will launch this node and need to track its maximum possible resource usage against our remaining resources

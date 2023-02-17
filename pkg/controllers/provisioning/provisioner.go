@@ -16,15 +16,15 @@ package provisioning
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/imdario/mergo"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
-	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -143,7 +143,7 @@ func (p *Provisioner) LaunchMachines(ctx context.Context, machines []*scheduler.
 			machineNames[i] = machineName
 		}
 	})
-	if err := multierr.Combine(errs...); err != nil {
+	if err := errors.Join(errs...); err != nil {
 		return machineNames, err
 	}
 	return machineNames, nil
@@ -342,7 +342,7 @@ func (p *Provisioner) Launch(ctx context.Context, machine *scheduler.Machine, op
 	// ourselves to enforce the binding decision and enable images to be pulled
 	// before the node is fully Ready.
 	if _, err := p.coreV1Client.Nodes().Create(ctx, k8sNode, metav1.CreateOptions{}); err != nil {
-		if errors.IsAlreadyExists(err) {
+		if k8serrors.IsAlreadyExists(err) {
 			logging.FromContext(ctx).Debugf("node already registered")
 		} else {
 			return "", fmt.Errorf("creating node %s, %w", k8sNode.Name, err)
@@ -376,7 +376,7 @@ func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*v1.Pod, error) {
 }
 
 func (p *Provisioner) Validate(ctx context.Context, pod *v1.Pod) error {
-	return multierr.Combine(
+	return errors.Join(
 		validateProvisionerNameCanExist(pod),
 		validateAffinity(pod),
 		p.volumeTopology.validatePersistentVolumeClaims(ctx, pod),
@@ -413,11 +413,11 @@ func validateAffinity(p *v1.Pod) (errs error) {
 	}
 	if p.Spec.Affinity.NodeAffinity != nil {
 		for _, term := range p.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution {
-			errs = multierr.Append(errs, validateNodeSelectorTerm(term.Preference))
+			errs = errors.Join(errs, validateNodeSelectorTerm(term.Preference))
 		}
 		if p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
 			for _, term := range p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
-				errs = multierr.Append(errs, validateNodeSelectorTerm(term))
+				errs = errors.Join(errs, validateNodeSelectorTerm(term))
 			}
 		}
 	}
@@ -426,11 +426,11 @@ func validateAffinity(p *v1.Pod) (errs error) {
 
 func validateNodeSelectorTerm(term v1.NodeSelectorTerm) (errs error) {
 	if term.MatchFields != nil {
-		errs = multierr.Append(errs, fmt.Errorf("node selector term with matchFields is not supported"))
+		errs = errors.Join(errs, fmt.Errorf("node selector term with matchFields is not supported"))
 	}
 	if term.MatchExpressions != nil {
 		for _, requirement := range term.MatchExpressions {
-			errs = multierr.Append(errs, v1alpha5.ValidateRequirement(requirement))
+			errs = errors.Join(errs, v1alpha5.ValidateRequirement(requirement))
 		}
 	}
 	return errs

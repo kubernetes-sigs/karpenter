@@ -16,10 +16,10 @@ package settings
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
-	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/configmap"
@@ -69,17 +69,17 @@ func (*Settings) Inject(ctx context.Context, cm *v1.ConfigMap) (context.Context,
 
 func (in *Settings) Validate() (err error) {
 	if in.BatchMaxDuration == nil {
-		err = multierr.Append(err, fmt.Errorf("batchMaxDuration is required"))
+		err = errors.Join(err, fmt.Errorf("batchMaxDuration is required"))
 	} else if in.BatchMaxDuration.Duration <= 0 {
-		err = multierr.Append(err, fmt.Errorf("batchMaxDuration cannot be negative"))
+		err = errors.Join(err, fmt.Errorf("batchMaxDuration cannot be negative"))
 	}
 	if in.BatchIdleDuration == nil {
-		err = multierr.Append(err, fmt.Errorf("batchIdleDuration is required"))
+		err = errors.Join(err, fmt.Errorf("batchIdleDuration is required"))
 	} else if in.BatchIdleDuration.Duration <= 0 {
-		err = multierr.Append(err, fmt.Errorf("batchIdleDuration cannot be negative"))
+		err = errors.Join(err, fmt.Errorf("batchIdleDuration cannot be negative"))
 	}
 	if in.TTLAfterNotRegistered != nil && in.TTLAfterNotRegistered.Duration <= 0 {
-		err = multierr.Append(err, fmt.Errorf("ttlAfterNotRegistered cannot be negative"))
+		err = errors.Join(err, fmt.Errorf("ttlAfterNotRegistered cannot be negative"))
 	}
 	return err
 }

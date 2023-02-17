@@ -16,12 +16,12 @@ package v1alpha5
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/samber/lo"
-	"go.uber.org/multierr"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -291,29 +291,29 @@ func ValidateRequirement(requirement v1.NodeSelectorRequirement) error { //nolin
 		requirement.Key = normalized
 	}
 	if !SupportedNodeSelectorOps.Has(string(requirement.Operator)) {
-		errs = multierr.Append(errs, fmt.Errorf("key %s has an unsupported operator %s not in %s", requirement.Key, requirement.Operator, SupportedNodeSelectorOps.UnsortedList()))
+		errs = errors.Join(errs, fmt.Errorf("key %s has an unsupported operator %s not in %s", requirement.Key, requirement.Operator, SupportedNodeSelectorOps.UnsortedList()))
 	}
 	if e := IsRestrictedLabel(requirement.Key); e != nil {
-		errs = multierr.Append(errs, e)
+		errs = errors.Join(errs, e)
 	}
 	for _, err := range validation.IsQualifiedName(requirement.Key) {
-		errs = multierr.Append(errs, fmt.Errorf("key %s is not a qualified name, %s", requirement.Key, err))
+		errs = errors.Join(errs, fmt.Errorf("key %s is not a qualified name, %s", requirement.Key, err))
 	}
 	for _, value := range requirement.Values {
 		for _, err := range validation.IsValidLabelValue(value) {
-			errs = multierr.Append(errs, fmt.Errorf("invalid value %s for key %s, %s", value, requirement.Key, err))
+			errs = errors.Join(errs, fmt.Errorf("invalid value %s for key %s, %s", value, requirement.Key, err))
 		}
 	}
 	if requirement.Operator == v1.NodeSelectorOpIn && len(requirement.Values) == 0 {
-		errs = multierr.Append(errs, fmt.Errorf("key %s with operator %s must have a value defined", requirement.Key, requirement.Operator))
+		errs = errors.Join(errs, fmt.Errorf("key %s with operator %s must have a value defined", requirement.Key, requirement.Operator))
 	}
 	if requirement.Operator == v1.NodeSelectorOpGt || requirement.Operator == v1.NodeSelectorOpLt {
 		if len(requirement.Values) != 1 {
-			errs = multierr.Append(errs, fmt.Errorf("key %s with operator %s must have a single positive integer value", requirement.Key, requirement.Operator))
+			errs = errors.Join(errs, fmt.Errorf("key %s with operator %s must have a single positive integer value", requirement.Key, requirement.Operator))
 		} else {
 			value, err := strconv.Atoi(requirement.Values[0])
 			if err != nil || value < 0 {
-				errs = multierr.Append(errs, fmt.Errorf("key %s with operator %s must have a single positive integer value", requirement.Key, requirement.Operator))
+				errs = errors.Join(errs, fmt.Errorf("key %s with operator %s must have a single positive integer value", requirement.Key, requirement.Operator))
 			}
 		}
 	}

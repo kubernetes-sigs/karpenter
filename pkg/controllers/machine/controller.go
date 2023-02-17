@@ -16,12 +16,12 @@ package machine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
-	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/utils/clock"
@@ -109,16 +109,16 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 		c.liveness,
 	} {
 		res, err := reconciler.Reconcile(ctx, machine)
-		errs = multierr.Append(errs, err)
+		errs = errors.Join(errs, err)
 		results = append(results, res)
 	}
 	if !equality.Semantic.DeepEqual(stored, machine) {
 		statusCopy := machine.DeepCopy()
 		if err := c.kubeClient.Patch(ctx, machine, client.MergeFrom(stored)); err != nil {
-			return reconcile.Result{}, client.IgnoreNotFound(multierr.Append(errs, err))
+			return reconcile.Result{}, client.IgnoreNotFound(errors.Join(errs, err))
 		}
 		if err := c.kubeClient.Status().Patch(ctx, statusCopy, client.MergeFrom(stored)); err != nil {
-			return reconcile.Result{}, client.IgnoreNotFound(multierr.Append(errs, err))
+			return reconcile.Result{}, client.IgnoreNotFound(errors.Join(errs, err))
 		}
 	}
 	return result.Min(results...), errs

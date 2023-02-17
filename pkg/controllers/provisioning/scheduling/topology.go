@@ -16,13 +16,13 @@ package scheduling
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 
-	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -71,7 +71,7 @@ func NewTopology(ctx context.Context, kubeClient client.Client, cluster *state.C
 
 	errs := t.updateInverseAffinities(ctx)
 	for i := range pods {
-		errs = multierr.Append(errs, t.Update(ctx, pods[i]))
+		errs = errors.Join(errs, t.Update(ctx, pods[i]))
 	}
 	if errs != nil {
 		return nil, errs
@@ -190,7 +190,7 @@ func (t *Topology) updateInverseAffinities(ctx context.Context) error {
 			return true
 		}
 		if err := t.updateInverseAntiAffinity(ctx, pod, node.Labels); err != nil {
-			errs = multierr.Append(errs, fmt.Errorf("tracking existing pod anti-affinity, %w", err))
+			errs = errors.Join(errs, fmt.Errorf("tracking existing pod anti-affinity, %w", err))
 		}
 		return true
 	})

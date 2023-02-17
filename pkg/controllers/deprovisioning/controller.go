@@ -16,6 +16,7 @@ package deprovisioning
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -23,9 +24,8 @@ import (
 	"github.com/avast/retry-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
-	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
@@ -177,7 +177,7 @@ func (c *Controller) waitForDeletion(ctx context.Context, node *v1.Node) {
 		var n v1.Node
 		nerr := c.kubeClient.Get(ctx, client.ObjectKey{Name: node.Name}, &n)
 		// We expect the not node found error, at which point we know the node is deleted.
-		if errors.IsNotFound(nerr) {
+		if k8serrors.IsNotFound(nerr) {
 			return nil
 		}
 		// make the user aware of why deprovisioning is paused
@@ -206,7 +206,7 @@ func (c *Controller) launchReplacementNodes(ctx context.Context, action Command)
 	nodeNames, err := c.provisioner.LaunchMachines(ctx, action.replacementNodes)
 	if err != nil {
 		// uncordon the nodes as the launch may fail (e.g. ICE or incompatible AMI)
-		err = multierr.Append(err, c.setNodesUnschedulable(ctx, false, nodeNamesToRemove...))
+		err = errors.Join(err, c.setNodesUnschedulable(ctx, false, nodeNamesToRemove...))
 		return err
 	}
 	if len(nodeNames) != len(action.replacementNodes) {
@@ -243,10 +243,10 @@ func (c *Controller) launchReplacementNodes(ctx context.Context, action Command)
 			errs[i] = err
 		}
 	})
-	multiErr := multierr.Combine(errs...)
+	multiErr := errors.Join(errs...)
 	if multiErr != nil {
 		c.cluster.UnmarkForDeletion(nodeNamesToRemove...)
-		return multierr.Combine(c.setNodesUnschedulable(ctx, false, nodeNamesToRemove...),
+		return errors.Join(c.setNodesUnschedulable(ctx, false, nodeNamesToRemove...),
 			fmt.Errorf("timed out checking node readiness, %w", multiErr))
 	}
 	return nil
@@ -257,7 +257,7 @@ func (c *Controller) setNodesUnschedulable(ctx context.Context, isUnschedulable 
 	for _, nodeName := range nodeNames {
 		var node v1.Node
 		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: nodeName}, &node); err != nil {
-			multiErr = multierr.Append(multiErr, fmt.Errorf("getting node, %w", err))
+			multiErr = errors.Join(multiErr, fmt.Errorf("getting node, %w", err))
 		}
 
 		// node is being deleted already, so no need to un-cordon
@@ -273,7 +273,7 @@ func (c *Controller) setNodesUnschedulable(ctx context.Context, isUnschedulable 
 		persisted := node.DeepCopy()
 		node.Spec.Unschedulable = isUnschedulable
 		if err := c.kubeClient.Patch(ctx, &node, client.MergeFrom(persisted)); err != nil {
-			multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
+			multiErr = errors.Join(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
 		}
 	}
 	return multiErr

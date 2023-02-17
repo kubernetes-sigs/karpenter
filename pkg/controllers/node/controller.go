@@ -16,8 +16,8 @@ package node
 
 import (
 	"context"
+	"errors"
 
-	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/types"
@@ -101,7 +101,7 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Re
 	}
 	for _, reconciler := range reconcilers {
 		res, err := reconciler.Reconcile(ctx, provisioner, node)
-		errs = multierr.Append(errs, err)
+		errs = errors.Join(errs, err)
 		results = append(results, res)
 	}
 	if !equality.Semantic.DeepEqual(stored, node) {

@@ -15,10 +15,10 @@ limitations under the License.
 package scheduling
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/samber/lo"
-	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 )
 
@@ -34,7 +34,7 @@ func (ts Taints) Tolerates(pod *v1.Pod) (errs error) {
 			tolerates = tolerates || t.ToleratesTaint(&taint)
 		}
 		if !tolerates {
-			errs = multierr.Append(errs, fmt.Errorf("did not tolerate %s=%s:%s", taint.Key, taint.Value, taint.Effect))
+			errs = errors.Join(errs, fmt.Errorf("did not tolerate %s=%s:%s", taint.Key, taint.Value, taint.Effect))
 		}
 	}
 	return errs

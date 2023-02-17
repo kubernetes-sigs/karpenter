@@ -15,12 +15,12 @@ limitations under the License.
 package scheduling
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/samber/lo"
-	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
@@ -126,10 +126,10 @@ func (r Requirements) Compatible(requirements Requirements) (errs error) {
 		if operator := requirements.Get(key).Operator(); r.Has(key) || operator == v1.NodeSelectorOpNotIn || operator == v1.NodeSelectorOpDoesNotExist {
 			continue
 		}
-		errs = multierr.Append(errs, fmt.Errorf("label %q does not have known values%s", key, labelHint(r, key)))
+		errs = errors.Join(errs, fmt.Errorf("label %q does not have known values%s", key, labelHint(r, key)))
 	}
 	// Well Known Labels must intersect, but if not defined, are allowed.
-	return multierr.Append(errs, r.Intersects(requirements))
+	return errors.Join(errs, r.Intersects(requirements))
 }
 
 // editDistance is an implementation of edit distance from Algorithms/DPV
@@ -199,7 +199,7 @@ func (r Requirements) Intersects(requirements Requirements) (errs error) {
 					continue
 				}
 			}
-			errs = multierr.Append(errs, fmt.Errorf("key %s, %s not in %s", key, incoming, existing))
+			errs = errors.Join(errs, fmt.Errorf("key %s, %s not in %s", key, incoming, existing))
 		}
 	}
 	return errs
