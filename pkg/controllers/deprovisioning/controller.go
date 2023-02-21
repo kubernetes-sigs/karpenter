@@ -144,8 +144,9 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 	deprovisioningActionsPerformedCounter.With(prometheus.Labels{"action": fmt.Sprintf("%s/%s", d, command.action)}).Add(1)
 	logging.FromContext(ctx).Infof("deprovisioning via %s %s", d, command)
 
+	reason := fmt.Sprintf("%s/%s", d, command.action)
 	if command.action == actionReplace {
-		if err := c.launchReplacementNodes(ctx, command); err != nil {
+		if err := c.launchReplacementNodes(ctx, command, reason); err != nil {
 			// If we failed to launch the replacement, don't deprovision.  If this is some permanent failure,
 			// we don't want to disrupt workloads with no way to provision new nodes for them.
 			return fmt.Errorf("launching replacement node, %w", err)
@@ -163,7 +164,6 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 		if err := c.kubeClient.Delete(ctx, oldNode); client.IgnoreNotFound(err) != nil {
 			logging.FromContext(ctx).Errorf("Deleting node, %s", err)
 		} else {
-			reason := fmt.Sprintf("%s/%s", d, command.action)
 			metrics.NodesTerminatedCounter.With(prometheus.Labels{
 				metrics.ReasonLabel:      reason,
 				metrics.ProvisionerLabel: owningProvisioner,
@@ -205,7 +205,7 @@ func (c *Controller) waitForDeletion(ctx context.Context, node *v1.Node) {
 
 // launchReplacementNodes launches replacement nodes and blocks until it is ready
 // nolint:gocyclo
-func (c *Controller) launchReplacementNodes(ctx context.Context, action Command) error {
+func (c *Controller) launchReplacementNodes(ctx context.Context, action Command, reason string) error {
 	defer metrics.Measure(deprovisioningReplacementNodeInitializedHistogram)()
 	nodeNamesToRemove := lo.Map(action.nodesToRemove, func(n *v1.Node, _ int) string { return n.Name })
 	// cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
@@ -213,7 +213,7 @@ func (c *Controller) launchReplacementNodes(ctx context.Context, action Command)
 		return fmt.Errorf("cordoning nodes, %w", err)
 	}
 
-	nodeNames, err := c.provisioner.LaunchMachines(ctx, action.replacementNodes, provisioning.WithReason(metrics.DeprovisioningReason))
+	nodeNames, err := c.provisioner.LaunchMachines(ctx, action.replacementNodes, provisioning.WithReason(reason))
 	if err != nil {
 		// uncordon the nodes as the launch may fail (e.g. ICE or incompatible AMI)
 		err = multierr.Append(err, c.setNodesUnschedulable(ctx, false, nodeNamesToRemove...))
