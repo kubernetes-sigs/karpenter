@@ -40,13 +40,14 @@ import (
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/metrics"
+	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 )
 
@@ -250,12 +251,12 @@ func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c cli
 	for _, m := range machines {
 		ctx = injection.WithNamespacedName(ctx, types.NamespacedName{Name: m.Labels[v1alpha5.ProvisionerNameLabelKey]})
 		// TODO: Check the error on the provisioner launch
-		node, err := provisioner.Launch(ctx, m)
+		name, err := provisioner.Launch(ctx, m, metrics.ProvisioningReason)
 		if err != nil {
 			return bindings
 		}
 		for _, pod := range m.Pods {
-			bindings[pod] = ExpectNodeExistsWithOffset(offset+1, ctx, c, node.Name)
+			bindings[pod] = ExpectNodeExistsWithOffset(offset+1, ctx, c, name)
 		}
 	}
 	for _, node := range nodes {
@@ -297,7 +298,7 @@ func ExpectOwnerReferenceExists(obj, owner client.Object) metav1.OwnerReference 
 // FindMetricWithLabelValues attempts to find a metric with a name with a set of label values
 // If no metric is found, the *prometheus.Metric will be nil
 func FindMetricWithLabelValues(name string, labelValues map[string]string) (*prometheus.Metric, bool) {
-	metrics, err := metrics.Registry.Gather()
+	metrics, err := crmetrics.Registry.Gather()
 	ExpectWithOffset(1, err).To(BeNil())
 
 	mf, found := lo.Find(metrics, func(mf *prometheus.MetricFamily) bool {
