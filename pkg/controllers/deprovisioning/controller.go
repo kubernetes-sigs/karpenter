@@ -154,12 +154,7 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 	}
 
 	for _, oldNode := range command.nodesToRemove {
-		owningProvisioner := "N/A"
-
-		if provisioner, ok := oldNode.Labels[v1alpha5.ProvisionerNameLabelKey]; ok {
-			owningProvisioner = provisioner
-		}
-
+		owningProvisioner := oldNode.Labels[v1alpha5.ProvisionerNameLabelKey]
 		c.recorder.Publish(deprovisioningevents.TerminatingNode(oldNode, command.String()))
 		if err := c.kubeClient.Delete(ctx, oldNode); client.IgnoreNotFound(err) != nil {
 			logging.FromContext(ctx).Errorf("Deleting node, %s", err)

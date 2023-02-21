@@ -219,11 +219,7 @@ func (ns *NodeScraper) getNodeLabels(node *v1.Node, resourceTypeName string) pro
 	metricLabels := prometheus.Labels{}
 	metricLabels[resourceType] = resourceTypeName
 	metricLabels[nodeName] = node.GetName()
-	if provisionerName, ok := node.Labels[v1alpha5.ProvisionerNameLabelKey]; !ok {
-		metricLabels[nodeProvisioner] = "N/A"
-	} else {
-		metricLabels[nodeProvisioner] = provisionerName
-	}
+	metricLabels[nodeProvisioner] = node.Labels[v1alpha5.ProvisionerNameLabelKey]
 	metricLabels[nodePhase] = string(node.Status.Phase)
 
 	// Populate well known labels
