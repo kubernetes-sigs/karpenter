@@ -329,27 +329,18 @@ func canBeTerminated(node CandidateNode, pdbs *PDBLimits) (string, bool) {
 	if !node.DeletionTimestamp.IsZero() {
 		return "in the process of deletion", false
 	}
-	if pdb, ok := pdbs.CanEvictPods(node.pods); !ok {
-		return fmt.Sprintf("pdb %s prevents pod evictions", pdb), false
+	if pdbs != nil {
+		if pdb, ok := pdbs.CanEvictPods(node.pods); !ok {
+			return fmt.Sprintf("pdb %s prevents pod evictions", pdb), false
+		}
 	}
-
-	if reason, ok := PodsPreventEviction(node.pods); ok {
-		return reason, false
+	if p, ok := lo.Find(node.pods, func(p *v1.Pod) bool {
+		if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
+			return false
+		}
+		return pod.HasDoNotEvict(p)
+	}); ok {
+		return fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name), false
 	}
 	return "", true
-}
-
-// PodsPreventEviction returns true if there are pods that would prevent eviction
-func PodsPreventEviction(pods []*v1.Pod) (string, bool) {
-	for _, p := range pods {
-		// don't care about pods that are finishing, finished or owned by the node
-		if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
-			continue
-		}
-
-		if pod.HasDoNotEvict(p) {
-			return fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name), true
-		}
-	}
-	return "", false
 }

@@ -932,7 +932,7 @@ var _ = Describe("Delete Node", func() {
 		ExpectNotFound(ctx, env.Client, node1)
 	})
 	It("can delete nodes, considers do-not-evict", func() {
-		// create our RS so we can link a pod to it
+		// create our RS, so we can link a pod to it
 		rs := test.ReplicaSet()
 		ExpectApplied(ctx, env.Client, rs)
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
@@ -1000,6 +1000,7 @@ var _ = Describe("Delete Node", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
 
 		fakeClock.Step(10 * time.Minute)
+
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})

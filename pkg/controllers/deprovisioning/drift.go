@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -61,13 +62,12 @@ func (d *Drift) ComputeCommand(ctx context.Context, candidates ...CandidateNode)
 	if err != nil {
 		return Command{}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
-	for _, candidate := range candidates {
-		// is this a node that we can terminate?  This check is meant to be fast so we can save the expense of simulated
-		// scheduling unless its really needed
-		if _, canTerminate := canBeTerminated(candidate, pdbs); !canTerminate {
-			continue
-		}
+	candidates = lo.Filter(candidates, func(n CandidateNode, _ int) bool {
+		_, canTerminate := canBeTerminated(n, pdbs)
+		return canTerminate
+	})
 
+	for _, candidate := range candidates {
 		// Check if we need to create any nodes.
 		newNodes, allPodsScheduled, err := simulateScheduling(ctx, d.kubeClient, d.cluster, d.provisioner, candidate)
 		if err != nil {
