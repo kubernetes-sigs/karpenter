@@ -76,7 +76,7 @@ If the KubeletConfiguration is used, a user that changes these settings most lik
 
 If a user changes subnets, this indicates a need to migrate away from the old one, where capacity must run on the new subnets. If a subnet has been forcefully deleted, a zone is experiencing an outage, or users want to load balance their applications, Karpenter should drift nodes if the subnet selector no longer matches.
 
-### Security GroupSelector
+### SecurityGroupSelector
 
 A very similar case to SubnetSelector. This is a vital part of discovering how nodes are allowed to communicate within the cluster. If this changes, the nodes should definitely be deprovisioned.
 
