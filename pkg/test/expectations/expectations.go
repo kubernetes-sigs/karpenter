@@ -251,7 +251,7 @@ func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c cli
 	for _, m := range machines {
 		ctx = injection.WithNamespacedName(ctx, types.NamespacedName{Name: m.Labels[v1alpha5.ProvisionerNameLabelKey]})
 		// TODO: Check the error on the provisioner launch
-		name, err := provisioner.Launch(ctx, m, metrics.ProvisioningReason)
+		name, err := provisioner.Launch(ctx, m, provisioning.WithReason(metrics.ProvisioningReason))
 		if err != nil {
 			return bindings
 		}

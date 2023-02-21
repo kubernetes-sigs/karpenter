@@ -55,12 +55,20 @@ import (
 // actions and configuration during scheduling
 type LaunchOptions struct {
 	RecordPodNomination bool
+	Reason              string
 }
 
 // RecordPodNomination causes nominate pod events to be recorded against the node.
 func RecordPodNomination(o LaunchOptions) LaunchOptions {
 	o.RecordPodNomination = true
 	return o
+}
+
+func WithReason(reason string) func(LaunchOptions) LaunchOptions {
+	return func(o LaunchOptions) LaunchOptions {
+		o.Reason = reason
+		return o
+	}
 }
 
 // Provisioner waits for enqueued pods, batches them, creates capacity and binds the pods to the capacity.
@@ -116,14 +124,14 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 	if len(machines) == 0 {
 		return reconcile.Result{}, nil
 	}
-	_, err = p.LaunchMachines(ctx, machines, metrics.ProvisioningReason, RecordPodNomination)
+	_, err = p.LaunchMachines(ctx, machines, WithReason(metrics.ProvisioningReason), RecordPodNomination)
 
 	return reconcile.Result{}, err
 }
 
 // LaunchMachines launches nodes passed into the function in parallel. It returns a slice of the successfully created node
 // names as well as a multierr of any errors that occurred while launching nodes
-func (p *Provisioner) LaunchMachines(ctx context.Context, machines []*scheduler.Machine, launchReason string, opts ...functional.Option[LaunchOptions]) ([]string, error) {
+func (p *Provisioner) LaunchMachines(ctx context.Context, machines []*scheduler.Machine, opts ...functional.Option[LaunchOptions]) ([]string, error) {
 	// Launch capacity and bind pods
 	errs := make([]error, len(machines))
 	machineNames := make([]string, len(machines))
@@ -133,7 +141,7 @@ func (p *Provisioner) LaunchMachines(ctx context.Context, machines []*scheduler.
 		// register the provisioner on the context so we can pull it off for tagging purposes
 		// TODO: rethink this, maybe just pass the provisioner down instead of hiding it in the context?
 		ctx = injection.WithNamespacedName(ctx, types.NamespacedName{Name: machines[i].Labels[v1alpha5.ProvisionerNameLabelKey]})
-		if machineName, err := p.Launch(ctx, machines[i], launchReason, opts...); err != nil {
+		if machineName, err := p.Launch(ctx, machines[i], opts...); err != nil {
 			errs[i] = fmt.Errorf("launching machine, %w", err)
 		} else {
 			machineNames[i] = machineName
@@ -297,7 +305,7 @@ func (p *Provisioner) Schedule(ctx context.Context) ([]*scheduler.Machine, []*sc
 	return scheduler.Solve(ctx, pods)
 }
 
-func (p *Provisioner) Launch(ctx context.Context, machine *scheduler.Machine, launchReason string, opts ...functional.Option[LaunchOptions]) (string, error) {
+func (p *Provisioner) Launch(ctx context.Context, machine *scheduler.Machine, opts ...functional.Option[LaunchOptions]) (string, error) {
 	// Check limits
 	latest := &v1alpha5.Provisioner{}
 	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: machine.ProvisionerName}, latest); err != nil {
@@ -347,12 +355,13 @@ func (p *Provisioner) Launch(ctx context.Context, machine *scheduler.Machine, la
 	if err := p.cluster.UpdateNode(ctx, k8sNode); err != nil {
 		return "", fmt.Errorf("updating cluster state, %w", err)
 	}
+	launchOpts := functional.ResolveOptions(opts...)
 	metrics.NodesCreatedCounter.With(prometheus.Labels{
-		metrics.ReasonLabel:      launchReason,
+		metrics.ReasonLabel:      launchOpts.Reason,
 		metrics.ProvisionerLabel: k8sNode.Labels[v1alpha5.ProvisionerNameLabelKey],
 	}).Inc()
 	p.cluster.NominateNodeForPod(ctx, k8sNode.Name)
-	if functional.ResolveOptions(opts...).RecordPodNomination {
+	if launchOpts.RecordPodNomination {
 		for _, pod := range machine.Pods {
 			p.recorder.Publish(events.NominatePod(pod, k8sNode))
 		}
