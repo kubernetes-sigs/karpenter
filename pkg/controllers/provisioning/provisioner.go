@@ -55,12 +55,20 @@ import (
 // actions and configuration during scheduling
 type LaunchOptions struct {
 	RecordPodNomination bool
+	Reason              string
 }
 
 // RecordPodNomination causes nominate pod events to be recorded against the node.
 func RecordPodNomination(o LaunchOptions) LaunchOptions {
 	o.RecordPodNomination = true
 	return o
+}
+
+func WithReason(reason string) func(LaunchOptions) LaunchOptions {
+	return func(o LaunchOptions) LaunchOptions {
+		o.Reason = reason
+		return o
+	}
 }
 
 // Provisioner waits for enqueued pods, batches them, creates capacity and binds the pods to the capacity.
@@ -116,11 +124,7 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 	if len(machines) == 0 {
 		return reconcile.Result{}, nil
 	}
-	machineNames, err := p.LaunchMachines(ctx, machines, RecordPodNomination)
-
-	// Any successfully created node is going to have the nodeName value filled in the slice
-	successfullyCreatedNodeCount := lo.CountBy(machineNames, func(name string) bool { return name != "" })
-	metrics.NodesCreatedCounter.WithLabelValues(metrics.ProvisioningReason).Add(float64(successfullyCreatedNodeCount))
+	_, err = p.LaunchMachines(ctx, machines, WithReason(metrics.ProvisioningReason), RecordPodNomination)
 
 	return reconcile.Result{}, err
 }
@@ -351,8 +355,13 @@ func (p *Provisioner) Launch(ctx context.Context, machine *scheduler.Machine, op
 	if err := p.cluster.UpdateNode(ctx, k8sNode); err != nil {
 		return "", fmt.Errorf("updating cluster state, %w", err)
 	}
+	launchOpts := functional.ResolveOptions(opts...)
+	metrics.NodesCreatedCounter.With(prometheus.Labels{
+		metrics.ReasonLabel:      launchOpts.Reason,
+		metrics.ProvisionerLabel: k8sNode.Labels[v1alpha5.ProvisionerNameLabelKey],
+	}).Inc()
 	p.cluster.NominateNodeForPod(ctx, k8sNode.Name)
-	if functional.ResolveOptions(opts...).RecordPodNomination {
+	if launchOpts.RecordPodNomination {
 		for _, pod := range machine.Pods {
 			p.recorder.Publish(events.NominatePod(pod, k8sNode))
 		}

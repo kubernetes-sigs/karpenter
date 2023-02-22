@@ -30,10 +30,11 @@ var (
 			Namespace: Namespace,
 			Subsystem: nodeSubsystem,
 			Name:      "created",
-			Help:      "Number of nodes created in total by Karpenter. Labeled by reason the node was created.",
+			Help:      "Number of nodes created in total by Karpenter. Labeled by reason the node was created and the owning provisioner.",
 		},
 		[]string{
-			"reason",
+			ReasonLabel,
+			ProvisionerLabel,
 		},
 	)
 	NodesTerminatedCounter = prometheus.NewCounterVec(
@@ -41,10 +42,11 @@ var (
 			Namespace: Namespace,
 			Subsystem: nodeSubsystem,
 			Name:      "terminated",
-			Help:      "Number of nodes terminated in total by Karpenter. Labeled by reason the node was terminated.",
+			Help:      "Number of nodes terminated in total by Karpenter. Labeled by reason the node was terminated and the owning provisioner.",
 		},
 		[]string{
-			"reason",
+			ReasonLabel,
+			ProvisionerLabel,
 		},
 	)
 	MachinesCreatedCounter = prometheus.NewCounterVec(
