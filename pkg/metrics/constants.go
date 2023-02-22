@@ -28,11 +28,8 @@ const (
 	ReasonLabel      = "reason"
 
 	// Reasons for CREATE/DELETE shared metrics
-	ConsolidationReason = "consolidation"
-	ProvisioningReason  = "provisioning"
-	ExpirationReason    = "expiration"
-	EmptinessReason     = "emptiness"
-	DriftReason         = "drift"
+	ProvisioningReason   = "provisioning"
+	DeprovisioningReason = "deprovisioning"
 )
 
 // DurationBuckets returns a []float64 of default threshold values for duration histograms.

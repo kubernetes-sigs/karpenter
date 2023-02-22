@@ -108,13 +108,20 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) controller.Bu
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
 	if !c.cluster.Synced(ctx) {
 		return reconcile.Result{Requeue: true}, nil
+	windowMap, err := buildDisruptionGates(ctx, c.kubeClient, c.clock)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("building machine disruption gate mapping, %w", err)
 	}
 	// Attempt different deprovisioning methods. We'll only let one method perform an action
 	isConsolidated := c.cluster.Consolidated()
 	for _, d := range c.deprovisioners {
+		prohibitedNodeNames, err := getProhibitedNodeNames(ctx, c.kubeClient, windowMap[d.String()])
+		if err != nil {
+			return reconcile.Result{}, fmt.Errorf("determining machines with prohibited deprovisioning, %w", err)
+		}
 		candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.clock, c.cloudProvider, d.ShouldDeprovision)
 		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("determining candidate nodes, %w", err)
+			return reconcile.Result{}, fmt.Errorf("determining candidates, %w", err)
 		}
 		// If there are no candidate nodes, move to the next deprovisioner
 		if len(candidates) == 0 {

@@ -15,6 +15,7 @@ require (
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/prometheus/client_golang v1.14.0
 	github.com/prometheus/client_model v0.3.0
+	github.com/robfig/cron/v3 v3.0.0
 	github.com/samber/lo v1.37.0
 	go.uber.org/multierr v1.9.0
 	go.uber.org/zap v1.24.0

@@ -1772,6 +1772,594 @@ var _ = Describe("Consolidation TTL", func() {
 	})
 })
 
+var _ = Describe("MachineDisruptionGates", func() {
+	It("should block deprovisioning on all Karpenter nodes for nil selector", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// Wednesday January 1st 2020 Noon UTC
+		// (Minute | Hour | Day of Month | Month | Day of Week)
+		fakeClock.SetTime(time.Date(2020, 01, 01, 12, 0, 0, 0, time.UTC))
+
+		gate := test.MachineDisruptionGate(v1alpha5.MachineDisruptionGate{
+			Spec: v1alpha5.MachineDisruptionGateSpec{
+				Schedules: []v1alpha5.Schedule{
+					{
+						Crontab:  "0 12 * * *",
+						Duration: metav1.Duration{Duration: 1 * time.Hour},
+					},
+				},
+				Actions: []string{"Consolidation", "Expiration", "Drift", "Emptiness"},
+			},
+		})
+		prov := test.Provisioner(test.ProvisionerOptions{
+			Consolidation:          &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
+			TTLSecondsUntilExpired: ptr.Int64(100),
+		})
+		prov2 := test.Provisioner(test.ProvisionerOptions{
+			Consolidation:          &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
+			TTLSecondsUntilExpired: ptr.Int64(100),
+		})
+		node1 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: lo.Assign(map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
+				}, labels)},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		node2 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: lo.Assign(map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov2.Name,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
+				}, labels)},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		ExpectApplied(ctx, env.Client, node1, node2, prov, prov2, gate)
+
+		// inform cluster state about the nodes
+		ExpectMakeNodesReady(ctx, env.Client, node1, node2)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
+
+		fakeClock.Step(10 * time.Minute)
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
+		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
+
+		// and the nodes should not be deleted
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node1), node1)).To(Succeed())
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node2), node2)).To(Succeed())
+	})
+	It("should block expiration", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// Wednesday January 1st 2020 Noon UTC
+		// (Minute | Hour | Day of Month | Month | Day of Week)
+		fakeClock.SetTime(time.Date(2020, 01, 01, 12, 0, 0, 0, time.UTC))
+
+		// Disable Drift
+		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
+		gate := test.MachineDisruptionGate(v1alpha5.MachineDisruptionGate{
+			Spec: v1alpha5.MachineDisruptionGateSpec{
+				Schedules: []v1alpha5.Schedule{
+					{
+						Crontab:  "0 12 * * *",
+						Duration: metav1.Duration{Duration: 1 * time.Hour},
+					},
+				},
+				Actions: []string{"Expiration"},
+				Selector: &metav1.LabelSelector{
+					MatchLabels: labels,
+				},
+			},
+		})
+		prov := test.Provisioner(test.ProvisionerOptions{
+			TTLSecondsUntilExpired: ptr.Int64(100),
+		})
+		node1 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: lo.Assign(map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
+				}, labels)},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		ExpectApplied(ctx, env.Client, node1, prov, gate)
+
+		// inform cluster state about the nodes
+		ExpectMakeNodesReady(ctx, env.Client, node1)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+
+		fakeClock.Step(10 * time.Minute)
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
+		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
+
+		// and the node should not be deleted
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node1), node1)).To(Succeed())
+	})
+	It("should block consolidation", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// Wednesday January 1st 2020 Noon UTC
+		// (Minute | Hour | Day of Month | Month | Day of Week)
+		fakeClock.SetTime(time.Date(2020, 01, 01, 12, 0, 0, 0, time.UTC))
+
+		// Disable Drift
+		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
+		gate := test.MachineDisruptionGate(v1alpha5.MachineDisruptionGate{
+			Spec: v1alpha5.MachineDisruptionGateSpec{
+				Schedules: []v1alpha5.Schedule{
+					{
+						Crontab:  "0 12 * * *",
+						Duration: metav1.Duration{Duration: 1 * time.Hour},
+					},
+				},
+				Actions: []string{"Consolidation"},
+				Selector: &metav1.LabelSelector{
+					MatchLabels: labels,
+				},
+			},
+		})
+
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+		pods := test.Pods(3, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}}})
+
+		prov := test.Provisioner(test.ProvisionerOptions{
+			TTLSecondsUntilExpired: ptr.Int64(100),
+		})
+		node1 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: lo.Assign(map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
+				}, labels)},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		node2 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: lo.Assign(map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
+				}, labels)},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], node1, node2, prov, gate)
+		ExpectMakeNodesReady(ctx, env.Client, node1, node2)
+
+		ExpectManualBinding(ctx, env.Client, pods[0], node1)
+		ExpectManualBinding(ctx, env.Client, pods[1], node1)
+		ExpectManualBinding(ctx, env.Client, pods[2], node2)
+		ExpectScheduled(ctx, env.Client, pods[0])
+		ExpectScheduled(ctx, env.Client, pods[1])
+		ExpectScheduled(ctx, env.Client, pods[2])
+
+		// inform cluster state about the nodes
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
+
+		fakeClock.Step(10 * time.Minute)
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
+		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
+
+		// expect the nodes to not be deleted
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node1), node1)).To(Succeed())
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node2), node2)).To(Succeed())
+	})
+	It("should block emptiness", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// Wednesday January 1st 2020 Noon UTC
+		// (Minute | Hour | Day of Month | Month | Day of Week)
+		fakeClock.SetTime(time.Date(2020, 01, 01, 12, 0, 0, 0, time.UTC))
+
+		// Disable Drift
+		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
+		gate := test.MachineDisruptionGate(v1alpha5.MachineDisruptionGate{
+			Spec: v1alpha5.MachineDisruptionGateSpec{
+				Schedules: []v1alpha5.Schedule{
+					{
+						Crontab:  "0 12 * * *",
+						Duration: metav1.Duration{Duration: 1 * time.Hour},
+					},
+				},
+				Actions: []string{"Emptiness"},
+				Selector: &metav1.LabelSelector{
+					MatchLabels: labels,
+				},
+			},
+		})
+		prov := test.Provisioner(test.ProvisionerOptions{
+			TTLSecondsAfterEmpty: ptr.Int64(100),
+		})
+		node1 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: lo.Assign(map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
+				}, labels)},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		ExpectApplied(ctx, env.Client, node1, prov, gate)
+
+		// inform cluster state about the nodes
+		ExpectMakeNodesReady(ctx, env.Client, node1)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+
+		fakeClock.Step(10 * time.Minute)
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
+		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
+
+		// and the node should not be deleted
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node1), node1)).To(Succeed())
+	})
+	It("should block drift", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// Wednesday January 1st 2020 Noon UTC
+		// (Minute | Hour | Day of Month | Month | Day of Week)
+		fakeClock.SetTime(time.Date(2020, 01, 01, 12, 0, 0, 0, time.UTC))
+
+		gate := test.MachineDisruptionGate(v1alpha5.MachineDisruptionGate{
+			Spec: v1alpha5.MachineDisruptionGateSpec{
+				Schedules: []v1alpha5.Schedule{
+					{
+						Crontab:  "0 12 * * *",
+						Duration: metav1.Duration{Duration: 1 * time.Hour},
+					},
+				},
+				Actions: []string{"Drift"},
+				Selector: &metav1.LabelSelector{
+					MatchLabels: labels,
+				},
+			},
+		})
+		prov := test.Provisioner()
+		node1 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
+				},
+				Labels: lo.Assign(map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
+				}, labels)},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		ExpectApplied(ctx, env.Client, node1, prov, gate)
+
+		// inform cluster state about the nodes
+		ExpectMakeNodesReady(ctx, env.Client, node1)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+
+		fakeClock.Step(10 * time.Minute)
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
+		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
+
+		// and the node should not be deleted
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node1), node1)).To(Succeed())
+	})
+	It("should block deprovisioning with an AND semantic across windows", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// Wednesday January 1st 2020 Noon UTC
+		// (Minute | Hour | Day of Month | Month | Day of Week)
+		fakeClock.SetTime(time.Date(2020, 01, 01, 12, 0, 0, 0, time.UTC))
+
+		gate := test.MachineDisruptionGate(v1alpha5.MachineDisruptionGate{
+			Spec: v1alpha5.MachineDisruptionGateSpec{
+				Schedules: []v1alpha5.Schedule{
+					{
+						Crontab:  "0 12 * * *",
+						Duration: metav1.Duration{Duration: 1 * time.Hour},
+					},
+				},
+				Actions: []string{"Drift"},
+				Selector: &metav1.LabelSelector{
+					MatchLabels: labels,
+				},
+			},
+		})
+		gate2 := test.MachineDisruptionGate(v1alpha5.MachineDisruptionGate{
+			Spec: v1alpha5.MachineDisruptionGateSpec{
+				Schedules: []v1alpha5.Schedule{
+					{
+						Crontab:  "0 12 * * *",
+						Duration: metav1.Duration{Duration: 1 * time.Hour},
+					},
+				},
+				Actions: []string{"Drift"},
+				Selector: &metav1.LabelSelector{
+					MatchLabels: labels,
+				},
+			},
+		})
+		prov := test.Provisioner()
+		node1 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
+				},
+				Labels: lo.Assign(map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
+				}, labels)},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		ExpectApplied(ctx, env.Client, node1, prov, gate, gate2)
+
+		// inform cluster state about the nodes
+		ExpectMakeNodesReady(ctx, env.Client, node1)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+
+		fakeClock.Step(10 * time.Minute)
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
+		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
+
+		// and the node should not be deleted
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node1), node1)).To(Succeed())
+	})
+	It("should block deprovisioning with an OR semantic across schedules", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// Wednesday January 1st 2020 Noon UTC
+		// (Minute | Hour | Day of Month | Month | Day of Week)
+		fakeClock.SetTime(time.Date(2020, 01, 01, 12, 0, 0, 0, time.UTC))
+
+		gate := test.MachineDisruptionGate(v1alpha5.MachineDisruptionGate{
+			Spec: v1alpha5.MachineDisruptionGateSpec{
+				Schedules: []v1alpha5.Schedule{
+					{
+						Crontab:  "0 12 * * *",
+						Duration: metav1.Duration{Duration: 1 * time.Hour},
+					},
+					{
+						Crontab:  "0 10 * * *",
+						Duration: metav1.Duration{Duration: 4 * time.Hour},
+					},
+				},
+				Actions: []string{"Drift"},
+				Selector: &metav1.LabelSelector{
+					MatchLabels: labels,
+				},
+			},
+		})
+
+		prov := test.Provisioner()
+		node1 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
+				},
+				Labels: lo.Assign(map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
+				}, labels)},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		ExpectApplied(ctx, env.Client, node1, prov, gate)
+
+		// inform cluster state about the nodes
+		ExpectMakeNodesReady(ctx, env.Client, node1)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+
+		fakeClock.Step(10 * time.Minute)
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
+		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
+
+		// and the node should not be deleted
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node1), node1)).To(Succeed())
+	})
+	It("should block deprovisioning with matchExpressions", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// Wednesday January 1st 2020 Noon UTC
+		// (Minute | Hour | Day of Month | Month | Day of Week)
+		fakeClock.SetTime(time.Date(2020, 01, 01, 12, 0, 0, 0, time.UTC))
+
+		gate := test.MachineDisruptionGate(v1alpha5.MachineDisruptionGate{
+			Spec: v1alpha5.MachineDisruptionGateSpec{
+				Schedules: []v1alpha5.Schedule{
+					{
+						Crontab:  "0 12 * * *",
+						Duration: metav1.Duration{Duration: 1 * time.Hour},
+					},
+				},
+				Actions: []string{"Drift"},
+				Selector: &metav1.LabelSelector{
+					MatchExpressions: []metav1.LabelSelectorRequirement{
+						{
+							Key:      v1alpha5.ProvisionerNameLabelKey,
+							Operator: metav1.LabelSelectorOpNotIn,
+							Values:   []string{test.RandomName()},
+						},
+					},
+				},
+			},
+		})
+
+		prov := test.Provisioner()
+		node1 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
+				},
+				Labels: lo.Assign(map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
+				}, labels)},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		ExpectApplied(ctx, env.Client, node1, prov, gate)
+
+		// inform cluster state about the nodes
+		ExpectMakeNodesReady(ctx, env.Client, node1)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+
+		fakeClock.Step(10 * time.Minute)
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
+		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
+
+		// and the node should not be deleted
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node1), node1)).To(Succeed())
+	})
+	It("should block deprovisioning with matchLabels", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// Wednesday January 1st 2020 Noon UTC
+		// (Minute | Hour | Day of Month | Month | Day of Week)
+		fakeClock.SetTime(time.Date(2020, 01, 01, 12, 0, 0, 0, time.UTC))
+
+		prov := test.Provisioner()
+
+		gate := test.MachineDisruptionGate(v1alpha5.MachineDisruptionGate{
+			Spec: v1alpha5.MachineDisruptionGateSpec{
+				Schedules: []v1alpha5.Schedule{
+					{
+						Crontab:  "0 12 * * *",
+						Duration: metav1.Duration{Duration: 1 * time.Hour},
+					},
+				},
+				Actions: []string{"Drift"},
+				Selector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: prov.Name,
+						v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+						v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
+					},
+				},
+			},
+		})
+		node1 := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
+				},
+				Labels: lo.Assign(map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
+				}, labels)},
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			}})
+
+		ExpectApplied(ctx, env.Client, node1, prov, gate)
+
+		// inform cluster state about the nodes
+		ExpectMakeNodesReady(ctx, env.Client, node1)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+
+		fakeClock.Step(10 * time.Minute)
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
+		Expect(err).ToNot(HaveOccurred())
+		wg.Wait()
+
+		// and the node should not be deleted
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node1), node1)).To(Succeed())
+	})
+})
 var _ = Describe("Parallelization", func() {
 	var prov *v1alpha5.Provisioner
 	var machine *v1alpha5.Machine

@@ -21,14 +21,17 @@ import (
 	"sync"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/events"
 )
 
 // Validation is used to perform validation on a consolidation command.  It makes an assumption that when re-used, all
@@ -43,6 +46,7 @@ type Validation struct {
 	cloudProvider    cloudprovider.CloudProvider
 	provisioner      *provisioning.Provisioner
 	once             sync.Once
+	recorder         events.Recorder
 	// validationCandidates are the cached validation candidates.  We capture these when validating the first command and reuse them for
 	// validating subsequent commands.
 	validationCandidates []*Candidate
@@ -73,6 +77,10 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 		case <-v.clock.After(waitDuration):
 		}
 	}
+	prohibited, err := v.getProhibitedCandidates(ctx)
+	if err != nil {
+		return false, fmt.Errorf("getting prohibited candidates, %w", err)
+	}
 
 	if len(v.validationCandidates) == 0 {
 		v.validationCandidates, err = GetCandidates(ctx, v.cluster, v.kubeClient, v.clock, v.cloudProvider, v.ShouldDeprovision)
@@ -87,6 +95,11 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 		if v.cluster.IsNodeNominated(n.Name()) {
 			return false, nil
 		}
+		// a disruption gate doesn't allow deprovisioning, try deprovisioning on the node another time
+		if prohibited.Has(n.Name) {
+			v.recorder.Publish(deprovisioningevents.BlockedDeprovisioning(n, "machine has blocking disruption gate"))
+			return false, nil
+		}
 	}
 
 	isValid, err := v.ValidateCommand(ctx, cmd, v.validationCandidates)
@@ -95,6 +108,19 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 	}
 
 	return isValid, nil
+}
+
+func (v *Validation) getProhibitedCandidates(ctx context.Context) (sets.String, error) {
+	// Re-compute Maintenance Windows for candidate validation
+	gates, err := buildDisruptionGates(ctx, v.kubeClient, v.clock)
+	if err != nil {
+		return nil, fmt.Errorf("building machine disruption gates, %w", err)
+	}
+	prohibited, err := getProhibitedNodeNames(ctx, v.kubeClient, gates[consolidationMethod])
+	if err != nil {
+		return nil, fmt.Errorf("getting prohibited node names, %w", err)
+	}
+	return prohibited, nil
 }
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes

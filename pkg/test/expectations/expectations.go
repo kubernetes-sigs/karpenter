@@ -203,6 +203,7 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 		&v1.PersistentVolumeClaim{},
 		&v1.PersistentVolume{},
 		&storagev1.StorageClass{},
+		&v1alpha5.MachineDisruptionGate{},
 		&v1alpha5.Provisioner{},
 		&v1alpha5.Machine{},
 	} {

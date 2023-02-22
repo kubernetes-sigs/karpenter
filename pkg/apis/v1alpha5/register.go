@@ -36,6 +36,8 @@ var (
 			&ProvisionerList{},
 			&Machine{},
 			&MachineList{},
+			&MachineDisruptionGate{},
+			&MachineDisruptionGateList{},
 		)
 		metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 		return nil

@@ -24,9 +24,11 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
 
@@ -36,6 +38,42 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+func getProhibitedNodeNames(ctx context.Context, kubeClient client.Client, gates []*v1alpha5.MachineDisruptionGate) (sets.String, error) {
+	names := sets.NewString()
+	for _, gate := range gates {
+		nodeList := &v1.NodeList{}
+		if err := kubeClient.List(ctx, nodeList,
+			pscheduling.TopologyListOptions("", gate.Spec.Selector),
+			client.HasLabels{v1alpha5.ProvisionerNameLabelKey},
+		); err != nil {
+			return nil, fmt.Errorf("listing nodes, %w", err)
+		}
+		nodes := lo.Map(nodeList.Items, func(n v1.Node, _ int) string { return n.Name })
+		names.Insert(nodes...)
+	}
+	return names, nil
+}
+
+func buildDisruptionGates(ctx context.Context, kubeClient client.Client, clk clock.Clock) (map[string][]*v1alpha5.MachineDisruptionGate, error) {
+	gates := &v1alpha5.MachineDisruptionGateList{}
+	if err := kubeClient.List(ctx, gates); err != nil {
+		return nil, fmt.Errorf("listing machine disruption gates, %w", err)
+	}
+
+	gateMap := map[string][]*v1alpha5.MachineDisruptionGate{}
+	for i := range gates.Items {
+		mdg := &gates.Items[i]
+		if !mdg.IsGateActive(ctx, clk) {
+			continue
+		}
+		// Actions have been validated so we know we'll only get actions we allow.
+		for _, action := range mdg.Spec.Actions {
+			gateMap[action] = append(gateMap[action], mdg)
+		}
+	}
+	return gateMap, nil
+}
 
 //nolint:gocyclo
 func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
@@ -155,7 +193,8 @@ func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
 }
 
 // GetCandidates returns nodes that appear to be currently deprovisionable based off of their provisioner
-func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, clk clock.Clock, cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter) ([]*Candidate, error) {
+func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, clk clock.Clock, cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter,
+	recorder events.Recorder, prohibitedNodeNames sets.String) ([]*Candidate, error) {
 	provisionerMap, provisionerToInstanceTypes, err := buildProvisionerMap(ctx, kubeClient, cloudProvider)
 	if err != nil {
 		return nil, err
@@ -164,8 +203,14 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 		cn, e := NewCandidate(ctx, kubeClient, clk, n, provisionerMap, provisionerToInstanceTypes)
 		return cn, e == nil
 	})
+	for _, n := range candidates {
+		// If node is prohibited by a Machine Disruption Gate, skip node, but emit event.
+		if prohibitedNodeNames.Has(n.Name()) {
+			recorder.Publish(deprovisioningevents.BlockedDeprovisioning(n.Node, "machine has blocking disruption gate"))
+		}
+	}
 	// Filter only the valid candidates that we should deprovision
-	return lo.Filter(candidates, func(c *Candidate, _ int) bool { return shouldDeprovision(ctx, c) }), nil
+	return lo.Filter(candidates, func(c *Candidate, _ int) bool { return shouldDeprovision(ctx, c) && !prohibitedNodeNames.Has(c.Name()) }), nil
 }
 
 // buildProvisionerMap builds a provName -> provisioner map and a provName -> instanceName -> instance type map

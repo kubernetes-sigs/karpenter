@@ -71,8 +71,7 @@ func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	}
 	validationCandidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.clock, c.cloudProvider, c.ShouldDeprovision)
 	if err != nil {
-		logging.FromContext(ctx).Errorf("computing validation candidates %s", err)
-		return Command{}, err
+		return Command{}, fmt.Errorf("getting validation candidates, %w", err)
 	}
 	candidatesToDelete := mapCandidates(cmd.candidates, validationCandidates)
 
@@ -85,4 +84,31 @@ func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	}
 
 	return cmd, nil
+}
+
+func (c *EmptyMachineConsolidation) getValidationCandidates(ctx context.Context, cmd Command) ([]Candidate, error) {
+	// empty node consolidation doesn't use Validation as we get to take advantage of cluster.IsNodeNominated.  This
+	// lets us avoid a scheduling simulation (which is performed periodically while pending pods exist and drives
+	// cluster.IsNodeNominated already).
+	select {
+	case <-ctx.Done():
+		return nil, errors.New("interrupted")
+	case <-c.clock.After(consolidationTTL):
+	}
+	// Re-compute Maintenance Windows
+	mws, err := buildDisruptionGates(ctx, c.kubeClient, c.clock)
+	if err != nil {
+		return nil, fmt.Errorf("building machine disruption gates mapping, %w", err)
+	}
+	names, err := getProhibitedNodeNames(ctx, c.kubeClient, mws[consolidationMethod])
+	if err != nil {
+		return nil, fmt.Errorf("getting prohibited node names, %w", err)
+	}
+	validationCandidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.clock, c.cloudProvider, c.ShouldDeprovision, c.recorder, names)
+	if err != nil {
+		logging.FromContext(ctx).Errorf("computing validation candidates %s", err)
+		return nil, err
+	}
+
+	return mapCandidates(cmd.nodesToRemove, validationCandidates), nil
 }

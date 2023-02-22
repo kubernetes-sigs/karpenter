@@ -67,7 +67,7 @@ const consolidationTTL = 15 * time.Second
 
 // string is the string representation of the deprovisioner
 func (c *consolidation) String() string {
-	return metrics.ConsolidationReason
+	return consolidationMethod
 }
 
 // sortAndFilterCandidates orders deprovisionable nodes by the disruptionCost, removing any that we already know won't

@@ -25,7 +25,6 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
 // Emptiness is a subreconciler that deletes empty machines.
@@ -78,5 +77,5 @@ func (e *Emptiness) ComputeCommand(_ context.Context, candidates ...*Candidate) 
 
 // string is the string representation of the deprovisioner
 func (e *Emptiness) String() string {
-	return metrics.EmptinessReason
+	return emptinessMethod
 }

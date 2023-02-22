@@ -34,7 +34,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
-	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
 // Expiration is a subreconciler that deletes empty nodes.
@@ -122,7 +121,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...*Candidat
 
 // String is the string representation of the deprovisioner
 func (e *Expiration) String() string {
-	return metrics.ExpirationReason
+	return expirationMethod
 }
 
 func getExpirationTime(node *v1.Node, provisioner *v1alpha5.Provisioner) time.Time {

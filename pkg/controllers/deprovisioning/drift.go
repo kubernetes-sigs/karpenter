@@ -29,7 +29,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
-	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
 // Drift is a subreconciler that deletes drifted machines.
@@ -112,5 +111,5 @@ func (d *Drift) ComputeCommand(ctx context.Context, candidates ...*Candidate) (C
 
 // String is the string representation of the deprovisioner
 func (d *Drift) String() string {
-	return metrics.DriftReason
+	return driftMethod
 }
