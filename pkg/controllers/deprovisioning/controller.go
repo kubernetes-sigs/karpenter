@@ -154,14 +154,13 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 	}
 
 	for _, oldNode := range command.nodesToRemove {
-		owningProvisioner := oldNode.Labels[v1alpha5.ProvisionerNameLabelKey]
 		c.recorder.Publish(deprovisioningevents.TerminatingNode(oldNode, command.String()))
 		if err := c.kubeClient.Delete(ctx, oldNode); client.IgnoreNotFound(err) != nil {
 			logging.FromContext(ctx).Errorf("Deleting node, %s", err)
 		} else {
 			metrics.NodesTerminatedCounter.With(prometheus.Labels{
 				metrics.ReasonLabel:      reason,
-				metrics.ProvisionerLabel: owningProvisioner,
+				metrics.ProvisionerLabel: oldNode.Labels[v1alpha5.ProvisionerNameLabelKey],
 			}).Inc()
 		}
 	}
