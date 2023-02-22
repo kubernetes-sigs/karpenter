@@ -18,9 +18,8 @@ import (
 	"context"
 	"time"
 
-	"k8s.io/utils/clock"
-
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/ptr"
 
@@ -66,7 +65,11 @@ func (e *Emptiness) ShouldDeprovision(ctx context.Context, n *state.Node, provis
 
 // ComputeCommand generates a deprovisioning command given deprovisionable nodes
 func (e *Emptiness) ComputeCommand(_ context.Context, nodes ...CandidateNode) (Command, error) {
-	emptyNodes := lo.Filter(nodes, func(n CandidateNode, _ int) bool { return len(n.pods) == 0 })
+	emptyNodes := lo.Filter(nodes, func(n CandidateNode, _ int) bool {
+		_, canTerminate := canBeTerminated(n, nil)
+		return len(n.pods) == 0 && canTerminate
+	})
+
 	if len(emptyNodes) == 0 {
 		return Command{action: actionDoNothing}, nil
 	}

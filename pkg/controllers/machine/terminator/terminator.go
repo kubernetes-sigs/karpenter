@@ -76,9 +76,6 @@ func (t *Terminator) Drain(ctx context.Context, node *v1.Node) error {
 	var podsToEvict []*v1.Pod
 	// Skip node due to pods that are not able to be evicted
 	for _, p := range pods {
-		if podutil.HasDoNotEvict(p) {
-			return NewNodeDrainError(fmt.Errorf("pod %s/%s has do-not-evict annotation", p.Namespace, p.Name))
-		}
 		// Ignore if unschedulable is tolerated, since they will reschedule
 		if podutil.ToleratesUnschedulableTaint(p) {
 			continue

@@ -43,7 +43,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	. "knative.dev/pkg/logging/testing"
-	"knative.dev/pkg/ptr"
 
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
@@ -166,143 +165,6 @@ var _ = Describe("Termination", func() {
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 			ExpectNotFound(ctx, env.Client, node)
 		})
-		It("should not delete nodes that have a do-not-evict pod", func() {
-			podEvict := test.Pod(test.PodOptions{
-				NodeName:   node.Name,
-				ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
-			})
-			podNoEvict := test.Pod(test.PodOptions{
-				NodeName: node.Name,
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations:     map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"},
-					OwnerReferences: defaultOwnerRefs,
-				},
-			})
-
-			ExpectApplied(ctx, env.Client, node, podEvict, podNoEvict)
-
-			Expect(env.Client.Delete(ctx, node)).To(Succeed())
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
-
-			// Expect no pod to be enqueued for eviction
-			ExpectNotEnqueuedForEviction(evictionQueue, podEvict, podNoEvict)
-
-			// Expect node to exist and be draining
-			ExpectNodeDraining(env.Client, node.Name)
-
-			// Delete do-not-evict pod
-			ExpectDeleted(ctx, env.Client, podNoEvict)
-
-			// Reconcile node to evict pod
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
-
-			// Expect podEvict to be enqueued for eviction then be successful
-			ExpectEvicted(env.Client, podEvict)
-
-			// Delete pod to simulate successful eviction
-			ExpectDeleted(ctx, env.Client, podEvict)
-
-			// Reconcile to delete node
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
-			ExpectNotFound(ctx, env.Client, node)
-		})
-		It("should not delete nodes that have a do-not-evict pod that tolerates an unschedulable taint", func() {
-			podEvict := test.Pod(test.PodOptions{
-				NodeName:   node.Name,
-				ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
-			})
-			podNoEvict := test.Pod(test.PodOptions{
-				NodeName:    node.Name,
-				Tolerations: []v1.Toleration{{Key: v1.TaintNodeUnschedulable, Operator: v1.TolerationOpExists, Effect: v1.TaintEffectNoSchedule}},
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations:     map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"},
-					OwnerReferences: defaultOwnerRefs,
-				},
-			})
-
-			ExpectApplied(ctx, env.Client, node, podEvict, podNoEvict)
-
-			Expect(env.Client.Delete(ctx, node)).To(Succeed())
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
-
-			// Expect no pod to be enqueued for eviction
-			ExpectNotEnqueuedForEviction(evictionQueue, podEvict, podNoEvict)
-
-			// Expect node to exist and be draining
-			ExpectNodeDraining(env.Client, node.Name)
-
-			// Delete do-not-evict pod
-			ExpectDeleted(ctx, env.Client, podNoEvict)
-
-			// Reconcile node to evict pod
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
-
-			// Expect podEvict to be enqueued for eviction then be successful
-			ExpectEvicted(env.Client, podEvict)
-
-			// Delete pod to simulate successful eviction
-			ExpectDeleted(ctx, env.Client, podEvict)
-
-			// Reconcile to delete node
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
-			ExpectNotFound(ctx, env.Client, node)
-		})
-		It("should not delete nodes that have a do-not-evict static pod", func() {
-			ExpectApplied(ctx, env.Client, node)
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			podEvict := test.Pod(test.PodOptions{
-				NodeName:   node.Name,
-				ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
-			})
-			podNoEvict := test.Pod(test.PodOptions{
-				NodeName: node.Name,
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"},
-					OwnerReferences: []metav1.OwnerReference{{
-						APIVersion: "v1",
-						Kind:       "Node",
-						Name:       node.Name,
-						UID:        node.UID,
-					}},
-				},
-			})
-
-			ExpectApplied(ctx, env.Client, podEvict, podNoEvict)
-
-			Expect(env.Client.Delete(ctx, node)).To(Succeed())
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
-
-			// Expect no pod to be enqueued for eviction
-			ExpectNotEnqueuedForEviction(evictionQueue, podEvict, podNoEvict)
-
-			// Expect node to exist and be draining
-			ExpectNodeDraining(env.Client, node.Name)
-
-			// Delete do-not-evict pod
-			ExpectDeleted(ctx, env.Client, podNoEvict)
-
-			// Reconcile node to evict pod
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
-
-			// Expect podEvict to be enqueued for eviction then be successful
-			ExpectEvicted(env.Client, podEvict)
-
-			// Delete pod to simulate successful eviction
-			ExpectDeleted(ctx, env.Client, podEvict)
-
-			// Reconcile to delete node
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
-			ExpectNotFound(ctx, env.Client, node)
-		})
 		It("should delete nodes that have pods without an ownerRef", func() {
 			pod := test.Pod(test.PodOptions{
 				NodeName: node.Name,
@@ -332,50 +194,6 @@ var _ = Describe("Termination", func() {
 			// Reconcile to delete node
 			ExpectNotFound(ctx, env.Client, node)
 		})
-		It("should not delete nodes that have a do-not-delete pod without an ownerRef", func() {
-			podEvict := test.Pod(test.PodOptions{
-				NodeName: node.Name,
-				ObjectMeta: metav1.ObjectMeta{
-					OwnerReferences: nil,
-				},
-			})
-			podNoEvict := test.Pod(test.PodOptions{
-				NodeName: node.Name,
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations:     map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"},
-					OwnerReferences: nil,
-				},
-			})
-
-			ExpectApplied(ctx, env.Client, node, podEvict, podNoEvict)
-			Expect(env.Client.Delete(ctx, node)).To(Succeed())
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
-
-			// Expect no pod to be enqueued for eviction
-			ExpectNotEnqueuedForEviction(evictionQueue, podEvict, podNoEvict)
-
-			// Expect node to exist and be draining
-			ExpectNodeDraining(env.Client, node.Name)
-
-			// Delete do-not-evict pod
-			ExpectDeleted(ctx, env.Client, podNoEvict)
-
-			// Reconcile node to evict pod
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
-
-			// Expect podEvict to be enqueued for eviction then be successful
-			ExpectEvicted(env.Client, podEvict)
-
-			// Delete pod to simulate successful eviction
-			ExpectDeleted(ctx, env.Client, podEvict)
-
-			// Reconcile to delete node
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
-			ExpectNotFound(ctx, env.Client, node)
-		})
 		It("should delete nodes with terminal pods", func() {
 			podEvictPhaseSucceeded := test.Pod(test.PodOptions{
 				NodeName: node.Name,
@@ -390,41 +208,6 @@ var _ = Describe("Termination", func() {
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			// Trigger Termination Controller, which should ignore these pods and delete the node
-			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
-			ExpectNotFound(ctx, env.Client, node)
-		})
-		It("should delete nodes that have do-not-evict on pods for which it does not apply", func() {
-			pods := []*v1.Pod{
-				test.Pod(test.PodOptions{
-					NodeName: node.Name,
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations:     map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"},
-						OwnerReferences: defaultOwnerRefs,
-					},
-				}),
-				test.Pod(test.PodOptions{
-					NodeName:    node.Name,
-					Tolerations: []v1.Toleration{{Operator: v1.TolerationOpExists}},
-					ObjectMeta:  metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
-				}),
-				test.Pod(test.PodOptions{
-					NodeName:   node.Name,
-					ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
-				}),
-			}
-			ExpectApplied(ctx, env.Client, node)
-			for _, pod := range pods {
-				ExpectApplied(ctx, env.Client, pod)
-			}
-			// Trigger eviction
-			Expect(env.Client.Delete(ctx, node)).To(Succeed())
-			for _, pod := range pods {
-				Expect(env.Client.Delete(ctx, pod, &client.DeleteOptions{GracePeriodSeconds: ptr.Int64(30)})).To(Succeed())
-			}
-			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			// Simulate stuck terminating
-			fakeClock.Step(2 * time.Minute)
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 			ExpectNotFound(ctx, env.Client, node)
 		})

@@ -42,7 +42,6 @@ func (t *Termination) Check(ctx context.Context, node *v1.Node, provisioner *v1a
 	if node.DeletionTimestamp.IsZero() {
 		return nil, nil
 	}
-
 	pods, err := nodeutils.GetNodePods(ctx, t.kubeClient, node)
 	if err != nil {
 		return nil, err
@@ -54,13 +53,5 @@ func (t *Termination) Check(ctx context.Context, node *v1.Node, provisioner *v1a
 			message: fmt.Sprintf("Can't drain node, PDB %s is blocking evictions", pdb),
 		})
 	}
-
-	if reason, ok := deprovisioning.PodsPreventEviction(pods); ok {
-		issues = append(issues, Issue{
-			node:    node,
-			message: fmt.Sprintf("Can't drain node, %s", reason),
-		})
-	}
-
 	return issues, nil
 }

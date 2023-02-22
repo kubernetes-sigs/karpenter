@@ -21,6 +21,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/samber/lo"
 	"k8s.io/utils/clock"
 
 	v1 "k8s.io/api/core/v1"
@@ -72,13 +73,12 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...Candidate
 	if err != nil {
 		return Command{}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
-	for _, candidate := range candidates {
-		// is this a node that we can terminate?  This check is meant to be fast so we can save the expense of simulated
-		// scheduling unless its really needed
-		if _, canBeTerminated := canBeTerminated(candidate, pdbs); !canBeTerminated {
-			continue
-		}
+	candidates = lo.Filter(candidates, func(n CandidateNode, _ int) bool {
+		_, canTerminate := canBeTerminated(n, pdbs)
+		return canTerminate
+	})
 
+	for _, candidate := range candidates {
 		// Check if we need to create any nodes.
 		newNodes, allPodsScheduled, err := simulateScheduling(ctx, e.kubeClient, e.cluster, e.provisioner, candidate)
 		if err != nil {
@@ -93,7 +93,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...Candidate
 			logging.FromContext(ctx).With("node", candidate.Name).Debugf("continuing to expire node after scheduling simulation failed to schedule all pods")
 		}
 
-		logging.FromContext(ctx).With("expirationTTL", time.Duration(ptr.Int64Value(candidates[0].provisioner.Spec.TTLSecondsUntilExpired))*time.Second).
+		logging.FromContext(ctx).With("ttl", time.Duration(ptr.Int64Value(candidates[0].provisioner.Spec.TTLSecondsUntilExpired))*time.Second).
 			With("delay", time.Since(getExpirationTime(candidates[0].Node, candidates[0].provisioner))).Infof("triggering termination for expired node after TTL")
 
 		// were we able to schedule all the pods on the inflight nodes?
