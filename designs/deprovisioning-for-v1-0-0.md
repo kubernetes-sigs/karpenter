@@ -95,6 +95,10 @@ spec:
 
 This provides a solution to time-based deprovisioning blocking. Relying users to vend their own solution with a CronJob fails unsafe, which could result in unexpected application disruptions and node churn. Karpenter should always be able to correctly consider when to provision or deprovision nodes without relying on other independent moving parts to modify the functionality. This has the downside of being another API that users must have to learn, and another Custom Resource that Karpenter must manage.
 
+#### Time Zones
+
+CronJobs [default to using the local time zone](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/#time-zones). With K8s v1.25, users can enable the CronJobTimeZone feature gate to ensure this. Since Karpenter cannot guarantee what its host instance will report as its local time, whether UTC or the hosted region's time zone, Karpenter's will parse all schedules in UTC. This ensures that schedules are all parsed the same way. In the future this could be expanded to a TimeZone spec field for the Node Disruption Gate.
+
 ### ProvisionerSpec API Reorganization - Pain Points (2, 3)
 
 Each deprovisioning mechanism needs a way to both intelligently work for users that want a hands off experience and be extendable to the large pool of use cases in Karpenter. Karpenter needs to consider default behavior for the out-of-the-box experience and organize the `ProvisionerSpec` into a semantically similar way to what’s done in code.
