@@ -37,42 +37,41 @@ Once each of the deprovisioning mechanisms are enabled, users have different [wa
 4. Use the `do-not-consolidate` node annotation to disable consolidation. (Node Level)
     1. *Pain Point (7):* This does not disable any other deprovisioning mechanisms. It requires being patched out once the node can be consolidated, similar to the `do-not-evict` pod annotation.
 
-To enable more toggling options for deprovisioning for nodes globally, owned by a Provisioner, or individually, users have asked for [Maintenance Windows](https://github.com/aws/karpenter/issues/1302) and [Provisioner Disabling](https://github.com/aws/karpenter/issues/2491). This document chooses Maintenance Windows as the solution.
+To enable more toggling options for deprovisioning for nodes globally, owned by a Provisioner, or individually, users have asked for [Machine Disruption Gate](https://github.com/aws/karpenter/issues/1302) and [Provisioner Disabling](https://github.com/aws/karpenter/issues/2491). This document chooses Machine Disruption Gates as the solution.
 
 *While interruption is technically considered deprovisioning, it is a forceful method, which is un-blockable once it’s enabled. This means that there are no toggling options for interruption once it’s enabled.*
 
 ## Proposed Solutions
 
-### Maintenance Windows - Pain Points (1, 4, 5, 6, 7)
+### Machine Disruption Gate - Pain Points (1, 4, 5, 6, 7)
 
-Maintenance Windows will be where users toggle deprovisioning after they’ve been enabled. Maintenance Windows will be a new Custom Resource to represent when users want to prohibit Karpenter from deprovisioning.
+Machine Disruption Gates will be where users toggle deprovisioning after they’ve been enabled. Machine Disruption Gates will be a new Custom Resource to represent when users want to prohibit Karpenter from deprovisioning.
 
-Maintenance Windows enable customers to say “what” deprovisioning actions and “when“ actions _*cannot*_ be taken on their Karpenter nodes. When deciding to deprovision a node, every Maintenance Window with a matching selector and schedule must allow the action (an AND semantic).
+Machine Disruption Gates enable customers to say “what” deprovisioning actions and “when“ actions _*cannot*_ be taken on their Karpenter nodes. When deciding to deprovision a node, every Machine Disruption Gate with a matching selector and schedule must allow the action (an AND semantic).
 
-* Schedules (`[]Schedule`) - Time windows on when the Maintenance Window is active.
-    * Cron (`string`) - Crontab where each hit represents the start of a schedule
+* Schedules (`[]Schedule`) - Time recurrences when the Machine Disruption Gate is active.
+    * Crontab (`string`) - Crontab where each hit represents the start of a schedule
     * Duration (`metav1.Duration`) - How long the schedule is valid since the last crontab hit
-* Actions (`[]string`) - Deprovisioning action enums that will be blocked
-* Selector (`[]v1.NodeSelectorRequirement`) - Which nodes will be blocked from being deprovisioned
+* Actions (`[]string`) - Deprovisioning actions that will be blocked
+* Selector (`*metav1.LabelSelector`) - Label selector to reference which Karpenter Machines should be blocked
 
 ```
-apiVersion: karpenter.sh/v1alpha1
-kind: MaintenanceWindow
+apiVersion: karpenter.sh/v1alpha5
+kind: MachineDisruptionGate
 metadata:
   name: nights
 spec:
   schedules: // Multiple schedules for heterogenous durations
-    - cron: "0 6 * * 1-5"
+    - crontab: "0 6 * * 1-5"
       duration: 1h
-    - cron: "0 9 * * 1-5"
+    - crontab: "0 9 * * 1-5"
       duration: 10h
   actions: // Applies to
     - Expiration
     - Consolidation
     - Drift
-    - Rebalance
   selector: # Nodes that match these
-    matchExpressions: # v1.nodeSelectorTerms
+    matchExpressions: # *metav1.LabelSelector
     - key: topology.kubernetes.io/zone
       operator: In
       values: [ "us-west-2a" ]
@@ -80,17 +79,18 @@ spec:
 
 ```
 apiVersion: karpenter.sh/v1alpha1
-kind: MaintenanceWindow
+kind: MachineDisruptionGate
 metadata:
   name: disable-everything
 spec:
-  // no selector, matches everything
-  // no schedules, matches everything
+  // no selector, matches every Karpenter node
+  schedules:
+    - crontab: "* * * * *"
+      duration: 1h
   actions:
-    - Expiration // disable expiration
+    - Expiration
     - Consolidation
     - Drift
-    - Rebalance
 ```
 
 This provides a solution to time-based deprovisioning blocking. Relying users to vend their own solution with a CronJob fails unsafe, which could result in unexpected application disruptions and node churn. Karpenter should always be able to correctly consider when to provision or deprovision nodes without relying on other independent moving parts to modify the functionality. This has the downside of being another API that users must have to learn, and another Custom Resource that Karpenter must manage.
@@ -119,11 +119,11 @@ spec:
 
 TTL defaults can be either persisted or runtime defaults. Runtime defaults will make each field a pointer (*metav1.Duration) where a deprovisioning mechanism uses a hard-coded TTL default for each deprovisioning mechanism or is disabled until a user defines it. A Persisted default will use an empty metav1.Duration{} field, and will rely on Provisioner Defaults to set the setting on the Provisioner, similar to the [OS and Architecture requirements](https://github.com/aws/karpenter/blob/main/pkg/apis/v1alpha5/provisioner.go#L45).
 
-*Suggestion:* We should use a persisted default for the TTLs. This ensures that users can see which TTLs are being used on their Provisioners with kubectl instead of navigating the code or documentation for values. This enables all deprovisioning by default with chosen TTL values for each, requiring less work for newer users. Since deprovisioning will be always enabled, deprovisioning will need a sane way to disable deprovisioning, relying on Maintenance Windows to fill that gap.
+*Suggestion:* We should use a persisted default for the TTLs. This ensures that users can see which TTLs are being used on their Provisioners with kubectl instead of navigating the code or documentation for values. This enables all deprovisioning by default with chosen TTL values for each, requiring less work for newer users. Since deprovisioning will be always enabled, deprovisioning will need a sane way to disable deprovisioning, relying on Machine Disruption Gates to fill that gap.
 
 ### Complete Drift
 
-As discussed above, Drift will be completed by pulling it out of the feature gate and enabling it by default, relying on Maintenance Windows for it to be disabled. Karpenter will also enforce all template provisioning constraints as well, which plugs in easily to the existing Drift mechanism.
+As discussed above, Drift will be completed by pulling it out of the feature gate and enabling it by default, relying on Machine Disruption Gates for it to be disabled. Karpenter will also enforce all template provisioning constraints as well, which plugs in easily to the existing Drift mechanism.
 
 Each case is validated in [Node Templates and Drift](node-templates-and-drift.md).
 
@@ -131,9 +131,9 @@ Each case is validated in [Node Templates and Drift](node-templates-and-drift.md
 
 A long-time item on the backlog is to remove emptiness since Consolidation has been fully implemented. Emptiness was the first deprovisioning method implemented, and only works for a small subset of use-cases. The core idea is to remove a node after some TTL if there are no applications running on it (excluding some [caveats](https://github.com/aws/karpenter-core/blob/main/pkg/controllers/node/emptiness.go#L87)). Consolidation not only removes nodes with no applications like Emptiness, but also re-schedules capacity elsewhere to “consolidate” applications to save on cost.
 
-Although Consolidation can deprovision capacity in the same way that Emptiness does, they’re enabled with two different fields, where [Consolidation can be disruptive and Emptiness cannot](https://github.com/aws/karpenter/issues/2680#issuecomment-1341284018). Removing Emptiness would require making the ConsolidationTTL configurable (hard-coded as 15s currently). Since users cannot currently enable both Emptiness and Consolidation, only users of Emptiness should be affected by removing Emptiness. They’ll experience more proactive cost-reallocation, and can disable it with Maintenance Windows. Existing consolidation users will only gain more control.
+Although Consolidation can deprovision capacity in the same way that Emptiness does, they’re enabled with two different fields, where [Consolidation can be disruptive and Emptiness cannot](https://github.com/aws/karpenter/issues/2680#issuecomment-1341284018). Removing Emptiness would require making the ConsolidationTTL configurable (hard-coded as 15s currently). Since users cannot currently enable both Emptiness and Consolidation, only users of Emptiness should be affected by removing Emptiness. They’ll experience more proactive cost-reallocation, and can disable it with Machine Disruption Gates. Existing consolidation users will only gain more control.
 
-To ease any potential pain, the Maintenance Windows above could also implement EmptyConsolidation and NonEmptyConsolidation as actions to delineate the two mechanisms once they’ve been merged. Some users may want automatic deprovisioning of nodes that are un-used by applications, but still have Consolidation compute better bin-packing.
+To ease any potential pain, the Machine Disruption Gates above could also implement EmptyConsolidation and NonEmptyConsolidation as actions to delineate the two mechanisms once they’ve been merged. Some users may want automatic deprovisioning of nodes that are un-used by applications, but still have Consolidation compute better bin-packing.
 
 ### Native AMI Versioning
 
@@ -150,7 +150,7 @@ We can implement [Native AMI Versioning](https://github.com/aws/karpenter/pull/3
 3. Custom Drain Flow: https://github.com/aws/karpenter/issues/2705
 4. Node Auto Repair: https://github.com/aws/karpenter/issues/2021
 5. Disable all deprovisioning by disabling a provisioner: https://github.com/aws/karpenter/issues/2491
-6. General Maintenance Windows: https://github.com/aws/karpenter/issues/1302
+6. General Machine Disruption Gates: https://github.com/aws/karpenter/issues/1302
 
 #### Consolidation
 
@@ -160,25 +160,25 @@ We can implement [Native AMI Versioning](https://github.com/aws/karpenter/pull/3
 4. Consolidate on a schedule: https://github.com/aws/karpenter/issues/2308
 5. Preferences on consolidation replacement: https://github.com/aws/karpenter/issues/2486
 
-### Example Maintenance Window Uses
+### Example Machine Disruption Gate Uses
 
 1. No Consolidation, Rebalance, or Drift during critical work hours (9 AM - 5 PM) for all nodes owned by the two billing-teams in `us-west-2a`
 
 ```
 apiVersion: karpenter.sh/v1alpha1
-kind: MaintenanceWindow
+kind: MachineDisruptionGate
 metadata:
   name: critical
 spec:
   schedules: // Multiple schedules for heterogenous durations
-    - cron: "0 9 * * 1-5"
+    - crontab: "0 9 * * 1-5"
       duration: 8h
   actions: // Applies to
     - Consolidation
     - Drift
     - Rebalance
-  selector: # Nodes that match these
-    matchExpressions: # v1.nodeSelectorTerms
+  selector:
+    matchExpressions: # *metav1.LabelSelector
     - key: topology.kubernetes.io/zone
       operator: In
       values: [ "us-west-2a" ]
@@ -191,16 +191,16 @@ spec:
 
 ```
 apiVersion: karpenter.sh/v1alpha1
-kind: MaintenanceWindow
+kind: MachineDisruptionGate
 metadata:
   name: nights-spot-amd
 spec:
   schedules:
-    - cron: "0 0 * * 1-5"
+    - crontab: "0 0 * * 1-5"
       duration: 9h
-    - cron: "0 17 * * 1-5"
+    - crontab: "0 17 * * 1-5"
       duration: 8h
-    - cron: "0 0 * * 6-7"
+    - crontab: "0 0 * * 6-7"
       duration: 24h
   actions:
     - Drift
