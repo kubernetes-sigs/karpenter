@@ -53,7 +53,7 @@ func NewExpiration(clk clock.Clock, kubeClient client.Client, cluster *state.Clu
 		kubeClient:  kubeClient,
 		cluster:     cluster,
 		provisioner: provisioner,
-		recorder: recorder,
+		recorder:    recorder,
 	}
 }
 
