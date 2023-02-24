@@ -66,7 +66,7 @@ var _ = BeforeSuite(func() {
 	}))
 	ctx = settings.ToContext(ctx, test.Settings())
 
-	cloudProvider = fake.NewCloudProvider(env.Client)
+	cloudProvider = fake.NewCloudProvider()
 	evictionQueue = terminator.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}))
 	terminator := terminator.NewTerminator(fakeClock, env.Client, evictionQueue)
 	machineController = machine.NewController(fakeClock, env.Client, cloudProvider, terminator, events.NewRecorder(&record.FakeRecorder{}))

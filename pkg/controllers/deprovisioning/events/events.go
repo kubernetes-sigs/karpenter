@@ -24,41 +24,49 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
-func BlockedDeprovisioning(node *v1.Node, reason string) events.Event {
-	return events.Event{
-		InvolvedObject: node,
-		Type:           v1.EventTypeNormal,
-		Reason:         "BlockedDeprovisioning",
-		Message:        fmt.Sprintf("Cannot deprovision node due to %s", reason),
-		DedupeValues:   []string{node.Name, reason},
+func Blocked(node *v1.Node, machine *v1alpha5.Machine, reason string) []events.Event {
+	return []events.Event{
+		{
+			InvolvedObject: node,
+			Type:           v1.EventTypeNormal,
+			Reason:         "DeprovisioningBlocked",
+			Message:        fmt.Sprintf("Cannot deprovision node due to %s", reason),
+			DedupeValues:   []string{node.Name, reason},
+		},
+		{
+			InvolvedObject: machine,
+			Type:           v1.EventTypeNormal,
+			Reason:         "DeprovisioningBlocked",
+			Message:        fmt.Sprintf("Cannot deprovision machine due to %s", reason),
+			DedupeValues:   []string{machine.Name, reason},
+		},
 	}
 }
 
-func TerminatingNode(node *v1.Node, reason string) events.Event {
-	return events.Event{
-		InvolvedObject: node,
-		Type:           v1.EventTypeNormal,
-		Reason:         "DeprovisioningTerminatingNode",
-		Message:        fmt.Sprintf("Deprovisioning node via %s", reason),
-		DedupeValues:   []string{node.Name, reason},
+func Terminating(node *v1.Node, machine *v1alpha5.Machine, reason string) []events.Event {
+	return []events.Event{
+		{
+			InvolvedObject: node,
+			Type:           v1.EventTypeNormal,
+			Reason:         "DeprovisioningTerminating",
+			Message:        fmt.Sprintf("Deprovisioning node via %s", reason),
+			DedupeValues:   []string{node.Name, reason},
+		},
+		{
+			InvolvedObject: machine,
+			Type:           v1.EventTypeNormal,
+			Reason:         "DeprovisioningTerminating",
+			Message:        fmt.Sprintf("Deprovisioning machine via %s", reason),
+			DedupeValues:   []string{machine.Name, reason},
+		},
 	}
 }
 
-func TerminatingMachine(machine *v1alpha5.Machine, reason string) events.Event {
+func Launching(machine *v1alpha5.Machine, reason string) events.Event {
 	return events.Event{
 		InvolvedObject: machine,
 		Type:           v1.EventTypeNormal,
-		Reason:         "DeprovisioningTerminatingMachine",
-		Message:        fmt.Sprintf("Deprovisioning machine via %s", reason),
-		DedupeValues:   []string{machine.Name, reason},
-	}
-}
-
-func LaunchingMachine(machine *v1alpha5.Machine, reason string) events.Event {
-	return events.Event{
-		InvolvedObject: machine,
-		Type:           v1.EventTypeNormal,
-		Reason:         "DeprovisioningLaunchingMachine",
+		Reason:         "DeprovisioningLaunching",
 		Message:        fmt.Sprintf("Launching machine for %s", reason),
 		DedupeValues:   []string{machine.Name, reason},
 	}
@@ -84,24 +92,23 @@ func WaitingOnDeletion(machine *v1alpha5.Machine) events.Event {
 	}
 }
 
-func UnconsolidatableReason(node *v1.Node, reason string) events.Event {
-	return events.Event{
-		InvolvedObject: node,
-		Type:           v1.EventTypeNormal,
-		Reason:         "Unconsolidatable",
-		Message:        reason,
-		DedupeValues:   []string{node.Name},
-		DedupeTimeout:  time.Minute * 15,
-	}
-}
-
-func UnconsolidatableReasonMachine(machine *v1alpha5.Machine, reason string) events.Event {
-	return events.Event{
-		InvolvedObject: machine,
-		Type:           v1.EventTypeNormal,
-		Reason:         "Unconsolidatable",
-		Message:        reason,
-		DedupeValues:   []string{machine.Name},
-		DedupeTimeout:  time.Minute * 15,
+func Unconsolidatable(node *v1.Node, machine *v1alpha5.Machine, reason string) []events.Event {
+	return []events.Event{
+		{
+			InvolvedObject: node,
+			Type:           v1.EventTypeNormal,
+			Reason:         "Unconsolidatable",
+			Message:        reason,
+			DedupeValues:   []string{node.Name},
+			DedupeTimeout:  time.Minute * 15,
+		},
+		{
+			InvolvedObject: machine,
+			Type:           v1.EventTypeNormal,
+			Reason:         "Unconsolidatable",
+			Message:        reason,
+			DedupeValues:   []string{machine.Name},
+			DedupeTimeout:  time.Minute * 15,
+		},
 	}
 }

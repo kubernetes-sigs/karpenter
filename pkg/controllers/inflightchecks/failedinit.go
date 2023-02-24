@@ -30,7 +30,7 @@ import (
 
 // initFailureTime is the time after which we start reporting a node as having failed to initialize. This is set
 // so that we should have few if any false positives.
-const initFailureTime = 1 * time.Hour
+const initFailureTime = time.Hour
 
 // FailedInit detects nodes that fail to initialize within an hour and reports the reason for the initialization
 // failure

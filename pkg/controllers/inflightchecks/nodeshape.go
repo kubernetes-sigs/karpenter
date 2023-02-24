@@ -49,7 +49,7 @@ func (n *NodeShape) Check(ctx context.Context, node *v1.Node, machine *v1alpha5.
 	for resourceName, expectedQuantity := range machine.Status.Capacity {
 		nodeQuantity, ok := node.Status.Capacity[resourceName]
 		if !ok && !expectedQuantity.IsZero() {
-			issues = append(issues, Issue(fmt.Sprintf("Expected resource %s not found", resourceName)))
+			issues = append(issues, Issue(fmt.Sprintf("Expected resource \"%s\" not found", resourceName)))
 			continue
 		}
 

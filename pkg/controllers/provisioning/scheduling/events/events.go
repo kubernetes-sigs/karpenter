@@ -30,26 +30,29 @@ var PodNominationRateLimiter = flowcontrol.NewTokenBucketRateLimiter(5, 10)
 // PodNominationRateLimiterForMachine is a pointer so it rate-limits across events
 var PodNominationRateLimiterForMachine = flowcontrol.NewTokenBucketRateLimiter(5, 10)
 
-func NominatePod(pod *v1.Pod, node *v1.Node) events.Event {
-	return events.Event{
-		InvolvedObject: pod,
-		Type:           v1.EventTypeNormal,
-		Reason:         "Nominated",
-		Message:        fmt.Sprintf("Pod should schedule on node: %s", node.Name),
-		DedupeValues:   []string{string(pod.UID), node.Name},
-		RateLimiter:    PodNominationRateLimiter,
+func NominatePod(pod *v1.Pod, node *v1.Node, machine *v1alpha5.Machine) []events.Event {
+	var evts []events.Event
+	if node != nil {
+		evts = append(evts, events.Event{
+			InvolvedObject: pod,
+			Type:           v1.EventTypeNormal,
+			Reason:         "Nominated",
+			Message:        fmt.Sprintf("Pod should schedule on node: %s", node.Name),
+			DedupeValues:   []string{string(pod.UID)},
+			RateLimiter:    PodNominationRateLimiter,
+		})
 	}
-}
-
-func NominatePodForMachine(pod *v1.Pod, machine *v1alpha5.Machine) events.Event {
-	return events.Event{
-		InvolvedObject: pod,
-		Type:           v1.EventTypeNormal,
-		Reason:         "Nominated",
-		Message:        fmt.Sprintf("Pod should schedule on node associated with machine: %s", machine.Name),
-		DedupeValues:   []string{string(pod.UID), machine.Name},
-		RateLimiter:    PodNominationRateLimiterForMachine,
+	if machine != nil {
+		evts = append(evts, events.Event{
+			InvolvedObject: pod,
+			Type:           v1.EventTypeNormal,
+			Reason:         "NominatedMachine",
+			Message:        fmt.Sprintf("Pod should schedule on node associated with machine: %s", machine.Name),
+			DedupeValues:   []string{string(pod.UID)},
+			RateLimiter:    PodNominationRateLimiterForMachine,
+		})
 	}
+	return evts
 }
 
 func PodFailedToSchedule(pod *v1.Pod, err error) events.Event {

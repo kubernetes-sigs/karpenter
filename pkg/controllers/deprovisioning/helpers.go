@@ -39,20 +39,20 @@ import (
 
 //nolint:gocyclo
 func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
-	candidateNodes ...*CandidateNode) (newNodes []*pscheduling.Machine, allPodsScheduled bool, err error) {
+	candidates ...*Candidate) (newMachines []*pscheduling.Machine, allPodsScheduled bool, err error) {
 
-	candidateNodeNames := sets.NewString(lo.Map(candidateNodes, func(t *CandidateNode, i int) string { return t.Name() })...)
+	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
 	nodes := cluster.Nodes()
 	deletingNodes := nodes.Deleting()
 	stateNodes := lo.Filter(nodes.Active(), func(n *state.Node, _ int) bool {
-		return !candidateNodeNames.Has(n.Name())
+		return !candidateNames.Has(n.Name())
 	})
 
 	// We do one final check to ensure that the node that we are attempting to consolidate isn't
 	// already handled for deletion by some other controller. This could happen if the node was markedForDeletion
-	// between returning the candidateNodes and getting the stateNodes above
+	// between returning the candidates and getting the stateNodes above
 	if _, ok := lo.Find(deletingNodes, func(n *state.Node) bool {
-		return candidateNodeNames.Has(n.Name())
+		return candidateNames.Has(n.Name())
 	}); ok {
 		return nil, false, errCandidateNodeDeleting
 	}
@@ -68,7 +68,7 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return nil, false, fmt.Errorf("determining pending pods, %w", err)
 	}
 
-	for _, n := range candidateNodes {
+	for _, n := range candidates {
 		pods = append(pods, n.pods...)
 	}
 	pods = append(pods, deletingNodePods...)
@@ -80,13 +80,13 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return nil, false, fmt.Errorf("creating scheduler, %w", err)
 	}
 
-	newNodes, ifn, err := scheduler.Solve(ctx, pods)
+	newMachines, ifn, err := scheduler.Solve(ctx, pods)
 	if err != nil {
 		return nil, false, fmt.Errorf("simulating scheduling, %w", err)
 	}
 
 	podsScheduled := 0
-	for _, n := range newNodes {
+	for _, n := range newMachines {
 		podsScheduled += len(n.Pods)
 	}
 	for _, n := range ifn {
@@ -101,7 +101,15 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 			return nil, false, nil
 		}
 	}
-	return newNodes, podsScheduled == len(pods), nil
+	return newMachines, podsScheduled == len(pods), nil
+}
+
+// mapCandidates maps the list of proposed nodes to remove with the current state
+func mapCandidates(proposed, current []*Candidate) []*Candidate {
+	proposedNames := sets.NewString(lo.Map(proposed, func(c *Candidate, i int) string { return c.Name() })...)
+	return lo.Filter(current, func(c *Candidate, _ int) bool {
+		return proposedNames.Has(c.Name())
+	})
 }
 
 // instanceTypesAreSubset returns true if the lhs slice of instance types are a subset of the rhs.
@@ -154,18 +162,19 @@ func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
 	return cost
 }
 
-type CandidateFilter func(context.Context, *CandidateNode) bool
+type CandidateFilter func(context.Context, *Candidate) bool
 
-// candidateNodes returns nodes that appear to be currently deprovisionable based off of their provisioner
-// nolint:gocyclo
-func candidateNodes(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, clk clock.Clock, cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter) ([]*CandidateNode, error) {
+// GetCandidates returns nodes that appear to be currently deprovisionable based off of their provisioner
+func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, clk clock.Clock, cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter) ([]*Candidate, error) {
 	provisionerMap, provisionerToInstanceTypes, err := buildProvisionerMap(ctx, kubeClient, cloudProvider)
 	if err != nil {
 		return nil, err
 	}
-	return lo.Reject(lo.Map(cluster.Nodes(), func(n *state.Node, _ int) *CandidateNode {
+	candidates := lo.Map(cluster.Nodes(), func(n *state.Node, _ int) *Candidate {
 		return NewCandidateNode(ctx, kubeClient, clk, n, provisionerMap, provisionerToInstanceTypes)
-	}), func(c *CandidateNode, _ int) bool { return c == nil || !shouldDeprovision(ctx, c) }), nil
+	})
+	// Filter only the valid candidates that we should deprovision
+	return lo.Filter(candidates, func(c *Candidate, _ int) bool { return c != nil && shouldDeprovision(ctx, c) }), nil
 }
 
 // buildProvisionerMap builds a provName -> provisioner map and a provName -> instanceName -> instance type map
@@ -230,8 +239,8 @@ func clamp(min, val, max float64) float64 {
 	return val
 }
 
-func hasDoNotEvictPod(cn *CandidateNode) (*v1.Pod, bool) {
-	return lo.Find(cn.pods, func(p *v1.Pod) bool {
+func hasDoNotEvictPod(c *Candidate) (*v1.Pod, bool) {
+	return lo.Find(c.pods, func(p *v1.Pod) bool {
 		if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
 			return false
 		}

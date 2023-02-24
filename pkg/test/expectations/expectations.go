@@ -58,7 +58,6 @@ const (
 	RequestInterval           = 1 * time.Second
 )
 
-// Bindings are potential binding that was reported through event recording.
 type Bindings map[*v1.Pod]*Binding
 
 type Binding struct {

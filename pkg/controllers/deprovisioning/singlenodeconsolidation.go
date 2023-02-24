@@ -41,7 +41,7 @@ func NewSingleNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeCli
 // ComputeCommand generates a deprovisioning command given deprovisionable nodes
 //
 //nolint:gocyclo
-func (c *SingleNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...*CandidateNode) (Command, error) {
+func (c *SingleNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	if c.cluster.Consolidated() {
 		return Command{action: actionDoNothing}, nil
 	}
@@ -52,9 +52,9 @@ func (c *SingleNodeConsolidation) ComputeCommand(ctx context.Context, candidates
 
 	v := NewValidation(consolidationTTL, c.clock, c.cluster, c.kubeClient, c.provisioner, c.cloudProvider)
 	var failedValidation bool
-	for _, node := range candidates {
+	for _, candidate := range candidates {
 		// compute a possible consolidation option
-		cmd, err := c.computeConsolidation(ctx, node)
+		cmd, err := c.computeConsolidation(ctx, candidate)
 		if err != nil {
 			logging.FromContext(ctx).Errorf("computing consolidation %s", err)
 			continue

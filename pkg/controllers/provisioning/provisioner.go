@@ -321,7 +321,7 @@ func (p *Provisioner) Launch(ctx context.Context, m *scheduler.Machine, opts ...
 	}).Inc()
 	if functional.ResolveOptions(opts...).RecordPodNomination {
 		for _, pod := range m.Pods {
-			p.recorder.Publish(schedulingevents.NominatePodForMachine(pod, machine))
+			p.recorder.Publish(schedulingevents.NominatePod(pod, nil, machine)...)
 		}
 	}
 	return machine.Name, nil

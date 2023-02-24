@@ -41,7 +41,7 @@ func NewEmptiness(clk clock.Clock) *Emptiness {
 }
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes
-func (e *Emptiness) ShouldDeprovision(ctx context.Context, c *CandidateNode) bool {
+func (e *Emptiness) ShouldDeprovision(ctx context.Context, c *Candidate) bool {
 	if c.provisioner == nil || c.provisioner.Spec.TTLSecondsAfterEmpty == nil || len(c.pods) != 0 {
 		return false
 	}
@@ -62,17 +62,17 @@ func (e *Emptiness) ShouldDeprovision(ctx context.Context, c *CandidateNode) boo
 }
 
 // ComputeCommand generates a deprovisioning command given deprovisionable nodes
-func (e *Emptiness) ComputeCommand(_ context.Context, nodes ...*CandidateNode) (Command, error) {
-	emptyNodes := lo.Filter(nodes, func(cn *CandidateNode, _ int) bool {
+func (e *Emptiness) ComputeCommand(_ context.Context, candidates ...*Candidate) (Command, error) {
+	emptyCandidates := lo.Filter(candidates, func(cn *Candidate, _ int) bool {
 		return cn.Machine.DeletionTimestamp.IsZero() && len(cn.pods) == 0
 	})
 
-	if len(emptyNodes) == 0 {
+	if len(emptyCandidates) == 0 {
 		return Command{action: actionDoNothing}, nil
 	}
 	return Command{
-		nodesToRemove: emptyNodes,
-		action:        actionDelete,
+		candidatesToRemove: emptyCandidates,
+		action:             actionDelete,
 	}, nil
 }
 

@@ -21,8 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/samber/lo"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -47,7 +45,7 @@ type Validation struct {
 	once             sync.Once
 	// validationCandidates are the cached validation candidates.  We capture these when validating the first command and reuse them for
 	// validating subsequent commands.
-	validationCandidates []*CandidateNode
+	validationCandidates []*Candidate
 }
 
 func NewValidation(validationPeriod time.Duration, clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider) *Validation {
@@ -77,7 +75,7 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 	}
 
 	if len(v.validationCandidates) == 0 {
-		v.validationCandidates, err = candidateNodes(ctx, v.cluster, v.kubeClient, v.clock, v.cloudProvider, v.ShouldDeprovision)
+		v.validationCandidates, err = GetCandidates(ctx, v.cluster, v.kubeClient, v.clock, v.cloudProvider, v.ShouldDeprovision)
 		if err != nil {
 			return false, fmt.Errorf("constructing validation candidates, %w", err)
 		}
@@ -85,7 +83,7 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 
 	// a node we are about to delete is a target of a currently pending pod, wait for that to settle
 	// before continuing consolidation
-	for _, n := range cmd.nodesToRemove {
+	for _, n := range cmd.candidatesToRemove {
 		if v.cluster.IsNodeNominated(n.Name()) {
 			return false, nil
 		}
@@ -100,7 +98,7 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 }
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes
-func (v *Validation) ShouldDeprovision(_ context.Context, c *CandidateNode) bool {
+func (v *Validation) ShouldDeprovision(_ context.Context, c *Candidate) bool {
 	if val, ok := c.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey]; ok {
 		return val != "true"
 	}
@@ -108,16 +106,16 @@ func (v *Validation) ShouldDeprovision(_ context.Context, c *CandidateNode) bool
 }
 
 // ValidateCommand validates a command for a deprovisioner
-func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidateNodes []*CandidateNode) (bool, error) {
+func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidates []*Candidate) (bool, error) {
 	// map from nodes we are about to remove back into candidate nodes with cluster state
-	nodesToDelete := filterValidNodes(cmd.nodesToRemove, candidateNodes)
+	candidatesToDelete := mapCandidates(cmd.candidatesToRemove, candidates)
 
 	// None of the chosen candidate nodes are valid for execution, so retry
-	if len(nodesToDelete) == 0 {
+	if len(candidatesToDelete) == 0 {
 		return false, nil
 	}
 
-	newNodes, allPodsScheduled, err := simulateScheduling(ctx, v.kubeClient, v.cluster, v.provisioner, nodesToDelete...)
+	newMachines, allPodsScheduled, err := simulateScheduling(ctx, v.kubeClient, v.cluster, v.provisioner, candidatesToDelete...)
 	if err != nil {
 		return false, fmt.Errorf("simluating scheduling, %w", err)
 	}
@@ -126,12 +124,12 @@ func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidate
 	}
 
 	// We want to ensure that the re-simulated scheduling using the current cluster state produces the same result.
-	// There are three possible options for the number of new nodesToDelete that we need to handle:
-	// len(newNodes) == 0, as long as we weren't expecting a new node, this is valid
-	// len(newNodes) > 1, something in the cluster changed so that the nodesToDelete we were going to delete can no longer
+	// There are three possible options for the number of new candidatesToDelete that we need to handle:
+	// len(newMachines) == 0, as long as we weren't expecting a new node, this is valid
+	// len(newMachines) > 1, something in the cluster changed so that the candidatesToDelete we were going to delete can no longer
 	//                    be deleted without producing more than one node
-	// len(newNodes) == 1, as long as the node looks like what we were expecting, this is valid
-	if len(newNodes) == 0 {
+	// len(newMachines) == 1, as long as the node looks like what we were expecting, this is valid
+	if len(newMachines) == 0 {
 		if len(cmd.replacementMachines) == 0 {
 			// scheduling produced zero new nodes and we weren't expecting any, so this is valid.
 			return true, nil
@@ -142,7 +140,7 @@ func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidate
 	}
 
 	// we need more than one replacement node which is never valid currently (all of our node replacement is m->1, never m->n)
-	if len(newNodes) > 1 {
+	if len(newMachines) > 1 {
 		return false, nil
 	}
 
@@ -163,7 +161,7 @@ func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidate
 	// a 4xlarge and replace it with a 2xlarge. If things have changed and the scheduling simulation we just performed
 	// now says that we need to launch a 4xlarge. It's still launching the correct number of nodes, but it's just
 	// as expensive or possibly more so we shouldn't validate.
-	if !instanceTypesAreSubset(cmd.replacementMachines[0].InstanceTypeOptions, newNodes[0].InstanceTypeOptions) {
+	if !instanceTypesAreSubset(cmd.replacementMachines[0].InstanceTypeOptions, newMachines[0].InstanceTypeOptions) {
 		return false, nil
 	}
 
@@ -171,12 +169,4 @@ func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidate
 	// - current scheduling simulation says to create a new node with types T = {T_0, T_1, ..., T_n}
 	// - our lifecycle command says to create a node with types {U_0, U_1, ..., U_n} where U is a subset of T
 	return true, nil
-}
-
-// filterValidNodes filters the list of proposed nodes to remove with the current state
-func filterValidNodes(proposed, candidateNodes []*CandidateNode) []*CandidateNode {
-	verifyNodeNames := sets.NewString(lo.Map(proposed, func(c *CandidateNode, i int) string { return c.Name() })...)
-	return lo.Filter(candidateNodes, func(c *CandidateNode, _ int) bool {
-		return verifyNodeNames.Has(c.Name())
-	})
 }

@@ -140,18 +140,12 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 		s.recorder.Publish(schedulingevents.PodFailedToSchedule(pod, errors[pod]))
 	}
 
-	for _, node := range s.existingNodes {
-		if len(node.Pods) > 0 {
-			s.cluster.NominateNodeForPod(ctx, node.Name())
+	for _, existing := range s.existingNodes {
+		if len(existing.Pods) > 0 {
+			s.cluster.NominateNodeForPod(ctx, existing.Name())
 		}
-		for _, pod := range node.Pods {
-			// If node is inflight, it won't have a real node to represent it
-			if node.Node.Node != nil {
-				s.recorder.Publish(schedulingevents.NominatePod(pod, node.Node.Node))
-			}
-			if node.Machine != nil {
-				s.recorder.Publish(schedulingevents.NominatePodForMachine(pod, node.Machine))
-			}
+		for _, pod := range existing.Pods {
+			s.recorder.Publish(schedulingevents.NominatePod(pod, existing.Node.Node, existing.Machine)...)
 		}
 	}
 

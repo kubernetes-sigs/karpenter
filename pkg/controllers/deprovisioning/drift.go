@@ -51,7 +51,7 @@ func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *pro
 }
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes
-func (d *Drift) ShouldDeprovision(ctx context.Context, c *CandidateNode) bool {
+func (d *Drift) ShouldDeprovision(ctx context.Context, c *Candidate) bool {
 	// Look up the feature flag to see if we should deprovision the node because of drift.
 	if !settings.FromContext(ctx).DriftEnabled {
 		return false
@@ -60,23 +60,23 @@ func (d *Drift) ShouldDeprovision(ctx context.Context, c *CandidateNode) bool {
 }
 
 // ComputeCommand generates a deprovisioning command given deprovisionable nodes
-func (d *Drift) ComputeCommand(ctx context.Context, candidates ...*CandidateNode) (Command, error) {
+func (d *Drift) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	pdbs, err := NewPDBLimits(ctx, d.kubeClient)
 	if err != nil {
 		return Command{}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
 	// filter out nodes that can't be terminated
-	candidates = lo.Filter(candidates, func(cn *CandidateNode, _ int) bool {
+	candidates = lo.Filter(candidates, func(cn *Candidate, _ int) bool {
 		if !cn.Machine.DeletionTimestamp.IsZero() {
 			return false
 		}
 		if pdb, ok := pdbs.CanEvictPods(cn.pods); !ok {
-			d.recorder.Publish(deprovisioningevents.BlockedDeprovisioning(cn.Node.Node, fmt.Sprintf("pdb %s prevents pod evictions", pdb)))
+			d.recorder.Publish(deprovisioningevents.Blocked(cn.Node.Node, cn.Node.Machine, fmt.Sprintf("pdb %s prevents pod evictions", pdb))...)
 			return false
 		}
 		if p, ok := hasDoNotEvictPod(cn); ok {
-			d.recorder.Publish(deprovisioningevents.BlockedDeprovisioning(cn.Node.Node,
-				fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name)))
+			d.recorder.Publish(deprovisioningevents.Blocked(cn.Node.Node, cn.Node.Machine,
+				fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name))...)
 			return false
 		}
 		return true
@@ -94,10 +94,16 @@ func (d *Drift) ComputeCommand(ctx context.Context, candidates ...*CandidateNode
 		}
 		// Log when all pods can't schedule, as the command will get executed immediately.
 		if !allPodsScheduled {
-			logging.FromContext(ctx).With("node", candidate.Name()).Debug("Continuing to terminate drifted node after scheduling simulation failed to schedule all pods")
+			logging.FromContext(ctx).With("machine", candidate.Machine.Name, "node", candidate.Node.Node.Name).Debug("Continuing to terminate drifted machine after scheduling simulation failed to schedule all pods")
+		}
+		if len(newMachines) == 0 {
+			return Command{
+				candidatesToRemove: []*Candidate{candidate},
+				action:             actionDelete,
+			}, nil
 		}
 		return Command{
-			nodesToRemove:       []*CandidateNode{candidate},
+			candidatesToRemove:  []*Candidate{candidate},
 			action:              actionReplace,
 			replacementMachines: newMachines,
 		}, nil

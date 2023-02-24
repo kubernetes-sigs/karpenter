@@ -25,9 +25,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -40,7 +38,6 @@ import (
 var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)
 
 type CloudProvider struct {
-	kubeClient    client.Client
 	InstanceTypes []*cloudprovider.InstanceType
 
 	mu sync.RWMutex
@@ -52,9 +49,8 @@ type CloudProvider struct {
 	Drifted            bool
 }
 
-func NewCloudProvider(kubeClient client.Client) *CloudProvider {
+func NewCloudProvider() *CloudProvider {
 	return &CloudProvider{
-		kubeClient:         kubeClient,
 		AllowedCreateCalls: math.MaxInt,
 		CreatedMachines:    map[string]*v1alpha5.Machine{},
 	}
@@ -84,13 +80,8 @@ func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (
 	if len(c.CreateCalls) > c.AllowedCreateCalls {
 		return &v1alpha5.Machine{}, fmt.Errorf("erroring as number of AllowedCreateCalls has been exceeded")
 	}
-
-	provisioner := &v1alpha5.Provisioner{}
-	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: machine.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
-		return nil, fmt.Errorf("getting provisioner to generate instance types, %w", err)
-	}
 	reqs := scheduling.NewNodeSelectorRequirements(machine.Spec.Requirements...)
-	instanceTypes := lo.Filter(lo.Must(c.GetInstanceTypes(ctx, provisioner)), func(i *cloudprovider.InstanceType, _ int) bool {
+	instanceTypes := lo.Filter(lo.Must(c.GetInstanceTypes(ctx, nil)), func(i *cloudprovider.InstanceType, _ int) bool {
 		return reqs.Compatible(i.Requirements) == nil &&
 			len(i.Offerings.Requirements(reqs).Available()) > 0 &&
 			resources.Fits(machine.Spec.Resources.Requests, i.Allocatable())

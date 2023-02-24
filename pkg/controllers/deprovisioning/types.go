@@ -31,14 +31,14 @@ import (
 )
 
 type Deprovisioner interface {
-	ShouldDeprovision(context.Context, *CandidateNode) bool
-	ComputeCommand(context.Context, ...*CandidateNode) (Command, error)
+	ShouldDeprovision(context.Context, *Candidate) bool
+	ComputeCommand(context.Context, ...*Candidate) (Command, error)
 	String() string
 }
 
-// CandidateNode is a node that we are considering for deprovisioning along with extra information to be used in
+// Candidate is a state.Node that we are considering for deprovisioning along with extra information to be used in
 // making that determination
-type CandidateNode struct {
+type Candidate struct {
 	*state.Node
 	instanceType   *cloudprovider.InstanceType
 	provisioner    *v1alpha5.Provisioner
@@ -48,7 +48,7 @@ type CandidateNode struct {
 
 //nolint:gocyclo
 func NewCandidateNode(ctx context.Context, kubeClient client.Client, clk clock.Clock, node *state.Node,
-	provisionerMap map[string]*v1alpha5.Provisioner, provisionerToInstanceTypes map[string]map[string]*cloudprovider.InstanceType) *CandidateNode {
+	provisionerMap map[string]*v1alpha5.Provisioner, provisionerToInstanceTypes map[string]map[string]*cloudprovider.InstanceType) *Candidate {
 
 	// check whether the node has all the labels we need
 	for _, label := range []string{
@@ -96,7 +96,7 @@ func NewCandidateNode(ctx context.Context, kubeClient client.Client, clk clock.C
 		logging.FromContext(ctx).Errorf("Determining node pods, %s", err)
 		return nil
 	}
-	cn := &CandidateNode{
+	cn := &Candidate{
 		Node:           node.DeepCopy(),
 		instanceType:   instanceType,
 		provisioner:    provisioner,
@@ -110,7 +110,7 @@ func NewCandidateNode(ctx context.Context, kubeClient client.Client, clk clock.C
 // lifetimeRemaining calculates the fraction of node lifetime remaining in the range [0.0, 1.0].  If the TTLSecondsUntilExpired
 // is non-zero, we use it to scale down the disruption costs of nodes that are going to expire.  Just after creation, the
 // disruption cost is highest and it approaches zero as the node ages towards its expiration time.
-func lifetimeRemaining(c *CandidateNode, clock clock.Clock) float64 {
+func lifetimeRemaining(c *Candidate, clock clock.Clock) float64 {
 	remaining := 1.0
 	if c.provisioner.Spec.TTLSecondsUntilExpired != nil {
 		ageInSeconds := clock.Since(c.Node.Node.CreationTimestamp.Time).Seconds()
@@ -149,15 +149,15 @@ func (a action) String() string {
 }
 
 type Command struct {
-	nodesToRemove       []*CandidateNode
+	candidatesToRemove  []*Candidate
 	action              action
 	replacementMachines []*scheduling.Machine
 }
 
 func (o Command) String() string {
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "%s, terminating %d machines ", o.action, len(o.nodesToRemove))
-	for i, old := range o.nodesToRemove {
+	fmt.Fprintf(&buf, "%s, terminating %d machines ", o.action, len(o.candidatesToRemove))
+	for i, old := range o.candidatesToRemove {
 		if i != 0 {
 			fmt.Fprint(&buf, ", ")
 		}

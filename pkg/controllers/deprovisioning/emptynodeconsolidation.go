@@ -41,7 +41,7 @@ func NewEmptyNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClie
 }
 
 // ComputeCommand generates a deprovisioning command given deprovisionable nodes
-func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...*CandidateNode) (Command, error) {
+func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	if c.cluster.Consolidated() {
 		return Command{action: actionDoNothing}, nil
 	}
@@ -51,14 +51,14 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 	}
 
 	// select the entirely empty nodes
-	emptyNodes := lo.Filter(candidates, func(n *CandidateNode, _ int) bool { return len(n.pods) == 0 })
-	if len(emptyNodes) == 0 {
+	emptyCandidates := lo.Filter(candidates, func(n *Candidate, _ int) bool { return len(n.pods) == 0 })
+	if len(emptyCandidates) == 0 {
 		return Command{action: actionDoNothing}, nil
 	}
 
 	cmd := Command{
-		nodesToRemove: emptyNodes,
-		action:        actionDelete,
+		candidatesToRemove: emptyCandidates,
+		action:             actionDelete,
 	}
 
 	// empty node consolidation doesn't use Validation as we get to take advantage of cluster.IsNodeNominated.  This
@@ -69,12 +69,12 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 		return Command{}, errors.New("interrupted")
 	case <-c.clock.After(consolidationTTL):
 	}
-	validationCandidates, err := candidateNodes(ctx, c.cluster, c.kubeClient, c.clock, c.cloudProvider, c.ShouldDeprovision)
+	validationCandidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.clock, c.cloudProvider, c.ShouldDeprovision)
 	if err != nil {
 		logging.FromContext(ctx).Errorf("computing validation candidates %s", err)
 		return Command{}, err
 	}
-	nodesToDelete := filterValidNodes(cmd.nodesToRemove, validationCandidates)
+	nodesToDelete := mapCandidates(cmd.candidatesToRemove, validationCandidates)
 
 	// the deletion of empty nodes is easy to validate, we just ensure that all the nodesToDelete are still empty and that
 	// the node isn't a target of a recent scheduling simulation

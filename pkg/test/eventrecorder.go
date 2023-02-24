@@ -35,11 +35,13 @@ func NewEventRecorder() *EventRecorder {
 	}
 }
 
-func (e *EventRecorder) Publish(evt events.Event) {
+func (e *EventRecorder) Publish(evts ...events.Event) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.events = append(e.events, evt)
-	e.calls[evt.Reason]++
+	e.events = append(e.events, evts...)
+	for _, evt := range evts {
+		e.calls[evt.Reason]++
+	}
 }
 
 func (e *EventRecorder) Calls(reason string) int {

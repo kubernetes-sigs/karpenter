@@ -41,7 +41,7 @@ func NewMultiNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClie
 	return &MultiNodeConsolidation{makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
 }
 
-func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...*CandidateNode) (Command, error) {
+func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	if m.cluster.Consolidated() {
 		return Command{action: actionDoNothing}, nil
 	}
@@ -74,7 +74,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 
 // firstNNodeConsolidationOption looks at the first N nodes to determine if they can all be consolidated at once.  The
 // nodes are sorted by increasing disruption order which correlates to likelihood if being able to consolidate the node
-func (m *MultiNodeConsolidation) firstNNodeConsolidationOption(ctx context.Context, candidates []*CandidateNode, max int) (Command, error) {
+func (m *MultiNodeConsolidation) firstNNodeConsolidationOption(ctx context.Context, candidates []*Candidate, max int) (Command, error) {
 	// we always operate on at least two nodes at once, for single nodes standard consolidation will find all solutions
 	if len(candidates) < 2 {
 		return Command{action: actionDoNothing}, nil
@@ -89,9 +89,9 @@ func (m *MultiNodeConsolidation) firstNNodeConsolidationOption(ctx context.Conte
 	for min <= max {
 		mid := (min + max) / 2
 
-		nodesToConsolidate := candidates[0 : mid+1]
+		candidatesToConsolidate := candidates[0 : mid+1]
 
-		action, err := m.computeConsolidation(ctx, nodesToConsolidate...)
+		action, err := m.computeConsolidation(ctx, candidatesToConsolidate...)
 		if err != nil {
 			return Command{}, err
 		}
@@ -99,7 +99,7 @@ func (m *MultiNodeConsolidation) firstNNodeConsolidationOption(ctx context.Conte
 		// ensure that the action is sensical for replacements, see explanation on filterOutSameType for why this is
 		// required
 		if action.action == actionReplace {
-			action.replacementMachines[0].InstanceTypeOptions = filterOutSameType(action.replacementMachines[0], nodesToConsolidate)
+			action.replacementMachines[0].InstanceTypeOptions = filterOutSameType(action.replacementMachines[0], candidatesToConsolidate)
 			if len(action.replacementMachines[0].InstanceTypeOptions) == 0 {
 				action.action = actionDoNothing
 			}
@@ -132,37 +132,37 @@ func (m *MultiNodeConsolidation) firstNNodeConsolidationOption(ctx context.Conte
 // This code sees that t3a.small is the cheapest type in both lists and filters it and anything more expensive out
 // leaving the valid consolidation:
 // nodes=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.nano
-func filterOutSameType(newNode *scheduling.Machine, consolidate []*CandidateNode) []*cloudprovider.InstanceType {
+func filterOutSameType(newMachine *scheduling.Machine, consolidate []*Candidate) []*cloudprovider.InstanceType {
 	existingInstanceTypes := sets.NewString()
-	nodePricesByInstanceType := map[string]float64{}
+	pricesByInstanceType := map[string]float64{}
 
 	// get the price of the cheapest node that we currently are considering deleting indexed by instance type
-	for _, n := range consolidate {
-		existingInstanceTypes.Insert(n.instanceType.Name)
-		of, ok := n.instanceType.Offerings.Get(n.Labels()[v1alpha5.LabelCapacityType], n.Labels()[v1.LabelTopologyZone])
+	for _, c := range consolidate {
+		existingInstanceTypes.Insert(c.instanceType.Name)
+		of, ok := c.instanceType.Offerings.Get(c.Labels()[v1alpha5.LabelCapacityType], c.Labels()[v1.LabelTopologyZone])
 		if !ok {
 			continue
 		}
-		existingPrice, ok := nodePricesByInstanceType[n.instanceType.Name]
+		existingPrice, ok := pricesByInstanceType[c.instanceType.Name]
 		if !ok {
 			existingPrice = math.MaxFloat64
 		}
 		if of.Price < existingPrice {
-			nodePricesByInstanceType[n.instanceType.Name] = of.Price
+			pricesByInstanceType[c.instanceType.Name] = of.Price
 		}
 	}
 
 	maxPrice := math.MaxFloat64
-	for _, it := range newNode.InstanceTypeOptions {
+	for _, it := range newMachine.InstanceTypeOptions {
 		// we are considering replacing multiple nodes with a single node of one of the same types, so the replacement
 		// node must be cheaper than the price of the existing node, or we should just keep that one and do a
 		// deletion only to reduce cluster disruption (fewer pods will re-schedule).
 		if existingInstanceTypes.Has(it.Name) {
-			if nodePricesByInstanceType[it.Name] < maxPrice {
-				maxPrice = nodePricesByInstanceType[it.Name]
+			if pricesByInstanceType[it.Name] < maxPrice {
+				maxPrice = pricesByInstanceType[it.Name]
 			}
 		}
 	}
 
-	return filterByPrice(newNode.InstanceTypeOptions, newNode.Requirements, maxPrice)
+	return filterByPrice(newMachine.InstanceTypeOptions, newMachine.Requirements, maxPrice)
 }
