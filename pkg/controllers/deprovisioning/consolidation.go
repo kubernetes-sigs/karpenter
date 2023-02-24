@@ -35,7 +35,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
-	"github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
 // consolidation is the base consolidation controller that provides common functionality used across the different
@@ -85,18 +84,11 @@ func (c *consolidation) sortAndFilterCandidates(ctx context.Context, nodes []Can
 			c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(cn.Node, "in the process of deletion"))
 			return false
 		}
-		if pdbs != nil {
-			if pdb, ok := pdbs.CanEvictPods(cn.pods); !ok {
-				c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(cn.Node, fmt.Sprintf("pdb %s prevents pod evictions", pdb)))
-				return false
-			}
+		if pdb, ok := pdbs.CanEvictPods(cn.pods); !ok {
+			c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(cn.Node, fmt.Sprintf("pdb %s prevents pod evictions", pdb)))
+			return false
 		}
-		if p, ok := lo.Find(cn.pods, func(p *v1.Pod) bool {
-			if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
-				return false
-			}
-			return pod.HasDoNotEvict(p)
-		}); ok {
+		if p, ok := hasDoNotEvictPod(cn); ok {
 			c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(cn.Node,
 				fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name)))
 			return false

@@ -35,7 +35,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
-	"github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
 // Expiration is a subreconciler that deletes empty nodes.
@@ -83,18 +82,11 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...Candidate
 		if !cn.DeletionTimestamp.IsZero() {
 			return false
 		}
-		if pdbs != nil {
-			if pdb, ok := pdbs.CanEvictPods(cn.pods); !ok {
-				e.recorder.Publish(deprovisioningevents.BlockedDeprovisioning(cn.Node, fmt.Sprintf("pdb %s prevents pod evictions", pdb)))
-				return false
-			}
+		if pdb, ok := pdbs.CanEvictPods(cn.pods); !ok {
+			e.recorder.Publish(deprovisioningevents.BlockedDeprovisioning(cn.Node, fmt.Sprintf("pdb %s prevents pod evictions", pdb)))
+			return false
 		}
-		if p, ok := lo.Find(cn.pods, func(p *v1.Pod) bool {
-			if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
-				return false
-			}
-			return pod.HasDoNotEvict(p)
-		}); ok {
+		if p, ok := hasDoNotEvictPod(cn); ok {
 			e.recorder.Publish(deprovisioningevents.BlockedDeprovisioning(cn.Node,
 				fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name)))
 			return false

@@ -28,6 +28,7 @@ import (
 	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/scheduling"
+	"github.com/aws/karpenter-core/pkg/utils/pod"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -322,4 +323,13 @@ func mapNodes(nodes []*v1.Node, candidateNodes []CandidateNode) []CandidateNode 
 		}
 	}
 	return ret
+}
+
+func hasDoNotEvictPod(cn CandidateNode) (*v1.Pod, bool) {
+	return lo.Find(cn.pods, func(p *v1.Pod) bool {
+		if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
+			return false
+		}
+		return pod.HasDoNotEvict(p)
+	})
 }

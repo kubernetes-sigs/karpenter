@@ -31,7 +31,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
-	"github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
 // Drift is a subreconciler that deletes empty nodes.
@@ -72,18 +71,11 @@ func (d *Drift) ComputeCommand(ctx context.Context, candidates ...CandidateNode)
 		if !cn.DeletionTimestamp.IsZero() {
 			return false
 		}
-		if pdbs != nil {
-			if pdb, ok := pdbs.CanEvictPods(cn.pods); !ok {
-				d.recorder.Publish(deprovisioningevents.BlockedDeprovisioning(cn.Node, fmt.Sprintf("pdb %s prevents pod evictions", pdb)))
-				return false
-			}
+		if pdb, ok := pdbs.CanEvictPods(cn.pods); !ok {
+			d.recorder.Publish(deprovisioningevents.BlockedDeprovisioning(cn.Node, fmt.Sprintf("pdb %s prevents pod evictions", pdb)))
+			return false
 		}
-		if p, ok := lo.Find(cn.pods, func(p *v1.Pod) bool {
-			if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
-				return false
-			}
-			return pod.HasDoNotEvict(p)
-		}); ok {
+		if p, ok := hasDoNotEvictPod(cn); ok {
 			d.recorder.Publish(deprovisioningevents.BlockedDeprovisioning(cn.Node,
 				fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name)))
 			return false
