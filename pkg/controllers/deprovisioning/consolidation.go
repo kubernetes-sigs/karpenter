@@ -80,8 +80,17 @@ func (c *consolidation) sortAndFilterCandidates(ctx context.Context, nodes []Can
 
 	// filter out nodes that can't be terminated
 	nodes = lo.Filter(nodes, func(cn CandidateNode, _ int) bool {
-		if reason, canTerminate := canBeTerminated(cn, pdbs); !canTerminate {
-			c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(cn.Node, reason))
+		if !cn.DeletionTimestamp.IsZero() {
+			c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(cn.Node, "in the process of deletion"))
+			return false
+		}
+		if pdb, ok := pdbs.CanEvictPods(cn.pods); !ok {
+			c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(cn.Node, fmt.Sprintf("pdb %s prevents pod evictions", pdb)))
+			return false
+		}
+		if p, ok := hasDoNotEvictPod(cn); ok {
+			c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(cn.Node,
+				fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name)))
 			return false
 		}
 		return true

@@ -30,8 +30,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
@@ -42,14 +44,16 @@ type Expiration struct {
 	kubeClient  client.Client
 	cluster     *state.Cluster
 	provisioner *provisioning.Provisioner
+	recorder    events.Recorder
 }
 
-func NewExpiration(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner) *Expiration {
+func NewExpiration(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder) *Expiration {
 	return &Expiration{
 		clock:       clk,
 		kubeClient:  kubeClient,
 		cluster:     cluster,
 		provisioner: provisioner,
+		recorder:    recorder,
 	}
 }
 
@@ -73,9 +77,21 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...Candidate
 	if err != nil {
 		return Command{}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
-	candidates = lo.Filter(candidates, func(n CandidateNode, _ int) bool {
-		_, canTerminate := canBeTerminated(n, pdbs)
-		return canTerminate
+	// filter out nodes that can't be terminated
+	candidates = lo.Filter(candidates, func(cn CandidateNode, _ int) bool {
+		if !cn.DeletionTimestamp.IsZero() {
+			return false
+		}
+		if pdb, ok := pdbs.CanEvictPods(cn.pods); !ok {
+			e.recorder.Publish(deprovisioningevents.BlockedDeprovisioning(cn.Node, fmt.Sprintf("pdb %s prevents pod evictions", pdb)))
+			return false
+		}
+		if p, ok := hasDoNotEvictPod(cn); ok {
+			e.recorder.Publish(deprovisioningevents.BlockedDeprovisioning(cn.Node,
+				fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name)))
+			return false
+		}
+		return true
 	})
 
 	for _, candidate := range candidates {
