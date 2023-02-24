@@ -30,8 +30,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
@@ -42,14 +44,16 @@ type Expiration struct {
 	kubeClient  client.Client
 	cluster     *state.Cluster
 	provisioner *provisioning.Provisioner
+	recorder    events.Recorder
 }
 
-func NewExpiration(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner) *Expiration {
+func NewExpiration(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder) *Expiration {
 	return &Expiration{
 		clock:       clk,
 		kubeClient:  kubeClient,
 		cluster:     cluster,
 		provisioner: provisioner,
+		recorder: recorder,
 	}
 }
 
@@ -74,7 +78,10 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...Candidate
 		return Command{}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
 	candidates = lo.Filter(candidates, func(n CandidateNode, _ int) bool {
-		_, canTerminate := canBeTerminated(n, pdbs)
+		reason, canTerminate, hasDoNotEvict := canBeTerminated(n, pdbs)
+		if hasDoNotEvict {
+			e.recorder.Publish(deprovisioningevents.BlockedDeprovisioning(n.Node, reason))
+		}
 		return canTerminate
 	})
 

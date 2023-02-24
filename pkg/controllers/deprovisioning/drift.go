@@ -26,8 +26,10 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
@@ -37,13 +39,15 @@ type Drift struct {
 	kubeClient  client.Client
 	cluster     *state.Cluster
 	provisioner *provisioning.Provisioner
+	recorder    events.Recorder
 }
 
-func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner) *Drift {
+func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder) *Drift {
 	return &Drift{
 		kubeClient:  kubeClient,
 		cluster:     cluster,
 		provisioner: provisioner,
+		recorder:    recorder,
 	}
 }
 
@@ -63,7 +67,10 @@ func (d *Drift) ComputeCommand(ctx context.Context, candidates ...CandidateNode)
 		return Command{}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
 	candidates = lo.Filter(candidates, func(n CandidateNode, _ int) bool {
-		_, canTerminate := canBeTerminated(n, pdbs)
+		reason, canTerminate, hasDoNotEvict := canBeTerminated(n, pdbs)
+		if hasDoNotEvict {
+			d.recorder.Publish(deprovisioningevents.BlockedDeprovisioning(n.Node, reason))
+		}
 		return canTerminate
 	})
 

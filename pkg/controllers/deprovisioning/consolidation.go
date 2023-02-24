@@ -80,7 +80,7 @@ func (c *consolidation) sortAndFilterCandidates(ctx context.Context, nodes []Can
 
 	// filter out nodes that can't be terminated
 	nodes = lo.Filter(nodes, func(cn CandidateNode, _ int) bool {
-		if reason, canTerminate := canBeTerminated(cn, pdbs); !canTerminate {
+		if reason, canTerminate, _ := canBeTerminated(cn, pdbs); !canTerminate {
 			c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(cn.Node, reason))
 			return false
 		}

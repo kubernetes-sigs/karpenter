@@ -23,6 +23,16 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
+func BlockedDeprovisioning(node *v1.Node, reason string) events.Event {
+	return events.Event{
+		InvolvedObject: node,
+		Type:           v1.EventTypeNormal,
+		Reason:         "BlockedDeprovisioning",
+		Message:        fmt.Sprintf("Cannot deprovision node due to %s", reason),
+		DedupeValues:   []string{node.Name, reason},
+	}
+}
+
 func TerminatingNode(node *v1.Node, reason string) events.Event {
 	return events.Event{
 		InvolvedObject: node,

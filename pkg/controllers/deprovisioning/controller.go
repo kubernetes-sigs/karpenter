@@ -81,9 +81,9 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 		cloudProvider: cp,
 		deprovisioners: []Deprovisioner{
 			// Expire any nodes that must be deleted, allowing their pods to potentially land on currently
-			NewExpiration(clk, kubeClient, cluster, provisioner),
+			NewExpiration(clk, kubeClient, cluster, provisioner, recorder),
 			// Terminate any nodes that have drifted from provisioning specifications, allowing the pods to reschedule.
-			NewDrift(kubeClient, cluster, provisioner),
+			NewDrift(kubeClient, cluster, provisioner, recorder),
 			// Delete any remaining empty nodes as there is zero cost in terms of dirsuption.  Emptiness and
 			// emptyNodeConsolidation are mutually exclusive, only one of these will operate
 			NewEmptiness(clk),

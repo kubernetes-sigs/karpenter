@@ -325,13 +325,13 @@ func mapNodes(nodes []*v1.Node, candidateNodes []CandidateNode) []CandidateNode 
 	return ret
 }
 
-func canBeTerminated(node CandidateNode, pdbs *PDBLimits) (string, bool) {
+func canBeTerminated(node CandidateNode, pdbs *PDBLimits) (string, bool, bool) {
 	if !node.DeletionTimestamp.IsZero() {
-		return "in the process of deletion", false
+		return "in the process of deletion", false, false
 	}
 	if pdbs != nil {
 		if pdb, ok := pdbs.CanEvictPods(node.pods); !ok {
-			return fmt.Sprintf("pdb %s prevents pod evictions", pdb), false
+			return fmt.Sprintf("pdb %s prevents pod evictions", pdb), false, false
 		}
 	}
 	if p, ok := lo.Find(node.pods, func(p *v1.Pod) bool {
@@ -340,7 +340,7 @@ func canBeTerminated(node CandidateNode, pdbs *PDBLimits) (string, bool) {
 		}
 		return pod.HasDoNotEvict(p)
 	}); ok {
-		return fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name), false
+		return fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name), false, true
 	}
-	return "", true
+	return "", true, false
 }
