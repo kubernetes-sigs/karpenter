@@ -44,14 +44,14 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
 	nodes := cluster.Nodes()
 	deletingNodes := nodes.Deleting()
-	stateNodes := lo.Filter(nodes.Active(), func(n *state.Node, _ int) bool {
+	stateNodes := lo.Filter(nodes.Active(), func(n *state.StateNode, _ int) bool {
 		return !candidateNames.Has(n.Name())
 	})
 
 	// We do one final check to ensure that the node that we are attempting to consolidate isn't
 	// already handled for deletion by some other controller. This could happen if the node was markedForDeletion
 	// between returning the candidates and getting the stateNodes above
-	if _, ok := lo.Find(deletingNodes, func(n *state.Node) bool {
+	if _, ok := lo.Find(deletingNodes, func(n *state.StateNode) bool {
 		return candidateNames.Has(n.Name())
 	}); ok {
 		return nil, false, errCandidateNodeDeleting
@@ -104,14 +104,6 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	return newMachines, podsScheduled == len(pods), nil
 }
 
-// mapCandidates maps the list of proposed nodes to remove with the current state
-func mapCandidates(proposed, current []*Candidate) []*Candidate {
-	proposedNames := sets.NewString(lo.Map(proposed, func(c *Candidate, i int) string { return c.Name() })...)
-	return lo.Filter(current, func(c *Candidate, _ int) bool {
-		return proposedNames.Has(c.Name())
-	})
-}
-
 // instanceTypesAreSubset returns true if the lhs slice of instance types are a subset of the rhs.
 func instanceTypesAreSubset(lhs []*cloudprovider.InstanceType, rhs []*cloudprovider.InstanceType) bool {
 	rhsNames := sets.NewString(lo.Map(rhs, func(t *cloudprovider.InstanceType, i int) string { return t.Name })...)
@@ -162,19 +154,18 @@ func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
 	return cost
 }
 
-type CandidateFilter func(context.Context, *Candidate) bool
-
 // GetCandidates returns nodes that appear to be currently deprovisionable based off of their provisioner
 func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, clk clock.Clock, cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter) ([]*Candidate, error) {
 	provisionerMap, provisionerToInstanceTypes, err := buildProvisionerMap(ctx, kubeClient, cloudProvider)
 	if err != nil {
 		return nil, err
 	}
-	candidates := lo.Map(cluster.Nodes(), func(n *state.Node, _ int) *Candidate {
-		return NewCandidateNode(ctx, kubeClient, clk, n, provisionerMap, provisionerToInstanceTypes)
+	candidates := lo.FilterMap(cluster.Nodes(), func(n *state.StateNode, _ int) (*Candidate, bool) {
+		cn, e := NewCandidate(ctx, kubeClient, clk, n, provisionerMap, provisionerToInstanceTypes)
+		return cn, e == nil
 	})
 	// Filter only the valid candidates that we should deprovision
-	return lo.Filter(candidates, func(c *Candidate, _ int) bool { return c != nil && shouldDeprovision(ctx, c) }), nil
+	return lo.Filter(candidates, func(c *Candidate, _ int) bool { return shouldDeprovision(ctx, c) }), nil
 }
 
 // buildProvisionerMap builds a provName -> provisioner map and a provName -> instanceName -> instance type map
@@ -199,6 +190,14 @@ func buildProvisionerMap(ctx context.Context, kubeClient client.Client, cloudPro
 		}
 	}
 	return provisioners, instanceTypesByProvisioner, nil
+}
+
+// mapCandidates maps the list of proposed candidates with the current state
+func mapCandidates(proposed, current []*Candidate) []*Candidate {
+	proposedNames := sets.NewString(lo.Map(proposed, func(c *Candidate, i int) string { return c.Name() })...)
+	return lo.Filter(current, func(c *Candidate, _ int) bool {
+		return proposedNames.Has(c.Name())
+	})
 }
 
 // worstLaunchPrice gets the worst-case launch price from the offerings that are offered

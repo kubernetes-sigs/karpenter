@@ -287,7 +287,7 @@ func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c cli
 	for _, node := range nodes {
 		for _, pod := range node.Pods {
 			bindings[pod] = &Binding{
-				Node:    node.Node.Node,
+				Node:    node.Node,
 				Machine: node.Machine,
 			}
 		}
@@ -418,7 +418,7 @@ func ExpectManualBinding(ctx context.Context, c client.Client, pod *v1.Pod, node
 }
 
 func ExpectManualBindingWithOffset(offset int, ctx context.Context, c client.Client, pod *v1.Pod, node *v1.Node) {
-	err := c.Create(ctx, &v1.Binding{
+	ExpectWithOffset(offset+1, c.Create(ctx, &v1.Binding{
 		TypeMeta: pod.TypeMeta,
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pod.ObjectMeta.Name,
@@ -428,13 +428,7 @@ func ExpectManualBindingWithOffset(offset int, ctx context.Context, c client.Cli
 		Target: v1.ObjectReference{
 			Name: node.Name,
 		},
-	})
-	// This happens when we are scheduling deleting pods. The new pod will eventually go on the new node,
-	// but we are currently modeling the pod that exists on the deleting node
-	if errors.IsConflict(err) {
-		return
-	}
-	ExpectWithOffset(offset+1, err).To(Succeed())
+	})).To(Succeed())
 	Eventually(func(g Gomega) {
 		g.Expect(c.Get(ctx, client.ObjectKeyFromObject(pod), pod)).To(Succeed())
 		g.Expect(pod.Spec.NodeName).To(Equal(node.Name))

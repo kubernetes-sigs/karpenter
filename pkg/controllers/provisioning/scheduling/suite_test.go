@@ -2034,7 +2034,7 @@ var _ = Describe("In-Flight Nodes", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
 			ExpectApplied(ctx, env.Client, provisioner, dsPod)
-			cluster.ForEachNode(func(f *state.Node) bool {
+			cluster.ForEachNode(func(f *state.StateNode) bool {
 				dsRequests := f.DaemonSetRequests()
 				available := f.Available()
 				Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 0))
@@ -2045,7 +2045,7 @@ var _ = Describe("In-Flight Nodes", func() {
 			ExpectManualBinding(ctx, env.Client, dsPod, node1)
 			ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(dsPod))
 
-			cluster.ForEachNode(func(f *state.Node) bool {
+			cluster.ForEachNode(func(f *state.StateNode) bool {
 				dsRequests := f.DaemonSetRequests()
 				available := f.Available()
 				Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 1))
@@ -2122,7 +2122,7 @@ var _ = Describe("In-Flight Nodes", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
 			ExpectApplied(ctx, env.Client, provisioner, dsPod)
-			cluster.ForEachNode(func(f *state.Node) bool {
+			cluster.ForEachNode(func(f *state.StateNode) bool {
 				dsRequests := f.DaemonSetRequests()
 				available := f.Available()
 				Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 0))
@@ -2133,7 +2133,7 @@ var _ = Describe("In-Flight Nodes", func() {
 			ExpectManualBinding(ctx, env.Client, dsPod, node1)
 			ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(dsPod))
 
-			cluster.ForEachNode(func(f *state.Node) bool {
+			cluster.ForEachNode(func(f *state.StateNode) bool {
 				dsRequests := f.DaemonSetRequests()
 				available := f.Available()
 				Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 1))
@@ -2192,7 +2192,7 @@ var _ = Describe("In-Flight Nodes", func() {
 		// due to the in-flight node support, we should pack existing newNodes before launching new node. The end result
 		// is that we should only have some spare capacity on our final node
 		nodesWithCPUFree := 0
-		cluster.ForEachNode(func(n *state.Node) bool {
+		cluster.ForEachNode(func(n *state.StateNode) bool {
 			available := n.Available()
 			if available.Cpu().AsApproximateFloat64() >= 1 {
 				nodesWithCPUFree++

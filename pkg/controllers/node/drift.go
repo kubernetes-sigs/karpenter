@@ -21,7 +21,6 @@ import (
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -63,13 +62,7 @@ func (d *Drift) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner
 	node.Annotations = lo.Assign(node.Annotations, map[string]string{
 		v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
 	})
-	if err = d.kubeClient.Update(ctx, node); err != nil {
-		if errors.IsConflict(err) {
-			return reconcile.Result{Requeue: true}, nil
-		}
-		return reconcile.Result{}, err
-	}
-	logging.FromContext(ctx).Debugf("node drifted")
+	logging.FromContext(ctx).Debugf("annotated node as drifted")
 	// Requeue after 5 minutes for the cache TTL
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 }

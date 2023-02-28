@@ -41,7 +41,7 @@ type SchedulerOptions struct {
 }
 
 func NewScheduler(ctx context.Context, kubeClient client.Client, machines []*MachineTemplate,
-	provisioners []v1alpha5.Provisioner, cluster *state.Cluster, stateNodes []*state.Node, topology *Topology,
+	provisioners []v1alpha5.Provisioner, cluster *state.Cluster, stateNodes []*state.StateNode, topology *Topology,
 	instanceTypes map[string][]*cloudprovider.InstanceType, daemonSetPods []*v1.Pod,
 	recorder events.Recorder, opts SchedulerOptions) *Scheduler {
 
@@ -145,7 +145,7 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 			s.cluster.NominateNodeForPod(ctx, existing.Name())
 		}
 		for _, pod := range existing.Pods {
-			s.recorder.Publish(schedulingevents.NominatePod(pod, existing.Node.Node, existing.Machine)...)
+			s.recorder.Publish(schedulingevents.NominatePod(pod, existing.Node, existing.Machine)...)
 		}
 	}
 
@@ -219,7 +219,7 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 	return errs
 }
 
-func (s *Scheduler) calculateExistingMachines(stateNodes []*state.Node, daemonSetPods []*v1.Pod) {
+func (s *Scheduler) calculateExistingMachines(stateNodes []*state.StateNode, daemonSetPods []*v1.Pod) {
 	// create our existing nodes
 	for _, node := range stateNodes {
 		if !node.Owned() {

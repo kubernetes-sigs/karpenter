@@ -182,12 +182,12 @@ func (c *Controller) cleanupNodeForMachine(ctx context.Context, machine *v1alpha
 	}
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
 	if err = c.terminator.Cordon(ctx, node); err != nil {
-		if terminator.IsNodeDrainError(err) {
-			c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
-		}
 		return fmt.Errorf("cordoning node, %w", err)
 	}
 	if err = c.terminator.Drain(ctx, node); err != nil {
+		if terminator.IsNodeDrainError(err) {
+			c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
+		}
 		return fmt.Errorf("draining node, %w", err)
 	}
 	return client.IgnoreNotFound(c.kubeClient.Delete(ctx, node))

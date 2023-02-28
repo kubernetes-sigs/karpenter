@@ -43,7 +43,7 @@ func (l *Liveness) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (re
 			if err := l.kubeClient.Delete(ctx, machine); err != nil {
 				return reconcile.Result{}, client.IgnoreNotFound(err)
 			}
-			logging.FromContext(ctx).Debugf("terminating machine since node hasn't registered within %s", settings.FromContext(ctx).TTLAfterNotRegistered.Duration)
+			logging.FromContext(ctx).With("ttl", settings.FromContext(ctx).TTLAfterNotRegistered.Duration).Debugf("terminating machine since node hasn't registered within registration ttl")
 			metrics.MachinesTerminatedCounter.With(prometheus.Labels{
 				metrics.ReasonLabel:      "node_registration_timeout",
 				metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],

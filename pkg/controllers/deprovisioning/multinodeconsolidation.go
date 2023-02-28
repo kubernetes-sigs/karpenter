@@ -19,12 +19,10 @@ import (
 	"fmt"
 	"math"
 
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
@@ -99,8 +97,8 @@ func (m *MultiNodeConsolidation) firstNNodeConsolidationOption(ctx context.Conte
 		// ensure that the action is sensical for replacements, see explanation on filterOutSameType for why this is
 		// required
 		if action.action == actionReplace {
-			action.replacementMachines[0].InstanceTypeOptions = filterOutSameType(action.replacementMachines[0], candidatesToConsolidate)
-			if len(action.replacementMachines[0].InstanceTypeOptions) == 0 {
+			action.replacements[0].InstanceTypeOptions = filterOutSameType(action.replacements[0], candidatesToConsolidate)
+			if len(action.replacements[0].InstanceTypeOptions) == 0 {
 				action.action = actionDoNothing
 			}
 		}
@@ -139,7 +137,7 @@ func filterOutSameType(newMachine *scheduling.Machine, consolidate []*Candidate)
 	// get the price of the cheapest node that we currently are considering deleting indexed by instance type
 	for _, c := range consolidate {
 		existingInstanceTypes.Insert(c.instanceType.Name)
-		of, ok := c.instanceType.Offerings.Get(c.Labels()[v1alpha5.LabelCapacityType], c.Labels()[v1.LabelTopologyZone])
+		of, ok := c.instanceType.Offerings.Get(c.capacityType, c.zone)
 		if !ok {
 			continue
 		}

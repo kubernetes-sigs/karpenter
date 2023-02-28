@@ -20,7 +20,6 @@ import (
 
 	"github.com/patrickmn/go-cache"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -32,7 +31,6 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
 	inflightchecksevents "github.com/aws/karpenter-core/pkg/controllers/inflightchecks/events"
 	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
@@ -54,7 +52,7 @@ type Issue string
 type Check interface {
 	// Check performs the inflight check, this should return a list of slice discovered, or an empty
 	// slice if no issues were found
-	Check(ctx context.Context, node *v1.Node, machine *v1alpha5.Machine, provisioner *v1alpha5.Provisioner, pdbs *deprovisioning.PDBLimits) ([]Issue, error)
+	Check(context.Context, *v1.Node, *v1alpha5.Machine) ([]Issue, error)
 }
 
 // scanPeriod is how often we inspect and report issues that are found.
@@ -95,24 +93,13 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 	}
 	c.lastScanned.SetDefault(client.ObjectKeyFromObject(machine).String(), c.clock.Now())
 
-	provisioner := &v1alpha5.Provisioner{}
-	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: machine.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
-		// provisioner is missing, node should be removed soon
-		return reconcile.Result{}, client.IgnoreNotFound(err)
-	}
 	node, err := machineutil.NodeForMachine(ctx, c.kubeClient, machine)
 	if err != nil {
 		return reconcile.Result{}, machineutil.IgnoreDuplicateNodeError(machineutil.IgnoreNodeNotFoundError(err))
 	}
-
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name, "provisioner", provisioner.Name))
-	pdbs, err := deprovisioning.NewPDBLimits(ctx, c.kubeClient)
-	if err != nil {
-		return reconcile.Result{}, err
-	}
 	var allIssues []Issue
 	for _, check := range c.checks {
-		issues, err := check.Check(ctx, node, machine, provisioner, pdbs)
+		issues, err := check.Check(ctx, node, machine)
 		if err != nil {
 			logging.FromContext(ctx).Errorf("checking node with %T, %s", check, err)
 		}
@@ -120,8 +107,7 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 	}
 	for _, issue := range allIssues {
 		logging.FromContext(ctx).Infof("inflight check failed, %s", issue)
-		c.recorder.Publish(inflightchecksevents.NodeInflightCheck(node, string(issue)))
-		c.recorder.Publish(inflightchecksevents.MachineInflightCheck(machine, string(issue)))
+		c.recorder.Publish(inflightchecksevents.InflightCheck(node, machine, string(issue))...)
 	}
 	return reconcile.Result{RequeueAfter: scanPeriod}, nil
 }

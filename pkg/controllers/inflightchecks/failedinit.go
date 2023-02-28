@@ -24,7 +24,6 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/machine"
 )
 
@@ -43,7 +42,7 @@ func NewFailedInit(clk clock.Clock, provider cloudprovider.CloudProvider) Check 
 	return &FailedInit{clock: clk, provider: provider}
 }
 
-func (f FailedInit) Check(ctx context.Context, node *v1.Node, m *v1alpha5.Machine, provisioner *v1alpha5.Provisioner, pdbs *deprovisioning.PDBLimits) ([]Issue, error) {
+func (f FailedInit) Check(_ context.Context, node *v1.Node, m *v1alpha5.Machine) ([]Issue, error) {
 	// ignore machines that are deleting
 	if !m.DeletionTimestamp.IsZero() {
 		return nil, nil

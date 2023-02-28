@@ -22,7 +22,6 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
 )
 
 // NodeShape detects nodes that have launched with 10% or less of any resource than was expected.
@@ -36,7 +35,7 @@ func NewNodeShape(provider cloudprovider.CloudProvider) Check {
 	}
 }
 
-func (n *NodeShape) Check(ctx context.Context, node *v1.Node, machine *v1alpha5.Machine, provisioner *v1alpha5.Provisioner, pdbs *deprovisioning.PDBLimits) ([]Issue, error) {
+func (n *NodeShape) Check(ctx context.Context, node *v1.Node, machine *v1alpha5.Machine) ([]Issue, error) {
 	// ignore machines that are deleting
 	if !machine.DeletionTimestamp.IsZero() {
 		return nil, nil

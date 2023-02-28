@@ -36,19 +36,23 @@ type Deprovisioner interface {
 	String() string
 }
 
-// Candidate is a state.Node that we are considering for deprovisioning along with extra information to be used in
+type CandidateFilter func(context.Context, *Candidate) bool
+
+// Candidate is a state.StateNode that we are considering for deprovisioning along with extra information to be used in
 // making that determination
 type Candidate struct {
-	*state.Node
+	*state.StateNode
 	instanceType   *cloudprovider.InstanceType
 	provisioner    *v1alpha5.Provisioner
+	zone           string
+	capacityType   string
 	disruptionCost float64
 	pods           []*v1.Pod
 }
 
 //nolint:gocyclo
-func NewCandidateNode(ctx context.Context, kubeClient client.Client, clk clock.Clock, node *state.Node,
-	provisionerMap map[string]*v1alpha5.Provisioner, provisionerToInstanceTypes map[string]map[string]*cloudprovider.InstanceType) *Candidate {
+func NewCandidate(ctx context.Context, kubeClient client.Client, clk clock.Clock, node *state.StateNode,
+	provisionerMap map[string]*v1alpha5.Provisioner, provisionerToInstanceTypes map[string]map[string]*cloudprovider.InstanceType) (*Candidate, error) {
 
 	// check whether the node has all the labels we need
 	for _, label := range []string{
@@ -57,7 +61,7 @@ func NewCandidateNode(ctx context.Context, kubeClient client.Client, clk clock.C
 		v1alpha5.ProvisionerNameLabelKey,
 	} {
 		if _, ok := node.Labels()[label]; !ok {
-			return nil
+			return nil, fmt.Errorf("state node doesn't have required label '%s'", label)
 		}
 	}
 
@@ -65,55 +69,55 @@ func NewCandidateNode(ctx context.Context, kubeClient client.Client, clk clock.C
 	instanceTypeMap := provisionerToInstanceTypes[node.Labels()[v1alpha5.ProvisionerNameLabelKey]]
 	// skip any nodes where we can't determine the provisioner
 	if provisioner == nil || instanceTypeMap == nil {
-		return nil
+		return nil, fmt.Errorf("provisioner '%s' can't be resolved for state node", node.Labels()[v1alpha5.ProvisionerNameLabelKey])
 	}
-
 	instanceType := instanceTypeMap[node.Labels()[v1.LabelInstanceTypeStable]]
 	// skip any nodes that we can't determine the instance of
 	if instanceType == nil {
-		return nil
+		return nil, fmt.Errorf("instance type '%s' can't be resolved", node.Labels()[v1.LabelInstanceTypeStable])
 	}
 
 	// skip any nodes that are already marked for deletion and being handled
 	if node.MarkedForDeletion() {
-		return nil
+		return nil, fmt.Errorf("state node is marked for deletion")
 	}
 	// skip nodes that aren't initialized
 	// This also means that the real Node doesn't exist for it
 	if !node.Initialized() {
-		return nil
+		return nil, fmt.Errorf("state node isn't initialized")
 	}
 	// skip the node if it is nominated by a recent provisioning pass to be the target of a pending pod.
 	if node.Nominated() {
-		return nil
+		return nil, fmt.Errorf("state node is nominated")
 	}
 	if node.Node == nil || node.Machine == nil {
-		return nil
+		return nil, fmt.Errorf("state node doesn't contain both a node and a machine")
 	}
 
 	pods, err := node.Pods(ctx, kubeClient)
 	if err != nil {
 		logging.FromContext(ctx).Errorf("Determining node pods, %s", err)
-		return nil
+		return nil, fmt.Errorf("getting pods from state node, %w", err)
 	}
 	cn := &Candidate{
-		Node:           node.DeepCopy(),
-		instanceType:   instanceType,
-		provisioner:    provisioner,
-		pods:           pods,
-		disruptionCost: disruptionCost(ctx, pods),
+		StateNode:    node.DeepCopy(),
+		instanceType: instanceType,
+		provisioner:  provisioner,
+		capacityType: node.Labels()[v1alpha5.LabelCapacityType],
+		zone:         node.Labels()[v1.LabelTopologyZone],
+		pods:         pods,
 	}
-	cn.disruptionCost *= lifetimeRemaining(cn, clk)
-	return cn
+	cn.disruptionCost = disruptionCost(ctx, pods) * cn.lifetimeRemaining(clk)
+	return cn, nil
 }
 
 // lifetimeRemaining calculates the fraction of node lifetime remaining in the range [0.0, 1.0].  If the TTLSecondsUntilExpired
 // is non-zero, we use it to scale down the disruption costs of nodes that are going to expire.  Just after creation, the
 // disruption cost is highest and it approaches zero as the node ages towards its expiration time.
-func lifetimeRemaining(c *Candidate, clock clock.Clock) float64 {
+func (c *Candidate) lifetimeRemaining(clock clock.Clock) float64 {
 	remaining := 1.0
 	if c.provisioner.Spec.TTLSecondsUntilExpired != nil {
-		ageInSeconds := clock.Since(c.Node.Node.CreationTimestamp.Time).Seconds()
+		ageInSeconds := clock.Since(c.Node.CreationTimestamp.Time).Seconds()
 		totalLifetimeSeconds := float64(*c.provisioner.Spec.TTLSecondsUntilExpired)
 		lifetimeRemainingSeconds := totalLifetimeSeconds - ageInSeconds
 		remaining = clamp(0.0, lifetimeRemainingSeconds/totalLifetimeSeconds, 1.0)
@@ -149,32 +153,28 @@ func (a action) String() string {
 }
 
 type Command struct {
-	candidatesToRemove  []*Candidate
-	action              action
-	replacementMachines []*scheduling.Machine
+	candidates   []*Candidate
+	action       action
+	replacements []*scheduling.Machine
 }
 
 func (o Command) String() string {
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "%s, terminating %d machines ", o.action, len(o.candidatesToRemove))
-	for i, old := range o.candidatesToRemove {
+	fmt.Fprintf(&buf, "%s, terminating %d machines ", o.action, len(o.candidates))
+	for i, old := range o.candidates {
 		if i != 0 {
 			fmt.Fprint(&buf, ", ")
 		}
 		fmt.Fprintf(&buf, "%s", old.Name())
-		if instanceType, ok := old.Labels()[v1.LabelInstanceTypeStable]; ok {
-			fmt.Fprintf(&buf, "/%s", instanceType)
-		}
-		if capacityType, ok := old.Labels()[v1alpha5.LabelCapacityType]; ok {
-			fmt.Fprintf(&buf, "/%s", capacityType)
-		}
+		fmt.Fprintf(&buf, "/%s", old.instanceType.Name)
+		fmt.Fprintf(&buf, "/%s", old.capacityType)
 	}
-	if len(o.replacementMachines) == 0 {
+	if len(o.replacements) == 0 {
 		return buf.String()
 	}
 	odNodes := 0
 	spotNodes := 0
-	for _, machine := range o.replacementMachines {
+	for _, machine := range o.replacements {
 		ct := machine.Requirements.Get(v1alpha5.LabelCapacityType)
 		if ct.Has(v1alpha5.CapacityTypeOnDemand) {
 			odNodes++
@@ -184,19 +184,19 @@ func (o Command) String() string {
 		}
 	}
 	// Print list of instance types for the first replacementNode.
-	if len(o.replacementMachines) > 1 {
+	if len(o.replacements) > 1 {
 		fmt.Fprintf(&buf, " and replacing with %d spot and %d on-demand nodes from types %s",
 			spotNodes, odNodes,
-			scheduling.InstanceTypeList(o.replacementMachines[0].InstanceTypeOptions))
+			scheduling.InstanceTypeList(o.replacements[0].InstanceTypeOptions))
 		return buf.String()
 	}
-	ct := o.replacementMachines[0].Requirements.Get(v1alpha5.LabelCapacityType)
+	ct := o.replacements[0].Requirements.Get(v1alpha5.LabelCapacityType)
 	nodeDesc := "node"
 	if ct.Len() == 1 {
 		nodeDesc = fmt.Sprintf("%s node", ct.Any())
 	}
 	fmt.Fprintf(&buf, " and replacing with %s from types %s",
 		nodeDesc,
-		scheduling.InstanceTypeList(o.replacementMachines[0].InstanceTypeOptions))
+		scheduling.InstanceTypeList(o.replacements[0].InstanceTypeOptions))
 	return buf.String()
 }

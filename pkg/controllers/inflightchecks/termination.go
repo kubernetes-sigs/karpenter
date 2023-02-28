@@ -37,10 +37,14 @@ func NewTermination(kubeClient client.Client) Check {
 	}
 }
 
-func (t *Termination) Check(ctx context.Context, node *v1.Node, machine *v1alpha5.Machine, provisioner *v1alpha5.Provisioner, pdbs *deprovisioning.PDBLimits) ([]Issue, error) {
+func (t *Termination) Check(ctx context.Context, node *v1.Node, machine *v1alpha5.Machine) ([]Issue, error) {
 	// we are only looking at nodes that are hung deleting
 	if machine.DeletionTimestamp.IsZero() {
 		return nil, nil
+	}
+	pdbs, err := deprovisioning.NewPDBLimits(ctx, t.kubeClient)
+	if err != nil {
+		return nil, err
 	}
 	pods, err := nodeutils.GetNodePods(ctx, t.kubeClient, node)
 	if err != nil {

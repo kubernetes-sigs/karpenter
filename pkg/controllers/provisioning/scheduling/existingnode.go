@@ -26,7 +26,7 @@ import (
 )
 
 type ExistingNode struct {
-	*state.Node
+	*state.StateNode
 
 	Pods         []*v1.Pod
 	topology     *Topology
@@ -34,7 +34,7 @@ type ExistingNode struct {
 	requirements scheduling.Requirements
 }
 
-func NewExistingNode(n *state.Node, topology *Topology, daemonResources v1.ResourceList) *ExistingNode {
+func NewExistingNode(n *state.StateNode, topology *Topology, daemonResources v1.ResourceList) *ExistingNode {
 	// The state node passed in here must be a deep copy from cluster state as we modify it
 	// the remaining daemonResources to schedule are the total daemonResources minus what has already scheduled
 	remainingDaemonResources := resources.Subtract(daemonResources, n.DaemonSetRequests())
@@ -48,8 +48,7 @@ func NewExistingNode(n *state.Node, topology *Topology, daemonResources v1.Resou
 		}
 	}
 	node := &ExistingNode{
-		Node: n,
-
+		StateNode:    n,
 		topology:     topology,
 		requests:     remainingDaemonResources,
 		requirements: scheduling.NewLabelRequirements(n.Labels()),

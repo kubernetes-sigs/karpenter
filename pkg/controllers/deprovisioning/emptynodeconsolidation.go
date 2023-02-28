@@ -57,8 +57,8 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 	}
 
 	cmd := Command{
-		candidatesToRemove: emptyCandidates,
-		action:             actionDelete,
+		candidates: emptyCandidates,
+		action:     actionDelete,
 	}
 
 	// empty node consolidation doesn't use Validation as we get to take advantage of cluster.IsNodeNominated.  This
@@ -74,7 +74,7 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 		logging.FromContext(ctx).Errorf("computing validation candidates %s", err)
 		return Command{}, err
 	}
-	nodesToDelete := mapCandidates(cmd.candidatesToRemove, validationCandidates)
+	nodesToDelete := mapCandidates(cmd.candidates, validationCandidates)
 
 	// the deletion of empty nodes is easy to validate, we just ensure that all the nodesToDelete are still empty and that
 	// the node isn't a target of a recent scheduling simulation

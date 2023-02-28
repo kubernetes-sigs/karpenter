@@ -47,6 +47,7 @@ func (g *GarbageCollect) Reconcile(ctx context.Context, machine *v1alpha5.Machin
 	if _, expireTime, ok := g.lastChecked.GetWithExpiration(client.ObjectKeyFromObject(machine).String()); ok {
 		return reconcile.Result{RequeueAfter: time.Until(expireTime)}, nil
 	}
+	// Check if there is cloudprovider machine that is backing this in-cluster machine. If there isn't, then delete the Machine
 	if _, err := g.cloudProvider.Get(ctx, machine.Status.ProviderID); cloudprovider.IsMachineNotFoundError(err) {
 		if err = g.kubeClient.Delete(ctx, machine); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)

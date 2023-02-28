@@ -59,13 +59,13 @@ func NewExpiration(clk clock.Clock, kubeClient client.Client, cluster *state.Clu
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes
 func (e *Expiration) ShouldDeprovision(ctx context.Context, c *Candidate) bool {
-	return e.clock.Now().After(getExpirationTime(c.Node.Node, c.provisioner))
+	return e.clock.Now().After(getExpirationTime(c.Node, c.provisioner))
 }
 
 // SortCandidates orders expired nodes by when they've expired
 func (e *Expiration) SortCandidates(candidates []*Candidate) []*Candidate {
 	sort.Slice(candidates, func(i int, j int) bool {
-		return getExpirationTime(candidates[i].Node.Node, candidates[i].provisioner).Before(getExpirationTime(candidates[j].Node.Node, candidates[j].provisioner))
+		return getExpirationTime(candidates[i].Node, candidates[i].provisioner).Before(getExpirationTime(candidates[j].Node, candidates[j].provisioner))
 	})
 	return candidates
 }
@@ -83,11 +83,11 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...*Candidat
 			return false
 		}
 		if pdb, ok := pdbs.CanEvictPods(cn.pods); !ok {
-			e.recorder.Publish(deprovisioningevents.Blocked(cn.Node.Node, cn.Node.Machine, fmt.Sprintf("pdb %s prevents pod evictions", pdb))...)
+			e.recorder.Publish(deprovisioningevents.Blocked(cn.Node, cn.Machine, fmt.Sprintf("pdb %s prevents pod evictions", pdb))...)
 			return false
 		}
 		if p, ok := hasDoNotEvictPod(cn); ok {
-			e.recorder.Publish(deprovisioningevents.Blocked(cn.Node.Node, cn.Node.Machine,
+			e.recorder.Publish(deprovisioningevents.Blocked(cn.Node, cn.Machine,
 				fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name))...)
 			return false
 		}
@@ -110,11 +110,11 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...*Candidat
 		}
 
 		logging.FromContext(ctx).With("ttl", time.Duration(ptr.Int64Value(candidates[0].provisioner.Spec.TTLSecondsUntilExpired))*time.Second).
-			With("delay", time.Since(getExpirationTime(candidates[0].Node.Node, candidates[0].provisioner))).Infof("triggering termination for expired node after TTL")
+			With("delay", time.Since(getExpirationTime(candidates[0].Node, candidates[0].provisioner))).Infof("triggering termination for expired node after TTL")
 		return Command{
-			candidatesToRemove:  []*Candidate{candidate},
-			action:              actionReplace,
-			replacementMachines: newMachines,
+			candidates:   []*Candidate{candidate},
+			action:       actionReplace,
+			replacements: newMachines,
 		}, nil
 	}
 	return Command{action: actionDoNothing}, nil

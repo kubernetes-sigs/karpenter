@@ -33,6 +33,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
 	"github.com/aws/karpenter-core/pkg/controllers/termination"
 	"github.com/aws/karpenter-core/pkg/events"
@@ -62,7 +63,7 @@ var _ = BeforeSuite(func() {
 	}))
 	evictionQueue := terminator.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}))
 	terminator := terminator.NewTerminator(fakeClock, env.Client, evictionQueue)
-	terminationController = termination.NewController(env.Client, terminator, events.NewRecorder(&record.FakeRecorder{}))
+	terminationController = termination.NewController(env.Client, fake.NewCloudProvider(), terminator, events.NewRecorder(&record.FakeRecorder{}))
 })
 
 var _ = AfterSuite(func() {

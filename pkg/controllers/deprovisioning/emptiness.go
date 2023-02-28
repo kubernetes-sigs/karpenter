@@ -71,8 +71,8 @@ func (e *Emptiness) ComputeCommand(_ context.Context, candidates ...*Candidate) 
 		return Command{action: actionDoNothing}, nil
 	}
 	return Command{
-		candidatesToRemove: emptyCandidates,
-		action:             actionDelete,
+		candidates: emptyCandidates,
+		action:     actionDelete,
 	}, nil
 }
 

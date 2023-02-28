@@ -21,22 +21,21 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
-func NodeInflightCheck(node *v1.Node, message string) events.Event {
-	return events.Event{
-		InvolvedObject: node,
-		Type:           v1.EventTypeWarning,
-		Reason:         "FailedInflightCheck",
-		Message:        message,
-		DedupeValues:   []string{node.Name, message},
-	}
-}
-
-func MachineInflightCheck(machine *v1alpha5.Machine, message string) events.Event {
-	return events.Event{
-		InvolvedObject: machine,
-		Type:           v1.EventTypeWarning,
-		Reason:         "FailedInflightCheck",
-		Message:        message,
-		DedupeValues:   []string{machine.Name, message},
+func InflightCheck(node *v1.Node, machine *v1alpha5.Machine, message string) []events.Event {
+	return []events.Event{
+		{
+			InvolvedObject: node,
+			Type:           v1.EventTypeWarning,
+			Reason:         "FailedInflightCheck",
+			Message:        message,
+			DedupeValues:   []string{node.Name, message},
+		},
+		{
+			InvolvedObject: machine,
+			Type:           v1.EventTypeWarning,
+			Reason:         "FailedInflightCheck",
+			Message:        message,
+			DedupeValues:   []string{machine.Name, message},
+		},
 	}
 }

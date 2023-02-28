@@ -2329,6 +2329,7 @@ func ExpectMakeNewMachinesReady(ctx context.Context, c client.Client, wg *sync.W
 
 	wg.Add(1)
 	go func() {
+		machinesMadeReady := 0
 		ctx, cancel := context.WithTimeout(ctx, time.Second*10) // give up after 10s
 		defer GinkgoRecover()
 		defer wg.Done()
@@ -2340,7 +2341,6 @@ func ExpectMakeNewMachinesReady(ctx context.Context, c client.Client, wg *sync.W
 				if err := c.List(ctx, machineList); err != nil {
 					continue
 				}
-				machinesMadeReady := 0
 				for i := range machineList.Items {
 					m := &machineList.Items[i]
 					if existingMachineNames.Has(m.Name) {

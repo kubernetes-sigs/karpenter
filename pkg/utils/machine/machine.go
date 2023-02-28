@@ -32,6 +32,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/scheduling"
 )
 
+// EventHandler is a watcher on v1alpha5.Machine that maps Machines to Nodes based on provider ids
+// and enqueues reconcile.Requests for the Nodes
 func EventHandler(ctx context.Context, c client.Client) handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
 		machine := o.(*v1alpha5.Machine)
@@ -50,6 +52,8 @@ func EventHandler(ctx context.Context, c client.Client) handler.EventHandler {
 	})
 }
 
+// NodeEventHandler is a watcher on v1.Node that maps Nodes to Machines based on provider ids
+// and enqueues reconcile.Requests for the Machines
 func NodeEventHandler(ctx context.Context, c client.Client) handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
 		node := o.(*v1.Node)
@@ -65,6 +69,7 @@ func NodeEventHandler(ctx context.Context, c client.Client) handler.EventHandler
 	})
 }
 
+// NodeNotFoundError is an error returned when no v1.Nodes are found matching the passed providerID
 type NodeNotFoundError struct {
 	ProviderID string
 }
@@ -88,6 +93,7 @@ func IgnoreNodeNotFoundError(err error) error {
 	return nil
 }
 
+// DuplicateNodeError is an error returned when multiple v1.Nodes are found matching the passed providerID
 type DuplicateNodeError struct {
 	ProviderID string
 }
@@ -111,6 +117,10 @@ func IgnoreDuplicateNodeError(err error) error {
 	return nil
 }
 
+// NodeForMachine is a helper function that takes a v1alpha5.Machine and attempts to find the matching v1.Node by its providerID
+// This function will return errors if:
+//  1. No v1.Nodes match the v1alpha5.Machine providerID
+//  2. Multiple v1.Nodes match the v1alpha5.Machine providerID
 func NodeForMachine(ctx context.Context, c client.Client, machine *v1alpha5.Machine) (*v1.Node, error) {
 	nodeList := v1.NodeList{}
 	if err := c.List(ctx, &nodeList, client.MatchingFields{"spec.providerID": machine.Status.ProviderID}, client.Limit(2)); err != nil {

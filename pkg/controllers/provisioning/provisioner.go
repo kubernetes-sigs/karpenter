@@ -17,7 +17,6 @@ package provisioning
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
@@ -113,7 +112,7 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 		return reconcile.Result{}, nil
 	}
 	if !p.cluster.Synced(ctx) {
-		return reconcile.Result{RequeueAfter: time.Second}, nil
+		return reconcile.Result{Requeue: true}, nil
 	}
 
 	// Schedule pods to potential nodes, exit if nothing to do
@@ -191,7 +190,7 @@ func (p *Provisioner) consolidationWarnings(ctx context.Context, po v1.Pod) {
 }
 
 //nolint:gocyclo
-func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNodes []*state.Node, opts scheduler.SchedulerOptions) (*scheduler.Scheduler, error) {
+func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNodes []*state.StateNode, opts scheduler.SchedulerOptions) (*scheduler.Scheduler, error) {
 	// Build node templates
 	var machines []*scheduler.MachineTemplate
 	var provisionerList v1alpha5.ProvisionerList
