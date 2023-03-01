@@ -31,6 +31,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
+	utilsscheduling "github.com/aws/karpenter-core/pkg/utils/scheduling"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -44,7 +45,7 @@ func getProhibitedNodeNames(ctx context.Context, kubeClient client.Client, gates
 	for _, gate := range gates {
 		nodeList := &v1.NodeList{}
 		if err := kubeClient.List(ctx, nodeList,
-			pscheduling.TopologyListOptions("", gate.Spec.Selector),
+			utilsscheduling.TopologyListOptions("", gate.Spec.Selector),
 			client.HasLabels{v1alpha5.ProvisionerNameLabelKey},
 		); err != nil {
 			return nil, fmt.Errorf("listing nodes, %w", err)

@@ -36,6 +36,10 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
+const (
+	expirationMethod = "Expiration"
+)
+
 // Expiration is a subreconciler that deletes empty nodes.
 // Expiration will respect TTLSecondsAfterEmpty
 type Expiration struct {

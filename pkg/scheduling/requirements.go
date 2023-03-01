@@ -217,16 +217,6 @@ func (r Requirements) Labels() map[string]string {
 	return labels
 }
 
-func (r Requirements) Fields() map[string]string {
-	fields := map[string]string{}
-	for key, requirement := range r {
-		if value := requirement.Any(); value != "" {
-			fields[key] = value
-		}
-	}
-	return fields
-}
-
 func (r Requirements) String() string {
 	requirements := lo.Reject(r.Values(), func(requirement *Requirement, _ int) bool { return v1alpha5.RestrictedLabels.Has(requirement.Key) })
 	return strings.Join(lo.Map(requirements, func(requirement *Requirement, _ int) string { return requirement.String() }), ", ")

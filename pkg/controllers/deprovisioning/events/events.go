@@ -32,6 +32,7 @@ func Blocked(node *v1.Node, machine *v1alpha5.Machine, reason string) []events.E
 			Reason:         "DeprovisioningBlocked",
 			Message:        fmt.Sprintf("Cannot deprovision node due to %s", reason),
 			DedupeValues:   []string{node.Name, reason},
+			DedupeTimeout:  15 * time.Minute,
 		},
 		{
 			InvolvedObject: machine,
@@ -39,6 +40,7 @@ func Blocked(node *v1.Node, machine *v1alpha5.Machine, reason string) []events.E
 			Reason:         "DeprovisioningBlocked",
 			Message:        fmt.Sprintf("Cannot deprovision machine due to %s", reason),
 			DedupeValues:   []string{machine.Name, reason},
+			DedupeTimeout:  15 * time.Minute,
 		},
 	}
 }

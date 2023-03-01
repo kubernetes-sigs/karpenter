@@ -47,6 +47,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	pscheduling "github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/test"
+	utilsscheduling "github.com/aws/karpenter-core/pkg/utils/scheduling"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -2671,7 +2672,7 @@ func ExpectMaxSkew(ctx context.Context, c client.Client, namespace string, const
 	nodes := &v1.NodeList{}
 	ExpectWithOffset(1, c.List(ctx, nodes)).To(Succeed())
 	pods := &v1.PodList{}
-	ExpectWithOffset(1, c.List(ctx, pods, scheduling.TopologyListOptions(namespace, constraint.LabelSelector))).To(Succeed())
+	Expect(c.List(ctx, pods, utilsscheduling.TopologyListOptions(namespace, constraint.LabelSelector))).To(Succeed())
 	skew := map[string]int{}
 
 	nodeMap := map[string]*v1.Node{}

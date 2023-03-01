@@ -72,11 +72,11 @@ type MachineDisruptionGateList struct {
 	Items           []MachineDisruptionGate `json:"items"`
 }
 
+// IsGateActive will return true if the current time is within one of the gate's schedules.
 func (m *MachineDisruptionGate) IsGateActive(ctx context.Context, clk clock.Clock) bool {
-	schedules := m.Spec.Schedules
 	p := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 
-	for _, s := range schedules {
+	for _, s := range m.Spec.Schedules {
 		schedule, err := p.Parse(fmt.Sprintf(CrontabTemplateFormat, s.Crontab))
 		// This shouldn't happen as we validate this on creation.
 		// This would only happen if validation was bypassed.
