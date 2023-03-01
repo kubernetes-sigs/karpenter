@@ -46,7 +46,7 @@ func NewProvisionerController(kubeClient client.Client, cluster *state.Cluster) 
 }
 
 func (c *ProvisionerController) Name() string {
-	return "provisionerstate"
+	return "provisioner_state"
 }
 
 func (c *ProvisionerController) Reconcile(_ context.Context, _ *v1alpha5.Provisioner) (reconcile.Result, error) {

@@ -448,7 +448,7 @@ func validateNodeSelectorTerm(term v1.NodeSelectorTerm) (errs error) {
 var schedulingDuration = prometheus.NewHistogramVec(
 	prometheus.HistogramOpts{
 		Namespace: metrics.Namespace,
-		Subsystem: "allocation_controller",
+		Subsystem: "provisioner",
 		Name:      "scheduling_duration_seconds",
 		Help:      "Duration of scheduling process in seconds. Broken down by provisioner and error.",
 		Buckets:   metrics.DurationBuckets(),

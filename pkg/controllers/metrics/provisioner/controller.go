@@ -101,7 +101,7 @@ func NewController(kubeClient client.Client) corecontroller.Controller {
 }
 
 func (c *Controller) Name() string {
-	return "provisionermetrics"
+	return "provisioner_metrics"
 }
 
 // Reconcile executes a termination control loop for the resource

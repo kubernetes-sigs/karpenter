@@ -41,7 +41,7 @@ func NewController(cluster *state.Cluster) *Controller {
 }
 
 func (c *Controller) Name() string {
-	return "metricscraper"
+	return "metric_scraper"
 }
 
 func (c *Controller) Builder(_ context.Context, mgr manager.Manager) controller.Builder {
