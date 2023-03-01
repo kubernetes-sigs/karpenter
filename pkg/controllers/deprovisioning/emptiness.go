@@ -27,6 +27,10 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 )
 
+const (
+	emptinessMethod = "Emptiness"
+)
+
 // Emptiness is a subreconciler that deletes empty machines.
 // Emptiness will respect TTLSecondsAfterEmpty
 type Emptiness struct {

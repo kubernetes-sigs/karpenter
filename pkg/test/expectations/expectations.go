@@ -51,6 +51,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/test"
+	utilsscheduling "github.com/aws/karpenter-core/pkg/utils/scheduling"
 )
 
 const (
@@ -460,7 +461,7 @@ func ExpectSkew(ctx context.Context, c client.Client, namespace string, constrai
 	nodes := &v1.NodeList{}
 	ExpectWithOffset(1, c.List(ctx, nodes)).To(Succeed())
 	pods := &v1.PodList{}
-	ExpectWithOffset(1, c.List(ctx, pods, scheduling.TopologyListOptions(namespace, constraint.LabelSelector))).To(Succeed())
+	ExpectWithOffset(1, c.List(ctx, pods, utilsscheduling.TopologyListOptions(namespace, constraint.LabelSelector))).To(Succeed())
 	skew := map[string]int{}
 	for i, pod := range pods.Items {
 		if scheduling.IgnoredForTopology(&pods.Items[i]) {

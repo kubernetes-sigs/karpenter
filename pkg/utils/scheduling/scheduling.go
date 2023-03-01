@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/selection"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
 func TopologyListOptions(namespace string, labelSelector *metav1.LabelSelector) *client.ListOptions {
 	selector := labels.Everything()
 	if labelSelector == nil {

@@ -64,10 +64,9 @@ func makeConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient cli
 
 // consolidationTTL is the TTL between creating a consolidation command and validating that it still works.
 const (
-	consolidationTTL = 15 * time.Second
+	consolidationTTL    = 15 * time.Second
 	consolidationMethod = "Consolidation"
 )
-
 
 // string is the string representation of the deprovisioner
 func (c *consolidation) String() string {

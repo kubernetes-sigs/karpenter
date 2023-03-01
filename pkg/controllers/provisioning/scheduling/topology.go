@@ -22,13 +22,14 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 
-	utilsscheduling "github.com/aws/karpenter-core/pkg/utils/scheduling"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	utilsets "k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	utilsscheduling "github.com/aws/karpenter-core/pkg/utils/scheduling"
 
 	"github.com/aws/karpenter-core/pkg/utils/pod"
 )

@@ -16,18 +16,8 @@ package v1alpha5
 
 import (
 	"context"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // SetDefaults for the MachineDisruptionGate
 func (m *MachineDisruptionGate) SetDefaults(ctx context.Context) {
-	m.Spec.Selector = &metav1.LabelSelector{
-		MatchExpressions: []metav1.LabelSelectorRequirement{
-			{
-				Key:      ProvisionerNameLabelKey,
-				Operator: metav1.LabelSelectorOpExists,
-			},
-		},
-	}
 }
