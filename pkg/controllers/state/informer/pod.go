@@ -47,7 +47,7 @@ func NewPodController(kubeClient client.Client, cluster *state.Cluster) corecont
 }
 
 func (c *PodController) Name() string {
-	return "pod-state"
+	return "pod_state"
 }
 
 func (c *PodController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
