@@ -59,7 +59,7 @@ func (l *Launch) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reco
 				})
 				return reconcile.Result{}, nil
 			}
-			machine.StatusConditions().MarkFalse(v1alpha5.MachineCreated, "MachineLinkFailed", "Linking the Machine to an existing backing cloudprovider machine failed")
+			machine.StatusConditions().MarkFalse(v1alpha5.MachineCreated, "LinkFailed", truncateMessage(err.Error()))
 			return reconcile.Result{}, fmt.Errorf("linking machine, %w", err)
 		}
 		logging.FromContext(ctx).Debugf("linked machine")
@@ -70,7 +70,7 @@ func (l *Launch) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reco
 				logging.FromContext(ctx).Error(err)
 				return reconcile.Result{}, client.IgnoreNotFound(l.kubeClient.Delete(ctx, machine))
 			}
-			machine.StatusConditions().MarkFalse(v1alpha5.MachineCreated, "LaunchFailed", "Launching a cloudprovider machine failed")
+			machine.StatusConditions().MarkFalse(v1alpha5.MachineCreated, "LaunchFailed", truncateMessage(err.Error()))
 			return reconcile.Result{}, fmt.Errorf("creating machine, %w", err)
 		}
 		logging.FromContext(ctx).Debugf("created machine")
@@ -94,4 +94,11 @@ func PopulateMachineDetails(machine, retrieved *v1alpha5.Machine) {
 	machine.Status.ProviderID = retrieved.Status.ProviderID
 	machine.Status.Allocatable = retrieved.Status.Allocatable
 	machine.Status.Capacity = retrieved.Status.Capacity
+}
+
+func truncateMessage(msg string) string {
+	if len(msg) < 200 {
+		return msg
+	}
+	return msg[:200] + "..."
 }

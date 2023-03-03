@@ -58,7 +58,6 @@ var cluster *state.Cluster
 var nodeController controller.Controller
 var cloudProvider *fake.CloudProvider
 var prov *provisioning.Provisioner
-var provisioningController controller.Controller
 var daemonsetController controller.Controller
 var env *test.Environment
 var instanceTypeMap map[string]*cloudprovider.InstanceType
@@ -78,7 +77,6 @@ var _ = BeforeSuite(func() {
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	prov = provisioning.NewProvisioner(env.Client, corev1.NewForConfigOrDie(env.Config), events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
-	provisioningController = provisioning.NewController(env.Client, prov, events.NewRecorder(&record.FakeRecorder{}))
 	instanceTypes, _ := cloudProvider.GetInstanceTypes(context.Background(), nil)
 	instanceTypeMap = map[string]*cloudprovider.InstanceType{}
 	for _, it := range instanceTypes {

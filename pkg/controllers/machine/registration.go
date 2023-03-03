@@ -39,6 +39,7 @@ type Registration struct {
 
 func (r *Registration) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
 	if machine.Status.ProviderID == "" {
+		machine.StatusConditions().MarkUnknown(v1alpha5.MachineRegistered, "", "")
 		return reconcile.Result{}, nil
 	}
 	if machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {

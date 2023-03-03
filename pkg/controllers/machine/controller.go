@@ -108,7 +108,7 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 		c.launch,
 		c.registration,
 		c.initialization,
-		c.liveness,
+		c.liveness, // we check liveness last, since we don't want to delete the machine, and then still launch
 	} {
 		res, err := reconciler.Reconcile(ctx, machine)
 		errs = multierr.Append(errs, err)

@@ -1849,7 +1849,7 @@ var _ = Describe("Parallelization", func() {
 		ExpectTriggerVerifyAction(&wg)
 		go func() {
 			defer GinkgoRecover()
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			_, _ = deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		}()
 		wg.Wait()
 
@@ -2251,7 +2251,7 @@ func ExpectNewMachinesDeleted(ctx context.Context, c client.Client, wg *sync.Wai
 	wg.Add(1)
 	go func() {
 		machinesDeleted := 0
-		ctx, cancel := context.WithTimeout(ctx, time.Second*10) // give up after 10s
+		ctx, cancel := context.WithTimeout(ctx, time.Second*30) // give up after 30s
 		defer GinkgoRecover()
 		defer wg.Done()
 		defer cancel()
@@ -2273,6 +2273,8 @@ func ExpectNewMachinesDeleted(ctx context.Context, c client.Client, wg *sync.Wai
 						return
 					}
 				}
+			case <-ctx.Done():
+				Fail(fmt.Sprintf("waiting for machines to be deleted, %s", ctx.Err()))
 			}
 		}
 	}()

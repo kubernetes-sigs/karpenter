@@ -157,7 +157,7 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 		if err := c.launchReplacementMachines(ctx, command, reason); err != nil {
 			// If we failed to launch the replacement, don't deprovision.  If this is some permanent failure,
 			// we don't want to disrupt workloads with no way to provision new nodes for them.
-			return fmt.Errorf("launching replacement node, %w", err)
+			return fmt.Errorf("launching replacement machine, %w", err)
 		}
 	}
 
@@ -185,6 +185,72 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 	return nil
 }
 
+// launchReplacementMachines launches replacement machines and blocks until it is ready
+// nolint:gocyclo
+func (c *Controller) launchReplacementMachines(ctx context.Context, action Command, reason string) error {
+	defer metrics.Measure(deprovisioningReplacementNodeInitializedHistogram)()
+	candidateNodeNames := lo.Map(action.candidates, func(c *Candidate, _ int) string { return c.Node.Name })
+
+	// cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
+	if err := c.setNodesUnschedulable(ctx, true, candidateNodeNames...); err != nil {
+		return fmt.Errorf("cordoning nodes, %w", err)
+	}
+
+	machineNames, err := c.provisioner.LaunchMachines(ctx, action.replacements, provisioning.WithReason(reason))
+	if err != nil {
+		// uncordon the nodes as the launch may fail (e.g. ICE)
+		err = multierr.Append(err, c.setNodesUnschedulable(ctx, false, candidateNodeNames...))
+		return err
+	}
+	if len(machineNames) != len(action.replacements) {
+		// shouldn't ever occur since a partially failed LaunchMachines should return an error
+		return fmt.Errorf("expected %d machines, got %d", len(action.replacements), len(machineNames))
+	}
+
+	// We have the new machines created at the API server so mark the old machines for deletion
+	c.cluster.MarkForDeletion(candidateNodeNames...)
+
+	errs := make([]error, len(machineNames))
+	workqueue.ParallelizeUntil(ctx, len(machineNames), len(machineNames), func(i int) {
+		// machine never became ready or the machines that we tried to launch got Insufficient Capacity or some
+		// other transient error
+		errs[i] = c.waitForReadiness(ctx, action, machineNames[i])
+	})
+	if err = multierr.Combine(errs...); err != nil {
+		c.cluster.UnmarkForDeletion(candidateNodeNames...)
+		return multierr.Combine(c.setNodesUnschedulable(ctx, false, candidateNodeNames...),
+			fmt.Errorf("timed out checking machine readiness, %w", err))
+	}
+	return nil
+}
+
+// TODO @njtran: Allow to bypass this check for certain deprovisioners
+func (c *Controller) waitForReadiness(ctx context.Context, action Command, name string) error {
+	// Wait for the machine to be initialized
+	var once sync.Once
+	pollStart := time.Now()
+	return retry.Do(func() error {
+		machine := &v1alpha5.Machine{}
+		if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: name}, machine); err != nil {
+			// If the machine was deleted after a few seconds (to give the cache time to update), then we assume
+			// that the machine was deleted due to an Insufficient Capacity error
+			if errors.IsNotFound(err) && c.clock.Since(pollStart) > time.Second*5 {
+				return retry.Unrecoverable(fmt.Errorf("getting machine, %w", err))
+			}
+			return fmt.Errorf("getting machine, %w", err)
+		}
+		once.Do(func() {
+			c.recorder.Publish(deprovisioningevents.Launching(machine, action.String()))
+		})
+		if !machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).IsTrue() {
+			// make the user aware of why deprovisioning is paused
+			c.recorder.Publish(deprovisioningevents.WaitingOnReadiness(machine))
+			return fmt.Errorf("machine is not initialized")
+		}
+		return nil
+	}, waitRetryOptions...)
+}
+
 // waitForDeletion waits for the specified node to be removed from the API server. This deletion can take some period
 // of time if there are PDBs that govern pods on the node as we need to wait until the node drains before
 // it's actually deleted.
@@ -209,78 +275,11 @@ func (c *Controller) waitForDeletion(ctx context.Context, machine *v1alpha5.Mach
 	}
 }
 
-// launchReplacementMachines launches replacement machines and blocks until it is ready
-// nolint:gocyclo
-func (c *Controller) launchReplacementMachines(ctx context.Context, action Command, reason string) error {
-	defer metrics.Measure(deprovisioningReplacementNodeInitializedHistogram)()
-	candidateNames := lo.Map(action.candidates, func(c *Candidate, _ int) string { return c.Name() })
-
-	// cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
-	if err := c.setNodesUnschedulable(ctx, true, action.candidates...); err != nil {
-		return fmt.Errorf("cordoning nodes, %w", err)
-	}
-
-	machineNames, err := c.provisioner.LaunchMachines(ctx, action.replacements, provisioning.WithReason(reason))
-	if err != nil {
-		// uncordon the nodes as the launch may fail (e.g. ICE)
-		err = multierr.Append(err, c.setNodesUnschedulable(ctx, false, action.candidates...))
-		return err
-	}
-	if len(machineNames) != len(action.replacements) {
-		// shouldn't ever occur since a partially failed LaunchMachines should return an error
-		return fmt.Errorf("expected %d machines, got %d", len(action.replacements), len(machineNames))
-	}
-
-	// We have the new machines created at the API server so mark the old machines for deletion
-	c.cluster.MarkForDeletion(candidateNames...)
-	if err = c.waitForReadiness(ctx, action, machineNames...); err != nil {
-		c.cluster.UnmarkForDeletion(candidateNames...)
-		return multierr.Combine(c.setNodesUnschedulable(ctx, false, action.candidates...),
-			fmt.Errorf("timed out checking node readiness, %w", err))
-	}
-	return nil
-}
-
-// TODO @njtran: Allow to bypass this check for certain deprovisioners
-func (c *Controller) waitForReadiness(ctx context.Context, action Command, names ...string) error {
-	errs := make([]error, len(names))
-	pollStart := c.clock.Now()
-
-	workqueue.ParallelizeUntil(ctx, len(names), len(names), func(i int) {
-		// Wait for the machine to be initialized
-		var once sync.Once
-		if err := retry.Do(func() error {
-			machine := &v1alpha5.Machine{}
-			if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: names[i]}, machine); err != nil {
-				// If the machine was deleted after a second (to give the cache time to update), then we assume
-				// that tha machine was deleted due to an Insufficient Capacity error
-				if errors.IsNotFound(err) && c.clock.Now().Add(time.Second).After(pollStart) {
-					return retry.Unrecoverable(fmt.Errorf("getting node, %w", err))
-				}
-				return fmt.Errorf("getting node, %w", err)
-			}
-			once.Do(func() {
-				c.recorder.Publish(deprovisioningevents.Launching(machine, action.String()))
-			})
-			if !machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).IsTrue() {
-				// make the user aware of why deprovisioning is paused
-				c.recorder.Publish(deprovisioningevents.WaitingOnReadiness(machine))
-				return fmt.Errorf("machine is not initialized")
-			}
-			return nil
-		}, waitRetryOptions...); err != nil {
-			// machine never became ready or the machines that we tried to launch got Insufficient Capacity,
-			errs[i] = err
-		}
-	})
-	return multierr.Combine(errs...)
-}
-
-func (c *Controller) setNodesUnschedulable(ctx context.Context, isUnschedulable bool, candidates ...*Candidate) error {
+func (c *Controller) setNodesUnschedulable(ctx context.Context, isUnschedulable bool, names ...string) error {
 	var multiErr error
-	for _, cn := range candidates {
+	for _, name := range names {
 		node := &v1.Node{}
-		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: cn.Node.Name}, node); err != nil {
+		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: name}, node); err != nil {
 			multiErr = multierr.Append(multiErr, fmt.Errorf("getting node, %w", err))
 		}
 

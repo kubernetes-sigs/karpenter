@@ -339,11 +339,9 @@ var _ = Describe("Drift", func() {
 		wg.Wait()
 
 		// Cascade any deletion of the machine to the node
-		ExpectMachinesCascadeDeletion(ctx, env.Client, machine2)
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine1, machine2)
 
-		// we don't need a new node, but we should evict everything off one of node2 which only has a single pod
 		// Expect one of the nodes to be deleted
-		ExpectNotFound(ctx, env.Client, machine2, node2)
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 	})

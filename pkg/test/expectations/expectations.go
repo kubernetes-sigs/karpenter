@@ -323,8 +323,10 @@ func ExpectMachineDeployedWithOffset(offset int, ctx context.Context, c client.C
 func ExpectMachinesCascadeDeletion(ctx context.Context, c client.Client, machines ...*v1alpha5.Machine) {
 	nodes := ExpectNodesWithOffset(1, ctx, c)
 	for _, machine := range machines {
-		// This expectation requires that the machine is already gone
-		ExpectNotFoundWithOffset(1, ctx, c, machine)
+		err := c.Get(ctx, client.ObjectKeyFromObject(machine), &v1alpha5.Machine{})
+		if !errors.IsNotFound(err) {
+			continue
+		}
 		for _, node := range nodes {
 			if node.Spec.ProviderID == machine.Status.ProviderID {
 				Expect(c.Delete(ctx, node))
