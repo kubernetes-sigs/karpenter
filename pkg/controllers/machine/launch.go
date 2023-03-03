@@ -59,6 +59,7 @@ func (l *Launch) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reco
 				})
 				return reconcile.Result{}, nil
 			}
+			machine.StatusConditions().MarkFalse(v1alpha5.MachineCreated, "MachineLinkFailed", "Linking the Machine to an existing backing cloudprovider machine failed")
 			return reconcile.Result{}, fmt.Errorf("linking machine, %w", err)
 		}
 		logging.FromContext(ctx).Debugf("linked machine")
@@ -69,6 +70,7 @@ func (l *Launch) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reco
 				logging.FromContext(ctx).Error(err)
 				return reconcile.Result{}, client.IgnoreNotFound(l.kubeClient.Delete(ctx, machine))
 			}
+			machine.StatusConditions().MarkFalse(v1alpha5.MachineCreated, "LaunchFailed", "Launching a cloudprovider machine failed")
 			return reconcile.Result{}, fmt.Errorf("creating machine, %w", err)
 		}
 		logging.FromContext(ctx).Debugf("created machine")

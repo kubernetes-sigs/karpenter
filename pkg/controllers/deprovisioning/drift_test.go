@@ -65,11 +65,8 @@ var _ = Describe("Drift", func() {
 		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
 		ExpectApplied(ctx, env.Client, machine, node, prov)
 
-		// inform cluster state about the nodes and machines
-		ExpectMakeNodesReady(ctx, env.Client, node)
-		ExpectMakeMachinesReady(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -79,7 +76,7 @@ var _ = Describe("Drift", func() {
 		wg.Wait()
 
 		// Expect to not create or delete more machines
-		ExpectMachineCount(ctx, env.Client, "==", 1)
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		ExpectExists(ctx, env.Client, machine)
 	})
 	It("should ignore nodes with the drift label, but not the drifted value", func() {
@@ -88,11 +85,8 @@ var _ = Describe("Drift", func() {
 		})
 		ExpectApplied(ctx, env.Client, machine, node, prov)
 
-		// inform cluster state about the nodes and machines
-		ExpectMakeNodesReady(ctx, env.Client, node)
-		ExpectMakeMachinesReady(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -102,24 +96,21 @@ var _ = Describe("Drift", func() {
 		wg.Wait()
 
 		// Expect to not create or delete more machines
-		ExpectMachineCount(ctx, env.Client, "==", 1)
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		ExpectExists(ctx, env.Client, machine)
 	})
 	It("should ignore nodes without the drift label", func() {
 		ExpectApplied(ctx, env.Client, machine, node, prov)
 
-		// inform cluster state about the nodes and machines
-		ExpectMakeNodesReady(ctx, env.Client, node)
-		ExpectMakeMachinesReady(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		fakeClock.Step(10 * time.Minute)
 
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 
 		// Expect to not create or delete more machines
-		ExpectMachineCount(ctx, env.Client, "==", 1)
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		ExpectExists(ctx, env.Client, machine)
 	})
 	It("can delete drifted nodes", func() {
@@ -128,11 +119,8 @@ var _ = Describe("Drift", func() {
 		})
 		ExpectApplied(ctx, env.Client, machine, node, prov)
 
-		// inform cluster state about the nodes and machines
-		ExpectMakeNodesReady(ctx, env.Client, node)
-		ExpectMakeMachinesReady(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -141,9 +129,13 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+
 		// We should delete the machine that has drifted
-		ExpectMachineCount(ctx, env.Client, "==", 0)
-		ExpectNotFound(ctx, env.Client, machine)
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+		ExpectNotFound(ctx, env.Client, machine, node)
 	})
 	It("can replace drifted nodes", func() {
 		labels := map[string]string{
@@ -174,30 +166,31 @@ var _ = Describe("Drift", func() {
 
 		// bind the pods to the node
 		ExpectManualBinding(ctx, env.Client, pod, node)
-		ExpectScheduled(ctx, env.Client, pod)
 
-		// inform cluster state about the nodes and machines
-		ExpectMakeNodesReady(ctx, env.Client, node)
-		ExpectMakeMachinesReady(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		fakeClock.Step(10 * time.Minute)
 
 		// deprovisioning won't delete the old machine until the new machine is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1, machine)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
-		ExpectNotFound(ctx, env.Client, machine)
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+
+		ExpectNotFound(ctx, env.Client, machine, node)
 
 		// Expect that the new machine was created and its different than the original
-		ExpectMachineCount(ctx, env.Client, "==", 1)
-		machineList := &v1alpha5.MachineList{}
-		Expect(env.Client.List(ctx, machineList)).To(Succeed())
-		Expect(machineList.Items[0].Name).ToNot(Equal(machine.Name))
+		machines := ExpectMachines(ctx, env.Client)
+		nodes := ExpectNodes(ctx, env.Client)
+		Expect(machines).To(HaveLen(1))
+		Expect(nodes).To(HaveLen(1))
+		Expect(machines[0].Name).ToNot(Equal(machine.Name))
+		Expect(nodes[0].Name).ToNot(Equal(node.Name))
 	})
 	It("can replace drifted nodes with multiple nodes", func() {
 		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
@@ -277,28 +270,26 @@ var _ = Describe("Drift", func() {
 		ExpectManualBinding(ctx, env.Client, pods[0], node)
 		ExpectManualBinding(ctx, env.Client, pods[1], node)
 		ExpectManualBinding(ctx, env.Client, pods[2], node)
-		ExpectScheduled(ctx, env.Client, pods[0])
-		ExpectScheduled(ctx, env.Client, pods[1])
-		ExpectScheduled(ctx, env.Client, pods[2])
 
-		// inform cluster state about the nodes and machines
-		ExpectMakeNodesReady(ctx, env.Client, node)
-		ExpectMakeMachinesReady(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		fakeClock.Step(10 * time.Minute)
 
 		// deprovisioning won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 3, machine)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 3)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+
 		// expect that drift provisioned three nodes, one for each pod
-		ExpectNotFound(ctx, env.Client, machine)
-		ExpectMachineCount(ctx, env.Client, "==", 3)
+		ExpectNotFound(ctx, env.Client, machine, node)
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(3))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(3))
 	})
 	It("should delete one drifted node at a time", func() {
 		machine1, node1 := test.MachineAndNode(v1alpha5.Machine{
@@ -337,13 +328,8 @@ var _ = Describe("Drift", func() {
 		})
 		ExpectApplied(ctx, env.Client, machine1, node1, machine2, node2, prov)
 
-		// inform cluster state about the nodes and machines
-		ExpectMakeNodesReady(ctx, env.Client, node1, node2)
-		ExpectMakeMachinesReady(ctx, env.Client, machine1, machine2)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
-		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine1))
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
-		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine2))
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -352,8 +338,13 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine2)
+
 		// we don't need a new node, but we should evict everything off one of node2 which only has a single pod
 		// Expect one of the nodes to be deleted
-		ExpectMachineCount(ctx, env.Client, "==", 1)
+		ExpectNotFound(ctx, env.Client, machine2, node2)
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 	})
 })

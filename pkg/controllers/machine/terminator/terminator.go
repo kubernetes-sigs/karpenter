@@ -47,6 +47,11 @@ func NewTerminator(clk clock.Clock, kubeClient client.Client, eq *EvictionQueue)
 func (t *Terminator) Cordon(ctx context.Context, node *v1.Node) error {
 	stored := node.DeepCopy()
 	node.Spec.Unschedulable = true
+	// Adding this label to the node ensures that the node is removed from the load-balancer target group
+	// while it is draining and before it is terminated. This prevents 500s coming prior to health check
+	// when the load balancer controller hasn't yet determined that the node and underlying connections are gone
+	// https://github.com/aws/aws-node-termination-handler/issues/316
+	// https://github.com/aws/karpenter/pull/2518
 	node.Labels = lo.Assign(node.Labels, map[string]string{
 		v1.LabelNodeExcludeBalancers: "karpenter",
 	})
@@ -126,9 +131,9 @@ func (t *Terminator) evict(pods []*v1.Pod) {
 	}
 	// 2. Evict critical pods if all noncritical are evicted
 	if len(nonCritical) == 0 {
-		t.evictionQueue.Add(critical)
+		t.evictionQueue.Add(critical...)
 	} else {
-		t.evictionQueue.Add(nonCritical)
+		t.evictionQueue.Add(nonCritical...)
 	}
 }
 

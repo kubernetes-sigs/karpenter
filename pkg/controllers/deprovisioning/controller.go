@@ -222,7 +222,7 @@ func (c *Controller) launchReplacementMachines(ctx context.Context, action Comma
 
 	machineNames, err := c.provisioner.LaunchMachines(ctx, action.replacements, provisioning.WithReason(reason))
 	if err != nil {
-		// uncordon the nodes as the launch may fail (e.g. ICE or incompatible AMI)
+		// uncordon the nodes as the launch may fail (e.g. ICE)
 		err = multierr.Append(err, c.setNodesUnschedulable(ctx, false, action.candidates...))
 		return err
 	}
@@ -231,18 +231,32 @@ func (c *Controller) launchReplacementMachines(ctx context.Context, action Comma
 		return fmt.Errorf("expected %d machines, got %d", len(action.replacements), len(machineNames))
 	}
 
-	// We have the new nodes created at the API server so mark the old nodes for deletion
+	// We have the new machines created at the API server so mark the old machines for deletion
 	c.cluster.MarkForDeletion(candidateNames...)
+	if err = c.waitForReadiness(ctx, action, machineNames...); err != nil {
+		c.cluster.UnmarkForDeletion(candidateNames...)
+		return multierr.Combine(c.setNodesUnschedulable(ctx, false, action.candidates...),
+			fmt.Errorf("timed out checking node readiness, %w", err))
+	}
+	return nil
+}
 
-	// Wait for nodes to be ready
-	// TODO @njtran: Allow to bypass this check for certain deprovisioners
-	errs := make([]error, len(machineNames))
-	workqueue.ParallelizeUntil(ctx, len(machineNames), len(machineNames), func(i int) {
+// TODO @njtran: Allow to bypass this check for certain deprovisioners
+func (c *Controller) waitForReadiness(ctx context.Context, action Command, names ...string) error {
+	errs := make([]error, len(names))
+	pollStart := c.clock.Now()
+
+	workqueue.ParallelizeUntil(ctx, len(names), len(names), func(i int) {
 		// Wait for the machine to be initialized
 		var once sync.Once
 		if err := retry.Do(func() error {
 			machine := &v1alpha5.Machine{}
-			if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: machineNames[i]}, machine); err != nil {
+			if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: names[i]}, machine); err != nil {
+				// If the machine was deleted after a second (to give the cache time to update), then we assume
+				// that tha machine was deleted due to an Insufficient Capacity error
+				if errors.IsNotFound(err) && c.clock.Now().Add(time.Second).After(pollStart) {
+					return retry.Unrecoverable(fmt.Errorf("getting node, %w", err))
+				}
 				return fmt.Errorf("getting node, %w", err)
 			}
 			once.Do(func() {
@@ -255,17 +269,11 @@ func (c *Controller) launchReplacementMachines(ctx context.Context, action Comma
 			}
 			return nil
 		}, waitRetryOptions...); err != nil {
-			// nodes never become ready, so uncordon the nodes we were trying to delete and report the error
+			// machine never became ready or the machines that we tried to launch got Insufficient Capacity,
 			errs[i] = err
 		}
 	})
-	multiErr := multierr.Combine(errs...)
-	if multiErr != nil {
-		c.cluster.UnmarkForDeletion(candidateNames...)
-		return multierr.Combine(c.setNodesUnschedulable(ctx, false, action.candidates...),
-			fmt.Errorf("timed out checking node readiness, %w", multiErr))
-	}
-	return nil
+	return multierr.Combine(errs...)
 }
 
 func (c *Controller) setNodesUnschedulable(ctx context.Context, isUnschedulable bool, candidates ...*Candidate) error {

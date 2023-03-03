@@ -82,12 +82,36 @@ var _ = Describe("Termination", func() {
 		node.Finalizers = []string{v1alpha5.TerminationFinalizer}
 	})
 	It("should cordon, drain, and delete the Machine on terminate", func() {
-		ExpectApplied(ctx, env.Client, provisioner, node, machine)
+		pods := []*v1.Pod{
+			test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}}),
+			test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}}),
+		}
+		ExpectApplied(ctx, env.Client, machine, node, pods[0], pods[1])
 
-		// Kickoff the deletion flow for the machine
+		// Trigger Finalization Flow
 		Expect(env.Client.Delete(ctx, machine)).To(Succeed())
+		machine = ExpectExists(ctx, env.Client, machine)
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 
-		// Machine should delete and the Node deletion should cascade shortly after
+		// Expect the pods to be evicted
+		ExpectEvicted(env.Client, pods[0], pods[1])
+
+		// Expect node to exist and be draining, but not deleted
+		machine = ExpectExists(ctx, env.Client, machine)
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectNodeDraining(env.Client, node.Name)
+
+		ExpectDeleted(ctx, env.Client, pods[1])
+
+		// Expect node to exist and be draining, but not deleted
+		machine = ExpectExists(ctx, env.Client, machine)
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectNodeDraining(env.Client, node.Name)
+
+		ExpectDeleted(ctx, env.Client, pods[0])
+
+		// Reconcile to delete node
+		machine = ExpectExists(ctx, env.Client, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 		ExpectNotFound(ctx, env.Client, machine)
 	})
@@ -358,40 +382,6 @@ var _ = Describe("Termination", func() {
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 		ExpectNotFound(ctx, env.Client, machine)
 
-	})
-	It("should not delete machines until all pods are deleted", func() {
-		pods := []*v1.Pod{
-			test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}}),
-			test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}}),
-		}
-		ExpectApplied(ctx, env.Client, machine, node, pods[0], pods[1])
-
-		// Trigger Finalization Flow
-		Expect(env.Client.Delete(ctx, machine)).To(Succeed())
-		machine = ExpectExists(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-
-		// Expect the pods to be evicted
-		ExpectEvicted(env.Client, pods[0], pods[1])
-
-		// Expect node to exist and be draining, but not deleted
-		machine = ExpectExists(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		ExpectNodeDraining(env.Client, node.Name)
-
-		ExpectDeleted(ctx, env.Client, pods[1])
-
-		// Expect node to exist and be draining, but not deleted
-		machine = ExpectExists(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		ExpectNodeDraining(env.Client, node.Name)
-
-		ExpectDeleted(ctx, env.Client, pods[0])
-
-		// Reconcile to delete node
-		machine = ExpectExists(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		ExpectNotFound(ctx, env.Client, machine)
 	})
 	It("should wait for pods to terminate", func() {
 		pod := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})

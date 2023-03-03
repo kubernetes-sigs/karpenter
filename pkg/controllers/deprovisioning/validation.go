@@ -108,14 +108,14 @@ func (v *Validation) ShouldDeprovision(_ context.Context, c *Candidate) bool {
 // ValidateCommand validates a command for a deprovisioner
 func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidates []*Candidate) (bool, error) {
 	// map from nodes we are about to remove back into candidate nodes with cluster state
-	candidatesToDelete := mapCandidates(cmd.candidates, candidates)
+	candidates = mapCandidates(cmd.candidates, candidates)
 
 	// None of the chosen candidate nodes are valid for execution, so retry
-	if len(candidatesToDelete) == 0 {
+	if len(candidates) == 0 {
 		return false, nil
 	}
 
-	newMachines, allPodsScheduled, err := simulateScheduling(ctx, v.kubeClient, v.cluster, v.provisioner, candidatesToDelete...)
+	newMachines, allPodsScheduled, err := simulateScheduling(ctx, v.kubeClient, v.cluster, v.provisioner, candidates...)
 	if err != nil {
 		return false, fmt.Errorf("simluating scheduling, %w", err)
 	}
@@ -124,9 +124,9 @@ func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidate
 	}
 
 	// We want to ensure that the re-simulated scheduling using the current cluster state produces the same result.
-	// There are three possible options for the number of new candidatesToDelete that we need to handle:
+	// There are three possible options for the number of new candidates that we need to handle:
 	// len(newMachines) == 0, as long as we weren't expecting a new node, this is valid
-	// len(newMachines) > 1, something in the cluster changed so that the candidatesToDelete we were going to delete can no longer
+	// len(newMachines) > 1, something in the cluster changed so that the candidates we were going to delete can no longer
 	//                    be deleted without producing more than one node
 	// len(newMachines) == 1, as long as the node looks like what we were expecting, this is valid
 	if len(newMachines) == 0 {

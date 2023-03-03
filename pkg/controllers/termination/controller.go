@@ -80,34 +80,34 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("removing machines, %w", err)
 	}
-	if allRemoved {
-		// TODO @joinnis: Remove this section after v1beta1 migration is completed
-		// We need to keep the full termination flow in here during the migration timeframe
-		// This is because there is a short time where a node with the karpenter.sh/termination finalizer
-		// may not have a machine owner and we should still terminate gracefully
-		if err := c.terminator.Cordon(ctx, node); err != nil {
-			return reconcile.Result{}, fmt.Errorf("cordoning node, %w", err)
-		}
-		if err := c.terminator.Drain(ctx, node); err != nil {
-			if terminator.IsNodeDrainError(err) {
-				c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
-				return reconcile.Result{Requeue: true}, nil
-			}
-			return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
-		}
-		if err := c.cloudProvider.Delete(ctx, machineutil.NewFromNode(node)); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
-			return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
-		}
-		stored := node.DeepCopy()
-		controllerutil.RemoveFinalizer(node, v1alpha5.TerminationFinalizer)
-		if !equality.Semantic.DeepEqual(stored, node) {
-			if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
-				return reconcile.Result{}, client.IgnoreNotFound(err)
-			}
-			metrics.NodesTerminatedCounter.Inc()
-			logging.FromContext(ctx).Infof("deleted node")
-		}
+	if !allRemoved {
 		return reconcile.Result{}, nil
+	}
+	// TODO @joinnis: Remove this section after v1beta1 migration is completed
+	// We need to keep the full termination flow in here during the migration timeframe
+	// This is because there is a short time where a node with the karpenter.sh/termination finalizer
+	// may not have a machine owner and we should still terminate gracefully
+	if err := c.terminator.Cordon(ctx, node); err != nil {
+		return reconcile.Result{}, fmt.Errorf("cordoning node, %w", err)
+	}
+	if err := c.terminator.Drain(ctx, node); err != nil {
+		if terminator.IsNodeDrainError(err) {
+			c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
+			return reconcile.Result{Requeue: true}, nil
+		}
+		return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
+	}
+	if err := c.cloudProvider.Delete(ctx, machineutil.NewFromNode(node)); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
+		return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
+	}
+	stored := node.DeepCopy()
+	controllerutil.RemoveFinalizer(node, v1alpha5.TerminationFinalizer)
+	if !equality.Semantic.DeepEqual(stored, node) {
+		if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+			return reconcile.Result{}, client.IgnoreNotFound(err)
+		}
+		metrics.NodesTerminatedCounter.Inc()
+		logging.FromContext(ctx).Infof("deleted node")
 	}
 	return reconcile.Result{}, nil
 }

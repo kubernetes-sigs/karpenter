@@ -320,28 +320,42 @@ func ExpectMachineDeployedWithOffset(offset int, ctx context.Context, c client.C
 	return m, node
 }
 
+func ExpectMachinesCascadeDeletion(ctx context.Context, c client.Client, machines ...*v1alpha5.Machine) {
+	nodes := ExpectNodesWithOffset(1, ctx, c)
+	for _, machine := range machines {
+		// This expectation requires that the machine is already gone
+		ExpectNotFoundWithOffset(1, ctx, c, machine)
+		for _, node := range nodes {
+			if node.Spec.ProviderID == machine.Status.ProviderID {
+				Expect(c.Delete(ctx, node))
+			}
+		}
+	}
+}
+
 func ExpectMakeMachinesReady(ctx context.Context, c client.Client, machines ...*v1alpha5.Machine) {
 	ExpectMakeMachinesReadyWithOffset(1, ctx, c, machines...)
 }
 
 func ExpectMakeMachinesReadyWithOffset(offset int, ctx context.Context, c client.Client, machines ...*v1alpha5.Machine) {
-	for _, machine := range machines {
-		m := &v1alpha5.Machine{}
-		ExpectWithOffset(offset+1, c.Get(ctx, client.ObjectKeyFromObject(machine), m))
-
-		m.StatusConditions().MarkTrue(v1alpha5.MachineCreated)
-		m.StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
-		m.StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
-		ExpectAppliedWithOffset(offset+1, ctx, c, m)
+	for i := range machines {
+		machines[i] = ExpectExistsWithOffset(offset+1, ctx, c, machines[i])
+		machines[i].StatusConditions().MarkTrue(v1alpha5.MachineCreated)
+		machines[i].StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
+		machines[i].StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
+		ExpectAppliedWithOffset(offset+1, ctx, c, machines[i])
 	}
 }
 
 func ExpectMakeNodesReady(ctx context.Context, c client.Client, nodes ...*v1.Node) {
-	for _, node := range nodes {
-		var n v1.Node
-		Expect(c.Get(ctx, client.ObjectKeyFromObject(node), &n)).To(Succeed())
-		n.Status.Phase = v1.NodeRunning
-		n.Status.Conditions = []v1.NodeCondition{
+	ExpectMakeNodesReadyWithOffset(1, ctx, c, nodes...)
+}
+
+func ExpectMakeNodesReadyWithOffset(offset int, ctx context.Context, c client.Client, nodes ...*v1.Node) {
+	for i := range nodes {
+		nodes[i] = ExpectExistsWithOffset(offset+1, ctx, c, nodes[i])
+		nodes[i].Status.Phase = v1.NodeRunning
+		nodes[i].Status.Conditions = []v1.NodeCondition{
 			{
 				Type:               v1.NodeReady,
 				Status:             v1.ConditionTrue,
@@ -350,18 +364,22 @@ func ExpectMakeNodesReady(ctx context.Context, c client.Client, nodes ...*v1.Nod
 				Reason:             "KubeletReady",
 			},
 		}
-		if n.Labels == nil {
-			n.Labels = map[string]string{}
+		if nodes[i].Labels == nil {
+			nodes[i].Labels = map[string]string{}
 		}
-		n.Labels[v1alpha5.LabelNodeInitialized] = "true"
-		n.Spec.Taints = nil
-		ExpectApplied(ctx, c, &n)
+		nodes[i].Labels[v1alpha5.LabelNodeInitialized] = "true"
+		nodes[i].Spec.Taints = nil
+		ExpectAppliedWithOffset(offset+1, ctx, c, nodes[i])
 	}
 }
 
 func ExpectReconcileSucceeded(ctx context.Context, reconciler reconcile.Reconciler, key client.ObjectKey) reconcile.Result {
+	return ExpectReconcileSucceededWithOffset(1, ctx, reconciler, key)
+}
+
+func ExpectReconcileSucceededWithOffset(offset int, ctx context.Context, reconciler reconcile.Reconciler, key client.ObjectKey) reconcile.Result {
 	result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
-	ExpectWithOffset(1, err).ToNot(HaveOccurred())
+	ExpectWithOffset(offset+1, err).ToNot(HaveOccurred())
 	return result
 }
 
@@ -469,8 +487,26 @@ func ExpectResources(expected, real v1.ResourceList) {
 	}
 }
 
-func ExpectMachineCount(ctx context.Context, c client.Client, comparator string, count int) {
+func ExpectNodes(ctx context.Context, c client.Client) []*v1.Node {
+	return ExpectNodesWithOffset(1, ctx, c)
+}
+
+func ExpectNodesWithOffset(offset int, ctx context.Context, c client.Client) []*v1.Node {
+	nodeList := &v1.NodeList{}
+	ExpectWithOffset(offset+1, c.List(ctx, nodeList)).To(Succeed())
+	return lo.Map(nodeList.Items, func(n v1.Node, _ int) *v1.Node {
+		return &n
+	})
+}
+
+func ExpectMachines(ctx context.Context, c client.Client) []*v1alpha5.Machine {
+	return ExpectMachinesWithOffset(1, ctx, c)
+}
+
+func ExpectMachinesWithOffset(offset int, ctx context.Context, c client.Client) []*v1alpha5.Machine {
 	machineList := &v1alpha5.MachineList{}
-	ExpectWithOffset(1, c.List(ctx, machineList)).To(Succeed())
-	ExpectWithOffset(1, len(machineList.Items)).To(BeNumerically(comparator, count))
+	ExpectWithOffset(offset+1, c.List(ctx, machineList)).To(Succeed())
+	return lo.Map(machineList.Items, func(m v1alpha5.Machine, _ int) *v1alpha5.Machine {
+		return &m
+	})
 }

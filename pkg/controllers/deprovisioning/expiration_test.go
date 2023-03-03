@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -63,28 +64,23 @@ var _ = Describe("Expiration", func() {
 	It("should ignore nodes without TTLSecondsUntilExpired", func() {
 		ExpectApplied(ctx, env.Client, machine, node, prov)
 
-		// inform cluster state about the nodes and machines
-		ExpectMakeNodesReady(ctx, env.Client, node)
-		ExpectMakeMachinesReady(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		fakeClock.Step(10 * time.Minute)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 
 		// Expect to not create or delete more machines
-		ExpectMachineCount(ctx, env.Client, "==", 1)
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 		ExpectExists(ctx, env.Client, machine)
 	})
 	It("can delete expired nodes", func() {
-		prov.Spec.TTLSecondsUntilExpired = lo.ToPtr[int64](60)
+		prov.Spec.TTLSecondsUntilExpired = ptr.Int64(60)
 		ExpectApplied(ctx, env.Client, machine, node, prov)
 
-		// inform cluster state about the nodes and machines
-		ExpectMakeNodesReady(ctx, env.Client, node)
-		ExpectMakeMachinesReady(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		// step forward past the expiration time
 		fakeClock.Step(10 * time.Minute)
@@ -94,9 +90,13 @@ var _ = Describe("Expiration", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+
 		// Expect that the expired machine is gone
-		ExpectMachineCount(ctx, env.Client, "==", 0)
-		ExpectNotFound(ctx, env.Client, machine)
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+		ExpectNotFound(ctx, env.Client, machine, node)
 	})
 	It("should expire one node at a time, starting with most expired", func() {
 		expireProv := test.Provisioner(test.ProvisionerOptions{
@@ -116,9 +116,7 @@ var _ = Describe("Expiration", func() {
 				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
 			},
 		})
-		prov = test.Provisioner(test.ProvisionerOptions{
-			TTLSecondsUntilExpired: ptr.Int64(500),
-		})
+		prov.Spec.TTLSecondsUntilExpired = ptr.Int64(500)
 		machineNotExpire, nodeNotExpire := test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -136,13 +134,8 @@ var _ = Describe("Expiration", func() {
 
 		ExpectApplied(ctx, env.Client, machineToExpire, nodeToExpire, machineNotExpire, nodeNotExpire, expireProv, prov)
 
-		// inform cluster state about the nodes and machines
-		ExpectMakeNodesReady(ctx, env.Client, nodeToExpire, nodeNotExpire)
-		ExpectMakeMachinesReady(ctx, env.Client, machineToExpire, machineNotExpire)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodeToExpire))
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodeNotExpire))
-		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machineToExpire))
-		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machineNotExpire))
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{nodeToExpire, nodeNotExpire}, []*v1alpha5.Machine{machineToExpire, machineNotExpire})
 
 		// step forward past the expiration time
 		fakeClock.Step(10 * time.Minute)
@@ -152,9 +145,13 @@ var _ = Describe("Expiration", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machineToExpire)
+
 		// Expect that one of the expired machines is gone
-		ExpectMachineCount(ctx, env.Client, "==", 1)
-		ExpectNotFound(ctx, env.Client, machineToExpire)
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		ExpectNotFound(ctx, env.Client, machineToExpire, nodeToExpire)
 	})
 	It("can replace node for expiration", func() {
 		labels := map[string]string{
@@ -183,28 +180,75 @@ var _ = Describe("Expiration", func() {
 
 		// bind pods to node
 		ExpectManualBinding(ctx, env.Client, pod, node)
-		ExpectScheduled(ctx, env.Client, pod)
 
-		// inform cluster state about the nodes and machines
-		ExpectMakeNodesReady(ctx, env.Client, node)
-		ExpectMakeMachinesReady(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		fakeClock.Step(10 * time.Minute)
 
 		// deprovisioning won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1, machine)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+
 		// Expect that the new machine was created, and it's different than the original
-		ExpectMachineCount(ctx, env.Client, "==", 1)
-		machineList := &v1alpha5.MachineList{}
-		Expect(env.Client.List(ctx, machineList)).To(Succeed())
-		Expect(machineList.Items[0].Name).ToNot(Equal(machine.Name))
+		ExpectNotFound(ctx, env.Client, machine, node)
+		machines := ExpectMachines(ctx, env.Client)
+		nodes := ExpectNodes(ctx, env.Client)
+		Expect(machines).To(HaveLen(1))
+		Expect(nodes).To(HaveLen(1))
+		Expect(machines[0].Name).ToNot(Equal(machine.Name))
+		Expect(nodes[0].Name).ToNot(Equal(node.Name))
+	})
+	It("should uncordon nodes when expiration replacement partially fails", func() {
+		prov.Spec.TTLSecondsUntilExpired = ptr.Int64(30)
+
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, rs, machine, node, prov, pod)
+
+		// bind pods to node
+		ExpectManualBinding(ctx, env.Client, pod, node)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
+		fakeClock.Step(10 * time.Minute)
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectNewMachinesDeleted(ctx, env.Client, &wg, 1)
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
+		Expect(err).To(HaveOccurred())
+		wg.Wait()
+
+		// We should have tried to create a new machine but failed to do so; therefore, we uncordoned the existing node
+		node = ExpectExists(ctx, env.Client, node)
+		Expect(node.Spec.Unschedulable).To(BeFalse())
 	})
 	It("can replace node for expiration with multiple nodes", func() {
 		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
@@ -281,26 +325,24 @@ var _ = Describe("Expiration", func() {
 		ExpectManualBinding(ctx, env.Client, pods[0], node)
 		ExpectManualBinding(ctx, env.Client, pods[1], node)
 		ExpectManualBinding(ctx, env.Client, pods[2], node)
-		ExpectScheduled(ctx, env.Client, pods[0])
-		ExpectScheduled(ctx, env.Client, pods[1])
-		ExpectScheduled(ctx, env.Client, pods[2])
 
-		// inform cluster state about the nodes and machines
-		ExpectMakeNodesReady(ctx, env.Client, node)
-		ExpectMakeMachinesReady(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		fakeClock.Step(10 * time.Minute)
 
 		// deprovisioning won't delete the old machine until the new machine is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 3, machine)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 3)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
-		ExpectMachineCount(ctx, env.Client, "==", 3)
-		ExpectNotFound(ctx, env.Client, machine)
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(3))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(3))
+		ExpectNotFound(ctx, env.Client, machine, node)
 	})
 })
