@@ -134,6 +134,26 @@ var _ = AfterEach(func() {
 	}
 })
 
+var _ = Describe("Consolidation State", func() {
+	It("should not reset consolidation state if consolidation hasn't run", func() {
+		// this assumes that the consolidate reset period is 5 minutes, which it is currently
+		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(cluster.Consolidated()).To(BeTrue())
+		fakeClock.Step(1 * time.Minute)
+		Expect(cluster.Consolidated()).To(BeTrue())
+
+		// reconciling now shouldn't set the last consolidated time to current time, as consolidation isn't actually
+		// running since it last ran 1 minute ago
+		_, err = deprovisioningController.Reconcile(ctx, reconcile.Request{})
+		Expect(err).ToNot(HaveOccurred())
+		// but advancing the clock 4:30, so we are at 5:30 past the last run time should cause consolidated to return
+		// false
+		fakeClock.Step(4*time.Minute + 30*time.Second)
+		Expect(cluster.Consolidated()).To(BeFalse())
+	})
+})
+
 var _ = Describe("Pod Eviction Cost", func() {
 	const standardPodCost = 1.0
 	It("should have a standard disruptionCost for a pod with no priority or disruptionCost specified", func() {
