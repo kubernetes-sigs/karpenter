@@ -20,7 +20,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -318,7 +317,7 @@ var _ = Describe("Expiration", func() {
 				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("8")},
 			},
 		})
-		prov.Spec.TTLSecondsUntilExpired = lo.ToPtr[int64](200)
+		prov.Spec.TTLSecondsUntilExpired = ptr.Int64(200)
 		ExpectApplied(ctx, env.Client, rs, machine, node, prov, pods[0], pods[1], pods[2])
 
 		// bind pods to node

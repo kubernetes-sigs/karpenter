@@ -38,7 +38,6 @@ import (
 	clock "k8s.io/utils/clock/testing"
 	. "knative.dev/pkg/logging/testing"
 	"knative.dev/pkg/ptr"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -48,8 +47,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
-	"github.com/aws/karpenter-core/pkg/controllers/machine"
-	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
@@ -69,7 +66,6 @@ var provisioner *provisioning.Provisioner
 var cloudProvider *fake.CloudProvider
 var nodeStateController controller.Controller
 var machineStateController controller.Controller
-var machineController controller.Controller
 var fakeClock *clock.FakeClock
 var onDemandInstances []*cloudprovider.InstanceType
 var mostExpensiveInstance *cloudprovider.InstanceType
@@ -84,19 +80,13 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...), test.WithFieldIndexers(func(c cache.Cache) error {
-		return c.IndexField(ctx, &v1.Node{}, "spec.providerID", func(obj client.Object) []string {
-			return []string{obj.(*v1.Node).Spec.ProviderID}
-		})
-	}))
+	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
 	ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: true}))
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	machineStateController = informer.NewMachineController(env.Client, cluster)
-	terminator := terminator.NewTerminator(fakeClock, env.Client, terminator.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{})))
-	machineController = machine.NewController(fakeClock, env.Client, cloudProvider, terminator, events.NewRecorder(&record.FakeRecorder{}))
 	provisioner = provisioning.NewProvisioner(env.Client, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster)
 })
 
@@ -130,6 +120,7 @@ var _ = BeforeEach(func() {
 		fakeClock.Step(1 * time.Minute)
 	}
 	fakeClock.SetTime(time.Now())
+	cluster.SetConsolidated(false)
 	deprovisioningController = deprovisioning.NewController(fakeClock, env.Client, provisioner, cloudProvider, events.NewRecorder(&record.FakeRecorder{}), cluster)
 
 	// Reset Feature Flags to test defaults
@@ -143,7 +134,7 @@ var _ = AfterEach(func() {
 
 var _ = Describe("Consolidation State", func() {
 	It("should not reset consolidation state if consolidation hasn't run", func() {
-		// this assumes that the consolidate reset period is 5 minutes, which it is currently
+		// this assumes that the consolidation reset period is 5 minutes, which it is currently
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(cluster.Consolidated()).To(BeTrue())

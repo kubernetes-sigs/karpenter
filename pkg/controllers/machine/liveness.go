@@ -36,22 +36,22 @@ type Liveness struct {
 	kubeClient client.Client
 }
 
-// creationTTL is a heuristic time that we expect to succeed with our cloudprovider.Create() call
+// launchTTL is a heuristic time that we expect to succeed with our cloudprovider.Create() call
 // If we don't succeed within this time, then we should delete and try again through some other mechanism
-const creationTTL = time.Minute * 2
+const launchTTL = time.Minute * 2
 
 func (l *Liveness) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	creationRes, creationErr := l.creationTTL(ctx, machine)
+	creationRes, creationErr := l.launchTTL(ctx, machine)
 	registrationRes, registrationErr := l.registrationTTL(ctx, machine)
 	return result.Min(creationRes, registrationRes), multierr.Combine(creationErr, registrationErr)
 }
 
-func (l *Liveness) creationTTL(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
+func (l *Liveness) launchTTL(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
 	if machine.StatusConditions().GetCondition(v1alpha5.MachineCreated).IsTrue() {
 		return reconcile.Result{}, nil
 	}
-	if machine.CreationTimestamp.IsZero() || l.clock.Since(machine.CreationTimestamp.Time) < creationTTL {
-		return reconcile.Result{RequeueAfter: creationTTL - l.clock.Since(machine.CreationTimestamp.Time)}, nil
+	if machine.CreationTimestamp.IsZero() || l.clock.Since(machine.CreationTimestamp.Time) < launchTTL {
+		return reconcile.Result{RequeueAfter: launchTTL - l.clock.Since(machine.CreationTimestamp.Time)}, nil
 	}
 	// Delete the machine if we believe the machine won't create
 	if err := l.kubeClient.Delete(ctx, machine); err != nil {

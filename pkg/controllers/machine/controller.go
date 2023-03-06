@@ -145,8 +145,8 @@ func (c *Controller) Finalize(ctx context.Context, machine *v1alpha5.Machine) (r
 	}
 	controllerutil.RemoveFinalizer(machine, v1alpha5.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(stored, machine) {
-		if err := c.kubeClient.Patch(ctx, machine, client.MergeFrom(stored)); client.IgnoreNotFound(err) != nil {
-			return reconcile.Result{}, fmt.Errorf("removing machine termination finalizer, %w", err)
+		if err := c.kubeClient.Patch(ctx, machine, client.MergeFrom(stored)); err != nil {
+			return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("removing machine termination finalizer, %w", err))
 		}
 		logging.FromContext(ctx).Infof("deleted machine")
 	}

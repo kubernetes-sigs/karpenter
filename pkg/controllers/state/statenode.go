@@ -36,21 +36,21 @@ import (
 // nolint: revive
 type StateNodes []*StateNode
 
-// Active filters nodes that are not in a MarkedForDeletion state
+// Active filters StateNodes that are not in a MarkedForDeletion state
 func (n StateNodes) Active() StateNodes {
 	return lo.Filter(n, func(node *StateNode, _ int) bool {
 		return !node.MarkedForDeletion()
 	})
 }
 
-// Deleting filters nodes that are in a MarkedForDeletion state
+// Deleting filters StateNodes that are in a MarkedForDeletion state
 func (n StateNodes) Deleting() StateNodes {
 	return lo.Filter(n, func(node *StateNode, _ int) bool {
 		return node.MarkedForDeletion()
 	})
 }
 
-// Pods gets the pods assigned to all Nodes based on the kubernetes api-server bindings
+// Pods gets the pods assigned to all StateNodes based on the kubernetes api-server bindings
 func (n StateNodes) Pods(ctx context.Context, c client.Client) ([]*v1.Pod, error) {
 	var pods []*v1.Pod
 	for _, node := range n {
