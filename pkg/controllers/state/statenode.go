@@ -102,7 +102,7 @@ func NewNode() *StateNode {
 		podRequests:         map[types.NamespacedName]v1.ResourceList{},
 		podLimits:           map[types.NamespacedName]v1.ResourceList{},
 		hostPortUsage:       &scheduling.HostPortUsage{},
-		volumeUsage:         &scheduling.VolumeUsage{},
+		volumeUsage:         scheduling.NewVolumeUsage(),
 		volumeLimits:        scheduling.VolumeCount{},
 	}
 }
@@ -319,7 +319,7 @@ func (in *StateNode) Owned() bool {
 	return in.Labels()[v1alpha5.ProvisionerNameLabelKey] != ""
 }
 
-func (in *StateNode) updateForPod(ctx context.Context, pod *v1.Pod) {
+func (in *StateNode) updateForPod(ctx context.Context, kubeClient client.Client, pod *v1.Pod) {
 	podKey := client.ObjectKeyFromObject(pod)
 
 	in.podRequests[podKey] = resources.RequestsForPods(pod)
@@ -330,7 +330,7 @@ func (in *StateNode) updateForPod(ctx context.Context, pod *v1.Pod) {
 		in.daemonSetLimits[podKey] = resources.LimitsForPods(pod)
 	}
 	in.hostPortUsage.Add(ctx, pod)
-	in.volumeUsage.Add(ctx, pod)
+	in.volumeUsage.Add(ctx, kubeClient, pod)
 }
 
 func (in *StateNode) cleanupForPod(podKey types.NamespacedName) {

@@ -175,7 +175,7 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 	// first try to schedule against an in-flight real node
 	for _, node := range s.existingNodes {
-		if err := node.Add(ctx, pod); err == nil {
+		if err := node.Add(ctx, s.kubeClient, pod); err == nil {
 			return nil
 		}
 	}

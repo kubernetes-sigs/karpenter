@@ -382,17 +382,20 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *
 		oldNode = NewNode()
 	}
 	n := &StateNode{
-		Node:              node,
-		Machine:           oldNode.Machine,
-		hostPortUsage:     scheduling.NewHostPortUsage(),
-		volumeUsage:       scheduling.NewVolumeLimits(c.kubeClient),
-		volumeLimits:      scheduling.VolumeCount{},
-		daemonSetRequests: map[types.NamespacedName]v1.ResourceList{},
-		daemonSetLimits:   map[types.NamespacedName]v1.ResourceList{},
-		podRequests:       map[types.NamespacedName]v1.ResourceList{},
-		podLimits:         map[types.NamespacedName]v1.ResourceList{},
-		markedForDeletion: oldNode.markedForDeletion,
-		nominatedUntil:    oldNode.nominatedUntil,
+		Node:                node,
+		Machine:             oldNode.Machine,
+		inflightAllocatable: oldNode.inflightAllocatable,
+		inflightCapacity:    oldNode.inflightCapacity,
+		startupTaints:       oldNode.startupTaints,
+		daemonSetRequests:   map[types.NamespacedName]v1.ResourceList{},
+		daemonSetLimits:     map[types.NamespacedName]v1.ResourceList{},
+		podRequests:         map[types.NamespacedName]v1.ResourceList{},
+		podLimits:           map[types.NamespacedName]v1.ResourceList{},
+		hostPortUsage:       scheduling.NewHostPortUsage(),
+		volumeUsage:         scheduling.NewVolumeUsage(),
+		volumeLimits:        scheduling.VolumeCount{},
+		markedForDeletion:   oldNode.markedForDeletion,
+		nominatedUntil:      oldNode.nominatedUntil,
 	}
 	if err := multierr.Combine(
 		c.populateStartupTaints(ctx, n),
@@ -484,7 +487,7 @@ func (c *Cluster) populateResourceRequests(ctx context.Context, n *StateNode) er
 			continue
 		}
 		c.cleanupOldBindings(pod)
-		n.updateForPod(ctx, pod)
+		n.updateForPod(ctx, c.kubeClient, pod)
 		c.bindings[client.ObjectKeyFromObject(pod)] = pod.Spec.NodeName
 	}
 	return nil
@@ -504,7 +507,7 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 		return errors.NewNotFound(schema.GroupResource{Resource: "Machine"}, pod.Spec.NodeName)
 	}
 	c.cleanupOldBindings(pod)
-	n.updateForPod(ctx, pod)
+	n.updateForPod(ctx, c.kubeClient, pod)
 	c.bindings[client.ObjectKeyFromObject(pod)] = pod.Spec.NodeName
 	return nil
 }

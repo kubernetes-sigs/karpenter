@@ -19,6 +19,7 @@ import (
 	"fmt"
 
 	v1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -58,7 +59,7 @@ func NewExistingNode(n *state.StateNode, topology *Topology, daemonResources v1.
 	return node
 }
 
-func (n *ExistingNode) Add(ctx context.Context, pod *v1.Pod) error {
+func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v1.Pod) error {
 	// Check Taints
 	if err := scheduling.Taints(n.Taints()).Tolerates(pod); err != nil {
 		return err
@@ -69,7 +70,7 @@ func (n *ExistingNode) Add(ctx context.Context, pod *v1.Pod) error {
 	}
 
 	// determine the number of volumes that will be mounted if the pod schedules
-	mountedVolumeCount, err := n.VolumeUsage().Validate(ctx, pod)
+	mountedVolumeCount, err := n.VolumeUsage().Validate(ctx, kubeClient, pod)
 	if err != nil {
 		return err
 	}
@@ -109,6 +110,6 @@ func (n *ExistingNode) Add(ctx context.Context, pod *v1.Pod) error {
 	n.requirements = nodeRequirements
 	n.topology.Record(pod, nodeRequirements)
 	n.HostPortUsage().Add(ctx, pod)
-	n.VolumeUsage().Add(ctx, pod)
+	n.VolumeUsage().Add(ctx, kubeClient, pod)
 	return nil
 }
