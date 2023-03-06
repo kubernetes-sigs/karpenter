@@ -175,7 +175,7 @@ var _ = Describe("Expiration", func() {
 				},
 			},
 		})
-		prov.Spec.TTLSecondsUntilExpired = lo.ToPtr[int64](30)
+		prov.Spec.TTLSecondsUntilExpired = ptr.Int64(30)
 		ExpectApplied(ctx, env.Client, rs, pod, machine, node, prov)
 
 		// bind pods to node

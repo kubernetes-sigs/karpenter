@@ -58,9 +58,9 @@ type Controller struct {
 // pollingPeriod that we inspect cluster to look for opportunities to deprovision
 const pollingPeriod = 10 * time.Second
 
-var errCandidateNodeDeleting = fmt.Errorf("candidate node is deleting")
+var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 
-// waitRetryOptions are the retry options used when waiting on a node to become ready or to be deleted
+// waitRetryOptions are the retry options used when waiting on a machine to become ready or to be deleted
 // readiness can take some time as the node needs to come up, have any daemonset extended resoruce plugins register, etc.
 // deletion can take some time in the case of restrictive PDBs that throttle the rate at which the node is drained
 var waitRetryOptions = []retry.Option{
@@ -81,18 +81,18 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 		recorder:      recorder,
 		cloudProvider: cp,
 		deprovisioners: []Deprovisioner{
-			// Expire any nodes that must be deleted, allowing their pods to potentially land on currently
+			// Expire any machines that must be deleted, allowing their pods to potentially land on currently
 			NewExpiration(clk, kubeClient, cluster, provisioner, recorder),
-			// Terminate any nodes that have drifted from provisioning specifications, allowing the pods to reschedule.
+			// Terminate any machines that have drifted from provisioning specifications, allowing the pods to reschedule.
 			NewDrift(kubeClient, cluster, provisioner, recorder),
-			// Delete any remaining empty nodes as there is zero cost in terms of dirsuption.  Emptiness and
+			// Delete any remaining empty machines as there is zero cost in terms of disruption.  Emptiness and
 			// emptyNodeConsolidation are mutually exclusive, only one of these will operate
 			NewEmptiness(clk),
-			NewEmptyNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
-			// Attempt to identify multiple nodes that we can consolidate simultaneously to reduce pod churn
-			NewMultiNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
-			// And finally fall back our single node consolidation to further reduce cluster cost.
-			NewSingleNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
+			NewEmptyMachineConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
+			// Attempt to identify multiple machines that we can consolidate simultaneously to reduce pod churn
+			NewMultiMachineConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
+			// And finally fall back our single machines consolidation to further reduce cluster cost.
+			NewSingleMachineConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
 		},
 	}
 }
@@ -251,14 +251,14 @@ func (c *Controller) waitForReadiness(ctx context.Context, action Command, name 
 	}, waitRetryOptions...)
 }
 
-// waitForDeletion waits for the specified node to be removed from the API server. This deletion can take some period
-// of time if there are PDBs that govern pods on the node as we need to wait until the node drains before
+// waitForDeletion waits for the specified machine to be removed from the API server. This deletion can take some period
+// of time if there are PDBs that govern pods on the machine as we need to wait until the node drains before
 // it's actually deleted.
 func (c *Controller) waitForDeletion(ctx context.Context, machine *v1alpha5.Machine) {
 	if err := retry.Do(func() error {
 		m := &v1alpha5.Machine{}
 		nerr := c.kubeClient.Get(ctx, client.ObjectKeyFromObject(machine), m)
-		// We expect the not node found error, at which point we know the node is deleted.
+		// We expect the not machine found error, at which point we know the machine is deleted.
 		if errors.IsNotFound(nerr) {
 			return nil
 		}
@@ -267,7 +267,7 @@ func (c *Controller) waitForDeletion(ctx context.Context, machine *v1alpha5.Mach
 		if nerr != nil {
 			return fmt.Errorf("expected machine to be not found, %w", nerr)
 		}
-		// the node still exists
+		// the machine still exists
 		return fmt.Errorf("expected machine to be not found")
 	}, waitRetryOptions...,
 	); err != nil {

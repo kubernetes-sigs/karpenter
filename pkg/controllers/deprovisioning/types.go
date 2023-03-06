@@ -113,7 +113,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, clk clock.Clock
 
 // lifetimeRemaining calculates the fraction of node lifetime remaining in the range [0.0, 1.0].  If the TTLSecondsUntilExpired
 // is non-zero, we use it to scale down the disruption costs of nodes that are going to expire.  Just after creation, the
-// disruption cost is highest and it approaches zero as the node ages towards its expiration time.
+// disruption cost is highest, and it approaches zero as the node ages towards its expiration time.
 func (c *Candidate) lifetimeRemaining(clock clock.Clock) float64 {
 	remaining := 1.0
 	if c.provisioner.Spec.TTLSecondsUntilExpired != nil {
@@ -136,10 +136,10 @@ const (
 
 func (a action) String() string {
 	switch a {
-	// Deprovisioning action with no replacement nodes
+	// Deprovisioning action with no replacement machines
 	case actionDelete:
 		return "delete"
-	// Deprovisioning action with replacement nodes
+	// Deprovisioning action with replacement machines
 	case actionReplace:
 		return "replace"
 	// Deprovisioning failed for a retryable reason
@@ -172,31 +172,31 @@ func (o Command) String() string {
 	if len(o.replacements) == 0 {
 		return buf.String()
 	}
-	odNodes := 0
-	spotNodes := 0
+	odMachines := 0
+	spotMachines := 0
 	for _, machine := range o.replacements {
 		ct := machine.Requirements.Get(v1alpha5.LabelCapacityType)
 		if ct.Has(v1alpha5.CapacityTypeOnDemand) {
-			odNodes++
+			odMachines++
 		}
 		if ct.Has(v1alpha5.CapacityTypeSpot) {
-			spotNodes++
+			spotMachines++
 		}
 	}
-	// Print list of instance types for the first replacementNode.
+	// Print list of instance types for the first replacements.
 	if len(o.replacements) > 1 {
-		fmt.Fprintf(&buf, " and replacing with %d spot and %d on-demand nodes from types %s",
-			spotNodes, odNodes,
+		fmt.Fprintf(&buf, " and replacing with %d spot and %d on-demand machines from types %s",
+			spotMachines, odMachines,
 			scheduling.InstanceTypeList(o.replacements[0].InstanceTypeOptions))
 		return buf.String()
 	}
 	ct := o.replacements[0].Requirements.Get(v1alpha5.LabelCapacityType)
-	nodeDesc := "node"
+	machineDesc := "machine"
 	if ct.Len() == 1 {
-		nodeDesc = fmt.Sprintf("%s node", ct.Any())
+		machineDesc = fmt.Sprintf("%s machine", ct.Any())
 	}
 	fmt.Fprintf(&buf, " and replacing with %s from types %s",
-		nodeDesc,
+		machineDesc,
 		scheduling.InstanceTypeList(o.replacements[0].InstanceTypeOptions))
 	return buf.String()
 }

@@ -54,7 +54,7 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	if _, ok := lo.Find(deletingNodes, func(n *state.StateNode) bool {
 		return candidateNames.Has(n.Name())
 	}); ok {
-		return nil, false, errCandidateNodeDeleting
+		return nil, false, errCandidateDeleting
 	}
 
 	// We get the pods that are on nodes that are deleting

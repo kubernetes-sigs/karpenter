@@ -28,20 +28,19 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
-// SingleNodeConsolidation is the consolidation controller that performs single node consolidation.
-type SingleNodeConsolidation struct {
+// SingleMachineConsolidation is the consolidation controller that performs single machine consolidation.
+type SingleMachineConsolidation struct {
 	consolidation
 }
 
-func NewSingleNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cp cloudprovider.CloudProvider, recorder events.Recorder) *SingleNodeConsolidation {
-	return &SingleNodeConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
+func NewSingleMachineConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
+	cp cloudprovider.CloudProvider, recorder events.Recorder) *SingleMachineConsolidation {
+	return &SingleMachineConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
 }
 
-// ComputeCommand generates a deprovisioning command given deprovisionable nodes
-//
-//nolint:gocyclo
-func (c *SingleNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
+// ComputeCommand generates a deprovisioning command given deprovisionable machines
+// nolint:gocyclo
+func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	if c.cluster.Consolidated() {
 		return Command{action: actionDoNothing}, nil
 	}

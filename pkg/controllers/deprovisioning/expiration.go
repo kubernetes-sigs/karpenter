@@ -99,7 +99,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...*Candidat
 		newMachines, allPodsScheduled, err := simulateScheduling(ctx, e.kubeClient, e.cluster, e.provisioner, candidate)
 		if err != nil {
 			// if a candidate node is now deleting, just retry
-			if errors.Is(err, errCandidateNodeDeleting) {
+			if errors.Is(err, errCandidateDeleting) {
 				continue
 			}
 			return Command{}, err

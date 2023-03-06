@@ -28,7 +28,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
-// Emptiness is a subreconciler that deletes empty nodes.
+// Emptiness is a subreconciler that deletes empty machines.
 // Emptiness will respect TTLSecondsAfterEmpty
 type Emptiness struct {
 	clock clock.Clock
@@ -40,13 +40,13 @@ func NewEmptiness(clk clock.Clock) *Emptiness {
 	}
 }
 
-// ShouldDeprovision is a predicate used to filter deprovisionable nodes
+// ShouldDeprovision is a predicate used to filter deprovisionable machines
 func (e *Emptiness) ShouldDeprovision(ctx context.Context, c *Candidate) bool {
 	if c.provisioner == nil || c.provisioner.Spec.TTLSecondsAfterEmpty == nil || len(c.pods) != 0 {
 		return false
 	}
 
-	emptinessTimestamp, hasEmptinessTimestamp := c.Annotations()[v1alpha5.EmptinessTimestampAnnotationKey]
+	emptinessTimestamp, hasEmptinessTimestamp := c.Node.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
 	if !hasEmptinessTimestamp {
 		return false
 	}
@@ -61,7 +61,7 @@ func (e *Emptiness) ShouldDeprovision(ctx context.Context, c *Candidate) bool {
 	return e.clock.Now().After(emptinessTime.Add(ttl))
 }
 
-// ComputeCommand generates a deprovisioning command given deprovisionable nodes
+// ComputeCommand generates a deprovisioning command given deprovisionable machines
 func (e *Emptiness) ComputeCommand(_ context.Context, candidates ...*Candidate) (Command, error) {
 	emptyCandidates := lo.Filter(candidates, func(cn *Candidate, _ int) bool {
 		return cn.Machine.DeletionTimestamp.IsZero() && len(cn.pods) == 0

@@ -32,8 +32,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
-// Drift is a subreconciler that deletes empty nodes.
-// Drift will respect TTLSecondsAfterEmpty
+// Drift is a subreconciler that deletes drifted machines.
 type Drift struct {
 	kubeClient  client.Client
 	cluster     *state.Cluster
@@ -50,22 +49,22 @@ func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *pro
 	}
 }
 
-// ShouldDeprovision is a predicate used to filter deprovisionable nodes
+// ShouldDeprovision is a predicate used to filter deprovisionable machines
 func (d *Drift) ShouldDeprovision(ctx context.Context, c *Candidate) bool {
-	// Look up the feature flag to see if we should deprovision the node because of drift.
+	// Look up the feature flag to see if we should deprovision the machine because of drift.
 	if !settings.FromContext(ctx).DriftEnabled {
 		return false
 	}
 	return c.Annotations()[v1alpha5.VoluntaryDisruptionAnnotationKey] == v1alpha5.VoluntaryDisruptionDriftedAnnotationValue
 }
 
-// ComputeCommand generates a deprovisioning command given deprovisionable nodes
+// ComputeCommand generates a deprovisioning command given deprovisionable machines
 func (d *Drift) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	pdbs, err := NewPDBLimits(ctx, d.kubeClient)
 	if err != nil {
 		return Command{}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
-	// filter out nodes that can't be terminated
+	// filter out machines that can't be terminated
 	candidates = lo.Filter(candidates, func(cn *Candidate, _ int) bool {
 		if !cn.Machine.DeletionTimestamp.IsZero() {
 			return false
@@ -83,11 +82,11 @@ func (d *Drift) ComputeCommand(ctx context.Context, candidates ...*Candidate) (C
 	})
 
 	for _, candidate := range candidates {
-		// Check if we need to create any nodes.
+		// Check if we need to create any machines.
 		newMachines, allPodsScheduled, err := simulateScheduling(ctx, d.kubeClient, d.cluster, d.provisioner, candidate)
 		if err != nil {
-			// if a candidate node is now deleting, just retry
-			if errors.Is(err, errCandidateNodeDeleting) {
+			// if a candidate machine is now deleting, just retry
+			if errors.Is(err, errCandidateDeleting) {
 				continue
 			}
 			return Command{}, err

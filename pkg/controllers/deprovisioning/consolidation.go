@@ -191,7 +191,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	newMachines, allPodsScheduled, err := simulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, candidates...)
 	if err != nil {
 		// if a candidate node is now deleting, just retry
-		if errors.Is(err, errCandidateNodeDeleting) {
+		if errors.Is(err, errCandidateDeleting) {
 			return Command{action: actionDoNothing}, nil
 		}
 		return Command{}, err
