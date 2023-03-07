@@ -61,6 +61,15 @@ func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 		action:     actionDelete,
 	}
 
+	// empty node consolidation doesn't use Validation as we get to take advantage of cluster.IsNodeNominated.  This
+	// lets us avoid a scheduling simulation (which is performed periodically while pending pods exist and drives
+	// cluster.IsNodeNominated already).
+	select {
+	case <-ctx.Done():
+		return Command{}, errors.New("interrupted")
+	case <-c.clock.After(consolidationTTL):
+	}
+
 	validationCandidates, err := c.getValidationCandidates(ctx, cmd)
 	if err != nil {
 		return Command{}, fmt.Errorf("getting validation candidates, %w", err)
@@ -78,22 +87,14 @@ func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 }
 
 func (c *EmptyMachineConsolidation) getValidationCandidates(ctx context.Context, cmd Command) ([]*Candidate, error) {
-	// empty node consolidation doesn't use Validation as we get to take advantage of cluster.IsNodeNominated.  This
-	// lets us avoid a scheduling simulation (which is performed periodically while pending pods exist and drives
-	// cluster.IsNodeNominated already).
-	select {
-	case <-ctx.Done():
-		return nil, errors.New("interrupted")
-	case <-c.clock.After(consolidationTTL):
-	}
 	// Re-compute Machine Disruption Gates
-	mws, err := buildDisruptionGates(ctx, c.kubeClient, c.clock)
+	gates, err := buildDisruptionGates(ctx, c.kubeClient, c.clock)
 	if err != nil {
 		return nil, fmt.Errorf("building machine disruption gates mapping, %w", err)
 	}
-	names, err := getProhibitedNodeNames(ctx, c.kubeClient, mws[consolidationMethod])
+	names, err := getProhibitedMachineNames(ctx, c.kubeClient, gates[consolidationMethod])
 	if err != nil {
-		return nil, fmt.Errorf("getting prohibited node names, %w", err)
+		return nil, fmt.Errorf("getting prohibited machine names, %w", err)
 	}
 	validationCandidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.clock, c.cloudProvider, c.ShouldDeprovision, c.recorder, names)
 	if err != nil {

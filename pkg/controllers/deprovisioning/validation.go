@@ -95,7 +95,7 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 		if v.cluster.IsNodeNominated(n.Name()) {
 			return false, nil
 		}
-		// a disruption gate doesn't allow deprovisioning, try deprovisioning on the node another time
+		// a disruption gate doesn't allow deprovisioning, try deprovisioning later
 		if prohibited.Has(n.Name()) {
 			v.recorder.Publish(deprovisioningevents.Blocked(n.Node, n.Machine, "blocking disruption gate")...)
 			return false, nil
@@ -111,19 +111,19 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 }
 
 func (v *Validation) getProhibitedCandidates(ctx context.Context) (sets.String, error) {
-	// Re-compute Maintenance Windows for candidate validation
+	// Re-compute Machine Disruption Gates for candidate validation
 	gates, err := buildDisruptionGates(ctx, v.kubeClient, v.clock)
 	if err != nil {
 		return nil, fmt.Errorf("building machine disruption gates, %w", err)
 	}
-	prohibited, err := getProhibitedNodeNames(ctx, v.kubeClient, gates[consolidationMethod])
+	prohibited, err := getProhibitedMachineNames(ctx, v.kubeClient, gates[consolidationMethod])
 	if err != nil {
-		return nil, fmt.Errorf("getting prohibited node names, %w", err)
+		return nil, fmt.Errorf("getting prohibited machine names, %w", err)
 	}
 	return prohibited, nil
 }
 
-// ShouldDeprovision is a predicate used to filter deprovisionable nodes
+// ShouldDeprovision is a predicate used to filter deprovisionable machines
 func (v *Validation) ShouldDeprovision(_ context.Context, c *Candidate) bool {
 	if val, ok := c.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey]; ok {
 		return val != "true"
@@ -165,14 +165,14 @@ func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidate
 		return false, nil
 	}
 
-	// we need more than one replacement machine which is never valid currently (all of our node replacement is m->1, never m->n)
+	// we need more than one replacement machine which is never valid currently (all of our machine replacement is m->1, never m->n)
 	if len(newMachines) > 1 {
 		return false, nil
 	}
 
 	// we now know that scheduling simulation wants to create one new machine
 	if len(cmd.replacements) == 0 {
-		// but we weren't expecting any new nodes, so this is invalid
+		// but we weren't expecting any new machines, so this is invalid
 		return false, nil
 	}
 

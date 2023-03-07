@@ -117,11 +117,11 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	// Attempt different deprovisioning methods. We'll only let one method perform an action
 	isConsolidated := c.cluster.Consolidated()
 	for _, d := range c.deprovisioners {
-		prohibitedNodeNames, err := getProhibitedNodeNames(ctx, c.kubeClient, gates[d.String()])
+		prohibited, err := getProhibitedMachineNames(ctx, c.kubeClient, gates[d.String()])
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("determining machines with prohibited deprovisioning, %w", err)
 		}
-		candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.clock, c.cloudProvider, d.ShouldDeprovision, c.recorder, prohibitedNodeNames)
+		candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.clock, c.cloudProvider, d.ShouldDeprovision, c.recorder, prohibited)
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("determining candidates, %w", err)
 		}

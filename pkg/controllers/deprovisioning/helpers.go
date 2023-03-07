@@ -40,18 +40,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func getProhibitedNodeNames(ctx context.Context, kubeClient client.Client, gates []*v1alpha5.MachineDisruptionGate) (sets.String, error) {
+func getProhibitedMachineNames(ctx context.Context, kubeClient client.Client, gates []*v1alpha5.MachineDisruptionGate) (sets.String, error) {
 	names := sets.NewString()
 	for _, gate := range gates {
-		nodeList := &v1.NodeList{}
-		if err := kubeClient.List(ctx, nodeList,
+		machineList := &v1alpha5.MachineList{}
+		if err := kubeClient.List(ctx, machineList,
 			utilsscheduling.TopologyListOptions("", gate.Spec.Selector),
 			client.HasLabels{v1alpha5.ProvisionerNameLabelKey},
 		); err != nil {
-			return nil, fmt.Errorf("listing nodes, %w", err)
+			return nil, fmt.Errorf("listing machines, %w", err)
 		}
-		nodes := lo.Map(nodeList.Items, func(n v1.Node, _ int) string { return n.Name })
-		names.Insert(nodes...)
+		machines := lo.Map(machineList.Items, func(m v1alpha5.Machine, _ int) string { return m.Name })
+		names.Insert(machines...)
 	}
 	return names, nil
 }
@@ -195,7 +195,7 @@ func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
 
 // GetCandidates returns nodes that appear to be currently deprovisionable based off of their provisioner
 func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, clk clock.Clock, cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter,
-	recorder events.Recorder, prohibitedNodeNames sets.String) ([]*Candidate, error) {
+	recorder events.Recorder, prohibited sets.String) ([]*Candidate, error) {
 	provisionerMap, provisionerToInstanceTypes, err := buildProvisionerMap(ctx, kubeClient, cloudProvider)
 	if err != nil {
 		return nil, err
@@ -204,14 +204,14 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 		cn, e := NewCandidate(ctx, kubeClient, clk, n, provisionerMap, provisionerToInstanceTypes)
 		return cn, e == nil
 	})
-	for _, n := range candidates {
-		// If node is prohibited by a Machine Disruption Gate, skip node, but emit event.
-		if prohibitedNodeNames.Has(n.Name()) {
-			recorder.Publish(deprovisioningevents.Blocked(n.Node, n.Machine, "has blocking disruption gate")...)
+	for _, c := range candidates {
+		// If machine is prohibited by a Machine Disruption Gate, emit event and skip deprovisioning.
+		if prohibited.Has(c.Name()) {
+			recorder.Publish(deprovisioningevents.Blocked(c.Node, c.Machine, "has blocking disruption gate")...)
 		}
 	}
 	// Filter only the valid candidates that we should deprovision
-	return lo.Filter(candidates, func(c *Candidate, _ int) bool { return shouldDeprovision(ctx, c) && !prohibitedNodeNames.Has(c.Name()) }), nil
+	return lo.Filter(candidates, func(c *Candidate, _ int) bool { return shouldDeprovision(ctx, c) && !prohibited.Has(c.Name()) }), nil
 }
 
 // buildProvisionerMap builds a provName -> provisioner map and a provName -> instanceName -> instance type map
