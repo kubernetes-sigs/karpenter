@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package provisioning
+package scheduling
 
 import (
 	"context"
@@ -140,9 +140,9 @@ func (v *VolumeTopology) getPersistentVolumeClaim(ctx context.Context, pod *v1.P
 	return pvc, nil
 }
 
-// validatePersistentVolumeClaims returns an error if the pod doesn't appear to be valid with respect to
+// ValidatePersistentVolumeClaims returns an error if the pod doesn't appear to be valid with respect to
 // PVCs (e.g. the PVC is not found or references an unknown storage class).
-func (v *VolumeTopology) validatePersistentVolumeClaims(ctx context.Context, pod *v1.Pod) error {
+func (v *VolumeTopology) ValidatePersistentVolumeClaims(ctx context.Context, pod *v1.Pod) error {
 	for _, volume := range pod.Spec.Volumes {
 		var storageClassName *string
 		var volumeName string

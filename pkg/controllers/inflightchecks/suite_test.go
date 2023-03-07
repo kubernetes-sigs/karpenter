@@ -17,7 +17,6 @@ package inflightchecks_test
 import (
 	"context"
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 
@@ -29,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	clock "k8s.io/utils/clock/testing"
 	. "knative.dev/pkg/logging/testing"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis"
@@ -36,7 +36,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/inflightchecks"
-	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
@@ -48,7 +47,7 @@ var inflightController controller.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
 var cp *fake.CloudProvider
-var recorder *FakeEventRecorder
+var recorder *test.EventRecorder
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -58,10 +57,14 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
-	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
+	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...), test.WithFieldIndexers(func(c cache.Cache) error {
+		return c.IndexField(ctx, &v1.Node{}, "spec.providerID", func(obj client.Object) []string {
+			return []string{obj.(*v1.Node).Spec.ProviderID}
+		})
+	}))
 	ctx = settings.ToContext(ctx, test.Settings())
 	cp = &fake.CloudProvider{}
-	recorder = NewFakeEventRecorder()
+	recorder = test.NewEventRecorder()
 	inflightController = inflightchecks.NewController(fakeClock, env.Client, recorder, cp)
 })
 
@@ -86,58 +89,91 @@ var _ = Describe("Controller", func() {
 
 	Context("Initialization Failure", func() {
 		It("should detect issues with nodes that never have an extended resource registered", func() {
-			n := test.Node(test.NodeOptions{
+			machine, node := test.MachineAndNode(v1alpha5.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
 						v1.LabelInstanceTypeStable:       "gpu-vendor-instance-type",
 					},
 				},
+				Spec: v1alpha5.MachineSpec{
+					Resources: v1alpha5.ResourceRequirements{
+						Requests: v1.ResourceList{
+							fake.ResourceGPUVendorA: resource.MustParse("1"),
+							v1.ResourceCPU:          resource.MustParse("1"),
+							v1.ResourceMemory:       resource.MustParse("1Gi"),
+							v1.ResourcePods:         resource.MustParse("1"),
+						},
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Capacity: v1.ResourceList{
+						fake.ResourceGPUVendorA: resource.MustParse("1"),
+						v1.ResourceCPU:          resource.MustParse("1"),
+						v1.ResourceMemory:       resource.MustParse("1Gi"),
+						v1.ResourcePods:         resource.MustParse("10"),
+					},
+				},
 			})
-			n.Status.Capacity = v1.ResourceList{
+			// Don't have the node register the ResourceGPUVendorA with its capacity
+			node.Status.Capacity = v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("1"),
 				v1.ResourceMemory: resource.MustParse("1Gi"),
 				v1.ResourcePods:   resource.MustParse("10"),
 			}
-			ExpectApplied(ctx, env.Client, provisioner, n)
+			ExpectApplied(ctx, env.Client, provisioner, machine, node)
 			fakeClock.Step(2 * time.Hour)
-			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(n))
-			ExpectDetectedEvent("Expected resource \"fake.com/vendor-a\" didn't register on the node")
+			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(machine))
+			Expect(recorder.DetectedEvent("Expected resource \"fake.com/vendor-a\" didn't register on the node")).To(BeTrue())
 		})
 		It("should detect issues with nodes that have a startup taint which isn't removed", func() {
-			startupTaint := v1.Taint{
-				Key:    "my.startup.taint",
-				Effect: v1.TaintEffectNoSchedule,
-			}
-			provisioner.Spec.StartupTaints = append(provisioner.Spec.StartupTaints, startupTaint)
-			n := test.Node(test.NodeOptions{
+			machine, node := test.MachineAndNode(v1alpha5.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
 						v1.LabelInstanceTypeStable:       "default-instance-type",
 					},
 				},
+				Spec: v1alpha5.MachineSpec{
+					StartupTaints: []v1.Taint{
+						{
+							Key:    "my.startup.taint",
+							Effect: v1.TaintEffectNoSchedule,
+						},
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Capacity: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("1"),
+						v1.ResourceMemory: resource.MustParse("1Gi"),
+						v1.ResourcePods:   resource.MustParse("10"),
+					},
+				},
 			})
-			n.Spec.Taints = append(n.Spec.Taints, startupTaint)
-			n.Status.Capacity = v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("1"),
-				v1.ResourceMemory: resource.MustParse("1Gi"),
-				v1.ResourcePods:   resource.MustParse("10"),
-			}
-			ExpectApplied(ctx, env.Client, provisioner, n)
+			ExpectApplied(ctx, env.Client, provisioner, machine, node)
 			fakeClock.Step(2 * time.Hour)
-			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(n))
-			ExpectDetectedEvent("Startup taint \"my.startup.taint:NoSchedule\" is still on the node")
+			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(machine))
+			Expect(recorder.DetectedEvent("Startup taint \"my.startup.taint:NoSchedule\" is still on the node")).To(BeTrue())
 		})
 	})
 
 	Context("Termination failure", func() {
 		It("should detect issues with a node that is stuck deleting due to a PDB", func() {
-			n := test.Node(test.NodeOptions{
+			machine, node := test.MachineAndNode(v1alpha5.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
 						v1.LabelInstanceTypeStable:       "default-instance-type",
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Capacity: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("1"),
+						v1.ResourceMemory: resource.MustParse("1Gi"),
+						v1.ResourcePods:   resource.MustParse("10"),
 					},
 				},
 			})
@@ -146,24 +182,19 @@ var _ = Describe("Controller", func() {
 				Labels:         podsLabels,
 				MaxUnavailable: &intstr.IntOrString{IntVal: 0, Type: intstr.Int},
 			})
-			n.Status.Capacity = v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("1"),
-				v1.ResourceMemory: resource.MustParse("1Gi"),
-				v1.ResourcePods:   resource.MustParse("10"),
-			}
-			n.Finalizers = []string{"prevent.deletion/now"}
+			machine.Finalizers = []string{"prevent.deletion/now"}
 			p := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: podsLabels}})
-			ExpectApplied(ctx, env.Client, provisioner, n, p, pdb)
-			ExpectManualBinding(ctx, env.Client, p, n)
-			_ = env.Client.Delete(ctx, n)
-			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(n))
-			ExpectDetectedEvent(fmt.Sprintf("Can't drain node, PDB %s/%s is blocking evictions", pdb.Namespace, pdb.Name))
+			ExpectApplied(ctx, env.Client, provisioner, machine, node, p, pdb)
+			ExpectManualBinding(ctx, env.Client, p, node)
+			_ = env.Client.Delete(ctx, machine)
+			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(machine))
+			Expect(recorder.DetectedEvent(fmt.Sprintf("Can't drain node, PDB %s/%s is blocking evictions", pdb.Namespace, pdb.Name))).To(BeTrue())
 		})
 	})
 
 	Context("Node Shape", func() {
 		It("should detect issues that launch with much fewer resources than expected", func() {
-			n := test.Node(test.NodeOptions{
+			machine, node := test.MachineAndNode(v1alpha5.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
@@ -171,68 +202,23 @@ var _ = Describe("Controller", func() {
 						v1alpha5.LabelNodeInitialized:    "true",
 					},
 				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Capacity: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("16"),
+						v1.ResourceMemory: resource.MustParse("128Gi"),
+						v1.ResourcePods:   resource.MustParse("10"),
+					},
+				},
 			})
-			n.Status.Capacity = v1.ResourceList{
+			node.Status.Capacity = v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("16"),
 				v1.ResourceMemory: resource.MustParse("64Gi"),
 				v1.ResourcePods:   resource.MustParse("10"),
 			}
-			ExpectApplied(ctx, env.Client, provisioner, n)
-			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(n))
-			ExpectDetectedEvent("Expected 128Gi of resource memory, but found 64Gi (50.0% of expected)")
+			ExpectApplied(ctx, env.Client, provisioner, machine, node)
+			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(machine))
+			Expect(recorder.DetectedEvent("Expected 128Gi of resource memory, but found 64Gi (50.0% of expected)")).To(BeTrue())
 		})
 	})
 })
-
-var _ events.Recorder = (*FakeEventRecorder)(nil)
-
-// FakeEventRecorder is a mock event recorder that is used to facilitate testing.
-type FakeEventRecorder struct {
-	mu     sync.RWMutex
-	calls  map[string]int
-	events []events.Event
-}
-
-func NewFakeEventRecorder() *FakeEventRecorder {
-	return &FakeEventRecorder{
-		calls: map[string]int{},
-	}
-}
-
-func (e *FakeEventRecorder) Publish(evt events.Event) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.events = append(e.events, evt)
-	e.calls[evt.Reason]++
-}
-
-func (e *FakeEventRecorder) Calls(reason string) int {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.calls[reason]
-}
-
-func (e *FakeEventRecorder) Reset() {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.events = nil
-	e.calls = map[string]int{}
-}
-
-func (e *FakeEventRecorder) ForEachEvent(f func(evt events.Event)) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	for _, e := range e.events {
-		f(e)
-	}
-}
-
-func ExpectDetectedEvent(msg string) {
-	foundEvent := false
-	recorder.ForEachEvent(func(evt events.Event) {
-		if evt.Message == msg {
-			foundEvent = true
-		}
-	})
-	ExpectWithOffset(1, foundEvent).To(BeTrue(), fmt.Sprintf("didn't find %q event", msg))
-}

@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -46,7 +45,7 @@ type Validation struct {
 	once             sync.Once
 	// validationCandidates are the cached validation candidates.  We capture these when validating the first command and reuse them for
 	// validating subsequent commands.
-	validationCandidates []CandidateNode
+	validationCandidates []*Candidate
 }
 
 func NewValidation(validationPeriod time.Duration, clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider) *Validation {
@@ -76,16 +75,16 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 	}
 
 	if len(v.validationCandidates) == 0 {
-		v.validationCandidates, err = candidateNodes(ctx, v.cluster, v.kubeClient, v.clock, v.cloudProvider, v.ShouldDeprovision)
+		v.validationCandidates, err = GetCandidates(ctx, v.cluster, v.kubeClient, v.clock, v.cloudProvider, v.ShouldDeprovision)
 		if err != nil {
 			return false, fmt.Errorf("constructing validation candidates, %w", err)
 		}
 	}
 
-	// a node we are about to delete is a target of a currently pending pod, wait for that to settle
+	// a candidate we are about to delete is a target of a currently pending pod, wait for that to settle
 	// before continuing consolidation
-	for _, n := range cmd.nodesToRemove {
-		if v.cluster.IsNodeNominated(n.Name) {
+	for _, n := range cmd.candidates {
+		if v.cluster.IsNodeNominated(n.Name()) {
 			return false, nil
 		}
 	}
@@ -99,23 +98,24 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 }
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes
-func (v *Validation) ShouldDeprovision(_ context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, _ []*v1.Pod) bool {
-	if val, ok := n.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey]; ok {
+func (v *Validation) ShouldDeprovision(_ context.Context, c *Candidate) bool {
+	if val, ok := c.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey]; ok {
 		return val != "true"
 	}
-	return provisioner != nil && provisioner.Spec.Consolidation != nil && ptr.BoolValue(provisioner.Spec.Consolidation.Enabled)
+	return c.provisioner != nil && c.provisioner.Spec.Consolidation != nil && ptr.BoolValue(c.provisioner.Spec.Consolidation.Enabled)
 }
 
 // ValidateCommand validates a command for a deprovisioner
-func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidateNodes []CandidateNode) (bool, error) {
-	// map from nodes we are about to remove back into candidate nodes with cluster state
-	nodesToDelete := mapNodes(cmd.nodesToRemove, candidateNodes)
-	// None of the chosen candidate nodes are valid for execution, so retry
-	if len(nodesToDelete) == 0 {
+func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidates []*Candidate) (bool, error) {
+	// map from candidates we are about to remove back into candidates with cluster state
+	candidates = mapCandidates(cmd.candidates, candidates)
+
+	// None of the chosen candidate are valid for execution, so retry
+	if len(candidates) == 0 {
 		return false, nil
 	}
 
-	newNodes, allPodsScheduled, err := simulateScheduling(ctx, v.kubeClient, v.cluster, v.provisioner, nodesToDelete...)
+	newMachines, allPodsScheduled, err := simulateScheduling(ctx, v.kubeClient, v.cluster, v.provisioner, candidates...)
 	if err != nil {
 		return false, fmt.Errorf("simluating scheduling, %w", err)
 	}
@@ -124,49 +124,49 @@ func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidate
 	}
 
 	// We want to ensure that the re-simulated scheduling using the current cluster state produces the same result.
-	// There are three possible options for the number of new nodesToDelete that we need to handle:
-	// len(newNodes) == 0, as long as we weren't expecting a new node, this is valid
-	// len(newNodes) > 1, something in the cluster changed so that the nodesToDelete we were going to delete can no longer
-	//                    be deleted without producing more than one node
-	// len(newNodes) == 1, as long as the node looks like what we were expecting, this is valid
-	if len(newNodes) == 0 {
-		if len(cmd.replacementNodes) == 0 {
-			// scheduling produced zero new nodes and we weren't expecting any, so this is valid.
+	// There are three possible options for the number of new candidates that we need to handle:
+	// len(newMachines) == 0, as long as we weren't expecting a new machine, this is valid
+	// len(newMachines) > 1, something in the cluster changed so that the candidates we were going to delete can no longer
+	//                    be deleted without producing more than one machine
+	// len(newMachines) == 1, as long as the machine looks like what we were expecting, this is valid
+	if len(newMachines) == 0 {
+		if len(cmd.replacements) == 0 {
+			// scheduling produced zero new machines and we weren't expecting any, so this is valid.
 			return true, nil
 		}
-		// if it produced no new nodes, but we were expecting one we should re-simulate as there is likely a better
+		// if it produced no new machines, but we were expecting one we should re-simulate as there is likely a better
 		// consolidation option now
 		return false, nil
 	}
 
-	// we need more than one replacement node which is never valid currently (all of our node replacement is m->1, never m->n)
-	if len(newNodes) > 1 {
+	// we need more than one replacement machine which is never valid currently (all of our node replacement is m->1, never m->n)
+	if len(newMachines) > 1 {
 		return false, nil
 	}
 
-	// we now know that scheduling simulation wants to create one new node
-	if len(cmd.replacementNodes) == 0 {
+	// we now know that scheduling simulation wants to create one new machine
+	if len(cmd.replacements) == 0 {
 		// but we weren't expecting any new nodes, so this is invalid
 		return false, nil
 	}
 
-	// We know that the scheduling simulation wants to create a new node and that the command we are verifying wants
-	// to create a new node. The scheduling simulation doesn't apply any filtering to instance types, so it may include
+	// We know that the scheduling simulation wants to create a new machine and that the command we are verifying wants
+	// to create a new machine. The scheduling simulation doesn't apply any filtering to instance types, so it may include
 	// instance types that we don't want to launch which were filtered out when the lifecycleCommand was created.  To
 	// check if our lifecycleCommand is valid, we just want to ensure that the list of instance types we are considering
 	// creating are a subset of what scheduling says we should create.  We check for a subset since the scheduling
 	// simulation here does no price filtering, so it will include more expensive types.
 	//
-	// This is necessary since consolidation only wants cheaper nodes.  Suppose consolidation determined we should delete
+	// This is necessary since consolidation only wants cheaper machines.  Suppose consolidation determined we should delete
 	// a 4xlarge and replace it with a 2xlarge. If things have changed and the scheduling simulation we just performed
-	// now says that we need to launch a 4xlarge. It's still launching the correct number of nodes, but it's just
+	// now says that we need to launch a 4xlarge. It's still launching the correct number of machines, but it's just
 	// as expensive or possibly more so we shouldn't validate.
-	if !instanceTypesAreSubset(cmd.replacementNodes[0].InstanceTypeOptions, newNodes[0].InstanceTypeOptions) {
+	if !instanceTypesAreSubset(cmd.replacements[0].InstanceTypeOptions, newMachines[0].InstanceTypeOptions) {
 		return false, nil
 	}
 
 	// Now we know:
-	// - current scheduling simulation says to create a new node with types T = {T_0, T_1, ..., T_n}
-	// - our lifecycle command says to create a node with types {U_0, U_1, ..., U_n} where U is a subset of T
+	// - current scheduling simulation says to create a new machine with types T = {T_0, T_1, ..., T_n}
+	// - our lifecycle command says to create a machine with types {U_0, U_1, ..., U_n} where U is a subset of T
 	return true, nil
 }

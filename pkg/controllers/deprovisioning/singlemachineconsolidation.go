@@ -28,20 +28,19 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
-// SingleNodeConsolidation is the consolidation controller that performs single node consolidation.
-type SingleNodeConsolidation struct {
+// SingleMachineConsolidation is the consolidation controller that performs single machine consolidation.
+type SingleMachineConsolidation struct {
 	consolidation
 }
 
-func NewSingleNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cp cloudprovider.CloudProvider, recorder events.Recorder) *SingleNodeConsolidation {
-	return &SingleNodeConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
+func NewSingleMachineConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
+	cp cloudprovider.CloudProvider, recorder events.Recorder) *SingleMachineConsolidation {
+	return &SingleMachineConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
 }
 
-// ComputeCommand generates a deprovisioning command given deprovisionable nodes
-//
-//nolint:gocyclo
-func (c *SingleNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...CandidateNode) (Command, error) {
+// ComputeCommand generates a deprovisioning command given deprovisionable machines
+// nolint:gocyclo
+func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	if c.cluster.Consolidated() {
 		return Command{action: actionDoNothing}, nil
 	}
@@ -52,9 +51,9 @@ func (c *SingleNodeConsolidation) ComputeCommand(ctx context.Context, candidates
 
 	v := NewValidation(consolidationTTL, c.clock, c.cluster, c.kubeClient, c.provisioner, c.cloudProvider)
 	var failedValidation bool
-	for _, node := range candidates {
+	for _, candidate := range candidates {
 		// compute a possible consolidation option
-		cmd, err := c.computeConsolidation(ctx, node)
+		cmd, err := c.computeConsolidation(ctx, candidate)
 		if err != nil {
 			logging.FromContext(ctx).Errorf("computing consolidation %s", err)
 			continue

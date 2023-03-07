@@ -33,7 +33,7 @@ type ProvisionerOptions struct {
 	metav1.ObjectMeta
 	Limits                 v1.ResourceList
 	Provider               interface{}
-	ProviderRef            *v1alpha5.ProviderRef
+	ProviderRef            *v1alpha5.MachineTemplateRef
 	Kubelet                *v1alpha5.KubeletConfiguration
 	Annotations            map[string]string
 	Labels                 map[string]string

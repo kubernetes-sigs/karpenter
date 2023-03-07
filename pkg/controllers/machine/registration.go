@@ -30,6 +30,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/scheduling"
+	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 )
 
 type Registration struct {
@@ -38,6 +39,7 @@ type Registration struct {
 
 func (r *Registration) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
 	if machine.Status.ProviderID == "" {
+		machine.StatusConditions().MarkUnknown(v1alpha5.MachineRegistered, "", "")
 		return reconcile.Result{}, nil
 	}
 	if machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
@@ -45,19 +47,19 @@ func (r *Registration) Reconcile(ctx context.Context, machine *v1alpha5.Machine)
 	}
 
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", machine.Status.ProviderID))
-	node, err := nodeForMachine(ctx, r.kubeClient, machine)
+	node, err := machineutil.NodeForMachine(ctx, r.kubeClient, machine)
 	if err != nil {
-		if IsNodeNotFoundError(err) {
+		if machineutil.IsNodeNotFoundError(err) {
 			machine.StatusConditions().MarkFalse(v1alpha5.MachineRegistered, "NodeNotFound", "Node not registered with cluster")
 			return reconcile.Result{}, nil
 		}
-		if IsDuplicateNodeError(err) {
+		if machineutil.IsDuplicateNodeError(err) {
 			machine.StatusConditions().MarkFalse(v1alpha5.MachineRegistered, "MultipleNodesFound", "Invariant violated, machine matched multiple nodes")
 			return reconcile.Result{}, nil
 		}
 		return reconcile.Result{}, fmt.Errorf("getting node for machine, %w", err)
 	}
-	logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
 	if err = r.syncNode(ctx, machine, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("syncing node, %w", err)
 	}

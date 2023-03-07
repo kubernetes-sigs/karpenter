@@ -156,7 +156,7 @@ func (ns *NodeScraper) Scrape(_ context.Context) {
 	})
 
 	// Populate metrics
-	ns.cluster.ForEachNode(func(n *state.Node) bool {
+	ns.cluster.ForEachNode(func(n *state.StateNode) bool {
 		if n.Node == nil {
 			return true
 		}

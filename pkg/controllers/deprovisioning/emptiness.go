@@ -18,7 +18,6 @@ import (
 	"context"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/ptr"
@@ -26,11 +25,10 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
-// Emptiness is a subreconciler that deletes empty nodes.
+// Emptiness is a subreconciler that deletes empty machines.
 // Emptiness will respect TTLSecondsAfterEmpty
 type Emptiness struct {
 	clock clock.Clock
@@ -42,17 +40,17 @@ func NewEmptiness(clk clock.Clock) *Emptiness {
 	}
 }
 
-// ShouldDeprovision is a predicate used to filter deprovisionable nodes
-func (e *Emptiness) ShouldDeprovision(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, nodePods []*v1.Pod) bool {
-	if provisioner == nil || provisioner.Spec.TTLSecondsAfterEmpty == nil || len(nodePods) != 0 {
+// ShouldDeprovision is a predicate used to filter deprovisionable machines
+func (e *Emptiness) ShouldDeprovision(ctx context.Context, c *Candidate) bool {
+	if c.provisioner == nil || c.provisioner.Spec.TTLSecondsAfterEmpty == nil || len(c.pods) != 0 {
 		return false
 	}
 
-	emptinessTimestamp, hasEmptinessTimestamp := n.Annotations()[v1alpha5.EmptinessTimestampAnnotationKey]
+	emptinessTimestamp, hasEmptinessTimestamp := c.Node.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
 	if !hasEmptinessTimestamp {
 		return false
 	}
-	ttl := time.Duration(ptr.Int64Value(provisioner.Spec.TTLSecondsAfterEmpty)) * time.Second
+	ttl := time.Duration(ptr.Int64Value(c.provisioner.Spec.TTLSecondsAfterEmpty)) * time.Second
 
 	emptinessTime, err := time.Parse(time.RFC3339, emptinessTimestamp)
 	if err != nil {
@@ -63,18 +61,18 @@ func (e *Emptiness) ShouldDeprovision(ctx context.Context, n *state.Node, provis
 	return e.clock.Now().After(emptinessTime.Add(ttl))
 }
 
-// ComputeCommand generates a deprovisioning command given deprovisionable nodes
-func (e *Emptiness) ComputeCommand(_ context.Context, nodes ...CandidateNode) (Command, error) {
-	emptyNodes := lo.Filter(nodes, func(n CandidateNode, _ int) bool {
-		return n.DeletionTimestamp.IsZero() && len(n.pods) == 0
+// ComputeCommand generates a deprovisioning command given deprovisionable machines
+func (e *Emptiness) ComputeCommand(_ context.Context, candidates ...*Candidate) (Command, error) {
+	emptyCandidates := lo.Filter(candidates, func(cn *Candidate, _ int) bool {
+		return cn.Machine.DeletionTimestamp.IsZero() && len(cn.pods) == 0
 	})
 
-	if len(emptyNodes) == 0 {
+	if len(emptyCandidates) == 0 {
 		return Command{action: actionDoNothing}, nil
 	}
 	return Command{
-		nodesToRemove: lo.Map(emptyNodes, func(n CandidateNode, _ int) *v1.Node { return n.Node }),
-		action:        actionDelete,
+		candidates: emptyCandidates,
+		action:     actionDelete,
 	}, nil
 }
 

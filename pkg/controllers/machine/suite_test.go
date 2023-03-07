@@ -46,9 +46,9 @@ import (
 
 var ctx context.Context
 var machineController controller.Controller
+var evictionQueue *terminator.EvictionQueue
 var env *test.Environment
 var fakeClock *clock.FakeClock
-var term *terminator.Terminator
 var cloudProvider *fake.CloudProvider
 
 func TestAPIs(t *testing.T) {
@@ -67,8 +67,9 @@ var _ = BeforeSuite(func() {
 	ctx = settings.ToContext(ctx, test.Settings())
 
 	cloudProvider = fake.NewCloudProvider()
-	term = terminator.NewTerminator(fakeClock, env.Client, cloudProvider, terminator.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{})))
-	machineController = machine.NewController(fakeClock, env.Client, cloudProvider, term, events.NewRecorder(&record.FakeRecorder{}))
+	evictionQueue = terminator.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}))
+	terminator := terminator.NewTerminator(fakeClock, env.Client, evictionQueue)
+	machineController = machine.NewController(fakeClock, env.Client, cloudProvider, terminator, events.NewRecorder(&record.FakeRecorder{}))
 })
 
 var _ = AfterSuite(func() {
@@ -95,7 +96,7 @@ var _ = Describe("Finalizer", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, machine)
+		ExpectApplied(ctx, env.Client, provisioner, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)

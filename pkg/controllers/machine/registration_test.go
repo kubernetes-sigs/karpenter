@@ -30,7 +30,6 @@ import (
 
 var _ = Describe("Registration", func() {
 	var provisioner *v1alpha5.Provisioner
-
 	BeforeEach(func() {
 		provisioner = test.Provisioner()
 	})

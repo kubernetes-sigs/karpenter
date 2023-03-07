@@ -19,15 +19,15 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/samber/lo"
-
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/utils/machine"
 )
 
 type Drift struct {
@@ -39,17 +39,30 @@ func (d *Drift) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner
 	if _, ok := node.Annotations[v1alpha5.VoluntaryDisruptionAnnotationKey]; ok {
 		return reconcile.Result{}, nil
 	}
-
+	machineName, ok := node.Labels[v1alpha5.MachineNameLabelKey]
+	if !ok {
+		return reconcile.Result{}, nil
+	}
+	machine := &v1alpha5.Machine{}
+	if err := d.kubeClient.Get(ctx, types.NamespacedName{Name: machineName}, machine); err != nil {
+		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
+	if !machine.StatusConditions().GetCondition(v1alpha5.MachineCreated).IsTrue() {
+		return reconcile.Result{Requeue: true}, nil
+	}
 	// TODO: Add Provisioner Drift
-	drifted, err := d.cloudProvider.IsMachineDrifted(ctx, machine.NewFromNode(node))
+	drifted, err := d.cloudProvider.IsMachineDrifted(ctx, machine)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("getting drift for node, %w", err)
 	}
-	if drifted {
-		node.Annotations = lo.Assign(node.Annotations, map[string]string{
-			v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
-		})
+	if !drifted {
+		// Requeue after 5 minutes for the cache TTL
+		return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
+	node.Annotations = lo.Assign(node.Annotations, map[string]string{
+		v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
+	})
+	logging.FromContext(ctx).Debugf("annotated node as drifted")
 	// Requeue after 5 minutes for the cache TTL
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 }

@@ -19,6 +19,7 @@ import (
 	"fmt"
 
 	v1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -26,7 +27,7 @@ import (
 )
 
 type ExistingNode struct {
-	*state.Node
+	*state.StateNode
 
 	Pods         []*v1.Pod
 	topology     *Topology
@@ -34,7 +35,7 @@ type ExistingNode struct {
 	requirements scheduling.Requirements
 }
 
-func NewExistingNode(n *state.Node, topology *Topology, daemonResources v1.ResourceList) *ExistingNode {
+func NewExistingNode(n *state.StateNode, topology *Topology, daemonResources v1.ResourceList) *ExistingNode {
 	// The state node passed in here must be a deep copy from cluster state as we modify it
 	// the remaining daemonResources to schedule are the total daemonResources minus what has already scheduled
 	remainingDaemonResources := resources.Subtract(daemonResources, n.DaemonSetRequests())
@@ -48,8 +49,7 @@ func NewExistingNode(n *state.Node, topology *Topology, daemonResources v1.Resou
 		}
 	}
 	node := &ExistingNode{
-		Node: n,
-
+		StateNode:    n,
 		topology:     topology,
 		requests:     remainingDaemonResources,
 		requirements: scheduling.NewLabelRequirements(n.Labels()),
@@ -59,7 +59,7 @@ func NewExistingNode(n *state.Node, topology *Topology, daemonResources v1.Resou
 	return node
 }
 
-func (n *ExistingNode) Add(ctx context.Context, pod *v1.Pod) error {
+func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v1.Pod) error {
 	// Check Taints
 	if err := scheduling.Taints(n.Taints()).Tolerates(pod); err != nil {
 		return err
@@ -70,7 +70,7 @@ func (n *ExistingNode) Add(ctx context.Context, pod *v1.Pod) error {
 	}
 
 	// determine the number of volumes that will be mounted if the pod schedules
-	mountedVolumeCount, err := n.VolumeUsage().Validate(ctx, pod)
+	mountedVolumeCount, err := n.VolumeUsage().Validate(ctx, kubeClient, pod)
 	if err != nil {
 		return err
 	}
@@ -88,7 +88,7 @@ func (n *ExistingNode) Add(ctx context.Context, pod *v1.Pod) error {
 
 	nodeRequirements := scheduling.NewRequirements(n.requirements.Values()...)
 	podRequirements := scheduling.NewPodRequirements(pod)
-	// Check Node Affinity Requirements
+	// Check Machine Affinity Requirements
 	if err = nodeRequirements.Compatible(podRequirements); err != nil {
 		return err
 	}
@@ -110,6 +110,6 @@ func (n *ExistingNode) Add(ctx context.Context, pod *v1.Pod) error {
 	n.requirements = nodeRequirements
 	n.topology.Record(pod, nodeRequirements)
 	n.HostPortUsage().Add(ctx, pod)
-	n.VolumeUsage().Add(ctx, pod)
+	n.VolumeUsage().Add(ctx, kubeClient, pod)
 	return nil
 }

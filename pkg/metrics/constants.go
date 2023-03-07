@@ -24,17 +24,15 @@ const (
 	// Common namespace for application metrics.
 	Namespace = "karpenter"
 
-	ErrorLabel       = "error"
 	ProvisionerLabel = "provisioner"
 	ReasonLabel      = "reason"
 
 	// Reasons for CREATE/DELETE shared metrics
-	DeprovisioningReason = "deprovisioning"
-	ConsolidationReason  = "consolidation"
-	ProvisioningReason   = "provisioning"
-	ExpirationReason     = "expiration"
-	EmptinessReason      = "emptiness"
-	DriftReason          = "drift"
+	ConsolidationReason = "consolidation"
+	ProvisioningReason  = "provisioning"
+	ExpirationReason    = "expiration"
+	EmptinessReason     = "emptiness"
+	DriftReason         = "drift"
 )
 
 // DurationBuckets returns a []float64 of default threshold values for duration histograms.

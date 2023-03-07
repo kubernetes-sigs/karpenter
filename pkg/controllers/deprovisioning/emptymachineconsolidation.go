@@ -20,7 +20,6 @@ import (
 	"fmt"
 
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -31,18 +30,18 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
-// EmptyNodeConsolidation is the consolidation controller that performs multi-node consolidation of entirely empty nodes
-type EmptyNodeConsolidation struct {
+// EmptyMachineConsolidation is the consolidation controller that performs multi-machine consolidation of entirely empty machines
+type EmptyMachineConsolidation struct {
 	consolidation
 }
 
-func NewEmptyNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client,
-	provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder) *EmptyNodeConsolidation {
-	return &EmptyNodeConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
+func NewEmptyMachineConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client,
+	provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder) *EmptyMachineConsolidation {
+	return &EmptyMachineConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
 }
 
-// ComputeCommand generates a deprovisioning command given deprovisionable nodes
-func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...CandidateNode) (Command, error) {
+// ComputeCommand generates a deprovisioning command given deprovisionable machines
+func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	if c.cluster.Consolidated() {
 		return Command{action: actionDoNothing}, nil
 	}
@@ -52,17 +51,17 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 	}
 
 	// select the entirely empty nodes
-	emptyNodes := lo.Filter(candidates, func(n CandidateNode, _ int) bool { return len(n.pods) == 0 })
-	if len(emptyNodes) == 0 {
+	emptyCandidates := lo.Filter(candidates, func(n *Candidate, _ int) bool { return len(n.pods) == 0 })
+	if len(emptyCandidates) == 0 {
 		return Command{action: actionDoNothing}, nil
 	}
 
 	cmd := Command{
-		nodesToRemove: lo.Map(emptyNodes, func(n CandidateNode, _ int) *v1.Node { return n.Node }),
-		action:        actionDelete,
+		candidates: emptyCandidates,
+		action:     actionDelete,
 	}
 
-	// empty node consolidation doesn't use Validation as we get to take advantage of cluster.IsNodeNominated.  This
+	// empty machine consolidation doesn't use Validation as we get to take advantage of cluster.IsNodeNominated.  This
 	// lets us avoid a scheduling simulation (which is performed periodically while pending pods exist and drives
 	// cluster.IsNodeNominated already).
 	select {
@@ -70,17 +69,17 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 		return Command{}, errors.New("interrupted")
 	case <-c.clock.After(consolidationTTL):
 	}
-	validationCandidates, err := candidateNodes(ctx, c.cluster, c.kubeClient, c.clock, c.cloudProvider, c.ShouldDeprovision)
+	validationCandidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.clock, c.cloudProvider, c.ShouldDeprovision)
 	if err != nil {
 		logging.FromContext(ctx).Errorf("computing validation candidates %s", err)
 		return Command{}, err
 	}
-	nodesToDelete := mapNodes(cmd.nodesToRemove, validationCandidates)
+	candidatesToDelete := mapCandidates(cmd.candidates, validationCandidates)
 
-	// the deletion of empty nodes is easy to validate, we just ensure that all the nodesToDelete are still empty and that
-	// the node isn't a target of a recent scheduling simulation
-	for _, n := range nodesToDelete {
-		if len(n.pods) != 0 && !c.cluster.IsNodeNominated(n.Name) {
+	// the deletion of empty machines is easy to validate, we just ensure that all the candidatesToDelete are still empty and that
+	// the machine isn't a target of a recent scheduling simulation
+	for _, n := range candidatesToDelete {
+		if len(n.pods) != 0 && !c.cluster.IsNodeNominated(n.Name()) {
 			return Command{action: actionRetry}, nil
 		}
 	}

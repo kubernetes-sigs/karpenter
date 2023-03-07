@@ -20,12 +20,13 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
@@ -36,140 +37,105 @@ import (
 )
 
 var _ = Describe("Drift", func() {
+	var prov *v1alpha5.Provisioner
+	var machine *v1alpha5.Machine
+	var node *v1.Node
+
+	BeforeEach(func() {
+		prov = test.Provisioner()
+		machine, node = test.MachineAndNode(v1alpha5.Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.RandomProviderID(),
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+	})
 	It("should ignore drifted nodes if the feature flag is disabled", func() {
 		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
-		prov := test.Provisioner()
-		node := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-				},
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:  resource.MustParse("32"),
-				v1.ResourcePods: resource.MustParse("100"),
-			}},
-		)
+		ExpectApplied(ctx, env.Client, machine, node, prov)
 
-		ExpectApplied(ctx, env.Client, node, prov)
-		ExpectMakeNodesReady(ctx, env.Client, node)
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
-		// inform cluster state about the nodes
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 		fakeClock.Step(10 * time.Minute)
+
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
-		Expect(err).ToNot(HaveOccurred())
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
-		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
-		ExpectExists(ctx, env.Client, node)
+		// Expect to not create or delete more machines
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		ExpectExists(ctx, env.Client, machine)
 	})
 	It("should ignore nodes with the drift label, but not the drifted value", func() {
-		prov := test.Provisioner()
-		node := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-				},
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: "wrong-value",
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:  resource.MustParse("32"),
-				v1.ResourcePods: resource.MustParse("100"),
-			}},
-		)
+		node.Annotations = lo.Assign(node.Annotations, map[string]string{
+			v1alpha5.VoluntaryDisruptionAnnotationKey: "wrong-value",
+		})
+		ExpectApplied(ctx, env.Client, machine, node, prov)
 
-		ExpectApplied(ctx, env.Client, node, prov)
-		ExpectMakeNodesReady(ctx, env.Client, node)
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
-		// inform cluster state about the nodes
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 		fakeClock.Step(10 * time.Minute)
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
-		Expect(err).ToNot(HaveOccurred())
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
-		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
-		ExpectExists(ctx, env.Client, node)
+		// Expect to not create or delete more machines
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		ExpectExists(ctx, env.Client, machine)
 	})
 	It("should ignore nodes without the drift label", func() {
-		prov := test.Provisioner()
-		node := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
-		})
+		ExpectApplied(ctx, env.Client, machine, node, prov)
 
-		ExpectApplied(ctx, env.Client, node, prov)
-		ExpectMakeNodesReady(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
-		// inform cluster state about the nodes
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 		fakeClock.Step(10 * time.Minute)
-		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
-		Expect(err).ToNot(HaveOccurred())
 
-		// we don't need a new node
-		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
-		// and can't delete the node since node is not drifted
-		ExpectNodeExists(ctx, env.Client, node.Name)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+		// Expect to not create or delete more machines
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		ExpectExists(ctx, env.Client, machine)
 	})
 	It("can delete drifted nodes", func() {
-		prov := test.Provisioner()
-		node := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-				},
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:  resource.MustParse("32"),
-				v1.ResourcePods: resource.MustParse("100"),
-			}},
-		)
+		node.Annotations = lo.Assign(node.Annotations, map[string]string{
+			v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
+		})
+		ExpectApplied(ctx, env.Client, machine, node, prov)
 
-		ExpectApplied(ctx, env.Client, node, prov)
-		ExpectMakeNodesReady(ctx, env.Client, node)
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
-		// inform cluster state about the nodes
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 		fakeClock.Step(10 * time.Minute)
+
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
-		Expect(err).ToNot(HaveOccurred())
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
-		// we don't need a new node, but we should evict everything off one of node2 which only has a single pod
-		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
-		// and delete the old one
-		ExpectNotFound(ctx, env.Client, node)
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+
+		// We should delete the machine that has drifted
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+		ExpectNotFound(ctx, env.Client, machine, node)
 	})
 	It("can replace drifted nodes", func() {
 		labels := map[string]string{
@@ -193,40 +159,38 @@ var _ = Describe("Drift", func() {
 					},
 				}}})
 
-		prov := test.Provisioner()
-		node := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-				},
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+		node.Annotations = lo.Assign(node.Annotations, map[string]string{
+			v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
 		})
-		ExpectApplied(ctx, env.Client, rs, pod, node, prov)
-		ExpectMakeNodesReady(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		ExpectManualBinding(ctx, env.Client, pod, node)
-		ExpectScheduled(ctx, env.Client, pod)
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
+		ExpectApplied(ctx, env.Client, rs, pod, machine, node, prov)
 
-		// deprovisioning won't delete the old node until the new node is ready
-		var wg sync.WaitGroup
-		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1, node)
+		// bind the pods to the node
+		ExpectManualBinding(ctx, env.Client, pod, node)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		fakeClock.Step(10 * time.Minute)
-		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
-		Expect(err).ToNot(HaveOccurred())
+
+		// deprovisioning won't delete the old machine until the new machine is ready
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
-		Expect(cloudProvider.CreateCalls).To(HaveLen(1))
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
 
-		ExpectNotFound(ctx, env.Client, node)
+		ExpectNotFound(ctx, env.Client, machine, node)
+
+		// Expect that the new machine was created and its different than the original
+		machines := ExpectMachines(ctx, env.Client)
+		nodes := ExpectNodes(ctx, env.Client)
+		Expect(machines).To(HaveLen(1))
+		Expect(nodes).To(HaveLen(1))
+		Expect(machines[0].Name).ToNot(Equal(machine.Name))
+		Expect(nodes[0].Name).ToNot(Equal(node.Name))
 	})
 	It("can replace drifted nodes with multiple nodes", func() {
 		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
@@ -283,8 +247,7 @@ var _ = Describe("Drift", func() {
 			},
 		})
 
-		prov := test.Provisioner()
-		node := test.Node(test.NodeOptions{
+		machine, node := test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
@@ -292,39 +255,44 @@ var _ = Describe("Drift", func() {
 					v1alpha5.LabelCapacityType:       currentInstance.Offerings[0].CapacityType,
 					v1.LabelTopologyZone:             currentInstance.Offerings[0].Zone,
 				},
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("8")},
+			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID:  test.RandomProviderID(),
+				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("8")},
+			},
 		})
-		ExpectApplied(ctx, env.Client, rs, node, prov, pods[0], pods[1], pods[2])
-		ExpectMakeNodesReady(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		node.Annotations = lo.Assign(node.Annotations, map[string]string{
+			v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
+		})
+		ExpectApplied(ctx, env.Client, rs, machine, node, prov, pods[0], pods[1], pods[2])
+
+		// bind the pods to the node
 		ExpectManualBinding(ctx, env.Client, pods[0], node)
 		ExpectManualBinding(ctx, env.Client, pods[1], node)
 		ExpectManualBinding(ctx, env.Client, pods[2], node)
-		ExpectScheduled(ctx, env.Client, pods[0])
-		ExpectScheduled(ctx, env.Client, pods[1])
-		ExpectScheduled(ctx, env.Client, pods[2])
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
+
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
+		fakeClock.Step(10 * time.Minute)
 
 		// deprovisioning won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 3, node)
-
-		fakeClock.Step(10 * time.Minute)
-		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
-		Expect(err).ToNot(HaveOccurred())
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 3)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		wg.Wait()
 
-		Expect(cloudProvider.CreateCalls).To(HaveLen(3))
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
 
-		ExpectNotFound(ctx, env.Client, node)
+		// expect that drift provisioned three nodes, one for each pod
+		ExpectNotFound(ctx, env.Client, machine, node)
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(3))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(3))
 	})
 	It("should delete one drifted node at a time", func() {
-		prov := test.Provisioner()
-		node1 := test.Node(test.NodeOptions{
+		machine1, node1 := test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
@@ -334,10 +302,14 @@ var _ = Describe("Drift", func() {
 				},
 				Annotations: map[string]string{
 					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+				},
+			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID:  test.RandomProviderID(),
+				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+			},
 		})
-		node2 := test.Node(test.NodeOptions{
+		machine2, node2 := test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
@@ -347,29 +319,30 @@ var _ = Describe("Drift", func() {
 				},
 				Annotations: map[string]string{
 					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
-				}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+				},
+			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID:  test.RandomProviderID(),
+				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+			},
 		})
-		ExpectApplied(ctx, env.Client, node1, prov, node2)
-		ExpectMakeNodesReady(ctx, env.Client, node1, node2)
+		ExpectApplied(ctx, env.Client, machine1, node1, machine2, node2, prov)
 
-		// inform cluster state about the nodes
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
 
 		fakeClock.Step(10 * time.Minute)
+
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
-		Expect(err).ToNot(HaveOccurred())
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
-		// we don't need a new node, but we should evict everything off one of node2 which only has a single pod
-		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine1, machine2)
 
 		// Expect one of the nodes to be deleted
-		nodes := &v1.NodeList{}
-		Expect(env.Client.List(ctx, nodes)).To(Succeed())
-		Expect(len(nodes.Items)).To(Equal(1))
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 	})
 })

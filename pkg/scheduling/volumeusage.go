@@ -33,7 +33,6 @@ import (
 type VolumeUsage struct {
 	volumes    volumes
 	podVolumes map[types.NamespacedName]volumes
-	kubeClient client.Client
 }
 
 type volumes map[string]sets.String
@@ -82,16 +81,15 @@ func (u volumes) copy() volumes {
 	return cp
 }
 
-func NewVolumeLimits(kubeClient client.Client) *VolumeUsage {
+func NewVolumeUsage() *VolumeUsage {
 	return &VolumeUsage{
-		kubeClient: kubeClient,
 		volumes:    volumes{},
 		podVolumes: map[types.NamespacedName]volumes{},
 	}
 }
 
-func (v *VolumeUsage) Add(ctx context.Context, pod *v1.Pod) {
-	podVolumes, err := v.validate(ctx, pod)
+func (v *VolumeUsage) Add(ctx context.Context, kubeClient client.Client, pod *v1.Pod) {
+	podVolumes, err := v.validate(ctx, kubeClient, pod)
 	if err != nil {
 		logging.FromContext(ctx).Errorf("inconsistent state error adding volume, %s, please file an issue", err)
 	}
@@ -130,8 +128,8 @@ func (c VolumeCount) Fits(rhs VolumeCount) bool {
 	return true
 }
 
-func (v *VolumeUsage) Validate(ctx context.Context, pod *v1.Pod) (VolumeCount, error) {
-	podVolumes, err := v.validate(ctx, pod)
+func (v *VolumeUsage) Validate(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (VolumeCount, error) {
+	podVolumes, err := v.validate(ctx, kubeClient, pod)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +140,7 @@ func (v *VolumeUsage) Validate(ctx context.Context, pod *v1.Pod) (VolumeCount, e
 	return result, nil
 }
 
-func (v *VolumeUsage) validate(ctx context.Context, pod *v1.Pod) (volumes, error) {
+func (v *VolumeUsage) validate(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (volumes, error) {
 	podPVCs := volumes{}
 	for _, volume := range pod.Spec.Volumes {
 		var pvcID string
@@ -150,7 +148,7 @@ func (v *VolumeUsage) validate(ctx context.Context, pod *v1.Pod) (volumes, error
 		var volumeName string
 		var pvc v1.PersistentVolumeClaim
 		if volume.PersistentVolumeClaim != nil {
-			if err := v.kubeClient.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: volume.PersistentVolumeClaim.ClaimName}, &pvc); err != nil {
+			if err := kubeClient.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: volume.PersistentVolumeClaim.ClaimName}, &pvc); err != nil {
 				return nil, err
 			}
 			pvcID = fmt.Sprintf("%s/%s", pod.Namespace, volume.PersistentVolumeClaim.ClaimName)
@@ -170,12 +168,12 @@ func (v *VolumeUsage) validate(ctx context.Context, pod *v1.Pod) (volumes, error
 		// We can track the volume usage by the CSI Driver name which is pulled from the storage class for dynamic
 		// volumes, or if it's bound/static we can pull the volume name
 		if volumeName != "" {
-			driverName, err = v.driverFromVolume(ctx, volumeName)
+			driverName, err = v.driverFromVolume(ctx, kubeClient, volumeName)
 			if err != nil {
 				return nil, err
 			}
 		} else if storageClassName != nil && *storageClassName != "" {
-			driverName, err = v.driverFromSC(ctx, storageClassName)
+			driverName, err = v.driverFromSC(ctx, kubeClient, storageClassName)
 			if err != nil {
 				return nil, err
 			}
@@ -189,17 +187,17 @@ func (v *VolumeUsage) validate(ctx context.Context, pod *v1.Pod) (volumes, error
 	return podPVCs, nil
 }
 
-func (v *VolumeUsage) driverFromSC(ctx context.Context, storageClassName *string) (string, error) {
+func (v *VolumeUsage) driverFromSC(ctx context.Context, kubeClient client.Client, storageClassName *string) (string, error) {
 	var sc storagev1.StorageClass
-	if err := v.kubeClient.Get(ctx, client.ObjectKey{Name: *storageClassName}, &sc); err != nil {
+	if err := kubeClient.Get(ctx, client.ObjectKey{Name: *storageClassName}, &sc); err != nil {
 		return "", err
 	}
 	return sc.Provisioner, nil
 }
 
-func (v *VolumeUsage) driverFromVolume(ctx context.Context, volumeName string) (string, error) {
+func (v *VolumeUsage) driverFromVolume(ctx context.Context, kubeClient client.Client, volumeName string) (string, error) {
 	var pv v1.PersistentVolume
-	if err := v.kubeClient.Get(ctx, client.ObjectKey{Name: volumeName}, &pv); err != nil {
+	if err := kubeClient.Get(ctx, client.ObjectKey{Name: volumeName}, &pv); err != nil {
 		return "", err
 	}
 	if pv.Spec.CSI != nil {
@@ -227,7 +225,6 @@ func (v *VolumeUsage) DeepCopy() *VolumeUsage {
 }
 
 func (v *VolumeUsage) DeepCopyInto(out *VolumeUsage) {
-	out.kubeClient = v.kubeClient
 	out.volumes = v.volumes.copy()
 	out.podVolumes = map[types.NamespacedName]volumes{}
 	for k, v := range v.podVolumes {

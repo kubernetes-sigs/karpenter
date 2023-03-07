@@ -27,6 +27,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	schedulingevents "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling/events"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -40,7 +41,7 @@ type SchedulerOptions struct {
 }
 
 func NewScheduler(ctx context.Context, kubeClient client.Client, machines []*MachineTemplate,
-	provisioners []v1alpha5.Provisioner, cluster *state.Cluster, stateNodes []*state.Node, topology *Topology,
+	provisioners []v1alpha5.Provisioner, cluster *state.Cluster, stateNodes []*state.StateNode, topology *Topology,
 	instanceTypes map[string][]*cloudprovider.InstanceType, daemonSetPods []*v1.Pod,
 	recorder events.Recorder, opts SchedulerOptions) *Scheduler {
 
@@ -79,7 +80,7 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, machines []*Mac
 
 type Scheduler struct {
 	ctx                context.Context
-	newNodes           []*Machine
+	newMachines        []*Machine
 	existingNodes      []*ExistingNode
 	machineTemplates   []*MachineTemplate
 	remainingResources map[string]v1.ResourceList // provisioner name -> remaining resources for that provisioner
@@ -123,44 +124,41 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) ([]*Machine, []*E
 		}
 	}
 
-	for _, n := range s.newNodes {
-		n.FinalizeScheduling()
+	for _, m := range s.newMachines {
+		m.FinalizeScheduling()
 	}
 	if !s.opts.SimulationMode {
 		s.recordSchedulingResults(ctx, pods, q.List(), errors)
 	}
-	return s.newNodes, s.existingNodes, nil
+	return s.newMachines, s.existingNodes, nil
 }
 
 func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod, failedToSchedule []*v1.Pod, errors map[*v1.Pod]error) {
 	// Report failures and nominations
 	for _, pod := range failedToSchedule {
 		logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(pod)).Errorf("Could not schedule pod, %s", errors[pod])
-		s.recorder.Publish(events.PodFailedToSchedule(pod, errors[pod]))
+		s.recorder.Publish(schedulingevents.PodFailedToSchedule(pod, errors[pod]))
 	}
 
-	for _, node := range s.existingNodes {
-		if len(node.Pods) > 0 {
-			s.cluster.NominateNodeForPod(ctx, node.Name())
+	for _, existing := range s.existingNodes {
+		if len(existing.Pods) > 0 {
+			s.cluster.NominateNodeForPod(ctx, existing.Name())
 		}
-		for _, pod := range node.Pods {
-			// If node is inflight, it won't have a real node to represent it
-			if node.Node.Node != nil {
-				s.recorder.Publish(events.NominatePod(pod, node.Node.Node))
-			}
+		for _, pod := range existing.Pods {
+			s.recorder.Publish(schedulingevents.NominatePod(pod, existing.Node, existing.Machine)...)
 		}
 	}
 
 	// Report new nodes, or exit to avoid log spam
 	newCount := 0
-	for _, node := range s.newNodes {
-		newCount += len(node.Pods)
+	for _, machine := range s.newMachines {
+		newCount += len(machine.Pods)
 	}
 	if newCount == 0 {
 		return
 	}
 	logging.FromContext(ctx).With("pods", len(pods)).Infof("found provisionable pod(s)")
-	logging.FromContext(ctx).With("nodes", len(s.newNodes), "pods", newCount).Infof("computed new node(s) to fit pod(s)")
+	logging.FromContext(ctx).With("machines", len(s.newMachines), "pods", newCount).Infof("computed new machine(s) to fit pod(s)")
 	// Report in flight newNodes, or exit to avoid log spam
 	inflightCount := 0
 	existingCount := 0
@@ -177,51 +175,51 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 	// first try to schedule against an in-flight real node
 	for _, node := range s.existingNodes {
-		if err := node.Add(ctx, pod); err == nil {
+		if err := node.Add(ctx, s.kubeClient, pod); err == nil {
 			return nil
 		}
 	}
 
 	// Consider using https://pkg.go.dev/container/heap
-	sort.Slice(s.newNodes, func(a, b int) bool { return len(s.newNodes[a].Pods) < len(s.newNodes[b].Pods) })
+	sort.Slice(s.newMachines, func(a, b int) bool { return len(s.newMachines[a].Pods) < len(s.newMachines[b].Pods) })
 
 	// Pick existing node that we are about to create
-	for _, node := range s.newNodes {
-		if err := node.Add(ctx, pod); err == nil {
+	for _, machine := range s.newMachines {
+		if err := machine.Add(ctx, pod); err == nil {
 			return nil
 		}
 	}
 
 	// Create new node
 	var errs error
-	for _, nodeTemplate := range s.machineTemplates {
-		instanceTypes := s.instanceTypes[nodeTemplate.ProvisionerName]
+	for _, machineTemplate := range s.machineTemplates {
+		instanceTypes := s.instanceTypes[machineTemplate.ProvisionerName]
 		// if limits have been applied to the provisioner, ensure we filter instance types to avoid violating those limits
-		if remaining, ok := s.remainingResources[nodeTemplate.ProvisionerName]; ok {
-			instanceTypes = filterByRemainingResources(s.instanceTypes[nodeTemplate.ProvisionerName], remaining)
+		if remaining, ok := s.remainingResources[machineTemplate.ProvisionerName]; ok {
+			instanceTypes = filterByRemainingResources(s.instanceTypes[machineTemplate.ProvisionerName], remaining)
 			if len(instanceTypes) == 0 {
 				errs = multierr.Append(errs, fmt.Errorf("all available instance types exceed provisioner limits"))
 				continue
-			} else if len(s.instanceTypes[nodeTemplate.ProvisionerName]) != len(instanceTypes) && !s.opts.SimulationMode {
+			} else if len(s.instanceTypes[machineTemplate.ProvisionerName]) != len(instanceTypes) && !s.opts.SimulationMode {
 				logging.FromContext(ctx).Debugf("%d out of %d instance types were excluded because they would breach provisioner limits",
-					len(s.instanceTypes[nodeTemplate.ProvisionerName])-len(instanceTypes), len(s.instanceTypes[nodeTemplate.ProvisionerName]))
+					len(s.instanceTypes[machineTemplate.ProvisionerName])-len(instanceTypes), len(s.instanceTypes[machineTemplate.ProvisionerName]))
 			}
 		}
 
-		node := NewMachine(nodeTemplate, s.topology, s.daemonOverhead[nodeTemplate], instanceTypes)
-		if err := node.Add(ctx, pod); err != nil {
-			errs = multierr.Append(errs, fmt.Errorf("incompatible with provisioner %q, %w", nodeTemplate.ProvisionerName, err))
+		machine := NewMachine(machineTemplate, s.topology, s.daemonOverhead[machineTemplate], instanceTypes)
+		if err := machine.Add(ctx, pod); err != nil {
+			errs = multierr.Append(errs, fmt.Errorf("incompatible with provisioner %q, %w", machineTemplate.ProvisionerName, err))
 			continue
 		}
-		// we will launch this node and need to track its maximum possible resource usage against our remaining resources
-		s.newNodes = append(s.newNodes, node)
-		s.remainingResources[nodeTemplate.ProvisionerName] = subtractMax(s.remainingResources[nodeTemplate.ProvisionerName], node.InstanceTypeOptions)
+		// we will launch this machine and need to track its maximum possible resource usage against our remaining resources
+		s.newMachines = append(s.newMachines, machine)
+		s.remainingResources[machineTemplate.ProvisionerName] = subtractMax(s.remainingResources[machineTemplate.ProvisionerName], machine.InstanceTypeOptions)
 		return nil
 	}
 	return errs
 }
 
-func (s *Scheduler) calculateExistingMachines(stateNodes []*state.Node, daemonSetPods []*v1.Pod) {
+func (s *Scheduler) calculateExistingMachines(stateNodes []*state.StateNode, daemonSetPods []*v1.Pod) {
 	// create our existing nodes
 	for _, node := range stateNodes {
 		if !node.Owned() {
@@ -243,7 +241,7 @@ func (s *Scheduler) calculateExistingMachines(stateNodes []*state.Node, daemonSe
 
 		// We don't use the status field and instead recompute the remaining resources to ensure we have a consistent view
 		// of the cluster during scheduling.  Depending on how node creation falls out, this will also work for cases where
-		// we don't create Node resources.
+		// we don't create Machine resources.
 		if _, ok := s.remainingResources[node.Labels()[v1alpha5.ProvisionerNameLabelKey]]; ok {
 			s.remainingResources[node.Labels()[v1alpha5.ProvisionerNameLabelKey]] = resources.Subtract(s.remainingResources[node.Labels()[v1alpha5.ProvisionerNameLabelKey]], node.Capacity())
 		}

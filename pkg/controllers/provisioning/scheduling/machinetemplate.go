@@ -15,6 +15,8 @@ limitations under the License.
 package scheduling
 
 import (
+	"fmt"
+
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,7 +35,7 @@ type MachineTemplate struct {
 	ProvisionerName     string
 	InstanceTypeOptions cloudprovider.InstanceTypes
 	Provider            *v1alpha5.Provider
-	ProviderRef         *v1alpha5.ProviderRef
+	ProviderRef         *v1alpha5.MachineTemplateRef
 	Annotations         map[string]string
 	Labels              map[string]string
 	Taints              scheduling.Taints
@@ -82,7 +84,7 @@ func (i *MachineTemplate) ToMachine(owner *v1alpha5.Provisioner) *v1alpha5.Machi
 	})...))
 	m := &v1alpha5.Machine{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: i.ProvisionerName,
+			GenerateName: fmt.Sprintf("%s-", i.ProvisionerName),
 			Annotations:  lo.Assign(i.Annotations, v1alpha5.ProviderAnnotation(i.Provider)),
 			Labels:       i.Labels,
 		},

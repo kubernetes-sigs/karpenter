@@ -32,25 +32,26 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
-// Nodes is a typed version of a list of *Node
-type Nodes []*Node
+// StateNodes is a typed version of a list of *Node
+// nolint: revive
+type StateNodes []*StateNode
 
-// Active filters nodes that are not in a MarkedForDeletion state
-func (n Nodes) Active() Nodes {
-	return lo.Filter(n, func(node *Node, _ int) bool {
+// Active filters StateNodes that are not in a MarkedForDeletion state
+func (n StateNodes) Active() StateNodes {
+	return lo.Filter(n, func(node *StateNode, _ int) bool {
 		return !node.MarkedForDeletion()
 	})
 }
 
-// Deleting filters nodes that are in a MarkedForDeletion state
-func (n Nodes) Deleting() Nodes {
-	return lo.Filter(n, func(node *Node, _ int) bool {
+// Deleting filters StateNodes that are in a MarkedForDeletion state
+func (n StateNodes) Deleting() StateNodes {
+	return lo.Filter(n, func(node *StateNode, _ int) bool {
 		return node.MarkedForDeletion()
 	})
 }
 
-// Pods gets the pods assigned to all Nodes based on the kubernetes api-server bindings
-func (n Nodes) Pods(ctx context.Context, c client.Client) ([]*v1.Pod, error) {
+// Pods gets the pods assigned to all StateNodes based on the kubernetes api-server bindings
+func (n StateNodes) Pods(ctx context.Context, c client.Client) ([]*v1.Pod, error) {
 	var pods []*v1.Pod
 	for _, node := range n {
 		p, err := node.Pods(ctx, c)
@@ -62,11 +63,12 @@ func (n Nodes) Pods(ctx context.Context, c client.Client) ([]*v1.Pod, error) {
 	return pods, nil
 }
 
-// Node is a cached version of a node in the cluster that maintains state which is expensive to compute every time it's
+// StateNode is a cached version of a node in the cluster that maintains state which is expensive to compute every time it's
 // needed.  This currently contains node utilization across all the allocatable resources, but will soon be used to
 // compute topology information.
 // +k8s:deepcopy-gen=true
-type Node struct {
+// nolint: revive
+type StateNode struct {
 	Node    *v1.Node
 	Machine *v1alpha5.Machine
 
@@ -90,8 +92,8 @@ type Node struct {
 	nominatedUntil    metav1.Time
 }
 
-func NewNode() *Node {
-	return &Node{
+func NewNode() *StateNode {
+	return &StateNode{
 		inflightAllocatable: v1.ResourceList{},
 		inflightCapacity:    v1.ResourceList{},
 		startupTaints:       []v1.Taint{},
@@ -100,52 +102,70 @@ func NewNode() *Node {
 		podRequests:         map[types.NamespacedName]v1.ResourceList{},
 		podLimits:           map[types.NamespacedName]v1.ResourceList{},
 		hostPortUsage:       &scheduling.HostPortUsage{},
-		volumeUsage:         &scheduling.VolumeUsage{},
+		volumeUsage:         scheduling.NewVolumeUsage(),
 		volumeLimits:        scheduling.VolumeCount{},
 	}
 }
 
-func (in *Node) Name() string {
-	if !in.Initialized() && in.Machine != nil {
+func (in *StateNode) Name() string {
+	if in.Node == nil {
+		return in.Machine.Name
+	}
+	if in.Machine == nil {
+		return in.Node.Name
+	}
+	if !in.Machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
 		return in.Machine.Name
 	}
 	return in.Node.Name
 }
 
 // Pods gets the pods assigned to the Node based on the kubernetes api-server bindings
-func (in *Node) Pods(ctx context.Context, c client.Client) ([]*v1.Pod, error) {
+func (in *StateNode) Pods(ctx context.Context, c client.Client) ([]*v1.Pod, error) {
 	if in.Node == nil {
 		return nil, nil
 	}
 	return nodeutils.GetNodePods(ctx, c, in.Node)
 }
 
-func (in *Node) HostName() string {
+func (in *StateNode) HostName() string {
 	if in.Labels()[v1.LabelHostname] == "" {
 		return in.Name()
 	}
 	return in.Labels()[v1.LabelHostname]
 }
 
-func (in *Node) Annotations() map[string]string {
+func (in *StateNode) Annotations() map[string]string {
 	// If the machine exists and the state node isn't initialized
 	// use the machine representation of the annotations
-	if !in.Initialized() && in.Machine != nil {
+	if in.Node == nil {
+		return in.Machine.Annotations
+	}
+	if in.Machine == nil {
+		return in.Node.Annotations
+	}
+	if !in.Machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
 		return in.Machine.Annotations
 	}
 	return in.Node.Annotations
 }
 
-func (in *Node) Labels() map[string]string {
+func (in *StateNode) Labels() map[string]string {
 	// If the machine exists and the state node isn't initialized
 	// use the machine representation of the labels
-	if !in.Initialized() && in.Machine != nil {
+	if in.Node == nil {
+		return in.Machine.Labels
+	}
+	if in.Machine == nil {
+		return in.Node.Labels
+	}
+	if !in.Machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
 		return in.Machine.Labels
 	}
 	return in.Node.Labels
 }
 
-func (in *Node) Taints() []v1.Taint {
+func (in *StateNode) Taints() []v1.Taint {
 	ephemeralTaints := []v1.Taint{
 		{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
 		{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
@@ -175,10 +195,7 @@ func (in *Node) Taints() []v1.Taint {
 	})
 }
 
-// Initialized always implies that the node is there. If something is initialized, we are guaranteed that the Node
-// exists inside of cluster state. If the node is not initialized, it is possible that it is represented by a Node or
-// by a Machine inside of cluster state
-func (in *Node) Initialized() bool {
+func (in *StateNode) Initialized() bool {
 	if in.Machine != nil {
 		if in.Node != nil && in.Machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).IsTrue() {
 			return true
@@ -191,7 +208,7 @@ func (in *Node) Initialized() bool {
 	return false
 }
 
-func (in *Node) Capacity() v1.ResourceList {
+func (in *StateNode) Capacity() v1.ResourceList {
 	if !in.Initialized() && in.Machine != nil {
 		// Override any zero quantity values in the node status
 		if in.Node != nil {
@@ -219,7 +236,7 @@ func (in *Node) Capacity() v1.ResourceList {
 	return in.Node.Status.Capacity
 }
 
-func (in *Node) Allocatable() v1.ResourceList {
+func (in *StateNode) Allocatable() v1.ResourceList {
 	if !in.Initialized() && in.Machine != nil {
 		// Override any zero quantity values in the node status
 		if in.Node != nil {
@@ -248,39 +265,39 @@ func (in *Node) Allocatable() v1.ResourceList {
 }
 
 // Available is allocatable minus anything allocated to pods.
-func (in *Node) Available() v1.ResourceList {
+func (in *StateNode) Available() v1.ResourceList {
 	return resources.Subtract(in.Allocatable(), in.PodRequests())
 }
 
-func (in *Node) DaemonSetRequests() v1.ResourceList {
+func (in *StateNode) DaemonSetRequests() v1.ResourceList {
 	return resources.Merge(lo.Values(in.daemonSetRequests)...)
 }
 
-func (in *Node) DaemonSetLimits() v1.ResourceList {
+func (in *StateNode) DaemonSetLimits() v1.ResourceList {
 	return resources.Merge(lo.Values(in.daemonSetLimits)...)
 }
 
-func (in *Node) HostPortUsage() *scheduling.HostPortUsage {
+func (in *StateNode) HostPortUsage() *scheduling.HostPortUsage {
 	return in.hostPortUsage
 }
 
-func (in *Node) VolumeUsage() *scheduling.VolumeUsage {
+func (in *StateNode) VolumeUsage() *scheduling.VolumeUsage {
 	return in.volumeUsage
 }
 
-func (in *Node) VolumeLimits() scheduling.VolumeCount {
+func (in *StateNode) VolumeLimits() scheduling.VolumeCount {
 	return in.volumeLimits
 }
 
-func (in *Node) PodRequests() v1.ResourceList {
+func (in *StateNode) PodRequests() v1.ResourceList {
 	return resources.Merge(lo.Values(in.podRequests)...)
 }
 
-func (in *Node) PodLimits() v1.ResourceList {
+func (in *StateNode) PodLimits() v1.ResourceList {
 	return resources.Merge(lo.Values(in.podLimits)...)
 }
 
-func (in *Node) MarkedForDeletion() bool {
+func (in *StateNode) MarkedForDeletion() bool {
 	// The Node is marked for the Deletion if:
 	//  1. The Node has explicitly MarkedForDeletion
 	//  2. The Node has a Machine counterpart and is actively deleting
@@ -290,19 +307,19 @@ func (in *Node) MarkedForDeletion() bool {
 		(in.Node != nil && in.Machine == nil && !in.Node.DeletionTimestamp.IsZero())
 }
 
-func (in *Node) Nominate(ctx context.Context) {
+func (in *StateNode) Nominate(ctx context.Context) {
 	in.nominatedUntil = metav1.Time{Time: time.Now().Add(nominationWindow(ctx))}
 }
 
-func (in *Node) Nominated() bool {
+func (in *StateNode) Nominated() bool {
 	return in.nominatedUntil.After(time.Now())
 }
 
-func (in *Node) Owned() bool {
+func (in *StateNode) Owned() bool {
 	return in.Labels()[v1alpha5.ProvisionerNameLabelKey] != ""
 }
 
-func (in *Node) updateForPod(ctx context.Context, pod *v1.Pod) {
+func (in *StateNode) updateForPod(ctx context.Context, kubeClient client.Client, pod *v1.Pod) {
 	podKey := client.ObjectKeyFromObject(pod)
 
 	in.podRequests[podKey] = resources.RequestsForPods(pod)
@@ -313,10 +330,10 @@ func (in *Node) updateForPod(ctx context.Context, pod *v1.Pod) {
 		in.daemonSetLimits[podKey] = resources.LimitsForPods(pod)
 	}
 	in.hostPortUsage.Add(ctx, pod)
-	in.volumeUsage.Add(ctx, pod)
+	in.volumeUsage.Add(ctx, kubeClient, pod)
 }
 
-func (in *Node) cleanupForPod(podKey types.NamespacedName) {
+func (in *StateNode) cleanupForPod(podKey types.NamespacedName) {
 	in.hostPortUsage.DeletePod(podKey)
 	in.volumeUsage.DeletePod(podKey)
 	delete(in.podRequests, podKey)
