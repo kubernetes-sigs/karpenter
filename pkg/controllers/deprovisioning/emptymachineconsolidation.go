@@ -61,23 +61,14 @@ func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 		action:     actionDelete,
 	}
 
-	// empty machine consolidation doesn't use Validation as we get to take advantage of cluster.IsNodeNominated.  This
-	// lets us avoid a scheduling simulation (which is performed periodically while pending pods exist and drives
-	// cluster.IsNodeNominated already).
-	select {
-	case <-ctx.Done():
-		return Command{}, errors.New("interrupted")
-	case <-c.clock.After(consolidationTTL):
-	}
-	validationCandidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.clock, c.cloudProvider, c.ShouldDeprovision)
+	validationCandidates, err := c.getValidationCandidates(ctx, cmd)
 	if err != nil {
 		return Command{}, fmt.Errorf("getting validation candidates, %w", err)
 	}
-	candidatesToDelete := mapCandidates(cmd.candidates, validationCandidates)
 
 	// the deletion of empty machines is easy to validate, we just ensure that all the candidatesToDelete are still empty and that
 	// the machine isn't a target of a recent scheduling simulation
-	for _, n := range candidatesToDelete {
+	for _, n := range mapCandidates(cmd.candidates, validationCandidates) {
 		if len(n.pods) != 0 && !c.cluster.IsNodeNominated(n.Name()) {
 			return Command{action: actionRetry}, nil
 		}
@@ -86,7 +77,7 @@ func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	return cmd, nil
 }
 
-func (c *EmptyMachineConsolidation) getValidationCandidates(ctx context.Context, cmd Command) ([]Candidate, error) {
+func (c *EmptyMachineConsolidation) getValidationCandidates(ctx context.Context, cmd Command) ([]*Candidate, error) {
 	// empty node consolidation doesn't use Validation as we get to take advantage of cluster.IsNodeNominated.  This
 	// lets us avoid a scheduling simulation (which is performed periodically while pending pods exist and drives
 	// cluster.IsNodeNominated already).
@@ -95,7 +86,7 @@ func (c *EmptyMachineConsolidation) getValidationCandidates(ctx context.Context,
 		return nil, errors.New("interrupted")
 	case <-c.clock.After(consolidationTTL):
 	}
-	// Re-compute Maintenance Windows
+	// Re-compute Machine Disruption Gates
 	mws, err := buildDisruptionGates(ctx, c.kubeClient, c.clock)
 	if err != nil {
 		return nil, fmt.Errorf("building machine disruption gates mapping, %w", err)
@@ -110,5 +101,5 @@ func (c *EmptyMachineConsolidation) getValidationCandidates(ctx context.Context,
 		return nil, err
 	}
 
-	return mapCandidates(cmd.nodesToRemove, validationCandidates), nil
+	return mapCandidates(cmd.candidates, validationCandidates), nil
 }

@@ -39,7 +39,7 @@ var (
 	// Resources defined in the project
 	Resources = map[schema.GroupVersionKind]resourcesemantics.GenericCRD{
 		v1alpha5.SchemeGroupVersion.WithKind("Provisioner"):           &v1alpha5.Provisioner{},
-		v1alpha5.SchemeGroupVersion.WithKind("Machine"):     &v1alpha5.Machine{},
+		v1alpha5.SchemeGroupVersion.WithKind("Machine"):               &v1alpha5.Machine{},
 		v1alpha5.SchemeGroupVersion.WithKind("MachineDisruptionGate"): &v1alpha5.MachineDisruptionGate{},
 	}
 	Settings = []settings.Injectable{&settings.Settings{}}

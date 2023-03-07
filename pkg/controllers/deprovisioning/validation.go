@@ -83,7 +83,7 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 	}
 
 	if len(v.validationCandidates) == 0 {
-		v.validationCandidates, err = GetCandidates(ctx, v.cluster, v.kubeClient, v.clock, v.cloudProvider, v.ShouldDeprovision)
+		v.validationCandidates, err = GetCandidates(ctx, v.cluster, v.kubeClient, v.clock, v.cloudProvider, v.ShouldDeprovision, v.recorder, prohibited)
 		if err != nil {
 			return false, fmt.Errorf("constructing validation candidates, %w", err)
 		}
@@ -96,8 +96,8 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 			return false, nil
 		}
 		// a disruption gate doesn't allow deprovisioning, try deprovisioning on the node another time
-		if prohibited.Has(n.Name) {
-			v.recorder.Publish(deprovisioningevents.BlockedDeprovisioning(n, "machine has blocking disruption gate"))
+		if prohibited.Has(n.Name()) {
+			v.recorder.Publish(deprovisioningevents.Blocked(n.Node, n.Machine, "blocking disruption gate")...)
 			return false, nil
 		}
 	}

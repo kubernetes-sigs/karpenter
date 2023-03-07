@@ -207,7 +207,7 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 	for _, n := range candidates {
 		// If node is prohibited by a Machine Disruption Gate, skip node, but emit event.
 		if prohibitedNodeNames.Has(n.Name()) {
-			recorder.Publish(deprovisioningevents.BlockedDeprovisioning(n.Node, "machine has blocking disruption gate"))
+			recorder.Publish(deprovisioningevents.Blocked(n.Node, n.Machine, "has blocking disruption gate")...)
 		}
 	}
 	// Filter only the valid candidates that we should deprovision
