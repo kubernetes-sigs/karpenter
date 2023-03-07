@@ -59,7 +59,7 @@ type ProvisionerSpec struct {
 	// ProviderRef is a reference to a dedicated CRD for the chosen provider, that holds
 	// additional configuration options
 	// +optional
-	ProviderRef *ProviderRef `json:"providerRef,omitempty"`
+	ProviderRef *MachineTemplateRef `json:"providerRef,omitempty"`
 	// TTLSecondsAfterEmpty is the number of seconds the controller will wait
 	// before attempting to delete a node, measured from when the node is
 	// detected to be empty. A Node is considered to be empty when it does not

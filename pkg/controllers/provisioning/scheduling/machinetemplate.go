@@ -35,7 +35,7 @@ type MachineTemplate struct {
 	ProvisionerName     string
 	InstanceTypeOptions cloudprovider.InstanceTypes
 	Provider            *v1alpha5.Provider
-	ProviderRef         *v1alpha5.ProviderRef
+	ProviderRef         *v1alpha5.MachineTemplateRef
 	Annotations         map[string]string
 	Labels              map[string]string
 	Taints              scheduling.Taints
@@ -96,7 +96,7 @@ func (i *MachineTemplate) ToMachine(owner *v1alpha5.Provisioner) *v1alpha5.Machi
 			Resources: v1alpha5.ResourceRequirements{
 				Requests: i.Requests,
 			},
-			ProviderRef: i.ProviderRef,
+			MachineTemplateRef: i.ProviderRef,
 		},
 	}
 	lo.Must0(controllerutil.SetOwnerReference(owner, m, scheme.Scheme))

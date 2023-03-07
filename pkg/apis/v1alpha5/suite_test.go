@@ -48,7 +48,7 @@ var _ = Describe("Validation", func() {
 		provisioner = &Provisioner{
 			ObjectMeta: metav1.ObjectMeta{Name: strings.ToLower(randomdata.SillyName())},
 			Spec: ProvisionerSpec{
-				ProviderRef: &ProviderRef{
+				ProviderRef: &MachineTemplateRef{
 					Kind: "NodeTemplate",
 					Name: "default",
 				},
@@ -106,7 +106,7 @@ var _ = Describe("Validation", func() {
 	Context("Provider", func() {
 		It("should not allow provider and providerRef", func() {
 			provisioner.Spec.Provider = &Provider{}
-			provisioner.Spec.ProviderRef = &ProviderRef{Name: "providerRef"}
+			provisioner.Spec.ProviderRef = &MachineTemplateRef{Name: "providerRef"}
 			Expect(provisioner.Validate(ctx)).ToNot(Succeed())
 		})
 		It("should require at least one of provider and providerRef", func() {

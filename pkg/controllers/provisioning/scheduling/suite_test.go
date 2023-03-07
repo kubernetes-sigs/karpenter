@@ -2249,10 +2249,10 @@ var _ = Describe("In-Flight Nodes", func() {
 		}}
 
 		// there was a bug in cluster state where we failed to identify the instance type resources when using a
-		// ProviderRef so modify our provisioner to use the ProviderRef and ensure that the second pod schedules
+		// MachineTemplateRef so modify our provisioner to use the MachineTemplateRef and ensure that the second pod schedules
 		// to the existingNodes node
 		provisioner.Spec.Provider = nil
-		provisioner.Spec.ProviderRef = &v1alpha5.ProviderRef{}
+		provisioner.Spec.ProviderRef = &v1alpha5.MachineTemplateRef{}
 
 		ExpectApplied(ctx, env.Client, provisioner)
 		pod := test.UnschedulablePod(opts)

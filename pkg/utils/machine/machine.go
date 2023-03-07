@@ -145,7 +145,7 @@ func New(node *v1.Node, provisioner *v1alpha5.Provisioner) *v1alpha5.Machine {
 	machine.Spec.Taints = provisioner.Spec.Taints
 	machine.Spec.StartupTaints = provisioner.Spec.StartupTaints
 	machine.Spec.Requirements = provisioner.Spec.Requirements
-	machine.Spec.ProviderRef = provisioner.Spec.ProviderRef
+	machine.Spec.MachineTemplateRef = provisioner.Spec.ProviderRef
 	lo.Must0(controllerutil.SetOwnerReference(provisioner, machine, scheme.Scheme))
 	return machine
 }

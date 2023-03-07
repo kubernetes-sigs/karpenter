@@ -37,8 +37,8 @@ type MachineSpec struct {
 	// Kubelet are options passed to the kubelet when provisioning nodes
 	// +optional
 	Kubelet *KubeletConfiguration `json:"kubelet,omitempty"`
-	// ProviderRef is a reference to an object that defines provider specific configuration
-	ProviderRef *ProviderRef `json:"providerRef,omitempty"`
+	// MachineTemplateRef is a reference to an object that defines provider specific configuration
+	MachineTemplateRef *MachineTemplateRef `json:"machineTemplateRef,omitempty"`
 }
 
 // KubeletConfiguration defines args to be used when configuring kubelet on provisioned nodes.
@@ -106,7 +106,7 @@ type KubeletConfiguration struct {
 	CPUCFSQuota bool `json:"cpuCFSQuota,omitempty"`
 }
 
-type ProviderRef struct {
+type MachineTemplateRef struct {
 	// Kind of the referent; More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds"
 	Kind string `json:"kind,omitempty"`
 	// Name of the referent; More info: http://kubernetes.io/docs/user-guide/identifiers#names

@@ -857,7 +857,7 @@ var _ = Describe("Provisioning", func() {
 		})
 		It("should create a machine request propagating the provider reference", func() {
 			ExpectApplied(ctx, env.Client, test.Provisioner(test.ProvisionerOptions{
-				ProviderRef: &v1alpha5.ProviderRef{
+				ProviderRef: &v1alpha5.MachineTemplateRef{
 					APIVersion: "cloudprovider.karpenter.sh/v1alpha1",
 					Kind:       "CloudProvider",
 					Name:       "default",
@@ -867,8 +867,8 @@ var _ = Describe("Provisioning", func() {
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 
 			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
-			Expect(cloudProvider.CreateCalls[0].Spec.ProviderRef).To(Equal(
-				&v1alpha5.ProviderRef{
+			Expect(cloudProvider.CreateCalls[0].Spec.MachineTemplateRef).To(Equal(
+				&v1alpha5.MachineTemplateRef{
 					APIVersion: "cloudprovider.karpenter.sh/v1alpha1",
 					Kind:       "CloudProvider",
 					Name:       "default",
