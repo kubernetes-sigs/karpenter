@@ -62,15 +62,14 @@ func makeConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient cli
 	}
 }
 
-// consolidationTTL is the TTL between creating a consolidation command and validating that it still works.
 const (
-	consolidationTTL    = 15 * time.Second
-	consolidationMethod = "Consolidation"
+	// consolidationTTL is the TTL between creating a consolidation command and validating that it still works.
+	consolidationTTL = 15 * time.Second
 )
 
 // string is the string representation of the deprovisioner
 func (c *consolidation) String() string {
-	return consolidationMethod
+	return v1alpha5.ConsolidationMethod
 }
 
 // sortAndFilterCandidates orders deprovisionable nodes by the disruptionCost, removing any that we already know won't

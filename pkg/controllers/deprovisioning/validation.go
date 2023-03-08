@@ -97,7 +97,7 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 		}
 		// a disruption gate doesn't allow deprovisioning, try deprovisioning later
 		if prohibited.Has(n.Name()) {
-			v.recorder.Publish(deprovisioningevents.Blocked(n.Node, n.Machine, "blocking disruption gate")...)
+			v.recorder.Publish(deprovisioningevents.Blocked(n.Node, n.Machine, "has blocking disruption gate")...)
 			return false, nil
 		}
 	}
@@ -116,7 +116,7 @@ func (v *Validation) getProhibitedCandidates(ctx context.Context) (sets.String, 
 	if err != nil {
 		return nil, fmt.Errorf("building machine disruption gates, %w", err)
 	}
-	prohibited, err := getProhibitedMachineNames(ctx, v.kubeClient, gates[consolidationMethod])
+	prohibited, err := getProhibitedMachineNames(ctx, v.kubeClient, gates[v1alpha5.ConsolidationMethod])
 	if err != nil {
 		return nil, fmt.Errorf("getting prohibited machine names, %w", err)
 	}

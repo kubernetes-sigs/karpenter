@@ -36,10 +36,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
-const (
-	expirationMethod = "Expiration"
-)
-
 // Expiration is a subreconciler that deletes empty nodes.
 // Expiration will respect TTLSecondsAfterEmpty
 type Expiration struct {
@@ -125,7 +121,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...*Candidat
 
 // String is the string representation of the deprovisioner
 func (e *Expiration) String() string {
-	return expirationMethod
+	return v1alpha5.ExpirationMethod
 }
 
 func getExpirationTime(node *v1.Node, provisioner *v1alpha5.Provisioner) time.Time {

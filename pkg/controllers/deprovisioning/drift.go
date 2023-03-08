@@ -31,10 +31,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
-const (
-	driftMethod = "Drift"
-)
-
 // Drift is a subreconciler that deletes drifted machines.
 type Drift struct {
 	kubeClient  client.Client
@@ -115,5 +111,5 @@ func (d *Drift) ComputeCommand(ctx context.Context, candidates ...*Candidate) (C
 
 // String is the string representation of the deprovisioner
 func (d *Drift) String() string {
-	return driftMethod
+	return v1alpha5.DriftMethod
 }

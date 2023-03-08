@@ -27,10 +27,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 )
 
-const (
-	emptinessMethod = "Emptiness"
-)
-
 // Emptiness is a subreconciler that deletes empty machines.
 // Emptiness will respect TTLSecondsAfterEmpty
 type Emptiness struct {
@@ -81,5 +77,5 @@ func (e *Emptiness) ComputeCommand(_ context.Context, candidates ...*Candidate) 
 
 // string is the string representation of the deprovisioner
 func (e *Emptiness) String() string {
-	return emptinessMethod
+	return v1alpha5.EmptinessMethod
 }

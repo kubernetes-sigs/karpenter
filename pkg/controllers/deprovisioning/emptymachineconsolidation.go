@@ -24,6 +24,7 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -50,7 +51,7 @@ func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 		return Command{}, fmt.Errorf("sorting candidates, %w", err)
 	}
 
-	// select the entirely empty nodes
+	// select the entirely empty machines
 	emptyCandidates := lo.Filter(candidates, func(n *Candidate, _ int) bool { return len(n.pods) == 0 })
 	if len(emptyCandidates) == 0 {
 		return Command{action: actionDoNothing}, nil
@@ -61,7 +62,7 @@ func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 		action:     actionDelete,
 	}
 
-	// empty node consolidation doesn't use Validation as we get to take advantage of cluster.IsNodeNominated.  This
+	// empty machine consolidation doesn't use Validation as we get to take advantage of cluster.IsNodeNominated.  This
 	// lets us avoid a scheduling simulation (which is performed periodically while pending pods exist and drives
 	// cluster.IsNodeNominated already).
 	select {
@@ -77,7 +78,7 @@ func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 
 	// the deletion of empty machines is easy to validate, we just ensure that all the candidatesToDelete are still empty and that
 	// the machine isn't a target of a recent scheduling simulation
-	for _, n := range mapCandidates(cmd.candidates, validationCandidates) {
+	for _, n := range validationCandidates {
 		if len(n.pods) != 0 && !c.cluster.IsNodeNominated(n.Name()) {
 			return Command{action: actionRetry}, nil
 		}
@@ -92,7 +93,7 @@ func (c *EmptyMachineConsolidation) getValidationCandidates(ctx context.Context,
 	if err != nil {
 		return nil, fmt.Errorf("building machine disruption gates mapping, %w", err)
 	}
-	names, err := getProhibitedMachineNames(ctx, c.kubeClient, gates[consolidationMethod])
+	names, err := getProhibitedMachineNames(ctx, c.kubeClient, gates[v1alpha5.ConsolidationMethod])
 	if err != nil {
 		return nil, fmt.Errorf("getting prohibited machine names, %w", err)
 	}

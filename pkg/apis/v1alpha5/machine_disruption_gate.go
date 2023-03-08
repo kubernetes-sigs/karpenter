@@ -25,7 +25,14 @@ import (
 	"knative.dev/pkg/logging"
 )
 
-var AllowedActions sets.String = sets.NewString("Consolidation", "Emptiness", "Expiration", "Drift")
+const (
+	ConsolidationMethod = "Consolidation"
+	EmptinessMethod     = "Emptiness"
+	ExpirationMethod    = "Expiration"
+	DriftMethod         = "Drift"
+)
+
+var AllowedActions sets.String = sets.NewString(ConsolidationMethod, EmptinessMethod, ExpirationMethod, DriftMethod)
 var CrontabTemplateFormat = "TZ=UTC %s"
 
 // MachineDisruptionGateSpec is the top level field for MachineDisruptionGates.
