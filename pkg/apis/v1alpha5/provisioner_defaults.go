@@ -19,5 +19,4 @@ import (
 )
 
 // SetDefaults for the provisioner
-func (p *Provisioner) SetDefaults(ctx context.Context) {
-}
+func (p *Provisioner) SetDefaults(_ context.Context) {}
