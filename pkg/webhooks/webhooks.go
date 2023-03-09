@@ -17,43 +17,33 @@ package webhooks
 import (
 	"context"
 
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
 	knativeinjection "knative.dev/pkg/injection"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/webhook/certificates"
 	"knative.dev/pkg/webhook/configmaps"
-	"knative.dev/pkg/webhook/resourcesemantics/defaulting"
+	"knative.dev/pkg/webhook/resourcesemantics"
 	"knative.dev/pkg/webhook/resourcesemantics/validation"
 
-	"github.com/aws/karpenter-core/pkg/apis"
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 )
 
 func NewWebhooks() []knativeinjection.ControllerConstructor {
 	return []knativeinjection.ControllerConstructor{
 		certificates.NewController,
-		NewCRDDefaultingWebhook,
 		NewCRDValidationWebhook,
 		NewConfigValidationWebhook,
 	}
-}
-
-func NewCRDDefaultingWebhook(ctx context.Context, w configmap.Watcher) *controller.Impl {
-	return defaulting.NewAdmissionController(ctx,
-		"defaulting.webhook.karpenter.sh",
-		"/default/karpenter.sh",
-		apis.Resources,
-		InjectContext,
-		true,
-	)
 }
 
 func NewCRDValidationWebhook(ctx context.Context, w configmap.Watcher) *controller.Impl {
 	return validation.NewAdmissionController(ctx,
 		"validation.webhook.karpenter.sh",
 		"/validate/karpenter.sh",
-		apis.Resources,
-		InjectContext,
+		Resources,
+		func(ctx context.Context) context.Context { return ctx },
 		true,
 	)
 }
@@ -68,6 +58,6 @@ func NewConfigValidationWebhook(ctx context.Context, cmw configmap.Watcher) *con
 	)
 }
 
-func InjectContext(ctx context.Context) context.Context {
-	return ctx
+var Resources = map[schema.GroupVersionKind]resourcesemantics.GenericCRD{
+	v1alpha5.SchemeGroupVersion.WithKind("Provisioner"): &v1alpha5.Provisioner{},
 }

@@ -186,7 +186,6 @@ func (c *Controller) cleanupNodeForMachine(ctx context.Context, machine *v1alpha
 	}
 	if err = c.terminator.Drain(ctx, node); err != nil {
 		if terminator.IsNodeDrainError(err) {
-			logging.FromContext(ctx).Errorf("%s", err)
 			c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
 		}
 		return fmt.Errorf("draining node, %w", err)
