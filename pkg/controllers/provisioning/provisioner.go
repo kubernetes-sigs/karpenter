@@ -227,13 +227,26 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 			requirements.Add(instanceType.Requirements.Values()...)
 
 			for key, requirement := range requirements {
-				domains[key] = domains[key].Union(sets.NewString(requirement.Values()...))
+				//This code used to execute a Union between domains[key] and requirement.Values().
+				//The downside of this is that Union is immutable and takes a copy of the set it is executed upon.
+				//This resulted in a lot of memory pressure on the heap and poor performance
+				//https://github.com/aws/karpenter/issues/3565
+				if domains[key] == nil {
+					domains[key] = sets.NewString(requirement.Values()...)
+				} else {
+					domains[key].Insert(requirement.Values()...)
+				}
 			}
 		}
 
 		for key, requirement := range scheduling.NewNodeSelectorRequirements(provisioner.Spec.Requirements...) {
 			if requirement.Operator() == v1.NodeSelectorOpIn {
-				domains[key] = domains[key].Union(sets.NewString(requirement.Values()...))
+				//The following is a performance optimisation, for the explanation see the comment above
+				if domains[key] == nil {
+					domains[key] = sets.NewString(requirement.Values()...)
+				} else {
+					domains[key].Insert(requirement.Values()...)
+				}
 			}
 		}
 	}
