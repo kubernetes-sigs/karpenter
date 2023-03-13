@@ -118,8 +118,8 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 			// Reconcile all nodes related to a provisioner when it changes.
 			&source.Kind{Type: &v1alpha5.Provisioner{}},
 			handler.EnqueueRequestsFromMapFunc(func(o client.Object) (requests []reconcile.Request) {
-				nodes := &v1.NodeList{}
-				if err := c.kubeClient.List(ctx, nodes, client.MatchingLabels(map[string]string{v1alpha5.ProvisionerNameLabelKey: o.GetName()})); err != nil {
+				nodes := v1.NodeList{}
+				if err := c.kubeClient.List(ctx, &nodes, client.MatchingLabels(map[string]string{v1alpha5.ProvisionerNameLabelKey: o.GetName()})); err != nil {
 					logging.FromContext(ctx).Errorf("Failed to list nodes when mapping expiration watch events, %s", err)
 					return requests
 				}

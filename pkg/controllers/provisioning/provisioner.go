@@ -327,8 +327,8 @@ func (p *Provisioner) Launch(ctx context.Context, m *scheduler.Machine, opts ...
 }
 
 func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*v1.Pod, error) {
-	daemonSetList := &appsv1.DaemonSetList{}
-	if err := p.kubeClient.List(ctx, daemonSetList); err != nil {
+	daemonSetList := appsv1.DaemonSetList{}
+	if err := p.kubeClient.List(ctx, &daemonSetList); err != nil {
 		return nil, fmt.Errorf("listing daemonsets, %w", err)
 	}
 

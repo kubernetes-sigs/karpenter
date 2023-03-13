@@ -73,8 +73,8 @@ func (r *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 }
 
 func (r *Emptiness) isEmpty(ctx context.Context, n *v1.Node) (bool, error) {
-	pods := &v1.PodList{}
-	if err := r.kubeClient.List(ctx, pods, client.MatchingFields{"spec.nodeName": n.Name}); err != nil {
+	pods := v1.PodList{}
+	if err := r.kubeClient.List(ctx, &pods, client.MatchingFields{"spec.nodeName": n.Name}); err != nil {
 		return false, fmt.Errorf("listing pods for node, %w", err)
 	}
 	for i := range pods.Items {

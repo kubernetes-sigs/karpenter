@@ -229,13 +229,13 @@ func (t *Topology) updateInverseAntiAffinity(ctx context.Context, pod *v1.Pod, d
 // countDomains initializes the topology group by registereding any well known domains and performing pod counts
 // against the cluster for any existing pods.
 func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
-	podList := &v1.PodList{}
+	podList := v1.PodList{}
 
 	// collect the pods from all the specified namespaces (don't see a way to query multiple namespaces
 	// simultaneously)
 	var pods []v1.Pod
 	for _, ns := range tg.namespaces.UnsortedList() {
-		if err := t.kubeClient.List(ctx, podList, TopologyListOptions(ns, tg.selector)); err != nil {
+		if err := t.kubeClient.List(ctx, &podList, TopologyListOptions(ns, tg.selector)); err != nil {
 			return fmt.Errorf("listing pods, %w", err)
 		}
 		pods = append(pods, podList.Items...)

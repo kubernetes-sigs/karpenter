@@ -96,8 +96,8 @@ func (t *Terminator) Drain(ctx context.Context, node *v1.Node) error {
 
 // getPods returns a list of evictable pods for the node
 func (t *Terminator) getPods(ctx context.Context, node *v1.Node) ([]*v1.Pod, error) {
-	podList := &v1.PodList{}
-	if err := t.kubeClient.List(ctx, podList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
+	podList := v1.PodList{}
+	if err := t.kubeClient.List(ctx, &podList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
 		return nil, fmt.Errorf("listing pods on node, %w", err)
 	}
 	var pods []*v1.Pod

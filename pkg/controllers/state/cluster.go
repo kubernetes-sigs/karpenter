@@ -80,8 +80,8 @@ func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudPro
 // of the cluster is as close to correct as it can be when we begin to perform operations
 // utilizing the cluster state as our source of truth
 func (c *Cluster) Synced(ctx context.Context) bool {
-	machineList := &v1alpha5.MachineList{}
-	if err := c.kubeClient.List(ctx, machineList); err != nil {
+	machineList := v1alpha5.MachineList{}
+	if err := c.kubeClient.List(ctx, &machineList); err != nil {
 		logging.FromContext(ctx).Errorf("checking cluster state sync, %v", err)
 		return false
 	}
@@ -310,8 +310,8 @@ func (c *Cluster) GetDaemonSetPod(daemonset *appsv1.DaemonSet) *v1.Pod {
 }
 
 func (c *Cluster) UpdateDaemonSet(ctx context.Context, daemonset *appsv1.DaemonSet) error {
-	pods := &v1.PodList{}
-	err := c.kubeClient.List(ctx, pods, client.InNamespace(daemonset.Namespace))
+	pods := v1.PodList{}
+	err := c.kubeClient.List(ctx, &pods, client.InNamespace(daemonset.Namespace))
 	if err != nil {
 		return err
 	}

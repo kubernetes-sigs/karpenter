@@ -113,8 +113,8 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 }
 
 func (c *Controller) ensureMachinesRemoved(ctx context.Context, n *v1.Node) (allRemoved bool, err error) {
-	machineList := &v1alpha5.MachineList{}
-	if err = c.kubeClient.List(ctx, machineList, client.MatchingFields{"status.providerID": n.Spec.ProviderID}); err != nil {
+	machineList := v1alpha5.MachineList{}
+	if err = c.kubeClient.List(ctx, &machineList, client.MatchingFields{"status.providerID": n.Spec.ProviderID}); err != nil {
 		return false, err
 	}
 	if len(machineList.Items) == 0 {
