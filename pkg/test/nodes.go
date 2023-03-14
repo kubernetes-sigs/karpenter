@@ -20,8 +20,6 @@ import (
 	"github.com/imdario/mergo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 )
 
 type NodeOptions struct {
@@ -63,19 +61,4 @@ func Node(overrides ...NodeOptions) *v1.Node {
 			Conditions:  []v1.NodeCondition{{Type: v1.NodeReady, Status: options.ReadyStatus, Reason: options.ReadyReason}},
 		},
 	}
-}
-
-func MachineLinkedNode(machine *v1alpha5.Machine) *v1.Node {
-	return Node(
-		NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels:      machine.Labels,
-				Annotations: machine.Annotations,
-			},
-			Taints:      append(machine.Spec.Taints, machine.Spec.StartupTaints...),
-			Capacity:    machine.Status.Capacity,
-			Allocatable: machine.Status.Allocatable,
-			ProviderID:  machine.Status.ProviderID,
-		},
-	)
 }

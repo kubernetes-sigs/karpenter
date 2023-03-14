@@ -25,20 +25,26 @@ import (
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 	podutil "github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
 type Terminator struct {
 	clock         clock.Clock
 	kubeClient    client.Client
+	cloudProvider cloudprovider.CloudProvider
 	evictionQueue *EvictionQueue
 }
 
-func NewTerminator(clk clock.Clock, kubeClient client.Client, eq *EvictionQueue) *Terminator {
+func NewTerminator(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, eq *EvictionQueue) *Terminator {
 	return &Terminator{
 		clock:         clk,
 		kubeClient:    kubeClient,
+		cloudProvider: cloudProvider,
 		evictionQueue: eq,
 	}
 }
@@ -47,11 +53,6 @@ func NewTerminator(clk clock.Clock, kubeClient client.Client, eq *EvictionQueue)
 func (t *Terminator) Cordon(ctx context.Context, node *v1.Node) error {
 	stored := node.DeepCopy()
 	node.Spec.Unschedulable = true
-	// Adding this label to the node ensures that the node is removed from the load-balancer target group
-	// while it is draining and before it is terminated. This prevents 500s coming prior to health check
-	// when the load balancer controller hasn't yet determined that the node and underlying connections are gone
-	// https://github.com/aws/aws-node-termination-handler/issues/316
-	// https://github.com/aws/karpenter/pull/2518
 	node.Labels = lo.Assign(node.Labels, map[string]string{
 		v1.LabelNodeExcludeBalancers: "karpenter",
 	})
@@ -94,6 +95,25 @@ func (t *Terminator) Drain(ctx context.Context, node *v1.Node) error {
 	return nil
 }
 
+// TerminateNode calls cloud provider delete then removes the finalizer to delete the node
+func (t *Terminator) TerminateNode(ctx context.Context, node *v1.Node) error {
+	stored := node.DeepCopy()
+	// Delete the instance associated with node
+	if err := t.cloudProvider.Delete(ctx, machineutil.NewFromNode(node)); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
+		return fmt.Errorf("terminating cloudprovider instance, %w", err)
+	}
+	controllerutil.RemoveFinalizer(node, v1alpha5.TerminationFinalizer)
+	if !equality.Semantic.DeepEqual(node, stored) {
+		logging.FromContext(ctx).Infof("deleted node")
+		if err := t.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+			return err
+		}
+		// We use stored.DeletionTimestamp since the api-server may give back a node after the patch without a deletionTimestamp
+		terminationSummary.Observe(time.Since(stored.DeletionTimestamp.Time).Seconds())
+	}
+	return nil
+}
+
 // getPods returns a list of evictable pods for the node
 func (t *Terminator) getPods(ctx context.Context, node *v1.Node) ([]*v1.Pod, error) {
 	podList := &v1.PodList{}
@@ -131,9 +151,9 @@ func (t *Terminator) evict(pods []*v1.Pod) {
 	}
 	// 2. Evict critical pods if all noncritical are evicted
 	if len(nonCritical) == 0 {
-		t.evictionQueue.Add(critical...)
+		t.evictionQueue.Add(critical)
 	} else {
-		t.evictionQueue.Add(nonCritical...)
+		t.evictionQueue.Add(nonCritical)
 	}
 }
 

@@ -41,7 +41,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
@@ -128,12 +127,6 @@ func NewOperator() (context.Context, *Operator) {
 	lo.Must0(manager.GetFieldIndexer().IndexField(ctx, &v1.Pod{}, "spec.nodeName", func(o client.Object) []string {
 		return []string{o.(*v1.Pod).Spec.NodeName}
 	}), "failed to setup pod indexer")
-	lo.Must0(manager.GetFieldIndexer().IndexField(ctx, &v1.Node{}, "spec.providerID", func(o client.Object) []string {
-		return []string{o.(*v1.Node).Spec.ProviderID}
-	}), "failed to setup node provider id indexer")
-	lo.Must0(manager.GetFieldIndexer().IndexField(ctx, &v1alpha5.Machine{}, "status.providerID", func(o client.Object) []string {
-		return []string{o.(*v1alpha5.Machine).Status.ProviderID}
-	}), "failed to setup machine provider id indexer")
 
 	return ctx, &Operator{
 		Manager:             manager,

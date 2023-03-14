@@ -20,95 +20,66 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
-func Blocked(node *v1.Node, machine *v1alpha5.Machine, reason string) []events.Event {
-	return []events.Event{
-		{
-			InvolvedObject: node,
-			Type:           v1.EventTypeNormal,
-			Reason:         "DeprovisioningBlocked",
-			Message:        fmt.Sprintf("Cannot deprovision node due to %s", reason),
-			DedupeValues:   []string{node.Name, reason},
-		},
-		{
-			InvolvedObject: machine,
-			Type:           v1.EventTypeNormal,
-			Reason:         "DeprovisioningBlocked",
-			Message:        fmt.Sprintf("Cannot deprovision machine due to %s", reason),
-			DedupeValues:   []string{machine.Name, reason},
-		},
-	}
-}
-
-func Terminating(node *v1.Node, machine *v1alpha5.Machine, reason string) []events.Event {
-	return []events.Event{
-		{
-			InvolvedObject: node,
-			Type:           v1.EventTypeNormal,
-			Reason:         "DeprovisioningTerminating",
-			Message:        fmt.Sprintf("Deprovisioning node via %s", reason),
-			DedupeValues:   []string{node.Name, reason},
-		},
-		{
-			InvolvedObject: machine,
-			Type:           v1.EventTypeNormal,
-			Reason:         "DeprovisioningTerminating",
-			Message:        fmt.Sprintf("Deprovisioning machine via %s", reason),
-			DedupeValues:   []string{machine.Name, reason},
-		},
-	}
-}
-
-func Launching(machine *v1alpha5.Machine, reason string) events.Event {
+func BlockedDeprovisioning(node *v1.Node, reason string) events.Event {
 	return events.Event{
-		InvolvedObject: machine,
+		InvolvedObject: node,
 		Type:           v1.EventTypeNormal,
-		Reason:         "DeprovisioningLaunching",
-		Message:        fmt.Sprintf("Launching machine for %s", reason),
-		DedupeValues:   []string{machine.Name, reason},
+		Reason:         "BlockedDeprovisioning",
+		Message:        fmt.Sprintf("Cannot deprovision node due to %s", reason),
+		DedupeValues:   []string{node.Name, reason},
 	}
 }
 
-func WaitingOnReadiness(machine *v1alpha5.Machine) events.Event {
+func TerminatingNode(node *v1.Node, reason string) events.Event {
 	return events.Event{
-		InvolvedObject: machine,
+		InvolvedObject: node,
+		Type:           v1.EventTypeNormal,
+		Reason:         "DeprovisioningTerminatingNode",
+		Message:        fmt.Sprintf("Deprovisioning node via %s", reason),
+		DedupeValues:   []string{node.Name, reason},
+	}
+}
+
+func LaunchingNode(node *v1.Node, reason string) events.Event {
+	return events.Event{
+		InvolvedObject: node,
+		Type:           v1.EventTypeNormal,
+		Reason:         "DeprovisioningLaunchingNode",
+		Message:        fmt.Sprintf("Launching node for %s", reason),
+		DedupeValues:   []string{node.Name, reason},
+	}
+}
+
+func WaitingOnReadiness(node *v1.Node) events.Event {
+	return events.Event{
+		InvolvedObject: node,
 		Type:           v1.EventTypeNormal,
 		Reason:         "DeprovisioningWaitingReadiness",
 		Message:        "Waiting on readiness to continue deprovisioning",
-		DedupeValues:   []string{machine.Name},
+		DedupeValues:   []string{node.Name},
 	}
 }
 
-func WaitingOnDeletion(machine *v1alpha5.Machine) events.Event {
+func WaitingOnDeletion(node *v1.Node) events.Event {
 	return events.Event{
-		InvolvedObject: machine,
+		InvolvedObject: node,
 		Type:           v1.EventTypeNormal,
 		Reason:         "DeprovisioningWaitingDeletion",
 		Message:        "Waiting on deletion to continue deprovisioning",
-		DedupeValues:   []string{machine.Name},
+		DedupeValues:   []string{node.Name},
 	}
 }
 
-func Unconsolidatable(node *v1.Node, machine *v1alpha5.Machine, reason string) []events.Event {
-	return []events.Event{
-		{
-			InvolvedObject: node,
-			Type:           v1.EventTypeNormal,
-			Reason:         "Unconsolidatable",
-			Message:        reason,
-			DedupeValues:   []string{node.Name},
-			DedupeTimeout:  time.Minute * 15,
-		},
-		{
-			InvolvedObject: machine,
-			Type:           v1.EventTypeNormal,
-			Reason:         "Unconsolidatable",
-			Message:        reason,
-			DedupeValues:   []string{machine.Name},
-			DedupeTimeout:  time.Minute * 15,
-		},
+func UnconsolidatableReason(node *v1.Node, reason string) events.Event {
+	return events.Event{
+		InvolvedObject: node,
+		Type:           v1.EventTypeNormal,
+		Reason:         "Unconsolidatable",
+		Message:        reason,
+		DedupeValues:   []string{node.Name},
+		DedupeTimeout:  time.Minute * 15,
 	}
 }

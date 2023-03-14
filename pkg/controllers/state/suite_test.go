@@ -166,7 +166,7 @@ var _ = Describe("Inflight Nodes", func() {
 						v1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
 					},
 				},
-				MachineTemplateRef: &v1alpha5.MachineTemplateRef{
+				MachineTemplateRef: &v1alpha5.ProviderRef{
 					Name: "default",
 				},
 			},
@@ -217,7 +217,7 @@ var _ = Describe("Inflight Nodes", func() {
 						v1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
 					},
 				},
-				MachineTemplateRef: &v1alpha5.MachineTemplateRef{
+				MachineTemplateRef: &v1alpha5.ProviderRef{
 					Name: "default",
 				},
 			},
@@ -255,7 +255,7 @@ var _ = Describe("Inflight Nodes", func() {
 						Values:   []string{"test-zone-1"},
 					},
 				},
-				MachineTemplateRef: &v1alpha5.MachineTemplateRef{
+				MachineTemplateRef: &v1alpha5.ProviderRef{
 					Name: "default",
 				},
 			},
@@ -303,7 +303,7 @@ var _ = Describe("Inflight Nodes", func() {
 						Values:   []string{"test-zone-1"},
 					},
 				},
-				MachineTemplateRef: &v1alpha5.MachineTemplateRef{
+				MachineTemplateRef: &v1alpha5.ProviderRef{
 					Name: "default",
 				},
 			},
@@ -387,7 +387,7 @@ var _ = Describe("Inflight Nodes", func() {
 						Values:   []string{"test-zone-1"},
 					},
 				},
-				MachineTemplateRef: &v1alpha5.MachineTemplateRef{
+				MachineTemplateRef: &v1alpha5.ProviderRef{
 					Name: "default",
 				},
 			},
@@ -690,7 +690,7 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectManualBinding(ctx, env.Client, pod1, node)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
 
-		cluster.ForEachNode(func(n *state.StateNode) bool {
+		cluster.ForEachNode(func(n *state.Node) bool {
 			ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("2.5")}, n.Available())
 			ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("1.5")}, n.PodRequests())
 			return true
@@ -699,7 +699,7 @@ var _ = Describe("Node Resource Level", func() {
 		// delete the node and the internal state should disappear as well
 		ExpectDeleted(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		cluster.ForEachNode(func(n *state.StateNode) bool {
+		cluster.ForEachNode(func(n *state.Node) bool {
 			Fail("shouldn't be called as the node was deleted")
 			return true
 		})
@@ -728,7 +728,7 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectManualBinding(ctx, env.Client, pod1, node1)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
 
-		cluster.ForEachNode(func(n *state.StateNode) bool {
+		cluster.ForEachNode(func(n *state.Node) bool {
 			ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("2.5")}, n.Available())
 			ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("1.5")}, n.PodRequests())
 			return true
@@ -762,7 +762,7 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node2))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
 
-		cluster.ForEachNode(func(n *state.StateNode) bool {
+		cluster.ForEachNode(func(n *state.Node) bool {
 			if n.Node.Name == node1.Name {
 				// not on node1 any longer, so it should be fully free
 				ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("4")}, n.Available())
@@ -958,7 +958,7 @@ var _ = Describe("Node Resource Level", func() {
 						Values:   []string{"test-zone-1"},
 					},
 				},
-				MachineTemplateRef: &v1alpha5.MachineTemplateRef{
+				MachineTemplateRef: &v1alpha5.ProviderRef{
 					Name: "default",
 				},
 			},
@@ -1507,7 +1507,7 @@ var _ = Describe("DaemonSet Controller", func() {
 
 func ExpectStateNodeCount(comparator string, count int) int {
 	c := 0
-	cluster.ForEachNode(func(n *state.StateNode) bool {
+	cluster.ForEachNode(func(n *state.Node) bool {
 		c++
 		return true
 	})
@@ -1515,9 +1515,9 @@ func ExpectStateNodeCount(comparator string, count int) int {
 	return c
 }
 
-func ExpectStateNodeExistsWithOffset(offset int, node *v1.Node) *state.StateNode {
-	var ret *state.StateNode
-	cluster.ForEachNode(func(n *state.StateNode) bool {
+func ExpectStateNodeExistsWithOffset(offset int, node *v1.Node) *state.Node {
+	var ret *state.Node
+	cluster.ForEachNode(func(n *state.Node) bool {
 		if n.Node.Name != node.Name {
 			return true
 		}
@@ -1528,13 +1528,13 @@ func ExpectStateNodeExistsWithOffset(offset int, node *v1.Node) *state.StateNode
 	return ret
 }
 
-func ExpectStateNodeExists(node *v1.Node) *state.StateNode {
+func ExpectStateNodeExists(node *v1.Node) *state.Node {
 	return ExpectStateNodeExistsWithOffset(1, node)
 }
 
-func ExpectStateNodeExistsForMachine(machine *v1alpha5.Machine) *state.StateNode {
-	var ret *state.StateNode
-	cluster.ForEachNode(func(n *state.StateNode) bool {
+func ExpectStateNodeExistsForMachine(machine *v1alpha5.Machine) *state.Node {
+	var ret *state.Node
+	cluster.ForEachNode(func(n *state.Node) bool {
 		if n.Machine.Name != machine.Name {
 			return true
 		}
@@ -1545,9 +1545,9 @@ func ExpectStateNodeExistsForMachine(machine *v1alpha5.Machine) *state.StateNode
 	return ret
 }
 
-func ExpectStateNodeNotFoundForMachine(machine *v1alpha5.Machine) *state.StateNode {
-	var ret *state.StateNode
-	cluster.ForEachNode(func(n *state.StateNode) bool {
+func ExpectStateNodeNotFoundForMachine(machine *v1alpha5.Machine) *state.Node {
+	var ret *state.Node
+	cluster.ForEachNode(func(n *state.Node) bool {
 		if n.Machine.Name != machine.Name {
 			return true
 		}

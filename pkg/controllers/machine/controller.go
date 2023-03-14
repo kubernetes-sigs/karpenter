@@ -20,11 +20,10 @@ import (
 	"time"
 
 	"github.com/patrickmn/go-cache"
+	"github.com/samber/lo"
 	"go.uber.org/multierr"
-	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -34,6 +33,7 @@ import (
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
@@ -41,10 +41,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
-	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/machine/terminator/events"
 	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 	"github.com/aws/karpenter-core/pkg/utils/result"
 )
 
@@ -108,7 +106,7 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 		c.launch,
 		c.registration,
 		c.initialization,
-		c.liveness, // we check liveness last, since we don't want to delete the machine, and then still launch
+		c.liveness,
 	} {
 		res, err := reconciler.Reconcile(ctx, machine)
 		errs = multierr.Append(errs, err)
@@ -135,7 +133,7 @@ func (c *Controller) Finalize(ctx context.Context, machine *v1alpha5.Machine) (r
 		if terminator.IsNodeDrainError(err) {
 			return reconcile.Result{Requeue: true}, nil
 		}
-		return reconcile.Result{}, client.IgnoreNotFound(err)
+		return reconcile.Result{}, nil
 	}
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", machine.Status.ProviderID))
 	if machine.Status.ProviderID != "" {
@@ -159,36 +157,57 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 		For(&v1alpha5.Machine{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(
 			&source.Kind{Type: &v1.Node{}},
-			machineutil.NodeEventHandler(ctx, c.kubeClient),
+			handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
+				node := o.(*v1.Node)
+				machineList := &v1alpha5.MachineList{}
+				if err := c.kubeClient.List(ctx, machineList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
+					return []reconcile.Request{}
+				}
+				return lo.Map(machineList.Items, func(m v1alpha5.Machine, _ int) reconcile.Request {
+					return reconcile.Request{
+						NamespacedName: client.ObjectKeyFromObject(&m),
+					}
+				})
+			}),
 		).
-		WithOptions(controller.Options{
-			RateLimiter: workqueue.NewMaxOfRateLimiter(
-				workqueue.NewItemExponentialFailureRateLimiter(time.Second, time.Minute),
-				// 10 qps, 100 bucket size
-				&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
-			),
-			MaxConcurrentReconciles: 100, // higher concurrency limit since we want fast reaction to node syncing and launch
-		}))
+		WithOptions(controller.Options{MaxConcurrentReconciles: 50})) // higher concurrency limit since we want fast reaction to node syncing and launch
 }
 
 func (c *Controller) cleanupNodeForMachine(ctx context.Context, machine *v1alpha5.Machine) error {
-	node, err := machineutil.NodeForMachine(ctx, c.kubeClient, machine)
+	node, err := nodeForMachine(ctx, c.kubeClient, machine)
 	if err != nil {
 		// We don't clean the node if we either don't find a node or have violated the single machine to single node invariant
-		if machineutil.IsNodeNotFoundError(err) || machineutil.IsDuplicateNodeError(err) {
+		if IsNodeNotFoundError(err) || IsDuplicateNodeError(err) {
 			return nil
 		}
 		return err
 	}
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
 	if err = c.terminator.Cordon(ctx, node); err != nil {
+		if terminator.IsNodeDrainError(err) {
+			c.recorder.Publish(events.NodeFailedToDrain(node, err))
+		}
 		return fmt.Errorf("cordoning node, %w", err)
 	}
 	if err = c.terminator.Drain(ctx, node); err != nil {
 		if terminator.IsNodeDrainError(err) {
-			c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
+			c.recorder.Publish(events.NodeFailedToDrain(node, err))
 		}
 		return fmt.Errorf("draining node, %w", err)
 	}
-	return client.IgnoreNotFound(c.kubeClient.Delete(ctx, node))
+	return nil
+}
+
+func nodeForMachine(ctx context.Context, c client.Client, machine *v1alpha5.Machine) (*v1.Node, error) {
+	nodeList := v1.NodeList{}
+	if err := c.List(ctx, &nodeList, client.MatchingFields{"spec.providerID": machine.Status.ProviderID}, client.Limit(2)); err != nil {
+		return nil, fmt.Errorf("listing nodes, %w", err)
+	}
+	if len(nodeList.Items) > 1 {
+		return nil, &DuplicateNodeError{ProviderID: machine.Status.ProviderID}
+	}
+	if len(nodeList.Items) == 0 {
+		return nil, &NodeNotFoundError{ProviderID: machine.Status.ProviderID}
+	}
+	return &nodeList.Items[0], nil
 }

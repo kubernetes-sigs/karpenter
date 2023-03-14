@@ -43,7 +43,7 @@ func (e Event) dedupeKey() string {
 }
 
 type Recorder interface {
-	Publish(...Event)
+	Publish(Event)
 }
 
 type recorder struct {
@@ -61,13 +61,7 @@ func NewRecorder(r record.EventRecorder) Recorder {
 }
 
 // Publish creates a Kubernetes event using the passed event struct
-func (r *recorder) Publish(evts ...Event) {
-	for _, evt := range evts {
-		r.publishEvent(evt)
-	}
-}
-
-func (r *recorder) publishEvent(evt Event) {
+func (r *recorder) Publish(evt Event) {
 	// Override the timeout if one is set for an event
 	timeout := defaultDedupeTimeout
 	if evt.DedupeTimeout != 0 {

@@ -72,24 +72,25 @@ func (c *consolidation) String() string {
 
 // sortAndFilterCandidates orders deprovisionable nodes by the disruptionCost, removing any that we already know won't
 // be viable consolidation options.
-func (c *consolidation) sortAndFilterCandidates(ctx context.Context, nodes []*Candidate) ([]*Candidate, error) {
+func (c *consolidation) sortAndFilterCandidates(ctx context.Context, nodes []CandidateNode) ([]CandidateNode, error) {
 	pdbs, err := NewPDBLimits(ctx, c.kubeClient)
 	if err != nil {
 		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
 
 	// filter out nodes that can't be terminated
-	nodes = lo.Filter(nodes, func(cn *Candidate, _ int) bool {
-		if !cn.Machine.DeletionTimestamp.IsZero() {
-			c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.Machine, "in the process of deletion")...)
+	nodes = lo.Filter(nodes, func(cn CandidateNode, _ int) bool {
+		if !cn.DeletionTimestamp.IsZero() {
+			c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(cn.Node, "in the process of deletion"))
 			return false
 		}
 		if pdb, ok := pdbs.CanEvictPods(cn.pods); !ok {
-			c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.Machine, fmt.Sprintf("pdb %s prevents pod evictions", pdb))...)
+			c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(cn.Node, fmt.Sprintf("pdb %s prevents pod evictions", pdb)))
 			return false
 		}
 		if p, ok := hasDoNotEvictPod(cn); ok {
-			c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.Machine, fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name))...)
+			c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(cn.Node,
+				fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name)))
 			return false
 		}
 		return true
@@ -102,26 +103,26 @@ func (c *consolidation) sortAndFilterCandidates(ctx context.Context, nodes []*Ca
 }
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes
-func (c *consolidation) ShouldDeprovision(_ context.Context, cn *Candidate) bool {
-	if val, ok := cn.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey]; ok {
-		c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.Machine, fmt.Sprintf("%s annotation exists", v1alpha5.DoNotConsolidateNodeAnnotationKey))...)
+func (c *consolidation) ShouldDeprovision(ctx context.Context, n *state.Node, provisioner *v1alpha5.Provisioner, _ []*v1.Pod) bool {
+	if val, ok := n.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey]; ok {
+		c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(n.Node, fmt.Sprintf("%s annotation exists", v1alpha5.DoNotConsolidateNodeAnnotationKey)))
 		return val != "true"
 	}
-	if cn.provisioner == nil {
-		c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.Machine, "provisioner is unknown")...)
+	if provisioner == nil {
+		c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(n.Node, "provisioner is unknown"))
 		return false
 	}
-	if cn.provisioner.Spec.Consolidation == nil || !ptr.BoolValue(cn.provisioner.Spec.Consolidation.Enabled) {
-		c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.Machine, fmt.Sprintf("provisioner %s has consolidation disabled", cn.provisioner.Name))...)
+	if provisioner.Spec.Consolidation == nil || !ptr.BoolValue(provisioner.Spec.Consolidation.Enabled) {
+		c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(n.Node, fmt.Sprintf("provisioner %s has consolidation disabled", provisioner.Name)))
 		return false
 	}
 	return true
 }
 
 // ValidateCommand validates a command for a deprovisioner
-func (c *consolidation) ValidateCommand(ctx context.Context, cmd Command, candidateNodes []*Candidate) (bool, error) {
+func (c *consolidation) ValidateCommand(ctx context.Context, cmd Command, candidateNodes []CandidateNode) (bool, error) {
 	// map from nodes we are about to remove back into candidate nodes with cluster state
-	nodesToDelete := mapCandidates(cmd.candidates, candidateNodes)
+	nodesToDelete := mapNodes(cmd.nodesToRemove, candidateNodes)
 	// None of the chosen candidate nodes are valid for execution, so retry
 	if len(nodesToDelete) == 0 {
 		return false, nil
@@ -142,7 +143,7 @@ func (c *consolidation) ValidateCommand(ctx context.Context, cmd Command, candid
 	//                    be deleted without producing more than one node
 	// len(newNodes) == 1, as long as the node looks like what we were expecting, this is valid
 	if len(newNodes) == 0 {
-		if len(cmd.replacements) == 0 {
+		if len(cmd.replacementNodes) == 0 {
 			// scheduling produced zero new nodes and we weren't expecting any, so this is valid.
 			return true, nil
 		}
@@ -157,7 +158,7 @@ func (c *consolidation) ValidateCommand(ctx context.Context, cmd Command, candid
 	}
 
 	// we now know that scheduling simulation wants to create one new node
-	if len(cmd.replacements) == 0 {
+	if len(cmd.replacementNodes) == 0 {
 		// but we weren't expecting any new nodes, so this is invalid
 		return false, nil
 	}
@@ -172,7 +173,7 @@ func (c *consolidation) ValidateCommand(ctx context.Context, cmd Command, candid
 	// a 4xlarge and replace it with a 2xlarge. If things have changed and the scheduling simulation we just performed
 	// now says that we need to launch a 4xlarge. It's still launching the correct number of nodes, but it's just
 	// as expensive or possibly more so we shouldn't validate.
-	if !instanceTypesAreSubset(cmd.replacements[0].InstanceTypeOptions, newNodes[0].InstanceTypeOptions) {
+	if !instanceTypesAreSubset(cmd.replacementNodes[0].InstanceTypeOptions, newNodes[0].InstanceTypeOptions) {
 		return false, nil
 	}
 
@@ -185,13 +186,13 @@ func (c *consolidation) ValidateCommand(ctx context.Context, cmd Command, candid
 // computeConsolidation computes a consolidation action to take
 //
 // nolint:gocyclo
-func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...*Candidate) (Command, error) {
+func (c *consolidation) computeConsolidation(ctx context.Context, nodes ...CandidateNode) (Command, error) {
 	defer metrics.Measure(deprovisioningDurationHistogram.WithLabelValues("Replace/Delete"))()
 	// Run scheduling simulation to compute consolidation option
-	newMachines, allPodsScheduled, err := simulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, candidates...)
+	newNodes, allPodsScheduled, err := simulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, nodes...)
 	if err != nil {
 		// if a candidate node is now deleting, just retry
-		if errors.Is(err, errCandidateDeleting) {
+		if errors.Is(err, errCandidateNodeDeleting) {
 			return Command{action: actionDoNothing}, nil
 		}
 		return Command{}, err
@@ -200,57 +201,57 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	// if not all of the pods were scheduled, we can't do anything
 	if !allPodsScheduled {
 		// This method is used by multi-node consolidation as well, so we'll only report in the single node case
-		if len(candidates) == 1 {
-			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, candidates[0].Machine, "not all pods would schedule")...)
+		if len(nodes) == 1 {
+			c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(nodes[0].Node, "not all pods would schedule"))
 		}
 		return Command{action: actionDoNothing}, nil
 	}
 
-	// were we able to schedule all the pods on the inflight candidates?
-	if len(newMachines) == 0 {
+	// were we able to schedule all the pods on the inflight nodes?
+	if len(newNodes) == 0 {
 		return Command{
-			candidates: candidates,
-			action:     actionDelete,
+			nodesToRemove: lo.Map(nodes, func(n CandidateNode, _ int) *v1.Node { return n.Node }),
+			action:        actionDelete,
 		}, nil
 	}
 
-	// we're not going to turn a single node into multiple candidates
-	if len(newMachines) != 1 {
-		if len(candidates) == 1 {
-			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, candidates[0].Machine, fmt.Sprintf("can't remove without creating %d candidates", len(newMachines)))...)
+	// we're not going to turn a single node into multiple nodes
+	if len(newNodes) != 1 {
+		if len(nodes) == 1 {
+			c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(nodes[0].Node, fmt.Sprintf("can't remove without creating %d nodes", len(newNodes))))
 		}
 		return Command{action: actionDoNothing}, nil
 	}
 
 	// get the current node price based on the offering
 	// fallback if we can't find the specific zonal pricing data
-	nodesPrice, err := getCandidatePrices(candidates)
+	nodesPrice, err := getNodePrices(nodes)
 	if err != nil {
 		return Command{}, fmt.Errorf("getting offering price from candidate node, %w", err)
 	}
-	newMachines[0].InstanceTypeOptions = filterByPrice(newMachines[0].InstanceTypeOptions, newMachines[0].Requirements, nodesPrice)
-	if len(newMachines[0].InstanceTypeOptions) == 0 {
-		if len(candidates) == 1 {
-			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, candidates[0].Machine, "can't replace with a cheaper node")...)
+	newNodes[0].InstanceTypeOptions = filterByPrice(newNodes[0].InstanceTypeOptions, newNodes[0].Requirements, nodesPrice)
+	if len(newNodes[0].InstanceTypeOptions) == 0 {
+		if len(nodes) == 1 {
+			c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(nodes[0].Node, "can't replace with a cheaper node"))
 		}
 		// no instance types remain after filtering by price
 		return Command{action: actionDoNothing}, nil
 	}
 
-	// If the existing candidates are all spot and the replacement is spot, we don't consolidate.  We don't have a reliable
+	// If the existing nodes are all spot and the replacement is spot, we don't consolidate.  We don't have a reliable
 	// mechanism to determine if this replacement makes sense given instance type availability (e.g. we may replace
 	// a spot node with one that is less available and more likely to be reclaimed).
 	allExistingAreSpot := true
-	for _, cn := range candidates {
-		if cn.capacityType != v1alpha5.CapacityTypeSpot {
+	for _, n := range nodes {
+		if n.capacityType != v1alpha5.CapacityTypeSpot {
 			allExistingAreSpot = false
 		}
 	}
 
 	if allExistingAreSpot &&
-		newMachines[0].Requirements.Get(v1alpha5.LabelCapacityType).Has(v1alpha5.CapacityTypeSpot) {
-		if len(candidates) == 1 {
-			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, candidates[0].Machine, "can't replace a spot node with a spot node")...)
+		newNodes[0].Requirements.Get(v1alpha5.LabelCapacityType).Has(v1alpha5.CapacityTypeSpot) {
+		if len(nodes) == 1 {
+			c.recorder.Publish(deprovisioningevents.UnconsolidatableReason(nodes[0].Node, "can't replace a spot node with a spot node"))
 		}
 		return Command{action: actionDoNothing}, nil
 	}
@@ -259,25 +260,25 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	// assumption, that the spot variant will launch. We also need to add a requirement to the node to ensure that if
 	// spot capacity is insufficient we don't replace the node with a more expensive on-demand node.  Instead the launch
 	// should fail and we'll just leave the node alone.
-	ctReq := newMachines[0].Requirements.Get(v1alpha5.LabelCapacityType)
+	ctReq := newNodes[0].Requirements.Get(v1alpha5.LabelCapacityType)
 	if ctReq.Has(v1alpha5.CapacityTypeSpot) && ctReq.Has(v1alpha5.CapacityTypeOnDemand) {
-		newMachines[0].Requirements.Add(scheduling.NewRequirement(v1alpha5.LabelCapacityType, v1.NodeSelectorOpIn, v1alpha5.CapacityTypeSpot))
+		newNodes[0].Requirements.Add(scheduling.NewRequirement(v1alpha5.LabelCapacityType, v1.NodeSelectorOpIn, v1alpha5.CapacityTypeSpot))
 	}
 
 	return Command{
-		candidates:   candidates,
-		action:       actionReplace,
-		replacements: newMachines,
+		nodesToRemove:    lo.Map(nodes, func(n CandidateNode, _ int) *v1.Node { return n.Node }),
+		action:           actionReplace,
+		replacementNodes: newNodes,
 	}, nil
 }
 
-// getCandidatePrices returns the sum of the prices of the given candidate nodes
-func getCandidatePrices(candidates []*Candidate) (float64, error) {
+// getNodePrices returns the sum of the prices of the given candidate nodes
+func getNodePrices(nodes []CandidateNode) (float64, error) {
 	var price float64
-	for _, c := range candidates {
-		offering, ok := c.instanceType.Offerings.Get(c.capacityType, c.zone)
+	for _, n := range nodes {
+		offering, ok := n.instanceType.Offerings.Get(n.capacityType, n.zone)
 		if !ok {
-			return 0.0, fmt.Errorf("unable to determine offering for %s/%s/%s", c.instanceType.Name, c.capacityType, c.zone)
+			return 0.0, fmt.Errorf("unable to determine offering for %s/%s/%s", n.instanceType.Name, n.capacityType, n.zone)
 		}
 		price += offering.Price
 	}

@@ -26,7 +26,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 	nodeutil "github.com/aws/karpenter-core/pkg/utils/node"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
@@ -42,14 +41,13 @@ type Initialization struct {
 // This method handles both nil provisioners and nodes without extended resources gracefully.
 func (i *Initialization) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
 	if machine.Status.ProviderID == "" {
-		machine.StatusConditions().MarkUnknown(v1alpha5.MachineInitialized, "", "")
 		return reconcile.Result{}, nil
 	}
 	if machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).IsTrue() {
 		return reconcile.Result{}, nil
 	}
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", machine.Status.ProviderID))
-	node, err := machineutil.NodeForMachine(ctx, i.kubeClient, machine)
+	node, err := nodeForMachine(ctx, i.kubeClient, machine)
 	if err != nil {
 		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "NodeNotFound", "Node not registered with cluster")
 		return reconcile.Result{}, nil //nolint:nilerr
@@ -59,11 +57,11 @@ func (i *Initialization) Reconcile(ctx context.Context, machine *v1alpha5.Machin
 		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "NodeNotReady", "Node status is NotReady")
 		return reconcile.Result{}, nil
 	}
-	if taint, ok := IsStartupTaintRemoved(node, machine); !ok {
+	if taint, ok := isStartupTaintRemoved(node, machine); !ok {
 		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "StartupTaintsExist", "StartupTaint '%s' still exists", formatTaint(taint))
 		return reconcile.Result{}, nil
 	}
-	if name, ok := RequestedResourcesRegistered(node, machine); !ok {
+	if name, ok := requestedResourcesRegistered(node, machine); !ok {
 		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "ResourceNotRegistered", "Resource '%s' was requested but not registered", name)
 		return reconcile.Result{}, nil
 	}
@@ -79,9 +77,9 @@ func (i *Initialization) Reconcile(ctx context.Context, machine *v1alpha5.Machin
 	return reconcile.Result{}, nil
 }
 
-// IsStartupTaintRemoved returns true if there are no startup taints registered for the provisioner, or if all startup
+// isStartupTaintRemoved returns true if there are no startup taints registered for the provisioner, or if all startup
 // taints have been removed from the node
-func IsStartupTaintRemoved(node *v1.Node, machine *v1alpha5.Machine) (*v1.Taint, bool) {
+func isStartupTaintRemoved(node *v1.Node, machine *v1alpha5.Machine) (*v1.Taint, bool) {
 	if machine != nil {
 		for _, startupTaint := range machine.Spec.StartupTaints {
 			for i := range node.Spec.Taints {
@@ -95,9 +93,9 @@ func IsStartupTaintRemoved(node *v1.Node, machine *v1alpha5.Machine) (*v1.Taint,
 	return nil, true
 }
 
-// RequestedResourcesRegistered returns true if there are no extended resources on the node, or they have all been
+// requestedResourcesRegistered returns true if there are no extended resources on the node, or they have all been
 // registered by device plugins
-func RequestedResourcesRegistered(node *v1.Node, machine *v1alpha5.Machine) (v1.ResourceName, bool) {
+func requestedResourcesRegistered(node *v1.Node, machine *v1alpha5.Machine) (v1.ResourceName, bool) {
 	for resourceName, quantity := range machine.Spec.Resources.Requests {
 		if quantity.IsZero() {
 			continue

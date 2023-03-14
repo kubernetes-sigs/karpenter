@@ -51,6 +51,7 @@ var fakeClock *clock.FakeClock
 var env *test.Environment
 var cluster *state.Cluster
 var nodeController controller.Controller
+var podController controller.Controller
 var metricsStateController controller.Controller
 var cloudProvider *fake.CloudProvider
 var provisioner *v1alpha5.Provisioner
@@ -71,6 +72,7 @@ var _ = BeforeSuite(func() {
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	provisioner = test.Provisioner(test.ProvisionerOptions{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
 	nodeController = informer.NewNodeController(env.Client, cluster)
+	podController = informer.NewPodController(env.Client, cluster)
 	metricsStateController = metricsstate.NewController(cluster)
 	ExpectApplied(ctx, env.Client, provisioner)
 })

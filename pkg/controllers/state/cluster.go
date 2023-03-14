@@ -50,8 +50,8 @@ type Cluster struct {
 	clock         clock.Clock
 
 	mu               sync.RWMutex
-	nodes            map[string]*StateNode           // provider id -> cached node
-	bindings         map[types.NamespacedName]string // pod namespaced named -> node name
+	nodes            map[string]*Node                // provider id -> node
+	bindings         map[types.NamespacedName]string // pod namespaced named -> node node
 	nameToProviderID map[string]string               // node name -> provider id
 	daemonSetPods    sync.Map                        // daemonSet -> existing pod
 
@@ -68,7 +68,7 @@ func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudPro
 		clock:            clk,
 		kubeClient:       client,
 		cloudProvider:    cp,
-		nodes:            map[string]*StateNode{},
+		nodes:            map[string]*Node{},
 		bindings:         map[types.NamespacedName]string{},
 		daemonSetPods:    sync.Map{},
 		nameToProviderID: map[string]string{},
@@ -137,8 +137,8 @@ func (c *Cluster) ForPodsWithAntiAffinity(fn func(p *v1.Pod, n *v1.Node) bool) {
 }
 
 // ForEachNode calls the supplied function once per node object that is being tracked. It is not safe to store the
-// state.StateNode object, it should be only accessed from within the function provided to this method.
-func (c *Cluster) ForEachNode(f func(n *StateNode) bool) {
+// state.Node object, it should be only accessed from within the function provided to this method.
+func (c *Cluster) ForEachNode(f func(n *Node) bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -151,11 +151,11 @@ func (c *Cluster) ForEachNode(f func(n *StateNode) bool) {
 
 // Nodes creates a DeepCopy of all state nodes.
 // NOTE: This is very inefficient so this should only be used when DeepCopying is absolutely necessary
-func (c *Cluster) Nodes() StateNodes {
+func (c *Cluster) Nodes() Nodes {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return lo.Map(lo.Values(c.nodes), func(n *StateNode, _ int) *StateNode {
+	return lo.Map(lo.Values(c.nodes), func(n *Node, _ int) *Node {
 		return n.DeepCopy()
 	})
 }
@@ -294,7 +294,7 @@ func (c *Cluster) Consolidated() bool {
 func (c *Cluster) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.nodes = map[string]*StateNode{}
+	c.nodes = map[string]*Node{}
 	c.nameToProviderID = map[string]string{}
 	c.bindings = map[types.NamespacedName]string{}
 	c.antiAffinityPods = sync.Map{}
@@ -339,11 +339,11 @@ func (c *Cluster) DeleteDaemonSet(key types.NamespacedName) {
 // and explicitly modifying the cluster state. If you do not hold the cluster state lock before calling any of these helpers
 // you will hit race conditions and data corruption
 
-func (c *Cluster) newStateFromMachine(machine *v1alpha5.Machine, oldNode *StateNode) *StateNode {
+func (c *Cluster) newStateFromMachine(machine *v1alpha5.Machine, oldNode *Node) *Node {
 	if oldNode == nil {
 		oldNode = NewNode()
 	}
-	n := &StateNode{
+	n := &Node{
 		Node:              oldNode.Node,
 		Machine:           machine,
 		hostPortUsage:     oldNode.hostPortUsage,
@@ -377,25 +377,22 @@ func (c *Cluster) cleanupMachine(name string) {
 	}
 }
 
-func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *StateNode) (*StateNode, error) {
+func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *Node) (*Node, error) {
 	if oldNode == nil {
 		oldNode = NewNode()
 	}
-	n := &StateNode{
-		Node:                node,
-		Machine:             oldNode.Machine,
-		inflightAllocatable: oldNode.inflightAllocatable,
-		inflightCapacity:    oldNode.inflightCapacity,
-		startupTaints:       oldNode.startupTaints,
-		daemonSetRequests:   map[types.NamespacedName]v1.ResourceList{},
-		daemonSetLimits:     map[types.NamespacedName]v1.ResourceList{},
-		podRequests:         map[types.NamespacedName]v1.ResourceList{},
-		podLimits:           map[types.NamespacedName]v1.ResourceList{},
-		hostPortUsage:       scheduling.NewHostPortUsage(),
-		volumeUsage:         scheduling.NewVolumeUsage(),
-		volumeLimits:        scheduling.VolumeCount{},
-		markedForDeletion:   oldNode.markedForDeletion,
-		nominatedUntil:      oldNode.nominatedUntil,
+	n := &Node{
+		Node:              node,
+		Machine:           oldNode.Machine,
+		hostPortUsage:     scheduling.NewHostPortUsage(),
+		volumeUsage:       scheduling.NewVolumeLimits(c.kubeClient),
+		volumeLimits:      scheduling.VolumeCount{},
+		daemonSetRequests: map[types.NamespacedName]v1.ResourceList{},
+		daemonSetLimits:   map[types.NamespacedName]v1.ResourceList{},
+		podRequests:       map[types.NamespacedName]v1.ResourceList{},
+		podLimits:         map[types.NamespacedName]v1.ResourceList{},
+		markedForDeletion: oldNode.markedForDeletion,
+		nominatedUntil:    oldNode.nominatedUntil,
 	}
 	if err := multierr.Combine(
 		c.populateStartupTaints(ctx, n),
@@ -427,7 +424,7 @@ func (c *Cluster) cleanupNode(name string) {
 	}
 }
 
-func (c *Cluster) populateStartupTaints(ctx context.Context, n *StateNode) error {
+func (c *Cluster) populateStartupTaints(ctx context.Context, n *Node) error {
 	if !n.Owned() {
 		return nil
 	}
@@ -439,7 +436,7 @@ func (c *Cluster) populateStartupTaints(ctx context.Context, n *StateNode) error
 	return nil
 }
 
-func (c *Cluster) populateInflight(ctx context.Context, n *StateNode) error {
+func (c *Cluster) populateInflight(ctx context.Context, n *Node) error {
 	if !n.Owned() {
 		return nil
 	}
@@ -462,7 +459,7 @@ func (c *Cluster) populateInflight(ctx context.Context, n *StateNode) error {
 	return nil
 }
 
-func (c *Cluster) populateVolumeLimits(ctx context.Context, n *StateNode) error {
+func (c *Cluster) populateVolumeLimits(ctx context.Context, n *Node) error {
 	var csiNode storagev1.CSINode
 	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Name}, &csiNode); err != nil {
 		return client.IgnoreNotFound(fmt.Errorf("getting CSINode to determine volume limit for %s, %w", n.Node.Name, err))
@@ -476,7 +473,7 @@ func (c *Cluster) populateVolumeLimits(ctx context.Context, n *StateNode) error 
 	return nil
 }
 
-func (c *Cluster) populateResourceRequests(ctx context.Context, n *StateNode) error {
+func (c *Cluster) populateResourceRequests(ctx context.Context, n *Node) error {
 	var pods v1.PodList
 	if err := c.kubeClient.List(ctx, &pods, client.MatchingFields{"spec.nodeName": n.Node.Name}); err != nil {
 		return fmt.Errorf("listing pods, %w", err)
@@ -487,7 +484,7 @@ func (c *Cluster) populateResourceRequests(ctx context.Context, n *StateNode) er
 			continue
 		}
 		c.cleanupOldBindings(pod)
-		n.updateForPod(ctx, c.kubeClient, pod)
+		n.updateForPod(ctx, pod)
 		c.bindings[client.ObjectKeyFromObject(pod)] = pod.Spec.NodeName
 	}
 	return nil
@@ -507,7 +504,7 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 		return errors.NewNotFound(schema.GroupResource{Resource: "Machine"}, pod.Spec.NodeName)
 	}
 	c.cleanupOldBindings(pod)
-	n.updateForPod(ctx, c.kubeClient, pod)
+	n.updateForPod(ctx, pod)
 	c.bindings[client.ObjectKeyFromObject(pod)] = pod.Spec.NodeName
 	return nil
 }
@@ -558,7 +555,7 @@ func (c *Cluster) updatePodAntiAffinities(pod *v1.Pod) {
 	}
 }
 
-func (c *Cluster) triggerConsolidationOnChange(old, new *StateNode) {
+func (c *Cluster) triggerConsolidationOnChange(old, new *Node) {
 	if old == nil || new == nil {
 		c.SetConsolidated(false)
 		return

@@ -33,6 +33,20 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/options"
 )
 
+type resourceKey struct{}
+
+func WithNamespacedName(ctx context.Context, namespacedname types.NamespacedName) context.Context {
+	return context.WithValue(ctx, resourceKey{}, namespacedname)
+}
+
+func GetNamespacedName(ctx context.Context) types.NamespacedName {
+	retval := ctx.Value(resourceKey{})
+	if retval == nil {
+		return types.NamespacedName{}
+	}
+	return retval.(types.NamespacedName)
+}
+
 type optionsKey struct{}
 
 func WithOptions(ctx context.Context, opts options.Options) context.Context {

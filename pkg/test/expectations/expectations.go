@@ -44,35 +44,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/controllers/machine"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/metrics"
-	"github.com/aws/karpenter-core/pkg/test"
+	"github.com/aws/karpenter-core/pkg/operator/injection"
 )
 
 const (
 	ReconcilerPropagationTime = 10 * time.Second
 	RequestInterval           = 1 * time.Second
 )
-
-type Bindings map[*v1.Pod]*Binding
-
-type Binding struct {
-	Machine *v1alpha5.Machine
-	Node    *v1.Node
-}
-
-func (b Bindings) Get(p *v1.Pod) *Binding {
-	for k, v := range b {
-		if client.ObjectKeyFromObject(k) == client.ObjectKeyFromObject(p) {
-			return v
-		}
-	}
-	return nil
-}
 
 func ExpectExists[T client.Object](ctx context.Context, c client.Client, obj T) T {
 	return ExpectExistsWithOffset(1, ctx, c, obj)
@@ -241,147 +223,53 @@ func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objs ...clien
 	}
 }
 
-func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*v1.Pod) Bindings {
-	bindings := ExpectProvisionedNoBindingWithOffset(1, ctx, c, cluster, cloudProvider, provisioner, pods...)
-	podKeys := sets.NewString(lo.Map(pods, func(p *v1.Pod, _ int) string { return client.ObjectKeyFromObject(p).String() })...)
-	for pod, binding := range bindings {
+func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, pods ...*v1.Pod) map[*v1.Pod]*v1.Node {
+	bindings := ExpectProvisionedNoBindingWithOffset(1, ctx, c, provisioner, pods...)
+	podNames := sets.NewString(lo.Map(pods, func(p *v1.Pod, _ int) string { return p.Name })...)
+	for pod, node := range bindings {
 		// Only bind the pods that are passed through
-		if podKeys.Has(client.ObjectKeyFromObject(pod).String()) {
-			ExpectManualBindingWithOffset(1, ctx, c, pod, binding.Node)
+		if podNames.Has(pod.Name) {
+			ExpectManualBindingWithOffset(1, ctx, c, pod, node)
 			ExpectWithOffset(1, cluster.UpdatePod(ctx, pod)).To(Succeed()) // track pod bindings
 		}
 	}
 	return bindings
 }
 
-func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*v1.Pod) Bindings {
-	return ExpectProvisionedNoBindingWithOffset(1, ctx, c, cluster, cloudProvider, provisioner, pods...)
+func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, provisioner *provisioning.Provisioner, pods ...*v1.Pod) map[*v1.Pod]*v1.Node {
+	return ExpectProvisionedNoBindingWithOffset(1, ctx, c, provisioner, pods...)
 }
 
-func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*v1.Pod) Bindings {
+func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c client.Client, provisioner *provisioning.Provisioner, pods ...*v1.Pod) map[*v1.Pod]*v1.Node {
 	// Persist objects
 	for _, pod := range pods {
 		ExpectAppliedWithOffset(offset+1, ctx, c, pod)
 	}
 	// TODO: Check the error on the provisioner scheduling round
 	machines, nodes, _ := provisioner.Schedule(ctx)
-	bindings := Bindings{}
+	bindings := map[*v1.Pod]*v1.Node{}
 	for _, m := range machines {
+		ctx = injection.WithNamespacedName(ctx, types.NamespacedName{Name: m.Labels[v1alpha5.ProvisionerNameLabelKey]})
 		// TODO: Check the error on the provisioner launch
 		name, err := provisioner.Launch(ctx, m, provisioning.WithReason(metrics.ProvisioningReason))
 		if err != nil {
 			return bindings
 		}
-		machine := &v1alpha5.Machine{}
-		ExpectWithOffset(offset+1, c.Get(ctx, types.NamespacedName{Name: name}, machine)).To(Succeed())
-		machine, node := ExpectMachineDeployedWithOffset(offset+1, ctx, c, cluster, cloudProvider, machine)
-		if machine != nil && node != nil {
-			for _, pod := range m.Pods {
-				bindings[pod] = &Binding{
-					Machine: machine,
-					Node:    node,
-				}
-			}
+		for _, pod := range m.Pods {
+			bindings[pod] = ExpectNodeExistsWithOffset(offset+1, ctx, c, name)
 		}
 	}
 	for _, node := range nodes {
 		for _, pod := range node.Pods {
-			bindings[pod] = &Binding{
-				Node:    node.Node,
-				Machine: node.Machine,
-			}
+			bindings[pod] = node.Node.Node
 		}
 	}
 	return bindings
 }
 
-func ExpectMachineDeployed(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, machine *v1alpha5.Machine) (*v1alpha5.Machine, *v1.Node) {
-	return ExpectMachineDeployedWithOffset(1, ctx, c, cluster, cloudProvider, machine)
-}
-
-func ExpectMachineDeployedWithOffset(offset int, ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, m *v1alpha5.Machine) (*v1alpha5.Machine, *v1.Node) {
-	resolved, err := cloudProvider.Create(ctx, m)
-	// TODO @joinnis: Check this error rather than swallowing it. This is swallowed right now due to how we are doing some testing in the cloudprovider
-	if err != nil {
-		return nil, nil
-	}
-	ExpectWithOffset(offset+1, err).To(Succeed())
-
-	// Make the machine ready in the status conditions
-	machine.PopulateMachineDetails(m, resolved)
-	m.StatusConditions().MarkTrue(v1alpha5.MachineCreated)
-	m.StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
-
-	// Mock the machine launch and node joining at the apiserver
-	node := test.MachineLinkedNode(m)
-	ExpectAppliedWithOffset(offset+1, ctx, c, m, node)
-	ExpectWithOffset(offset+1, cluster.UpdateNode(ctx, node)).To(Succeed())
-	cluster.UpdateMachine(m)
-	return m, node
-}
-
-func ExpectMachinesCascadeDeletion(ctx context.Context, c client.Client, machines ...*v1alpha5.Machine) {
-	nodes := ExpectNodesWithOffset(1, ctx, c)
-	for _, machine := range machines {
-		err := c.Get(ctx, client.ObjectKeyFromObject(machine), &v1alpha5.Machine{})
-		if !errors.IsNotFound(err) {
-			continue
-		}
-		for _, node := range nodes {
-			if node.Spec.ProviderID == machine.Status.ProviderID {
-				Expect(c.Delete(ctx, node))
-			}
-		}
-	}
-}
-
-func ExpectMakeMachinesReady(ctx context.Context, c client.Client, machines ...*v1alpha5.Machine) {
-	ExpectMakeMachinesReadyWithOffset(1, ctx, c, machines...)
-}
-
-func ExpectMakeMachinesReadyWithOffset(offset int, ctx context.Context, c client.Client, machines ...*v1alpha5.Machine) {
-	for i := range machines {
-		machines[i] = ExpectExistsWithOffset(offset+1, ctx, c, machines[i])
-		machines[i].StatusConditions().MarkTrue(v1alpha5.MachineCreated)
-		machines[i].StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
-		machines[i].StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
-		ExpectAppliedWithOffset(offset+1, ctx, c, machines[i])
-	}
-}
-
-func ExpectMakeNodesReady(ctx context.Context, c client.Client, nodes ...*v1.Node) {
-	ExpectMakeNodesReadyWithOffset(1, ctx, c, nodes...)
-}
-
-func ExpectMakeNodesReadyWithOffset(offset int, ctx context.Context, c client.Client, nodes ...*v1.Node) {
-	for i := range nodes {
-		nodes[i] = ExpectExistsWithOffset(offset+1, ctx, c, nodes[i])
-		nodes[i].Status.Phase = v1.NodeRunning
-		nodes[i].Status.Conditions = []v1.NodeCondition{
-			{
-				Type:               v1.NodeReady,
-				Status:             v1.ConditionTrue,
-				LastHeartbeatTime:  metav1.Now(),
-				LastTransitionTime: metav1.Now(),
-				Reason:             "KubeletReady",
-			},
-		}
-		if nodes[i].Labels == nil {
-			nodes[i].Labels = map[string]string{}
-		}
-		nodes[i].Labels[v1alpha5.LabelNodeInitialized] = "true"
-		nodes[i].Spec.Taints = nil
-		ExpectAppliedWithOffset(offset+1, ctx, c, nodes[i])
-	}
-}
-
 func ExpectReconcileSucceeded(ctx context.Context, reconciler reconcile.Reconciler, key client.ObjectKey) reconcile.Result {
-	return ExpectReconcileSucceededWithOffset(1, ctx, reconciler, key)
-}
-
-func ExpectReconcileSucceededWithOffset(offset int, ctx context.Context, reconciler reconcile.Reconciler, key client.ObjectKey) reconcile.Result {
 	result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
-	ExpectWithOffset(offset+1, err).ToNot(HaveOccurred())
+	ExpectWithOffset(1, err).ToNot(HaveOccurred())
 	return result
 }
 
@@ -478,7 +366,7 @@ func ExpectSkew(ctx context.Context, c client.Client, namespace string, constrai
 			}
 		}
 	}
-	return Expect(skew)
+	return ExpectWithOffset(1, skew)
 }
 
 // ExpectResources expects all the resources in expected to exist in real with the same values
@@ -489,26 +377,18 @@ func ExpectResources(expected, real v1.ResourceList) {
 	}
 }
 
-func ExpectNodes(ctx context.Context, c client.Client) []*v1.Node {
-	return ExpectNodesWithOffset(1, ctx, c)
+type gomegaKeyType struct{}
+
+var gomegaKey = gomegaKeyType{}
+
+func GomegaWithContext(ctx context.Context, g Gomega) context.Context {
+	return context.WithValue(ctx, gomegaKey, g)
 }
 
-func ExpectNodesWithOffset(offset int, ctx context.Context, c client.Client) []*v1.Node {
-	nodeList := &v1.NodeList{}
-	ExpectWithOffset(offset+1, c.List(ctx, nodeList)).To(Succeed())
-	return lo.Map(nodeList.Items, func(n v1.Node, _ int) *v1.Node {
-		return &n
-	})
-}
-
-func ExpectMachines(ctx context.Context, c client.Client) []*v1alpha5.Machine {
-	return ExpectMachinesWithOffset(1, ctx, c)
-}
-
-func ExpectMachinesWithOffset(offset int, ctx context.Context, c client.Client) []*v1alpha5.Machine {
-	machineList := &v1alpha5.MachineList{}
-	ExpectWithOffset(offset+1, c.List(ctx, machineList)).To(Succeed())
-	return lo.Map(machineList.Items, func(m v1alpha5.Machine, _ int) *v1alpha5.Machine {
-		return &m
-	})
+func GomegaFromContext(ctx context.Context) Gomega {
+	data := ctx.Value(gomegaKey)
+	if data == nil {
+		panic("Gomega not defined in context")
+	}
+	return data.(Gomega)
 }

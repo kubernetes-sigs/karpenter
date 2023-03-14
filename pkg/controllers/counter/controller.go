@@ -76,7 +76,7 @@ func (c *Controller) resourceCountsFor(provisionerName string) v1.ResourceList {
 	// Record all resources provisioned by the provisioners, we look at the cluster state nodes as their capacity
 	// is accurately reported even for nodes that haven't fully started yet. This allows us to update our provisioner
 	// status immediately upon node creation instead of waiting for the node to become ready.
-	c.cluster.ForEachNode(func(n *state.StateNode) bool {
+	c.cluster.ForEachNode(func(n *state.Node) bool {
 		// Don't count nodes that we are planning to delete. This is to ensure that we are consistent throughout
 		// our provisioning and deprovisioning loops
 		if n.MarkedForDeletion() {

@@ -37,14 +37,10 @@ func NewTermination(kubeClient client.Client) Check {
 	}
 }
 
-func (t *Termination) Check(ctx context.Context, node *v1.Node, machine *v1alpha5.Machine) ([]Issue, error) {
+func (t *Termination) Check(ctx context.Context, node *v1.Node, provisioner *v1alpha5.Provisioner, pdbs *deprovisioning.PDBLimits) ([]Issue, error) {
 	// we are only looking at nodes that are hung deleting
-	if machine.DeletionTimestamp.IsZero() {
+	if node.DeletionTimestamp.IsZero() {
 		return nil, nil
-	}
-	pdbs, err := deprovisioning.NewPDBLimits(ctx, t.kubeClient)
-	if err != nil {
-		return nil, err
 	}
 	pods, err := nodeutils.GetNodePods(ctx, t.kubeClient, node)
 	if err != nil {
@@ -52,7 +48,10 @@ func (t *Termination) Check(ctx context.Context, node *v1.Node, machine *v1alpha
 	}
 	var issues []Issue
 	if pdb, ok := pdbs.CanEvictPods(pods); !ok {
-		issues = append(issues, Issue(fmt.Sprintf("Can't drain node, PDB %s is blocking evictions", pdb)))
+		issues = append(issues, Issue{
+			node:    node,
+			message: fmt.Sprintf("Can't drain node, PDB %s is blocking evictions", pdb),
+		})
 	}
 	return issues, nil
 }

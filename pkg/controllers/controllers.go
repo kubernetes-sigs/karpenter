@@ -25,7 +25,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/counter"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/inflightchecks"
-	"github.com/aws/karpenter-core/pkg/controllers/machine"
 	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
 	metricspod "github.com/aws/karpenter-core/pkg/controllers/metrics/pod"
 	metricsprovisioner "github.com/aws/karpenter-core/pkg/controllers/metrics/provisioner"
@@ -54,8 +53,8 @@ func NewControllers(
 	cloudProvider cloudprovider.CloudProvider,
 ) []controller.Controller {
 
-	provisioner := provisioning.NewProvisioner(kubeClient, kubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
-	terminator := terminator.NewTerminator(clock, kubeClient, terminator.NewEvictionQueue(ctx, kubernetesInterface.CoreV1(), recorder))
+	provisioner := provisioning.NewProvisioner(ctx, kubeClient, kubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
+	terminator := terminator.NewTerminator(clock, kubeClient, cloudProvider, terminator.NewEvictionQueue(ctx, kubernetesInterface.CoreV1(), recorder))
 	return []controller.Controller{
 		provisioner,
 		metricsstate.NewController(cluster),
@@ -65,13 +64,11 @@ func NewControllers(
 		informer.NewNodeController(kubeClient, cluster),
 		informer.NewPodController(kubeClient, cluster),
 		informer.NewProvisionerController(kubeClient, cluster),
-		informer.NewMachineController(kubeClient, cluster),
 		node.NewController(clock, kubeClient, cloudProvider, cluster),
-		termination.NewController(kubeClient, cloudProvider, terminator, recorder),
+		termination.NewController(kubeClient, terminator, recorder),
 		metricspod.NewController(kubeClient),
 		metricsprovisioner.NewController(kubeClient),
 		counter.NewController(kubeClient, cluster),
 		inflightchecks.NewController(clock, kubeClient, recorder, cloudProvider),
-		machine.NewController(clock, kubeClient, cloudProvider, terminator, recorder),
 	}
 }

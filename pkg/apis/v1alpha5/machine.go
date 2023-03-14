@@ -38,7 +38,7 @@ type MachineSpec struct {
 	// +optional
 	Kubelet *KubeletConfiguration `json:"kubelet,omitempty"`
 	// MachineTemplateRef is a reference to an object that defines provider specific configuration
-	MachineTemplateRef *MachineTemplateRef `json:"machineTemplateRef,omitempty"`
+	MachineTemplateRef *ProviderRef `json:"machineTemplateRef,omitempty"`
 }
 
 // KubeletConfiguration defines args to be used when configuring kubelet on provisioned nodes.
@@ -106,7 +106,7 @@ type KubeletConfiguration struct {
 	CPUCFSQuota bool `json:"cpuCFSQuota,omitempty"`
 }
 
-type MachineTemplateRef struct {
+type ProviderRef struct {
 	// Kind of the referent; More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds"
 	Kind string `json:"kind,omitempty"`
 	// Name of the referent; More info: http://kubernetes.io/docs/user-guide/identifiers#names
@@ -129,8 +129,6 @@ type ResourceRequirements struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=machines,scope=Cluster,categories=karpenter
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Type",type="string",JSONPath=".metadata.labels.node\\.kubernetes\\.io/instance-type",description=""
-// +kubebuilder:printcolumn:name="Capacity",type="string",JSONPath=".metadata.labels.karpenter\\.sh/capacity-type",description=""
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type==\"Ready\")].status",description=""
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description=""
 type Machine struct {
