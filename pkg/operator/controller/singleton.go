@@ -17,11 +17,14 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/client-go/util/workqueue"
 	"knative.dev/pkg/logging"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/config/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/ratelimiter"
@@ -41,18 +44,26 @@ func NewSingletonManagedBy(m manager.Manager) SingletonBuilder {
 }
 
 func (b SingletonBuilder) Complete(r Reconciler) error {
-	return b.mgr.Add(newSingleton(r))
+	return b.mgr.Add(newSingleton(r, b.mgr.GetCache(), b.mgr.GetControllerOptions()))
 }
 
 type Singleton struct {
 	Reconciler
-	rateLimiter ratelimiter.RateLimiter
+	cache            cache.Cache
+	cacheSyncTimeout time.Duration
+	rateLimiter      ratelimiter.RateLimiter
 }
 
-func newSingleton(r Reconciler) *Singleton {
+func newSingleton(r Reconciler, cache cache.Cache, opts v1alpha1.ControllerConfigurationSpec) *Singleton {
 	s := &Singleton{
 		Reconciler:  r,
+		cache:       cache,
 		rateLimiter: workqueue.DefaultItemBasedRateLimiter(),
+	}
+	if opts.CacheSyncTimeout != nil {
+		s.cacheSyncTimeout = *opts.CacheSyncTimeout
+	} else {
+		s.cacheSyncTimeout = time.Minute * 2 // default to 2 minutes
 	}
 	s.initMetrics()
 	return s
@@ -73,6 +84,13 @@ func (s *Singleton) initMetrics() {
 var singletonRequest = reconcile.Request{}
 
 func (s *Singleton) Start(ctx context.Context) error {
+	// Wait for cache sync before starting any control loop
+	// This ensures that we have the necessary RBAC permissions and that we start all the controllers
+	// at the same time while also making sure that the cache info is up-to-date when calling the client.Reader
+	if err := s.ensureCacheSynced(ctx); err != nil {
+		return err
+	}
+
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(s.Name()))
 	logging.FromContext(ctx).Infof("starting controller")
 	defer logging.FromContext(ctx).Infof("stopping controller")
@@ -84,6 +102,17 @@ func (s *Singleton) Start(ctx context.Context) error {
 			return nil
 		}
 	}
+}
+
+func (s *Singleton) ensureCacheSynced(ctx context.Context) error {
+	// use a context with timeout for syncing caches (defaults to 2 minutes)
+	timeoutCtx, cancel := context.WithTimeout(ctx, s.cacheSyncTimeout)
+	defer cancel()
+
+	if ok := s.cache.WaitForCacheSync(timeoutCtx); !ok {
+		return fmt.Errorf("failed to wait for %s caches to sync", s.Name())
+	}
+	return nil
 }
 
 func (s *Singleton) reconcile(ctx context.Context) time.Duration {
