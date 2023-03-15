@@ -25,12 +25,36 @@ const (
 )
 
 var (
+	NodesCreatedCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: nodeSubsystem,
+			Name:      "created",
+			Help:      "Number of nodes created in total by Karpenter. Labeled by reason the node was created and the owning provisioner.",
+		},
+		[]string{
+			ReasonLabel,
+			ProvisionerLabel,
+		},
+	)
+	NodesTerminatedCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: nodeSubsystem,
+			Name:      "terminated",
+			Help:      "Number of nodes terminated in total by Karpenter. Labeled by reason the node was terminated and the owning provisioner.",
+		},
+		[]string{
+			ReasonLabel,
+			ProvisionerLabel,
+		},
+	)
 	MachinesCreatedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: machineSubsystem,
 			Name:      "created",
-			Help:      "Number of machines created in total by Karpenter. Labeled by reason the machine was created.",
+			Help:      "Number of machines created in total by Karpenter. Labeled by reason the machine was terminated and the owning provisioner.",
 		},
 		[]string{
 			ReasonLabel,
@@ -42,21 +66,15 @@ var (
 			Namespace: Namespace,
 			Subsystem: machineSubsystem,
 			Name:      "terminated",
-			Help:      "Number of machines terminated in total by Karpenter. Labeled by reason the machine was terminated.",
+			Help:      "Number of machines terminated in total by Karpenter. Labeled by reason the machine was terminated and the owning provisioner.",
 		},
 		[]string{
 			ReasonLabel,
 			ProvisionerLabel,
 		},
 	)
-	NodesTerminatedCounter = prometheus.NewCounter(prometheus.CounterOpts{
-		Namespace: Namespace,
-		Subsystem: nodeSubsystem,
-		Name:      "terminated",
-		Help:      "Number of nodes terminated in total by Karpenter.",
-	})
 )
 
 func MustRegister() {
-	crmetrics.Registry.MustRegister(MachinesCreatedCounter, MachinesTerminatedCounter, NodesTerminatedCounter)
+	crmetrics.Registry.MustRegister(NodesCreatedCounter, NodesTerminatedCounter)
 }

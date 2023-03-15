@@ -18,7 +18,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -26,29 +29,44 @@ import (
 
 // NodeShape detects nodes that have launched with 10% or less of any resource than was expected.
 type NodeShape struct {
-	provider cloudprovider.CloudProvider
+	kubeClient client.Client
+	provider   cloudprovider.CloudProvider
 }
 
-func NewNodeShape(provider cloudprovider.CloudProvider) Check {
+func NewNodeShape(kubeClient client.Client, provider cloudprovider.CloudProvider) Check {
 	return &NodeShape{
-		provider: provider,
+		kubeClient: kubeClient,
+		provider:   provider,
 	}
 }
 
-func (n *NodeShape) Check(ctx context.Context, node *v1.Node, machine *v1alpha5.Machine) ([]Issue, error) {
-	// ignore machines that are deleting
-	if !machine.DeletionTimestamp.IsZero() {
+func (n *NodeShape) Check(ctx context.Context, node *v1.Node) ([]Issue, error) {
+	// ignore nodes that are deleting
+	if !node.DeletionTimestamp.IsZero() {
 		return nil, nil
 	}
-	// and machines that haven't initialized yet
-	if machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).IsTrue() {
+	// and nodes that haven't initialized yet
+	if node.Labels[v1alpha5.LabelNodeInitialized] != "true" {
 		return nil, nil
+	}
+	provisioner := &v1alpha5.Provisioner{}
+	if err := n.kubeClient.Get(ctx, types.NamespacedName{Name: node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
+		// provisioner is missing, node should be removed soon
+		return nil, client.IgnoreNotFound(err)
+	}
+	instanceTypes, err := n.provider.GetInstanceTypes(ctx, provisioner)
+	if err != nil {
+		return nil, err
+	}
+	instanceType, ok := lo.Find(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.Name == node.Labels[v1.LabelInstanceTypeStable] })
+	if !ok {
+		return []Issue{Issue(fmt.Sprintf("Instance Type %q not found", node.Labels[v1.LabelInstanceTypeStable]))}, nil
 	}
 	var issues []Issue
-	for resourceName, expectedQuantity := range machine.Status.Capacity {
+	for resourceName, expectedQuantity := range instanceType.Capacity {
 		nodeQuantity, ok := node.Status.Capacity[resourceName]
 		if !ok && !expectedQuantity.IsZero() {
-			issues = append(issues, Issue(fmt.Sprintf("Expected resource \"%s\" not found", resourceName)))
+			issues = append(issues, Issue(fmt.Sprintf("Expected resource %s not found", resourceName)))
 			continue
 		}
 
@@ -57,7 +75,6 @@ func (n *NodeShape) Check(ctx context.Context, node *v1.Node, machine *v1alpha5.
 			issues = append(issues, Issue(fmt.Sprintf("Expected %s of resource %s, but found %s (%0.1f%% of expected)", expectedQuantity.String(),
 				resourceName, nodeQuantity.String(), pct*100)))
 		}
-
 	}
 	return issues, nil
 }

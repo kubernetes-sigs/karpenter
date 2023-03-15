@@ -46,18 +46,22 @@ func (r *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 	if provisioner.Spec.TTLSecondsAfterEmpty == nil {
 		return reconcile.Result{}, nil
 	}
+
 	// node is not ready yet, so we don't consider it to possibly be empty
 	if n.Labels[v1alpha5.LabelNodeInitialized] != "true" {
 		return reconcile.Result{}, nil
 	}
+
 	empty, err := r.isEmpty(ctx, n)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
+
 	// node is empty, but it is in-use per the last scheduling round so we don't consider it empty
 	if r.cluster.IsNodeNominated(n.Name) {
 		return reconcile.Result{}, nil
 	}
+
 	_, hasEmptinessTimestamp := n.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
 	if !empty && hasEmptinessTimestamp {
 		delete(n.Annotations, v1alpha5.EmptinessTimestampAnnotationKey)
@@ -68,6 +72,7 @@ func (r *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 		})
 		logging.FromContext(ctx).Infof("added TTL to empty node")
 	}
+
 	// Short requeue result so that we requeue to check for emptiness when the node nomination time ends
 	return reconcile.Result{RequeueAfter: time.Minute}, nil
 }

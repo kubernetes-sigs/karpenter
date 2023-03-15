@@ -111,9 +111,10 @@ func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (
 			break
 		}
 	}
+	name := test.RandomName()
 	created := &v1alpha5.Machine{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        machine.Name,
+			Name:        name,
 			Labels:      lo.Assign(labels, machine.Labels),
 			Annotations: machine.Annotations,
 		},

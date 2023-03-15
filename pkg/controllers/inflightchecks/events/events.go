@@ -17,11 +17,10 @@ package events
 import (
 	v1 "k8s.io/api/core/v1"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
-func InflightCheck(node *v1.Node, machine *v1alpha5.Machine, message string) []events.Event {
+func InflightCheck(node *v1.Node, message string) []events.Event {
 	return []events.Event{
 		{
 			InvolvedObject: node,
@@ -29,13 +28,6 @@ func InflightCheck(node *v1.Node, machine *v1alpha5.Machine, message string) []e
 			Reason:         "FailedInflightCheck",
 			Message:        message,
 			DedupeValues:   []string{node.Name, message},
-		},
-		{
-			InvolvedObject: machine,
-			Type:           v1.EventTypeWarning,
-			Reason:         "FailedInflightCheck",
-			Message:        message,
-			DedupeValues:   []string{machine.Name, message},
 		},
 	}
 }

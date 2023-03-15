@@ -71,6 +71,7 @@ func MachineLinkedNode(machine *v1alpha5.Machine) *v1.Node {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels:      machine.Labels,
 				Annotations: machine.Annotations,
+				Finalizers:  machine.Finalizers,
 			},
 			Taints:      append(machine.Spec.Taints, machine.Spec.StartupTaints...),
 			Capacity:    machine.Status.Capacity,
