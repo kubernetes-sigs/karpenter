@@ -240,7 +240,6 @@ func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objs ...clien
 		ExpectWithOffset(1, client.IgnoreNotFound(c.Patch(ctx, obj, client.MergeFrom(stored)))).To(Succeed())
 	}
 }
-
 func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*v1.Pod) Bindings {
 	bindings := ExpectProvisionedNoBindingWithOffset(1, ctx, c, cluster, cloudProvider, provisioner, pods...)
 	podKeys := sets.NewString(lo.Map(pods, func(p *v1.Pod, _ int) string { return client.ObjectKeyFromObject(p).String() })...)
@@ -258,7 +257,7 @@ func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *s
 	return ExpectProvisionedNoBindingWithOffset(1, ctx, c, cluster, cloudProvider, provisioner, pods...)
 }
 
-func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*v1.Pod) Bindings {
+func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c client.Client, _ *state.Cluster, _ cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*v1.Pod) Bindings {
 	// Persist objects
 	for _, pod := range pods {
 		ExpectAppliedWithOffset(offset+1, ctx, c, pod)
@@ -272,24 +271,13 @@ func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c cli
 		if err != nil {
 			return bindings
 		}
-		machine := &v1alpha5.Machine{}
-		ExpectWithOffset(offset+1, c.Get(ctx, types.NamespacedName{Name: name}, machine)).To(Succeed())
-		machine, node := ExpectMachineDeployedWithOffset(offset+1, ctx, c, cluster, cloudProvider, machine)
-		if machine != nil && node != nil {
-			for _, pod := range m.Pods {
-				bindings[pod] = &Binding{
-					Machine: machine,
-					Node:    node,
-				}
-			}
+		for _, pod := range m.Pods {
+			bindings[pod] = &Binding{Node: ExpectNodeExistsWithOffset(offset+1, ctx, c, name)}
 		}
 	}
 	for _, node := range nodes {
 		for _, pod := range node.Pods {
-			bindings[pod] = &Binding{
-				Node:    node.Node,
-				Machine: node.Machine,
-			}
+			bindings[pod] = &Binding{Node: node.Node}
 		}
 	}
 	return bindings

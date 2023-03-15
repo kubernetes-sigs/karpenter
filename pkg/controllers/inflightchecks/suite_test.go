@@ -124,10 +124,16 @@ var _ = Describe("Controller", func() {
 			}
 			ExpectApplied(ctx, env.Client, provisioner, machine, node)
 			fakeClock.Step(2 * time.Hour)
-			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(machine))
+			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(node))
 			Expect(recorder.DetectedEvent("Expected resource \"fake.com/vendor-a\" didn't register on the node")).To(BeTrue())
 		})
 		It("should detect issues with nodes that have a startup taint which isn't removed", func() {
+			provisioner.Spec.StartupTaints = []v1.Taint{
+				{
+					Key:    "my.startup.taint",
+					Effect: v1.TaintEffectNoSchedule,
+				},
+			}
 			machine, node := test.MachineAndNode(v1alpha5.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -154,7 +160,7 @@ var _ = Describe("Controller", func() {
 			})
 			ExpectApplied(ctx, env.Client, provisioner, machine, node)
 			fakeClock.Step(2 * time.Hour)
-			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(machine))
+			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(node))
 			Expect(recorder.DetectedEvent("Startup taint \"my.startup.taint:NoSchedule\" is still on the node")).To(BeTrue())
 		})
 	})
@@ -182,12 +188,12 @@ var _ = Describe("Controller", func() {
 				Labels:         podsLabels,
 				MaxUnavailable: &intstr.IntOrString{IntVal: 0, Type: intstr.Int},
 			})
-			machine.Finalizers = []string{"prevent.deletion/now"}
+			node.Finalizers = []string{"prevent.deletion/now"}
 			p := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: podsLabels}})
 			ExpectApplied(ctx, env.Client, provisioner, machine, node, p, pdb)
 			ExpectManualBinding(ctx, env.Client, p, node)
-			_ = env.Client.Delete(ctx, machine)
-			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(machine))
+			_ = env.Client.Delete(ctx, node)
+			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(node))
 			Expect(recorder.DetectedEvent(fmt.Sprintf("Can't drain node, PDB %s/%s is blocking evictions", pdb.Namespace, pdb.Name))).To(BeTrue())
 		})
 	})
@@ -217,7 +223,7 @@ var _ = Describe("Controller", func() {
 				v1.ResourcePods:   resource.MustParse("10"),
 			}
 			ExpectApplied(ctx, env.Client, provisioner, machine, node)
-			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(machine))
+			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(node))
 			Expect(recorder.DetectedEvent("Expected 128Gi of resource memory, but found 64Gi (50.0% of expected)")).To(BeTrue())
 		})
 	})

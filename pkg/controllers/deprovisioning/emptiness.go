@@ -64,7 +64,7 @@ func (e *Emptiness) ShouldDeprovision(ctx context.Context, c *Candidate) bool {
 // ComputeCommand generates a deprovisioning command given deprovisionable machines
 func (e *Emptiness) ComputeCommand(_ context.Context, candidates ...*Candidate) (Command, error) {
 	emptyCandidates := lo.Filter(candidates, func(cn *Candidate, _ int) bool {
-		return cn.Machine.DeletionTimestamp.IsZero() && len(cn.pods) == 0
+		return cn.Node.DeletionTimestamp.IsZero() && len(cn.pods) == 0
 	})
 
 	if len(emptyCandidates) == 0 {

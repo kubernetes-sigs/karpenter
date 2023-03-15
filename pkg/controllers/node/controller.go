@@ -49,21 +49,22 @@ var _ corecontroller.TypedController[*v1.Node] = (*Controller)(nil)
 // Controller manages a set of properties on karpenter provisioned nodes, such as
 // taints, labels, finalizers.
 type Controller struct {
-	kubeClient client.Client
-	cluster    *state.Cluster
-
-	emptiness *Emptiness
-	drift     *Drift
+	kubeClient     client.Client
+	cluster        *state.Cluster
+	initialization *Initialization
+	emptiness      *Emptiness
+	finalizer      *Finalizer
+	drift          *Drift
 }
 
 // NewController constructs a nodeController instance
 func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) corecontroller.Controller {
 	return corecontroller.Typed[*v1.Node](kubeClient, &Controller{
-		kubeClient: kubeClient,
-		cluster:    cluster,
-
-		emptiness: &Emptiness{kubeClient: kubeClient, clock: clk, cluster: cluster},
-		drift:     &Drift{kubeClient: kubeClient, cloudProvider: cloudProvider},
+		kubeClient:     kubeClient,
+		cluster:        cluster,
+		initialization: &Initialization{kubeClient: kubeClient, cloudProvider: cloudProvider},
+		emptiness:      &Emptiness{kubeClient: kubeClient, clock: clk, cluster: cluster},
+		drift:          &Drift{kubeClient: kubeClient, cloudProvider: cloudProvider},
 	})
 }
 
@@ -80,22 +81,24 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Re
 	if !node.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, nil
 	}
+
 	provisioner := &v1alpha5.Provisioner{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
-	}
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", provisioner.Name))
-
-	reconcilers := []nodeReconciler{
-		c.emptiness,
-	}
-	if settings.FromContext(ctx).DriftEnabled {
-		reconcilers = append(reconcilers, c.drift)
 	}
 
 	// Execute Reconcilers
 	var results []reconcile.Result
 	var errs error
+
+	reconcilers := []nodeReconciler{
+		c.initialization,
+		c.emptiness,
+		c.finalizer,
+	}
+	if settings.FromContext(ctx).DriftEnabled {
+		reconcilers = append(reconcilers, c.drift)
+	}
 	for _, reconciler := range reconcilers {
 		res, err := reconciler.Reconcile(ctx, provisioner, node)
 		errs = multierr.Append(errs, err)

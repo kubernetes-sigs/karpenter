@@ -66,15 +66,15 @@ func (d *Drift) ComputeCommand(ctx context.Context, candidates ...*Candidate) (C
 	}
 	// filter out machines that can't be terminated
 	candidates = lo.Filter(candidates, func(cn *Candidate, _ int) bool {
-		if !cn.Machine.DeletionTimestamp.IsZero() {
+		if !cn.Node.DeletionTimestamp.IsZero() {
 			return false
 		}
 		if pdb, ok := pdbs.CanEvictPods(cn.pods); !ok {
-			d.recorder.Publish(deprovisioningevents.Blocked(cn.Node, cn.Machine, fmt.Sprintf("pdb %s prevents pod evictions", pdb))...)
+			d.recorder.Publish(deprovisioningevents.Blocked(cn.Node, fmt.Sprintf("pdb %s prevents pod evictions", pdb))...)
 			return false
 		}
 		if p, ok := hasDoNotEvictPod(cn); ok {
-			d.recorder.Publish(deprovisioningevents.Blocked(cn.Node, cn.Machine,
+			d.recorder.Publish(deprovisioningevents.Blocked(cn.Node,
 				fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name))...)
 			return false
 		}
@@ -93,7 +93,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, candidates ...*Candidate) (C
 		}
 		// Log when all pods can't schedule, as the command will get executed immediately.
 		if !allPodsScheduled {
-			logging.FromContext(ctx).With("machine", candidate.Machine.Name, "node", candidate.Node.Name).Debug("Continuing to terminate drifted machine after scheduling simulation failed to schedule all pods")
+			logging.FromContext(ctx).With("node", candidate.Node.Name).Debug("Continuing to terminate drifted machine after scheduling simulation failed to schedule all pods")
 		}
 		if len(newMachines) == 0 {
 			return Command{

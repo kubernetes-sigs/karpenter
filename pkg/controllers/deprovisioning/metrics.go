@@ -44,8 +44,8 @@ var deprovisioningReplacementNodeInitializedHistogram = prometheus.NewHistogram(
 	prometheus.HistogramOpts{
 		Namespace: metrics.Namespace,
 		Subsystem: deprovisioningSubsystem,
-		Name:      "replacement_machine_initialized_seconds",
-		Help:      "Amount of time required for a replacement machine to become initialized.",
+		Name:      "replacement_node_initialized_seconds",
+		Help:      "Amount of time required for a replacement node to become initialized.",
 		Buckets:   metrics.DurationBuckets(),
 	})
 

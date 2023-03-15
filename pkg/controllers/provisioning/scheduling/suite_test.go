@@ -1800,15 +1800,12 @@ var _ = Describe("In-Flight Nodes", func() {
 		bindings := ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
 		ExpectScheduled(ctx, env.Client, initialPod)
 
-		// delete the node/machine
-		machine1 := bindings.Get(initialPod).Machine
+		// delete the node
 		node1 := bindings.Get(initialPod).Node
-		machine1.Finalizers = nil
 		node1.Finalizers = nil
-		ExpectApplied(ctx, env.Client, machine1, node1)
-		ExpectDeleted(ctx, env.Client, machine1, node1)
+		ExpectApplied(ctx, env.Client, node1)
+		ExpectDeleted(ctx, env.Client, node1)
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
-		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine1))
 
 		secondPod := test.UnschedulablePod(opts)
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, secondPod)
@@ -1922,9 +1919,7 @@ var _ = Describe("In-Flight Nodes", func() {
 			bindings := ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
 			ExpectScheduled(ctx, env.Client, initialPod)
 
-			machine1 := bindings.Get(initialPod).Machine
 			node1 := bindings.Get(initialPod).Node
-			machine1.StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
 
 			// delete the pod so that the node is empty
 			ExpectDeleted(ctx, env.Client, initialPod)
@@ -1934,7 +1929,7 @@ var _ = Describe("In-Flight Nodes", func() {
 				Value:  "tainted",
 				Effect: v1.TaintEffectNoSchedule,
 			})
-			ExpectApplied(ctx, env.Client, machine1, node1)
+			ExpectApplied(ctx, env.Client, node1)
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
 			secondPod := test.UnschedulablePod()
@@ -1988,13 +1983,11 @@ var _ = Describe("In-Flight Nodes", func() {
 
 			// Mark it initialized which only occurs once the startup taint was removed and re-apply only the startup taint.
 			// We also need to add resource capacity as after initialization we assume that kubelet has recorded them.
-
-			machine1 := bindings.Get(initialPod).Machine
 			node1 := bindings.Get(initialPod).Node
-			machine1.StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
+			node1.Labels[v1alpha5.LabelNodeInitialized] = "true"
 			node1.Spec.Taints = []v1.Taint{startupTaint}
 			node1.Status.Capacity = v1.ResourceList{v1.ResourcePods: resource.MustParse("10")}
-			ExpectApplied(ctx, env.Client, machine1, node1)
+			ExpectApplied(ctx, env.Client, node1)
 
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
