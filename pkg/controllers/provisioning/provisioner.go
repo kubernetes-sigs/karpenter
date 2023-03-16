@@ -117,7 +117,7 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 	}
 	// We need to ensure that our internal cluster state mechanism is synced before we proceed
 	// with making any scheduling decision off of our state nodes. Otherwise, we have the potential to make
-	//	// a scheduling decision based on a smaller subset of nodes in our cluster state than actually exist.
+	// a scheduling decision based on a smaller subset of nodes in our cluster state than actually exist.
 	if !p.cluster.Synced(ctx) {
 		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}
