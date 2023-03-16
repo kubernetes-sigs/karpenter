@@ -16,6 +16,7 @@ package counter
 
 import (
 	"context"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -60,6 +61,12 @@ func (c *Controller) Name() string {
 
 // Reconcile a control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner) (reconcile.Result, error) {
+	// We need to ensure that our internal cluster state mechanism is synced before we proceed
+	// Otherwise, we have the potential to patch over the status with a lower value for the provisioner resource
+	// counts on startup
+	if !c.cluster.Synced(ctx) {
+		return reconcile.Result{RequeueAfter: time.Second}, nil
+	}
 	stored := provisioner.DeepCopy()
 	// Determine resource usage and update provisioner.status.resources
 	provisioner.Status.Resources = c.resourceCountsFor(provisioner.Name)

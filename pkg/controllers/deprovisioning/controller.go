@@ -106,8 +106,11 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) controller.Bu
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
+	// We need to ensure that our internal cluster state mechanism is synced before we proceed
+	// with making any scheduling decision off of our state nodes. Otherwise, we have the potential to make
+	// a scheduling decision based on a smaller subset of nodes in our cluster state than actually exist.
 	if !c.cluster.Synced(ctx) {
-		return reconcile.Result{Requeue: true}, nil
+		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}
 	// Attempt different deprovisioning methods. We'll only let one method perform an action
 	isConsolidated := c.cluster.Consolidated()
