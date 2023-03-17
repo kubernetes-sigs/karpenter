@@ -81,7 +81,7 @@ func TestAPIs(t *testing.T) {
 	RunSpecs(t, "Deprovisioning")
 }
 
-var sampleSizeFlag = 20
+var benchmarkSampleSize = 20
 var experiment = gmeasure.NewExperiment("deprovisioning benchmarks")
 
 var _ = BeforeSuite(func() {
@@ -288,7 +288,7 @@ var _ = Describe("Replace Nodes", func() {
 			experiment.MeasureDuration("replacing nodes", basicReplacementFunc)
 			ExpectCleanedUp(ctx, env.Client)
 			cluster.Reset()
-		}, gmeasure.SamplingConfig{N: sampleSizeFlag, Duration: 1 * time.Minute})
+		}, gmeasure.SamplingConfig{N: benchmarkSampleSize, Duration: 1 * time.Minute})
 	})
 	It("can replace node", basicReplacementFunc)
 	It("can replace nodes, considers PDB", func() {
@@ -924,7 +924,7 @@ var _ = Describe("Delete Node", func() {
 			experiment.MeasureDuration("deleting nodes", basicDeleteFunc)
 			ExpectCleanedUp(ctx, env.Client)
 			cluster.Reset()
-		}, gmeasure.SamplingConfig{N: sampleSizeFlag, Duration: 1 * time.Minute})
+		}, gmeasure.SamplingConfig{N: benchmarkSampleSize, Duration: 1 * time.Minute})
 	})
 
 	It("can delete nodes", basicDeleteFunc)
@@ -1315,7 +1315,7 @@ var _ = Describe("Topology Consideration", func() {
 			experiment.MeasureDuration("replacing with zonal topology spread", basicZonalTopologyReplacementFunc)
 			ExpectCleanedUp(ctx, env.Client)
 			cluster.Reset()
-		}, gmeasure.SamplingConfig{N: sampleSizeFlag, Duration: 1 * time.Minute})
+		}, gmeasure.SamplingConfig{N: benchmarkSampleSize, Duration: 1 * time.Minute})
 	})
 
 	It("can replace node maintaining zonal topology spread", basicZonalTopologyReplacementFunc)
@@ -1458,7 +1458,7 @@ var _ = Describe("Empty Nodes", func() {
 			experiment.MeasureDuration("deleting empty nodes", basicEmptyDeletionFunc)
 			ExpectCleanedUp(ctx, env.Client)
 			cluster.Reset()
-		}, gmeasure.SamplingConfig{N: sampleSizeFlag, Duration: 1 * time.Minute})
+		}, gmeasure.SamplingConfig{N: benchmarkSampleSize, Duration: 1 * time.Minute})
 	})
 	It("can delete empty nodes with consolidation", basicEmptyDeletionFunc)
 	It("can delete multiple empty nodes with consolidation", func() {
@@ -2112,7 +2112,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 			experiment.MeasureDuration("merging 3 nodes into 1", multiNodeConsolidationFunc)
 			ExpectCleanedUp(ctx, env.Client)
 			cluster.Reset()
-		}, gmeasure.SamplingConfig{N: sampleSizeFlag, Duration: 1 * time.Minute})
+		}, gmeasure.SamplingConfig{N: benchmarkSampleSize, Duration: 1 * time.Minute})
 	})
 	It("can merge 3 nodes into 1", multiNodeConsolidationFunc)
 	It("won't merge 2 nodes into 1 of the same type", func() {
