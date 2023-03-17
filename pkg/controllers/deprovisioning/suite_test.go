@@ -16,6 +16,7 @@ package deprovisioning_test
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"math"
 	"sort"
@@ -26,6 +27,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gmeasure"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -36,6 +38,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
+	"knative.dev/pkg/logging"
 	. "knative.dev/pkg/logging/testing"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -78,6 +81,13 @@ func TestAPIs(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Deprovisioning")
 }
+
+var sampleSizeFlag int
+func init() {
+	flag.IntVar(&sampleSizeFlag, "benchmark-sample-size", 20, "This flag is used purely for ginkgo sample size on benchmarking.")
+}
+
+var experiment = gmeasure.NewExperiment("deprovisioning benchmarks")
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
@@ -207,75 +217,85 @@ var _ = Describe("Pod Eviction Cost", func() {
 	})
 })
 
-var _ = Describe("Replace Nodes", func() {
-	It("can replace node", func() {
-		labels := map[string]string{
-			"app": "test",
-		}
-		// create our RS so we can link a pod to it
-		rs := test.ReplicaSet()
-		ExpectApplied(ctx, env.Client, rs)
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+var basicReplacementFunc = func () {
+	labels := map[string]string{
+		"app": "test",
+	}
+	// create our RS so we can link a pod to it
+	rs := test.ReplicaSet()
+	ExpectApplied(ctx, env.Client, rs)
+	Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
 
-		pod := test.Pod(test.PodOptions{
-			ObjectMeta: metav1.ObjectMeta{Labels: labels,
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion:         "apps/v1",
-						Kind:               "ReplicaSet",
-						Name:               rs.Name,
-						UID:                rs.UID,
-						Controller:         ptr.Bool(true),
-						BlockOwnerDeletion: ptr.Bool(true),
-					},
-				}}})
-
-		prov := test.Provisioner(test.ProvisionerOptions{
-			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
-		})
-		machine, node := test.MachineAndNode(v1alpha5.Machine{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+	pod := test.Pod(test.PodOptions{
+		ObjectMeta: metav1.ObjectMeta{Labels: labels,
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion:         "apps/v1",
+					Kind:               "ReplicaSet",
+					Name:               rs.Name,
+					UID:                rs.UID,
+					Controller:         ptr.Bool(true),
+					BlockOwnerDeletion: ptr.Bool(true),
 				},
-			},
-			Status: v1alpha5.MachineStatus{
-				ProviderID:  test.RandomProviderID(),
-				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
-			},
-		})
-		ExpectApplied(ctx, env.Client, rs, pod, node, machine, prov)
+			}}})
 
-		// bind pods to node
-		ExpectManualBinding(ctx, env.Client, pod, node)
-
-		// inform cluster state about nodes and machines
-		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
-
-		fakeClock.Step(10 * time.Minute)
-
-		// consolidation won't delete the old machine until the new machine is ready
-		var wg sync.WaitGroup
-		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
-		wg.Wait()
-
-		// should create a new machine as there is a cheaper one that can hold the pod
-		nodes := ExpectNodes(ctx, env.Client)
-		Expect(nodes).To(HaveLen(1))
-
-		// Expect that the new machine does not request the most expensive instance type
-		Expect(nodes[0].Name).ToNot(Equal(node.Name))
-		Expect(scheduling.NewLabelRequirements(nodes[0].Labels).Has(v1.LabelInstanceTypeStable)).To(BeTrue())
-		Expect(scheduling.NewLabelRequirements(nodes[0].Labels).Get(v1.LabelInstanceTypeStable).Has(mostExpensiveInstance.Name)).To(BeFalse())
-
-		// and delete the old one
-		ExpectNotFound(ctx, env.Client, node)
+	prov := test.Provisioner(test.ProvisionerOptions{
+		Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 	})
+	machine, node := test.MachineAndNode(v1alpha5.Machine{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{
+				v1alpha5.ProvisionerNameLabelKey: prov.Name,
+				v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+				v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+				v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+			},
+		},
+		Status: v1alpha5.MachineStatus{
+			ProviderID:  test.RandomProviderID(),
+			Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+		},
+	})
+	ExpectApplied(ctx, env.Client, rs, pod, node, machine, prov)
+
+	// bind pods to node
+	ExpectManualBinding(ctx, env.Client, pod, node)
+
+	// inform cluster state about nodes and machines
+	ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
+	fakeClock.Step(10 * time.Minute)
+
+	// consolidation won't delete the old machine until the new machine is ready
+	var wg sync.WaitGroup
+	ExpectTriggerVerifyAction(&wg)
+	ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1)
+	ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+	wg.Wait()
+
+	// should create a new machine as there is a cheaper one that can hold the pod
+	nodes := ExpectNodes(ctx, env.Client)
+	Expect(nodes).To(HaveLen(1))
+
+	// Expect that the new machine does not request the most expensive instance type
+	Expect(nodes[0].Name).ToNot(Equal(node.Name))
+	Expect(scheduling.NewLabelRequirements(nodes[0].Labels).Has(v1.LabelInstanceTypeStable)).To(BeTrue())
+	Expect(scheduling.NewLabelRequirements(nodes[0].Labels).Get(v1.LabelInstanceTypeStable).Has(mostExpensiveInstance.Name)).To(BeFalse())
+
+	// and delete the old one
+	ExpectNotFound(ctx, env.Client, node)
+}
+
+var _ = Describe("Replace Nodes", func() {
+	It("measures deprovisioning replacement", Serial, Label("benchmark"), func() {
+		AddReportEntry(experiment.Name, experiment)
+		experiment.Sample(func (idx int) {
+			experiment.MeasureDuration("replacing nodes", basicReplacementFunc)
+			ExpectCleanedUp(ctx, env.Client)
+			cluster.Reset()
+		}, gmeasure.SamplingConfig{N: sampleSizeFlag, Duration: 1 * time.Minute})
+	})
+	It("can replace node", basicReplacementFunc)
 	It("can replace nodes, considers PDB", func() {
 		labels := map[string]string{
 			"app": "test",
@@ -814,12 +834,13 @@ var _ = Describe("Replace Nodes", func() {
 	})
 })
 
+
 var _ = Describe("Delete Node", func() {
 	var prov *v1alpha5.Provisioner
 	var machine1, machine2 *v1alpha5.Machine
 	var node1, node2 *v1.Node
 
-	BeforeEach(func() {
+	var setupVariables = func() {
 		prov = test.Provisioner(test.ProvisionerOptions{
 			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
@@ -857,8 +878,10 @@ var _ = Describe("Delete Node", func() {
 				},
 			},
 		})
-	})
-	It("can delete nodes", func() {
+	}
+	BeforeEach(setupVariables)
+
+	var basicDeleteFunc = func() {
 		labels := map[string]string{
 			"app": "test",
 		}
@@ -898,7 +921,18 @@ var _ = Describe("Delete Node", func() {
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 		// and delete the old one
 		ExpectNotFound(ctx, env.Client, node2)
+	}
+	It("measures deprovisioning deletion", Serial, Label("benchmark"), func() {
+		AddReportEntry(experiment.Name, experiment)
+		experiment.Sample(func (idx int) {
+			setupVariables()
+			experiment.MeasureDuration("deleting nodes", basicDeleteFunc)
+			ExpectCleanedUp(ctx, env.Client)
+			cluster.Reset()
+		}, gmeasure.SamplingConfig{N: sampleSizeFlag, Duration: 1 * time.Minute})
 	})
+
+	It("can delete nodes", basicDeleteFunc)
 	It("can delete nodes, considers PDB", func() {
 		var nl v1.NodeList
 		Expect(env.Client.List(ctx, &nl)).To(Succeed())
@@ -1156,7 +1190,7 @@ var _ = Describe("Topology Consideration", func() {
 	var zone1Node, zone2Node, zone3Node *v1.Node
 	var oldNodeNames sets.String
 
-	BeforeEach(func() {
+	var setupVariables = func() {
 		testZone1Instance := leastExpensiveInstanceWithZone("test-zone-1")
 		testZone2Instance := mostExpensiveInstanceWithZone("test-zone-2")
 		testZone3Instance := leastExpensiveInstanceWithZone("test-zone-3")
@@ -1207,8 +1241,11 @@ var _ = Describe("Topology Consideration", func() {
 			},
 		})
 		oldNodeNames = sets.NewString(zone1Node.Name, zone2Node.Name, zone3Node.Name)
-	})
-	It("can replace node maintaining zonal topology spread", func() {
+	}
+
+	BeforeEach(setupVariables)
+
+	var basicZonalTopologyReplacementFunc = func() {
 		labels := map[string]string{
 			"app": "test-zonal-spread",
 		}
@@ -1275,7 +1312,18 @@ var _ = Describe("Topology Consideration", func() {
 
 		// we should maintain our skew, the new node must be in the same zone as the old node it replaced
 		ExpectSkew(ctx, env.Client, "default", &tsc).To(ConsistOf(1, 1, 1))
+	}
+	It("measures replacement with zonal topology spread", Serial, Label("benchmark"), func() {
+		AddReportEntry(experiment.Name, experiment)
+		experiment.Sample(func (idx int) {
+			setupVariables()
+			experiment.MeasureDuration("replacing with zonal topology spread", basicZonalTopologyReplacementFunc)
+			ExpectCleanedUp(ctx, env.Client)
+			cluster.Reset()
+		}, gmeasure.SamplingConfig{N: sampleSizeFlag, Duration: 1 * time.Minute})
 	})
+
+	It("can replace node maintaining zonal topology spread", basicZonalTopologyReplacementFunc)
 	It("won't delete node if it would violate pod anti-affinity", func() {
 		labels := map[string]string{
 			"app": "test",
@@ -1350,7 +1398,7 @@ var _ = Describe("Empty Nodes", func() {
 	var machine1, machine2 *v1alpha5.Machine
 	var node1, node2 *v1.Node
 
-	BeforeEach(func() {
+	var setupVariables = func() {
 		prov = test.Provisioner(test.ProvisionerOptions{Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)}})
 		machine1, node1 = test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1386,8 +1434,11 @@ var _ = Describe("Empty Nodes", func() {
 				},
 			},
 		})
-	})
-	It("can delete empty nodes with consolidation", func() {
+	}
+
+	BeforeEach(setupVariables)
+
+	var basicEmptyDeletionFunc = func() {
 		ExpectApplied(ctx, env.Client, machine1, node1, prov)
 
 		// inform cluster state about nodes and machines
@@ -1403,7 +1454,18 @@ var _ = Describe("Empty Nodes", func() {
 		// we should delete the empty node
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
 		ExpectNotFound(ctx, env.Client, node1)
+	}
+
+	It("measures empty node deletion", Serial, Label("benchmark"), func() {
+		AddReportEntry(experiment.Name, experiment)
+		experiment.Sample(func (idx int) {
+			setupVariables()
+			experiment.MeasureDuration("deleting empty nodes", basicEmptyDeletionFunc)
+			ExpectCleanedUp(ctx, env.Client)
+			cluster.Reset()
+		}, gmeasure.SamplingConfig{N: sampleSizeFlag, Duration: 1 * time.Minute})
 	})
+	It("can delete empty nodes with consolidation", basicEmptyDeletionFunc)
 	It("can delete multiple empty nodes with consolidation", func() {
 		ExpectApplied(ctx, env.Client, machine1, node1, machine2, node2, prov)
 
@@ -1808,61 +1870,6 @@ var _ = Describe("Parallelization", func() {
 			},
 		})
 	})
-	It("should schedule an additional node when receiving pending pods while consolidating", func() {
-		labels := map[string]string{
-			"app": "test",
-		}
-		// create our RS so we can link a pod to it
-		rs := test.ReplicaSet()
-		ExpectApplied(ctx, env.Client, rs)
-
-		pod := test.Pod(test.PodOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: labels,
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion:         "apps/v1",
-						Kind:               "ReplicaSet",
-						Name:               rs.Name,
-						UID:                rs.UID,
-						Controller:         ptr.Bool(true),
-						BlockOwnerDeletion: ptr.Bool(true),
-					},
-				},
-			},
-		})
-
-		node.Finalizers = []string{"karpenter.sh/test-finalizer"}
-		machine.Finalizers = []string{"karpenter.sh/test-finalizer"}
-
-		ExpectApplied(ctx, env.Client, rs, pod, machine, node, prov)
-
-		// bind pods to node
-		ExpectManualBinding(ctx, env.Client, pod, node)
-
-		// inform cluster state about nodes and machines
-		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
-
-		fakeClock.Step(10 * time.Minute)
-
-		// Run the processing loop in parallel in the background with environment context
-		var wg sync.WaitGroup
-		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1)
-		ExpectTriggerVerifyAction(&wg)
-		go func() {
-			defer GinkgoRecover()
-			_, _ = deprovisioningController.Reconcile(ctx, reconcile.Request{})
-		}()
-		wg.Wait()
-
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
-
-		// Add a new pending pod that should schedule while node is not yet deleted
-		pod = test.UnschedulablePod()
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, provisioner, pod)
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
-		ExpectScheduled(ctx, env.Client, pod)
-	})
 	It("should not consolidate a node that is launched for pods on a deleting node", func() {
 		labels := map[string]string{
 			"app": "test",
@@ -1940,6 +1947,62 @@ var _ = Describe("Parallelization", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 	})
+
+	It("should schedule an additional node when receiving pending pods while consolidating", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				},
+			},
+		})
+
+		node.Finalizers = []string{"karpenter.sh/test-finalizer"}
+		machine.Finalizers = []string{"karpenter.sh/test-finalizer"}
+
+		ExpectApplied(ctx, env.Client, rs, pod, machine, node, prov)
+
+		// bind pods to node
+		ExpectManualBinding(ctx, env.Client, pod, node)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
+		fakeClock.Step(10 * time.Minute)
+
+		// Run the processing loop in parallel in the background with environment context
+		var wg sync.WaitGroup
+		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1)
+		ExpectTriggerVerifyAction(&wg)
+		go func() {
+			defer GinkgoRecover()
+			_, _ = deprovisioningController.Reconcile(ctx, reconcile.Request{})
+		}()
+		wg.Wait()
+
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+
+		// Add a new pending pod that should schedule while node is not yet deleted
+		pod = test.UnschedulablePod()
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, provisioner, pod)
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+		ExpectScheduled(ctx, env.Client, pod)
+	})
 })
 
 var _ = Describe("Multi-Node Consolidation", func() {
@@ -1947,7 +2010,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 	var machine1, machine2, machine3 *v1alpha5.Machine
 	var node1, node2, node3 *v1.Node
 
-	BeforeEach(func() {
+	var setupVariables = func() {
 		prov = test.Provisioner(test.ProvisionerOptions{Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)}})
 		machine1, node1 = test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
@@ -2000,8 +2063,11 @@ var _ = Describe("Multi-Node Consolidation", func() {
 				},
 			},
 		})
-	})
-	It("can merge 3 nodes into 1", func() {
+	}
+
+	BeforeEach(setupVariables)
+
+	var multiNodeConsolidationFunc = func() {
 		labels := map[string]string{
 			"app": "test",
 		}
@@ -2043,7 +2109,17 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		// three machines should be replaced with a single machine
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 		ExpectNotFound(ctx, env.Client, node1, node2, node3)
+	}
+	It("measures multi node consolidation", Serial, Label("benchmark"), func() {
+		AddReportEntry(experiment.Name, experiment)
+		experiment.Sample(func (idx int) {
+			setupVariables()
+			experiment.MeasureDuration("merging 3 nodes into 1", multiNodeConsolidationFunc)
+			ExpectCleanedUp(ctx, env.Client)
+			cluster.Reset()
+		}, gmeasure.SamplingConfig{N: sampleSizeFlag, Duration: 1 * time.Minute})
 	})
+	It("can merge 3 nodes into 1", multiNodeConsolidationFunc)
 	It("won't merge 2 nodes into 1 of the same type", func() {
 		labels := map[string]string{
 			"app": "test",
@@ -2284,8 +2360,12 @@ func ExpectMakeNewNodesReady(ctx context.Context, c client.Client, wg *sync.Wait
 			case <-time.After(50 * time.Millisecond):
 				nodeList := &v1.NodeList{}
 				if err := c.List(ctx, nodeList); err != nil {
+					logging.FromContext(ctx).Infof("got an error listing the nodes, %s", err)
 					continue
 				}
+				logging.FromContext(ctx).Infof("this is the nodes, %s", lo.Map(nodeList.Items, func(n v1.Node, _ int) string {
+					return n.Name
+				}))
 				for i := range nodeList.Items {
 					n := &nodeList.Items[i]
 					if existingNodeNames.Has(n.Name) {
