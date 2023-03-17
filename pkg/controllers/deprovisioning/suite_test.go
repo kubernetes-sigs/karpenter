@@ -16,7 +16,6 @@ package deprovisioning_test
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"math"
 	"sort"
@@ -82,11 +81,7 @@ func TestAPIs(t *testing.T) {
 	RunSpecs(t, "Deprovisioning")
 }
 
-var sampleSizeFlag int
-func init() {
-	flag.IntVar(&sampleSizeFlag, "benchmark-sample-size", 20, "This flag is used purely for ginkgo sample size on benchmarking.")
-}
-
+var sampleSizeFlag = 20
 var experiment = gmeasure.NewExperiment("deprovisioning benchmarks")
 
 var _ = BeforeSuite(func() {
