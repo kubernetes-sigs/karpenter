@@ -9,13 +9,22 @@ test: ## Run tests
 	go test ./... \
 		-race \
 		--ginkgo.focus="${FOCUS}" \
+		--ginkgo.skip="benchmark"
 		--ginkgo.v \
 		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
+
+ci-benchmark: ## Run Benchmarks
+	ginkgo ./pkg/... \
+		-race \
+		--dry-run \
+		--label-filter="benchmark" \
+		-cover -coverprofile=coverage.out -output-dir=. -coverpkg=./...
 
 deflake: ## Run randomized, racing tests until the test fails to catch flakes
 	ginkgo \
 		--race \
 		--focus="${FOCUS}" \
+		--skip="benchmark"
 		--randomize-all \
 		--until-it-fails \
 		-v \

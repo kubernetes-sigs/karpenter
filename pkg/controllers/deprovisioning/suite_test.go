@@ -212,7 +212,7 @@ var _ = Describe("Pod Eviction Cost", func() {
 	})
 })
 
-var basicReplacementFunc = func () {
+var basicReplacementFunc = func() {
 	labels := map[string]string{
 		"app": "test",
 	}
@@ -284,7 +284,7 @@ var basicReplacementFunc = func () {
 var _ = Describe("Replace Nodes", func() {
 	It("measures deprovisioning replacement", Serial, Label("benchmark"), func() {
 		AddReportEntry(experiment.Name, experiment)
-		experiment.Sample(func (idx int) {
+		experiment.Sample(func(idx int) {
 			experiment.MeasureDuration("replacing nodes", basicReplacementFunc)
 			ExpectCleanedUp(ctx, env.Client)
 			cluster.Reset()
@@ -829,7 +829,6 @@ var _ = Describe("Replace Nodes", func() {
 	})
 })
 
-
 var _ = Describe("Delete Node", func() {
 	var prov *v1alpha5.Provisioner
 	var machine1, machine2 *v1alpha5.Machine
@@ -919,7 +918,7 @@ var _ = Describe("Delete Node", func() {
 	}
 	It("measures deprovisioning deletion", Serial, Label("benchmark"), func() {
 		AddReportEntry(experiment.Name, experiment)
-		experiment.Sample(func (idx int) {
+		experiment.Sample(func(idx int) {
 			setupVariables()
 			experiment.MeasureDuration("deleting nodes", basicDeleteFunc)
 			ExpectCleanedUp(ctx, env.Client)
@@ -1310,7 +1309,7 @@ var _ = Describe("Topology Consideration", func() {
 	}
 	It("measures replacement with zonal topology spread", Serial, Label("benchmark"), func() {
 		AddReportEntry(experiment.Name, experiment)
-		experiment.Sample(func (idx int) {
+		experiment.Sample(func(idx int) {
 			setupVariables()
 			experiment.MeasureDuration("replacing with zonal topology spread", basicZonalTopologyReplacementFunc)
 			ExpectCleanedUp(ctx, env.Client)
@@ -1453,7 +1452,7 @@ var _ = Describe("Empty Nodes", func() {
 
 	It("measures empty node deletion", Serial, Label("benchmark"), func() {
 		AddReportEntry(experiment.Name, experiment)
-		experiment.Sample(func (idx int) {
+		experiment.Sample(func(idx int) {
 			setupVariables()
 			experiment.MeasureDuration("deleting empty nodes", basicEmptyDeletionFunc)
 			ExpectCleanedUp(ctx, env.Client)
@@ -1873,7 +1872,7 @@ var _ = Describe("Parallelization", func() {
 		rs := test.ReplicaSet()
 		ExpectApplied(ctx, env.Client, rs)
 
-		prov := test.Provisioner(test.ProvisionerOptions{
+		prov = test.Provisioner(test.ProvisionerOptions{
 			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 		})
 		podOpts := test.PodOptions{
@@ -2107,7 +2106,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 	}
 	It("measures multi node consolidation", Serial, Label("benchmark"), func() {
 		AddReportEntry(experiment.Name, experiment)
-		experiment.Sample(func (idx int) {
+		experiment.Sample(func(idx int) {
 			setupVariables()
 			experiment.MeasureDuration("merging 3 nodes into 1", multiNodeConsolidationFunc)
 			ExpectCleanedUp(ctx, env.Client)
