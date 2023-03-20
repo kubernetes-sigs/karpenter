@@ -135,6 +135,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 func (c *Controller) cleanup(podKey types.NamespacedName) {
 	if labels, ok := c.labelsMap.Load(podKey); ok {
 		podGaugeVec.Delete(labels.(prometheus.Labels))
+		c.labelsMap.Delete(podKey)
 	}
 }
 

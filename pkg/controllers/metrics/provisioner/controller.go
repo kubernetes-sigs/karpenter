@@ -129,6 +129,7 @@ func (c *Controller) cleanup(provisionerKey types.NamespacedName) {
 			usageGaugeVec.Delete(labels)
 			usagePctGaugeVec.Delete(labels)
 		}
+		c.labelCollection.Delete(provisionerKey)
 	}
 }
 
@@ -162,15 +163,17 @@ func (c *Controller) record(ctx context.Context, provisioner *v1alpha5.Provision
 func (c *Controller) set(provisioner *v1alpha5.Provisioner, resourceList v1.ResourceList, gaugeVec *prometheus.GaugeVec) error {
 	provisionerKey := client.ObjectKeyFromObject(provisioner)
 
+	var labels []prometheus.Labels
 	for resourceName, quantity := range resourceList {
 		resourceTypeName := strings.ReplaceAll(strings.ToLower(string(resourceName)), "-", "_")
 
-		labels := c.makeLabels(provisioner, resourceTypeName)
-		existingLabels, _ := c.labelCollection.LoadOrStore(provisionerKey, []prometheus.Labels{})
-		c.labelCollection.Store(provisionerKey, append(existingLabels.([]prometheus.Labels), labels))
+		label := c.makeLabels(provisioner, resourceTypeName)
+		labels = append(labels, label)
+		// Store the label we are about to add to the label collection
+		c.labelCollection.Store(provisionerKey, labels)
 
 		// gets existing gauge or gets a new one if it doesn't exist
-		gauge, err := gaugeVec.GetMetricWith(labels)
+		gauge, err := gaugeVec.GetMetricWith(label)
 		if err != nil {
 			return fmt.Errorf("creating or getting gauge: %w", err)
 		}
