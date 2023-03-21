@@ -1546,6 +1546,89 @@ var _ = Describe("Consolidation TTL", func() {
 			},
 		})
 	})
+	It("should not deprovision nodes that receive blocking pods during the TTL", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				},
+			},
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: v1.ResourceList{
+					v1.ResourceCPU: resource.MustParse("1"),
+				},
+			}})
+		noEvictPod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				Annotations: map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				},
+			},
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: v1.ResourceList{
+					v1.ResourceCPU: resource.MustParse("1"),
+				},
+			}})
+		ExpectApplied(ctx, env.Client, machine1, node1, prov, pod, noEvictPod)
+		ExpectManualBinding(ctx, env.Client, pod, node1)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		finished := atomic.Bool{}
+		go func() {
+			defer GinkgoRecover()
+			defer wg.Done()
+			defer finished.Store(true)
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+		}()
+
+		// wait for the deprovisioningController to block on the validation timeout
+		Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
+		// controller should be blocking during the timeout
+		Expect(finished.Load()).To(BeFalse())
+		// and the node should not be deleted yet
+		ExpectExists(ctx, env.Client, node1)
+
+		// make the node non-empty by binding it
+		ExpectManualBinding(ctx, env.Client, noEvictPod, node1)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+
+		// advance the clock so that the timeout expires
+		fakeClock.Step(31 * time.Second)
+		// controller should finish
+		Eventually(finished.Load, 10*time.Second).Should(BeTrue())
+		wg.Wait()
+
+		// nothing should be removed since the node is no longer empty
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		ExpectExists(ctx, env.Client, node1)
+	})
 	It("should wait for the node TTL for empty nodes before consolidating", func() {
 		ExpectApplied(ctx, env.Client, machine1, node1, prov)
 

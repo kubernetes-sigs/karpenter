@@ -27,8 +27,10 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/events"
 )
 
 // Validation is used to perform validation on a consolidation command.  It makes an assumption that when re-used, all
@@ -43,12 +45,13 @@ type Validation struct {
 	cloudProvider    cloudprovider.CloudProvider
 	provisioner      *provisioning.Provisioner
 	once             sync.Once
+	recorder         events.Recorder
 	// validationCandidates are the cached validation candidates.  We capture these when validating the first command and reuse them for
 	// validating subsequent commands.
 	validationCandidates []*Candidate
 }
 
-func NewValidation(validationPeriod time.Duration, clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider) *Validation {
+func NewValidation(validationPeriod time.Duration, clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder) *Validation {
 	return &Validation{
 		validationPeriod: validationPeriod,
 		clock:            clk,
@@ -56,6 +59,7 @@ func NewValidation(validationPeriod time.Duration, clk clock.Clock, cluster *sta
 		kubeClient:       kubeClient,
 		provisioner:      provisioner,
 		cloudProvider:    cp,
+		recorder:         recorder,
 	}
 }
 
@@ -73,20 +77,20 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 		case <-v.clock.After(waitDuration):
 		}
 	}
-
 	if len(v.validationCandidates) == 0 {
 		v.validationCandidates, err = GetCandidates(ctx, v.cluster, v.kubeClient, v.clock, v.cloudProvider, v.ShouldDeprovision)
 		if err != nil {
 			return false, fmt.Errorf("constructing validation candidates, %w", err)
 		}
 	}
+	// Compute PDBs and check if all the nodes are still deprovisionable.
+	pdbs, err := NewPDBLimits(ctx, v.kubeClient)
+	if err != nil {
+		return false, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
+	}
 
-	// a candidate we are about to delete is a target of a currently pending pod, wait for that to settle
-	// before continuing consolidation
-	for _, n := range cmd.candidates {
-		if v.cluster.IsNodeNominated(n.Name()) {
-			return false, nil
-		}
+	if valid := v.validateCandidates(ctx, cmd, pdbs); !valid {
+		return false, nil
 	}
 
 	isValid, err := v.ValidateCommand(ctx, cmd, v.validationCandidates)
@@ -95,6 +99,30 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 	}
 
 	return isValid, nil
+}
+
+// Returns if the candidates chosen can still be terminated after the TTL
+func (v *Validation) validateCandidates(ctx context.Context, cmd Command, pdbs *PDBLimits) bool {
+	for _, n := range cmd.candidates {
+		if !n.Node.DeletionTimestamp.IsZero() {
+			v.recorder.Publish(deprovisioningevents.Unconsolidatable(n.Node, "in the process of deletion")...)
+			return false
+		}
+		if pdb, ok := pdbs.CanEvictPods(n.pods); !ok {
+			v.recorder.Publish(deprovisioningevents.Unconsolidatable(n.Node, fmt.Sprintf("pdb %s prevents pod evictions", pdb))...)
+			return false
+		}
+		if p, ok := hasDoNotEvictPod(n); ok {
+			v.recorder.Publish(deprovisioningevents.Unconsolidatable(n.Node, fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name))...)
+			return false
+		}
+		// a candidate we are about to delete is a target of a currently pending pod, wait for that to settle
+		// before continuing consolidation
+		if v.cluster.IsNodeNominated(n.Name()) {
+			return false
+		}
+	}
+	return true
 }
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes

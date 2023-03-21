@@ -49,7 +49,7 @@ func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 		return Command{}, fmt.Errorf("sorting candidates, %w", err)
 	}
 
-	v := NewValidation(consolidationTTL, c.clock, c.cluster, c.kubeClient, c.provisioner, c.cloudProvider)
+	v := NewValidation(consolidationTTL, c.clock, c.cluster, c.kubeClient, c.provisioner, c.cloudProvider, c.recorder)
 	var failedValidation bool
 	for _, candidate := range candidates {
 		// compute a possible consolidation option
