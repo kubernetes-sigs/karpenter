@@ -89,7 +89,7 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 		return false, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
 
-	if valid := v.validateCandidates(ctx, cmd, pdbs); !valid {
+	if valid := v.validateCandidates(cmd, pdbs); !valid {
 		return false, nil
 	}
 
@@ -108,12 +108,12 @@ func (v *Validation) validateCandidates(cmd Command, pdbs *PDBLimits) bool {
 			v.recorder.Publish(deprovisioningevents.Unconsolidatable(n.Node, "in the process of deletion")...)
 			return false
 		}
-		if pdb, ok := pdbs.CanEvictPods(n.pods); !ok {
-			v.recorder.Publish(deprovisioningevents.Unconsolidatable(n.Node, fmt.Sprintf("pdb %s prevents pod evictions", pdb))...)
-			return false
-		}
 		if p, ok := hasDoNotEvictPod(n); ok {
 			v.recorder.Publish(deprovisioningevents.Unconsolidatable(n.Node, fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name))...)
+			return false
+		}
+		if pdb, ok := pdbs.CanEvictPods(n.pods); !ok {
+			v.recorder.Publish(deprovisioningevents.Unconsolidatable(n.Node, fmt.Sprintf("pdb %s prevents pod evictions", pdb))...)
 			return false
 		}
 		// a candidate we are about to delete is a target of a currently pending pod, wait for that to settle
