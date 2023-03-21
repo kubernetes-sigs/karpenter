@@ -102,7 +102,7 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 }
 
 // Returns if the candidates chosen can still be terminated after the TTL
-func (v *Validation) validateCandidates(ctx context.Context, cmd Command, pdbs *PDBLimits) bool {
+func (v *Validation) validateCandidates(cmd Command, pdbs *PDBLimits) bool {
 	for _, n := range cmd.candidates {
 		if !n.Node.DeletionTimestamp.IsZero() {
 			v.recorder.Publish(deprovisioningevents.Unconsolidatable(n.Node, "in the process of deletion")...)
