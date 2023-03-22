@@ -58,7 +58,7 @@ func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 		return cmd, nil
 	}
 
-	v := NewValidation(consolidationTTL, m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider)
+	v := NewValidation(consolidationTTL, m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder)
 	isValid, err := v.IsValid(ctx, cmd)
 	if err != nil {
 		return Command{}, fmt.Errorf("validating, %w", err)

@@ -29,6 +29,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/events"
 )
 
 // Validation is used to perform validation on a consolidation command.  It makes an assumption that when re-used, all
@@ -43,12 +44,13 @@ type Validation struct {
 	cloudProvider    cloudprovider.CloudProvider
 	provisioner      *provisioning.Provisioner
 	once             sync.Once
+	recorder         events.Recorder
 	// validationCandidates are the cached validation candidates.  We capture these when validating the first command and reuse them for
 	// validating subsequent commands.
 	validationCandidates []*Candidate
 }
 
-func NewValidation(validationPeriod time.Duration, clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider) *Validation {
+func NewValidation(validationPeriod time.Duration, clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder) *Validation {
 	return &Validation{
 		validationPeriod: validationPeriod,
 		clock:            clk,
@@ -56,6 +58,7 @@ func NewValidation(validationPeriod time.Duration, clk clock.Clock, cluster *sta
 		kubeClient:       kubeClient,
 		provisioner:      provisioner,
 		cloudProvider:    cp,
+		recorder:         recorder,
 	}
 }
 
@@ -73,14 +76,20 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 		case <-v.clock.After(waitDuration):
 		}
 	}
-
 	if len(v.validationCandidates) == 0 {
 		v.validationCandidates, err = GetCandidates(ctx, v.cluster, v.kubeClient, v.clock, v.cloudProvider, v.ShouldDeprovision)
 		if err != nil {
 			return false, fmt.Errorf("constructing validation candidates, %w", err)
 		}
 	}
-
+	nodes, err := filterCandidates(ctx, v.kubeClient, v.recorder, cmd.candidates)
+	if err != nil {
+		return false, fmt.Errorf("filtering candidates, %w", err)
+	}
+	// If we filtered out any candidates, return false as some nodes in the consolidation decision have changed.
+	if len(nodes) != len(cmd.candidates) {
+		return false, nil
+	}
 	// a candidate we are about to delete is a target of a currently pending pod, wait for that to settle
 	// before continuing consolidation
 	for _, n := range cmd.candidates {
