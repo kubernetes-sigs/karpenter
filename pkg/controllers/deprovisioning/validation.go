@@ -27,7 +27,6 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
@@ -98,30 +97,6 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 	}
 
 	return isValid, nil
-}
-
-// Returns if the candidates chosen can still be terminated after the TTL
-func (v *Validation) validateCandidates(cmd Command, pdbs *PDBLimits) bool {
-	for _, n := range cmd.candidates {
-		if !n.Node.DeletionTimestamp.IsZero() {
-			v.recorder.Publish(deprovisioningevents.Unconsolidatable(n.Node, "in the process of deletion")...)
-			return false
-		}
-		// a candidate we are about to delete is a target of a currently pending pod, wait for that to settle
-		// before continuing consolidation
-		if v.cluster.IsNodeNominated(n.Name()) {
-			return false
-		}
-		if p, ok := hasDoNotEvictPod(n); ok {
-			v.recorder.Publish(deprovisioningevents.Unconsolidatable(n.Node, fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name))...)
-			return false
-		}
-		if pdb, ok := pdbs.CanEvictPods(n.pods); !ok {
-			v.recorder.Publish(deprovisioningevents.Unconsolidatable(n.Node, fmt.Sprintf("pdb %s prevents pod evictions", pdb))...)
-			return false
-		}
-	}
-	return true
 }
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes
