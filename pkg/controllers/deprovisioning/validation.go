@@ -90,6 +90,13 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 	if len(nodes) != len(cmd.candidates) {
 		return false, nil
 	}
+	// a candidate we are about to delete is a target of a currently pending pod, wait for that to settle
+	// before continuing consolidation
+	for _, n := range cmd.candidates {
+		if v.cluster.IsNodeNominated(n.Name()) {
+			return false, nil
+		}
+	}
 
 	isValid, err := v.ValidateCommand(ctx, cmd, v.validationCandidates)
 	if err != nil {
