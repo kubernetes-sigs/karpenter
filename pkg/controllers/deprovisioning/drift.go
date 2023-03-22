@@ -57,8 +57,8 @@ func (d *Drift) ShouldDeprovision(ctx context.Context, c *Candidate) bool {
 }
 
 // ComputeCommand generates a deprovisioning command given deprovisionable machines
-func (d *Drift) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
-	candidates, err := filterCandidates(ctx, d.kubeClient, d.recorder, candidates)
+func (d *Drift) ComputeCommand(ctx context.Context, nodes ...*Candidate) (Command, error) {
+	candidates, err := filterCandidates(ctx, d.kubeClient, d.recorder, nodes)
 	if err != nil {
 		return Command{}, fmt.Errorf("filtering candidates, %w", err)
 	}

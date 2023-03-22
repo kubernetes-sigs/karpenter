@@ -61,20 +61,23 @@ func (e *Expiration) ShouldDeprovision(ctx context.Context, c *Candidate) bool {
 }
 
 // SortCandidates orders expired nodes by when they've expired
-func (e *Expiration) SortCandidates(candidates []*Candidate) []*Candidate {
+func (e *Expiration) filterAndSortCandidates(ctx context.Context, nodes []*Candidate) ([]*Candidate, error) {
+	candidates, err := filterCandidates(ctx, e.kubeClient, e.recorder, nodes)
+	if err != nil {
+		return nil, fmt.Errorf("filtering candidates, %w", err)
+	}
 	sort.Slice(candidates, func(i int, j int) bool {
 		return getExpirationTime(candidates[i].Node, candidates[i].provisioner).Before(getExpirationTime(candidates[j].Node, candidates[j].provisioner))
 	})
-	return candidates
+	return candidates, nil
 }
 
 // ComputeCommand generates a deprovisioning command given deprovisionable nodes
 func (e *Expiration) ComputeCommand(ctx context.Context, nodes ...*Candidate) (Command, error) {
-	candidates, err := filterCandidates(ctx, e.kubeClient, e.recorder, nodes)
+	candidates, err := e.filterAndSortCandidates(ctx, nodes)
 	if err != nil {
 		return Command{}, fmt.Errorf("filtering candidates, %w", err)
 	}
-	candidates = e.SortCandidates(candidates)
 
 	for _, candidate := range candidates {
 		// Check if we need to create any nodes.

@@ -48,15 +48,15 @@ func filterCandidates(ctx context.Context, kubeClient client.Client, recorder ev
 	// filter out nodes that can't be terminated
 	nodes = lo.Filter(nodes, func(cn *Candidate, _ int) bool {
 		if !cn.Node.DeletionTimestamp.IsZero() {
-			recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, "in the process of deletion")...)
+			recorder.Publish(deprovisioningevents.Blocked(cn.Node, "in the process of deletion")...)
 			return false
 		}
 		if pdb, ok := pdbs.CanEvictPods(cn.pods); !ok {
-			recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, fmt.Sprintf("pdb %s prevents pod evictions", pdb))...)
+			recorder.Publish(deprovisioningevents.Blocked(cn.Node, fmt.Sprintf("pdb %s prevents pod evictions", pdb))...)
 			return false
 		}
 		if p, ok := hasDoNotEvictPod(cn); ok {
-			recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name))...)
+			recorder.Publish(deprovisioningevents.Blocked(cn.Node, fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name))...)
 			return false
 		}
 		return true
