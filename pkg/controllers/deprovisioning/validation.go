@@ -83,13 +83,12 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 			return false, fmt.Errorf("constructing validation candidates, %w", err)
 		}
 	}
-	// Compute PDBs and check if all the nodes are still deprovisionable.
-	pdbs, err := NewPDBLimits(ctx, v.kubeClient)
+	nodes, err := filterCandidates(ctx, v.kubeClient, v.recorder, cmd.candidates)
 	if err != nil {
-		return false, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
+		return false, fmt.Errorf("filtering candidates, %w", err)
 	}
-
-	if valid := v.validateCandidates(cmd, pdbs); !valid {
+	// If we filtered out any candidates, return false as some nodes in the consolidation decision have changed.
+	if len(nodes) != len(cmd.candidates) {
 		return false, nil
 	}
 

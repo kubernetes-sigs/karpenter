@@ -21,7 +21,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/samber/lo"
 	"k8s.io/utils/clock"
 
 	v1 "k8s.io/api/core/v1"
@@ -30,7 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
@@ -71,28 +69,12 @@ func (e *Expiration) SortCandidates(candidates []*Candidate) []*Candidate {
 }
 
 // ComputeCommand generates a deprovisioning command given deprovisionable nodes
-func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
-	candidates = e.SortCandidates(candidates)
-	pdbs, err := NewPDBLimits(ctx, e.kubeClient)
+func (e *Expiration) ComputeCommand(ctx context.Context, nodes ...*Candidate) (Command, error) {
+	candidates, err := filterCandidates(ctx, e.kubeClient, e.recorder, nodes)
 	if err != nil {
-		return Command{}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
+		return Command{}, fmt.Errorf("filtering candidates, %w", err)
 	}
-	// filter out nodes that can't be terminated
-	candidates = lo.Filter(candidates, func(cn *Candidate, _ int) bool {
-		if !cn.Node.DeletionTimestamp.IsZero() {
-			return false
-		}
-		if pdb, ok := pdbs.CanEvictPods(cn.pods); !ok {
-			e.recorder.Publish(deprovisioningevents.Blocked(cn.Node, fmt.Sprintf("pdb %s prevents pod evictions", pdb))...)
-			return false
-		}
-		if p, ok := hasDoNotEvictPod(cn); ok {
-			e.recorder.Publish(deprovisioningevents.Blocked(cn.Node,
-				fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name))...)
-			return false
-		}
-		return true
-	})
+	candidates = e.SortCandidates(candidates)
 
 	for _, candidate := range candidates {
 		// Check if we need to create any nodes.
