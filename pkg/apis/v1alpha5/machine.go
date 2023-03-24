@@ -104,6 +104,12 @@ type KubeletConfiguration struct {
 	// CPUCFSQuota enables CPU CFS quota enforcement for containers that specify CPU limits.
 	// +optional
 	CPUCFSQuota bool `json:"cpuCFSQuota,omitempty"`
+	// ShutdownGracePeriod specifies the total duration that the node should delay the shutdown and total grace period for pod termination during a node shutdown.
+	// +optional
+	ShutdownGracePeriod *string `json:"shutdownGracePeriod,omitempty"`
+	// ShutdownGracePeriodCriticalPods specifies the duration used to terminate critical pods during a node shutdown. This should be less than ShutdownGracePeriod.
+	// +optional
+	ShutdownGracePeriodCriticalPods *string `json:"shutdownGracePeriodCriticalPods,omitempty"`
 }
 
 type MachineTemplateRef struct {
