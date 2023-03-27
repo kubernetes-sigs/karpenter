@@ -22,7 +22,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/test"
@@ -96,36 +95,5 @@ var _ = Describe("Liveness", func() {
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine)) // Reconcile again to handle termination flow
 		ExpectNotFound(ctx, env.Client, machine)
-	})
-	It("should not delete the Machine when the Node hasn't registered to the Machine past the registration TTL if ttlAfterNotRegistered is disabled", func() {
-		s := test.Settings()
-		s.TTLAfterNotRegistered = nil
-		ctx = settings.ToContext(ctx, s)
-		machine := test.Machine(v1alpha5.Machine{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-				},
-			},
-			Spec: v1alpha5.MachineSpec{
-				Resources: v1alpha5.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:          resource.MustParse("2"),
-						v1.ResourceMemory:       resource.MustParse("50Mi"),
-						v1.ResourcePods:         resource.MustParse("5"),
-						fake.ResourceGPUVendorA: resource.MustParse("1"),
-					},
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
-
-		// If the node hasn't registered in the liveness timeframe, then we deprovision the Machine
-		fakeClock.Step(time.Minute * 20)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine)) // Reconcile again to handle termination flow
-		ExpectExists(ctx, env.Client, machine)
 	})
 })

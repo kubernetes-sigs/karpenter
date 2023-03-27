@@ -138,11 +138,5 @@ settings:
   # Setting driftEnabled to true enables the drift deprovisioner to watch for drift between currently deployed nodes
   # and the desired state of nodes set in provisioners and node templates
   driftEnabled: false
-  # -- ttlAfterNotRegistered is in ALPHA and is planned to be removed in the future, pending design for handling nodes failing launch.
-  # The maximum length of time to wait for the machine to register to the cluster before terminating the machine.
-  # Generally, the default of 15m should be sufficient but raising or lowering this may be necessary depending
-  # on how slowly or quickly nodes join the cluster.
-  # Setting this value to an empty string disables the ttlAfterNotRegistered deprovisioning
-  ttlAfterNotRegistered: 15m
 
 
