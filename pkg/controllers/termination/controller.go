@@ -38,6 +38,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
+	"github.com/samber/lo"
 )
 
 var _ corecontroller.FinalizingTypedController[*v1.Node] = (*Controller)(nil)
@@ -77,11 +78,21 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 		return reconcile.Result{}, fmt.Errorf("cordoning node, %w", err)
 	}
 	if err := c.terminator.Drain(ctx, node); err != nil {
-		if terminator.IsNodeDrainError(err) {
-			c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
+		if !terminator.IsNodeDrainError(err) {
+			return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
+		}
+		c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
+		// If pods cannot be drained, check if the node lifecycle controller has tainted the node as unreachable.
+		if _, found := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
+			return taint.MatchTaint(&v1.Taint{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoExecute})
+		}); !found {
 			return reconcile.Result{Requeue: true}, nil
 		}
-		return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
+		// If the node is unreachable, complete node deletion if the underlying machine no longer exists.
+		// If the node exists, requeue after a second to not hammer the API.
+		if _, err := c.cloudProvider.Get(ctx, node.Spec.ProviderID); !cloudprovider.IsMachineNotFoundError(err) {
+			return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
+		}
 	}
 	if err := c.cloudProvider.Delete(ctx, machineutil.NewFromNode(node)); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
 		return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
