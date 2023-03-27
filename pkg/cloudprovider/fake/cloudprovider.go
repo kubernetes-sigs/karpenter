@@ -139,6 +139,15 @@ func (c *CloudProvider) Get(_ context.Context, id string) (*v1alpha5.Machine, er
 	return nil, cloudprovider.NewMachineNotFoundError(fmt.Errorf("no machine exists with id '%s'", id))
 }
 
+func (c *CloudProvider) List(_ context.Context) ([]*v1alpha5.Machine, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return lo.Map(lo.Values(c.CreatedMachines), func(m *v1alpha5.Machine, _ int) *v1alpha5.Machine {
+		return m.DeepCopy()
+	}), nil
+}
+
 func (c *CloudProvider) GetInstanceTypes(_ context.Context, _ *v1alpha5.Provisioner) ([]*cloudprovider.InstanceType, error) {
 	if c.InstanceTypes != nil {
 		return c.InstanceTypes, nil
