@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package garbagecollect_test
+package garbagecollection_test
 
 import (
 	"context"
@@ -22,7 +22,6 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -32,9 +31,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/machine"
-	"github.com/aws/karpenter-core/pkg/controllers/machine/garbagecollect"
-	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
-	"github.com/aws/karpenter-core/pkg/events"
+	"github.com/aws/karpenter-core/pkg/controllers/machine/garbagecollection"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
@@ -69,11 +66,8 @@ var _ = BeforeSuite(func() {
 	ctx = settings.ToContext(ctx, test.Settings())
 
 	cloudProvider = fake.NewCloudProvider()
-
-	evictionQueue := terminator.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}))
-	terminator := terminator.NewTerminator(fakeClock, env.Client, evictionQueue)
-	machineController = machine.NewController(fakeClock, env.Client, cloudProvider, terminator, events.NewRecorder(&record.FakeRecorder{}))
-	garbageCollectionController = garbagecollect.NewController(env.Client, cloudProvider, fakeClock)
+	garbageCollectionController = garbagecollection.NewController(env.Client, cloudProvider, fakeClock)
+	machineController = machine.NewController(fakeClock, env.Client, cloudProvider)
 })
 
 var _ = AfterSuite(func() {
@@ -112,7 +106,7 @@ var _ = Describe("GarbageCollection", func() {
 
 		// Expect the Machine to be removed now that the Instance is gone
 		ExpectReconcileSucceeded(ctx, garbageCollectionController, client.ObjectKey{})
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine)) // remove the finalizer
+		ExpectFinalizersRemoved(ctx, env.Client, machine)
 		ExpectNotFound(ctx, env.Client, machine)
 	})
 	It("should delete many Machines when the Node never appears and the instance is gone", func() {
@@ -143,7 +137,7 @@ var _ = Describe("GarbageCollection", func() {
 		ExpectReconcileSucceeded(ctx, garbageCollectionController, client.ObjectKey{})
 
 		for _, machine := range machines {
-			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine)) // remove the finalizer
+			ExpectFinalizersRemoved(ctx, env.Client, machine)
 		}
 		ExpectNotFound(ctx, env.Client, lo.Map(machines, func(m *v1alpha5.Machine, _ int) client.Object { return m })...)
 	})
@@ -164,7 +158,7 @@ var _ = Describe("GarbageCollection", func() {
 
 		// Reconcile the Machine. It should not be deleted by this flow since it has never been registered
 		ExpectReconcileSucceeded(ctx, garbageCollectionController, client.ObjectKey{})
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectFinalizersRemoved(ctx, env.Client, machine)
 		ExpectExists(ctx, env.Client, machine)
 	})
 })

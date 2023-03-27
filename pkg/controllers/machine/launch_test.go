@@ -123,8 +123,7 @@ var _ = Describe("Launch", func() {
 		machine := test.Machine()
 		ExpectApplied(ctx, env.Client, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine)) // Reconcile again to handle termination flow
-
+		ExpectFinalizersRemoved(ctx, env.Client, machine)
 		ExpectNotFound(ctx, env.Client, machine)
 	})
 })

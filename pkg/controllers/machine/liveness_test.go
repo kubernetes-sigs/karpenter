@@ -65,7 +65,7 @@ var _ = Describe("Liveness", func() {
 		// If the node hasn't registered in the creation timeframe, then we deprovision the Machine
 		fakeClock.Step(time.Minute * 3)
 		ExpectReconcileFailed(ctx, machineController, client.ObjectKeyFromObject(machine))
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine)) // Reconcile again to handle termination flow
+		ExpectFinalizersRemoved(ctx, env.Client, machine)
 		ExpectNotFound(ctx, env.Client, machine)
 	})
 	It("should delete the Machine when the Node hasn't registered to the Machine past the registration TTL", func() {
@@ -93,7 +93,7 @@ var _ = Describe("Liveness", func() {
 		// If the node hasn't registered in the liveness timeframe, then we deprovision the Machine
 		fakeClock.Step(time.Minute * 20)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine)) // Reconcile again to handle termination flow
+		ExpectFinalizersRemoved(ctx, env.Client, machine)
 		ExpectNotFound(ctx, env.Client, machine)
 	})
 })

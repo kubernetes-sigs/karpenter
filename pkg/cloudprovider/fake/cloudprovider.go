@@ -45,8 +45,10 @@ type CloudProvider struct {
 	CreateCalls        []*v1alpha5.Machine
 	AllowedCreateCalls int
 	NextCreateErr      error
-	CreatedMachines    map[string]*v1alpha5.Machine
-	Drifted            bool
+	DeleteCalls        []*v1alpha5.Machine
+
+	CreatedMachines map[string]*v1alpha5.Machine
+	Drifted         bool
 }
 
 func NewCloudProvider() *CloudProvider {
@@ -64,6 +66,7 @@ func (c *CloudProvider) Reset() {
 	c.CreatedMachines = map[string]*v1alpha5.Machine{}
 	c.AllowedCreateCalls = math.MaxInt
 	c.NextCreateErr = nil
+	c.DeleteCalls = []*v1alpha5.Machine{}
 }
 
 func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (*v1alpha5.Machine, error) {
@@ -196,6 +199,7 @@ func (c *CloudProvider) Delete(_ context.Context, m *v1alpha5.Machine) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	c.DeleteCalls = append(c.DeleteCalls, m)
 	if _, ok := c.CreatedMachines[m.Status.ProviderID]; ok {
 		delete(c.CreatedMachines, m.Status.ProviderID)
 		return nil
