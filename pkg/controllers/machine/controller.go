@@ -61,7 +61,6 @@ type Controller struct {
 	recorder      events.Recorder
 	terminator    *terminator.Terminator
 
-	garbageCollect *GarbageCollect
 	launch         *Launch
 	registration   *Registration
 	initialization *Initialization
@@ -77,7 +76,6 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 		recorder:      recorder,
 		terminator:    terminator,
 
-		garbageCollect: &GarbageCollect{kubeClient: kubeClient, cloudProvider: cloudProvider, lastChecked: cache.New(time.Minute*10, time.Second*10)},
 		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Minute, time.Second*10)},
 		registration:   &Registration{kubeClient: kubeClient},
 		initialization: &Initialization{kubeClient: kubeClient},
@@ -104,7 +102,6 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 	var results []reconcile.Result
 	var errs error
 	for _, reconciler := range []machineReconciler{
-		c.garbageCollect,
 		c.launch,
 		c.registration,
 		c.initialization,

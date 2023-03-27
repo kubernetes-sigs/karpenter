@@ -57,6 +57,8 @@ type CloudProvider interface {
 	Delete(context.Context, *v1alpha5.Machine) error
 	// Get retrieves a machine from the cloudprovider by its provider id
 	Get(context.Context, string) (*v1alpha5.Machine, error)
+	// List retrieves all machines from the cloudprovider
+	List(context.Context) ([]*v1alpha5.Machine, error)
 	// GetInstanceTypes returns instance types supported by the cloudprovider.
 	// Availability of types or zone may vary by provisioner or over time.  Regardless of
 	// availability, the GetInstanceTypes method should always return all instance types,
