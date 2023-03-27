@@ -16,7 +16,6 @@ package test
 
 import (
 	"fmt"
-	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -38,13 +37,9 @@ func Settings(overrides ...settings.Settings) *settings.Settings {
 	if options.BatchIdleDuration == nil {
 		options.BatchIdleDuration = &metav1.Duration{}
 	}
-	if options.TTLAfterNotRegistered == nil {
-		options.TTLAfterNotRegistered = &metav1.Duration{Duration: time.Minute * 15}
-	}
 	return &settings.Settings{
-		BatchMaxDuration:      options.BatchMaxDuration,
-		BatchIdleDuration:     options.BatchIdleDuration,
-		TTLAfterNotRegistered: options.TTLAfterNotRegistered,
-		DriftEnabled:          options.DriftEnabled,
+		BatchMaxDuration:  options.BatchMaxDuration,
+		BatchIdleDuration: options.BatchIdleDuration,
+		DriftEnabled:      options.DriftEnabled,
 	}
 }
