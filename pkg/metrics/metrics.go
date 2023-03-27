@@ -20,8 +20,9 @@ import (
 )
 
 const (
-	nodeSubsystem    = "nodes"
-	machineSubsystem = "machines"
+	nodeSubsystem                  = "nodes"
+	machineSubsystem               = "machines"
+	cloudProviderMachinesSubsystem = "cloudprovider_machines"
 )
 
 var (
@@ -54,7 +55,7 @@ var (
 			Namespace: Namespace,
 			Subsystem: machineSubsystem,
 			Name:      "created",
-			Help:      "Number of machines created in total by Karpenter. Labeled by reason the machine was terminated and the owning provisioner.",
+			Help:      "Number of machines created in total by Karpenter. Labeled by reason the machine was created and the owning provisioner.",
 		},
 		[]string{
 			ReasonLabel,

@@ -20,21 +20,16 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
-	"github.com/aws/karpenter-core/pkg/controllers/machine"
 	"github.com/aws/karpenter-core/pkg/controllers/machine/garbagecollect"
-	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
-	"github.com/aws/karpenter-core/pkg/events"
+	"github.com/aws/karpenter-core/pkg/controllers/machine/launch"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
@@ -47,7 +42,7 @@ import (
 )
 
 var ctx context.Context
-var machineController controller.Controller
+var launchController controller.Controller
 var garbageCollectionController controller.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
@@ -61,18 +56,11 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
-	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...), test.WithFieldIndexers(func(c cache.Cache) error {
-		return c.IndexField(ctx, &v1.Node{}, "spec.providerID", func(obj client.Object) []string {
-			return []string{obj.(*v1.Node).Spec.ProviderID}
-		})
-	}))
+	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
 	ctx = settings.ToContext(ctx, test.Settings())
 
 	cloudProvider = fake.NewCloudProvider()
-
-	evictionQueue := terminator.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}))
-	terminator := terminator.NewTerminator(fakeClock, env.Client, evictionQueue)
-	machineController = machine.NewController(fakeClock, env.Client, cloudProvider, terminator, events.NewRecorder(&record.FakeRecorder{}))
+	launchController = launch.NewController(fakeClock, env.Client, cloudProvider)
 	garbageCollectionController = garbagecollect.NewController(env.Client, cloudProvider, fakeClock)
 })
 
@@ -101,7 +89,7 @@ var _ = Describe("GarbageCollection", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, launchController, client.ObjectKeyFromObject(machine))
 		machine = ExpectExists(ctx, env.Client, machine)
 
 		// Step forward to move past the cache eventual consistency timeout
@@ -112,7 +100,7 @@ var _ = Describe("GarbageCollection", func() {
 
 		// Expect the Machine to be removed now that the Instance is gone
 		ExpectReconcileSucceeded(ctx, garbageCollectionController, client.ObjectKey{})
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine)) // remove the finalizer
+		ExpectFinalizersRemoved(ctx, env.Client, machine)
 		ExpectNotFound(ctx, env.Client, machine)
 	})
 	It("should delete many Machines when the Node never appears and the instance is gone", func() {
@@ -126,7 +114,7 @@ var _ = Describe("GarbageCollection", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, provisioner, machine)
-			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+			ExpectReconcileSucceeded(ctx, launchController, client.ObjectKeyFromObject(machine))
 			machine = ExpectExists(ctx, env.Client, machine)
 			machines = append(machines, machine)
 		}
@@ -143,7 +131,7 @@ var _ = Describe("GarbageCollection", func() {
 		ExpectReconcileSucceeded(ctx, garbageCollectionController, client.ObjectKey{})
 
 		for _, machine := range machines {
-			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine)) // remove the finalizer
+			ExpectFinalizersRemoved(ctx, env.Client, machine)
 		}
 		ExpectNotFound(ctx, env.Client, lo.Map(machines, func(m *v1alpha5.Machine, _ int) client.Object { return m })...)
 	})
@@ -156,7 +144,7 @@ var _ = Describe("GarbageCollection", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, launchController, client.ObjectKeyFromObject(machine))
 		machine = ExpectExists(ctx, env.Client, machine)
 
 		// Step forward to move past the cache eventual consistency timeout
@@ -164,7 +152,7 @@ var _ = Describe("GarbageCollection", func() {
 
 		// Reconcile the Machine. It should not be deleted by this flow since it has never been registered
 		ExpectReconcileSucceeded(ctx, garbageCollectionController, client.ObjectKey{})
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectFinalizersRemoved(ctx, env.Client, machine)
 		ExpectExists(ctx, env.Client, machine)
 	})
 })

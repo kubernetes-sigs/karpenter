@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/patrickmn/go-cache"
 	"go.uber.org/multierr"
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
@@ -61,7 +60,6 @@ type Controller struct {
 	recorder      events.Recorder
 	terminator    *terminator.Terminator
 
-	launch         *Launch
 	registration   *Registration
 	initialization *Initialization
 	liveness       *Liveness
@@ -76,7 +74,6 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 		recorder:      recorder,
 		terminator:    terminator,
 
-		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Minute, time.Second*10)},
 		registration:   &Registration{kubeClient: kubeClient},
 		initialization: &Initialization{kubeClient: kubeClient},
 		liveness:       &Liveness{clock: clk, kubeClient: kubeClient},
@@ -88,21 +85,14 @@ func (*Controller) Name() string {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	// Add the finalizer immediately since we shouldn't launch if we don't yet have the finalizer.
-	// Otherwise, we could leak resources
-	stored := machine.DeepCopy()
-	controllerutil.AddFinalizer(machine, v1alpha5.TerminationFinalizer)
-	if !equality.Semantic.DeepEqual(machine, stored) {
-		if err := c.kubeClient.Patch(ctx, machine, client.MergeFrom(stored)); err != nil {
-			return reconcile.Result{}, client.IgnoreNotFound(err)
-		}
+	if !machine.StatusConditions().GetCondition(v1alpha5.MachineCreated).IsTrue() {
+		return reconcile.Result{}, nil
 	}
 
-	stored = machine.DeepCopy()
+	stored := machine.DeepCopy()
 	var results []reconcile.Result
 	var errs error
 	for _, reconciler := range []machineReconciler{
-		c.launch,
 		c.registration,
 		c.initialization,
 		c.liveness, // we check liveness last, since we don't want to delete the machine, and then still launch
@@ -112,11 +102,7 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 		results = append(results, res)
 	}
 	if !equality.Semantic.DeepEqual(stored, machine) {
-		statusCopy := machine.DeepCopy()
-		if err := c.kubeClient.Patch(ctx, machine, client.MergeFrom(stored)); err != nil {
-			return reconcile.Result{}, client.IgnoreNotFound(multierr.Append(errs, err))
-		}
-		if err := c.kubeClient.Status().Patch(ctx, statusCopy, client.MergeFrom(stored)); err != nil {
+		if err := c.kubeClient.Status().Patch(ctx, machine, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(multierr.Append(errs, err))
 		}
 	}

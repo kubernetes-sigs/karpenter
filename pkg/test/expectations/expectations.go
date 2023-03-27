@@ -45,7 +45,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/controllers/machine"
+	"github.com/aws/karpenter-core/pkg/controllers/machine/launch"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -296,7 +296,7 @@ func ExpectMachineDeployedWithOffset(offset int, ctx context.Context, c client.C
 	ExpectWithOffset(offset+1, err).To(Succeed())
 
 	// Make the machine ready in the status conditions
-	machine.PopulateMachineDetails(m, resolved)
+	launch.PopulateMachineDetails(m, resolved)
 	m.StatusConditions().MarkTrue(v1alpha5.MachineCreated)
 	m.StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
 

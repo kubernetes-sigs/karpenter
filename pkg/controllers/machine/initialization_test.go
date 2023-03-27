@@ -54,7 +54,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, launchController, client.ObjectKeyFromObject(machine))
 		machine = ExpectExists(ctx, env.Client, machine)
 
 		node := test.Node(test.NodeOptions{
@@ -103,7 +103,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, launchController, client.ObjectKeyFromObject(machine))
 		machine = ExpectExists(ctx, env.Client, machine)
 
 		node := test.Node(test.NodeOptions{
@@ -143,7 +143,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, launchController, client.ObjectKeyFromObject(machine))
 		machine = ExpectExists(ctx, env.Client, machine)
 
 		node := test.Node(test.NodeOptions{
@@ -186,7 +186,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, launchController, client.ObjectKeyFromObject(machine))
 		machine = ExpectExists(ctx, env.Client, machine)
 
 		// Update the machine to add mock the instance type having an extended resource
@@ -234,7 +234,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, launchController, client.ObjectKeyFromObject(machine))
 		machine = ExpectExists(ctx, env.Client, machine)
 
 		// Update the machine to add mock the instance type having an extended resource
@@ -305,7 +305,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, launchController, client.ObjectKeyFromObject(machine))
 		machine = ExpectExists(ctx, env.Client, machine)
 
 		node := test.Node(test.NodeOptions{
@@ -375,7 +375,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, launchController, client.ObjectKeyFromObject(machine))
 		machine = ExpectExists(ctx, env.Client, machine)
 
 		node := test.Node(test.NodeOptions{

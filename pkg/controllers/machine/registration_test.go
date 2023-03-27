@@ -42,7 +42,7 @@ var _ = Describe("Registration", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, launchController, client.ObjectKeyFromObject(machine))
 		machine = ExpectExists(ctx, env.Client, machine)
 
 		node := test.Node(test.NodeOptions{ProviderID: machine.Status.ProviderID})
@@ -61,7 +61,7 @@ var _ = Describe("Registration", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, launchController, client.ObjectKeyFromObject(machine))
 		machine = ExpectExists(ctx, env.Client, machine)
 
 		node := test.Node(test.NodeOptions{ProviderID: machine.Status.ProviderID})
@@ -82,7 +82,7 @@ var _ = Describe("Registration", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, launchController, client.ObjectKeyFromObject(machine))
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(machine.Labels).To(HaveKeyWithValue("custom-label", "custom-value"))
 		Expect(machine.Labels).To(HaveKeyWithValue("other-custom-label", "other-custom-value"))
@@ -110,7 +110,7 @@ var _ = Describe("Registration", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, launchController, client.ObjectKeyFromObject(machine))
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(machine.Annotations).To(HaveKeyWithValue(v1alpha5.DoNotConsolidateNodeAnnotationKey, "true"))
 		Expect(machine.Annotations).To(HaveKeyWithValue("my-custom-annotation", "my-custom-value"))
@@ -148,7 +148,7 @@ var _ = Describe("Registration", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, launchController, client.ObjectKeyFromObject(machine))
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(machine.Spec.Taints).To(ContainElements(
 			v1.Taint{
@@ -216,7 +216,7 @@ var _ = Describe("Registration", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, launchController, client.ObjectKeyFromObject(machine))
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(machine.Spec.StartupTaints).To(ContainElements(
 			v1.Taint{
@@ -282,7 +282,7 @@ var _ = Describe("Registration", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, launchController, client.ObjectKeyFromObject(machine))
 		machine = ExpectExists(ctx, env.Client, machine)
 
 		node := test.Node(test.NodeOptions{ProviderID: machine.Status.ProviderID})

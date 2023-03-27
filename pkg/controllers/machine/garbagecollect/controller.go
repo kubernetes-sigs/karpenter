@@ -35,6 +35,9 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/sets"
 )
 
+// Controller is a garbage collection singleton controller that periodically polls the CloudProvider List()
+// API and checks if there are any machines that have been resolved on the cluster but do not have any CloudProvider
+// representation. If one of these machines exists, then the controller will delete the Machine.
 type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
@@ -50,7 +53,7 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 }
 
 func (c *Controller) Name() string {
-	return "machine_garbagecollect"
+	return "machine_garbagecollection"
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
@@ -77,11 +80,11 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 			errs[i] = client.IgnoreNotFound(err)
 			return
 		}
-		logging.FromContext(ctx).Debugf("garbage collecting machine with no cloudprovider representation")
+		logging.FromContext(ctx).With("machine", machines[i].Name, "provider-id", machines[i].Status.ProviderID).Debugf("garbage collecting machine with no cloudprovider representation")
 		metrics.MachinesTerminatedCounter.With(prometheus.Labels{
 			metrics.ReasonLabel:      "garbage_collected",
 			metrics.ProvisionerLabel: machines[i].Labels[v1alpha5.ProvisionerNameLabelKey],
-		})
+		}).Inc()
 	})
 	return reconcile.Result{RequeueAfter: time.Minute * 2}, multierr.Combine(errs...)
 }
