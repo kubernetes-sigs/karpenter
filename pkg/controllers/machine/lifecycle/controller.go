@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package machine
+package lifecycle
 
 import (
 	"context"
@@ -27,6 +27,7 @@ import (
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -49,10 +50,12 @@ type machineReconciler interface {
 
 var _ corecontroller.TypedController[*v1alpha5.Machine] = (*Controller)(nil)
 
-// Controller is a Machine Controller
+// Controller is a Machine Lifecycle controller that manages the lifecycle of the machine up until its termination
+// The controller is responsible for ensuring that new Machines get launched, that they have properly registered with
+// the cluster as nodes and that they are properly initialized, ensuring that Machines that do not have matching nodes
+// after some liveness TTL are removed
 type Controller struct {
-	kubeClient    client.Client
-	cloudProvider cloudprovider.CloudProvider
+	kubeClient client.Client
 
 	launch         *Launch
 	registration   *Registration
@@ -60,11 +63,9 @@ type Controller struct {
 	liveness       *Liveness
 }
 
-// NewController is a constructor for the Machine Controller
 func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
 	return corecontroller.Typed[*v1alpha5.Machine](kubeClient, &Controller{
-		kubeClient:    kubeClient,
-		cloudProvider: cloudProvider,
+		kubeClient: kubeClient,
 
 		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Minute, time.Second*10)},
 		registration:   &Registration{kubeClient: kubeClient},
@@ -74,14 +75,13 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 }
 
 func (*Controller) Name() string {
-	return "machine"
+	return "machine_lifecycle"
 }
 
 func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
 	if !machine.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, nil
 	}
-
 	// Add the finalizer immediately since we shouldn't launch if we don't yet have the finalizer.
 	// Otherwise, we could leak resources
 	stored := machine.DeepCopy()
@@ -99,7 +99,7 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 		c.launch,
 		c.registration,
 		c.initialization,
-		c.liveness, // we check liveness last, since we don't want to delete the machine, and then still launch
+		c.liveness,
 	} {
 		res, err := reconciler.Reconcile(ctx, machine)
 		errs = multierr.Append(errs, err)
@@ -120,7 +120,13 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontroller.Builder {
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
-		For(&v1alpha5.Machine{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		For(&v1alpha5.Machine{}, builder.WithPredicates(
+			predicate.Funcs{
+				CreateFunc: func(e event.CreateEvent) bool { return true },
+				UpdateFunc: func(e event.UpdateEvent) bool { return false },
+				DeleteFunc: func(e event.DeleteEvent) bool { return false },
+			},
+		)).
 		Watches(
 			&source.Kind{Type: &v1.Node{}},
 			machineutil.NodeEventHandler(ctx, c.kubeClient),
@@ -131,6 +137,6 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 				// 10 qps, 100 bucket size
 				&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
 			),
-			MaxConcurrentReconciles: 100, // higher concurrency limit since we want fast reaction to node syncing and launch
+			MaxConcurrentReconciles: 1000, // higher concurrency limit since we want fast reaction to node syncing and launch
 		}))
 }

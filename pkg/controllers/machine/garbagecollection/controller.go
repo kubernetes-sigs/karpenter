@@ -36,16 +36,16 @@ import (
 )
 
 type Controller struct {
+	clock         clock.Clock
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
-	clock         clock.Clock
 }
 
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, c clock.Clock) corecontroller.Controller {
+func NewController(c clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
 	return &Controller{
+		clock:         c,
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
-		clock:         c,
 	}
 }
 

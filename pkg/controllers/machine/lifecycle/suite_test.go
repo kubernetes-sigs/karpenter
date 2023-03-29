@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package machine_test
+package lifecycle_test
 
 import (
 	"context"
@@ -33,7 +33,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
-	"github.com/aws/karpenter-core/pkg/controllers/machine"
+	machinelifecycle "github.com/aws/karpenter-core/pkg/controllers/machine/lifecycle"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
@@ -63,7 +63,7 @@ var _ = BeforeSuite(func() {
 	ctx = settings.ToContext(ctx, test.Settings())
 
 	cloudProvider = fake.NewCloudProvider()
-	machineController = machine.NewController(fakeClock, env.Client, cloudProvider)
+	machineController = machinelifecycle.NewController(fakeClock, env.Client, cloudProvider)
 })
 
 var _ = AfterSuite(func() {

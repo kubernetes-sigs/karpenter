@@ -12,12 +12,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package machine
+package lifecycle
 
 import (
 	"context"
 	"fmt"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -28,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
@@ -38,11 +40,11 @@ type Registration struct {
 }
 
 func (r *Registration) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	if machine.Status.ProviderID == "" {
-		machine.StatusConditions().MarkUnknown(v1alpha5.MachineRegistered, "", "")
+	if machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
 		return reconcile.Result{}, nil
 	}
-	if machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
+	if !machine.StatusConditions().GetCondition(v1alpha5.MachineLaunched).IsTrue() {
+		machine.StatusConditions().MarkFalse(v1alpha5.MachineRegistered, "MachineNotLaunched", "Machine is not launched")
 		return reconcile.Result{}, nil
 	}
 
@@ -64,6 +66,9 @@ func (r *Registration) Reconcile(ctx context.Context, machine *v1alpha5.Machine)
 		return reconcile.Result{}, fmt.Errorf("syncing node, %w", err)
 	}
 	machine.StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
+	metrics.MachinesRegisteredCounter.With(prometheus.Labels{
+		metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
+	}).Inc()
 	return reconcile.Result{}, nil
 }
 
@@ -83,11 +88,9 @@ func (r *Registration) syncNode(ctx context.Context, machine *v1alpha5.Machine, 
 		node.Annotations = lo.Assign(node.Annotations, machine.Annotations)
 		// Sync all taints inside of Machine into the Machine taints
 		node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(machine.Spec.Taints)
-	}
-	node.Labels[v1alpha5.MachineNameLabelKey] = machine.Labels[v1alpha5.MachineNameLabelKey]
-	if !machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
 		node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(machine.Spec.StartupTaints)
 	}
+	node.Labels[v1alpha5.MachineNameLabelKey] = machine.Labels[v1alpha5.MachineNameLabelKey]
 	if !equality.Semantic.DeepEqual(stored, node) {
 		if err := r.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 			return fmt.Errorf("syncing node labels, %w", err)

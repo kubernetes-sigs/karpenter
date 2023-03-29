@@ -54,7 +54,7 @@ var (
 			Namespace: Namespace,
 			Subsystem: machineSubsystem,
 			Name:      "created",
-			Help:      "Number of machines created in total by Karpenter. Labeled by reason the machine was terminated and the owning provisioner.",
+			Help:      "Number of machines created in total by Karpenter. Labeled by reason the machine was created and the owning provisioner.",
 		},
 		[]string{
 			ReasonLabel,
@@ -70,6 +70,28 @@ var (
 		},
 		[]string{
 			ReasonLabel,
+			ProvisionerLabel,
+		},
+	)
+	MachinesRegisteredCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: machineSubsystem,
+			Name:      "registered",
+			Help:      "Number of machines registered in total by Karpenter. Labeled by the owning provisioner.",
+		},
+		[]string{
+			ProvisionerLabel,
+		},
+	)
+	MachinesInitializedCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: machineSubsystem,
+			Name:      "initialized",
+			Help:      "Number of machines initialized in total by Karpenter. Labeled by the owning provisioner.",
+		},
+		[]string{
 			ProvisionerLabel,
 		},
 	)

@@ -34,8 +34,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
-	"github.com/aws/karpenter-core/pkg/controllers/machine"
-	"github.com/aws/karpenter-core/pkg/controllers/machine/termination"
+	machinelifecycle "github.com/aws/karpenter-core/pkg/controllers/machine/lifecycle"
+	machinetermination "github.com/aws/karpenter-core/pkg/controllers/machine/termination"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
@@ -65,8 +65,8 @@ var _ = BeforeSuite(func() {
 	}))
 	ctx = settings.ToContext(ctx, test.Settings())
 	cloudProvider = fake.NewCloudProvider()
-	machineController = machine.NewController(fakeClock, env.Client, cloudProvider)
-	terminationController = termination.NewController(env.Client, cloudProvider)
+	machineController = machinelifecycle.NewController(fakeClock, env.Client, cloudProvider)
+	terminationController = machinetermination.NewController(env.Client, cloudProvider)
 })
 
 var _ = AfterSuite(func() {
@@ -119,7 +119,7 @@ var _ = Describe("Termination", func() {
 		ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(machine)) // triggers the node deletion
 		ExpectFinalizersRemoved(ctx, env.Client, node)
 		ExpectNotFound(ctx, env.Client, node)
-		
+
 		ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(machine)) // now all nodes are gone so machine deletion continues
 		ExpectNotFound(ctx, env.Client, machine, node)
 
