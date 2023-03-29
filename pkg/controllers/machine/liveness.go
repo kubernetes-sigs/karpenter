@@ -50,7 +50,7 @@ func (l *Liveness) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (re
 }
 
 func (l *Liveness) launchTTL(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	if machine.StatusConditions().GetCondition(v1alpha5.MachineCreated).IsTrue() {
+	if machine.StatusConditions().GetCondition(v1alpha5.MachineLaunched).IsTrue() {
 		return reconcile.Result{}, nil
 	}
 	if machine.CreationTimestamp.IsZero() || l.clock.Since(machine.CreationTimestamp.Time) < launchTTL {

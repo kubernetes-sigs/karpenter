@@ -59,7 +59,7 @@ func (l *Launch) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reco
 				})
 				return reconcile.Result{}, nil
 			}
-			machine.StatusConditions().MarkFalse(v1alpha5.MachineCreated, "LinkFailed", truncateMessage(err.Error()))
+			machine.StatusConditions().MarkFalse(v1alpha5.MachineLaunched, "LinkFailed", truncateMessage(err.Error()))
 			return reconcile.Result{}, fmt.Errorf("linking machine, %w", err)
 		}
 		logging.FromContext(ctx).Debugf("linked machine")
@@ -70,14 +70,14 @@ func (l *Launch) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reco
 				logging.FromContext(ctx).Error(err)
 				return reconcile.Result{}, client.IgnoreNotFound(l.kubeClient.Delete(ctx, machine))
 			}
-			machine.StatusConditions().MarkFalse(v1alpha5.MachineCreated, "LaunchFailed", truncateMessage(err.Error()))
+			machine.StatusConditions().MarkFalse(v1alpha5.MachineLaunched, "LaunchFailed", truncateMessage(err.Error()))
 			return reconcile.Result{}, fmt.Errorf("creating machine, %w", err)
 		}
 		logging.FromContext(ctx).Debugf("created machine")
 	}
 	l.cache.SetDefault(client.ObjectKeyFromObject(machine).String(), created)
 	PopulateMachineDetails(machine, created)
-	machine.StatusConditions().MarkTrue(v1alpha5.MachineCreated)
+	machine.StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
 	return reconcile.Result{}, nil
 }
 

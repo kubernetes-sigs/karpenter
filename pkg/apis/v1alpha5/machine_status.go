@@ -37,14 +37,14 @@ type MachineStatus struct {
 
 func (in *Machine) StatusConditions() apis.ConditionManager {
 	return apis.NewLivingConditionSet(
-		MachineCreated,
+		MachineLaunched,
 		MachineRegistered,
 		MachineInitialized,
 	).Manage(in)
 }
 
 var (
-	MachineCreated     apis.ConditionType = "MachineCreated"
+	MachineLaunched    apis.ConditionType = "MachineLaunched"
 	MachineRegistered  apis.ConditionType = "MachineRegistered"
 	MachineInitialized apis.ConditionType = "MachineInitialized"
 )

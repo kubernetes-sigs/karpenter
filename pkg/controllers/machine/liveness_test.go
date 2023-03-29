@@ -60,7 +60,7 @@ var _ = Describe("Liveness", func() {
 		ExpectApplied(ctx, env.Client, provisioner, machine)
 		ExpectReconcileFailed(ctx, machineController, client.ObjectKeyFromObject(machine))
 		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineCreated).IsTrue()).To(BeFalse())
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineLaunched).IsTrue()).To(BeFalse())
 
 		// If the node hasn't registered in the creation timeframe, then we deprovision the Machine
 		fakeClock.Step(time.Minute * 3)

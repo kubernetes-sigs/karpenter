@@ -66,8 +66,8 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		return m.Status.ProviderID
 	})...)
 	machines := lo.Filter(lo.ToSlicePtr(machineList.Items), func(m *v1alpha5.Machine, _ int) bool {
-		return m.StatusConditions().GetCondition(v1alpha5.MachineCreated).IsTrue() &&
-			c.clock.Since(m.StatusConditions().GetCondition(v1alpha5.MachineCreated).LastTransitionTime.Inner.Time) > time.Second*10 &&
+		return m.StatusConditions().GetCondition(v1alpha5.MachineLaunched).IsTrue() &&
+			c.clock.Since(m.StatusConditions().GetCondition(v1alpha5.MachineLaunched).LastTransitionTime.Inner.Time) > time.Second*10 &&
 			!cloudProviderProviderIDs.Has(m.Status.ProviderID)
 	})
 
