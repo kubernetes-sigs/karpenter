@@ -55,7 +55,7 @@ var _ = Describe("Launch", func() {
 		_, err := cloudProvider.Get(ctx, machine.Status.ProviderID)
 		Expect(err).ToNot(HaveOccurred())
 	})
-	It("should add the MachineCreated status condition after creating the Machine", func() {
+	It("should add the MachineLaunched status condition after creating the Machine", func() {
 		machine := test.Machine(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -67,7 +67,7 @@ var _ = Describe("Launch", func() {
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineCreated).Status).To(Equal(v1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineLaunched).Status).To(Equal(v1.ConditionTrue))
 	})
 	It("should link an instance with the karpenter.sh/linked annotation", func() {
 		cloudProviderMachine := &v1alpha5.Machine{

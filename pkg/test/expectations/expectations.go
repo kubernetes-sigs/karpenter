@@ -297,7 +297,7 @@ func ExpectMachineDeployedWithOffset(offset int, ctx context.Context, c client.C
 
 	// Make the machine ready in the status conditions
 	machine.PopulateMachineDetails(m, resolved)
-	m.StatusConditions().MarkTrue(v1alpha5.MachineCreated)
+	m.StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
 	m.StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
 
 	// Mock the machine launch and node joining at the apiserver
@@ -330,7 +330,7 @@ func ExpectMakeMachinesReady(ctx context.Context, c client.Client, machines ...*
 func ExpectMakeMachinesReadyWithOffset(offset int, ctx context.Context, c client.Client, machines ...*v1alpha5.Machine) {
 	for i := range machines {
 		machines[i] = ExpectExistsWithOffset(offset+1, ctx, c, machines[i])
-		machines[i].StatusConditions().MarkTrue(v1alpha5.MachineCreated)
+		machines[i].StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
 		machines[i].StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
 		machines[i].StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
 		ExpectAppliedWithOffset(offset+1, ctx, c, machines[i])

@@ -176,7 +176,7 @@ func NewFromNode(node *v1.Node) *v1alpha5.Machine {
 	if _, ok := node.Labels[v1alpha5.LabelNodeInitialized]; ok {
 		m.StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
 	}
-	m.StatusConditions().MarkTrue(v1alpha5.MachineCreated)
+	m.StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
 	m.StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
 	return m
 }
