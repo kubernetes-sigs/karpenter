@@ -9,7 +9,7 @@ test: ## Run tests
 	go test ./... \
 		-race \
 		--ginkgo.focus="${FOCUS}" \
-		--ginkgo.skip="benchmark"
+		--ginkgo.skip="benchmark" \
 		--ginkgo.v \
 		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
 
@@ -24,7 +24,7 @@ deflake: ## Run randomized, racing tests until the test fails to catch flakes
 	ginkgo \
 		--race \
 		--focus="${FOCUS}" \
-		--skip="benchmark"
+		--skip="benchmark" \
 		--randomize-all \
 		--until-it-fails \
 		-v \
