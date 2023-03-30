@@ -82,14 +82,13 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 		}
 		c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
 		// If the underlying machine no longer exists.
-		// If the node exists, requeue after a second to not hammer the API.
 		if _, err := c.cloudProvider.Get(ctx, node.Spec.ProviderID); err != nil {
-			if !cloudprovider.IsMachineNotFoundError(err) {
-				return reconcile.Result{RequeueAfter: 1 * time.Second}, fmt.Errorf("getting machine, %w", err)
+			if cloudprovider.IsMachineNotFoundError(err) {
+				return reconcile.Result{}, c.removeFinalizer(ctx, node)
 			}
-			return reconcile.Result{}, c.removeFinalizer(ctx, node)
+			return reconcile.Result{}, fmt.Errorf("getting machine, %w", err)
 		}
-		return reconcile.Result{Requeue: true}, nil
+		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 
 	if err := c.cloudProvider.Delete(ctx, machineutil.NewFromNode(node)); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
