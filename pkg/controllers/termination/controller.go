@@ -38,7 +38,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
-	"github.com/samber/lo"
 )
 
 var _ corecontroller.FinalizingTypedController[*v1.Node] = (*Controller)(nil)
@@ -82,30 +81,33 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 			return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 		}
 		c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
-		// If pods cannot be drained, check if the node lifecycle controller has tainted the node as unreachable.
-		if _, found := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
-			return taint.MatchTaint(&v1.Taint{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoExecute})
-		}); !found {
-			return reconcile.Result{Requeue: true}, nil
-		}
-		// If the node is unreachable, complete node deletion if the underlying machine no longer exists.
+		// If the underlying machine no longer exists.
 		// If the node exists, requeue after a second to not hammer the API.
-		if _, err := c.cloudProvider.Get(ctx, node.Spec.ProviderID); !cloudprovider.IsMachineNotFoundError(err) {
-			return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
+		if _, err := c.cloudProvider.Get(ctx, node.Spec.ProviderID); err != nil {
+			if !cloudprovider.IsMachineNotFoundError(err) {
+				return reconcile.Result{RequeueAfter: 1 * time.Second}, fmt.Errorf("getting machine, %w", err)
+			}
+			return reconcile.Result{}, c.removeFinalizer(ctx, node)
 		}
+		return reconcile.Result{Requeue: true}, nil
 	}
+
 	if err := c.cloudProvider.Delete(ctx, machineutil.NewFromNode(node)); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
 		return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
 	}
-	stored := node.DeepCopy()
-	controllerutil.RemoveFinalizer(node, v1alpha5.TerminationFinalizer)
-	if !equality.Semantic.DeepEqual(stored, node) {
-		if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
-			return reconcile.Result{}, client.IgnoreNotFound(err)
+	return reconcile.Result{}, c.removeFinalizer(ctx, node)
+}
+
+func (c *Controller) removeFinalizer(ctx context.Context, n *v1.Node) error {
+	stored := n.DeepCopy()
+	controllerutil.RemoveFinalizer(n, v1alpha5.TerminationFinalizer)
+	if !equality.Semantic.DeepEqual(stored, n) {
+		if err := c.kubeClient.Patch(ctx, n, client.MergeFrom(stored)); err != nil {
+			return client.IgnoreNotFound(fmt.Errorf("patching node, %w", err))
 		}
 		logging.FromContext(ctx).Infof("deleted node")
 	}
-	return reconcile.Result{}, nil
+	return nil
 }
 
 func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontroller.Builder {
