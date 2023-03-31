@@ -53,6 +53,7 @@ var evictionQueue *terminator.EvictionQueue
 var env *test.Environment
 var defaultOwnerRefs = []metav1.OwnerReference{{Kind: "ReplicaSet", APIVersion: "appsv1", Name: "rs", UID: "1234567890"}}
 var fakeClock *clock.FakeClock
+var cloudProvider *fake.CloudProvider
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -64,7 +65,7 @@ var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
 
-	cloudProvider := fake.NewCloudProvider()
+	cloudProvider = fake.NewCloudProvider()
 	evictionQueue = terminator.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}))
 	terminationController = termination.NewController(env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, evictionQueue), events.NewRecorder(&record.FakeRecorder{}))
 })
@@ -75,14 +76,17 @@ var _ = AfterSuite(func() {
 
 var _ = Describe("Termination", func() {
 	var node *v1.Node
+	var machine *v1alpha5.Machine
 
 	BeforeEach(func() {
-		node = test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1alpha5.TerminationFinalizer}}})
+		machine, node = test.MachineAndNode(v1alpha5.Machine{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1alpha5.TerminationFinalizer}}})
+		cloudProvider.CreatedMachines[node.Spec.ProviderID] = machine
 	})
 
 	AfterEach(func() {
 		ExpectCleanedUp(ctx, env.Client)
 		fakeClock.SetTime(time.Now())
+		cloudProvider.Reset()
 	})
 
 	Context("Reconciliation", func() {
@@ -356,6 +360,37 @@ var _ = Describe("Termination", func() {
 			ExpectNodeDraining(env.Client, node.Name)
 
 			ExpectDeleted(ctx, env.Client, pods[0])
+
+			// Reconcile to delete node
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectNotFound(ctx, env.Client, node)
+		})
+		It("should delete nodes with no underlying machine even if not fully drained", func() {
+			pods := []*v1.Pod{
+				test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}}),
+				test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}}),
+			}
+			ExpectApplied(ctx, env.Client, node, pods[0], pods[1])
+
+			// Trigger Termination Controller
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+
+			// Expect the pods to be evicted
+			ExpectEvicted(env.Client, pods[0], pods[1])
+
+			// Expect node to exist and be draining, but not deleted
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectNodeDraining(env.Client, node.Name)
+
+			// After this, the node still has one pod that is evicting.
+			ExpectDeleted(ctx, env.Client, pods[1])
+
+			// Remove the node from created machines so that the cloud provider returns DNE
+			cloudProvider.CreatedMachines = map[string]*v1alpha5.Machine{}
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)

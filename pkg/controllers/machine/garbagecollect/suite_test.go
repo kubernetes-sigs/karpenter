@@ -105,7 +105,7 @@ var _ = Describe("GarbageCollection", func() {
 		machine = ExpectExists(ctx, env.Client, machine)
 
 		// Step forward to move past the cache eventual consistency timeout
-		fakeClock.Step(time.Second * 20)
+		fakeClock.SetTime(time.Now().Add(time.Second * 20))
 
 		// Delete the machine from the cloudprovider
 		Expect(cloudProvider.Delete(ctx, machine)).To(Succeed())
@@ -132,7 +132,7 @@ var _ = Describe("GarbageCollection", func() {
 		}
 
 		// Step forward to move past the cache eventual consistency timeout
-		fakeClock.Step(time.Second * 20)
+		fakeClock.SetTime(time.Now().Add(time.Second * 20))
 
 		for _, machine := range machines {
 			// Delete the machine from the cloudprovider
@@ -160,7 +160,7 @@ var _ = Describe("GarbageCollection", func() {
 		machine = ExpectExists(ctx, env.Client, machine)
 
 		// Step forward to move past the cache eventual consistency timeout
-		fakeClock.Step(time.Second * 20)
+		fakeClock.SetTime(time.Now().Add(time.Second * 20))
 
 		// Reconcile the Machine. It should not be deleted by this flow since it has never been registered
 		ExpectReconcileSucceeded(ctx, garbageCollectionController, client.ObjectKey{})

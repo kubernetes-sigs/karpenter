@@ -77,24 +77,36 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 		return reconcile.Result{}, fmt.Errorf("cordoning node, %w", err)
 	}
 	if err := c.terminator.Drain(ctx, node); err != nil {
-		if terminator.IsNodeDrainError(err) {
-			c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
-			return reconcile.Result{Requeue: true}, nil
+		if !terminator.IsNodeDrainError(err) {
+			return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 		}
-		return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
+		c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
+		// If the underlying machine no longer exists.
+		if _, err := c.cloudProvider.Get(ctx, node.Spec.ProviderID); err != nil {
+			if cloudprovider.IsMachineNotFoundError(err) {
+				return reconcile.Result{}, c.removeFinalizer(ctx, node)
+			}
+			return reconcile.Result{}, fmt.Errorf("getting machine, %w", err)
+		}
+		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
+
 	if err := c.cloudProvider.Delete(ctx, machineutil.NewFromNode(node)); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
 		return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
 	}
-	stored := node.DeepCopy()
-	controllerutil.RemoveFinalizer(node, v1alpha5.TerminationFinalizer)
-	if !equality.Semantic.DeepEqual(stored, node) {
-		if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
-			return reconcile.Result{}, client.IgnoreNotFound(err)
+	return reconcile.Result{}, c.removeFinalizer(ctx, node)
+}
+
+func (c *Controller) removeFinalizer(ctx context.Context, n *v1.Node) error {
+	stored := n.DeepCopy()
+	controllerutil.RemoveFinalizer(n, v1alpha5.TerminationFinalizer)
+	if !equality.Semantic.DeepEqual(stored, n) {
+		if err := c.kubeClient.Patch(ctx, n, client.MergeFrom(stored)); err != nil {
+			return client.IgnoreNotFound(fmt.Errorf("patching node, %w", err))
 		}
 		logging.FromContext(ctx).Infof("deleted node")
 	}
-	return reconcile.Result{}, nil
+	return nil
 }
 
 func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontroller.Builder {
