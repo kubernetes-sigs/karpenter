@@ -21,6 +21,9 @@ spec:
     - jsonPath: .metadata.labels.node\.kubernetes\.io/instance-type
       name: Type
       type: string
+    - jsonPath: .metadata.labels.topology\.kubernetes\.io/zone
+      name: Zone
+      type: string
     - jsonPath: .metadata.labels.karpenter\.sh/capacity-type
       name: Capacity
       type: string
