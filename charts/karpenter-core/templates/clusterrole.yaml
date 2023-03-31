@@ -64,7 +64,3 @@ rules:
     resources: ["validatingwebhookconfigurations"]
     verbs: ["update"]
     resourceNames: ["validation.webhook.karpenter.sh", "validation.webhook.config.karpenter.sh"]
-  - apiGroups: ["admissionregistration.k8s.io"]
-    resources: ["mutatingwebhookconfigurations"]
-    verbs: ["update"]
-    resourceNames: ["defaulting.webhook.karpenter.sh"]
