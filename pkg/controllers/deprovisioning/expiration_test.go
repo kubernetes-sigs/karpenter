@@ -16,10 +16,10 @@ package deprovisioning_test
 
 import (
 	"sync"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -41,9 +41,14 @@ var _ = Describe("Expiration", func() {
 	var node *v1.Node
 
 	BeforeEach(func() {
-		prov = test.Provisioner()
+		prov = test.Provisioner(test.ProvisionerOptions{
+			TTLSecondsUntilExpired: ptr.Int64(30),
+		})
 		machine, node = test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionExpiredAnnotationValue,
+				},
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
@@ -60,13 +65,28 @@ var _ = Describe("Expiration", func() {
 			},
 		})
 	})
-	It("should ignore nodes without TTLSecondsUntilExpired", func() {
+	It("should ignore nodes with the disruption annotation but different value", func() {
+		node.Annotations = lo.Assign(node.Annotations, map[string]string{
+			v1alpha5.VoluntaryDisruptionAnnotationKey: "wrong-value",
+		})
 		ExpectApplied(ctx, env.Client, machine, node, prov)
 
 		// inform cluster state about nodes and machines
 		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
-		fakeClock.Step(10 * time.Minute)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+		// Expect to not create or delete more machines
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		ExpectExists(ctx, env.Client, node)
+	})
+	It("should ignore nodes without the disruption annotation", func() {
+		delete(node.Annotations, v1alpha5.VoluntaryDisruptionAnnotationKey)
+		ExpectApplied(ctx, env.Client, machine, node, prov)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 
 		// Expect to not create or delete more machines
@@ -74,14 +94,10 @@ var _ = Describe("Expiration", func() {
 		ExpectExists(ctx, env.Client, node)
 	})
 	It("can delete expired nodes", func() {
-		prov.Spec.TTLSecondsUntilExpired = ptr.Int64(60)
 		ExpectApplied(ctx, env.Client, machine, node, prov)
 
 		// inform cluster state about nodes and machines
 		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
-
-		// step forward past the expiration time
-		fakeClock.Step(10 * time.Minute)
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
@@ -98,6 +114,9 @@ var _ = Describe("Expiration", func() {
 		})
 		machineToExpire, nodeToExpire := test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionExpiredAnnotationValue,
+				},
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: expireProv.Name,
 					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
@@ -110,7 +129,6 @@ var _ = Describe("Expiration", func() {
 				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
 			},
 		})
-		prov.Spec.TTLSecondsUntilExpired = ptr.Int64(500)
 		machineNotExpire, nodeNotExpire := test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -131,13 +149,7 @@ var _ = Describe("Expiration", func() {
 		// inform cluster state about nodes and machines
 		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{nodeToExpire, nodeNotExpire}, []*v1alpha5.Machine{machineToExpire, machineNotExpire})
 
-		// step forward past the expiration time
-		fakeClock.Step(10 * time.Minute)
-
-		var wg sync.WaitGroup
-		ExpectTriggerVerifyAction(&wg)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
-		wg.Wait()
 
 		// Expect that one of the expired machines is gone
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
@@ -174,8 +186,6 @@ var _ = Describe("Expiration", func() {
 		// inform cluster state about nodes and machines
 		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
-		fakeClock.Step(10 * time.Minute)
-
 		// deprovisioning won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
@@ -191,7 +201,6 @@ var _ = Describe("Expiration", func() {
 	})
 	It("should uncordon nodes when expiration replacement fails", func() {
 		cloudProvider.AllowedCreateCalls = 0 // fail the replacement and expect it to uncordon
-		prov.Spec.TTLSecondsUntilExpired = ptr.Int64(30)
 
 		labels := map[string]string{
 			"app": "test",
@@ -223,7 +232,6 @@ var _ = Describe("Expiration", func() {
 		// inform cluster state about nodes and machines
 		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
-		fakeClock.Step(10 * time.Minute)
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
@@ -290,6 +298,9 @@ var _ = Describe("Expiration", func() {
 		})
 		machine, node := test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionExpiredAnnotationValue,
+				},
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelInstanceTypeStable:       currentInstance.Name,
@@ -302,7 +313,6 @@ var _ = Describe("Expiration", func() {
 				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("8")},
 			},
 		})
-		prov.Spec.TTLSecondsUntilExpired = ptr.Int64(200)
 		ExpectApplied(ctx, env.Client, rs, machine, node, prov, pods[0], pods[1], pods[2])
 
 		// bind pods to node
@@ -312,8 +322,6 @@ var _ = Describe("Expiration", func() {
 
 		// inform cluster state about nodes and machines
 		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
-
-		fakeClock.Step(10 * time.Minute)
 
 		// deprovisioning won't delete the old machine until the new machine is ready
 		var wg sync.WaitGroup

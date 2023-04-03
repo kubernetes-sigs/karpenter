@@ -55,6 +55,7 @@ type Controller struct {
 	emptiness      *Emptiness
 	finalizer      *Finalizer
 	drift          *Drift
+	expiration     *Expiration
 }
 
 // NewController constructs a nodeController instance
@@ -95,6 +96,7 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Re
 		c.initialization,
 		c.emptiness,
 		c.finalizer,
+		c.expiration,
 	}
 	if settings.FromContext(ctx).DriftEnabled {
 		reconcilers = append(reconcilers, c.drift)

@@ -45,6 +45,9 @@ var _ = Describe("Drift", func() {
 		prov = test.Provisioner()
 		machine, node = test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
+				},
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
@@ -79,7 +82,7 @@ var _ = Describe("Drift", func() {
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 		ExpectExists(ctx, env.Client, node)
 	})
-	It("should ignore nodes with the drift label, but not the drifted value", func() {
+	It("should ignore nodes with the disrupted annotation key, but not the drifted value", func() {
 		node.Annotations = lo.Assign(node.Annotations, map[string]string{
 			v1alpha5.VoluntaryDisruptionAnnotationKey: "wrong-value",
 		})
@@ -99,7 +102,8 @@ var _ = Describe("Drift", func() {
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 		ExpectExists(ctx, env.Client, node)
 	})
-	It("should ignore nodes without the drift label", func() {
+	It("should ignore nodes without the disrupted annotation key", func() {
+		delete(node.Annotations, v1alpha5.VoluntaryDisruptionAnnotationKey)
 		ExpectApplied(ctx, env.Client, machine, node, prov)
 
 		// inform cluster state about nodes and machines
