@@ -66,6 +66,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 		initialization: &Initialization{kubeClient: kubeClient, cloudProvider: cloudProvider},
 		emptiness:      &Emptiness{kubeClient: kubeClient, clock: clk, cluster: cluster},
 		drift:          &Drift{kubeClient: kubeClient, cloudProvider: cloudProvider},
+		expiration:     &Expiration{clock: clk},
 	})
 }
 

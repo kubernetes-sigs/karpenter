@@ -62,7 +62,7 @@ func GetCondition(n *v1.Node, match v1.NodeConditionType) v1.NodeCondition {
 }
 
 func GetExpirationTime(node *v1.Node, provisioner *v1alpha5.Provisioner) time.Time {
-	if provisioner == nil || provisioner.Spec.TTLSecondsUntilExpired == nil {
+	if provisioner == nil || provisioner.Spec.TTLSecondsUntilExpired == nil || node == nil {
 		// If not defined, return some much larger time.
 		return time.Date(5000, 0, 0, 0, 0, 0, 0, time.UTC)
 	}
