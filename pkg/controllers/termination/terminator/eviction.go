@@ -31,7 +31,7 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/machine/terminator/events"
+	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/termination/terminator/events"
 	"github.com/aws/karpenter-core/pkg/events"
 )
 

@@ -66,6 +66,9 @@ func (c *CacheSyncingClient) Delete(ctx context.Context, obj client.Object, opts
 			}
 			return fmt.Errorf("getting object, %w", err)
 		}
+		if !obj.GetDeletionTimestamp().IsZero() {
+			return nil
+		}
 		return fmt.Errorf("object still exists")
 	}, pollingOptions...)
 	return nil

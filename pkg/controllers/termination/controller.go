@@ -33,8 +33,8 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
-	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/machine/terminator/events"
+	"github.com/aws/karpenter-core/pkg/controllers/termination/terminator"
+	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/termination/terminator/events"
 	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
@@ -109,7 +109,7 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *v1.Node) error {
 	return nil
 }
 
-func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontroller.Builder {
+func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1.Node{}).
@@ -120,7 +120,7 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 					// 10 qps, 100 bucket size
 					&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
 				),
-				MaxConcurrentReconciles: 10,
+				MaxConcurrentReconciles: 100,
 			},
 		))
 }

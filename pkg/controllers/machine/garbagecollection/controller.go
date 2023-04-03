@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package garbagecollect
+package garbagecollection
 
 import (
 	"context"
@@ -50,7 +50,7 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 }
 
 func (c *Controller) Name() string {
-	return "machine_garbagecollect"
+	return "machine_garbagecollection"
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
@@ -77,11 +77,13 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 			errs[i] = client.IgnoreNotFound(err)
 			return
 		}
-		logging.FromContext(ctx).Debugf("garbage collecting machine with no cloudprovider representation")
+		logging.FromContext(ctx).
+			With("provisioner", machines[i].Labels[v1alpha5.ProvisionerNameLabelKey], "machine", machines[i].Name, "provider-id", machines[i].Status.ProviderID).
+			Debugf("garbage collecting machine with no cloudprovider representation")
 		metrics.MachinesTerminatedCounter.With(prometheus.Labels{
 			metrics.ReasonLabel:      "garbage_collected",
 			metrics.ProvisionerLabel: machines[i].Labels[v1alpha5.ProvisionerNameLabelKey],
-		})
+		}).Inc()
 	})
 	return reconcile.Result{RequeueAfter: time.Minute * 2}, multierr.Combine(errs...)
 }

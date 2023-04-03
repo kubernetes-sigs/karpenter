@@ -122,17 +122,26 @@ func IgnoreDuplicateNodeError(err error) error {
 //  1. No v1.Nodes match the v1alpha5.Machine providerID
 //  2. Multiple v1.Nodes match the v1alpha5.Machine providerID
 func NodeForMachine(ctx context.Context, c client.Client, machine *v1alpha5.Machine) (*v1.Node, error) {
-	nodeList := v1.NodeList{}
-	if err := c.List(ctx, &nodeList, client.MatchingFields{"spec.providerID": machine.Status.ProviderID}, client.Limit(2)); err != nil {
-		return nil, fmt.Errorf("listing nodes, %w", err)
+	nodes, err := AllNodesForMachine(ctx, c, machine)
+	if err != nil {
+		return nil, err
 	}
-	if len(nodeList.Items) > 1 {
+	if len(nodes) > 1 {
 		return nil, &DuplicateNodeError{ProviderID: machine.Status.ProviderID}
 	}
-	if len(nodeList.Items) == 0 {
+	if len(nodes) == 0 {
 		return nil, &NodeNotFoundError{ProviderID: machine.Status.ProviderID}
 	}
-	return &nodeList.Items[0], nil
+	return nodes[0], nil
+}
+
+// AllNodesForMachine is a helper function that takes a v1alpha5.Machine and finds ALL matching v1.Nodes by their providerID
+func AllNodesForMachine(ctx context.Context, c client.Client, machine *v1alpha5.Machine) ([]*v1.Node, error) {
+	nodeList := v1.NodeList{}
+	if err := c.List(ctx, &nodeList, client.MatchingFields{"spec.providerID": machine.Status.ProviderID}); err != nil {
+		return nil, fmt.Errorf("listing nodes, %w", err)
+	}
+	return lo.ToSlicePtr(nodeList.Items), nil
 }
 
 // New converts a node into a Machine using known values from the node and provisioner spec values

@@ -16,7 +16,6 @@ package machine
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/patrickmn/go-cache"
@@ -26,7 +25,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -40,9 +38,6 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/controllers/machine/terminator"
-	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/machine/terminator/events"
-	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 	"github.com/aws/karpenter-core/pkg/utils/result"
@@ -52,14 +47,12 @@ type machineReconciler interface {
 	Reconcile(context.Context, *v1alpha5.Machine) (reconcile.Result, error)
 }
 
-var _ corecontroller.FinalizingTypedController[*v1alpha5.Machine] = (*Controller)(nil)
+var _ corecontroller.TypedController[*v1alpha5.Machine] = (*Controller)(nil)
 
 // Controller is a Machine Controller
 type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
-	recorder      events.Recorder
-	terminator    *terminator.Terminator
 
 	launch         *Launch
 	registration   *Registration
@@ -68,13 +61,10 @@ type Controller struct {
 }
 
 // NewController is a constructor for the Machine Controller
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider,
-	terminator *terminator.Terminator, recorder events.Recorder) corecontroller.Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
 	return corecontroller.Typed[*v1alpha5.Machine](kubeClient, &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
-		recorder:      recorder,
-		terminator:    terminator,
 
 		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Minute, time.Second*10)},
 		registration:   &Registration{kubeClient: kubeClient},
@@ -88,6 +78,10 @@ func (*Controller) Name() string {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
+	if !machine.DeletionTimestamp.IsZero() {
+		return reconcile.Result{}, nil
+	}
+
 	// Add the finalizer immediately since we shouldn't launch if we don't yet have the finalizer.
 	// Otherwise, we could leak resources
 	stored := machine.DeepCopy()
@@ -123,33 +117,6 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 	return result.Min(results...), errs
 }
 
-func (c *Controller) Finalize(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	stored := machine.DeepCopy()
-	if !controllerutil.ContainsFinalizer(machine, v1alpha5.TerminationFinalizer) {
-		return reconcile.Result{}, nil
-	}
-	if err := c.cleanupNodeForMachine(ctx, machine); err != nil {
-		if terminator.IsNodeDrainError(err) {
-			return reconcile.Result{Requeue: true}, nil
-		}
-		return reconcile.Result{}, client.IgnoreNotFound(err)
-	}
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", machine.Status.ProviderID))
-	if machine.Status.ProviderID != "" {
-		if err := c.cloudProvider.Delete(ctx, machine); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
-			return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
-		}
-	}
-	controllerutil.RemoveFinalizer(machine, v1alpha5.TerminationFinalizer)
-	if !equality.Semantic.DeepEqual(stored, machine) {
-		if err := c.kubeClient.Patch(ctx, machine, client.MergeFrom(stored)); err != nil {
-			return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("removing machine termination finalizer, %w", err))
-		}
-		logging.FromContext(ctx).Infof("deleted machine")
-	}
-	return reconcile.Result{}, nil
-}
-
 func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontroller.Builder {
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
@@ -166,26 +133,4 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 			),
 			MaxConcurrentReconciles: 100, // higher concurrency limit since we want fast reaction to node syncing and launch
 		}))
-}
-
-func (c *Controller) cleanupNodeForMachine(ctx context.Context, machine *v1alpha5.Machine) error {
-	node, err := machineutil.NodeForMachine(ctx, c.kubeClient, machine)
-	if err != nil {
-		// We don't clean the node if we either don't find a node or have violated the single machine to single node invariant
-		if machineutil.IsNodeNotFoundError(err) || machineutil.IsDuplicateNodeError(err) {
-			return nil
-		}
-		return err
-	}
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
-	if err = c.terminator.Cordon(ctx, node); err != nil {
-		return fmt.Errorf("cordoning node, %w", err)
-	}
-	if err = c.terminator.Drain(ctx, node); err != nil {
-		if terminator.IsNodeDrainError(err) {
-			c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
-		}
-		return fmt.Errorf("draining node, %w", err)
-	}
-	return client.IgnoreNotFound(c.kubeClient.Delete(ctx, node))
 }
