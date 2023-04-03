@@ -48,11 +48,11 @@ func (e *Expiration) Reconcile(ctx context.Context, provisioner *v1alpha5.Provis
 
 	expired := utilsnode.IsExpired(node, e.clock, provisioner)
 	if !expired && hasAnnotation {
-		delete(node.Annotations, v1alpha5.EmptinessTimestampAnnotationKey)
+		delete(node.Annotations, v1alpha5.VoluntaryDisruptionAnnotationKey)
 		logging.FromContext(ctx).Infof("removed expiration TTL from node")
 	} else if expired && !hasAnnotation {
 		node.Annotations = lo.Assign(node.Annotations, map[string]string{
-			v1alpha5.VoluntaryDisruptionExpiredAnnotationValue: e.clock.Now().Format(time.RFC3339),
+			v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionExpiredAnnotationValue,
 		})
 		logging.FromContext(ctx).Infof("added TTL to expired node")
 	}

@@ -384,6 +384,35 @@ var _ = Describe("Controller", func() {
 			Expect(node.Annotations).ToNot(HaveKey(v1alpha5.EmptinessTimestampAnnotationKey))
 		})
 	})
+	Context("Expiration", func() {
+		It("should annotate nodes as expired", func() {
+			provisioner.Spec.TTLSecondsUntilExpired = ptr.Int64(30)
+			node := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name},
+			}})
+			ExpectApplied(ctx, env.Client, provisioner, node)
+
+			// step forward to make the node expired
+			fakeClock.Step(60 * time.Second)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			Expect(node.Annotations).To(HaveKeyWithValue(v1alpha5.VoluntaryDisruptionAnnotationKey, v1alpha5.VoluntaryDisruptionDriftedAnnotationValue))
+		})
+		It("should remove the annotation from non-empty nodes", func() {
+			provisioner.Spec.TTLSecondsUntilExpired = ptr.Int64(200)
+			node := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name},
+				Annotations: map[string]string{
+					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
+				}},
+			})
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			Expect(node.Annotations).ToNot(HaveKeyWithValue(v1alpha5.VoluntaryDisruptionAnnotationKey, v1alpha5.VoluntaryDisruptionDriftedAnnotationValue))
+		})
+	})
 	Context("Finalizer", func() {
 		It("should add the termination finalizer if missing", func() {
 			n := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
