@@ -118,6 +118,8 @@ var _ = Describe("Termination", func() {
 		Expect(env.Client.Delete(ctx, machine)).To(Succeed())
 		ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(machine)) // triggers the node deletion
 		ExpectFinalizersRemoved(ctx, env.Client, node)
+		ExpectNotFound(ctx, env.Client, node)
+		
 		ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(machine)) // now all nodes are gone so machine deletion continues
 		ExpectNotFound(ctx, env.Client, machine, node)
 
@@ -142,6 +144,8 @@ var _ = Describe("Termination", func() {
 		Expect(env.Client.Delete(ctx, machine)).To(Succeed())
 		ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(machine)) // triggers the node deletion
 		ExpectFinalizersRemoved(ctx, env.Client, node1, node2, node3)
+		ExpectNotFound(ctx, env.Client, node1, node2, node3)
+
 		ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(machine)) // now all nodes are gone so machine deletion continues
 		ExpectNotFound(ctx, env.Client, machine, node1, node2, node3)
 
@@ -168,9 +172,10 @@ var _ = Describe("Termination", func() {
 		ExpectExists(ctx, env.Client, node)
 
 		ExpectFinalizersRemoved(ctx, env.Client, node)
+		ExpectNotFound(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(machine)) // now the machine should be gone
 
-		ExpectNotFound(ctx, env.Client, machine, node)
+		ExpectNotFound(ctx, env.Client, machine)
 	})
 	It("should not call Delete() on the CloudProvider if the machine hasn't been launched yet", func() {
 		ExpectApplied(ctx, env.Client, provisioner, machine)
