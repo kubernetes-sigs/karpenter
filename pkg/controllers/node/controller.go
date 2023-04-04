@@ -48,24 +48,21 @@ var _ corecontroller.TypedController[*v1.Node] = (*Controller)(nil)
 // Controller manages a set of properties on karpenter provisioned nodes, such as
 // taints, labels, finalizers.
 type Controller struct {
-	kubeClient     client.Client
-	cluster        *state.Cluster
-	initialization *Initialization
-	emptiness      *Emptiness
-	finalizer      *Finalizer
-	drift          *Drift
-	expiration     *Expiration
+	kubeClient client.Client
+	cluster    *state.Cluster
+	emptiness  *Emptiness
+	drift      *Drift
+	expiration *Expiration
 }
 
 // NewController constructs a nodeController instance
 func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) corecontroller.Controller {
 	return corecontroller.Typed[*v1.Node](kubeClient, &Controller{
-		kubeClient:     kubeClient,
-		cluster:        cluster,
-		initialization: &Initialization{kubeClient: kubeClient, cloudProvider: cloudProvider},
-		emptiness:      &Emptiness{kubeClient: kubeClient, clock: clk, cluster: cluster},
-		drift:          &Drift{kubeClient: kubeClient, cloudProvider: cloudProvider},
-		expiration:     &Expiration{clock: clk},
+		kubeClient: kubeClient,
+		cluster:    cluster,
+		emptiness:  &Emptiness{kubeClient: kubeClient, clock: clk, cluster: cluster},
+		drift:      &Drift{kubeClient: kubeClient, cloudProvider: cloudProvider},
+		expiration: &Expiration{clock: clk},
 	})
 }
 
@@ -82,20 +79,18 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Re
 	if !node.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, nil
 	}
-
 	provisioner := &v1alpha5.Provisioner{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: node.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", provisioner.Name))
 
 	// Execute Reconcilers
 	var results []reconcile.Result
 	var errs error
 
 	reconcilers := []nodeReconciler{
-		c.initialization,
 		c.emptiness,
-		c.finalizer,
 		c.expiration,
 		c.drift,
 	}

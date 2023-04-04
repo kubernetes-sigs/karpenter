@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -36,6 +37,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/termination/terminator"
 	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/termination/terminator/events"
 	"github.com/aws/karpenter-core/pkg/events"
+	"github.com/aws/karpenter-core/pkg/metrics"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 )
@@ -104,6 +106,9 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *v1.Node) error {
 		if err := c.kubeClient.Patch(ctx, n, client.MergeFrom(stored)); err != nil {
 			return client.IgnoreNotFound(fmt.Errorf("patching node, %w", err))
 		}
+		metrics.NodesTerminatedCounter.With(prometheus.Labels{
+			metrics.ProvisionerLabel: n.Labels[v1alpha5.ProvisionerNameLabelKey],
+		}).Inc()
 		logging.FromContext(ctx).Infof("deleted node")
 	}
 	return nil

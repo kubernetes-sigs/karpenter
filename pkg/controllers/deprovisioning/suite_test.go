@@ -264,21 +264,26 @@ var _ = Describe("Replace Nodes", func() {
 		// consolidation won't delete the old machine until the new machine is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+
 		// should create a new machine as there is a cheaper one that can hold the pod
+		machines := ExpectMachines(ctx, env.Client)
 		nodes := ExpectNodes(ctx, env.Client)
+		Expect(machines).To(HaveLen(1))
 		Expect(nodes).To(HaveLen(1))
 
 		// Expect that the new machine does not request the most expensive instance type
-		Expect(nodes[0].Name).ToNot(Equal(node.Name))
-		Expect(scheduling.NewLabelRequirements(nodes[0].Labels).Has(v1.LabelInstanceTypeStable)).To(BeTrue())
-		Expect(scheduling.NewLabelRequirements(nodes[0].Labels).Get(v1.LabelInstanceTypeStable).Has(mostExpensiveInstance.Name)).To(BeFalse())
+		Expect(machines[0].Name).ToNot(Equal(machine.Name))
+		Expect(scheduling.NewNodeSelectorRequirements(machines[0].Spec.Requirements...).Has(v1.LabelInstanceTypeStable)).To(BeTrue())
+		Expect(scheduling.NewNodeSelectorRequirements(machines[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Has(mostExpensiveInstance.Name)).To(BeFalse())
 
 		// and delete the old one
-		ExpectNotFound(ctx, env.Client, node)
+		ExpectNotFound(ctx, env.Client, machine, node)
 	})
 	It("can replace nodes, considers PDB", func() {
 		labels := map[string]string{
@@ -354,7 +359,7 @@ var _ = Describe("Replace Nodes", func() {
 		// we didn't create a new machine or delete the old one
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		ExpectExists(ctx, env.Client, node)
+		ExpectExists(ctx, env.Client, machine)
 	})
 	It("can replace nodes, PDB namespace must match", func() {
 		labels := map[string]string{
@@ -423,13 +428,17 @@ var _ = Describe("Replace Nodes", func() {
 		// consolidation won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+
 		// should create a new machine as there is a cheaper one that can hold the pod
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		ExpectNotFound(ctx, env.Client, node)
+		ExpectNotFound(ctx, env.Client, machine, node)
 	})
 	It("can replace nodes, considers do-not-consolidate annotation", func() {
 		labels := map[string]string{
@@ -513,9 +522,13 @@ var _ = Describe("Replace Nodes", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, regularMachine)
+
 		// we should delete the non-annotated node
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		ExpectNotFound(ctx, env.Client, regularNode)
+		ExpectNotFound(ctx, env.Client, regularMachine, regularNode)
 	})
 	It("won't replace node if any spot replacement is more expensive", func() {
 		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
@@ -613,8 +626,9 @@ var _ = Describe("Replace Nodes", func() {
 		Expect(cluster.Consolidated()).To(BeTrue())
 
 		// Expect to not create or delete more machines
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		ExpectExists(ctx, env.Client, node)
+		ExpectExists(ctx, env.Client, machine)
 	})
 	It("won't replace on-demand node if on-demand replacement is more expensive", func() {
 		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
@@ -727,8 +741,9 @@ var _ = Describe("Replace Nodes", func() {
 		Expect(cluster.Consolidated()).To(BeTrue())
 
 		// Expect to not create or delete more machines
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		ExpectExists(ctx, env.Client, node)
+		ExpectExists(ctx, env.Client, machine)
 	})
 	It("waits for node deletion to finish", func() {
 		labels := map[string]string{
@@ -757,6 +772,7 @@ var _ = Describe("Replace Nodes", func() {
 		})
 		machine, node := test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
+				Finalizers: []string{"unit-test.com/block-deletion"},
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
@@ -769,7 +785,6 @@ var _ = Describe("Replace Nodes", func() {
 				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
 			},
 		})
-		node.Finalizers = []string{"unit-test.com/block-deletion"}
 
 		ExpectApplied(ctx, env.Client, rs, pod, machine, node, prov)
 
@@ -784,7 +799,7 @@ var _ = Describe("Replace Nodes", func() {
 		// consolidation won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 
 		var consolidationFinished atomic.Bool
 		go func() {
@@ -795,25 +810,31 @@ var _ = Describe("Replace Nodes", func() {
 		}()
 		wg.Wait()
 
-		// node should still exist
-		ExpectExists(ctx, env.Client, node)
+		// machine should still exist
+		ExpectExists(ctx, env.Client, machine)
 		// and consolidation should still be running waiting on the machine's deletion
 		Expect(consolidationFinished.Load()).To(BeFalse())
 
-		// fetch the latest node object and remove the finalizer
-		node = ExpectExists(ctx, env.Client, node)
-		ExpectFinalizersRemoved(ctx, env.Client, node)
+		// fetch the latest machine object and remove the finalizer
+		machine = ExpectExists(ctx, env.Client, machine)
+		ExpectFinalizersRemoved(ctx, env.Client, machine)
 
 		// consolidation should complete now that the finalizer on the machine is gone and it can
 		// was actually deleted
 		Eventually(consolidationFinished.Load, 10*time.Second).Should(BeTrue())
 		wg.Wait()
 
-		ExpectNotFound(ctx, env.Client, node)
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+
+		ExpectNotFound(ctx, env.Client, machine, node)
 
 		// Expect that the new machine was created and its different than the original
+		machines := ExpectMachines(ctx, env.Client)
 		nodes := ExpectNodes(ctx, env.Client)
+		Expect(machines).To(HaveLen(1))
 		Expect(nodes).To(HaveLen(1))
+		Expect(machines[0].Name).ToNot(Equal(machine.Name))
 		Expect(nodes[0].Name).ToNot(Equal(node.Name))
 	})
 })
@@ -898,10 +919,14 @@ var _ = Describe("Delete Node", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine2)
+
 		// we don't need a new node, but we should evict everything off one of node2 which only has a single pod
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 		// and delete the old one
-		ExpectNotFound(ctx, env.Client, node2)
+		ExpectNotFound(ctx, env.Client, machine2, node2)
 	})
 	It("can delete nodes, considers PDB", func() {
 		var nl v1.NodeList
@@ -959,11 +984,15 @@ var _ = Describe("Delete Node", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
+
 		// we don't need a new node
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 		// but we expect to delete the machine with more pods (node1) as the pod on machine2 has a PDB preventing
 		// eviction
-		ExpectNotFound(ctx, env.Client, node1)
+		ExpectNotFound(ctx, env.Client, machine1, node1)
 	})
 	It("can delete nodes, considers do-not-evict", func() {
 		// create our RS, so we can link a pod to it
@@ -1006,10 +1035,14 @@ var _ = Describe("Delete Node", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
+
 		// we don't need a new node
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 		// but we expect to delete the machine with more pods (machine1) as the pod on machine2 has a do-not-evict annotation
-		ExpectNotFound(ctx, env.Client, node1)
+		ExpectNotFound(ctx, env.Client, machine1, node1)
 	})
 	It("can delete nodes, evicts pods without an ownerRef", func() {
 		// create our RS so we can link a pod to it
@@ -1050,11 +1083,15 @@ var _ = Describe("Delete Node", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine2)
+
 		// we don't need a new node
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 		// but we expect to delete the machine with the fewest pods (machine 2) even though the pod has no ownerRefs
 		// and will not be recreated
-		ExpectNotFound(ctx, env.Client, node2)
+		ExpectNotFound(ctx, env.Client, machine2, node2)
 	})
 	It("won't delete node if it would require pods to schedule on an un-initialized node", func() {
 		labels := map[string]string{
@@ -1094,7 +1131,7 @@ var _ = Describe("Delete Node", func() {
 
 		// shouldn't delete the node
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
-		Expect(fakeRecorder.Events).To(HaveLen(1))
+		Expect(fakeRecorder.Events).To(HaveLen(2))
 		event := <-fakeRecorder.Events
 		Expect(strings.Contains(event, "not all pods would schedule")).To(BeTrue())
 		Expect(strings.Contains(event, "would schedule against a non-initialized node")).To(BeTrue())
@@ -1190,10 +1227,14 @@ var _ = Describe("Node Lifetime Consideration", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
+
 		// the second node has more pods, so it would normally not be picked for consolidation, except it very little
 		// lifetime remaining, so it should be deleted
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		ExpectNotFound(ctx, env.Client, node1)
+		ExpectNotFound(ctx, env.Client, machine1, node1)
 	})
 })
 
@@ -1201,7 +1242,7 @@ var _ = Describe("Topology Consideration", func() {
 	var prov *v1alpha5.Provisioner
 	var zone1Machine, zone2Machine, zone3Machine *v1alpha5.Machine
 	var zone1Node, zone2Node, zone3Node *v1.Node
-	var oldNodeNames sets.String
+	var oldMachineNames sets.String
 
 	BeforeEach(func() {
 		testZone1Instance := leastExpensiveInstanceWithZone("test-zone-1")
@@ -1253,7 +1294,7 @@ var _ = Describe("Topology Consideration", func() {
 				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("1")},
 			},
 		})
-		oldNodeNames = sets.NewString(zone1Node.Name, zone2Node.Name, zone3Node.Name)
+		oldMachineNames = sets.NewString(zone1Machine.Name, zone2Machine.Name, zone3Machine.Name)
 	})
 	It("can replace node maintaining zonal topology spread", func() {
 		labels := map[string]string{
@@ -1302,17 +1343,25 @@ var _ = Describe("Topology Consideration", func() {
 		// consolidation won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		wg.Wait()
 
-		// should create a new node as there is a cheaper one that can hold the pod
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(3))
-		ExpectNotFound(ctx, env.Client, zone2Node)
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, zone2Machine)
 
-		// Find the new node
+		// should create a new node as there is a cheaper one that can hold the pod
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(3))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(3))
+		ExpectNotFound(ctx, env.Client, zone2Machine, zone2Node)
+
+		// Find the new node associated with the machine
+		newMachine, ok := lo.Find(ExpectMachines(ctx, env.Client), func(m *v1alpha5.Machine) bool {
+			return !oldMachineNames.Has(m.Name)
+		})
+		Expect(ok).To(BeTrue())
 		newNode, ok := lo.Find(ExpectNodes(ctx, env.Client), func(n *v1.Node) bool {
-			return !oldNodeNames.Has(n.Name)
+			return newMachine.Status.ProviderID == n.Spec.ProviderID
 		})
 		Expect(ok).To(BeTrue())
 
@@ -1385,10 +1434,11 @@ var _ = Describe("Topology Consideration", func() {
 
 		// our nodes are already the cheapest available, so we can't replace them.  If we delete, it would
 		// violate the anti-affinity rule, so we can't do anything.
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(3))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(3))
-		ExpectExists(ctx, env.Client, zone1Node)
-		ExpectExists(ctx, env.Client, zone2Node)
-		ExpectExists(ctx, env.Client, zone3Node)
+		ExpectExists(ctx, env.Client, zone1Machine)
+		ExpectExists(ctx, env.Client, zone2Machine)
+		ExpectExists(ctx, env.Client, zone3Machine)
 	})
 })
 
@@ -1447,9 +1497,13 @@ var _ = Describe("Empty Nodes", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
+
 		// we should delete the empty node
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		ExpectNotFound(ctx, env.Client, node1)
+		ExpectNotFound(ctx, env.Client, machine1, node1)
 	})
 	It("can delete multiple empty nodes with consolidation", func() {
 		ExpectApplied(ctx, env.Client, machine1, node1, machine2, node2, prov)
@@ -1462,10 +1516,14 @@ var _ = Describe("Empty Nodes", func() {
 		ExpectTriggerVerifyAction(&wg)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine1, machine2)
+
 		// we should delete the empty nodes
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		ExpectNotFound(ctx, env.Client, node1)
-		ExpectNotFound(ctx, env.Client, node2)
+		ExpectNotFound(ctx, env.Client, machine1)
+		ExpectNotFound(ctx, env.Client, machine2)
 	})
 	It("can delete empty nodes with TTLSecondsAfterEmpty with the emptiness timestamp", func() {
 		prov = test.Provisioner(test.ProvisionerOptions{TTLSecondsAfterEmpty: ptr.Int64(10)})
@@ -1491,9 +1549,13 @@ var _ = Describe("Empty Nodes", func() {
 		ExpectTriggerVerifyAction(&wg)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
+
 		// we should delete the empty node
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		ExpectNotFound(ctx, env.Client, node1)
+		ExpectNotFound(ctx, env.Client, machine1, node1)
 	})
 	It("considers pending pods when consolidating", func() {
 		machine1, node1 = test.MachineAndNode(v1alpha5.Machine{
@@ -1546,8 +1608,9 @@ var _ = Describe("Empty Nodes", func() {
 
 		// we don't need any new nodes and consolidation should notice the huge pending pod that needs the large
 		// node to schedule, which prevents the large expensive node from being replaced
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		ExpectExists(ctx, env.Client, node1)
+		ExpectExists(ctx, env.Client, machine1)
 	})
 })
 
@@ -1698,7 +1761,7 @@ var _ = Describe("Consolidation TTL", func() {
 		// controller should be blocking during the timeout
 		Expect(finished.Load()).To(BeFalse())
 		// and the node should not be deleted yet
-		ExpectExists(ctx, env.Client, node1)
+		ExpectExists(ctx, env.Client, machine1)
 
 		// advance the clock so that the timeout expires
 		fakeClock.Step(31 * time.Second)
@@ -1706,9 +1769,13 @@ var _ = Describe("Consolidation TTL", func() {
 		Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
+
 		// machine should be deleted after the TTL due to emptiness
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		ExpectNotFound(ctx, env.Client, node1)
+		ExpectNotFound(ctx, env.Client, machine1, node1)
 	})
 	It("should wait for the node TTL for non-empty nodes before consolidating", func() {
 		labels := map[string]string{
@@ -1778,8 +1845,8 @@ var _ = Describe("Consolidation TTL", func() {
 		// controller should be blocking during the timeout
 		Expect(finished.Load()).To(BeFalse())
 		// and the node should not be deleted yet
-		ExpectExists(ctx, env.Client, node1)
-		ExpectExists(ctx, env.Client, node2)
+		ExpectExists(ctx, env.Client, machine1)
+		ExpectExists(ctx, env.Client, machine2)
 
 		// advance the clock so that the timeout expires
 		fakeClock.Step(31 * time.Second)
@@ -1787,9 +1854,13 @@ var _ = Describe("Consolidation TTL", func() {
 		Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine2)
+
 		// machine should be deleted after the TTL due to emptiness
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		ExpectNotFound(ctx, env.Client, node2)
+		ExpectNotFound(ctx, env.Client, machine2, node2)
 	})
 	It("should not consolidate if the action becomes invalid during the node TTL wait", func() {
 		pod := test.Pod()
@@ -1814,7 +1885,7 @@ var _ = Describe("Consolidation TTL", func() {
 		// controller should be blocking during the timeout
 		Expect(finished.Load()).To(BeFalse())
 		// and the node should not be deleted yet
-		ExpectExists(ctx, env.Client, node1)
+		ExpectExists(ctx, env.Client, machine1)
 
 		// make the node non-empty by binding it
 		ExpectManualBinding(ctx, env.Client, pod, node1)
@@ -1827,8 +1898,9 @@ var _ = Describe("Consolidation TTL", func() {
 		wg.Wait()
 
 		// nothing should be removed since the node is no longer empty
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		ExpectExists(ctx, env.Client, node1)
+		ExpectExists(ctx, env.Client, machine1)
 	})
 })
 
@@ -1896,7 +1968,7 @@ var _ = Describe("Parallelization", func() {
 
 		// Run the processing loop in parallel in the background with environment context
 		var wg sync.WaitGroup
-		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectTriggerVerifyAction(&wg)
 		go func() {
 			defer GinkgoRecover()
@@ -1904,11 +1976,12 @@ var _ = Describe("Parallelization", func() {
 		}()
 		wg.Wait()
 
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(2))
 
 		// Add a new pending pod that should schedule while node is not yet deleted
 		pod = test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, provisioner, pod)
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(2))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
 		ExpectScheduled(ctx, env.Client, pod)
 	})
@@ -1952,6 +2025,8 @@ var _ = Describe("Parallelization", func() {
 		ExpectApplied(ctx, env.Client, rs, prov)
 		ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, provisioner, lo.Map(pods, func(p *v1.Pod, _ int) *v1.Pod { return p.DeepCopy() })...)
 
+		machines := ExpectMachines(ctx, env.Client)
+		Expect(machines).To(HaveLen(1))
 		nodes := ExpectNodes(ctx, env.Client)
 		Expect(nodes).To(HaveLen(1))
 
@@ -2085,13 +2160,17 @@ var _ = Describe("Multi-Node Consolidation", func() {
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine1, machine2, machine3)
+
 		// three machines should be replaced with a single machine
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		ExpectNotFound(ctx, env.Client, node1, node2, node3)
+		ExpectNotFound(ctx, env.Client, machine1, node1, machine2, node2, machine3, node3)
 	})
 	It("won't merge 2 nodes into 1 of the same type", func() {
 		labels := map[string]string{
@@ -2152,15 +2231,20 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
+
 		// We have [cheap-node, cheap-node] which multi-node consolidation could consolidate via
 		// [delete cheap-node, delete cheap-node, launch cheap-node]. This isn't the best method though
 		// as we should instead just delete one of the nodes instead of deleting both and launching a single
 		// identical replacement. This test verifies the filterOutSameType function from multi-node consolidation
 		// works to ensure we perform the least-disruptive action.
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 		// should have just deleted the node with the fewest pods
-		ExpectNotFound(ctx, env.Client, node1)
+		ExpectNotFound(ctx, env.Client, machine1, node1)
 		// and left the other node alone
+		ExpectExists(ctx, env.Client, machine2)
 		ExpectExists(ctx, env.Client, node2)
 	})
 	It("should wait for the node TTL for non-empty nodes before consolidating (multi-node)", func() {
@@ -2194,7 +2278,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
 
 		var wg sync.WaitGroup
-		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 
 		wg.Add(1)
 		finished := atomic.Bool{}
@@ -2210,8 +2294,8 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		// controller should be blocking during the timeout
 		Expect(finished.Load()).To(BeFalse())
 		// and the node should not be deleted yet
-		ExpectExists(ctx, env.Client, node1)
-		ExpectExists(ctx, env.Client, node2)
+		ExpectExists(ctx, env.Client, machine1)
+		ExpectExists(ctx, env.Client, machine2)
 
 		// advance the clock so that the timeout expires
 		fakeClock.Step(31 * time.Second)
@@ -2219,10 +2303,14 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine1, machine2)
+
 		// should launch a single smaller replacement node
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 		// and delete the two large ones
-		ExpectNotFound(ctx, env.Client, node1, node2)
+		ExpectNotFound(ctx, env.Client, machine1, node1, machine2, node2)
 	})
 })
 
@@ -2310,47 +2398,6 @@ func ExpectNewMachinesDeleted(ctx context.Context, c client.Client, wg *sync.Wai
 				}
 			case <-ctx.Done():
 				Fail(fmt.Sprintf("waiting for machines to be deleted, %s", ctx.Err()))
-			}
-		}
-	}()
-}
-
-func ExpectMakeNewNodesReady(ctx context.Context, c client.Client, wg *sync.WaitGroup, numNewNodes int) {
-	existingNodes := ExpectNodes(ctx, c)
-	existingNodeNames := sets.NewString(lo.Map(existingNodes, func(n *v1.Node, _ int) string {
-		return n.Name
-	})...)
-
-	wg.Add(1)
-	go func() {
-		nodesMadeReady := 0
-		ctx, cancel := context.WithTimeout(ctx, time.Second*10) // give up after 10s
-		defer GinkgoRecover()
-		defer wg.Done()
-		defer cancel()
-		for {
-			select {
-			case <-time.After(50 * time.Millisecond):
-				nodeList := &v1.NodeList{}
-				if err := c.List(ctx, nodeList); err != nil {
-					continue
-				}
-				for i := range nodeList.Items {
-					n := &nodeList.Items[i]
-					if existingNodeNames.Has(n.Name) {
-						continue
-					}
-					ExpectMakeNodesReady(ctx, c, n)
-
-					nodesMadeReady++
-					existingNodeNames.Insert(n.Name)
-					// did we make all the nodes ready that we expected?
-					if nodesMadeReady == numNewNodes {
-						return
-					}
-				}
-			case <-ctx.Done():
-				Fail(fmt.Sprintf("waiting for nodes to be ready, %s", ctx.Err()))
 			}
 		}
 	}()

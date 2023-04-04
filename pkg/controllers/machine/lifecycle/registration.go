@@ -69,6 +69,9 @@ func (r *Registration) Reconcile(ctx context.Context, machine *v1alpha5.Machine)
 	metrics.MachinesRegisteredCounter.With(prometheus.Labels{
 		metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
 	}).Inc()
+	metrics.NodesCreatedCounter.With(prometheus.Labels{
+		metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
+	}).Inc()
 	return reconcile.Result{}, nil
 }
 

@@ -17,10 +17,11 @@ package consistency
 import (
 	v1 "k8s.io/api/core/v1"
 
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
-func CheckEvent(node *v1.Node, message string) []events.Event {
+func CheckEvent(node *v1.Node, machine *v1alpha5.Machine, message string) []events.Event {
 	return []events.Event{
 		{
 			InvolvedObject: node,
@@ -28,6 +29,13 @@ func CheckEvent(node *v1.Node, message string) []events.Event {
 			Reason:         "FailedConsistencyCheck",
 			Message:        message,
 			DedupeValues:   []string{node.Name, message},
+		},
+		{
+			InvolvedObject: machine,
+			Type:           v1.EventTypeWarning,
+			Reason:         "FailedConsistencyCheck",
+			Message:        message,
+			DedupeValues:   []string{machine.Name, message},
 		},
 	}
 }
