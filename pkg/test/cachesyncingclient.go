@@ -154,7 +154,9 @@ func (c *cacheSyncingStatusWriter) Patch(ctx context.Context, obj client.Object,
 func objectSynced(ctx context.Context, c client.Client, obj client.Object) error {
 	temp := obj.DeepCopyObject().(client.Object)
 	if err := c.Get(ctx, client.ObjectKeyFromObject(obj), temp); err != nil {
-		return fmt.Errorf("getting object, %w", err)
+		// If the object isn't found, we assume that the cache was synced since the Update operation must have caused
+		// the object to get completely removed (like a finalizer update)
+		return client.IgnoreNotFound(fmt.Errorf("getting object, %w", err))
 	}
 	if obj.GetResourceVersion() != temp.GetResourceVersion() {
 		return fmt.Errorf("object hasn't updated")
