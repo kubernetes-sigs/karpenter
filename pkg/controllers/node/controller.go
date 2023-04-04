@@ -31,7 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
-	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 
@@ -55,6 +54,7 @@ type Controller struct {
 	emptiness      *Emptiness
 	finalizer      *Finalizer
 	drift          *Drift
+	expiration     *Expiration
 }
 
 // NewController constructs a nodeController instance
@@ -65,6 +65,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 		initialization: &Initialization{kubeClient: kubeClient, cloudProvider: cloudProvider},
 		emptiness:      &Emptiness{kubeClient: kubeClient, clock: clk, cluster: cluster},
 		drift:          &Drift{kubeClient: kubeClient, cloudProvider: cloudProvider},
+		expiration:     &Expiration{clock: clk},
 	})
 }
 
@@ -95,9 +96,8 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Re
 		c.initialization,
 		c.emptiness,
 		c.finalizer,
-	}
-	if settings.FromContext(ctx).DriftEnabled {
-		reconcilers = append(reconcilers, c.drift)
+		c.expiration,
+		c.drift,
 	}
 	for _, reconciler := range reconcilers {
 		res, err := reconciler.Reconcile(ctx, provisioner, node)
