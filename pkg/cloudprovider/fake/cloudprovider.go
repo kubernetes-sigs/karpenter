@@ -67,6 +67,7 @@ func (c *CloudProvider) Reset() {
 	c.AllowedCreateCalls = math.MaxInt
 	c.NextCreateErr = nil
 	c.DeleteCalls = []*v1alpha5.Machine{}
+	c.Drifted = false
 }
 
 func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (*v1alpha5.Machine, error) {

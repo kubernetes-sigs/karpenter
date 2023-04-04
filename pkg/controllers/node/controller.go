@@ -31,7 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
-	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 
@@ -98,9 +97,7 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Re
 		c.emptiness,
 		c.finalizer,
 		c.expiration,
-	}
-	if settings.FromContext(ctx).DriftEnabled {
-		reconcilers = append(reconcilers, c.drift)
+		c.drift,
 	}
 	for _, reconciler := range reconcilers {
 		res, err := reconciler.Reconcile(ctx, provisioner, node)

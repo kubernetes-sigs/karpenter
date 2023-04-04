@@ -16,7 +16,6 @@ package node
 
 import (
 	"context"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
@@ -35,28 +34,36 @@ type Expiration struct {
 }
 
 func (e *Expiration) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner, node *v1.Node) (reconcile.Result, error) {
-	// Ignore node if not applicable
-	if provisioner.Spec.TTLSecondsUntilExpired == nil {
-		return reconcile.Result{}, nil
-	}
-
 	// If the node is marked as voluntarily disrupted by another controller, do nothing.
 	val, hasAnnotation := node.Annotations[v1alpha5.VoluntaryDisruptionAnnotationKey]
 	if hasAnnotation && val != v1alpha5.VoluntaryDisruptionExpiredAnnotationValue {
 		return reconcile.Result{}, nil
 	}
 
+	// From here there are three scenarios to handle:
+	// 1. If TTLSecondsUntilExpired is not configured, but the node is expired,
+	//    remove the annotation so another disruption controller can annotate the node.
+	if provisioner.Spec.TTLSecondsUntilExpired == nil {
+		if val == v1alpha5.VoluntaryDisruptionExpiredAnnotationValue {
+			delete(node.Annotations, v1alpha5.VoluntaryDisruptionAnnotationKey)
+			logging.FromContext(ctx).Infof("removing expiration annotation from node as expiration has been disabled")
+		}
+		return reconcile.Result{}, nil
+	}
+
+	// 2. Otherwise, if the node isn't expired, but has the annotation, remove it.
 	expired := utilsnode.IsExpired(node, e.clock, provisioner)
 	if !expired && hasAnnotation {
 		delete(node.Annotations, v1alpha5.VoluntaryDisruptionAnnotationKey)
-		logging.FromContext(ctx).Infof("removed expiration TTL from node")
+		logging.FromContext(ctx).Infof("removing expiration annotation from node")
+		// 3. Finally, if the node is expired, but doesn't have the annotation, add it.
 	} else if expired && !hasAnnotation {
 		node.Annotations = lo.Assign(node.Annotations, map[string]string{
 			v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionExpiredAnnotationValue,
 		})
-		logging.FromContext(ctx).Infof("added TTL to expired node")
+		logging.FromContext(ctx).Infof("annotating node as expired")
 	}
 
-	// If not expired, and doesn't have annotation, requeue at expiration time.
-	return reconcile.Result{RequeueAfter: time.Until(utilsnode.GetExpirationTime(node, provisioner))}, nil
+	// If the node isn't expired and doesn't have annotation, return.
+	return reconcile.Result{}, nil
 }
