@@ -12,12 +12,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package machine
+package lifecycle
 
 import (
 	"context"
 	"fmt"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -26,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/metrics"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 	nodeutil "github.com/aws/karpenter-core/pkg/utils/node"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
@@ -41,11 +43,11 @@ type Initialization struct {
 // c) all extended resources have been registered
 // This method handles both nil provisioners and nodes without extended resources gracefully.
 func (i *Initialization) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	if machine.Status.ProviderID == "" {
-		machine.StatusConditions().MarkUnknown(v1alpha5.MachineInitialized, "", "")
+	if machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).IsTrue() {
 		return reconcile.Result{}, nil
 	}
-	if machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).IsTrue() {
+	if !machine.StatusConditions().GetCondition(v1alpha5.MachineLaunched).IsTrue() {
+		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "MachineNotLaunched", "Machine is not launched")
 		return reconcile.Result{}, nil
 	}
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", machine.Status.ProviderID))
@@ -76,6 +78,9 @@ func (i *Initialization) Reconcile(ctx context.Context, machine *v1alpha5.Machin
 		logging.FromContext(ctx).Debugf("node initialized")
 	}
 	machine.StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
+	metrics.MachinesInitializedCounter.With(prometheus.Labels{
+		metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
+	}).Inc()
 	return reconcile.Result{}, nil
 }
 
