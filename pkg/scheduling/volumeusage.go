@@ -18,7 +18,7 @@ import (
 	"context"
 	"fmt"
 
-	"k8s.io/csi-translation-lib"
+	csitranslation "k8s.io/csi-translation-lib"
 	"knative.dev/pkg/logging"
 
 	v1 "k8s.io/api/core/v1"
