@@ -847,10 +847,11 @@ var _ = Describe("Provisioning", func() {
 			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
 			Expect(cloudProvider.CreateCalls[0].OwnerReferences).To(ContainElement(
 				metav1.OwnerReference{
-					APIVersion: "karpenter.sh/v1alpha5",
-					Kind:       "Provisioner",
-					Name:       provisioner.Name,
-					UID:        provisioner.UID,
+					APIVersion:         "karpenter.sh/v1alpha5",
+					Kind:               "Provisioner",
+					Name:               provisioner.Name,
+					UID:                provisioner.UID,
+					BlockOwnerDeletion: lo.ToPtr(true),
 				},
 			))
 			ExpectScheduled(ctx, env.Client, pod)

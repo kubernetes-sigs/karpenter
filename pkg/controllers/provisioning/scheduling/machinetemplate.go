@@ -20,11 +20,10 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"knative.dev/pkg/ptr"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 )
 
@@ -87,6 +86,15 @@ func (i *MachineTemplate) ToMachine(owner *v1alpha5.Provisioner) *v1alpha5.Machi
 			GenerateName: fmt.Sprintf("%s-", i.ProvisionerName),
 			Annotations:  lo.Assign(i.Annotations, v1alpha5.ProviderAnnotation(i.Provider)),
 			Labels:       i.Labels,
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion:         v1alpha5.SchemeGroupVersion.String(),
+					Kind:               "Provisioner",
+					Name:               owner.Name,
+					UID:                owner.UID,
+					BlockOwnerDeletion: ptr.Bool(true),
+				},
+			},
 		},
 		Spec: v1alpha5.MachineSpec{
 			Taints:        i.Taints,
@@ -99,6 +107,5 @@ func (i *MachineTemplate) ToMachine(owner *v1alpha5.Provisioner) *v1alpha5.Machi
 			MachineTemplateRef: i.ProviderRef,
 		},
 	}
-	lo.Must0(controllerutil.SetOwnerReference(owner, m, scheme.Scheme))
 	return m
 }

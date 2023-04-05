@@ -24,13 +24,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/logging"
+	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/metrics"
-	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 )
@@ -78,10 +78,17 @@ func (r *Registration) Reconcile(ctx context.Context, machine *v1alpha5.Machine)
 func (r *Registration) syncNode(ctx context.Context, machine *v1alpha5.Machine, node *v1.Node) error {
 	stored := node.DeepCopy()
 	controllerutil.AddFinalizer(node, v1alpha5.TerminationFinalizer)
-	lo.Must0(controllerutil.SetOwnerReference(machine, node, scheme.Scheme))
+
 	// Remove any provisioner owner references since we own them
 	node.OwnerReferences = lo.Reject(node.OwnerReferences, func(o metav1.OwnerReference, _ int) bool {
 		return o.Kind == "Provisioner"
+	})
+	node.OwnerReferences = append(node.OwnerReferences, metav1.OwnerReference{
+		APIVersion:         v1alpha5.SchemeGroupVersion.String(),
+		Kind:               "Machine",
+		Name:               machine.Name,
+		UID:                machine.UID,
+		BlockOwnerDeletion: ptr.Bool(true),
 	})
 
 	// If the machine isn't registered as linked, then sync it

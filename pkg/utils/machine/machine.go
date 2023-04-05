@@ -22,13 +22,12 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 )
 
@@ -150,12 +149,20 @@ func New(node *v1.Node, provisioner *v1alpha5.Provisioner) *v1alpha5.Machine {
 	machine := NewFromNode(node)
 	machine.Annotations = lo.Assign(provisioner.Annotations, v1alpha5.ProviderAnnotation(provisioner.Spec.Provider))
 	machine.Labels = lo.Assign(provisioner.Labels, map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name})
+	machine.OwnerReferences = []metav1.OwnerReference{
+		{
+			APIVersion:         v1alpha5.SchemeGroupVersion.String(),
+			Kind:               "Provisioner",
+			Name:               provisioner.Name,
+			UID:                provisioner.UID,
+			BlockOwnerDeletion: ptr.Bool(true),
+		},
+	}
 	machine.Spec.Kubelet = provisioner.Spec.KubeletConfiguration
 	machine.Spec.Taints = provisioner.Spec.Taints
 	machine.Spec.StartupTaints = provisioner.Spec.StartupTaints
 	machine.Spec.Requirements = provisioner.Spec.Requirements
 	machine.Spec.MachineTemplateRef = provisioner.Spec.ProviderRef
-	lo.Must0(controllerutil.SetOwnerReference(provisioner, machine, scheme.Scheme))
 	return machine
 }
 
