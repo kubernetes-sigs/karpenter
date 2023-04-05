@@ -75,6 +75,9 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 	if !controllerutil.ContainsFinalizer(node, v1alpha5.TerminationFinalizer) {
 		return reconcile.Result{}, nil
 	}
+	if err := c.deleteAllMachines(ctx, node); err != nil {
+		return reconcile.Result{}, fmt.Errorf("deleting machines, %w", err)
+	}
 	if err := c.terminator.Cordon(ctx, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("cordoning node, %w", err)
 	}
@@ -97,6 +100,19 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 		return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
 	}
 	return reconcile.Result{}, c.removeFinalizer(ctx, node)
+}
+
+func (c *Controller) deleteAllMachines(ctx context.Context, node *v1.Node) error {
+	machineList := &v1alpha5.MachineList{}
+	if err := c.kubeClient.List(ctx, machineList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
+		return err
+	}
+	for i := range machineList.Items {
+		if err := c.kubeClient.Delete(ctx, &machineList.Items[i]); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+	}
+	return nil
 }
 
 func (c *Controller) removeFinalizer(ctx context.Context, n *v1.Node) error {

@@ -33,7 +33,6 @@ const (
 // Karpenter specific domains and labels
 const (
 	ProvisionerNameLabelKey = Group + "/provisioner-name"
-	MachineNameLabelKey     = Group + "/machine-name"
 	ManagedByLabelKey       = Group + "/managed-by"
 	LabelNodeInitialized    = Group + "/initialized"
 	LabelCapacityType       = Group + "/capacity-type"

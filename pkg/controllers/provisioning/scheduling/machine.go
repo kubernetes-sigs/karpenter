@@ -114,11 +114,6 @@ func (m *Machine) FinalizeScheduling() {
 	delete(m.Requirements, v1.LabelHostname)
 }
 
-func (m *Machine) String() string {
-	return fmt.Sprintf("machine with %d pods requesting %s from types %s", len(m.Pods), resources.String(m.Requests),
-		InstanceTypeList(m.InstanceTypeOptions))
-}
-
 func InstanceTypeList(instanceTypeOptions []*cloudprovider.InstanceType) string {
 	var itSb strings.Builder
 	for i, it := range instanceTypeOptions {

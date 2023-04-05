@@ -88,7 +88,12 @@ func (l *Launch) linkMachine(ctx context.Context, machine *v1alpha5.Machine) (*v
 		}).Inc()
 		return nil, nil
 	}
-	logging.FromContext(ctx).Debugf("linked machine")
+	logging.FromContext(ctx).With(
+		"provider-id", created.Status.ProviderID,
+		"instance-type", created.Labels[v1.LabelInstanceTypeStable],
+		"zone", created.Labels[v1.LabelTopologyZone],
+		"capacity-type", created.Labels[v1alpha5.LabelCapacityType],
+		"capacity", created.Status.Capacity).Infof("linked machine")
 	return created, nil
 }
 
@@ -112,7 +117,12 @@ func (l *Launch) launchMachine(ctx context.Context, machine *v1alpha5.Machine) (
 		}).Inc()
 		return nil, nil
 	}
-	logging.FromContext(ctx).Debugf("launched machine")
+	logging.FromContext(ctx).With(
+		"provider-id", created.Status.ProviderID,
+		"instance-type", created.Labels[v1.LabelInstanceTypeStable],
+		"zone", created.Labels[v1.LabelTopologyZone],
+		"capacity-type", created.Labels[v1alpha5.LabelCapacityType],
+		"capacity", created.Status.Capacity).Infof("launched machine")
 	return created, nil
 }
 

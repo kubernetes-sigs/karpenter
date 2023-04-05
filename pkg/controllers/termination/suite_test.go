@@ -23,6 +23,7 @@ import (
 
 	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 
 	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -63,7 +64,11 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
-	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
+	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...), test.WithFieldIndexers(func(c cache.Cache) error {
+		return c.IndexField(ctx, &v1alpha5.Machine{}, "status.providerID", func(obj client.Object) []string {
+			return []string{obj.(*v1alpha5.Machine).Status.ProviderID}
+		})
+	}))
 
 	cloudProvider = fake.NewCloudProvider()
 	evictionQueue = terminator.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}))
@@ -96,6 +101,15 @@ var _ = Describe("Termination", func() {
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 			ExpectNotFound(ctx, env.Client, node)
+		})
+		It("should delete machines associated with nodes", func() {
+			ExpectApplied(ctx, env.Client, node, machine)
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectExists(ctx, env.Client, machine)
+			ExpectFinalizersRemoved(ctx, env.Client, machine)
+			ExpectNotFound(ctx, env.Client, node, machine)
 		})
 		It("should not race if deleting nodes in parallel", func() {
 			var nodes []*v1.Node

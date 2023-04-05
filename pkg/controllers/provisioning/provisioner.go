@@ -327,7 +327,6 @@ func (p *Provisioner) Launch(ctx context.Context, m *scheduler.Machine, opts ...
 	}
 	options := functional.ResolveOptions(opts...)
 
-	logging.FromContext(ctx).Infof("launching %s", m)
 	machine := m.ToMachine(latest)
 	if err := p.kubeClient.Create(ctx, machine); err != nil {
 		return "", err
