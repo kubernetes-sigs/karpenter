@@ -49,6 +49,17 @@ var (
 			ProvisionerLabel,
 		},
 	)
+	MachinesLaunchedCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: machineSubsystem,
+			Name:      "launched",
+			Help:      "Number of machines launched in total by Karpenter. Labeled by the owning provisioner.",
+		},
+		[]string{
+			ProvisionerLabel,
+		},
+	)
 	MachinesRegisteredCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
@@ -96,6 +107,6 @@ var (
 )
 
 func MustRegister() {
-	crmetrics.Registry.MustRegister(MachinesCreatedCounter, MachinesTerminatedCounter, MachinesRegisteredCounter,
-		MachinesInitializedCounter, NodesCreatedCounter, NodesTerminatedCounter)
+	crmetrics.Registry.MustRegister(MachinesCreatedCounter, MachinesTerminatedCounter, MachinesLaunchedCounter,
+		MachinesRegisteredCounter, MachinesInitializedCounter, NodesCreatedCounter, NodesTerminatedCounter)
 }

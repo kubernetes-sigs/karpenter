@@ -1327,6 +1327,7 @@ var _ = Describe("Cluster State Sync", func() {
 			ExpectApplied(ctx, env.Client, machine)
 			ExpectApplied(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		}
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 	})

@@ -87,78 +87,6 @@ var _ = Describe("Controller", func() {
 		ExpectCleanedUp(ctx, env.Client)
 	})
 
-	Context("Initialization Failure", func() {
-		It("should detect issues with nodes that never have an extended resource registered", func() {
-			machine, node := test.MachineAndNode(v1alpha5.Machine{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-						v1.LabelInstanceTypeStable:       "gpu-vendor-instance-type",
-					},
-				},
-				Spec: v1alpha5.MachineSpec{
-					Resources: v1alpha5.ResourceRequirements{
-						Requests: v1.ResourceList{
-							fake.ResourceGPUVendorA: resource.MustParse("1"),
-							v1.ResourceCPU:          resource.MustParse("1"),
-							v1.ResourceMemory:       resource.MustParse("1Gi"),
-							v1.ResourcePods:         resource.MustParse("1"),
-						},
-					},
-				},
-				Status: v1alpha5.MachineStatus{
-					ProviderID: test.RandomProviderID(),
-					Capacity: v1.ResourceList{
-						fake.ResourceGPUVendorA: resource.MustParse("1"),
-						v1.ResourceCPU:          resource.MustParse("1"),
-						v1.ResourceMemory:       resource.MustParse("1Gi"),
-						v1.ResourcePods:         resource.MustParse("10"),
-					},
-				},
-			})
-			// Don't have the node register the ResourceGPUVendorA with its capacity
-			node.Status.Capacity = v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("1"),
-				v1.ResourceMemory: resource.MustParse("1Gi"),
-				v1.ResourcePods:   resource.MustParse("10"),
-			}
-			ExpectApplied(ctx, env.Client, provisioner, machine, node)
-			fakeClock.Step(2 * time.Hour)
-			ExpectReconcileSucceeded(ctx, consistencyController, client.ObjectKeyFromObject(machine))
-			Expect(recorder.DetectedEvent("expected resource \"fake.com/vendor-a\" didn't register on the node")).To(BeTrue())
-		})
-		It("should detect issues with nodes that have a startup taint which isn't removed", func() {
-			machine, node := test.MachineAndNode(v1alpha5.Machine{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-						v1.LabelInstanceTypeStable:       "default-instance-type",
-					},
-				},
-				Spec: v1alpha5.MachineSpec{
-					StartupTaints: []v1.Taint{
-						{
-							Key:    "my.startup.taint",
-							Effect: v1.TaintEffectNoSchedule,
-						},
-					},
-				},
-				Status: v1alpha5.MachineStatus{
-					ProviderID: test.RandomProviderID(),
-					Capacity: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("1"),
-						v1.ResourceMemory: resource.MustParse("1Gi"),
-						v1.ResourcePods:   resource.MustParse("10"),
-					},
-				},
-			})
-			ExpectApplied(ctx, env.Client, provisioner, machine, node)
-			fakeClock.Step(2 * time.Hour)
-			ExpectReconcileSucceeded(ctx, consistencyController, client.ObjectKeyFromObject(machine))
-			Expect(recorder.DetectedEvent("startup taint \"my.startup.taint:NoSchedule\" is still on the node")).To(BeTrue())
-		})
-	})
-
 	Context("Termination failure", func() {
 		It("should detect issues with a node that is stuck deleting due to a PDB", func() {
 			machine, node := test.MachineAndNode(v1alpha5.Machine{
@@ -217,6 +145,7 @@ var _ = Describe("Controller", func() {
 				v1.ResourcePods:   resource.MustParse("10"),
 			}
 			ExpectApplied(ctx, env.Client, provisioner, machine, node)
+			ExpectMakeMachinesReady(ctx, env.Client, machine)
 			ExpectReconcileSucceeded(ctx, consistencyController, client.ObjectKeyFromObject(machine))
 			Expect(recorder.DetectedEvent("expected 128Gi of resource memory, but found 64Gi (50.0% of expected)")).To(BeTrue())
 		})

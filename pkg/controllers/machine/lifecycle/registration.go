@@ -65,13 +65,18 @@ func (r *Registration) Reconcile(ctx context.Context, machine *v1alpha5.Machine)
 	if err = r.syncNode(ctx, machine, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("syncing node, %w", err)
 	}
+	logging.FromContext(ctx).Debugf("registered machine")
 	machine.StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
+	machine.Status.NodeName = node.Name
 	metrics.MachinesRegisteredCounter.With(prometheus.Labels{
 		metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
 	}).Inc()
-	metrics.NodesCreatedCounter.With(prometheus.Labels{
-		metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
-	}).Inc()
+	// If the machine is linked, then the node already existed so we don't mark it as created
+	if _, ok := machine.Annotations[v1alpha5.MachineLinkedAnnotationKey]; !ok {
+		metrics.NodesCreatedCounter.With(prometheus.Labels{
+			metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
+		}).Inc()
+	}
 	return reconcile.Result{}, nil
 }
 
@@ -104,7 +109,6 @@ func (r *Registration) syncNode(ctx context.Context, machine *v1alpha5.Machine, 
 		if err := r.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 			return fmt.Errorf("syncing node labels, %w", err)
 		}
-		logging.FromContext(ctx).Debugf("synced node")
 	}
 	return nil
 }

@@ -67,6 +67,7 @@ func (c *Controller) Reconcile(_ context.Context, _ *v1alpha5.Machine) (reconcil
 }
 
 func (c *Controller) Finalize(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", machine.Status.NodeName, "provisioner", machine.Labels[v1alpha5.ProvisionerNameLabelKey], "provider-id", machine.Status.ProviderID))
 	stored := machine.DeepCopy()
 	if !controllerutil.ContainsFinalizer(machine, v1alpha5.TerminationFinalizer) {
 		return reconcile.Result{}, nil
@@ -85,7 +86,6 @@ func (c *Controller) Finalize(ctx context.Context, machine *v1alpha5.Machine) (r
 	if len(nodes) > 0 {
 		return reconcile.Result{}, nil
 	}
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", machine.Labels[v1alpha5.ProvisionerNameLabelKey], "provider-id", machine.Status.ProviderID))
 	if machine.Status.ProviderID != "" {
 		if err := c.cloudProvider.Delete(ctx, machine); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
 			return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)

@@ -69,7 +69,6 @@ func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Re
 		recorder:    recorder,
 		lastScanned: cache.New(scanPeriod, 1*time.Minute),
 		checks: []Check{
-			NewFailedInit(clk, provider),
 			NewTermination(kubeClient),
 			NewNodeShape(provider),
 		}},
@@ -84,7 +83,7 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 	if machine.Status.ProviderID == "" {
 		return reconcile.Result{}, nil
 	}
-	// If we get an event before we should check for inflight checks, we ignore and wait
+	// If we get an event before we should check for consistency checks, we ignore and wait
 	if lastTime, ok := c.lastScanned.Get(client.ObjectKeyFromObject(machine).String()); ok {
 		if lastTime, ok := lastTime.(time.Time); ok {
 			remaining := scanPeriod - c.clock.Since(lastTime)
@@ -95,6 +94,8 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 	}
 	c.lastScanned.SetDefault(client.ObjectKeyFromObject(machine).String(), c.clock.Now())
 
+	// We assume the invariant that there is a single node for a single machine. If this invariant is violated,
+	// then we assume this is bubbled up through the machine lifecycle controller and don't perform consistency checks
 	node, err := machineutil.NodeForMachine(ctx, c.kubeClient, machine)
 	if err != nil {
 		return reconcile.Result{}, machineutil.IgnoreDuplicateNodeError(machineutil.IgnoreNodeNotFoundError(err))

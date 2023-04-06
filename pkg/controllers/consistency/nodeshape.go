@@ -41,14 +41,14 @@ func (n *NodeShape) Check(ctx context.Context, node *v1.Node, machine *v1alpha5.
 		return nil, nil
 	}
 	// and machines that haven't initialized yet
-	if machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).IsTrue() {
+	if !machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).IsTrue() {
 		return nil, nil
 	}
 	var issues []Issue
 	for resourceName, expectedQuantity := range machine.Status.Capacity {
 		nodeQuantity, ok := node.Status.Capacity[resourceName]
 		if !ok && !expectedQuantity.IsZero() {
-			issues = append(issues, Issue(fmt.Sprintf("expected resource \"%s\" not found", resourceName)))
+			issues = append(issues, Issue(fmt.Sprintf("expected resource %q not found", resourceName)))
 			continue
 		}
 

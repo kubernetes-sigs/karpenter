@@ -131,9 +131,12 @@ type ResourceRequirements struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Type",type="string",JSONPath=".metadata.labels.node\\.kubernetes\\.io/instance-type",description=""
 // +kubebuilder:printcolumn:name="Zone",type="string",JSONPath=".metadata.labels.topology\\.kubernetes\\.io/zone",description=""
-// +kubebuilder:printcolumn:name="Capacity",type="string",JSONPath=".metadata.labels.karpenter\\.sh/capacity-type",description=""
+// +kubebuilder:printcolumn:name="Node",type="string",JSONPath=".status.nodeName",description=""
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type==\"Ready\")].status",description=""
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description=""
+// +kubebuilder:printcolumn:name="Capacity",type="string",JSONPath=".metadata.labels.karpenter\\.sh/capacity-type",priority=1,description=""
+// +kubebuilder:printcolumn:name="Provisioner",type="string",JSONPath=".metadata.labels.karpenter\\.sh/provisioner-name",priority=1,description=""
+// +kubebuilder:printcolumn:name="Template",type="string",JSONPath=".spec.machineTemplateRef.name",priority=1,description=""
 type Machine struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

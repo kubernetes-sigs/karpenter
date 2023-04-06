@@ -1120,7 +1120,9 @@ var _ = Describe("Delete Node", func() {
 		ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
 		// inform cluster state about nodes and machines, intentionally leaving node1 as not ready
-		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node2}, []*v1alpha5.Machine{machine1, machine2})
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine1))
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node2}, []*v1alpha5.Machine{machine2})
 
 		fakeClock.Step(10 * time.Minute)
 

@@ -51,6 +51,7 @@ var _ = Describe("Registration", func() {
 
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineRegistered).Status).To(Equal(v1.ConditionTrue))
+		Expect(machine.Status.NodeName).To(Equal(node.Name))
 	})
 	It("should add the owner reference to the Node when the Node comes online", func() {
 		machine := test.Machine(v1alpha5.Machine{

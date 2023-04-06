@@ -75,8 +75,8 @@ func (i *Initialization) Reconcile(ctx context.Context, machine *v1alpha5.Machin
 		if err = i.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, err
 		}
-		logging.FromContext(ctx).Debugf("node initialized")
 	}
+	logging.FromContext(ctx).Debugf("initialized machine")
 	machine.StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
 	metrics.MachinesInitializedCounter.With(prometheus.Labels{
 		metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],

@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
+	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -79,9 +80,11 @@ func (*Controller) Name() string {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", machine.Labels[v1alpha5.ProvisionerNameLabelKey]))
 	if !machine.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, nil
 	}
+
 	// Add the finalizer immediately since we shouldn't launch if we don't yet have the finalizer.
 	// Otherwise, we could leak resources
 	stored := machine.DeepCopy()
@@ -113,6 +116,10 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 		if err := c.kubeClient.Status().Patch(ctx, statusCopy, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(multierr.Append(errs, err))
 		}
+		// We sleep here after a patch operation since we want to ensure that we are able to read our own writes
+		// so that we avoid duplicating metrics and log lines due to quick re-queues from our node watcher
+		// USE CAUTION when determining whether to increase this timeout or remove this line
+		time.Sleep(time.Second)
 	}
 	return result.Min(results...), errs
 }

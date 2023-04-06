@@ -63,8 +63,8 @@ var env *test.Environment
 var fakeClock *clock.FakeClock
 var cluster *state.Cluster
 var cloudProvider *fake.CloudProvider
-var machineStateController controller.Controller
 var nodeStateController controller.Controller
+var machineStateController controller.Controller
 var podStateController controller.Controller
 
 const csiProvider = "fake.csi.provider"
@@ -86,6 +86,7 @@ var _ = BeforeSuite(func() {
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	machineStateController = informer.NewMachineController(env.Client, cluster)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
+	machineStateController = informer.NewMachineController(env.Client, cluster)
 	podStateController = informer.NewPodController(env.Client, cluster)
 	prov = provisioning.NewProvisioner(env.Client, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster)
 

@@ -17,6 +17,7 @@ package provisioning
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -331,6 +332,8 @@ func (p *Provisioner) Launch(ctx context.Context, m *scheduler.Machine, opts ...
 	if err := p.kubeClient.Create(ctx, machine); err != nil {
 		return "", err
 	}
+	instanceTypeRequirement, _ := lo.Find(machine.Spec.Requirements, func(req v1.NodeSelectorRequirement) bool { return req.Key == v1.LabelInstanceTypeStable })
+	logging.FromContext(ctx).With("requests", machine.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).Infof("created machine")
 	p.cluster.NominateNodeForPod(ctx, machine.Name)
 	metrics.MachinesCreatedCounter.With(prometheus.Labels{
 		metrics.ReasonLabel:      options.Reason,
@@ -342,6 +345,21 @@ func (p *Provisioner) Launch(ctx context.Context, m *scheduler.Machine, opts ...
 		}
 	}
 	return machine.Name, nil
+}
+
+func instanceTypeList(names []string) string {
+	var itSb strings.Builder
+	for i, name := range names {
+		// print the first 5 instance types only (indices 0-4)
+		if i > 4 {
+			lo.Must(fmt.Fprintf(&itSb, " and %d other(s)", len(names)-i))
+			break
+		} else if i > 0 {
+			lo.Must(fmt.Fprint(&itSb, ", "))
+		}
+		lo.Must(fmt.Fprint(&itSb, name))
+	}
+	return itSb.String()
 }
 
 func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*v1.Pod, error) {

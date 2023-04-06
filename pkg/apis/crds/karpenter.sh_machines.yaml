@@ -24,8 +24,8 @@ spec:
     - jsonPath: .metadata.labels.topology\.kubernetes\.io/zone
       name: Zone
       type: string
-    - jsonPath: .metadata.labels.karpenter\.sh/capacity-type
-      name: Capacity
+    - jsonPath: .status.nodeName
+      name: Node
       type: string
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
@@ -33,6 +33,18 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .metadata.labels.karpenter\.sh/capacity-type
+      name: Capacity
+      priority: 1
+      type: string
+    - jsonPath: .metadata.labels.karpenter\.sh/provisioner-name
+      name: Provisioner
+      priority: 1
+      type: string
+    - jsonPath: .spec.machineTemplateRef.name
+      name: Template
+      priority: 1
+      type: string
     name: v1alpha5
     schema:
       openAPIV3Schema:
@@ -329,6 +341,9 @@ spec:
                   - type
                   type: object
                 type: array
+              nodeName:
+                description: NodeName is the name of the corresponding node object
+                type: string
               providerID:
                 description: ProviderID of the corresponding node object
                 type: string

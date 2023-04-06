@@ -82,13 +82,22 @@ func WaitingOnReadiness(machine *v1alpha5.Machine) events.Event {
 	}
 }
 
-func WaitingOnDeletion(machine *v1alpha5.Machine) events.Event {
-	return events.Event{
-		InvolvedObject: machine,
-		Type:           v1.EventTypeNormal,
-		Reason:         "DeprovisioningWaitingDeletion",
-		Message:        "Waiting on deletion to continue deprovisioning",
-		DedupeValues:   []string{machine.Name},
+func WaitingOnDeletion(node *v1.Node, machine *v1alpha5.Machine) []events.Event {
+	return []events.Event{
+		{
+			InvolvedObject: node,
+			Type:           v1.EventTypeNormal,
+			Reason:         "DeprovisioningWaitingDeletion",
+			Message:        "Waiting on deletion to continue deprovisioning",
+			DedupeValues:   []string{node.Name},
+		},
+		{
+			InvolvedObject: machine,
+			Type:           v1.EventTypeNormal,
+			Reason:         "DeprovisioningWaitingDeletion",
+			Message:        "Waiting on deletion to continue deprovisioning",
+			DedupeValues:   []string{machine.Name},
+		},
 	}
 }
 

@@ -202,7 +202,7 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 	// We wait for nodes to delete to ensure we don't start another round of deprovisioning until this node is fully
 	// deleted.
 	for _, oldCandidate := range command.candidates {
-		c.waitForDeletion(ctx, oldCandidate.Machine)
+		c.waitForDeletion(ctx, oldCandidate.Node, oldCandidate.Machine)
 	}
 	return nil
 }
@@ -276,7 +276,7 @@ func (c *Controller) waitForReadiness(ctx context.Context, action Command, name 
 // waitForDeletion waits for the specified machine to be removed from the API server. This deletion can take some period
 // of time if there are PDBs that govern pods on the machine as we need to wait until the node drains before
 // it's actually deleted.
-func (c *Controller) waitForDeletion(ctx context.Context, machine *v1alpha5.Machine) {
+func (c *Controller) waitForDeletion(ctx context.Context, node *v1.Node, machine *v1alpha5.Machine) {
 	if err := retry.Do(func() error {
 		m := &v1alpha5.Machine{}
 		nerr := c.kubeClient.Get(ctx, client.ObjectKeyFromObject(machine), m)
@@ -285,7 +285,7 @@ func (c *Controller) waitForDeletion(ctx context.Context, machine *v1alpha5.Mach
 			return nil
 		}
 		// make the user aware of why deprovisioning is paused
-		c.recorder.Publish(deprovisioningevents.WaitingOnDeletion(machine))
+		c.recorder.Publish(deprovisioningevents.WaitingOnDeletion(node, machine)...)
 		if nerr != nil {
 			return fmt.Errorf("expected machine to be not found, %w", nerr)
 		}

@@ -25,7 +25,9 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/consistency"
 	"github.com/aws/karpenter-core/pkg/controllers/counter"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
-	"github.com/aws/karpenter-core/pkg/controllers/machine"
+	machinegarbagecollection "github.com/aws/karpenter-core/pkg/controllers/machine/garbagecollection"
+	machinelifecycle "github.com/aws/karpenter-core/pkg/controllers/machine/lifecycle"
+	machinetermination "github.com/aws/karpenter-core/pkg/controllers/machine/termination"
 	metricspod "github.com/aws/karpenter-core/pkg/controllers/metrics/pod"
 	metricsprovisioner "github.com/aws/karpenter-core/pkg/controllers/metrics/provisioner"
 	metricsstate "github.com/aws/karpenter-core/pkg/controllers/metrics/state"
@@ -56,7 +58,8 @@ func NewControllers(
 
 	provisioner := provisioning.NewProvisioner(kubeClient, kubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
 	terminator := terminator.NewTerminator(clock, kubeClient, terminator.NewEvictionQueue(ctx, kubernetesInterface.CoreV1(), recorder))
-	controllers := []controller.Controller{
+
+	return []controller.Controller{
 		provisioner,
 		metricsstate.NewController(cluster),
 		deprovisioning.NewController(clock, kubeClient, provisioner, cloudProvider, recorder, cluster),
@@ -72,7 +75,8 @@ func NewControllers(
 		metricsprovisioner.NewController(kubeClient),
 		counter.NewController(kubeClient, cluster),
 		consistency.NewController(clock, kubeClient, recorder, cloudProvider),
+		machinelifecycle.NewController(clock, kubeClient, cloudProvider),
+		machinegarbagecollection.NewController(clock, kubeClient, cloudProvider),
+		machinetermination.NewController(kubeClient, cloudProvider),
 	}
-	controllers = append(controllers, machine.NewControllers(clock, kubeClient, cloudProvider)...)
-	return controllers
 }
