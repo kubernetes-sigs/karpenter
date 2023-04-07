@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package inflightchecks
+package consistency
 
 import (
 	"context"
@@ -68,18 +68,18 @@ func (f FailedInit) Check(ctx context.Context, n *v1.Node) ([]Issue, error) {
 	}
 	instanceType, ok := lo.Find(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.Name == n.Labels[v1.LabelInstanceTypeStable] })
 	if !ok {
-		return []Issue{Issue(fmt.Sprintf("Instance Type %q not found", n.Labels[v1.LabelInstanceTypeStable]))}, nil
+		return []Issue{Issue(fmt.Sprintf("instance type %q not found", n.Labels[v1.LabelInstanceTypeStable]))}, nil
 	}
 
 	// detect startup taints which should be removed
 	var result []Issue
 	if taint, ok := node.IsStartupTaintRemoved(n, provisioner); !ok {
-		result = append(result, Issue(fmt.Sprintf("Startup taint %q is still on the node", formatTaint(taint))))
+		result = append(result, Issue(fmt.Sprintf("startup taint %q is still on the node", formatTaint(taint))))
 	}
 
 	// and extended resources which never registered
 	if resource, ok := node.IsExtendedResourceRegistered(n, instanceType); !ok {
-		result = append(result, Issue(fmt.Sprintf("Expected resource %q didn't register on the node", resource)))
+		result = append(result, Issue(fmt.Sprintf("expected resource %q didn't register on the node", resource)))
 	}
 
 	return result, nil

@@ -12,13 +12,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package inflightchecks
+package consistency
 
 import (
 	"context"
+	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/patrickmn/go-cache"
+	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
@@ -30,7 +33,6 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	inflightchecksevents "github.com/aws/karpenter-core/pkg/controllers/inflightchecks/events"
 	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
@@ -48,7 +50,7 @@ type Controller struct {
 type Issue string
 
 type Check interface {
-	// Check performs the inflight check, this should return a list of slice discovered, or an empty
+	// Check performs the consistency check, this should return a list of slice discovered, or an empty
 	// slice if no issues were found
 	Check(context.Context, *v1.Node) ([]Issue, error)
 }
@@ -73,14 +75,14 @@ func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Re
 }
 
 func (c *Controller) Name() string {
-	return "inflightchecks"
+	return "consistency"
 }
 
 func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Result, error) {
 	if node.Labels[v1alpha5.ProvisionerNameLabelKey] == "" {
 		return reconcile.Result{}, nil
 	}
-	// If we get an event before we should check for inflight checks, we ignore and wait
+	// If we get an event before we should check for consistency checks, we ignore and wait
 	if lastTime, ok := c.lastScanned.Get(client.ObjectKeyFromObject(node).String()); ok {
 		if lastTime, ok := lastTime.(time.Time); ok {
 			remaining := scanPeriod - c.clock.Since(lastTime)
@@ -91,17 +93,16 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Re
 	}
 	c.lastScanned.SetDefault(client.ObjectKeyFromObject(node).String(), c.clock.Now())
 
-	var allIssues []Issue
 	for _, check := range c.checks {
 		issues, err := check.Check(ctx, node)
 		if err != nil {
-			logging.FromContext(ctx).Errorf("checking node with %T, %s", check, err)
+			return reconcile.Result{}, fmt.Errorf("checking node with %T, %w", check, err)
 		}
-		allIssues = append(allIssues, issues...)
-	}
-	for _, issue := range allIssues {
-		logging.FromContext(ctx).Infof("inflight check failed, %s", issue)
-		c.recorder.Publish(inflightchecksevents.InflightCheck(node, string(issue))...)
+		for _, issue := range issues {
+			logging.FromContext(ctx).Errorf("check failed, %s", issue)
+			consistencyErrors.With(prometheus.Labels{checkLabel: reflect.TypeOf(check).Elem().Name()}).Inc()
+			c.recorder.Publish(CheckEvent(node, string(issue))...)
+		}
 	}
 	return reconcile.Result{RequeueAfter: scanPeriod}, nil
 }

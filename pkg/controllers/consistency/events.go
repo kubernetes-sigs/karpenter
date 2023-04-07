@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package events
+package consistency
 
 import (
 	v1 "k8s.io/api/core/v1"
@@ -20,12 +20,12 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
-func InflightCheck(node *v1.Node, message string) []events.Event {
+func CheckEvent(node *v1.Node, message string) []events.Event {
 	return []events.Event{
 		{
 			InvolvedObject: node,
 			Type:           v1.EventTypeWarning,
-			Reason:         "FailedInflightCheck",
+			Reason:         "FailedConsistencyCheck",
 			Message:        message,
 			DedupeValues:   []string{node.Name, message},
 		},

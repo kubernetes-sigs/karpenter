@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package inflightchecks
+package consistency
 
 import (
 	"context"
@@ -60,19 +60,19 @@ func (n *NodeShape) Check(ctx context.Context, node *v1.Node) ([]Issue, error) {
 	}
 	instanceType, ok := lo.Find(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.Name == node.Labels[v1.LabelInstanceTypeStable] })
 	if !ok {
-		return []Issue{Issue(fmt.Sprintf("Instance Type %q not found", node.Labels[v1.LabelInstanceTypeStable]))}, nil
+		return []Issue{Issue(fmt.Sprintf("instance type %q not found", node.Labels[v1.LabelInstanceTypeStable]))}, nil
 	}
 	var issues []Issue
 	for resourceName, expectedQuantity := range instanceType.Capacity {
 		nodeQuantity, ok := node.Status.Capacity[resourceName]
 		if !ok && !expectedQuantity.IsZero() {
-			issues = append(issues, Issue(fmt.Sprintf("Expected resource %s not found", resourceName)))
+			issues = append(issues, Issue(fmt.Sprintf("expected resource %s not found", resourceName)))
 			continue
 		}
 
 		pct := nodeQuantity.AsApproximateFloat64() / expectedQuantity.AsApproximateFloat64()
 		if pct < 0.90 {
-			issues = append(issues, Issue(fmt.Sprintf("Expected %s of resource %s, but found %s (%0.1f%% of expected)", expectedQuantity.String(),
+			issues = append(issues, Issue(fmt.Sprintf("expected %s of resource %s, but found %s (%0.1f%% of expected)", expectedQuantity.String(),
 				resourceName, nodeQuantity.String(), pct*100)))
 		}
 	}
