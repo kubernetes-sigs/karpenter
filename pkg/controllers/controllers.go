@@ -22,9 +22,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	"github.com/aws/karpenter-core/pkg/controllers/consistency"
 	"github.com/aws/karpenter-core/pkg/controllers/counter"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
-	"github.com/aws/karpenter-core/pkg/controllers/inflightchecks"
 	metricspod "github.com/aws/karpenter-core/pkg/controllers/metrics/pod"
 	metricsprovisioner "github.com/aws/karpenter-core/pkg/controllers/metrics/provisioner"
 	metricsstate "github.com/aws/karpenter-core/pkg/controllers/metrics/state"
@@ -69,6 +69,6 @@ func NewControllers(
 		metricspod.NewController(kubeClient),
 		metricsprovisioner.NewController(kubeClient),
 		counter.NewController(kubeClient, cluster),
-		inflightchecks.NewController(clock, kubeClient, recorder, cloudProvider),
+		consistency.NewController(clock, kubeClient, recorder, cloudProvider),
 	}
 }

@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package inflightchecks
+package consistency
 
 import (
 	"context"
@@ -51,7 +51,7 @@ func (t *Termination) Check(ctx context.Context, node *v1.Node) ([]Issue, error)
 	}
 	var issues []Issue
 	if pdb, ok := pdbs.CanEvictPods(pods); !ok {
-		issues = append(issues, Issue(fmt.Sprintf("Can't drain node, PDB %s is blocking evictions", pdb)))
+		issues = append(issues, Issue(fmt.Sprintf("can't drain node, PDB %s is blocking evictions", pdb)))
 	}
 	return issues, nil
 }

@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package inflightchecks_test
+package consistency_test
 
 import (
 	"context"
@@ -35,7 +35,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
-	"github.com/aws/karpenter-core/pkg/controllers/inflightchecks"
+	"github.com/aws/karpenter-core/pkg/controllers/consistency"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
@@ -43,7 +43,7 @@ import (
 )
 
 var ctx context.Context
-var inflightController controller.Controller
+var consistencyController controller.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
 var cp *fake.CloudProvider
@@ -65,7 +65,7 @@ var _ = BeforeSuite(func() {
 	ctx = settings.ToContext(ctx, test.Settings())
 	cp = &fake.CloudProvider{}
 	recorder = test.NewEventRecorder()
-	inflightController = inflightchecks.NewController(fakeClock, env.Client, recorder, cp)
+	consistencyController = consistency.NewController(fakeClock, env.Client, recorder, cp)
 })
 
 var _ = AfterSuite(func() {
@@ -124,8 +124,8 @@ var _ = Describe("Controller", func() {
 			}
 			ExpectApplied(ctx, env.Client, provisioner, machine, node)
 			fakeClock.Step(2 * time.Hour)
-			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(node))
-			Expect(recorder.DetectedEvent("Expected resource \"fake.com/vendor-a\" didn't register on the node")).To(BeTrue())
+			ExpectReconcileSucceeded(ctx, consistencyController, client.ObjectKeyFromObject(node))
+			Expect(recorder.DetectedEvent("expected resource \"fake.com/vendor-a\" didn't register on the node")).To(BeTrue())
 		})
 		It("should detect issues with nodes that have a startup taint which isn't removed", func() {
 			provisioner.Spec.StartupTaints = []v1.Taint{
@@ -160,8 +160,8 @@ var _ = Describe("Controller", func() {
 			})
 			ExpectApplied(ctx, env.Client, provisioner, machine, node)
 			fakeClock.Step(2 * time.Hour)
-			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(node))
-			Expect(recorder.DetectedEvent("Startup taint \"my.startup.taint:NoSchedule\" is still on the node")).To(BeTrue())
+			ExpectReconcileSucceeded(ctx, consistencyController, client.ObjectKeyFromObject(node))
+			Expect(recorder.DetectedEvent("startup taint \"my.startup.taint:NoSchedule\" is still on the node")).To(BeTrue())
 		})
 	})
 
@@ -193,8 +193,8 @@ var _ = Describe("Controller", func() {
 			ExpectApplied(ctx, env.Client, provisioner, machine, node, p, pdb)
 			ExpectManualBinding(ctx, env.Client, p, node)
 			_ = env.Client.Delete(ctx, node)
-			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(node))
-			Expect(recorder.DetectedEvent(fmt.Sprintf("Can't drain node, PDB %s/%s is blocking evictions", pdb.Namespace, pdb.Name))).To(BeTrue())
+			ExpectReconcileSucceeded(ctx, consistencyController, client.ObjectKeyFromObject(node))
+			Expect(recorder.DetectedEvent(fmt.Sprintf("can't drain node, PDB %s/%s is blocking evictions", pdb.Namespace, pdb.Name))).To(BeTrue())
 		})
 	})
 
@@ -223,8 +223,8 @@ var _ = Describe("Controller", func() {
 				v1.ResourcePods:   resource.MustParse("10"),
 			}
 			ExpectApplied(ctx, env.Client, provisioner, machine, node)
-			ExpectReconcileSucceeded(ctx, inflightController, client.ObjectKeyFromObject(node))
-			Expect(recorder.DetectedEvent("Expected 128Gi of resource memory, but found 64Gi (50.0% of expected)")).To(BeTrue())
+			ExpectReconcileSucceeded(ctx, consistencyController, client.ObjectKeyFromObject(node))
+			Expect(recorder.DetectedEvent("expected 128Gi of resource memory, but found 64Gi (50.0% of expected)")).To(BeTrue())
 		})
 	})
 })
