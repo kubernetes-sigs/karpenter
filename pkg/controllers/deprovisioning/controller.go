@@ -57,6 +57,7 @@ type Controller struct {
 
 // pollingPeriod that we inspect cluster to look for opportunities to deprovision
 const pollingPeriod = 10 * time.Second
+const immediately = time.Millisecond
 
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 
@@ -133,14 +134,14 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 			continue
 		}
 		if cmd.action == actionRetry {
-			return reconcile.Result{Requeue: true}, nil
+			return reconcile.Result{RequeueAfter: immediately}, nil
 		}
 
 		// Attempt to deprovision
 		if err := c.executeCommand(ctx, d, cmd); err != nil {
 			return reconcile.Result{}, fmt.Errorf("deprovisioning candidates, %w", err)
 		}
-		return reconcile.Result{Requeue: true}, nil
+		return reconcile.Result{RequeueAfter: immediately}, nil
 	}
 
 	if !isConsolidated {
