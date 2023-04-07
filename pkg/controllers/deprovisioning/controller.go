@@ -110,17 +110,20 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	// with making any scheduling decision off of our state nodes. Otherwise, we have the potential to make
 	// a scheduling decision based on a smaller subset of nodes in our cluster state than actually exist.
 	if !c.cluster.Synced(ctx) {
+		logging.FromContext(ctx).Debugf("waiting for in-memory cluster state to sync before deprovisioning")
 		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}
 	// Attempt different deprovisioning methods. We'll only let one method perform an action
 	isConsolidated := c.cluster.Consolidated()
 	for _, d := range c.deprovisioners {
+		ctx = context.WithValue(ctx, "deprovisioner", d.String())
 		candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.clock, c.cloudProvider, d.ShouldDeprovision)
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("determining candidates, %w", err)
 		}
 		// If there are no candidate nodes, move to the next deprovisioner
 		if len(candidates) == 0 {
+			logging.FromContext(ctx).With("deprovisioner", ctx.Value("deprovisioner")).Debugf("found no deprovisionable nodes")
 			continue
 		}
 
@@ -153,7 +156,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 
 func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, command Command) error {
 	deprovisioningActionsPerformedCounter.With(prometheus.Labels{"action": fmt.Sprintf("%s/%s", d, command.action)}).Add(1)
-	logging.FromContext(ctx).Infof("deprovisioning via %s %s", d, command)
+	logging.FromContext(ctx).With("deprovisioner", ctx.Value("deprovisioner")).Infof("deprovisioning via %s %s", d, command)
 
 	reason := fmt.Sprintf("%s/%s", d, command.action)
 	if command.action == actionReplace {
@@ -274,7 +277,7 @@ func (c *Controller) waitForDeletion(ctx context.Context, node *v1.Node) {
 		return fmt.Errorf("expected node to be not found")
 	}, waitRetryOptions...,
 	); err != nil {
-		logging.FromContext(ctx).Errorf("Waiting on machine deletion, %s", err)
+		logging.FromContext(ctx).With("deprovisioner", ctx.Value("deprovisioner")).Errorf("Waiting on machine deletion, %s", err)
 	}
 }
 

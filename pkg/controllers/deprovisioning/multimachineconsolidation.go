@@ -21,6 +21,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
+	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -41,6 +42,7 @@ func NewMultiMachineConsolidation(clk clock.Clock, cluster *state.Cluster, kubeC
 
 func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	if m.cluster.Consolidated() {
+		logging.FromContext(ctx).Debugf("skipping multi node consolidation since cluster is consolidated")
 		return Command{action: actionDoNothing}, nil
 	}
 	candidates, err := m.sortAndFilterCandidates(ctx, candidates)

@@ -42,6 +42,7 @@ func NewSingleMachineConsolidation(clk clock.Clock, cluster *state.Cluster, kube
 // nolint:gocyclo
 func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	if c.cluster.Consolidated() {
+		logging.FromContext(ctx).Debugf("skipping single node consolidation since cluster is consolidated")
 		return Command{action: actionDoNothing}, nil
 	}
 	candidates, err := c.sortAndFilterCandidates(ctx, candidates)
