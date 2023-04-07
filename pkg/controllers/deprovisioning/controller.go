@@ -156,7 +156,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 
 func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, command Command) error {
 	deprovisioningActionsPerformedCounter.With(prometheus.Labels{"action": fmt.Sprintf("%s/%s", d, command.action)}).Add(1)
-	logging.FromContext(ctx).With("deprovisioner", ctx.Value("deprovisioner")).Infof("deprovisioning via %s %s", d, command)
+	logging.FromContext(ctx).Infof("deprovisioning via %s %s", d, command)
 
 	reason := fmt.Sprintf("%s/%s", d, command.action)
 	if command.action == actionReplace {
@@ -277,7 +277,7 @@ func (c *Controller) waitForDeletion(ctx context.Context, node *v1.Node) {
 		return fmt.Errorf("expected node to be not found")
 	}, waitRetryOptions...,
 	); err != nil {
-		logging.FromContext(ctx).With("deprovisioner", ctx.Value("deprovisioner")).Errorf("Waiting on machine deletion, %s", err)
+		logging.FromContext(ctx).Errorf("Waiting on machine deletion, %s", err)
 	}
 }
 
