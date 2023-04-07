@@ -47,6 +47,18 @@ func Terminating(node *v1.Node, reason string) []events.Event {
 	}
 }
 
+func Computing(deprovisioner string) []events.Event {
+	return []events.Event{
+		{
+			Type:           v1.EventTypeNormal,
+			Reason:         "ComputingDeprovisioning",
+			Message:        fmt.Sprintf("Computing deprovisioning for %s", deprovisioner),
+			DedupeValues:   []string{deprovisioner},
+			DedupeTimeout:  10 * time.Second,
+		},
+	}
+}
+
 func Launching(node *v1.Node, reason string) events.Event {
 	return events.Event{
 		InvolvedObject: node,

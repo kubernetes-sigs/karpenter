@@ -117,6 +117,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	isConsolidated := c.cluster.Consolidated()
 	for _, d := range c.deprovisioners {
 		ctx = context.WithValue(ctx, "deprovisioner", d.String())
+		c.recorder.Publish(deprovisioningevents.Computing(d.String())...)
 		candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.clock, c.cloudProvider, d.ShouldDeprovision)
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("determining candidates, %w", err)
