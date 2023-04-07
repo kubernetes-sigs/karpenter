@@ -103,7 +103,7 @@ type KubeletConfiguration struct {
 	ImageGCLowThresholdPercent *int32 `json:"imageGCLowThresholdPercent,omitempty"`
 	// CPUCFSQuota enables CPU CFS quota enforcement for containers that specify CPU limits.
 	// +optional
-	CPUCFSQuota bool `json:"cpuCFSQuota,omitempty"`
+	CPUCFSQuota *bool `json:"cpuCFSQuota,omitempty"`
 }
 
 type MachineTemplateRef struct {
