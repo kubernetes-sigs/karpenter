@@ -92,7 +92,7 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 	}
 
 	if err := c.cloudProvider.Delete(ctx, machineutil.NewFromNode(node)); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
-		return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
+		return reconcile.Result{}, fmt.Errorf("deprovisioning cloudprovider instance, %w", err)
 	}
 	return reconcile.Result{}, c.removeFinalizer(ctx, node)
 }

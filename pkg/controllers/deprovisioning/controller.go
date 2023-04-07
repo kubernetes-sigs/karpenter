@@ -145,6 +145,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 
 	if !isConsolidated {
 		// Mark cluster as consolidated, only if the deprovisioners ran and were not able to perform any work.
+		logging.FromContext(ctx).Info("cluster is consolidated, nothing to do")
 		c.cluster.SetConsolidated(true)
 	}
 	// All deprovisioners did nothing, so return nothing to do
@@ -165,13 +166,13 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 	}
 
 	for _, candidate := range command.candidates {
-		c.recorder.Publish(deprovisioningevents.Terminating(candidate.Node, command.String())...)
+		c.recorder.Publish(deprovisioningevents.Deprovisioned(candidate.Node, command.String())...)
 
 		if err := c.kubeClient.Delete(ctx, candidate.Node); err != nil {
 			if errors.IsNotFound(err) {
 				continue
 			}
-			logging.FromContext(ctx).Errorf("terminating machine, %s", err)
+			logging.FromContext(ctx).Errorf("deprovisioning machine, %s", err)
 		} else {
 			metrics.NodesTerminatedCounter.With(prometheus.Labels{
 				metrics.ReasonLabel:      reason,

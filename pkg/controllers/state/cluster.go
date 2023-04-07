@@ -79,10 +79,16 @@ func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudPro
 // have the same representation in the cluster state. This is to ensure that our view
 // of the cluster is as close to correct as it can be when we begin to perform operations
 // utilizing the cluster state as our source of truth
-func (c *Cluster) Synced(ctx context.Context) bool {
+func (c *Cluster) Synced(ctx context.Context) (synced bool) {
+	defer func() {
+		if !synced {
+			logging.FromContext(ctx).Error("cluster cache is not synchronized")
+		}
+	}()
+
 	nodeList := &v1.NodeList{}
 	if err := c.kubeClient.List(ctx, nodeList); err != nil {
-		logging.FromContext(ctx).Errorf("checking cluster state sync, %v", err)
+		logging.FromContext(ctx).Errorf("listing nodes for cluster sync, %v", err)
 		return false
 	}
 	c.mu.RLock()

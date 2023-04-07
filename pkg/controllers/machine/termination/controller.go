@@ -88,7 +88,7 @@ func (c *Controller) Finalize(ctx context.Context, machine *v1alpha5.Machine) (r
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", machine.Labels[v1alpha5.ProvisionerNameLabelKey], "provider-id", machine.Status.ProviderID))
 	if machine.Status.ProviderID != "" {
 		if err := c.cloudProvider.Delete(ctx, machine); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
-			return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
+			return reconcile.Result{}, fmt.Errorf("deprovisioning cloudprovider instance, %w", err)
 		}
 	}
 	controllerutil.RemoveFinalizer(machine, v1alpha5.TerminationFinalizer)

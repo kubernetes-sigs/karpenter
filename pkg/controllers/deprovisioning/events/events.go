@@ -35,25 +35,25 @@ func Blocked(node *v1.Node, reason string) []events.Event {
 	}
 }
 
-func Terminating(node *v1.Node, reason string) []events.Event {
+func Deprovisioned(node *v1.Node, message string) []events.Event {
 	return []events.Event{
 		{
 			InvolvedObject: node,
 			Type:           v1.EventTypeNormal,
-			Reason:         "DeprovisioningTerminating",
-			Message:        fmt.Sprintf("Deprovisioning node via %s", reason),
-			DedupeValues:   []string{node.Name, reason},
+			Reason:         "Deprovisioned",
+			Message:        message,
+			DedupeValues:   []string{node.Name, message},
 		},
 	}
 }
 
-func Launching(node *v1.Node, reason string) events.Event {
+func Launched(node *v1.Node, message string) events.Event {
 	return events.Event{
 		InvolvedObject: node,
 		Type:           v1.EventTypeNormal,
-		Reason:         "DeprovisioningLaunching",
-		Message:        fmt.Sprintf("Launching node for %s", reason),
-		DedupeValues:   []string{node.Name, reason},
+		Reason:         "DeprovisioningLaunched",
+		Message:        fmt.Sprintf("Launched replacement node for %s", message),
+		DedupeValues:   []string{node.Name, message},
 	}
 }
 
@@ -61,7 +61,7 @@ func WaitingOnReadiness(node *v1.Node) events.Event {
 	return events.Event{
 		InvolvedObject: node,
 		Type:           v1.EventTypeNormal,
-		Reason:         "DeprovisioningWaitingReadiness",
+		Reason:         "DeprovisioningWaiting",
 		Message:        "Waiting on readiness to continue deprovisioning",
 		DedupeValues:   []string{node.Name},
 	}
@@ -71,19 +71,19 @@ func WaitingOnDeletion(node *v1.Node) events.Event {
 	return events.Event{
 		InvolvedObject: node,
 		Type:           v1.EventTypeNormal,
-		Reason:         "DeprovisioningWaitingDeletion",
+		Reason:         "DeprovisioningWaiting",
 		Message:        "Waiting on deletion to continue deprovisioning",
 		DedupeValues:   []string{node.Name},
 	}
 }
 
-func Unconsolidatable(node *v1.Node, reason string) []events.Event {
+func Unconsolidatable(node *v1.Node, message string) []events.Event {
 	return []events.Event{
 		{
 			InvolvedObject: node,
 			Type:           v1.EventTypeNormal,
 			Reason:         "Unconsolidatable",
-			Message:        reason,
+			Message:        message,
 			DedupeValues:   []string{node.Name},
 			DedupeTimeout:  time.Minute * 15,
 		},
