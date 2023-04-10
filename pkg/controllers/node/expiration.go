@@ -65,5 +65,6 @@ func (e *Expiration) Reconcile(ctx context.Context, provisioner *v1alpha5.Provis
 	}
 
 	// If the node isn't expired and doesn't have annotation, return.
-	return reconcile.Result{}, nil
+	// Use t.Sub(t.Now()) instead of time.Now() to ensure we're using the injected clock.
+	return reconcile.Result{RequeueAfter: utilsnode.GetExpirationTime(node, provisioner).Sub(e.clock.Now())}, nil
 }
