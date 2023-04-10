@@ -50,7 +50,7 @@ func (d *Drift) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner
 	if !settings.FromContext(ctx).DriftEnabled {
 		if val == v1alpha5.VoluntaryDisruptionDriftedAnnotationValue {
 			delete(node.Annotations, v1alpha5.VoluntaryDisruptionAnnotationKey)
-			logging.FromContext(ctx).Infof("removing drift annotation from node as drift has been disabled")
+			logging.FromContext(ctx).Debugf("removing drift annotation from node as drift has been disabled")
 		}
 		return reconcile.Result{}, nil
 	}
@@ -62,13 +62,13 @@ func (d *Drift) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner
 	// 2. Otherwise, if the node isn't drifted, but has the annotation, remove it.
 	if !drifted && hasAnnotation {
 		delete(node.Annotations, v1alpha5.VoluntaryDisruptionAnnotationKey)
-		logging.FromContext(ctx).Infof("removing drift annotation from node")
+		logging.FromContext(ctx).Debugf("removing drift annotation from node")
 		// 3. Finally, if the node is drifted, but doesn't have the annotation, add it.
 	} else if drifted && !hasAnnotation {
 		node.Annotations = lo.Assign(node.Annotations, map[string]string{
 			v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
 		})
-		logging.FromContext(ctx).Infof("annotating node as drifted")
+		logging.FromContext(ctx).Debugf("annotating node as drifted")
 	}
 
 	// Requeue after 5 minutes for the cache TTL
