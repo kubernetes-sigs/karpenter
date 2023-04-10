@@ -116,32 +116,13 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	// Attempt different deprovisioning methods. We'll only let one method perform an action
 	isConsolidated := c.cluster.Consolidated()
 	for _, d := range c.deprovisioners {
-		candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.clock, c.cloudProvider, d.ShouldDeprovision)
+		success, err := c.deprovision(ctx, d)
 		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("determining candidates, %w", err)
+			logging.FromContext(ctx).Errorf("Failed during %q, %s", d, err)
 		}
-		// If there are no candidate nodes, move to the next deprovisioner
-		if len(candidates) == 0 {
-			continue
-		}
-
-		// Determine the deprovisioning action
-		cmd, err := d.ComputeCommand(ctx, candidates...)
-		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("computing deprovisioning decision, %w", err)
-		}
-		if cmd.action == actionDoNothing {
-			continue
-		}
-		if cmd.action == actionRetry {
+		if success {
 			return reconcile.Result{RequeueAfter: immediately}, nil
 		}
-
-		// Attempt to deprovision
-		if err := c.executeCommand(ctx, d, cmd); err != nil {
-			return reconcile.Result{}, fmt.Errorf("deprovisioning candidates, %w", err)
-		}
-		return reconcile.Result{RequeueAfter: immediately}, nil
 	}
 
 	if !isConsolidated {
@@ -150,6 +131,33 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	}
 	// All deprovisioners did nothing, so return nothing to do
 	return reconcile.Result{RequeueAfter: pollingPeriod}, nil
+}
+
+func (c *Controller) deprovision(ctx context.Context, deprovisioner Deprovisioner) (bool, error) {
+	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.clock, c.cloudProvider, deprovisioner.ShouldDeprovision)
+	if err != nil {
+		return false, fmt.Errorf("determining candidates, %w", err)
+	}
+	// If there are no candidate nodes, move to the next deprovisioner
+	if len(candidates) == 0 {
+		return false, nil
+	}
+
+	// Determine the deprovisioning action
+	cmd, err := deprovisioner.ComputeCommand(ctx, candidates...)
+	if err != nil {
+		return false, fmt.Errorf("computing deprovisioning decision, %w", err)
+	}
+	if cmd.action == actionDoNothing {
+		return false, nil
+	}
+
+	// Attempt to deprovision
+	if err := c.executeCommand(ctx, deprovisioner, cmd); err != nil {
+		return false, fmt.Errorf("deprovisioning candidates, %w", err)
+	}
+
+	return true, nil
 }
 
 func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, command Command) error {

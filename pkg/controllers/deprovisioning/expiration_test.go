@@ -26,7 +26,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -234,8 +233,7 @@ var _ = Describe("Expiration", func() {
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
-		Expect(err).To(HaveOccurred())
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
 		// We should have tried to create a new machine but failed to do so; therefore, we uncordoned the existing node

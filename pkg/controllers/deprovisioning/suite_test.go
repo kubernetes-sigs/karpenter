@@ -1744,7 +1744,8 @@ var _ = Describe("Consolidation TTL", func() {
 		ExpectNotFound(ctx, env.Client, node2)
 	})
 	It("should not consolidate if the action becomes invalid during the node TTL wait", func() {
-		pod := test.Pod()
+		// Only allow emptiness consolidation by using an instance type selector
+		pod := test.Pod(test.PodOptions{NodeSelector: map[string]string{v1.LabelInstanceType: node1.Labels[v1.LabelInstanceType]}})
 		ExpectApplied(ctx, env.Client, machine1, node1, prov, pod)
 
 		// inform cluster state about nodes and machines
