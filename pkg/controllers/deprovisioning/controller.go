@@ -53,6 +53,8 @@ type Controller struct {
 	clock          clock.Clock
 	cloudProvider  cloudprovider.CloudProvider
 	deprovisioners []Deprovisioner
+	mu             sync.Mutex
+	lastRun        map[string]time.Time
 }
 
 // pollingPeriod that we inspect cluster to look for opportunities to deprovision
@@ -81,6 +83,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 		provisioner:   provisioner,
 		recorder:      recorder,
 		cloudProvider: cp,
+		lastRun:       map[string]time.Time{},
 		deprovisioners: []Deprovisioner{
 			// Expire any machines that must be deleted, allowing their pods to potentially land on currently
 			NewExpiration(clk, kubeClient, cluster, provisioner, recorder),
@@ -107,15 +110,22 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) controller.Bu
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
+	// this won't catch if the reconcile loop hangs forever but it will catch other issues
+	c.logAbnormalRuns(ctx)
+	defer c.logAbnormalRuns(ctx)
+	c.recordRun("deprovisioning-loop")
+
 	// We need to ensure that our internal cluster state mechanism is synced before we proceed
 	// with making any scheduling decision off of our state nodes. Otherwise, we have the potential to make
 	// a scheduling decision based on a smaller subset of nodes in our cluster state than actually exist.
 	if !c.cluster.Synced(ctx) {
+		logging.FromContext(ctx).Debugf("waiting on cluster sync")
 		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}
 	// Attempt different deprovisioning methods. We'll only let one method perform an action
 	isConsolidated := c.cluster.Consolidated()
 	for _, d := range c.deprovisioners {
+		c.recordRun(fmt.Sprintf("%T", d))
 		success, err := c.deprovision(ctx, d)
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("deprovisioning via %q, %w", d, err)
@@ -312,4 +322,21 @@ func (c *Controller) setNodesUnschedulable(ctx context.Context, isUnschedulable 
 		}
 	}
 	return multiErr
+}
+
+func (c *Controller) recordRun(s string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastRun[s] = c.clock.Now()
+}
+
+func (c *Controller) logAbnormalRuns(ctx context.Context) {
+	const AbnormalTimeLimit = 15 * time.Minute
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for name, runTime := range c.lastRun {
+		if timeSince := c.clock.Since(runTime); timeSince > AbnormalTimeLimit {
+			logging.FromContext(ctx).Debugf("abnormal time between runs of %s = %s", name, timeSince)
+		}
+	}
 }
