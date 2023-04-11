@@ -65,12 +65,12 @@ func (r *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 	_, hasEmptinessTimestamp := n.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
 	if !empty && hasEmptinessTimestamp {
 		delete(n.Annotations, v1alpha5.EmptinessTimestampAnnotationKey)
-		logging.FromContext(ctx).Infof("removed emptiness TTL from node")
+		logging.FromContext(ctx).Debugf("removed emptiness TTL from node")
 	} else if empty && !hasEmptinessTimestamp {
 		n.Annotations = lo.Assign(n.Annotations, map[string]string{
 			v1alpha5.EmptinessTimestampAnnotationKey: r.clock.Now().Format(time.RFC3339),
 		})
-		logging.FromContext(ctx).Infof("added TTL to empty node")
+		logging.FromContext(ctx).Debugf("added TTL to empty node")
 	}
 
 	// Short requeue result so that we requeue to check for emptiness when the node nomination time ends

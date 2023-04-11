@@ -46,24 +46,27 @@ func (e *Expiration) Reconcile(ctx context.Context, provisioner *v1alpha5.Provis
 	if provisioner.Spec.TTLSecondsUntilExpired == nil {
 		if val == v1alpha5.VoluntaryDisruptionExpiredAnnotationValue {
 			delete(node.Annotations, v1alpha5.VoluntaryDisruptionAnnotationKey)
-			logging.FromContext(ctx).Infof("removing expiration annotation from node as expiration has been disabled")
+			logging.FromContext(ctx).Debugf("removing expiration annotation from node as expiration has been disabled")
 		}
 		return reconcile.Result{}, nil
 	}
 
-	// 2. Otherwise, if the node isn't expired, but has the annotation, remove it.
+	// 2. Otherwise, if the node is expired, but doesn't have the annotation, add it.
 	expired := utilsnode.IsExpired(node, e.clock, provisioner)
-	if !expired && hasAnnotation {
-		delete(node.Annotations, v1alpha5.VoluntaryDisruptionAnnotationKey)
-		logging.FromContext(ctx).Infof("removing expiration annotation from node")
-		// 3. Finally, if the node is expired, but doesn't have the annotation, add it.
-	} else if expired && !hasAnnotation {
+	if expired && !hasAnnotation {
 		node.Annotations = lo.Assign(node.Annotations, map[string]string{
 			v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionExpiredAnnotationValue,
 		})
-		logging.FromContext(ctx).Infof("annotating node as expired")
+		logging.FromContext(ctx).Debugf("annotating node as expired")
+		return reconcile.Result{}, nil
+	}
+	// 3. Finally, if the node isn't expired, but has the annotation, remove it.
+	if !expired && hasAnnotation {
+		delete(node.Annotations, v1alpha5.VoluntaryDisruptionAnnotationKey)
+		logging.FromContext(ctx).Debugf("removing expiration annotation from node")
 	}
 
 	// If the node isn't expired and doesn't have annotation, return.
-	return reconcile.Result{}, nil
+	// Use t.Sub(time.Now()) instead of time.Until() to ensure we're using the injected clock.
+	return reconcile.Result{RequeueAfter: utilsnode.GetExpirationTime(node, provisioner).Sub(e.clock.Now())}, nil
 }
