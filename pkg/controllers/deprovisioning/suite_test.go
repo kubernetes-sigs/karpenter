@@ -1605,7 +1605,8 @@ var _ = Describe("Consolidation TTL", func() {
 			defer GinkgoRecover()
 			defer wg.Done()
 			defer finished.Store(true)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
+			Expect(err).To(HaveOccurred())
 		}()
 
 		// wait for the deprovisioningController to block on the validation timeout
@@ -1744,8 +1745,7 @@ var _ = Describe("Consolidation TTL", func() {
 		ExpectNotFound(ctx, env.Client, node2)
 	})
 	It("should not consolidate if the action becomes invalid during the node TTL wait", func() {
-		// Only allow emptiness consolidation by using an instance type selector
-		pod := test.Pod(test.PodOptions{NodeSelector: map[string]string{v1.LabelInstanceType: node1.Labels[v1.LabelInstanceType]}})
+		pod := test.Pod()
 		ExpectApplied(ctx, env.Client, machine1, node1, prov, pod)
 
 		// inform cluster state about nodes and machines
@@ -1758,7 +1758,8 @@ var _ = Describe("Consolidation TTL", func() {
 			defer GinkgoRecover()
 			defer wg.Done()
 			defer finished.Store(true)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
+			Expect(err).To(HaveOccurred())
 		}()
 
 		// wait for the deprovisioningController to block on the validation timeout

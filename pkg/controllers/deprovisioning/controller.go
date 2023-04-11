@@ -118,7 +118,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	for _, d := range c.deprovisioners {
 		success, err := c.deprovision(ctx, d)
 		if err != nil {
-			logging.FromContext(ctx).Errorf("Failed during %q, %s", d, err)
+			return reconcile.Result{}, fmt.Errorf("deprovisioning via %q, %w", d, err)
 		}
 		if success {
 			return reconcile.Result{RequeueAfter: immediately}, nil
