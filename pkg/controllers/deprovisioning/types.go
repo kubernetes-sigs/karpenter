@@ -127,7 +127,6 @@ type action byte
 const (
 	actionDelete action = iota
 	actionReplace
-	actionRetry
 	actionDoNothing
 )
 
@@ -139,9 +138,6 @@ func (a action) String() string {
 	// Deprovisioning action with replacement machines
 	case actionReplace:
 		return "replace"
-	// Deprovisioning failed for a retryable reason
-	case actionRetry:
-		return "retry"
 	case actionDoNothing:
 		return "do nothing"
 	default:
