@@ -92,7 +92,6 @@ func (e *Expiration) ComputeCommand(ctx context.Context, nodes ...*Candidate) (C
 	}); len(empty) > 0 {
 		return Command{
 			candidates: empty,
-			action:     actionDelete,
 		}, nil
 	}
 
@@ -115,11 +114,10 @@ func (e *Expiration) ComputeCommand(ctx context.Context, nodes ...*Candidate) (C
 			With("delay", time.Since(node.GetExpirationTime(candidates[0].Node, candidates[0].provisioner))).Infof("triggering termination for expired node after TTL")
 		return Command{
 			candidates:   []*Candidate{candidate},
-			action:       actionReplace,
 			replacements: results.NewMachines,
 		}, nil
 	}
-	return Command{action: actionDoNothing}, nil
+	return Command{}, nil
 }
 
 // String is the string representation of the deprovisioner

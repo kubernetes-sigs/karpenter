@@ -42,7 +42,7 @@ func NewSingleMachineConsolidation(clk clock.Clock, cluster *state.Cluster, kube
 // nolint:gocyclo
 func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	if c.cluster.Consolidated() {
-		return Command{action: actionDoNothing}, nil
+		return Command{}, nil
 	}
 	candidates, err := c.sortAndFilterCandidates(ctx, candidates)
 	if err != nil {
@@ -57,7 +57,7 @@ func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 			logging.FromContext(ctx).Errorf("computing consolidation %s", err)
 			continue
 		}
-		if cmd.action == actionDoNothing {
+		if len(cmd.candidates) == 0 {
 			continue
 		}
 
@@ -70,9 +70,9 @@ func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 			return Command{}, fmt.Errorf("command is no longer valid, %s", cmd)
 		}
 
-		if cmd.action == actionReplace || cmd.action == actionDelete {
+		if len(cmd.candidates) > 0 {
 			return cmd, nil
 		}
 	}
-	return Command{action: actionDoNothing}, nil
+	return Command{}, nil
 }
