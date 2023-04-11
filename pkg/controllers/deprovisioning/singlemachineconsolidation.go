@@ -50,7 +50,6 @@ func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 	}
 
 	v := NewValidation(consolidationTTL, c.clock, c.cluster, c.kubeClient, c.provisioner, c.cloudProvider, c.recorder)
-	var failedValidation bool
 	for _, candidate := range candidates {
 		// compute a possible consolidation option
 		cmd, err := c.computeConsolidation(ctx, candidate)
@@ -58,7 +57,7 @@ func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 			logging.FromContext(ctx).Errorf("computing consolidation %s", err)
 			continue
 		}
-		if cmd.action == actionDoNothing || cmd.action == actionRetry {
+		if cmd.action == actionDoNothing {
 			continue
 		}
 
@@ -68,18 +67,12 @@ func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 			continue
 		}
 		if !isValid {
-			failedValidation = true
-			continue
+			return Command{}, fmt.Errorf("command is no longer valid, %s", cmd)
 		}
 
 		if cmd.action == actionReplace || cmd.action == actionDelete {
 			return cmd, nil
 		}
-	}
-
-	// we failed validation, so we need to retry
-	if failedValidation {
-		return Command{action: actionRetry}, nil
 	}
 	return Command{action: actionDoNothing}, nil
 }

@@ -1605,7 +1605,8 @@ var _ = Describe("Consolidation TTL", func() {
 			defer GinkgoRecover()
 			defer wg.Done()
 			defer finished.Store(true)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
+			Expect(err).To(HaveOccurred())
 		}()
 
 		// wait for the deprovisioningController to block on the validation timeout
@@ -1757,7 +1758,8 @@ var _ = Describe("Consolidation TTL", func() {
 			defer GinkgoRecover()
 			defer wg.Done()
 			defer finished.Store(true)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
+			Expect(err).To(HaveOccurred())
 		}()
 
 		// wait for the deprovisioningController to block on the validation timeout
