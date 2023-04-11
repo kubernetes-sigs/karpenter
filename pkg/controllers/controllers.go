@@ -25,9 +25,9 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/consistency"
 	"github.com/aws/karpenter-core/pkg/controllers/counter"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
+	metricsnode "github.com/aws/karpenter-core/pkg/controllers/metrics/node"
 	metricspod "github.com/aws/karpenter-core/pkg/controllers/metrics/pod"
 	metricsprovisioner "github.com/aws/karpenter-core/pkg/controllers/metrics/provisioner"
-	metricsstate "github.com/aws/karpenter-core/pkg/controllers/metrics/state"
 	"github.com/aws/karpenter-core/pkg/controllers/node"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -57,7 +57,7 @@ func NewControllers(
 	terminator := terminator.NewTerminator(clock, kubeClient, terminator.NewEvictionQueue(ctx, kubernetesInterface.CoreV1(), recorder))
 	return []controller.Controller{
 		provisioner,
-		metricsstate.NewController(cluster),
+		metricsnode.NewController(cluster),
 		deprovisioning.NewController(clock, kubeClient, provisioner, cloudProvider, recorder, cluster),
 		provisioning.NewController(kubeClient, provisioner, recorder),
 		informer.NewDaemonSetController(kubeClient, cluster),

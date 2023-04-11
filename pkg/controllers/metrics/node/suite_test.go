@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package metrics_test
+package node_test
 
 import (
 	"context"
@@ -30,7 +30,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	metricsstate "github.com/aws/karpenter-core/pkg/controllers/metrics/state"
+	"github.com/aws/karpenter-core/pkg/controllers/metrics/node"
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
@@ -51,7 +51,7 @@ var fakeClock *clock.FakeClock
 var env *test.Environment
 var cluster *state.Cluster
 var nodeController controller.Controller
-var metricsStateController controller.Controller
+var nodeMetricController controller.Controller
 var cloudProvider *fake.CloudProvider
 var provisioner *v1alpha5.Provisioner
 
@@ -71,7 +71,7 @@ var _ = BeforeSuite(func() {
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	provisioner = test.Provisioner(test.ProvisionerOptions{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
 	nodeController = informer.NewNodeController(env.Client, cluster)
-	metricsStateController = metricsstate.NewController(cluster)
+	nodeMetricController = node.NewController(cluster)
 	ExpectApplied(ctx, env.Client, provisioner)
 })
 
@@ -91,7 +91,7 @@ var _ = Describe("Node Metrics", func() {
 		node := test.Node(test.NodeOptions{Allocatable: resources})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectReconcileSucceeded(ctx, metricsStateController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, nodeMetricController, types.NamespacedName{})
 
 		for k, v := range resources {
 			metric, found := FindMetricWithLabelValues("karpenter_nodes_allocatable", map[string]string{
@@ -112,7 +112,7 @@ var _ = Describe("Node Metrics", func() {
 		node := test.Node(test.NodeOptions{Allocatable: resources})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectReconcileSucceeded(ctx, metricsStateController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, nodeMetricController, types.NamespacedName{})
 
 		_, found := FindMetricWithLabelValues("karpenter_nodes_allocatable", map[string]string{
 			"node_name": node.GetName(),
@@ -121,7 +121,7 @@ var _ = Describe("Node Metrics", func() {
 
 		ExpectDeleted(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectReconcileSucceeded(ctx, metricsStateController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, nodeMetricController, types.NamespacedName{})
 
 		_, found = FindMetricWithLabelValues("karpenter_nodes_allocatable", map[string]string{
 			"node_name": node.GetName(),
