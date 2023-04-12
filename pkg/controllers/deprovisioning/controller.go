@@ -172,7 +172,7 @@ func (c *Controller) deprovision(ctx context.Context, deprovisioner Deprovisione
 
 func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, command Command) error {
 	action := lo.Ternary(len(command.replacements) > 0, "replace", "delete")
-	deprovisioningActionsPerformedCounter.With(prometheus.Labels{"action": fmt.Sprintf("%s/%s", d, action)}).Add(1)
+	deprovisioningActionsPerformedCounter.With(prometheus.Labels{"action": fmt.Sprintf("%s/%s", d, action)}).Inc()
 	logging.FromContext(ctx).Infof("deprovisioning via %s %s", d, action)
 
 	reason := fmt.Sprintf("%s/%s", d, action)
