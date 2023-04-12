@@ -106,7 +106,7 @@ func (c *consolidation) ShouldDeprovision(_ context.Context, cn *Candidate) bool
 func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	defer metrics.Measure(deprovisioningDurationHistogram.WithLabelValues("Replace/Delete"))()
 	// Run scheduling simulation to compute consolidation option
-	newMachines, allPodsScheduled, err := simulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, candidates...)
+	results, err := simulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, candidates...)
 	if err != nil {
 		// if a candidate node is now deleting, just retry
 		if errors.Is(err, errCandidateDeleting) {
@@ -116,16 +116,16 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	}
 
 	// if not all of the pods were scheduled, we can't do anything
-	if !allPodsScheduled {
+	if !results.AllPodsScheduled() {
 		// This method is used by multi-node consolidation as well, so we'll only report in the single node case
 		if len(candidates) == 1 {
-			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, "not all pods would schedule")...)
+			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, results.PodSchedulingErrors())...)
 		}
 		return Command{action: actionDoNothing}, nil
 	}
 
 	// were we able to schedule all the pods on the inflight candidates?
-	if len(newMachines) == 0 {
+	if len(results.NewMachines) == 0 {
 		return Command{
 			candidates: candidates,
 			action:     actionDelete,
@@ -133,9 +133,9 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	}
 
 	// we're not going to turn a single node into multiple candidates
-	if len(newMachines) != 1 {
+	if len(results.NewMachines) != 1 {
 		if len(candidates) == 1 {
-			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, fmt.Sprintf("can't remove without creating %d candidates", len(newMachines)))...)
+			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, fmt.Sprintf("can't remove without creating %d candidates", len(results.NewMachines)))...)
 		}
 		return Command{action: actionDoNothing}, nil
 	}
@@ -146,8 +146,8 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	if err != nil {
 		return Command{}, fmt.Errorf("getting offering price from candidate node, %w", err)
 	}
-	newMachines[0].InstanceTypeOptions = filterByPrice(newMachines[0].InstanceTypeOptions, newMachines[0].Requirements, nodesPrice)
-	if len(newMachines[0].InstanceTypeOptions) == 0 {
+	results.NewMachines[0].InstanceTypeOptions = filterByPrice(results.NewMachines[0].InstanceTypeOptions, results.NewMachines[0].Requirements, nodesPrice)
+	if len(results.NewMachines[0].InstanceTypeOptions) == 0 {
 		if len(candidates) == 1 {
 			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, "can't replace with a cheaper node")...)
 		}
@@ -166,7 +166,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	}
 
 	if allExistingAreSpot &&
-		newMachines[0].Requirements.Get(v1alpha5.LabelCapacityType).Has(v1alpha5.CapacityTypeSpot) {
+		results.NewMachines[0].Requirements.Get(v1alpha5.LabelCapacityType).Has(v1alpha5.CapacityTypeSpot) {
 		if len(candidates) == 1 {
 			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, "can't replace a spot node with a spot node")...)
 		}
@@ -177,15 +177,15 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	// assumption, that the spot variant will launch. We also need to add a requirement to the node to ensure that if
 	// spot capacity is insufficient we don't replace the node with a more expensive on-demand node.  Instead the launch
 	// should fail and we'll just leave the node alone.
-	ctReq := newMachines[0].Requirements.Get(v1alpha5.LabelCapacityType)
+	ctReq := results.NewMachines[0].Requirements.Get(v1alpha5.LabelCapacityType)
 	if ctReq.Has(v1alpha5.CapacityTypeSpot) && ctReq.Has(v1alpha5.CapacityTypeOnDemand) {
-		newMachines[0].Requirements.Add(scheduling.NewRequirement(v1alpha5.LabelCapacityType, v1.NodeSelectorOpIn, v1alpha5.CapacityTypeSpot))
+		results.NewMachines[0].Requirements.Add(scheduling.NewRequirement(v1alpha5.LabelCapacityType, v1.NodeSelectorOpIn, v1alpha5.CapacityTypeSpot))
 	}
 
 	return Command{
 		candidates:   candidates,
 		action:       actionReplace,
-		replacements: newMachines,
+		replacements: results.NewMachines,
 	}, nil
 }
 

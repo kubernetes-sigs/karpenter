@@ -86,7 +86,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, nodes ...*Candidate) (C
 
 	for _, candidate := range candidates {
 		// Check if we need to create any nodes.
-		newMachines, allPodsScheduled, err := simulateScheduling(ctx, e.kubeClient, e.cluster, e.provisioner, candidate)
+		results, err := simulateScheduling(ctx, e.kubeClient, e.cluster, e.provisioner, candidate)
 		if err != nil {
 			// if a candidate node is now deleting, just retry
 			if errors.Is(err, errCandidateDeleting) {
@@ -95,8 +95,8 @@ func (e *Expiration) ComputeCommand(ctx context.Context, nodes ...*Candidate) (C
 			return Command{}, err
 		}
 		// Log when all pods can't schedule, as the command will get executed immediately.
-		if !allPodsScheduled {
-			logging.FromContext(ctx).With("node", candidate.Name).Debugf("continuing to expire node after scheduling simulation failed to schedule all pods")
+		if !results.AllPodsScheduled() {
+			logging.FromContext(ctx).With("node", candidate.Name).Debugf("continuing to expire node after scheduling simulation failed to schedule all pods, %s", results.PodSchedulingErrors())
 		}
 
 		logging.FromContext(ctx).With("ttl", time.Duration(ptr.Int64Value(candidates[0].provisioner.Spec.TTLSecondsUntilExpired))*time.Second).
@@ -104,7 +104,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, nodes ...*Candidate) (C
 		return Command{
 			candidates:   []*Candidate{candidate},
 			action:       actionReplace,
-			replacements: newMachines,
+			replacements: results.NewMachines,
 		}, nil
 	}
 	return Command{action: actionDoNothing}, nil

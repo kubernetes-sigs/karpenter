@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -67,6 +68,7 @@ var cloudProvider *fake.CloudProvider
 var nodeStateController controller.Controller
 var machineStateController controller.Controller
 var fakeClock *clock.FakeClock
+var fakeRecorder *record.FakeRecorder
 var onDemandInstances []*cloudprovider.InstanceType
 var mostExpensiveInstance *cloudprovider.InstanceType
 var mostExpensiveOffering cloudprovider.Offering
@@ -84,10 +86,11 @@ var _ = BeforeSuite(func() {
 	ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: true}))
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
+	fakeRecorder = record.NewFakeRecorder(500)
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	machineStateController = informer.NewMachineController(env.Client, cluster)
-	provisioner = provisioning.NewProvisioner(env.Client, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster)
+	provisioner = provisioning.NewProvisioner(env.Client, env.KubernetesInterface.CoreV1(), events.NewRecorder(fakeRecorder), cloudProvider, cluster)
 })
 
 var _ = AfterSuite(func() {
@@ -98,6 +101,7 @@ var _ = BeforeEach(func() {
 	cloudProvider.CreateCalls = nil
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 	cloudProvider.AllowedCreateCalls = math.MaxInt
+	fakeRecorder.Events = make(chan string, 500) // clear the events
 	onDemandInstances = lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
 		for _, o := range i.Offerings.Available() {
 			if o.CapacityType == v1alpha5.CapacityTypeOnDemand {
@@ -121,7 +125,7 @@ var _ = BeforeEach(func() {
 	}
 	fakeClock.SetTime(time.Now())
 	cluster.SetConsolidated(false)
-	deprovisioningController = deprovisioning.NewController(fakeClock, env.Client, provisioner, cloudProvider, events.NewRecorder(&record.FakeRecorder{}), cluster)
+	deprovisioningController = deprovisioning.NewController(fakeClock, env.Client, provisioner, cloudProvider, events.NewRecorder(fakeRecorder), cluster)
 
 	// Reset Feature Flags to test defaults
 	ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: true}))
@@ -1051,6 +1055,49 @@ var _ = Describe("Delete Node", func() {
 		// but we expect to delete the machine with the fewest pods (machine 2) even though the pod has no ownerRefs
 		// and will not be recreated
 		ExpectNotFound(ctx, env.Client, node2)
+	})
+	It("won't delete node if it would require pods to schedule on an un-initialized node", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		pods := test.Pods(3, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}}})
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], machine1, node1, machine2, node2, prov)
+
+		// bind pods to node
+		ExpectManualBinding(ctx, env.Client, pods[0], node1)
+		ExpectManualBinding(ctx, env.Client, pods[1], node1)
+		ExpectManualBinding(ctx, env.Client, pods[2], node2)
+
+		// inform cluster state about nodes and machines, intentionally leaving node1 as not ready
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node2}, []*v1alpha5.Machine{machine1, machine2})
+
+		fakeClock.Step(10 * time.Minute)
+
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+		wg.Wait()
+
+		// shouldn't delete the node
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+		Expect(fakeRecorder.Events).To(HaveLen(1))
+		event := <-fakeRecorder.Events
+		Expect(strings.Contains(event, "not all pods would schedule")).To(BeTrue())
+		Expect(strings.Contains(event, "would schedule against a non-initialized node")).To(BeTrue())
 	})
 })
 

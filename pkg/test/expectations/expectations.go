@@ -18,6 +18,7 @@ package expectations
 import (
 	"context"
 	"fmt"
+	"log"
 	"reflect"
 	"sync"
 	"time"
@@ -265,9 +266,13 @@ func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c cli
 		ExpectAppliedWithOffset(offset+1, ctx, c, pod)
 	}
 	// TODO: Check the error on the provisioner scheduling round
-	machines, nodes, _ := provisioner.Schedule(ctx)
+	results, err := provisioner.Schedule(ctx)
 	bindings := Bindings{}
-	for _, m := range machines {
+	if err != nil {
+		log.Printf("error provisioning in test, %s", err)
+		return bindings
+	}
+	for _, m := range results.NewMachines {
 		// TODO: Check the error on the provisioner launch
 		name, err := provisioner.Launch(ctx, m, provisioning.WithReason(metrics.ProvisioningReason))
 		if err != nil {
@@ -277,7 +282,7 @@ func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c cli
 			bindings[pod] = &Binding{Node: ExpectNodeExistsWithOffset(offset+1, ctx, c, name)}
 		}
 	}
-	for _, node := range nodes {
+	for _, node := range results.ExistingNodes {
 		for _, pod := range node.Pods {
 			bindings[pod] = &Binding{Node: node.Node}
 		}
