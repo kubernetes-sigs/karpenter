@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/utils/clock"
@@ -55,6 +56,7 @@ const (
 type Operator struct {
 	manager.Manager
 
+	RESTConfig          *rest.Config
 	KubernetesInterface kubernetes.Interface
 	EventRecorder       events.Recorder
 	Clock               clock.Clock
@@ -101,7 +103,7 @@ func NewOperator() (context.Context, *Operator) {
 	ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
 
 	// Manager
-	mgr, err := controllerruntime.NewManager(config, controllerruntime.Options{
+	manager, err := controllerruntime.NewManager(config, controllerruntime.Options{
 		Logger:                     ignoreDebugEvents(zapr.NewLogger(logger.Desugar())),
 		LeaderElection:             opts.EnableLeaderElection,
 		LeaderElectionID:           "karpenter-leader-election",
@@ -118,18 +120,19 @@ func NewOperator() (context.Context, *Operator) {
 			return ctx
 		},
 	})
-	mgr = lo.Must(mgr, err, "failed to setup manager")
+	manager = lo.Must(manager, err, "failed to setup manager")
 	if opts.EnableProfiling {
-		registerPprof(mgr)
+		registerPprof(manager)
 	}
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.Pod{}, "spec.nodeName", func(o client.Object) []string {
+	lo.Must0(manager.GetFieldIndexer().IndexField(ctx, &v1.Pod{}, "spec.nodeName", func(o client.Object) []string {
 		return []string{o.(*v1.Pod).Spec.NodeName}
 	}), "failed to setup pod indexer")
 
 	return ctx, &Operator{
-		Manager:             mgr,
+		Manager:             manager,
+		RESTConfig:          config,
 		KubernetesInterface: kubernetesInterface,
-		EventRecorder:       events.NewRecorder(mgr.GetEventRecorderFor(appName)),
+		EventRecorder:       events.NewRecorder(manager.GetEventRecorderFor(appName)),
 		Clock:               clock.RealClock{},
 	}
 }
@@ -138,8 +141,8 @@ func (o *Operator) WithControllers(ctx context.Context, controllers ...corecontr
 	for _, c := range controllers {
 		lo.Must0(c.Builder(ctx, o.Manager).Complete(c), "failed to register controller")
 	}
-	lo.Must0(o.Manager.AddHealthzCheck("healthz", healthz.Ping), "failed to setup liveness probe")
-	lo.Must0(o.Manager.AddReadyzCheck("readyz", healthz.Ping), "failed to setup readiness probe")
+	lo.Must0(o.AddHealthzCheck("healthz", healthz.Ping), "failed to setup liveness probe")
+	lo.Must0(o.AddReadyzCheck("readyz", healthz.Ping), "failed to setup readiness probe")
 	return o
 }
 

@@ -26,14 +26,14 @@ func init() {
 }
 
 const (
-	checkLabel           = "check"
-	consistencySubsystem = "consistency"
+	checkLabel = "check"
+	subsystem  = "consistency"
 )
 
 var consistencyErrors = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Namespace: metrics.Namespace,
-		Subsystem: consistencySubsystem,
+		Subsystem: subsystem,
 		Name:      "errors",
 		Help:      "Number of consistency checks that have failed.",
 	},
