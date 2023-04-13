@@ -1295,6 +1295,49 @@ var _ = Describe("Delete Node", func() {
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(100))
 		ExpectNotFound(ctx, env.Client, consolidatableMachine, consolidatableNode)
 	})
+	It("won't delete node if it would require pods to schedule on an un-initialized node", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		pods := test.Pods(3, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}}})
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], machine1, node1, machine2, node2, prov)
+
+		// bind pods to node
+		ExpectManualBinding(ctx, env.Client, pods[0], node1)
+		ExpectManualBinding(ctx, env.Client, pods[1], node1)
+		ExpectManualBinding(ctx, env.Client, pods[2], node2)
+
+		// inform cluster state about nodes and machines, intentionally leaving node1 as not ready
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node2}, []*v1alpha5.Machine{machine1, machine2})
+
+		fakeClock.Step(10 * time.Minute)
+
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+		wg.Wait()
+
+		// shouldn't delete the node
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+		Expect(fakeRecorder.Events).To(HaveLen(1))
+		event := <-fakeRecorder.Events
+		Expect(strings.Contains(event, "not all pods would schedule")).To(BeTrue())
+		Expect(strings.Contains(event, "would schedule against a non-initialized node")).To(BeTrue())
+	})
 })
 
 var _ = Describe("Node Lifetime Consideration", func() {
