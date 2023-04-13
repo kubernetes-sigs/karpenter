@@ -17,7 +17,9 @@ package scheduling
 import (
 	"context"
 	"fmt"
+	"sort"
 
+	"github.com/samber/lo"
 	csitranslation "k8s.io/csi-translation-lib"
 	"knative.dev/pkg/logging"
 
@@ -28,6 +30,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/utils/pretty"
+)
+
+const (
+	IsDefaultStorageClassAnnotation = "storageclass.kubernetes.io/is-default-class"
 )
 
 // translator is a CSI Translator that translates in-tree plugin names to their out-of-tree CSI driver names
@@ -151,9 +157,14 @@ func (v *VolumeUsage) Validate(ctx context.Context, kubeClient client.Client, po
 	return result, nil
 }
 
+//nolint:gocyclo
 func (v *VolumeUsage) validate(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (volumes, error) {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("pod", pod.Name))
 	podPVCs := volumes{}
+	defaultStorageClassName, err := v.discoverDefaultStorageClassName(ctx, kubeClient)
+	if err != nil {
+		return nil, fmt.Errorf("discovering default storage class, %w", err)
+	}
 	for _, volume := range pod.Spec.Volumes {
 		ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("volume", volume.Name))
 		var pvcID string
@@ -166,11 +177,17 @@ func (v *VolumeUsage) validate(ctx context.Context, kubeClient client.Client, po
 			}
 			pvcID = fmt.Sprintf("%s/%s", pod.Namespace, volume.PersistentVolumeClaim.ClaimName)
 			storageClassName = pvc.Spec.StorageClassName
+			if storageClassName == nil || *storageClassName == "" {
+				storageClassName = defaultStorageClassName
+			}
 			volumeName = pvc.Spec.VolumeName
 		} else if volume.Ephemeral != nil {
 			// generated name per https://kubernetes.io/docs/concepts/storage/ephemeral-volumes/#persistentvolumeclaim-naming
 			pvcID = fmt.Sprintf("%s/%s-%s", pod.Namespace, pod.Name, volume.Name)
 			storageClassName = volume.Ephemeral.VolumeClaimTemplate.Spec.StorageClassName
+			if storageClassName == nil || *storageClassName == "" {
+				storageClassName = defaultStorageClassName
+			}
 			volumeName = volume.Ephemeral.VolumeClaimTemplate.Spec.VolumeName
 		} else {
 			continue
@@ -185,6 +202,26 @@ func (v *VolumeUsage) validate(ctx context.Context, kubeClient client.Client, po
 		}
 	}
 	return podPVCs, nil
+}
+
+func (v *VolumeUsage) discoverDefaultStorageClassName(ctx context.Context, kubeClient client.Client) (*string, error) {
+	storageClassList := &storagev1.StorageClassList{}
+	if err := kubeClient.List(ctx, storageClassList); err != nil {
+		return nil, err
+	}
+	// Find all StorageClasses that have the default annotation
+	defaults := lo.Filter(storageClassList.Items, func(sc storagev1.StorageClass, _ int) bool {
+		return sc.Annotations[IsDefaultStorageClassAnnotation] == "true"
+	})
+	if len(defaults) == 0 {
+		return nil, nil
+	}
+	// Sort the default StorageClasses by timestamp and take the newest one
+	// https://github.com/kubernetes/kubernetes/pull/110559
+	sort.Slice(defaults, func(i, j int) bool {
+		return defaults[i].CreationTimestamp.After(defaults[j].CreationTimestamp.Time)
+	})
+	return lo.ToPtr(defaults[0].Name), nil
 }
 
 // resolveDriver resolves the storage driver name in the following order:
