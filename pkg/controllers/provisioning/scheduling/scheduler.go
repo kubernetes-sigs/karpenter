@@ -15,6 +15,7 @@ limitations under the License.
 package scheduling
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sort"
@@ -94,7 +95,38 @@ type Scheduler struct {
 	kubeClient         client.Client
 }
 
-func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) ([]*Machine, []*ExistingNode, error) {
+// Results contains the results of the scheduling operation
+type Results struct {
+	NewMachines   []*Machine
+	ExistingNodes []*ExistingNode
+	PodErrors     map[*v1.Pod]error
+}
+
+func (r Results) AllPodsScheduled() bool {
+	return len(r.PodErrors) == 0
+}
+
+// PodSchedulingErrors creates a string that describes why pods wouldn't schedule that is suitable for presentation
+func (r Results) PodSchedulingErrors() string {
+	if len(r.PodErrors) == 0 {
+		return "No Pod Scheduling Errors"
+	}
+	var msg bytes.Buffer
+	fmt.Fprintf(&msg, "not all pods would schedule, ")
+	const MaxErrors = 5
+	numErrors := 0
+	for k, err := range r.PodErrors {
+		fmt.Fprintf(&msg, "%s/%s => %s ", k.Namespace, k.Name, err)
+		numErrors++
+		if numErrors >= MaxErrors {
+			fmt.Fprintf(&msg, " and %d other(s)", len(r.PodErrors)-MaxErrors)
+			break
+		}
+	}
+	return msg.String()
+}
+
+func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) (*Results, error) {
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
 	// issues including pods with affinity to another pod in the batch. We could topo-sort to solve this, but it wouldn't
 	// solve the problem of scheduling pods where a particular order is needed to prevent a max-skew violation. E.g. if we
@@ -130,7 +162,17 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) ([]*Machine, []*E
 	if !s.opts.SimulationMode {
 		s.recordSchedulingResults(ctx, pods, q.List(), errors)
 	}
-	return s.newMachines, s.existingNodes, nil
+	// clear any nil errors so we can know that len(PodErrors) == 0 => all pods scheduled
+	for k, v := range errors {
+		if v == nil {
+			delete(errors, k)
+		}
+	}
+	return &Results{
+		NewMachines:   s.newMachines,
+		ExistingNodes: s.existingNodes,
+		PodErrors:     errors,
+	}, nil
 }
 
 func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod, failedToSchedule []*v1.Pod, errors map[*v1.Pod]error) {

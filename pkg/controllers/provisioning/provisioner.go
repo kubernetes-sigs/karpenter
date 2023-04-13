@@ -124,14 +124,14 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 	}
 
 	// Schedule pods to potential nodes, exit if nothing to do
-	machines, _, err := p.Schedule(ctx)
+	results, err := p.Schedule(ctx)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	if len(machines) == 0 {
+	if len(results.NewMachines) == 0 {
 		return reconcile.Result{}, nil
 	}
-	_, err = p.LaunchMachines(ctx, machines, WithReason(metrics.ProvisioningReason), RecordPodNomination)
+	_, err = p.LaunchMachines(ctx, results.NewMachines, WithReason(metrics.ProvisioningReason), RecordPodNomination)
 	return reconcile.Result{}, err
 }
 
@@ -278,7 +278,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	return scheduler.NewScheduler(ctx, p.kubeClient, machines, provisionerList.Items, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, opts), nil
 }
 
-func (p *Provisioner) Schedule(ctx context.Context) ([]*scheduler.Machine, []*scheduler.ExistingNode, error) {
+func (p *Provisioner) Schedule(ctx context.Context) (*scheduler.Results, error) {
 	defer metrics.Measure(schedulingDuration)()
 
 	// We collect the nodes with their used capacities before we get the list of pending pods. This ensures that
@@ -295,7 +295,7 @@ func (p *Provisioner) Schedule(ctx context.Context) ([]*scheduler.Machine, []*sc
 	// Get pods, exit if nothing to do
 	pendingPods, err := p.GetPendingPods(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	// Get pods from nodes that are preparing for deletion
 	// We do this after getting the pending pods so that we undershoot if pods are
@@ -303,15 +303,16 @@ func (p *Provisioner) Schedule(ctx context.Context) ([]*scheduler.Machine, []*sc
 	// NOTE: The assumption is that these nodes are cordoned and no additional pods will schedule to them
 	deletingNodePods, err := nodes.Deleting().Pods(ctx, p.kubeClient)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	pods := append(pendingPods, deletingNodePods...)
+	// nothing to schedule, so just return success
 	if len(pods) == 0 {
-		return nil, nil, nil
+		return &scheduler.Results{}, nil
 	}
 	scheduler, err := p.NewScheduler(ctx, pods, nodes.Active(), scheduler.SchedulerOptions{})
 	if err != nil {
-		return nil, nil, fmt.Errorf("creating scheduler, %w", err)
+		return nil, fmt.Errorf("creating scheduler, %w", err)
 	}
 	return scheduler.Solve(ctx, pods)
 }

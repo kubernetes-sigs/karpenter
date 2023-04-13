@@ -124,11 +124,11 @@ func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidate
 		return false, nil
 	}
 
-	newMachines, allPodsScheduled, err := simulateScheduling(ctx, v.kubeClient, v.cluster, v.provisioner, candidates...)
+	results, err := simulateScheduling(ctx, v.kubeClient, v.cluster, v.provisioner, candidates...)
 	if err != nil {
 		return false, fmt.Errorf("simluating scheduling, %w", err)
 	}
-	if !allPodsScheduled {
+	if !results.AllPodsScheduled() {
 		return false, nil
 	}
 
@@ -138,7 +138,7 @@ func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidate
 	// len(newMachines) > 1, something in the cluster changed so that the candidates we were going to delete can no longer
 	//                    be deleted without producing more than one machine
 	// len(newMachines) == 1, as long as the machine looks like what we were expecting, this is valid
-	if len(newMachines) == 0 {
+	if len(results.NewMachines) == 0 {
 		if len(cmd.replacements) == 0 {
 			// scheduling produced zero new machines and we weren't expecting any, so this is valid.
 			return true, nil
@@ -149,7 +149,7 @@ func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidate
 	}
 
 	// we need more than one replacement machine which is never valid currently (all of our node replacement is m->1, never m->n)
-	if len(newMachines) > 1 {
+	if len(results.NewMachines) > 1 {
 		return false, nil
 	}
 
@@ -170,7 +170,7 @@ func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidate
 	// a 4xlarge and replace it with a 2xlarge. If things have changed and the scheduling simulation we just performed
 	// now says that we need to launch a 4xlarge. It's still launching the correct number of machines, but it's just
 	// as expensive or possibly more so we shouldn't validate.
-	if !instanceTypesAreSubset(cmd.replacements[0].InstanceTypeOptions, newMachines[0].InstanceTypeOptions) {
+	if !instanceTypesAreSubset(cmd.replacements[0].InstanceTypeOptions, results.NewMachines[0].InstanceTypeOptions) {
 		return false, nil
 	}
 

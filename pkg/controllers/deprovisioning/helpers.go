@@ -66,7 +66,7 @@ func filterCandidates(ctx context.Context, kubeClient client.Client, recorder ev
 
 //nolint:gocyclo
 func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
-	candidates ...*Candidate) (newMachines []*pscheduling.Machine, allPodsScheduled bool, err error) {
+	candidates ...*Candidate) (*pscheduling.Results, error) {
 
 	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
 	nodes := cluster.Nodes()
@@ -81,18 +81,18 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	if _, ok := lo.Find(deletingNodes, func(n *state.StateNode) bool {
 		return candidateNames.Has(n.Name())
 	}); ok {
-		return nil, false, errCandidateDeleting
+		return nil, errCandidateDeleting
 	}
 
 	// We get the pods that are on nodes that are deleting
 	deletingNodePods, err := deletingNodes.Pods(ctx, kubeClient)
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
+		return nil, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
 	}
 	// start by getting all pending pods
 	pods, err := provisioner.GetPendingPods(ctx)
 	if err != nil {
-		return nil, false, fmt.Errorf("determining pending pods, %w", err)
+		return nil, fmt.Errorf("determining pending pods, %w", err)
 	}
 
 	for _, n := range candidates {
@@ -104,31 +104,26 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	})
 
 	if err != nil {
-		return nil, false, fmt.Errorf("creating scheduler, %w", err)
+		return nil, fmt.Errorf("creating scheduler, %w", err)
 	}
 
-	newMachines, ifn, err := scheduler.Solve(ctx, pods)
+	results, err := scheduler.Solve(ctx, pods)
 	if err != nil {
-		return nil, false, fmt.Errorf("simulating scheduling, %w", err)
-	}
-
-	podsScheduled := 0
-	for _, n := range newMachines {
-		podsScheduled += len(n.Pods)
-	}
-	for _, n := range ifn {
-		podsScheduled += len(n.Pods)
+		return nil, fmt.Errorf("simulating scheduling, %w", err)
 	}
 
 	// check if the scheduling relied on an existing node that isn't ready yet, if so we fail
 	// to schedule since we want to assume that we can delete a node and its pods will immediately
 	// move to an existing node which won't occur if that node isn't ready.
-	for _, n := range ifn {
+	for _, n := range results.ExistingNodes {
 		if !n.Initialized() {
-			return nil, false, nil
+			for _, p := range n.Pods {
+				results.PodErrors[p] = fmt.Errorf("would schedule against a non-initialized node %s", n.Name())
+			}
 		}
 	}
-	return newMachines, podsScheduled == len(pods), nil
+
+	return results, nil
 }
 
 // instanceTypesAreSubset returns true if the lhs slice of instance types are a subset of the rhs.

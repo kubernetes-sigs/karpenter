@@ -65,7 +65,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, nodes ...*Candidate) (Comman
 
 	for _, candidate := range candidates {
 		// Check if we need to create any machines.
-		newMachines, allPodsScheduled, err := simulateScheduling(ctx, d.kubeClient, d.cluster, d.provisioner, candidate)
+		results, err := simulateScheduling(ctx, d.kubeClient, d.cluster, d.provisioner, candidate)
 		if err != nil {
 			// if a candidate machine is now deleting, just retry
 			if errors.Is(err, errCandidateDeleting) {
@@ -74,10 +74,10 @@ func (d *Drift) ComputeCommand(ctx context.Context, nodes ...*Candidate) (Comman
 			return Command{}, err
 		}
 		// Log when all pods can't schedule, as the command will get executed immediately.
-		if !allPodsScheduled {
-			logging.FromContext(ctx).With("node", candidate.Node.Name).Debug("Continuing to terminate drifted machine after scheduling simulation failed to schedule all pods")
+		if !results.AllPodsScheduled() {
+			logging.FromContext(ctx).With("node", candidate.Node.Name).Debug("Continuing to terminate drifted machine after scheduling simulation failed to schedule all pods %s", results.PodSchedulingErrors())
 		}
-		if len(newMachines) == 0 {
+		if len(results.NewMachines) == 0 {
 			return Command{
 				candidates: []*Candidate{candidate},
 				action:     actionDelete,
@@ -86,7 +86,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, nodes ...*Candidate) (Comman
 		return Command{
 			candidates:   []*Candidate{candidate},
 			action:       actionReplace,
-			replacements: newMachines,
+			replacements: results.NewMachines,
 		}, nil
 	}
 	return Command{action: actionDoNothing}, nil
