@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/samber/lo"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -62,9 +63,10 @@ var env *test.Environment
 var fakeClock *clock.FakeClock
 var cluster *state.Cluster
 var cloudProvider *fake.CloudProvider
-var machineStateController controller.Controller
 var nodeStateController controller.Controller
 var podStateController controller.Controller
+
+const csiProvider = "fake.csi.provider"
 
 func TestScheduling(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -81,7 +83,6 @@ var _ = BeforeSuite(func() {
 	cloudProvider.InstanceTypes = instanceTypes
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
-	machineStateController = informer.NewMachineController(env.Client, cluster)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	podStateController = informer.NewPodController(env.Client, cluster)
 	prov = provisioning.NewProvisioner(env.Client, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster)
@@ -2501,7 +2502,6 @@ var _ = Describe("VolumeUsage", func() {
 		Expect(nodeList.Items).To(HaveLen(1))
 	})
 	It("should not fail for non-dynamic PVCs", func() {
-		const csiProvider = "fake.csi.provider"
 		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 			fake.NewInstanceType(
 				fake.InstanceTypeOptions{
@@ -2618,6 +2618,286 @@ var _ = Describe("VolumeUsage", func() {
 		Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 		// 5 of the same PVC should all be schedulable on the same node
 		Expect(nodeList.Items).To(HaveLen(1))
+	})
+	It("should launch nodes for pods with ephemeral volume using the specified storage class name", func() {
+		// Launch an initial pod onto a node and register the CSI Node with a volume count limit of 1
+		sc := test.StorageClass(test.StorageClassOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "my-storage-class",
+			},
+			Provisioner: ptr.String(csiProvider),
+			Zones:       []string{"test-zone-1"}})
+		// Create another default storage class that shouldn't be used and has no associated limits
+		sc2 := test.StorageClass(test.StorageClassOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "default-storage-class",
+				Annotations: map[string]string{
+					pscheduling.IsDefaultStorageClassAnnotation: "true",
+				},
+			},
+			Provisioner: ptr.String("other-provider"),
+			Zones:       []string{"test-zone-1"}})
+
+		initialPod := test.UnschedulablePod(test.PodOptions{})
+		// Pod has an ephemeral volume claim that has a specified storage class, so it should use the one specified
+		initialPod.Spec.Volumes = append(initialPod.Spec.Volumes, v1.Volume{
+			Name: "tmp-ephemeral",
+			VolumeSource: v1.VolumeSource{
+				Ephemeral: &v1.EphemeralVolumeSource{
+					VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
+						Spec: v1.PersistentVolumeClaimSpec{
+							StorageClassName: lo.ToPtr(sc.Name),
+							AccessModes: []v1.PersistentVolumeAccessMode{
+								v1.ReadWriteOnce,
+							},
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{
+									v1.ResourceStorage: resource.MustParse("1Gi"),
+								},
+							},
+						},
+					},
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, provisioner, sc, sc2, initialPod)
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
+		node := ExpectScheduled(ctx, env.Client, initialPod)
+		csiNode := &storagev1.CSINode{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: node.Name,
+			},
+			Spec: storagev1.CSINodeSpec{
+				Drivers: []storagev1.CSINodeDriver{
+					{
+						Name:   csiProvider,
+						NodeID: "fake-node-id",
+						Allocatable: &storagev1.VolumeNodeResources{
+							Count: ptr.Int32(1),
+						},
+					},
+					{
+						Name:   "other-provider",
+						NodeID: "fake-node-id",
+						Allocatable: &storagev1.VolumeNodeResources{
+							Count: ptr.Int32(10),
+						},
+					},
+				},
+			},
+		}
+		ExpectApplied(ctx, env.Client, csiNode)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+		pod := test.UnschedulablePod(test.PodOptions{})
+		// Pod has an ephemeral volume claim that has a specified storage class, so it should use the one specified
+		pod.Spec.Volumes = append(pod.Spec.Volumes, v1.Volume{
+			Name: "tmp-ephemeral",
+			VolumeSource: v1.VolumeSource{
+				Ephemeral: &v1.EphemeralVolumeSource{
+					VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
+						Spec: v1.PersistentVolumeClaimSpec{
+							StorageClassName: lo.ToPtr(sc.Name),
+							AccessModes: []v1.PersistentVolumeAccessMode{
+								v1.ReadWriteOnce,
+							},
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{
+									v1.ResourceStorage: resource.MustParse("1Gi"),
+								},
+							},
+						},
+					},
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, sc, provisioner, pod)
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		node2 := ExpectScheduled(ctx, env.Client, pod)
+		Expect(node.Name).ToNot(Equal(node2.Name))
+	})
+	It("should launch nodes for pods with ephemeral volume using a default storage class", func() {
+		// Launch an initial pod onto a node and register the CSI Node with a volume count limit of 1
+		sc := test.StorageClass(test.StorageClassOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "default-storage-class",
+				Annotations: map[string]string{
+					pscheduling.IsDefaultStorageClassAnnotation: "true",
+				},
+			},
+			Provisioner: ptr.String(csiProvider),
+			Zones:       []string{"test-zone-1"}})
+
+		initialPod := test.UnschedulablePod(test.PodOptions{})
+		// Pod has an ephemeral volume claim that has NO storage class, so it should use the default one
+		initialPod.Spec.Volumes = append(initialPod.Spec.Volumes, v1.Volume{
+			Name: "tmp-ephemeral",
+			VolumeSource: v1.VolumeSource{
+				Ephemeral: &v1.EphemeralVolumeSource{
+					VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
+						Spec: v1.PersistentVolumeClaimSpec{
+							AccessModes: []v1.PersistentVolumeAccessMode{
+								v1.ReadWriteOnce,
+							},
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{
+									v1.ResourceStorage: resource.MustParse("1Gi"),
+								},
+							},
+						},
+					},
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, provisioner, sc, initialPod)
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
+		node := ExpectScheduled(ctx, env.Client, initialPod)
+		csiNode := &storagev1.CSINode{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: node.Name,
+			},
+			Spec: storagev1.CSINodeSpec{
+				Drivers: []storagev1.CSINodeDriver{
+					{
+						Name:   csiProvider,
+						NodeID: "fake-node-id",
+						Allocatable: &storagev1.VolumeNodeResources{
+							Count: ptr.Int32(1),
+						},
+					},
+				},
+			},
+		}
+		ExpectApplied(ctx, env.Client, csiNode)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+		pod := test.UnschedulablePod(test.PodOptions{})
+		// Pod has an ephemeral volume claim that has NO storage class, so it should use the default one
+		pod.Spec.Volumes = append(pod.Spec.Volumes, v1.Volume{
+			Name: "tmp-ephemeral",
+			VolumeSource: v1.VolumeSource{
+				Ephemeral: &v1.EphemeralVolumeSource{
+					VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
+						Spec: v1.PersistentVolumeClaimSpec{
+							AccessModes: []v1.PersistentVolumeAccessMode{
+								v1.ReadWriteOnce,
+							},
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{
+									v1.ResourceStorage: resource.MustParse("1Gi"),
+								},
+							},
+						},
+					},
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, sc, provisioner, pod)
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		node2 := ExpectScheduled(ctx, env.Client, pod)
+		Expect(node.Name).ToNot(Equal(node2.Name))
+	})
+	It("should launch nodes for pods with ephemeral volume using the newest storage class", func() {
+		// Launch an initial pod onto a node and register the CSI Node with a volume count limit of 1
+		sc := test.StorageClass(test.StorageClassOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "default-storage-class",
+				Annotations: map[string]string{
+					pscheduling.IsDefaultStorageClassAnnotation: "true",
+				},
+			},
+			Provisioner: ptr.String("other-provider"),
+			Zones:       []string{"test-zone-1"}})
+		sc2 := test.StorageClass(test.StorageClassOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "newer-default-storage-class",
+				Annotations: map[string]string{
+					pscheduling.IsDefaultStorageClassAnnotation: "true",
+				},
+			},
+			Provisioner: ptr.String(csiProvider),
+			Zones:       []string{"test-zone-1"}})
+
+		ExpectApplied(ctx, env.Client, sc)
+		// Wait a few seconds to apply the second storage class to get a newer creationTimestamp
+		time.Sleep(time.Second * 2)
+		ExpectApplied(ctx, env.Client, sc2)
+
+		initialPod := test.UnschedulablePod(test.PodOptions{})
+		// Pod has an ephemeral volume claim that has NO storage class, so it should use the default one
+		initialPod.Spec.Volumes = append(initialPod.Spec.Volumes, v1.Volume{
+			Name: "tmp-ephemeral",
+			VolumeSource: v1.VolumeSource{
+				Ephemeral: &v1.EphemeralVolumeSource{
+					VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
+						Spec: v1.PersistentVolumeClaimSpec{
+							AccessModes: []v1.PersistentVolumeAccessMode{
+								v1.ReadWriteOnce,
+							},
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{
+									v1.ResourceStorage: resource.MustParse("1Gi"),
+								},
+							},
+						},
+					},
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, provisioner, sc, initialPod)
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
+		node := ExpectScheduled(ctx, env.Client, initialPod)
+		csiNode := &storagev1.CSINode{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: node.Name,
+			},
+			Spec: storagev1.CSINodeSpec{
+				Drivers: []storagev1.CSINodeDriver{
+					{
+						Name:   csiProvider,
+						NodeID: "fake-node-id",
+						Allocatable: &storagev1.VolumeNodeResources{
+							Count: ptr.Int32(1),
+						},
+					},
+					{
+						Name:   "other-provider",
+						NodeID: "fake-node-id",
+						Allocatable: &storagev1.VolumeNodeResources{
+							Count: ptr.Int32(10),
+						},
+					},
+				},
+			},
+		}
+		ExpectApplied(ctx, env.Client, csiNode)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+		pod := test.UnschedulablePod(test.PodOptions{})
+		// Pod has an ephemeral volume claim that has NO storage class, so it should use the default one
+		pod.Spec.Volumes = append(pod.Spec.Volumes, v1.Volume{
+			Name: "tmp-ephemeral",
+			VolumeSource: v1.VolumeSource{
+				Ephemeral: &v1.EphemeralVolumeSource{
+					VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
+						Spec: v1.PersistentVolumeClaimSpec{
+							AccessModes: []v1.PersistentVolumeAccessMode{
+								v1.ReadWriteOnce,
+							},
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{
+									v1.ResourceStorage: resource.MustParse("1Gi"),
+								},
+							},
+						},
+					},
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, sc, provisioner, pod)
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		node2 := ExpectScheduled(ctx, env.Client, pod)
+		Expect(node.Name).ToNot(Equal(node2.Name))
 	})
 	It("should not launch nodes for pods with ephemeral volume using a non-existent storage classes", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
