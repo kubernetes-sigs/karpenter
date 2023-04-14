@@ -50,6 +50,7 @@ var ctx context.Context
 var nodeController controller.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
+var cluster *state.Cluster
 var cp *fake.CloudProvider
 
 func TestAPIs(t *testing.T) {
@@ -63,7 +64,7 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
 	ctx = settings.ToContext(ctx, test.Settings())
 	cp = fake.NewCloudProvider()
-	cluster := state.NewCluster(fakeClock, env.Client, cp)
+	cluster = state.NewCluster(fakeClock, env.Client, cp)
 	nodeController = node.NewController(fakeClock, env.Client, cp, cluster)
 })
 
@@ -381,6 +382,25 @@ var _ = Describe("Controller", func() {
 
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			Expect(node.Annotations).To(HaveKey(v1alpha5.EmptinessTimestampAnnotationKey))
+		})
+		It("should return a requeue polling interval when the node is underutilized and nominated", func() {
+			provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(30)
+			node := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1alpha5.LabelNodeInitialized:    "true",
+					v1.LabelInstanceTypeStable:       "default-instance-type", // need the instance type for the cluster state update
+				},
+			}})
+			ExpectApplied(ctx, env.Client, provisioner, node)
+
+			// Add the node to the cluster state and nominate it in the internal cluster state
+			Expect(cluster.UpdateNode(ctx, node)).To(Succeed())
+			cluster.NominateNodeForPod(ctx, node.Name)
+
+			result := ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			Expect(result.RequeueAfter).To(Equal(time.Second * 30))
+			Expect(node.Labels).ToNot(HaveKey(v1alpha5.EmptinessTimestampAnnotationKey))
 		})
 		It("should remove labels from non-empty nodes", func() {
 			provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(30)
