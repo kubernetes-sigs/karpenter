@@ -15,8 +15,8 @@ limitations under the License.
 package scraper
 
 import (
+	"bytes"
 	"context"
-	"fmt"
 	"sort"
 	"strings"
 
@@ -248,12 +248,29 @@ func getWellKnownLabels() map[string]string {
 }
 
 func labelsToString(labels prometheus.Labels) string {
-	keyValues := lo.Entries(labels)
-	sort.Slice(keyValues, func(i, j int) bool {
-		return keyValues[i].Key < keyValues[j].Key
-	})
+	// this function is called often and shows up in profiling, so its optimized
+	// a bit to run ~2x faster than a more standard approach
+	keyValues := make([]string, 0, len(labels))
+	sz := 0
+	for k, v := range labels {
+		keyValues = append(keyValues, k)
+		// len(key + len(value) + len(="",)
+		sz += len(k) + len(v) + 4
+	}
+	sort.Strings(keyValues)
 
-	return strings.Join(lo.Map(keyValues, func(entry lo.Entry[string, string], _ int) string {
-		return fmt.Sprintf("%s=\"%s\"", entry.Key, entry.Value)
-	}), ",")
+	var buf bytes.Buffer
+	// grow the buffer to the size needed to avoid allocations
+	buf.Grow(sz)
+	for i, k := range keyValues {
+		if i > 0 {
+			buf.WriteByte(',')
+		}
+		// much faster to  append a string than to format a string
+		buf.WriteString(k)
+		buf.WriteString("=\"")
+		buf.WriteString(labels[k])
+		buf.WriteString("\"")
+	}
+	return buf.String()
 }
