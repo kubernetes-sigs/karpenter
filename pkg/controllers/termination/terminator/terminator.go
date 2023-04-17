@@ -56,10 +56,10 @@ func (t *Terminator) Cordon(ctx context.Context, node *v1.Node) error {
 		v1.LabelNodeExcludeBalancers: "karpenter",
 	})
 	if !equality.Semantic.DeepEqual(node, stored) {
-		logging.FromContext(ctx).Infof("cordoned node")
 		if err := t.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 			return err
 		}
+		logging.FromContext(ctx).Infof("cordoned node")
 	}
 	return nil
 }
