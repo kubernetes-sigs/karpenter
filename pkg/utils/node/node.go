@@ -17,14 +17,10 @@ package node
 import (
 	"context"
 	"fmt"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/utils/clock"
-	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
@@ -59,17 +55,4 @@ func GetCondition(n *v1.Node, match v1.NodeConditionType) v1.NodeCondition {
 		}
 	}
 	return v1.NodeCondition{}
-}
-
-func GetExpirationTime(node *v1.Node, provisioner *v1alpha5.Provisioner) time.Time {
-	if provisioner == nil || provisioner.Spec.TTLSecondsUntilExpired == nil || node == nil {
-		// If not defined, return some much larger time.
-		return time.Date(5000, 0, 0, 0, 0, 0, 0, time.UTC)
-	}
-	expirationTTL := time.Duration(ptr.Int64Value(provisioner.Spec.TTLSecondsUntilExpired)) * time.Second
-	return node.CreationTimestamp.Add(expirationTTL)
-}
-
-func IsExpired(n *v1.Node, clock clock.Clock, provisioner *v1alpha5.Provisioner) bool {
-	return clock.Now().After(GetExpirationTime(n, provisioner))
 }

@@ -47,9 +47,11 @@ func (in *Machine) StatusConditions() apis.ConditionManager {
 }
 
 var (
-	MachineLaunched    apis.ConditionType = "MachineLaunched"
-	MachineRegistered  apis.ConditionType = "MachineRegistered"
-	MachineInitialized apis.ConditionType = "MachineInitialized"
+	MachineLaunched               apis.ConditionType = "MachineLaunched"
+	MachineRegistered             apis.ConditionType = "MachineRegistered"
+	MachineInitialized            apis.ConditionType = "MachineInitialized"
+	MachineInvoluntarilyDisrupted apis.ConditionType = "MachineInvoluntarilyDisrupted"
+	MachineVoluntarilyDisrupted   apis.ConditionType = "MachineVoluntarilyDisrupted"
 )
 
 func (in *Machine) GetConditions() apis.Conditions {

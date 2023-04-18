@@ -34,7 +34,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
-	"github.com/aws/karpenter-core/pkg/utils/node"
+	"github.com/aws/karpenter-core/pkg/utils/functional"
 )
 
 // Expiration is a subreconciler that deletes empty nodes.
@@ -74,7 +74,7 @@ func (e *Expiration) filterAndSortCandidates(ctx context.Context, nodes []*Candi
 		return nil, fmt.Errorf("filtering candidates, %w", err)
 	}
 	sort.Slice(candidates, func(i int, j int) bool {
-		return node.GetExpirationTime(candidates[i].Node, candidates[i].provisioner).Before(node.GetExpirationTime(candidates[j].Node, candidates[j].provisioner))
+		return functional.GetExpirationTime(candidates[i].Node, candidates[i].provisioner).Before(functional.GetExpirationTime(candidates[j].Node, candidates[j].provisioner))
 	})
 	return candidates, nil
 }
@@ -112,7 +112,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, nodes ...*Candidate) (C
 		}
 
 		logging.FromContext(ctx).With("ttl", time.Duration(ptr.Int64Value(candidates[0].provisioner.Spec.TTLSecondsUntilExpired))*time.Second).
-			With("delay", time.Since(node.GetExpirationTime(candidates[0].Node, candidates[0].provisioner))).Infof("triggering termination for expired node after TTL")
+			With("delay", time.Since(functional.GetExpirationTime(candidates[0].Node, candidates[0].provisioner))).Infof("triggering termination for expired node after TTL")
 		return Command{
 			candidates:   []*Candidate{candidate},
 			replacements: results.NewMachines,

@@ -51,6 +51,7 @@ const (
 	// Karpenter specific annotation values
 	VoluntaryDisruptionDriftedAnnotationValue = "drifted"
 	VoluntaryDisruptionExpiredAnnotationValue = "expired"
+	VoluntaryDisruptionEmptyAnnotationValue   = "empty"
 )
 
 // Karpenter specific finalizers

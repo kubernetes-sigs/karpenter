@@ -25,6 +25,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/consistency"
 	"github.com/aws/karpenter-core/pkg/controllers/counter"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
+	machinedisruption "github.com/aws/karpenter-core/pkg/controllers/machine/disruption"
 	machinegarbagecollection "github.com/aws/karpenter-core/pkg/controllers/machine/garbagecollection"
 	machinelifecycle "github.com/aws/karpenter-core/pkg/controllers/machine/lifecycle"
 	machinetermination "github.com/aws/karpenter-core/pkg/controllers/machine/termination"
@@ -73,5 +74,6 @@ func NewControllers(
 		machinelifecycle.NewController(clock, kubeClient, cloudProvider),
 		machinegarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		machinetermination.NewController(kubeClient, cloudProvider),
+		machinedisruption.NewController(clock, kubeClient, cloudProvider),
 	}
 }
