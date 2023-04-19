@@ -16,25 +16,38 @@ package operator
 
 import (
 	"context"
+	"log"
 
 	"github.com/go-logr/logr"
+	"github.com/go-logr/zapr"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapio"
 	"k8s.io/client-go/rest"
+	"k8s.io/klog/v2"
 	"knative.dev/pkg/configmap/informer"
 	"knative.dev/pkg/injection"
 	"knative.dev/pkg/injection/sharedmain"
 	"knative.dev/pkg/logging"
 )
 
-// LoggingContextOrDie injects a logger into the returned context. The logger is
+// NewLogger returns a configured *zap.SugaredLogger. The logger is
 // configured by the ConfigMap `config-logging` and live updates the level.
 func NewLogger(ctx context.Context, componentName string, config *rest.Config, cmw *informer.InformedWatcher) *zap.SugaredLogger {
-	ctx, startinformers := injection.EnableInjectionOrDie(ctx, config)
+	ctx, startInformers := injection.EnableInjectionOrDie(logging.WithLogger(ctx, zap.NewNop().Sugar()), config)
 	logger, atomicLevel := sharedmain.SetupLoggerOrDie(ctx, componentName)
 	rest.SetDefaultWarningHandler(&logging.WarningHandler{Logger: logger})
 	sharedmain.WatchLoggingConfigOrDie(ctx, cmw, logger, atomicLevel, componentName)
-	startinformers()
+	startInformers()
 	return logger
+}
+
+// ConfigureGlobalLoggers sets up any package-wide loggers like "log" or "klog" that are utilized by other packages
+// to use the configured *zap.SugaredLogger from the context
+func ConfigureGlobalLoggers(ctx context.Context) {
+	klog.SetLogger(zapr.NewLogger(logging.FromContext(ctx).Desugar()))
+	w := &zapio.Writer{Log: logging.FromContext(ctx).Desugar(), Level: zap.DebugLevel}
+	log.SetFlags(0)
+	log.SetOutput(w)
 }
 
 type ignoreDebugEventsSink struct {
