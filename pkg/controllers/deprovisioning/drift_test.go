@@ -137,6 +137,61 @@ var _ = Describe("Drift", func() {
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
 		ExpectNotFound(ctx, env.Client, node)
 	})
+	It("should deprovision all empty drifted nodes in parallel", func() {
+		machine2, node2 := test.MachineAndNode(v1alpha5.Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
+				},
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.RandomProviderID(),
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		machine3, node3 := test.MachineAndNode(v1alpha5.Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
+				},
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.RandomProviderID(),
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, machine, node, machine2, node2, machine3, node3, prov)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node, node2, node3}, []*v1alpha5.Machine{machine, machine2, machine3})
+
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		wg.Wait()
+
+		// Expect that the expired machines are gone
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+		ExpectNotFound(ctx, env.Client, node)
+	})
 	It("can replace drifted nodes", func() {
 		labels := map[string]string{
 			"app": "test",
@@ -241,7 +296,7 @@ var _ = Describe("Drift", func() {
 			},
 		})
 
-		machine, node := test.MachineAndNode(v1alpha5.Machine{
+		machine, node = test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
@@ -281,34 +336,40 @@ var _ = Describe("Drift", func() {
 		ExpectNotFound(ctx, env.Client, node)
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(3))
 	})
-	It("should delete one drifted node at a time", func() {
-		machine1, node1 := test.MachineAndNode(v1alpha5.Machine{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+	It("should drift one non-empty node at a time", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+
+		pods := test.Pods(2, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
 				},
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
-				},
-			},
-			Status: v1alpha5.MachineStatus{
-				ProviderID:  test.RandomProviderID(),
-				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
 			},
 		})
+
 		machine2, node2 := test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionExpiredAnnotationValue,
+				},
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-				},
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
 				},
 			},
 			Status: v1alpha5.MachineStatus{
@@ -316,19 +377,32 @@ var _ = Describe("Drift", func() {
 				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
 			},
 		})
-		ExpectApplied(ctx, env.Client, machine1, node1, machine2, node2, prov)
+
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], machine, node, machine2, node2, prov)
+
+		// bind pods to node so that they're not empty and don't deprovision in parallel.
+		ExpectManualBinding(ctx, env.Client, pods[0], node)
+		ExpectManualBinding(ctx, env.Client, pods[1], node2)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node, node2}, []*v1alpha5.Machine{machine, machine2})
 
-		fakeClock.Step(10 * time.Minute)
-
+		// deprovisioning won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
-		// Expect one of the nodes to be deleted
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		nodes := ExpectNodes(ctx, env.Client)
+		_, ok1 := lo.Find(nodes, func(n *v1.Node) bool {
+			return n.Name == node.Name
+		})
+		_, ok2 := lo.Find(nodes, func(n *v1.Node) bool {
+			return n.Name == node2.Name
+		})
+		// Expect that one of the drifted machines is gone and replaced
+		Expect(ok1 || ok2).To(BeTrue())
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
 	})
 })
