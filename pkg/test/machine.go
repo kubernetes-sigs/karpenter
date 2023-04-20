@@ -50,3 +50,17 @@ func MachineAndNode(overrides ...v1alpha5.Machine) (*v1alpha5.Machine, *v1.Node)
 	m := Machine(overrides...)
 	return m, MachineLinkedNode(m)
 }
+
+// MachinesAndNodes creates homogeneous groups of machines and nodes based on the passed in options, evenly divided by the total machines requested
+func MachinesAndNodes(total int, options ...v1alpha5.Machine) ([]*v1alpha5.Machine, []*v1.Node) {
+	machines := make([]*v1alpha5.Machine, total)
+	nodes := make([]*v1.Node, total)
+	for _, opts := range options {
+		for i := 0; i < total/len(options); i++ {
+			machine, node := MachineAndNode(opts)
+			machines[i] = machine
+			nodes[i] = node
+		}
+	}
+	return machines, nodes
+}
