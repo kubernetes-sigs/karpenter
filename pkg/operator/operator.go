@@ -96,6 +96,7 @@ func NewOperator() (context.Context, *Operator) {
 	// Logging
 	logger := NewLogger(ctx, component, config, configMapWatcher)
 	ctx = logging.WithLogger(ctx, logger)
+	ConfigureGlobalLoggers(ctx)
 
 	// Inject settings from the ConfigMap(s) into the context
 	ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)

@@ -26,7 +26,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
-	"knative.dev/pkg/logging"
 	"knative.dev/pkg/system"
 
 	"github.com/aws/karpenter-core/pkg/apis/settings"
@@ -85,7 +84,6 @@ func WithSettingsOrDie(ctx context.Context, kubernetesInterface kubernetes.Inter
 	cancelCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	logging.FromContext(ctx).Debugf("waiting for configmaps")
 	factory := informers.NewSharedInformerFactoryWithOptions(kubernetesInterface, time.Second*30, informers.WithNamespace(system.Namespace()))
 	informer := factory.Core().V1().ConfigMaps().Informer()
 	factory.Start(cancelCtx.Done())
