@@ -22,6 +22,8 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/samber/lo"
+
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
@@ -61,6 +63,16 @@ func (d *Drift) ComputeCommand(ctx context.Context, nodes ...*Candidate) (Comman
 	candidates, err := filterCandidates(ctx, d.kubeClient, d.recorder, nodes)
 	if err != nil {
 		return Command{}, fmt.Errorf("filtering candidates, %w", err)
+	}
+
+	// Deprovision all empty drifted nodes, as they require no scheduling simulations.
+	if empty := lo.Filter(candidates, func(c *Candidate, _ int) bool {
+		return len(c.pods) == 0
+	}); len(empty) > 0 {
+		return Command{
+			candidates: empty,
+			action:     actionDelete,
+		}, nil
 	}
 
 	for _, candidate := range candidates {

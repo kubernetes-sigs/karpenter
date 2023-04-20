@@ -108,10 +108,73 @@ var _ = Describe("Expiration", func() {
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
 		ExpectNotFound(ctx, env.Client, node)
 	})
-	It("should expire one node at a time, starting with most expired", func() {
+	It("should deprovision all empty expired nodes in parallel", func() {
+		machines, nodes := test.MachinesAndNodes(100, v1alpha5.Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionExpiredAnnotationValue,
+				},
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1alpha5.MachineStatus{
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		for _, m := range machines {
+			ExpectApplied(ctx, env.Client, m)
+		}
+		for _, n := range nodes {
+			ExpectApplied(ctx, env.Client, n)
+		}
+		ExpectApplied(ctx, env.Client, prov)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, nodes, machines)
+
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		wg.Wait()
+
+		// Expect that the expired machines are gone
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+	})
+	It("should expire one non-empty node at a time, starting with most expired", func() {
 		expireProv := test.Provisioner(test.ProvisionerOptions{
 			TTLSecondsUntilExpired: ptr.Int64(100),
 		})
+
+		labels := map[string]string{
+			"app": "test",
+		}
+
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+
+		pods := test.Pods(2, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				},
+			},
+		})
+
 		machineToExpire, nodeToExpire := test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Annotations: map[string]string{
@@ -144,15 +207,24 @@ var _ = Describe("Expiration", func() {
 			},
 		})
 
-		ExpectApplied(ctx, env.Client, machineToExpire, nodeToExpire, machineNotExpire, nodeNotExpire, expireProv, prov)
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], machineToExpire, nodeToExpire, machineNotExpire, nodeNotExpire, expireProv, prov)
+
+		// bind pods to node so that they're not empty and don't deprovision in parallel.
+		ExpectManualBinding(ctx, env.Client, pods[0], nodeToExpire)
+		ExpectManualBinding(ctx, env.Client, pods[1], nodeNotExpire)
 
 		// inform cluster state about nodes and machines
 		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{nodeToExpire, nodeNotExpire}, []*v1alpha5.Machine{machineToExpire, machineNotExpire})
 
+		// deprovisioning won't delete the old node until the new node is ready
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		wg.Wait()
 
-		// Expect that one of the expired machines is gone
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		// Expect that one of the expired machines is replaced
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
 		ExpectNotFound(ctx, env.Client, nodeToExpire)
 	})
 	It("can replace node for expiration", func() {
