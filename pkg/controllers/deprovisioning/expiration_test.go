@@ -109,7 +109,7 @@ var _ = Describe("Expiration", func() {
 		ExpectNotFound(ctx, env.Client, node)
 	})
 	It("should deprovision all empty expired nodes in parallel", func() {
-		machine2, node2 := test.MachineAndNode(v1alpha5.Machine{
+		machines, nodes := test.MachinesAndNodes(100, v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Annotations: map[string]string{
 					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionExpiredAnnotationValue,
@@ -122,37 +122,22 @@ var _ = Describe("Expiration", func() {
 				},
 			},
 			Status: v1alpha5.MachineStatus{
-				ProviderID: test.RandomProviderID(),
 				Allocatable: map[v1.ResourceName]resource.Quantity{
 					v1.ResourceCPU:  resource.MustParse("32"),
 					v1.ResourcePods: resource.MustParse("100"),
 				},
 			},
 		})
-		machine3, node3 := test.MachineAndNode(v1alpha5.Machine{
-			ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionExpiredAnnotationValue,
-				},
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-				},
-			},
-			Status: v1alpha5.MachineStatus{
-				ProviderID: test.RandomProviderID(),
-				Allocatable: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU:  resource.MustParse("32"),
-					v1.ResourcePods: resource.MustParse("100"),
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, machine, node, machine2, node2, machine3, node3, prov)
+		for _, m := range machines {
+			ExpectApplied(ctx, env.Client, m)
+		}
+		for _, n := range nodes {
+			ExpectApplied(ctx, env.Client, n)
+		}
+		ExpectApplied(ctx, env.Client, prov)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node, node2, node3}, []*v1alpha5.Machine{machine, machine2, machine3})
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, nodes, machines)
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
@@ -161,7 +146,6 @@ var _ = Describe("Expiration", func() {
 
 		// Expect that the expired machines are gone
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		ExpectNotFound(ctx, env.Client, node)
 	})
 	It("should expire one non-empty node at a time, starting with most expired", func() {
 		expireProv := test.Provisioner(test.ProvisionerOptions{

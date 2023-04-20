@@ -36,6 +36,9 @@ func Machine(overrides ...v1alpha5.Machine) *v1alpha5.Machine {
 	if override.Name == "" {
 		override.Name = RandomName()
 	}
+	if override.Status.ProviderID == "" {
+		override.Status.ProviderID = RandomProviderID()
+	}
 	override.ObjectMeta.Labels = lo.Assign(override.ObjectMeta.Labels, map[string]string{
 		v1alpha5.MachineNameLabelKey: override.Name,
 	})

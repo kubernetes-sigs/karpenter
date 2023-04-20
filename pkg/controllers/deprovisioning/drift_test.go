@@ -151,18 +151,17 @@ var _ = Describe("Drift", func() {
 				},
 			},
 			Status: v1alpha5.MachineStatus{
-				ProviderID: test.RandomProviderID(),
 				Allocatable: map[v1.ResourceName]resource.Quantity{
 					v1.ResourceCPU:  resource.MustParse("32"),
 					v1.ResourcePods: resource.MustParse("100"),
 				},
 			},
 		})
-		for _, machine := range machines {
-			ExpectApplied(ctx, env.Client, machine)
+		for _, m := range machines {
+			ExpectApplied(ctx, env.Client, m)
 		}
-		for _, node := range nodes {
-			ExpectApplied(ctx, env.Client, node)
+		for _, n := range nodes {
+			ExpectApplied(ctx, env.Client, n)
 		}
 		ExpectApplied(ctx, env.Client, prov)
 
@@ -176,7 +175,6 @@ var _ = Describe("Drift", func() {
 
 		// Expect that the expired machines are gone
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		ExpectNotFound(ctx, env.Client, node)
 	})
 	It("can replace drifted nodes", func() {
 		labels := map[string]string{
