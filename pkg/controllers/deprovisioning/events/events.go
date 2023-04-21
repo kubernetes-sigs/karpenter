@@ -24,22 +24,33 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
-func Blocked(node *v1.Node, machine *v1alpha5.Machine, reason string) []events.Event {
-	return []events.Event{
-		{
-			InvolvedObject: node,
-			Type:           v1.EventTypeNormal,
-			Reason:         "DeprovisioningBlocked",
-			Message:        fmt.Sprintf("Cannot deprovision node due to %s", reason),
-			DedupeValues:   []string{node.Name, reason},
-		},
-		{
-			InvolvedObject: machine,
-			Type:           v1.EventTypeNormal,
-			Reason:         "DeprovisioningBlocked",
-			Message:        fmt.Sprintf("Cannot deprovision machine due to %s", reason),
-			DedupeValues:   []string{machine.Name, reason},
-		},
+func Launching(machine *v1alpha5.Machine, reason string) events.Event {
+	return events.Event{
+		InvolvedObject: machine,
+		Type:           v1.EventTypeNormal,
+		Reason:         "DeprovisioningLaunching",
+		Message:        fmt.Sprintf("Launching machine for %s", reason),
+		DedupeValues:   []string{machine.Name, reason},
+	}
+}
+
+func WaitingOnReadiness(machine *v1alpha5.Machine) events.Event {
+	return events.Event{
+		InvolvedObject: machine,
+		Type:           v1.EventTypeNormal,
+		Reason:         "DeprovisioningWaitingReadiness",
+		Message:        "Waiting on readiness to continue deprovisioning",
+		DedupeValues:   []string{machine.Name},
+	}
+}
+
+func WaitingOnDeletion(machine *v1alpha5.Machine) events.Event {
+	return events.Event{
+		InvolvedObject: machine,
+		Type:           v1.EventTypeNormal,
+		Reason:         "DeprovisioningWaitingDeletion",
+		Message:        "Waiting on deletion to continue deprovisioning",
+		DedupeValues:   []string{machine.Name},
 	}
 }
 
@@ -62,45 +73,6 @@ func Terminating(node *v1.Node, machine *v1alpha5.Machine, reason string) []even
 	}
 }
 
-func Launching(machine *v1alpha5.Machine, reason string) events.Event {
-	return events.Event{
-		InvolvedObject: machine,
-		Type:           v1.EventTypeNormal,
-		Reason:         "DeprovisioningLaunching",
-		Message:        fmt.Sprintf("Launching machine for %s", reason),
-		DedupeValues:   []string{machine.Name, reason},
-	}
-}
-
-func WaitingOnReadiness(machine *v1alpha5.Machine) events.Event {
-	return events.Event{
-		InvolvedObject: machine,
-		Type:           v1.EventTypeNormal,
-		Reason:         "DeprovisioningWaitingReadiness",
-		Message:        "Waiting on readiness to continue deprovisioning",
-		DedupeValues:   []string{machine.Name},
-	}
-}
-
-func WaitingOnDeletion(node *v1.Node, machine *v1alpha5.Machine) []events.Event {
-	return []events.Event{
-		{
-			InvolvedObject: node,
-			Type:           v1.EventTypeNormal,
-			Reason:         "DeprovisioningWaitingDeletion",
-			Message:        "Waiting on deletion to continue deprovisioning",
-			DedupeValues:   []string{node.Name},
-		},
-		{
-			InvolvedObject: machine,
-			Type:           v1.EventTypeNormal,
-			Reason:         "DeprovisioningWaitingDeletion",
-			Message:        "Waiting on deletion to continue deprovisioning",
-			DedupeValues:   []string{machine.Name},
-		},
-	}
-}
-
 func Unconsolidatable(node *v1.Node, machine *v1alpha5.Machine, reason string) []events.Event {
 	return []events.Event{
 		{
@@ -118,6 +90,25 @@ func Unconsolidatable(node *v1.Node, machine *v1alpha5.Machine, reason string) [
 			Message:        reason,
 			DedupeValues:   []string{machine.Name},
 			DedupeTimeout:  time.Minute * 15,
+		},
+	}
+}
+
+func Blocked(node *v1.Node, machine *v1alpha5.Machine, reason string) []events.Event {
+	return []events.Event{
+		{
+			InvolvedObject: node,
+			Type:           v1.EventTypeNormal,
+			Reason:         "DeprovisioningBlocked",
+			Message:        fmt.Sprintf("Cannot deprovision node due to %s", reason),
+			DedupeValues:   []string{node.Name, reason},
+		},
+		{
+			InvolvedObject: machine,
+			Type:           v1.EventTypeNormal,
+			Reason:         "DeprovisioningBlocked",
+			Message:        fmt.Sprintf("Cannot deprovision machine due to %s", reason),
+			DedupeValues:   []string{machine.Name, reason},
 		},
 	}
 }

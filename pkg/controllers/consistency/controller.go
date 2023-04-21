@@ -108,7 +108,7 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 		for _, issue := range issues {
 			logging.FromContext(ctx).Errorf("check failed, %s", issue)
 			consistencyErrors.With(prometheus.Labels{checkLabel: reflect.TypeOf(check).Elem().Name()}).Inc()
-			c.recorder.Publish(CheckEvent(node, machine, string(issue))...)
+			c.recorder.Publish(CheckEvent(machine, string(issue)))
 		}
 	}
 	return reconcile.Result{RequeueAfter: scanPeriod}, nil

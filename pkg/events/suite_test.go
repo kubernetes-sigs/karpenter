@@ -77,14 +77,13 @@ var _ = BeforeEach(func() {
 	internalRecorder = NewInternalRecorder()
 	eventRecorder = events.NewRecorder(internalRecorder)
 	schedulingevents.PodNominationRateLimiter = flowcontrol.NewTokenBucketRateLimiter(5, 10)
-	schedulingevents.PodNominationRateLimiterForMachine = flowcontrol.NewTokenBucketRateLimiter(5, 10)
+
 })
 
 var _ = Describe("Event Creation", func() {
 	It("should create a NominatePod event", func() {
-		eventRecorder.Publish(schedulingevents.NominatePod(PodWithUID(), NodeWithUID(), MachineWithUID())...)
-		Expect(internalRecorder.Calls(schedulingevents.NominatePod(PodWithUID(), NodeWithUID(), MachineWithUID())[0].Reason)).To(Equal(1))
-		Expect(internalRecorder.Calls(schedulingevents.NominatePod(PodWithUID(), NodeWithUID(), MachineWithUID())[1].Reason)).To(Equal(1))
+		eventRecorder.Publish(schedulingevents.NominatePod(PodWithUID(), NodeWithUID(), MachineWithUID()))
+		Expect(internalRecorder.Calls(schedulingevents.NominatePod(PodWithUID(), NodeWithUID(), MachineWithUID()).Reason)).To(Equal(1))
 	})
 	It("should create a EvictPod event", func() {
 		eventRecorder.Publish(terminatorevents.EvictPod(PodWithUID()))
@@ -135,20 +134,19 @@ var _ = Describe("Dedupe", func() {
 var _ = Describe("Rate Limiting", func() {
 	It("should only create max-burst when many events are created quickly", func() {
 		for i := 0; i < 100; i++ {
-			eventRecorder.Publish(schedulingevents.NominatePod(PodWithUID(), NodeWithUID(), MachineWithUID())...)
+			eventRecorder.Publish(schedulingevents.NominatePod(PodWithUID(), NodeWithUID(), MachineWithUID()))
 		}
-		Expect(internalRecorder.Calls(schedulingevents.NominatePod(PodWithUID(), NodeWithUID(), MachineWithUID())[0].Reason)).To(Equal(10))
-		Expect(internalRecorder.Calls(schedulingevents.NominatePod(PodWithUID(), NodeWithUID(), MachineWithUID())[1].Reason)).To(Equal(10))
+		Expect(internalRecorder.Calls(schedulingevents.NominatePod(PodWithUID(), NodeWithUID(), MachineWithUID()).Reason)).To(Equal(10))
+
 	})
 	It("should allow many events over time due to smoothed rate limiting", func() {
 		for i := 0; i < 3; i++ {
 			for j := 0; j < 5; j++ {
-				eventRecorder.Publish(schedulingevents.NominatePod(PodWithUID(), NodeWithUID(), MachineWithUID())...)
+				eventRecorder.Publish(schedulingevents.NominatePod(PodWithUID(), NodeWithUID(), MachineWithUID()))
 			}
 			time.Sleep(time.Second)
 		}
-		Expect(internalRecorder.Calls(schedulingevents.NominatePod(PodWithUID(), NodeWithUID(), MachineWithUID())[0].Reason)).To(Equal(15))
-		Expect(internalRecorder.Calls(schedulingevents.NominatePod(PodWithUID(), NodeWithUID(), MachineWithUID())[1].Reason)).To(Equal(15))
+		Expect(internalRecorder.Calls(schedulingevents.NominatePod(PodWithUID(), NodeWithUID(), MachineWithUID()).Reason)).To(Equal(15))
 	})
 })
 

@@ -21,21 +21,12 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
-func CheckEvent(node *v1.Node, machine *v1alpha5.Machine, message string) []events.Event {
-	return []events.Event{
-		{
-			InvolvedObject: node,
-			Type:           v1.EventTypeWarning,
-			Reason:         "FailedConsistencyCheck",
-			Message:        message,
-			DedupeValues:   []string{node.Name, message},
-		},
-		{
-			InvolvedObject: machine,
-			Type:           v1.EventTypeWarning,
-			Reason:         "FailedConsistencyCheck",
-			Message:        message,
-			DedupeValues:   []string{machine.Name, message},
-		},
+func CheckEvent(machine *v1alpha5.Machine, message string) events.Event {
+	return events.Event{
+		InvolvedObject: machine,
+		Type:           v1.EventTypeWarning,
+		Reason:         "FailedConsistencyCheck",
+		Message:        message,
+		DedupeValues:   []string{machine.Name, message},
 	}
 }

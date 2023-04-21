@@ -16,6 +16,7 @@ package events
 
 import (
 	"fmt"
+	"strings"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/flowcontrol"
@@ -27,32 +28,22 @@ import (
 // PodNominationRateLimiter is a pointer so it rate-limits across events
 var PodNominationRateLimiter = flowcontrol.NewTokenBucketRateLimiter(5, 10)
 
-// PodNominationRateLimiterForMachine is a pointer so it rate-limits across events
-var PodNominationRateLimiterForMachine = flowcontrol.NewTokenBucketRateLimiter(5, 10)
-
-func NominatePod(pod *v1.Pod, node *v1.Node, machine *v1alpha5.Machine) []events.Event {
-	var evts []events.Event
-	if node != nil {
-		evts = append(evts, events.Event{
-			InvolvedObject: pod,
-			Type:           v1.EventTypeNormal,
-			Reason:         "Nominated",
-			Message:        fmt.Sprintf("Pod should schedule on node: %s", node.Name),
-			DedupeValues:   []string{string(pod.UID)},
-			RateLimiter:    PodNominationRateLimiter,
-		})
-	}
+func NominatePod(pod *v1.Pod, node *v1.Node, machine *v1alpha5.Machine) events.Event {
+	var info []string
 	if machine != nil {
-		evts = append(evts, events.Event{
-			InvolvedObject: pod,
-			Type:           v1.EventTypeNormal,
-			Reason:         "NominatedMachine",
-			Message:        fmt.Sprintf("Pod should schedule on machine: %s", machine.Name),
-			DedupeValues:   []string{string(pod.UID)},
-			RateLimiter:    PodNominationRateLimiterForMachine,
-		})
+		info = append(info, fmt.Sprintf("machine/%s", machine.Name))
 	}
-	return evts
+	if node != nil {
+		info = append(info, fmt.Sprintf("node/%s", node.Name))
+	}
+	return events.Event{
+		InvolvedObject: pod,
+		Type:           v1.EventTypeNormal,
+		Reason:         "Nominated",
+		Message:        fmt.Sprintf("Pod should schedule on: %s", strings.Join(info, ", ")),
+		DedupeValues:   []string{string(pod.UID)},
+		RateLimiter:    PodNominationRateLimiter,
+	}
 }
 
 func PodFailedToSchedule(pod *v1.Pod, err error) events.Event {
