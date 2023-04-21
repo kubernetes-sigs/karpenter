@@ -24,13 +24,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/logging"
+	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/metrics"
-	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 )
@@ -65,20 +65,35 @@ func (r *Registration) Reconcile(ctx context.Context, machine *v1alpha5.Machine)
 	if err = r.syncNode(ctx, machine, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("syncing node, %w", err)
 	}
+	logging.FromContext(ctx).Debugf("registered machine")
 	machine.StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
+	machine.Status.NodeName = node.Name
 	metrics.MachinesRegisteredCounter.With(prometheus.Labels{
 		metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
 	}).Inc()
+	// If the machine is linked, then the node already existed so we don't mark it as created
+	if _, ok := machine.Annotations[v1alpha5.MachineLinkedAnnotationKey]; !ok {
+		metrics.NodesCreatedCounter.With(prometheus.Labels{
+			metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
+		}).Inc()
+	}
 	return reconcile.Result{}, nil
 }
 
 func (r *Registration) syncNode(ctx context.Context, machine *v1alpha5.Machine, node *v1.Node) error {
 	stored := node.DeepCopy()
 	controllerutil.AddFinalizer(node, v1alpha5.TerminationFinalizer)
-	lo.Must0(controllerutil.SetOwnerReference(machine, node, scheme.Scheme))
+
 	// Remove any provisioner owner references since we own them
 	node.OwnerReferences = lo.Reject(node.OwnerReferences, func(o metav1.OwnerReference, _ int) bool {
 		return o.Kind == "Provisioner"
+	})
+	node.OwnerReferences = append(node.OwnerReferences, metav1.OwnerReference{
+		APIVersion:         v1alpha5.SchemeGroupVersion.String(),
+		Kind:               "Machine",
+		Name:               machine.Name,
+		UID:                machine.UID,
+		BlockOwnerDeletion: ptr.Bool(true),
 	})
 
 	// If the machine isn't registered as linked, then sync it
@@ -90,12 +105,10 @@ func (r *Registration) syncNode(ctx context.Context, machine *v1alpha5.Machine, 
 		node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(machine.Spec.Taints)
 		node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(machine.Spec.StartupTaints)
 	}
-	node.Labels[v1alpha5.MachineNameLabelKey] = machine.Labels[v1alpha5.MachineNameLabelKey]
 	if !equality.Semantic.DeepEqual(stored, node) {
 		if err := r.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 			return fmt.Errorf("syncing node labels, %w", err)
 		}
-		logging.FromContext(ctx).Debugf("synced node")
 	}
 	return nil
 }

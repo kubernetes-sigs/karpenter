@@ -1327,11 +1327,11 @@ var _ = Describe("Cluster State Sync", func() {
 			ExpectApplied(ctx, env.Client, machine)
 			ExpectApplied(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		}
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 	})
 	It("shouldn't consider the cluster state synced if a machine hasn't resolved its provider id", func() {
-		Skip("enable this test when cluster state sync relies on machines")
 		// Deploy 1000 machines and sync them all with the cluster
 		for i := 0; i < 1000; i++ {
 			machine := test.Machine(v1alpha5.Machine{
@@ -1349,7 +1349,6 @@ var _ = Describe("Cluster State Sync", func() {
 		Expect(cluster.Synced(ctx)).To(BeFalse())
 	})
 	It("shouldn't consider the cluster state synced if a machine isn't tracked", func() {
-		Skip("enable this test when cluster state sync relies on machines")
 		// Deploy 1000 machines and sync them all with the cluster
 		for i := 0; i < 1000; i++ {
 			machine := test.Machine(v1alpha5.Machine{

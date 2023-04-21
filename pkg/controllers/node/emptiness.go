@@ -46,12 +46,10 @@ func (r *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 	if provisioner.Spec.TTLSecondsAfterEmpty == nil {
 		return reconcile.Result{}, nil
 	}
-
 	// node is not ready yet, so we don't consider it to possibly be empty
 	if n.Labels[v1alpha5.LabelNodeInitialized] != "true" {
 		return reconcile.Result{}, nil
 	}
-
 	empty, err := r.isEmpty(ctx, n)
 	if err != nil {
 		return reconcile.Result{}, err
@@ -62,7 +60,6 @@ func (r *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 	if r.cluster.IsNodeNominated(n.Name) {
 		return reconcile.Result{RequeueAfter: time.Second * 30}, nil
 	}
-
 	_, hasEmptinessTimestamp := n.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
 	if !empty && hasEmptinessTimestamp {
 		delete(n.Annotations, v1alpha5.EmptinessTimestampAnnotationKey)

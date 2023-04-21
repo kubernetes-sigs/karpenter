@@ -20,7 +20,6 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	clock "k8s.io/utils/clock/testing"
@@ -122,15 +121,19 @@ var _ = Describe("Controller", func() {
 		})
 		It("should annotate the node when it has drifted in the cloud provider", func() {
 			cp.Drifted = true
-			node := test.Node(test.NodeOptions{
+			machine, node := test.MachineAndNode(v1alpha5.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
 						v1.LabelInstanceTypeStable:       test.RandomName(),
 					},
 				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+				},
 			})
-			ExpectApplied(ctx, env.Client, provisioner, node)
+			ExpectApplied(ctx, env.Client, provisioner, machine, node)
+			ExpectMakeMachinesReady(ctx, env.Client, machine)
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			Expect(node.Annotations).To(HaveKeyWithValue(v1alpha5.VoluntaryDisruptionAnnotationKey, v1alpha5.VoluntaryDisruptionDriftedAnnotationValue))
@@ -153,206 +156,8 @@ var _ = Describe("Controller", func() {
 			Expect(node.Annotations).ToNot(HaveKey(v1alpha5.VoluntaryDisruptionAnnotationKey))
 		})
 	})
-
-	Context("Initialization", func() {
-		It("should initialize the node when ready", func() {
-			node := test.Node(test.NodeOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-					},
-				},
-				ReadyStatus: v1.ConditionTrue,
-			})
-			ExpectApplied(ctx, env.Client, provisioner, node)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Expect(node.Labels).To(HaveKey(v1alpha5.LabelNodeInitialized))
-		})
-		It("should not initialize the node when not ready", func() {
-			node := test.Node(test.NodeOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-					},
-				},
-				ReadyStatus: v1.ConditionFalse,
-			})
-			ExpectApplied(ctx, env.Client, provisioner, node)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Expect(node.Labels).ToNot(HaveKey(v1alpha5.LabelNodeInitialized))
-		})
-		It("should initialize the node when extended resources are registered", func() {
-			node := test.Node(test.NodeOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-						v1.LabelInstanceTypeStable:       "gpu-vendor-instance-type",
-					},
-				},
-				ReadyStatus: v1.ConditionTrue,
-				Allocatable: v1.ResourceList{
-					v1.ResourceCPU:          resource.MustParse("4"),
-					v1.ResourceMemory:       resource.MustParse("4Gi"),
-					v1.ResourcePods:         resource.MustParse("5"),
-					fake.ResourceGPUVendorA: resource.MustParse("2"),
-				},
-				Capacity: v1.ResourceList{
-					v1.ResourceCPU:          resource.MustParse("4"),
-					v1.ResourceMemory:       resource.MustParse("4Gi"),
-					v1.ResourcePods:         resource.MustParse("5"),
-					fake.ResourceGPUVendorA: resource.MustParse("2"),
-				},
-			})
-			ExpectApplied(ctx, env.Client, provisioner, node)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Expect(node.Labels).To(HaveKey(v1alpha5.LabelNodeInitialized))
-		})
-		It("should not initialize the node when extended resource isn't registered", func() {
-			node := test.Node(test.NodeOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-						v1.LabelInstanceTypeStable:       "gpu-vendor-instance-type",
-					},
-				},
-				ReadyStatus: v1.ConditionTrue,
-				Allocatable: v1.ResourceList{
-					v1.ResourceCPU:    resource.MustParse("4"),
-					v1.ResourceMemory: resource.MustParse("4Gi"),
-					v1.ResourcePods:   resource.MustParse("5"),
-				},
-				Capacity: v1.ResourceList{
-					v1.ResourceCPU:    resource.MustParse("4"),
-					v1.ResourceMemory: resource.MustParse("4Gi"),
-					v1.ResourcePods:   resource.MustParse("5"),
-				},
-			})
-			ExpectApplied(ctx, env.Client, provisioner, node)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Expect(node.Labels).ToNot(HaveKey(v1alpha5.LabelNodeInitialized))
-		})
-		It("should not initialize the node when capacity is filled but allocatable isn't set", func() {
-			node := test.Node(test.NodeOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-						v1.LabelInstanceTypeStable:       "gpu-vendor-instance-type",
-					},
-				},
-				ReadyStatus: v1.ConditionTrue,
-				Allocatable: v1.ResourceList{
-					v1.ResourceCPU:    resource.MustParse("4"),
-					v1.ResourceMemory: resource.MustParse("4Gi"),
-					v1.ResourcePods:   resource.MustParse("5"),
-				},
-				Capacity: v1.ResourceList{
-					v1.ResourceCPU:          resource.MustParse("4"),
-					v1.ResourceMemory:       resource.MustParse("4Gi"),
-					v1.ResourcePods:         resource.MustParse("5"),
-					fake.ResourceGPUVendorA: resource.MustParse("2"),
-				},
-			})
-			ExpectApplied(ctx, env.Client, provisioner, node)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Expect(node.Labels).ToNot(HaveKey(v1alpha5.LabelNodeInitialized))
-		})
-		It("should initialize the node when startup taints are removed", func() {
-			provisioner.Spec.StartupTaints = []v1.Taint{
-				{
-					Key:    "example.com/startup-taint1",
-					Value:  "true",
-					Effect: v1.TaintEffectNoExecute,
-				},
-				{
-					Key:    "example.com/startup-taint1",
-					Value:  "true",
-					Effect: v1.TaintEffectNoSchedule,
-				},
-				{
-					Key:    "example.com/startup-taint2",
-					Value:  "true",
-					Effect: v1.TaintEffectNoExecute,
-				},
-			}
-			node := test.Node(test.NodeOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-					},
-				},
-				ReadyStatus: v1.ConditionTrue,
-			})
-			ExpectApplied(ctx, env.Client, provisioner, node)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Expect(node.Labels).To(HaveKey(v1alpha5.LabelNodeInitialized))
-		})
-		It("should not initialize the node when startup taints aren't removed", func() {
-			provisioner.Spec.StartupTaints = []v1.Taint{
-				{
-					Key:    "example.com/startup-taint1",
-					Value:  "true",
-					Effect: v1.TaintEffectNoExecute,
-				},
-				{
-					Key:    "example.com/startup-taint1",
-					Value:  "true",
-					Effect: v1.TaintEffectNoSchedule,
-				},
-				{
-					Key:    "example.com/startup-taint2",
-					Value:  "true",
-					Effect: v1.TaintEffectNoExecute,
-				},
-			}
-			node := test.Node(test.NodeOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-					},
-				},
-				Taints: []v1.Taint{
-					{
-						Key:    "example.com/startup-taint1",
-						Value:  "true",
-						Effect: v1.TaintEffectNoExecute,
-					},
-				},
-				ReadyStatus: v1.ConditionTrue,
-			})
-			ExpectApplied(ctx, env.Client, provisioner, node)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Expect(node.Labels).ToNot(HaveKey(v1alpha5.LabelNodeInitialized))
-		})
-	})
 	Context("Emptiness", func() {
-		It("should not TTL nodes that have ready status unknown", func() {
-			provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(30)
-			node := test.Node(test.NodeOptions{
-				ObjectMeta:  metav1.ObjectMeta{Labels: map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name}},
-				ReadyStatus: v1.ConditionUnknown,
-			})
-
-			ExpectApplied(ctx, env.Client, provisioner, node)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Expect(node.Annotations).ToNot(HaveKey(v1alpha5.EmptinessTimestampAnnotationKey))
-		})
-		It("should not TTL nodes that have ready status false", func() {
+		It("should not TTL nodes that are not initialized", func() {
 			provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(30)
 			node := test.Node(test.NodeOptions{
 				ObjectMeta:  metav1.ObjectMeta{Labels: map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name}},
@@ -368,7 +173,10 @@ var _ = Describe("Controller", func() {
 		It("should label nodes as underutilized and add TTL", func() {
 			provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(30)
 			node := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name},
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1alpha5.LabelNodeInitialized:    "true",
+				},
 			}})
 			ExpectApplied(ctx, env.Client, provisioner, node)
 
@@ -405,7 +213,10 @@ var _ = Describe("Controller", func() {
 		It("should remove labels from non-empty nodes", func() {
 			provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(30)
 			node := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name},
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1alpha5.LabelNodeInitialized:    "true",
+				},
 				Annotations: map[string]string{
 					v1alpha5.EmptinessTimestampAnnotationKey: fakeClock.Now().Add(100 * time.Second).Format(time.RFC3339),
 				}},
@@ -464,57 +275,6 @@ var _ = Describe("Controller", func() {
 
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			Expect(node.Annotations).ToNot(HaveKey(v1alpha5.VoluntaryDisruptionAnnotationKey))
-		})
-	})
-	Context("Finalizer", func() {
-		It("should add the termination finalizer if missing", func() {
-			n := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
-				Labels:     map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name},
-				Finalizers: []string{"fake.com/finalizer"},
-			}})
-			ExpectApplied(ctx, env.Client, provisioner, n)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(n))
-
-			n = ExpectNodeExists(ctx, env.Client, n.Name)
-			Expect(n.Finalizers).To(ConsistOf(n.Finalizers[0], v1alpha5.TerminationFinalizer))
-		})
-		It("should do nothing if terminating", func() {
-			n := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
-				Labels:     map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name},
-				Finalizers: []string{"fake.com/finalizer"},
-			}})
-			ExpectApplied(ctx, env.Client, provisioner, n)
-			Expect(env.Client.Delete(ctx, n)).To(Succeed())
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(n))
-
-			n = ExpectNodeExists(ctx, env.Client, n.Name)
-			Expect(n.Finalizers).To(Equal(n.Finalizers))
-		})
-		It("should do nothing if the termination finalizer already exists", func() {
-			n := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
-				Labels:     map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name},
-				Finalizers: []string{v1alpha5.TerminationFinalizer, "fake.com/finalizer"},
-			}})
-			ExpectApplied(ctx, env.Client, provisioner, n)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(n))
-
-			n = ExpectNodeExists(ctx, env.Client, n.Name)
-			Expect(n.Finalizers).To(Equal(n.Finalizers))
-		})
-		It("should add an owner reference to the node", func() {
-			n := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name},
-			}})
-			ExpectApplied(ctx, env.Client, provisioner, n)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(n))
-			n = ExpectNodeExists(ctx, env.Client, n.Name)
-			Expect(n.OwnerReferences).To(Equal([]metav1.OwnerReference{{
-				APIVersion:         v1alpha5.SchemeGroupVersion.String(),
-				Kind:               "Provisioner",
-				Name:               provisioner.Name,
-				UID:                provisioner.UID,
-				BlockOwnerDeletion: ptr.Bool(true),
-			}}))
 		})
 	})
 	Context("Filters", func() {

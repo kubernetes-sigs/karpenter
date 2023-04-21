@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -36,6 +37,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/termination/terminator"
 	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/termination/terminator/events"
 	"github.com/aws/karpenter-core/pkg/events"
+	"github.com/aws/karpenter-core/pkg/metrics"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 )
@@ -73,6 +75,9 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 	if !controllerutil.ContainsFinalizer(node, v1alpha5.TerminationFinalizer) {
 		return reconcile.Result{}, nil
 	}
+	if err := c.deleteAllMachines(ctx, node); err != nil {
+		return reconcile.Result{}, fmt.Errorf("deleting machines, %w", err)
+	}
 	if err := c.terminator.Cordon(ctx, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("cordoning node, %w", err)
 	}
@@ -97,6 +102,19 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 	return reconcile.Result{}, c.removeFinalizer(ctx, node)
 }
 
+func (c *Controller) deleteAllMachines(ctx context.Context, node *v1.Node) error {
+	machineList := &v1alpha5.MachineList{}
+	if err := c.kubeClient.List(ctx, machineList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
+		return err
+	}
+	for i := range machineList.Items {
+		if err := c.kubeClient.Delete(ctx, &machineList.Items[i]); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+	}
+	return nil
+}
+
 func (c *Controller) removeFinalizer(ctx context.Context, n *v1.Node) error {
 	stored := n.DeepCopy()
 	controllerutil.RemoveFinalizer(n, v1alpha5.TerminationFinalizer)
@@ -104,6 +122,9 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *v1.Node) error {
 		if err := c.kubeClient.Patch(ctx, n, client.MergeFrom(stored)); err != nil {
 			return client.IgnoreNotFound(fmt.Errorf("patching node, %w", err))
 		}
+		metrics.NodesTerminatedCounter.With(prometheus.Labels{
+			metrics.ProvisionerLabel: n.Labels[v1alpha5.ProvisionerNameLabelKey],
+		}).Inc()
 		logging.FromContext(ctx).Infof("deleted node")
 	}
 	return nil

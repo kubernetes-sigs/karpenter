@@ -80,27 +80,36 @@ func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudPro
 // of the cluster is as close to correct as it can be when we begin to perform operations
 // utilizing the cluster state as our source of truth
 func (c *Cluster) Synced(ctx context.Context) bool {
+	machineList := &v1alpha5.MachineList{}
+	if err := c.kubeClient.List(ctx, machineList); err != nil {
+		logging.FromContext(ctx).Errorf("checking cluster state sync, %v", err)
+		return false
+	}
 	nodeList := &v1.NodeList{}
 	if err := c.kubeClient.List(ctx, nodeList); err != nil {
 		logging.FromContext(ctx).Errorf("checking cluster state sync, %v", err)
 		return false
 	}
 	c.mu.RLock()
-	stateProviderIDs := sets.New(lo.Keys(c.nodes)...)
+	stateNames := sets.New(lo.Keys(c.nameToProviderID)...)
 	c.mu.RUnlock()
 
-	providerIDs := sets.New[string]()
-	for _, node := range nodeList.Items {
-		if node.Spec.ProviderID == "" {
-			node.Spec.ProviderID = node.Name
+	names := sets.New[string]()
+	for _, machine := range machineList.Items {
+		// If the machine hasn't resolved its provider id, then it hasn't resolved its status
+		if machine.Status.ProviderID == "" {
+			return false
 		}
-		providerIDs.Insert(node.Spec.ProviderID)
+		names.Insert(machine.Name)
+	}
+	for _, node := range nodeList.Items {
+		names.Insert(node.Name)
 	}
 	// The provider ids tracked in-memory should at least have all the data that is in the api-server
 	// This doesn't ensure that the two states are exactly aligned (we could still not be tracking a node
 	// that exists in the cluster state but not in the apiserver) but it ensures that we have a state
 	// representation for every node/machine that exists on the apiserver
-	return stateProviderIDs.IsSuperset(providerIDs)
+	return stateNames.IsSuperset(names)
 }
 
 // ForPodsWithAntiAffinity calls the supplied function once for each pod with required anti affinity terms that is

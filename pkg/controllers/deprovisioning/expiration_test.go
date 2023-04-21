@@ -90,8 +90,9 @@ var _ = Describe("Expiration", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 
 		// Expect to not create or delete more machines
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		ExpectExists(ctx, env.Client, node)
+		ExpectExists(ctx, env.Client, machine)
 	})
 	It("can delete expired nodes", func() {
 		ExpectApplied(ctx, env.Client, machine, node, prov)
@@ -104,9 +105,13 @@ var _ = Describe("Expiration", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+
 		// Expect that the expired machine is gone
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		ExpectNotFound(ctx, env.Client, node)
+		ExpectNotFound(ctx, env.Client, machine, node)
 	})
 	It("should deprovision all empty expired nodes in parallel", func() {
 		machines, nodes := test.MachinesAndNodes(100, v1alpha5.Machine{
@@ -144,8 +149,12 @@ var _ = Describe("Expiration", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machines...)
+
 		// Expect that the expired machines are gone
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
 	})
 	It("should expire one non-empty node at a time, starting with most expired", func() {
 		expireProv := test.Provisioner(test.ProvisionerOptions{
@@ -219,13 +228,17 @@ var _ = Describe("Expiration", func() {
 		// deprovisioning won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
-		// Expect that one of the expired machines is replaced
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machineToExpire)
+
+		// Expect that one of the expired machines is gone
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(2))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
-		ExpectNotFound(ctx, env.Client, nodeToExpire)
+		ExpectNotFound(ctx, env.Client, machineToExpire, nodeToExpire)
 	})
 	It("can replace node for expiration", func() {
 		labels := map[string]string{
@@ -261,14 +274,20 @@ var _ = Describe("Expiration", func() {
 		// deprovisioning won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 1)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+
 		// Expect that the new machine was created, and it's different than the original
-		ExpectNotFound(ctx, env.Client, node)
+		ExpectNotFound(ctx, env.Client, machine, node)
+		machines := ExpectMachines(ctx, env.Client)
 		nodes := ExpectNodes(ctx, env.Client)
+		Expect(machines).To(HaveLen(1))
 		Expect(nodes).To(HaveLen(1))
+		Expect(machines[0].Name).ToNot(Equal(machine.Name))
 		Expect(nodes[0].Name).ToNot(Equal(node.Name))
 	})
 	It("should uncordon nodes when expiration replacement fails", func() {
@@ -306,6 +325,7 @@ var _ = Describe("Expiration", func() {
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
+		ExpectNewMachinesDeleted(ctx, env.Client, &wg, 1)
 		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		Expect(err).To(HaveOccurred())
 		wg.Wait()
@@ -398,11 +418,15 @@ var _ = Describe("Expiration", func() {
 		// deprovisioning won't delete the old machine until the new machine is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewNodesReady(ctx, env.Client, &wg, 3)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 3)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(3))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(3))
-		ExpectNotFound(ctx, env.Client, node)
+		ExpectNotFound(ctx, env.Client, machine, node)
 	})
 })

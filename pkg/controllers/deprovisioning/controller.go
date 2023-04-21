@@ -184,15 +184,15 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 	}
 
 	for _, candidate := range command.candidates {
-		c.recorder.Publish(deprovisioningevents.Terminating(candidate.Node, command.String())...)
+		c.recorder.Publish(deprovisioningevents.Terminating(candidate.Node, candidate.Machine, command.String())...)
 
-		if err := c.kubeClient.Delete(ctx, candidate.Node); err != nil {
+		if err := c.kubeClient.Delete(ctx, candidate.Machine); err != nil {
 			if errors.IsNotFound(err) {
 				continue
 			}
 			logging.FromContext(ctx).Errorf("terminating machine, %s", err)
 		} else {
-			metrics.NodesTerminatedCounter.With(prometheus.Labels{
+			metrics.MachinesTerminatedCounter.With(prometheus.Labels{
 				metrics.ReasonLabel:      reason,
 				metrics.ProvisionerLabel: candidate.provisioner.Name,
 			}).Inc()
@@ -202,7 +202,7 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 	// We wait for nodes to delete to ensure we don't start another round of deprovisioning until this node is fully
 	// deleted.
 	for _, oldCandidate := range command.candidates {
-		c.waitForDeletion(ctx, oldCandidate.Node)
+		c.waitForDeletion(ctx, oldCandidate.Machine)
 	}
 	return nil
 }
@@ -252,8 +252,8 @@ func (c *Controller) waitForReadiness(ctx context.Context, action Command, name 
 	var once sync.Once
 	pollStart := time.Now()
 	return retry.Do(func() error {
-		node := &v1.Node{}
-		if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: name}, node); err != nil {
+		machine := &v1alpha5.Machine{}
+		if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: name}, machine); err != nil {
 			// If the machine was deleted after a few seconds (to give the cache time to update), then we assume
 			// that the machine was deleted due to an Insufficient Capacity error
 			if errors.IsNotFound(err) && c.clock.Since(pollStart) > time.Second*5 {
@@ -262,12 +262,12 @@ func (c *Controller) waitForReadiness(ctx context.Context, action Command, name 
 			return fmt.Errorf("getting machine, %w", err)
 		}
 		once.Do(func() {
-			c.recorder.Publish(deprovisioningevents.Launching(node, action.String()))
+			c.recorder.Publish(deprovisioningevents.Launching(machine, action.String()))
 		})
-		if _, ok := node.Labels[v1alpha5.LabelNodeInitialized]; !ok {
+		if !machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).IsTrue() {
 			// make the user aware of why deprovisioning is paused
-			c.recorder.Publish(deprovisioningevents.WaitingOnReadiness(node))
-			return fmt.Errorf("node is not initialized")
+			c.recorder.Publish(deprovisioningevents.WaitingOnReadiness(machine))
+			return fmt.Errorf("machine is not initialized")
 		}
 		return nil
 	}, waitRetryOptions...)
@@ -276,21 +276,21 @@ func (c *Controller) waitForReadiness(ctx context.Context, action Command, name 
 // waitForDeletion waits for the specified machine to be removed from the API server. This deletion can take some period
 // of time if there are PDBs that govern pods on the machine as we need to wait until the node drains before
 // it's actually deleted.
-func (c *Controller) waitForDeletion(ctx context.Context, node *v1.Node) {
+func (c *Controller) waitForDeletion(ctx context.Context, machine *v1alpha5.Machine) {
 	if err := retry.Do(func() error {
-		m := &v1.Node{}
-		nerr := c.kubeClient.Get(ctx, client.ObjectKeyFromObject(node), m)
+		m := &v1alpha5.Machine{}
+		nerr := c.kubeClient.Get(ctx, client.ObjectKeyFromObject(machine), m)
 		// We expect the not machine found error, at which point we know the machine is deleted.
 		if errors.IsNotFound(nerr) {
 			return nil
 		}
 		// make the user aware of why deprovisioning is paused
-		c.recorder.Publish(deprovisioningevents.WaitingOnDeletion(node))
+		c.recorder.Publish(deprovisioningevents.WaitingOnDeletion(machine))
 		if nerr != nil {
-			return fmt.Errorf("expected node to be not found, %w", nerr)
+			return fmt.Errorf("expected machine to be not found, %w", nerr)
 		}
 		// the machine still exists
-		return fmt.Errorf("expected node to be not found")
+		return fmt.Errorf("expected machine to be not found")
 	}, waitRetryOptions...,
 	); err != nil {
 		logging.FromContext(ctx).Errorf("Waiting on machine deletion, %s", err)

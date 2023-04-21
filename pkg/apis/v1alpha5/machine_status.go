@@ -21,6 +21,9 @@ import (
 
 // MachineStatus defines the observed state of Machine
 type MachineStatus struct {
+	// NodeName is the name of the corresponding node object
+	// +optional
+	NodeName string `json:"nodeName,omitempty"`
 	// ProviderID of the corresponding node object
 	// +optional
 	ProviderID string `json:"providerID,omitempty"`

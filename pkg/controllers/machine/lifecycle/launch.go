@@ -17,7 +17,6 @@ package lifecycle
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/patrickmn/go-cache"
 	"github.com/prometheus/client_golang/prometheus"
@@ -54,7 +53,7 @@ func (l *Launch) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reco
 	//     need to grab info from the CloudProvider to get details on the machine.
 	//  3. It is a standard machine launch where we should call CloudProvider Create() and fill in details of the launched
 	//     machine into the Machine CR.
-	if ret, ok := l.cache.Get(client.ObjectKeyFromObject(machine).String()); ok {
+	if ret, ok := l.cache.Get(string(machine.UID)); ok {
 		created = ret.(*v1alpha5.Machine)
 	} else if _, ok := machine.Annotations[v1alpha5.MachineLinkedAnnotationKey]; ok {
 		created, err = l.linkMachine(ctx, machine)
@@ -65,13 +64,17 @@ func (l *Launch) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reco
 	if err != nil || created == nil {
 		return reconcile.Result{}, err
 	}
-	l.cache.SetDefault(client.ObjectKeyFromObject(machine).String(), created)
+	l.cache.SetDefault(string(machine.UID), created)
 	PopulateMachineDetails(machine, created)
 	machine.StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
+	metrics.MachinesLaunchedCounter.With(prometheus.Labels{
+		metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
+	}).Inc()
 	return reconcile.Result{}, nil
 }
 
 func (l *Launch) linkMachine(ctx context.Context, machine *v1alpha5.Machine) (*v1alpha5.Machine, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", machine.Annotations[v1alpha5.MachineLinkedAnnotationKey]))
 	created, err := l.cloudProvider.Get(ctx, machine.Annotations[v1alpha5.MachineLinkedAnnotationKey])
 	if err != nil {
 		if !cloudprovider.IsMachineNotFoundError(err) {
@@ -88,14 +91,16 @@ func (l *Launch) linkMachine(ctx context.Context, machine *v1alpha5.Machine) (*v
 		}).Inc()
 		return nil, nil
 	}
-	logging.FromContext(ctx).Debugf("linked machine")
+	logging.FromContext(ctx).With(
+		"provider-id", created.Status.ProviderID,
+		"instance-type", created.Labels[v1.LabelInstanceTypeStable],
+		"zone", created.Labels[v1.LabelTopologyZone],
+		"capacity-type", created.Labels[v1alpha5.LabelCapacityType],
+		"allocatable", created.Status.Allocatable).Infof("linked machine")
 	return created, nil
 }
 
 func (l *Launch) launchMachine(ctx context.Context, machine *v1alpha5.Machine) (*v1alpha5.Machine, error) {
-	instanceTypeRequirement, _ := lo.Find(machine.Spec.Requirements, func(req v1.NodeSelectorRequirement) bool { return req.Key == v1.LabelInstanceTypeStable })
-	logging.FromContext(ctx).With("pods", machine.Spec.Resources.Requests[v1.ResourcePods],
-		"resources", machine.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).Infof("launching machine")
 	created, err := l.cloudProvider.Create(ctx, machine)
 	if err != nil {
 		if !cloudprovider.IsInsufficientCapacityError(err) {
@@ -112,7 +117,12 @@ func (l *Launch) launchMachine(ctx context.Context, machine *v1alpha5.Machine) (
 		}).Inc()
 		return nil, nil
 	}
-	logging.FromContext(ctx).Debugf("launched machine")
+	logging.FromContext(ctx).With(
+		"provider-id", created.Status.ProviderID,
+		"instance-type", created.Labels[v1.LabelInstanceTypeStable],
+		"zone", created.Labels[v1.LabelTopologyZone],
+		"capacity-type", created.Labels[v1alpha5.LabelCapacityType],
+		"allocatable", created.Status.Allocatable).Infof("launched machine")
 	return created, nil
 }
 
@@ -130,24 +140,9 @@ func PopulateMachineDetails(machine, retrieved *v1alpha5.Machine) {
 	machine.Status.Capacity = retrieved.Status.Capacity
 }
 
-func instanceTypeList(names []string) string {
-	var itSb strings.Builder
-	for i, name := range names {
-		// print the first 5 instance types only (indices 0-4)
-		if i > 4 {
-			lo.Must(fmt.Fprintf(&itSb, " and %d other(s)", len(names)-i))
-			break
-		} else if i > 0 {
-			lo.Must(fmt.Fprint(&itSb, ", "))
-		}
-		lo.Must(fmt.Fprint(&itSb, name))
-	}
-	return itSb.String()
-}
-
 func truncateMessage(msg string) string {
-	if len(msg) < 200 {
+	if len(msg) < 300 {
 		return msg
 	}
-	return msg[:200] + "..."
+	return msg[:300] + "..."
 }

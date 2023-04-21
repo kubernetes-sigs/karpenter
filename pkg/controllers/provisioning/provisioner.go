@@ -17,16 +17,14 @@ package provisioning
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
-	"github.com/imdario/mergo"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -319,6 +317,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (*scheduler.Results, error) 
 
 func (p *Provisioner) Launch(ctx context.Context, m *scheduler.Machine, opts ...functional.Option[LaunchOptions]) (string, error) {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", m.Labels[v1alpha5.ProvisionerNameLabelKey]))
+
 	// Check limits
 	latest := &v1alpha5.Provisioner{}
 	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: m.ProvisionerName}, latest); err != nil {
@@ -329,57 +328,38 @@ func (p *Provisioner) Launch(ctx context.Context, m *scheduler.Machine, opts ...
 	}
 	options := functional.ResolveOptions(opts...)
 
-	logging.FromContext(ctx).Infof("launching %s", m)
-	created, err := p.cloudProvider.Create(
-		logging.WithLogger(ctx, logging.FromContext(ctx).Named("cloudprovider")),
-		m.ToMachine(latest),
-	)
-	if err != nil {
-		return "", fmt.Errorf("creating cloud provider instance, %w", err)
+	machine := m.ToMachine(latest)
+	if err := p.kubeClient.Create(ctx, machine); err != nil {
+		return "", err
 	}
-	k8sNode := &v1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   created.Name,
-			Labels: created.Labels,
-		},
-		Spec: v1.NodeSpec{
-			ProviderID: created.Status.ProviderID,
-		},
-	}
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", k8sNode.Name))
-
-	if err := mergo.Merge(k8sNode, m.ToNode()); err != nil {
-		return "", fmt.Errorf("merging cloud provider node, %w", err)
-	}
-	// ensure we clear out the status
-	k8sNode.Status = v1.NodeStatus{}
-
-	// Idempotently create a node. In rare cases, nodes can come online and
-	// self register before the controller is able to register a node object
-	// with the API server. In the common case, we create the node object
-	// ourselves to enforce the binding decision and enable images to be pulled
-	// before the node is fully Ready.
-	if _, err := p.coreV1Client.Nodes().Create(ctx, k8sNode, metav1.CreateOptions{}); err != nil {
-		if errors.IsAlreadyExists(err) {
-			logging.FromContext(ctx).Debugf("node already registered")
-		} else {
-			return "", fmt.Errorf("creating node %s, %w", k8sNode.Name, err)
-		}
-	}
-	if err := p.cluster.UpdateNode(ctx, k8sNode); err != nil {
-		return "", fmt.Errorf("updating cluster state, %w", err)
-	}
-	metrics.NodesCreatedCounter.With(prometheus.Labels{
+	instanceTypeRequirement, _ := lo.Find(machine.Spec.Requirements, func(req v1.NodeSelectorRequirement) bool { return req.Key == v1.LabelInstanceTypeStable })
+	logging.FromContext(ctx).With("requests", machine.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).Infof("created machine")
+	p.cluster.NominateNodeForPod(ctx, machine.Name)
+	metrics.MachinesCreatedCounter.With(prometheus.Labels{
 		metrics.ReasonLabel:      options.Reason,
-		metrics.ProvisionerLabel: k8sNode.Labels[v1alpha5.ProvisionerNameLabelKey],
+		metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
 	}).Inc()
-	p.cluster.NominateNodeForPod(ctx, k8sNode.Name)
-	if options.RecordPodNomination {
+	if functional.ResolveOptions(opts...).RecordPodNomination {
 		for _, pod := range m.Pods {
-			p.recorder.Publish(schedulingevents.NominatePod(pod, k8sNode)...)
+			p.recorder.Publish(schedulingevents.NominatePod(pod, nil, machine))
 		}
 	}
-	return k8sNode.Name, nil
+	return machine.Name, nil
+}
+
+func instanceTypeList(names []string) string {
+	var itSb strings.Builder
+	for i, name := range names {
+		// print the first 5 instance types only (indices 0-4)
+		if i > 4 {
+			lo.Must(fmt.Fprintf(&itSb, " and %d other(s)", len(names)-i))
+			break
+		} else if i > 0 {
+			lo.Must(fmt.Fprint(&itSb, ", "))
+		}
+		lo.Must(fmt.Fprint(&itSb, name))
+	}
+	return itSb.String()
 }
 
 func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*v1.Pod, error) {

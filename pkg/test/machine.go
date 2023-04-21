@@ -18,7 +18,6 @@ import (
 	"fmt"
 
 	"github.com/imdario/mergo"
-	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
@@ -39,9 +38,6 @@ func Machine(overrides ...v1alpha5.Machine) *v1alpha5.Machine {
 	if override.Status.ProviderID == "" {
 		override.Status.ProviderID = RandomProviderID()
 	}
-	override.ObjectMeta.Labels = lo.Assign(override.ObjectMeta.Labels, map[string]string{
-		v1alpha5.MachineNameLabelKey: override.Name,
-	})
 	return &v1alpha5.Machine{
 		ObjectMeta: ObjectMeta(override.ObjectMeta),
 		Spec:       override.Spec,

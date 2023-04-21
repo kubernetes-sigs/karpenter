@@ -16,26 +16,33 @@ package events
 
 import (
 	"fmt"
+	"strings"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/flowcontrol"
 
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
 // PodNominationRateLimiter is a pointer so it rate-limits across events
 var PodNominationRateLimiter = flowcontrol.NewTokenBucketRateLimiter(5, 10)
 
-func NominatePod(pod *v1.Pod, node *v1.Node) []events.Event {
-	return []events.Event{
-		{
-			InvolvedObject: pod,
-			Type:           v1.EventTypeNormal,
-			Reason:         "Nominated",
-			Message:        fmt.Sprintf("Pod should schedule on node: %s", node.Name),
-			DedupeValues:   []string{string(pod.UID)},
-			RateLimiter:    PodNominationRateLimiter,
-		},
+func NominatePod(pod *v1.Pod, node *v1.Node, machine *v1alpha5.Machine) events.Event {
+	var info []string
+	if machine != nil {
+		info = append(info, fmt.Sprintf("machine/%s", machine.Name))
+	}
+	if node != nil {
+		info = append(info, fmt.Sprintf("node/%s", node.Name))
+	}
+	return events.Event{
+		InvolvedObject: pod,
+		Type:           v1.EventTypeNormal,
+		Reason:         "Nominated",
+		Message:        fmt.Sprintf("Pod should schedule on: %s", strings.Join(info, ", ")),
+		DedupeValues:   []string{string(pod.UID)},
+		RateLimiter:    PodNominationRateLimiter,
 	}
 }
 
