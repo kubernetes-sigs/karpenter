@@ -104,6 +104,9 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		recorder.Publish(deprovisioningevents.Blocked(node.Node, node.Machine, "machine is nominated")...)
 		return nil, fmt.Errorf("state node is nominated")
 	}
+	if node.Node == nil || node.Machine == nil {
+		return nil, fmt.Errorf("state node doesn't contain both a node and a machine")
+	}
 
 	pods, err := node.Pods(ctx, kubeClient)
 	if err != nil {
