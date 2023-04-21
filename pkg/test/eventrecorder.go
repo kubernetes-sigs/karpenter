@@ -17,6 +17,8 @@ package test
 import (
 	"sync"
 
+	"github.com/samber/lo"
+
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
@@ -55,6 +57,24 @@ func (e *EventRecorder) Reset() {
 	defer e.mu.Unlock()
 	e.events = nil
 	e.calls = map[string]int{}
+}
+
+func (e *EventRecorder) Events() (res []events.Event) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	for _, evt := range e.events {
+		res = append(res, events.Event{
+			InvolvedObject: evt.InvolvedObject,
+			Type:           evt.Type,
+			Reason:         evt.Reason,
+			Message:        evt.Message,
+			DedupeValues:   lo.Map(evt.DedupeValues, func(v string, _ int) string { return v }),
+			DedupeTimeout:  evt.DedupeTimeout,
+			RateLimiter:    evt.RateLimiter,
+		})
+	}
+	return res
 }
 
 func (e *EventRecorder) ForEachEvent(f func(evt events.Event)) {
