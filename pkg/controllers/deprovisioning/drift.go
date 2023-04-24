@@ -55,7 +55,8 @@ func (d *Drift) ShouldDeprovision(ctx context.Context, c *Candidate) bool {
 	if !settings.FromContext(ctx).DriftEnabled {
 		return false
 	}
-	return c.Annotations()[v1alpha5.VoluntaryDisruptionAnnotationKey] == v1alpha5.VoluntaryDisruptionDriftedAnnotationValue
+	cond := c.Machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)
+	return cond.IsTrue() && cond.Reason == v1alpha5.VoluntarilyDisruptedReasonDrifted
 }
 
 // ComputeCommand generates a deprovisioning command given deprovisionable machines

@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package node_test
+package disruption_test
 
 import (
 	"context"
@@ -87,6 +87,75 @@ var _ = Describe("Controller", func() {
 		ExpectCleanedUp(ctx, env.Client)
 	})
 
+	Context("Drift", func() {
+		It("should not detect drift if the feature flag is disabled", func() {
+			cp.Drifted = true
+			ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
+			node := test.Node(test.NodeOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       test.RandomName(),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			Expect(node.Annotations).ToNot(HaveKeyWithValue(v1alpha5.VoluntaryDisruptionAnnotationKey, v1alpha5.VoluntaryDisruptionDriftedAnnotationValue))
+		})
+		It("should not detect drift if the provisioner does not exist", func() {
+			cp.Drifted = true
+			node := test.Node(test.NodeOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       test.RandomName(),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			Expect(node.Annotations).ToNot(HaveKeyWithValue(v1alpha5.VoluntaryDisruptionAnnotationKey, v1alpha5.VoluntaryDisruptionDriftedAnnotationValue))
+		})
+		It("should annotate the node when it has drifted in the cloud provider", func() {
+			cp.Drifted = true
+			machine, node := test.MachineAndNode(v1alpha5.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       test.RandomName(),
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			ExpectApplied(ctx, env.Client, provisioner, machine, node)
+			ExpectMakeMachinesReady(ctx, env.Client, machine)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			Expect(node.Annotations).To(HaveKeyWithValue(v1alpha5.VoluntaryDisruptionAnnotationKey, v1alpha5.VoluntaryDisruptionDriftedAnnotationValue))
+		})
+		It("should remove the annotation from nodes if drift is disabled", func() {
+			cp.Drifted = true
+			ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
+			node := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name},
+				Annotations: map[string]string{
+					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
+				},
+			}})
+			ExpectApplied(ctx, env.Client, provisioner, node)
+
+			// step forward to make the node expired
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			Expect(node.Annotations).ToNot(HaveKey(v1alpha5.VoluntaryDisruptionAnnotationKey))
+		})
+	})
 	Context("Emptiness", func() {
 		It("should not TTL nodes that are not initialized", func() {
 			provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(30)
@@ -162,6 +231,50 @@ var _ = Describe("Controller", func() {
 
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			Expect(node.Annotations).ToNot(HaveKey(v1alpha5.EmptinessTimestampAnnotationKey))
+		})
+	})
+	Context("Expiration", func() {
+		It("should remove the annotation from nodes when expiration is disabled", func() {
+			node := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name},
+				Annotations: map[string]string{
+					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionExpiredAnnotationValue,
+				},
+			}})
+			ExpectApplied(ctx, env.Client, provisioner, node)
+
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			Expect(node.Annotations).ToNot(HaveKey(v1alpha5.VoluntaryDisruptionAnnotationKey))
+		})
+		It("should annotate nodes as expired", func() {
+			provisioner.Spec.TTLSecondsUntilExpired = ptr.Int64(30)
+			node := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name},
+			}})
+			ExpectApplied(ctx, env.Client, provisioner, node)
+
+			// step forward to make the node expired
+			fakeClock.Step(60 * time.Second)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			Expect(node.Annotations).To(HaveKeyWithValue(v1alpha5.VoluntaryDisruptionAnnotationKey, v1alpha5.VoluntaryDisruptionExpiredAnnotationValue))
+		})
+		It("should remove the annotation from non-expired nodes", func() {
+			provisioner.Spec.TTLSecondsUntilExpired = ptr.Int64(200)
+			node := test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name},
+				Annotations: map[string]string{
+					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionExpiredAnnotationValue,
+				}},
+			})
+			ExpectApplied(ctx, env.Client, provisioner, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			Expect(node.Annotations).ToNot(HaveKey(v1alpha5.VoluntaryDisruptionAnnotationKey))
 		})
 	})
 	Context("Filters", func() {

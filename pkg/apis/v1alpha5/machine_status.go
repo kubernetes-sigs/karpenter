@@ -54,6 +54,12 @@ var (
 	MachineVoluntarilyDisrupted   apis.ConditionType = "MachineVoluntarilyDisrupted"
 )
 
+var (
+	VoluntarilyDisruptedReasonEmpty   = "Empty"
+	VoluntarilyDisruptedReasonDrifted = "Drifted"
+	VoluntarilyDisruptedReasonExpired = "Expired"
+)
+
 func (in *Machine) GetConditions() apis.Conditions {
 	return in.Status.Conditions
 }

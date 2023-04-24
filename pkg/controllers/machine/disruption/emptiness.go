@@ -18,25 +18,32 @@ import (
 	"context"
 	"time"
 
-	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 )
 
 // Emptiness is a node sub-controller that annotates or de-annotates an expired node based on TTLSecondsUntilExpired
 type Emptiness struct {
-	clock clock.Clock
+	kubeClient client.Client
+	clock      clock.Clock
 }
 
-func (e *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine, node *v1.Node) (reconcile.Result, error) {
+//nolint:gocyclo
+func (e *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) (reconcile.Result, error) {
+	node, err := machineutil.NodeForMachine(ctx, e.kubeClient, machine)
+	if err != nil {
+		return reconcile.Result{}, machineutil.IgnoreDuplicateNodeError(machineutil.IgnoreNodeNotFoundError(err))
+	}
+
 	// If the node is marked as voluntarily disrupted by another controller, do nothing.
 	voluntarilyDisrupted := machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)
-	if voluntarilyDisrupted.IsTrue() && voluntarilyDisrupted.Reason != "Empty" {
+	if voluntarilyDisrupted.IsTrue() && voluntarilyDisrupted.Reason != v1alpha5.VoluntarilyDisruptedReasonEmpty {
 		return reconcile.Result{}, nil
 	}
 
@@ -46,8 +53,7 @@ func (e *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 	if provisioner.Spec.TTLSecondsAfterEmpty == nil {
 		if voluntarilyDisrupted.IsTrue() {
 			_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineVoluntarilyDisrupted)
-			delete(node.Annotations, v1alpha5.VoluntaryDisruptionAnnotationKey)
-			logging.FromContext(ctx).Debugf("removing emptiness annotation from node as emptiness has been disabled")
+			logging.FromContext(ctx).Debugf("removing emptiness status condition from machine as emptiness has been disabled")
 		}
 		return reconcile.Result{}, nil
 	}
@@ -55,31 +61,25 @@ func (e *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 	emptinessTimestamp := node.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
 	if emptinessTimestamp == "" {
 		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineVoluntarilyDisrupted)
-		delete(node.Annotations, v1alpha5.VoluntaryDisruptionAnnotationKey)
 		return reconcile.Result{}, nil
 	}
 	emptyAt, err := time.Parse(time.RFC3339, emptinessTimestamp)
 	if err != nil {
 		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineVoluntarilyDisrupted)
-		delete(node.Annotations, v1alpha5.VoluntaryDisruptionAnnotationKey)
 		logging.FromContext(ctx).With("emptiness-timestamp", emptinessTimestamp).Errorf("unable to parse emptiness timestamp")
-		return reconcile.Result{}, nil
+		return reconcile.Result{}, nil //nolint:nilerr
 	}
 	emptinessTTLTime := emptyAt.Add(time.Duration(ptr.Int64Value(provisioner.Spec.TTLSecondsAfterEmpty)) * time.Second)
 
 	// 2. Otherwise, if the node is expired, but doesn't have the annotation, add it.
 	if e.clock.Now().After(emptinessTTLTime) && !voluntarilyDisrupted.IsTrue() {
-		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, "Empty", "")
-		node.Annotations = lo.Assign(node.Annotations, map[string]string{
-			v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionEmptyAnnotationValue,
-		})
-		logging.FromContext(ctx).Debugf("annotating node as empty")
+		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonEmpty, "")
+		logging.FromContext(ctx).Debugf("marking machine as empty")
 		return reconcile.Result{}, nil
 	}
 	// 3. Finally, if the node isn't expired, but has the annotation, remove it.
 	if !e.clock.Now().After(emptinessTTLTime) && voluntarilyDisrupted.IsTrue() {
 		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineVoluntarilyDisrupted)
-		delete(node.Annotations, v1alpha5.VoluntaryDisruptionAnnotationKey)
 		logging.FromContext(ctx).Debugf("removing empty annotation from node")
 	}
 	return reconcile.Result{RequeueAfter: emptinessTTLTime.Sub(e.clock.Now())}, nil

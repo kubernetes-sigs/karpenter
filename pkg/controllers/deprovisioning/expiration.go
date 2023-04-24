@@ -58,13 +58,9 @@ func NewExpiration(clk clock.Clock, kubeClient client.Client, cluster *state.Clu
 }
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes
-func (e *Expiration) ShouldDeprovision(ctx context.Context, c *Candidate) bool {
-	// Filter out nodes without the TTL defined or expired.
-	if c.provisioner == nil || c.provisioner.Spec.TTLSecondsUntilExpired == nil {
-		return false
-	}
-
-	return c.Node.Annotations[v1alpha5.VoluntaryDisruptionAnnotationKey] == v1alpha5.VoluntaryDisruptionExpiredAnnotationValue
+func (e *Expiration) ShouldDeprovision(_ context.Context, c *Candidate) bool {
+	cond := c.Machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)
+	return cond.IsTrue() && cond.Reason == v1alpha5.VoluntarilyDisruptedReasonExpired
 }
 
 // SortCandidates orders expired nodes by when they've expired

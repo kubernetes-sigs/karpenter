@@ -16,13 +16,9 @@ package deprovisioning
 
 import (
 	"context"
-	"time"
-
-	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
-	"knative.dev/pkg/ptr"
 
 	"github.com/samber/lo"
+	"k8s.io/utils/clock"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/metrics"
@@ -42,23 +38,8 @@ func NewEmptiness(clk clock.Clock) *Emptiness {
 
 // ShouldDeprovision is a predicate used to filter deprovisionable machines
 func (e *Emptiness) ShouldDeprovision(ctx context.Context, c *Candidate) bool {
-	if c.provisioner == nil || c.provisioner.Spec.TTLSecondsAfterEmpty == nil || len(c.pods) != 0 {
-		return false
-	}
-
-	emptinessTimestamp, hasEmptinessTimestamp := c.Node.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
-	if !hasEmptinessTimestamp {
-		return false
-	}
-	ttl := time.Duration(ptr.Int64Value(c.provisioner.Spec.TTLSecondsAfterEmpty)) * time.Second
-
-	emptinessTime, err := time.Parse(time.RFC3339, emptinessTimestamp)
-	if err != nil {
-		logging.FromContext(ctx).With("emptiness-timestamp", emptinessTimestamp).Errorf("unable to parse emptiness timestamp")
-		return true
-	}
-	// Don't deprovision if node's emptiness timestamp is before the emptiness TTL
-	return e.clock.Now().After(emptinessTime.Add(ttl))
+	cond := c.Machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)
+	return cond.IsTrue() && cond.Reason == v1alpha5.VoluntarilyDisruptedReasonEmpty
 }
 
 // ComputeCommand generates a deprovisioning command given deprovisionable machines

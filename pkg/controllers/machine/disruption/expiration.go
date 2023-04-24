@@ -17,25 +17,27 @@ package disruption
 import (
 	"context"
 
-	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/utils/functional"
+	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 )
 
 // Expiration is a node sub-controller that annotates or de-annotates an expired node based on TTLSecondsUntilExpired
 type Expiration struct {
-	clock clock.Clock
+	kubeClient client.Client
+	clock      clock.Clock
 }
 
-func (e *Expiration) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine, node *v1.Node) (reconcile.Result, error) {
-	// If the node is marked as voluntarily disrupted by another controller, do nothing.
+//nolint:gocyclo
+func (e *Expiration) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) (reconcile.Result, error) {
+	// If the machine is marked as voluntarily disrupted by another controller, do nothing.
 	voluntarilyDisrupted := machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)
-	if voluntarilyDisrupted.IsTrue() && voluntarilyDisrupted.Reason != "Expired" {
+	if voluntarilyDisrupted.IsTrue() && voluntarilyDisrupted.Reason != v1alpha5.VoluntarilyDisruptedReasonExpired {
 		return reconcile.Result{}, nil
 	}
 
@@ -45,27 +47,34 @@ func (e *Expiration) Reconcile(ctx context.Context, provisioner *v1alpha5.Provis
 	if provisioner.Spec.TTLSecondsUntilExpired == nil {
 		if voluntarilyDisrupted.IsTrue() {
 			_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineVoluntarilyDisrupted)
-			delete(node.Annotations, v1alpha5.VoluntaryDisruptionAnnotationKey)
-			logging.FromContext(ctx).Debugf("removing expiration annotation from node as expiration has been disabled")
+			logging.FromContext(ctx).Debugf("removing expiration status condition from machine as expiration has been disabled")
 		}
 		return reconcile.Result{}, nil
 	}
 
+	node, err := machineutil.NodeForMachine(ctx, e.kubeClient, machine)
+	if machineutil.IgnoreDuplicateNodeError(machineutil.IgnoreDuplicateNodeError(err)) != nil {
+		return reconcile.Result{}, err
+	}
+	// We do the expiration check in this way since there is still a migration path for creating Machines from Nodes
+	// In this case, we need to make sure that we take the older of the two for expiration
+	var expired bool
+	if node == nil || machine.CreationTimestamp.Before(&node.CreationTimestamp) {
+		expired = functional.IsExpired(machine, e.clock, provisioner)
+	} else {
+		expired = functional.IsExpired(node, e.clock, provisioner)
+	}
+
 	// 2. Otherwise, if the node is expired, but doesn't have the annotation, add it.
-	expired := functional.IsExpired(machine, e.clock, provisioner)
 	if expired && !voluntarilyDisrupted.IsTrue() {
-		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, "Expired", "")
-		node.Annotations = lo.Assign(node.Annotations, map[string]string{
-			v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionExpiredAnnotationValue,
-		})
-		logging.FromContext(ctx).Debugf("annotating node as expired")
+		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonExpired, "")
+		logging.FromContext(ctx).Debugf("marking machine as expired")
 		return reconcile.Result{}, nil
 	}
 	// 3. Finally, if the node isn't expired, but has the annotation, remove it.
 	if !expired && voluntarilyDisrupted.IsTrue() {
 		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineVoluntarilyDisrupted)
-		delete(node.Annotations, v1alpha5.VoluntaryDisruptionAnnotationKey)
-		logging.FromContext(ctx).Debugf("removing expiration annotation from node")
+		logging.FromContext(ctx).Debugf("removing expired status condition from machine")
 	}
 
 	// If the node isn't expired and doesn't have annotation, return.

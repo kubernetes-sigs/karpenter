@@ -34,15 +34,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
-
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/utils/result"
 )
 
 type machineReconciler interface {
-	Reconcile(context.Context, *v1alpha5.Provisioner, *v1alpha5.Machine, *v1.Node) (reconcile.Result, error)
+	Reconcile(context.Context, *v1alpha5.Provisioner, *v1alpha5.Machine) (reconcile.Result, error)
 }
 
 var _ corecontroller.TypedController[*v1alpha5.Machine] = (*Controller)(nil)
@@ -61,8 +59,9 @@ type Controller struct {
 func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
 	return corecontroller.Typed[*v1alpha5.Machine](kubeClient, &Controller{
 		kubeClient: kubeClient,
-		drift:      &Drift{kubeClient: kubeClient, cloudProvider: cloudProvider},
-		expiration: &Expiration{clock: clk},
+		drift:      &Drift{cloudProvider: cloudProvider},
+		expiration: &Expiration{kubeClient: kubeClient, clock: clk},
+		emptiness:  &Emptiness{kubeClient: kubeClient, clock: clk},
 	})
 }
 
@@ -72,18 +71,13 @@ func (c *Controller) Name() string {
 
 // Reconcile executes a reallocation control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	storedMachine := machine.DeepCopy()
+	stored := machine.DeepCopy()
 	if _, ok := machine.Labels[v1alpha5.ProvisionerNameLabelKey]; !ok {
 		return reconcile.Result{}, nil
 	}
 	if !machine.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, nil
 	}
-	node, err := machineutil.NodeForMachine(ctx, c.kubeClient, machine)
-	if err != nil {
-		return reconcile.Result{}, machineutil.IgnoreDuplicateNodeError(machineutil.IgnoreNodeNotFoundError(err))
-	}
-	storedNode := node.DeepCopy()
 	provisioner := &v1alpha5.Provisioner{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: machine.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
@@ -97,20 +91,12 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 		c.emptiness,
 	}
 	for _, reconciler := range reconcilers {
-		res, err := reconciler.Reconcile(ctx, provisioner, machine, node)
+		res, err := reconciler.Reconcile(ctx, provisioner, machine)
 		errs = multierr.Append(errs, err)
 		results = append(results, res)
 	}
-	if !equality.Semantic.DeepEqual(storedMachine, machine) {
-		if err = c.kubeClient.Status().Update(ctx, machine); err != nil {
-			if errors.IsConflict(err) {
-				return reconcile.Result{Requeue: true}, nil
-			}
-			return reconcile.Result{}, client.IgnoreNotFound(err)
-		}
-	}
-	if !equality.Semantic.DeepEqual(storedNode, node) {
-		if err = c.kubeClient.Status().Update(ctx, node); err != nil {
+	if !equality.Semantic.DeepEqual(stored, machine) {
+		if err := c.kubeClient.Status().Update(ctx, machine); err != nil {
 			if errors.IsConflict(err) {
 				return reconcile.Result{Requeue: true}, nil
 			}
@@ -146,7 +132,9 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 				if name := o.(*v1.Pod).Spec.NodeName; name != "" {
 					node := &v1.Node{}
 					if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: name}, node); err != nil {
-						logging.FromContext(ctx).Errorf("Failed to get node when mapping expiration watch events, %s", err)
+						if !errors.IsNotFound(err) {
+							logging.FromContext(ctx).Errorf("Failed to get node when mapping expiration watch events, %s", err)
+						}
 					}
 					machineList := &v1alpha5.MachineList{}
 					if err := c.kubeClient.List(ctx, machineList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {

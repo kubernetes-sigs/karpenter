@@ -34,7 +34,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/utils/result"
 )
@@ -51,18 +50,14 @@ type Controller struct {
 	kubeClient client.Client
 	cluster    *state.Cluster
 	emptiness  *Emptiness
-	drift      *Drift
-	expiration *Expiration
 }
 
 // NewController constructs a nodeController instance
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) corecontroller.Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster) corecontroller.Controller {
 	return corecontroller.Typed[*v1.Node](kubeClient, &Controller{
 		kubeClient: kubeClient,
 		cluster:    cluster,
 		emptiness:  &Emptiness{kubeClient: kubeClient, clock: clk, cluster: cluster},
-		drift:      &Drift{kubeClient: kubeClient, cloudProvider: cloudProvider},
-		expiration: &Expiration{clock: clk},
 	})
 }
 
@@ -91,8 +86,6 @@ func (c *Controller) Reconcile(ctx context.Context, node *v1.Node) (reconcile.Re
 
 	reconcilers := []nodeReconciler{
 		c.emptiness,
-		c.expiration,
-		c.drift,
 	}
 	for _, reconciler := range reconcilers {
 		res, err := reconciler.Reconcile(ctx, provisioner, node)
