@@ -79,7 +79,7 @@ func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	// the deletion of empty machines is easy to validate, we just ensure that all the candidatesToDelete are still empty and that
 	// the machine isn't a target of a recent scheduling simulation
 	for _, n := range candidatesToDelete {
-		if len(n.pods) != 0 && !c.cluster.IsNodeNominated(n.Name()) {
+		if len(n.pods) != 0 || c.cluster.IsNodeNominated(n.Name()) {
 			return Command{}, fmt.Errorf("command is no longer valid, %s", cmd)
 		}
 	}
