@@ -288,6 +288,12 @@ func (s *Scheduler) calculateExistingMachines(stateNodes []*state.StateNode, dae
 			s.remainingResources[node.Labels()[v1alpha5.ProvisionerNameLabelKey]] = resources.Subtract(s.remainingResources[node.Labels()[v1alpha5.ProvisionerNameLabelKey]], node.Capacity())
 		}
 	}
+	// Order the existing nodes for scheduling with initialized nodes first
+	// This is done specifically for consolidation where we want to make sure we schedule to initialized nodes
+	// before we attempt to schedule un-initialized ones
+	sort.SliceStable(s.existingNodes, func(i, j int) bool {
+		return s.existingNodes[i].Initialized()
+	})
 }
 
 func getDaemonOverhead(nodeTemplates []*MachineTemplate, daemonSetPods []*v1.Pod) map[*MachineTemplate]v1.ResourceList {

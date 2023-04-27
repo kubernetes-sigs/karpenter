@@ -302,21 +302,32 @@ func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c cli
 	return bindings
 }
 
-func ExpectMachineDeployed(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, machine *v1alpha5.Machine) (*v1alpha5.Machine, *v1.Node) {
-	return ExpectMachineDeployedWithOffset(1, ctx, c, cluster, cloudProvider, machine)
+func ExpectMachineDeployedNoNode(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, m *v1alpha5.Machine) *v1alpha5.Machine {
+	return ExpectMachineDeployedNoNodeWithOffset(1, ctx, c, cluster, cloudProvider, m)
 }
 
-func ExpectMachineDeployedWithOffset(offset int, ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, m *v1alpha5.Machine) (*v1alpha5.Machine, *v1.Node) {
+func ExpectMachineDeployedNoNodeWithOffset(offset int, ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, m *v1alpha5.Machine) *v1alpha5.Machine {
 	resolved, err := cloudProvider.Create(ctx, m)
 	// TODO @joinnis: Check this error rather than swallowing it. This is swallowed right now due to how we are doing some testing in the cloudprovider
 	if err != nil {
-		return nil, nil
+		return nil
 	}
 	ExpectWithOffset(offset+1, err).To(Succeed())
 
 	// Make the machine ready in the status conditions
 	lifecycle.PopulateMachineDetails(m, resolved)
 	m.StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
+	ExpectAppliedWithOffset(offset+1, ctx, c, m)
+	cluster.UpdateMachine(m)
+	return m
+}
+
+func ExpectMachineDeployed(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, machine *v1alpha5.Machine) (*v1alpha5.Machine, *v1.Node) {
+	return ExpectMachineDeployedWithOffset(1, ctx, c, cluster, cloudProvider, machine)
+}
+
+func ExpectMachineDeployedWithOffset(offset int, ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, m *v1alpha5.Machine) (*v1alpha5.Machine, *v1.Node) {
+	m = ExpectMachineDeployedNoNodeWithOffset(offset+1, ctx, c, cluster, cloudProvider, m)
 	m.StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
 
 	// Mock the machine launch and node joining at the apiserver
