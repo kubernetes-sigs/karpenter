@@ -77,7 +77,7 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 		}
 	}
 	if len(v.validationCandidates) == 0 {
-		v.validationCandidates, err = GetCandidates(ctx, v.cluster, v.kubeClient, v.clock, v.cloudProvider, v.ShouldDeprovision)
+		v.validationCandidates, err = GetCandidates(ctx, v.cluster, v.kubeClient, v.recorder, v.clock, v.cloudProvider, v.ShouldDeprovision)
 		if err != nil {
 			return false, fmt.Errorf("constructing validation candidates, %w", err)
 		}
