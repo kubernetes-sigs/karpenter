@@ -1506,6 +1506,28 @@ var _ = Describe("DaemonSet Controller", func() {
 	})
 })
 
+var _ = Describe("Consolidated State", func() {
+	It("should update the consolidated value when setting consolidation", func() {
+		cluster.SetConsolidated(true)
+		Expect(cluster.Consolidated()).To(BeTrue())
+
+		cluster.SetConsolidated(false)
+		Expect(cluster.Consolidated()).To(BeFalse())
+	})
+	It("should update the consolidated value when consolidation timeout (5m) has passed and state hasn't changed", func() {
+		cluster.SetConsolidated(true)
+
+		fakeClock.Step(time.Minute)
+		Expect(cluster.Consolidated()).To(BeTrue())
+
+		fakeClock.Step(time.Minute * 3)
+		Expect(cluster.Consolidated()).To(BeTrue())
+
+		fakeClock.Step(time.Minute * 2)
+		Expect(cluster.Consolidated()).To(BeFalse())
+	})
+})
+
 func ExpectStateNodeCount(comparator string, count int) int {
 	c := 0
 	cluster.ForEachNode(func(n *state.StateNode) bool {
