@@ -57,9 +57,8 @@ type Cluster struct {
 
 	antiAffinityPods sync.Map // pod namespaced name -> *v1.Pod of pods that have required anti affinities
 
-	// consolidated is a dirty bit that indicates that the cluster hasn't
-	// changed since last consolidation and avoids recomputation.
-	consolidated   atomic.Bool
+	// consolidatedAt is a timestamp marking the last time that we calculated consolidation off of the current cluster state
+	// This value is overridden with the 0 timestamp if we haven't calculated consolidation off of the current cluster state
 	consolidatedAt atomic.Int64
 }
 
@@ -268,23 +267,27 @@ func (c *Cluster) DeletePod(podKey types.NamespacedName) {
 	c.SetConsolidated(false)
 }
 
+// SetConsolidated updates based on the following conditions:
+//  1. consolidated is TRUE: Updates the state to record that we have viewed this cluster state at this time
+//  2. consolidated is FALSE: Resets the value to mark that we haven't currently viewed this state or the state is in flux
 func (c *Cluster) SetConsolidated(consolidated bool) {
-	c.consolidated.Store(consolidated)
-	c.consolidatedAt.Store(c.clock.Now().UnixMilli())
+	if consolidated {
+		c.consolidatedAt.Store(c.clock.Now().UnixMilli())
+	} else {
+		c.consolidatedAt.Store(0)
+	}
 }
 
-// ClusterConsolidationState returns a number representing the state of the cluster with respect to consolidation.  If
-// consolidation can't occur and this number hasn't changed, there is no point in re-attempting consolidation. This
+// Consolidated returns whether the current cluster state has been observed for consolidation. If
+// consolidation can't occur and the state hasn't changed, there is no point in re-attempting consolidation. This
 // allows reducing overall CPU utilization by pausing consolidation when the cluster is in a static state.
 func (c *Cluster) Consolidated() bool {
-	consolidatedAt := time.UnixMilli(c.consolidatedAt.Load())
-	// If 5 minutes elapsed since the last time the consolidation state was changed, we change the state anyway. This
-	// ensures that at least once every 5 minutes we consider consolidating our cluster in case something else has
+	// Either 5 minutes has elapsed since the last fully observed consolidation state OR
+	// the value is reset to 0 which means that we haven't observed this state.
+	// In either case, the time since the consolidatedAt value should be greater than the consolidation timeout (5m)
+	// This ensures that at least once every 5 minutes we consider consolidating our cluster in case something else has
 	// changed (e.g. instance type availability) that we can't detect which would allow consolidation to occur.
-	if c.clock.Now().After(consolidatedAt.Add(5 * time.Minute)) {
-		c.SetConsolidated(false)
-	}
-	return c.consolidated.Load()
+	return c.clock.Since(time.UnixMilli(c.consolidatedAt.Load())) < time.Minute*5
 }
 
 // Reset the cluster state for unit testing
