@@ -292,7 +292,13 @@ func (s *Scheduler) calculateExistingMachines(stateNodes []*state.StateNode, dae
 	// This is done specifically for consolidation where we want to make sure we schedule to initialized nodes
 	// before we attempt to schedule un-initialized ones
 	sort.SliceStable(s.existingNodes, func(i, j int) bool {
-		return s.existingNodes[i].Initialized()
+		if s.existingNodes[i].Initialized() && !s.existingNodes[j].Initialized() {
+			return true
+		}
+		if !s.existingNodes[i].Initialized() && s.existingNodes[j].Initialized() {
+			return false
+		}
+		return s.existingNodes[i].Name() < s.existingNodes[j].Name()
 	})
 }
 
