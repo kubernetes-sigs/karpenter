@@ -1872,7 +1872,9 @@ var _ = Describe("In-Flight Nodes", func() {
 				if i == elem {
 					m, node = ExpectMachineDeployed(ctx, env.Client, cluster, cloudProvider, m)
 				} else {
-					m = ExpectMachineDeployedNoNode(ctx, env.Client, cluster, cloudProvider, m)
+					var err error
+					m, err = ExpectMachineDeployedNoNode(ctx, env.Client, cluster, cloudProvider, m)
+					Expect(err).ToNot(HaveOccurred())
 				}
 				machines = append(machines, m)
 			}
