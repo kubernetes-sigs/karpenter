@@ -26,8 +26,10 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/events"
 )
 
 type Deprovisioner interface {
@@ -51,9 +53,12 @@ type Candidate struct {
 }
 
 //nolint:gocyclo
-func NewCandidate(ctx context.Context, kubeClient client.Client, clk clock.Clock, node *state.StateNode,
+func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode,
 	provisionerMap map[string]*v1alpha5.Provisioner, provisionerToInstanceTypes map[string]map[string]*cloudprovider.InstanceType) (*Candidate, error) {
 
+	if node.Node == nil || node.Machine == nil {
+		return nil, fmt.Errorf("state node doesn't contain both a node and a machine")
+	}
 	// check whether the node has all the labels we need
 	for _, label := range []string{
 		v1alpha5.LabelCapacityType,
@@ -61,6 +66,10 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, clk clock.Clock
 		v1alpha5.ProvisionerNameLabelKey,
 	} {
 		if _, ok := node.Labels()[label]; !ok {
+			// This means that we don't own the candidate which means we shouldn't fire an event for it
+			if label != v1alpha5.ProvisionerNameLabelKey {
+				recorder.Publish(deprovisioningevents.Blocked(node.Node, node.Machine, fmt.Sprintf("required label %q doesn't exist", label))...)
+			}
 			return nil, fmt.Errorf("state node doesn't have required label '%s'", label)
 		}
 	}
@@ -69,29 +78,31 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, clk clock.Clock
 	instanceTypeMap := provisionerToInstanceTypes[node.Labels()[v1alpha5.ProvisionerNameLabelKey]]
 	// skip any nodes where we can't determine the provisioner
 	if provisioner == nil || instanceTypeMap == nil {
+		recorder.Publish(deprovisioningevents.Blocked(node.Node, node.Machine, fmt.Sprintf("owning provisioner %q not found", provisioner.Name))...)
 		return nil, fmt.Errorf("provisioner '%s' can't be resolved for state node", node.Labels()[v1alpha5.ProvisionerNameLabelKey])
 	}
 	instanceType := instanceTypeMap[node.Labels()[v1.LabelInstanceTypeStable]]
 	// skip any nodes that we can't determine the instance of
 	if instanceType == nil {
+		recorder.Publish(deprovisioningevents.Blocked(node.Node, node.Machine, fmt.Sprintf("instance type %q not found", node.Labels()[v1.LabelInstanceTypeStable]))...)
 		return nil, fmt.Errorf("instance type '%s' can't be resolved", node.Labels()[v1.LabelInstanceTypeStable])
 	}
 
 	// skip any nodes that are already marked for deletion and being handled
 	if node.MarkedForDeletion() {
+		recorder.Publish(deprovisioningevents.Blocked(node.Node, node.Machine, "machine is marked for deletion")...)
 		return nil, fmt.Errorf("state node is marked for deletion")
 	}
 	// skip nodes that aren't initialized
 	// This also means that the real Node doesn't exist for it
 	if !node.Initialized() {
+		recorder.Publish(deprovisioningevents.Blocked(node.Node, node.Machine, "machine is not initialized")...)
 		return nil, fmt.Errorf("state node isn't initialized")
 	}
 	// skip the node if it is nominated by a recent provisioning pass to be the target of a pending pod.
 	if node.Nominated() {
+		recorder.Publish(deprovisioningevents.Blocked(node.Node, node.Machine, "machine is nominated")...)
 		return nil, fmt.Errorf("state node is nominated")
-	}
-	if node.Node == nil || node.Machine == nil {
-		return nil, fmt.Errorf("state node doesn't contain both a node and a machine")
 	}
 
 	pods, err := node.Pods(ctx, kubeClient)

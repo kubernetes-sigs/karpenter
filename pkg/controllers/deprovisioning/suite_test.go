@@ -1137,10 +1137,14 @@ var _ = Describe("Delete Node", func() {
 
 		// Expect Unconsolidatable events to be fired
 		evts := recorder.Events()
-		Expect(evts).To(HaveLen(2))
-
-		Expect(evts[0].Message).To(ContainSubstring("not all pods would schedule"))
-		Expect(evts[1].Message).To(ContainSubstring("would schedule against a non-initialized node"))
+		_, ok := lo.Find(evts, func(e events.Event) bool {
+			return strings.Contains(e.Message, "not all pods would schedule")
+		})
+		Expect(ok).To(BeTrue())
+		_, ok = lo.Find(evts, func(e events.Event) bool {
+			return strings.Contains(e.Message, "would schedule against a non-initialized node")
+		})
+		Expect(ok).To(BeTrue())
 	})
 	It("should consider initialized nodes before un-initialized nodes", func() {
 		defaultInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
