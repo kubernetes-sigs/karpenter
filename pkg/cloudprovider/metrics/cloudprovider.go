@@ -33,6 +33,9 @@ const (
 	metricLabelProvider   = "provider"
 )
 
+// decorator implements CloudProvider
+var _ cloudprovider.CloudProvider = (*decorator)(nil)
+
 var methodDurationHistogramVec = prometheus.NewHistogramVec(
 	prometheus.HistogramOpts{
 		Namespace: metrics.Namespace,
@@ -79,6 +82,11 @@ func (d *decorator) Delete(ctx context.Context, machine *v1alpha5.Machine) error
 func (d *decorator) Get(ctx context.Context, id string) (*v1alpha5.Machine, error) {
 	defer metrics.Measure(methodDurationHistogramVec.WithLabelValues(injection.GetControllerName(ctx), "Get", d.Name()))()
 	return d.CloudProvider.Get(ctx, id)
+}
+
+func (d *decorator) List(ctx context.Context) ([]*v1alpha5.Machine, error) {
+	defer metrics.Measure(methodDurationHistogramVec.WithLabelValues(injection.GetControllerName(ctx), "List", d.Name()))()
+	return d.CloudProvider.List(ctx)
 }
 
 func (d *decorator) GetInstanceTypes(ctx context.Context, provisioner *v1alpha5.Provisioner) ([]*cloudprovider.InstanceType, error) {
