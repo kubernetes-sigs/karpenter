@@ -144,10 +144,12 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 }
 
 func (c *Controller) deprovision(ctx context.Context, deprovisioner Deprovisioner) (bool, error) {
-	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, deprovisioner.ShouldDeprovision)
+	defer metrics.Measure(deprovisioningDurationHistogram.WithLabelValues(deprovisioner.String()))()
+	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.clock, c.cloudProvider, deprovisioner.ShouldDeprovision)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}
+	deprovisioningEligibleMachinesGauge.WithLabelValues(deprovisioner.String()).Set(float64(len(candidates)))
 	// If there are no candidate nodes, move to the next deprovisioner
 	if len(candidates) == 0 {
 		return false, nil
@@ -171,8 +173,8 @@ func (c *Controller) deprovision(ctx context.Context, deprovisioner Deprovisione
 }
 
 func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, command Command) error {
-	deprovisioningActionsPerformedCounter.With(prometheus.Labels{"action": fmt.Sprintf("%s/%s", d, command.Action())}).Inc()
-	logging.FromContext(ctx).Infof("deprovisioning via %s %s", d, command.Action())
+	deprovisioningActionsPerformedCounter.WithLabelValues(fmt.Sprintf("%s/%s", d, command.action)).Add(1)
+	logging.FromContext(ctx).Infof("deprovisioning via %s %s", d, command)
 
 	reason := fmt.Sprintf("%s/%s", d, command.Action())
 	if command.Action() == ReplaceAction {
