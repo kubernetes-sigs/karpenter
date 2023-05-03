@@ -141,13 +141,15 @@ type Command struct {
 	replacements []*scheduling.Machine
 }
 
-const (
-	noOpAction = "no-op"
-	replaceAction = "replace"
-	deleteAction = "delete"
+type Action string
+
+var (
+	noOpAction Action = "no-op"
+	replaceAction Action = "replace"
+	deleteAction Action = "delete"
 )
 
-func (o Command) Action() string {
+func (o Command) Action() Action {
 	switch {
 	case len(o.candidates) > 0 && len(o.replacements) == 0:
 		return replaceAction
