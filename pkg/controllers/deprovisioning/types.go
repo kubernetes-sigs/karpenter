@@ -147,7 +147,7 @@ const (
 	deleteAction = "delete"
 )
 
-func (o Command) Action() string {
+func (o Command) action() string {
 	if len(o.candidates) == 0 {
 		return noOpAction
 	}
@@ -159,7 +159,7 @@ func (o Command) Action() string {
 
 func (o Command) String() string {
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "%s, terminating %d machines ", o.Action(), len(o.candidates))
+	fmt.Fprintf(&buf, "%s, terminating %d machines ", o.action(), len(o.candidates))
 	for i, old := range o.candidates {
 		if i != 0 {
 			fmt.Fprint(&buf, ", ")

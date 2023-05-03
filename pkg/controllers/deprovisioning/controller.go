@@ -158,7 +158,7 @@ func (c *Controller) deprovision(ctx context.Context, deprovisioner Deprovisione
 	if err != nil {
 		return false, fmt.Errorf("computing deprovisioning decision, %w", err)
 	}
-	if cmd.Action() == noOpAction {
+	if cmd.action() == noOpAction {
 		return false, nil
 	}
 
@@ -171,12 +171,11 @@ func (c *Controller) deprovision(ctx context.Context, deprovisioner Deprovisione
 }
 
 func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, command Command) error {
-	action := lo.Ternary(len(command.replacements) > 0, replaceAction, deleteAction)
-	deprovisioningActionsPerformedCounter.With(prometheus.Labels{"action": fmt.Sprintf("%s/%s", d, action)}).Inc()
-	logging.FromContext(ctx).Infof("deprovisioning via %s %s", d, action)
+	deprovisioningActionsPerformedCounter.With(prometheus.Labels{"action": fmt.Sprintf("%s/%s", d, command.action())}).Inc()
+	logging.FromContext(ctx).Infof("deprovisioning via %s %s", d, command.action())
 
-	reason := fmt.Sprintf("%s/%s", d, action)
-	if command.Action() == replaceAction {
+	reason := fmt.Sprintf("%s/%s", d, command.action())
+	if command.action() == replaceAction {
 		if err := c.launchReplacementMachines(ctx, command, reason); err != nil {
 			// If we failed to launch the replacement, don't deprovision.  If this is some permanent failure,
 			// we don't want to disrupt workloads with no way to provision new nodes for them.
