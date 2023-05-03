@@ -56,6 +56,9 @@ type Candidate struct {
 func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode,
 	provisionerMap map[string]*v1alpha5.Provisioner, provisionerToInstanceTypes map[string]map[string]*cloudprovider.InstanceType) (*Candidate, error) {
 
+	if node.Node == nil || node.Machine == nil {
+		return nil, fmt.Errorf("state node doesn't contain both a node and a machine")
+	}
 	// check whether the node has all the labels we need
 	for _, label := range []string{
 		v1alpha5.LabelCapacityType,
@@ -101,9 +104,6 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		recorder.Publish(deprovisioningevents.Blocked(node.Node, node.Machine, "machine is nominated")...)
 		return nil, fmt.Errorf("state node is nominated")
 	}
-	if node.Node == nil || node.Machine == nil {
-		return nil, fmt.Errorf("state node doesn't contain both a node and a machine")
-	}
 
 	pods, err := node.Pods(ctx, kubeClient)
 	if err != nil {
@@ -147,19 +147,20 @@ const (
 	deleteAction = "delete"
 )
 
-func (o Command) action() string {
-	if len(o.candidates) == 0 {
+func (o Command) Action() string {
+	switch {
+	case len(o.candidates) > 0 && len(o.replacements) == 0:
+		return replaceAction
+	case len(o.candidates) > 0 && len(o.replacements) == 0:
+		return deleteAction
+	default:
 		return noOpAction
 	}
-	if len(o.replacements) > 0 {
-		return replaceAction
-	}
-	return deleteAction
 }
 
 func (o Command) String() string {
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "%s, terminating %d machines ", o.action(), len(o.candidates))
+	fmt.Fprintf(&buf, "%s, terminating %d machines ", o.Action(), len(o.candidates))
 	for i, old := range o.candidates {
 		if i != 0 {
 			fmt.Fprint(&buf, ", ")
