@@ -57,7 +57,7 @@ func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 			logging.FromContext(ctx).Errorf("computing consolidation %s", err)
 			continue
 		}
-		if cmd.Action() == noOpAction {
+		if cmd.Action() == NoOpAction {
 			continue
 		}
 
@@ -70,7 +70,7 @@ func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 			return Command{}, fmt.Errorf("command is no longer valid, %s", cmd)
 		}
 
-		if cmd.Action() != noOpAction {
+		if cmd.Action() != NoOpAction {
 			return cmd, nil
 		}
 	}

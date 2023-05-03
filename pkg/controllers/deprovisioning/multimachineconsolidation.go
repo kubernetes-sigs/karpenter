@@ -54,7 +54,7 @@ func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	if err != nil {
 		return Command{}, err
 	}
-	if cmd.Action() == noOpAction {
+	if cmd.Action() == NoOpAction {
 		return cmd, nil
 	}
 
@@ -97,7 +97,7 @@ func (m *MultiMachineConsolidation) firstNMachineConsolidationOption(ctx context
 		// ensure that the action is sensical for replacements, see explanation on filterOutSameType for why this is
 		// required
 		instanceTypeFiltered := false
-		if action.Action() == replaceAction {
+		if action.Action() == ReplaceAction {
 			action.replacements[0].InstanceTypeOptions = filterOutSameType(action.replacements[0], candidatesToConsolidate)
 			instanceTypeFiltered = len(action.replacements[0].InstanceTypeOptions) == 0
 		}
