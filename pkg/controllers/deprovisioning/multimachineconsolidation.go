@@ -89,7 +89,7 @@ func (m *MultiMachineConsolidation) firstNMachineConsolidationOption(ctx context
 
 		candidatesToConsolidate := candidates[0 : mid+1]
 
-		action, err := m.computeConsolidation(ctx, candidatesToConsolidate...)
+		cmd, err := m.computeConsolidation(ctx, candidatesToConsolidate...)
 		if err != nil {
 			return Command{}, err
 		}
@@ -97,14 +97,14 @@ func (m *MultiMachineConsolidation) firstNMachineConsolidationOption(ctx context
 		// ensure that the action is sensical for replacements, see explanation on filterOutSameType for why this is
 		// required
 		instanceTypeFiltered := false
-		if action.Action() == ReplaceAction {
-			action.replacements[0].InstanceTypeOptions = filterOutSameType(action.replacements[0], candidatesToConsolidate)
-			instanceTypeFiltered = len(action.replacements[0].InstanceTypeOptions) == 0
+		if cmd.Action() == ReplaceAction {
+			cmd.replacements[0].InstanceTypeOptions = filterOutSameType(cmd.replacements[0], candidatesToConsolidate)
+			instanceTypeFiltered = len(cmd.replacements[0].InstanceTypeOptions) == 0
 		}
 
-		if !instanceTypeFiltered {
+		if !instanceTypeFiltered || cmd.Action() == DeleteAction {
 			// we can consolidate machines [0,mid]
-			lastSavedCommand = action
+			lastSavedCommand = cmd
 			min = mid + 1
 		} else {
 			max = mid - 1
