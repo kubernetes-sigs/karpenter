@@ -78,7 +78,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	instanceTypeMap := provisionerToInstanceTypes[node.Labels()[v1alpha5.ProvisionerNameLabelKey]]
 	// skip any nodes where we can't determine the provisioner
 	if provisioner == nil || instanceTypeMap == nil {
-		recorder.Publish(deprovisioningevents.Blocked(node.Node, node.Machine, fmt.Sprintf("owning provisioner %q not found", provisioner.Name))...)
+		recorder.Publish(deprovisioningevents.Blocked(node.Node, node.Machine, fmt.Sprintf("owning provisioner %q not found", node.Labels()[v1alpha5.ProvisionerNameLabelKey]))...)
 		return nil, fmt.Errorf("provisioner '%s' can't be resolved for state node", node.Labels()[v1alpha5.ProvisionerNameLabelKey])
 	}
 	instanceType := instanceTypeMap[node.Labels()[v1.LabelInstanceTypeStable]]
