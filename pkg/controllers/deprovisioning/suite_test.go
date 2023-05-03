@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/rand"
 	"sort"
 	"strings"
 	"sync"
@@ -51,6 +52,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
+	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -1134,6 +1136,166 @@ var _ = Describe("Delete Node", func() {
 
 		// shouldn't delete the node
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+
+		// Expect Unconsolidatable events to be fired
+		evts := recorder.Events()
+		_, ok := lo.Find(evts, func(e events.Event) bool {
+			return strings.Contains(e.Message, "not all pods would schedule")
+		})
+		Expect(ok).To(BeTrue())
+		_, ok = lo.Find(evts, func(e events.Event) bool {
+			return strings.Contains(e.Message, "would schedule against a non-initialized node")
+		})
+		Expect(ok).To(BeTrue())
+	})
+	It("should consider initialized nodes before un-initialized nodes", func() {
+		defaultInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "default-instance-type",
+			Resources: v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse("3"),
+				v1.ResourceMemory: resource.MustParse("3Gi"),
+				v1.ResourcePods:   resource.MustParse("110"),
+			},
+		})
+		smallInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "small-instance-type",
+			Resources: v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse("1"),
+				v1.ResourceMemory: resource.MustParse("1Gi"),
+				v1.ResourcePods:   resource.MustParse("10"),
+			},
+		})
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			defaultInstanceType,
+			smallInstanceType,
+		}
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+
+		podCount := 100
+		pods := test.Pods(podCount, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				},
+			},
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("2"),
+					v1.ResourceMemory: resource.MustParse("2Gi"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, rs, prov)
+
+		// Setup 100 machines/nodes with a single machine/node that is initialized
+		elem := rand.Intn(100)
+		for i := 0; i < podCount; i++ {
+			m, n := test.MachineAndNode(v1alpha5.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: prov.Name,
+						v1.LabelInstanceTypeStable:       defaultInstanceType.Name,
+						v1alpha5.LabelCapacityType:       defaultInstanceType.Offerings[0].CapacityType,
+						v1.LabelTopologyZone:             defaultInstanceType.Offerings[0].Zone,
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:    resource.MustParse("3"),
+						v1.ResourceMemory: resource.MustParse("3Gi"),
+						v1.ResourcePods:   resource.MustParse("100"),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, pods[i], m, n)
+			ExpectManualBinding(ctx, env.Client, pods[i], n)
+
+			if i == elem {
+				ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{n}, []*v1alpha5.Machine{m})
+			} else {
+				ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(m))
+				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
+			}
+		}
+
+		// Create a pod and machine/node that will eventually be scheduled onto the initialized node
+		consolidatableMachine, consolidatableNode := test.MachineAndNode(v1alpha5.Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       smallInstanceType.Name,
+					v1alpha5.LabelCapacityType:       smallInstanceType.Offerings[0].CapacityType,
+					v1.LabelTopologyZone:             smallInstanceType.Offerings[0].Zone,
+				},
+			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.RandomProviderID(),
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:    resource.MustParse("1"),
+					v1.ResourceMemory: resource.MustParse("1Gi"),
+					v1.ResourcePods:   resource.MustParse("100"),
+				},
+			},
+		})
+
+		// create a new RS so we can link a pod to it
+		rs = test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		consolidatablePod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				},
+			},
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("1"),
+					v1.ResourceMemory: resource.MustParse("1Gi"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, consolidatableMachine, consolidatableNode, consolidatablePod)
+		ExpectManualBinding(ctx, env.Client, consolidatablePod, consolidatableNode)
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{consolidatableNode}, []*v1alpha5.Machine{consolidatableMachine})
+
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+		wg.Wait()
+
+		ExpectMachinesCascadeDeletion(ctx, env.Client, consolidatableMachine)
+
+		// Expect no events that state that the pods would schedule against a non-initialized node
+		evts := recorder.Events()
+		_, ok := lo.Find(evts, func(e events.Event) bool {
+			return strings.Contains(e.Message, "would schedule against a non-initialized node")
+		})
+		Expect(ok).To(BeFalse())
+
+		// the machine with the small instance should consolidate onto the initialized node
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(100))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(100))
+		ExpectNotFound(ctx, env.Client, consolidatableMachine, consolidatableNode)
 		Expect(fakeRecorder.Events).To(HaveLen(2))
 		event := <-fakeRecorder.Events
 		Expect(strings.Contains(event, "not all pods would schedule")).To(BeTrue())
