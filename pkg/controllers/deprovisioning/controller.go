@@ -158,7 +158,7 @@ func (c *Controller) deprovision(ctx context.Context, deprovisioner Deprovisione
 	if err != nil {
 		return false, fmt.Errorf("computing deprovisioning decision, %w", err)
 	}
-	if len(cmd.candidates) == 0 {
+	if cmd.Action() == noOpAction {
 		return false, nil
 	}
 
@@ -176,7 +176,7 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 	logging.FromContext(ctx).Infof("deprovisioning via %s %s", d, action)
 
 	reason := fmt.Sprintf("%s/%s", d, action)
-	if len(command.replacements) > 0 {
+	if command.Action() == replaceAction {
 		if err := c.launchReplacementMachines(ctx, command, reason); err != nil {
 			// If we failed to launch the replacement, don't deprovision.  If this is some permanent failure,
 			// we don't want to disrupt workloads with no way to provision new nodes for them.

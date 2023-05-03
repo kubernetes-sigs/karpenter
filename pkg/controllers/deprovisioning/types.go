@@ -56,9 +56,6 @@ type Candidate struct {
 func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode,
 	provisionerMap map[string]*v1alpha5.Provisioner, provisionerToInstanceTypes map[string]map[string]*cloudprovider.InstanceType) (*Candidate, error) {
 
-	if node.Node == nil || node.Machine == nil {
-		return nil, fmt.Errorf("state node doesn't contain both a node and a machine")
-	}
 	// check whether the node has all the labels we need
 	for _, label := range []string{
 		v1alpha5.LabelCapacityType,
