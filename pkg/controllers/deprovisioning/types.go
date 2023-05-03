@@ -144,17 +144,25 @@ type Command struct {
 	replacements []*scheduling.Machine
 }
 
-func (o Command) String() string {
-	var action string
+const (
+	noOpAction = "no-op"
+	replaceAction = "replace"
+	deleteAction = "delete"
+)
+
+func (o Command) Action() string {
 	if len(o.candidates) == 0 {
-		return "do nothing"
-	} else if len(o.replacements) > 0 {
-		action = "replace"
-	} else {
-		action = "delete"
+		return noOpAction
 	}
+	if len(o.replacements) > 0 {
+		return replaceAction
+	}
+	return deleteAction
+}
+
+func (o Command) String() string {
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "%s, terminating %d machines ", action, len(o.candidates))
+	fmt.Fprintf(&buf, "%s, terminating %d machines ", o.Action(), len(o.candidates))
 	for i, old := range o.candidates {
 		if i != 0 {
 			fmt.Fprint(&buf, ", ")
