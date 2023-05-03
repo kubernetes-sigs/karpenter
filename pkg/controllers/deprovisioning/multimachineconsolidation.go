@@ -102,6 +102,7 @@ func (m *MultiMachineConsolidation) firstNMachineConsolidationOption(ctx context
 			instanceTypeFiltered = len(cmd.replacements[0].InstanceTypeOptions) == 0
 		}
 
+		// instanceTypeFiltered will be false if the replacement action has valid instance types remaining after filtering.
 		if !instanceTypeFiltered || cmd.Action() == DeleteAction {
 			// we can consolidate machines [0,mid]
 			lastSavedCommand = cmd
