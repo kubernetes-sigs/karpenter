@@ -144,14 +144,14 @@ type Command struct {
 type Action string
 
 var (
-	noOpAction Action = "no-op"
+	noOpAction    Action = "no-op"
 	replaceAction Action = "replace"
-	deleteAction Action = "delete"
+	deleteAction  Action = "delete"
 )
 
 func (o Command) Action() Action {
 	switch {
-	case len(o.candidates) > 0 && len(o.replacements) == 0:
+	case len(o.candidates) > 0 && len(o.replacements) > 0:
 		return replaceAction
 	case len(o.candidates) > 0 && len(o.replacements) == 0:
 		return deleteAction
