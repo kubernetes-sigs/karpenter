@@ -69,10 +69,7 @@ func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 		if !isValid {
 			return Command{}, fmt.Errorf("command is no longer valid, %s", cmd)
 		}
-
-		if cmd.Action() != NoOpAction {
-			return cmd, nil
-		}
+		return cmd, nil
 	}
 	return Command{}, nil
 }
