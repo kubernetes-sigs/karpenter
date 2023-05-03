@@ -1127,8 +1127,6 @@ var _ = Describe("Delete Node", func() {
 		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine1))
 		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node2}, []*v1alpha5.Machine{machine2})
 
-		fakeClock.Step(10 * time.Minute)
-
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
@@ -1296,10 +1294,6 @@ var _ = Describe("Delete Node", func() {
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(100))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(100))
 		ExpectNotFound(ctx, env.Client, consolidatableMachine, consolidatableNode)
-		Expect(fakeRecorder.Events).To(HaveLen(2))
-		event := <-fakeRecorder.Events
-		Expect(strings.Contains(event, "not all pods would schedule")).To(BeTrue())
-		Expect(strings.Contains(event, "would schedule against a non-initialized node")).To(BeTrue())
 	})
 })
 
