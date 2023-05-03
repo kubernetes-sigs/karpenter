@@ -53,7 +53,7 @@ func (e *Expiration) Reconcile(ctx context.Context, provisioner *v1alpha5.Provis
 	}
 
 	node, err := machineutil.NodeForMachine(ctx, e.kubeClient, machine)
-	if machineutil.IgnoreDuplicateNodeError(machineutil.IgnoreDuplicateNodeError(err)) != nil {
+	if machineutil.IgnoreNodeNotFoundError(machineutil.IgnoreDuplicateNodeError(err)) != nil {
 		return reconcile.Result{}, err
 	}
 	// We do the expiration check in this way since there is still a migration path for creating Machines from Nodes

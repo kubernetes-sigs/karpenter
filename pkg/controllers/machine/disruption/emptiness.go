@@ -36,11 +36,6 @@ type Emptiness struct {
 
 //nolint:gocyclo
 func (e *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	node, err := machineutil.NodeForMachine(ctx, e.kubeClient, machine)
-	if err != nil {
-		return reconcile.Result{}, machineutil.IgnoreDuplicateNodeError(machineutil.IgnoreNodeNotFoundError(err))
-	}
-
 	// If the node is marked as voluntarily disrupted by another controller, do nothing.
 	voluntarilyDisrupted := machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)
 	if voluntarilyDisrupted.IsTrue() && voluntarilyDisrupted.Reason != v1alpha5.VoluntarilyDisruptedReasonEmpty {
@@ -56,6 +51,16 @@ func (e *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 			logging.FromContext(ctx).Debugf("removing emptiness status condition from machine as emptiness has been disabled")
 		}
 		return reconcile.Result{}, nil
+	}
+
+	// Get the node to check the emptiness timestamp
+	node, err := machineutil.NodeForMachine(ctx, e.kubeClient, machine)
+	if err != nil {
+		if machineutil.IsDuplicateNodeError(err) || machineutil.IsNodeNotFoundError(err) {
+			_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineVoluntarilyDisrupted)
+			return reconcile.Result{}, nil
+		}
+		return reconcile.Result{}, err
 	}
 
 	emptinessTimestamp := node.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]

@@ -45,8 +45,10 @@ type machineReconciler interface {
 
 var _ corecontroller.TypedController[*v1alpha5.Machine] = (*Controller)(nil)
 
-// Controller manages a set of properties on karpenter provisioned nodes, such as
-// taints, labels, finalizers.
+// Controller is a disruption controller that adds StatusConditions to Machines when they meet the
+// disruption criteria for that disruption type
+// i.e. When the Machine has surpassed its owning provisioner's expirationTTL, then it is marked as "VoluntarilyDisrupted"
+// in the StatusConditions with "Expired" as the reason
 type Controller struct {
 	kubeClient client.Client
 

@@ -1625,6 +1625,7 @@ var _ = Describe("Empty Nodes", func() {
 				},
 			},
 		})
+		machine1.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonEmpty, "")
 		machine2, node2 = test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -1642,6 +1643,7 @@ var _ = Describe("Empty Nodes", func() {
 				},
 			},
 		})
+		machine2.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonEmpty, "")
 	})
 	It("can delete empty nodes with consolidation", func() {
 		ExpectApplied(ctx, env.Client, machine1, node1, prov)
