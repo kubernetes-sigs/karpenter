@@ -17,7 +17,6 @@ package deprovisioning
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -60,14 +59,8 @@ func (d *Drift) ShouldDeprovision(ctx context.Context, c *Candidate) bool {
 
 // ComputeCommand generates a deprovisioning command given deprovisionable machines
 func (d *Drift) ComputeCommand(ctx context.Context, nodes ...*Candidate) (Command, error) {
-	candidates, err := filterCandidates(ctx, d.kubeClient, d.recorder, nodes)
-	if err != nil {
-		return Command{}, fmt.Errorf("filtering candidates, %w", err)
-	}
-	deprovisioningEligibleMachinesGauge.WithLabelValues(d.String()).Set(float64(len(candidates)))
-
 	// Deprovision all empty drifted nodes, as they require no scheduling simulations.
-	if empty := lo.Filter(candidates, func(c *Candidate, _ int) bool {
+	if empty := lo.Filter(nodes, func(c *Candidate, _ int) bool {
 		return len(c.pods) == 0
 	}); len(empty) > 0 {
 		return Command{
@@ -75,7 +68,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, nodes ...*Candidate) (Comman
 		}, nil
 	}
 
-	for _, candidate := range candidates {
+	for _, candidate := range nodes {
 		// Check if we need to create any machines.
 		results, err := simulateScheduling(ctx, d.kubeClient, d.cluster, d.provisioner, candidate)
 		if err != nil {

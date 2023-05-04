@@ -149,6 +149,7 @@ func (c *Controller) deprovision(ctx context.Context, deprovisioner Deprovisione
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}
+
 	// If there are no candidate nodes, move to the next deprovisioner
 	if len(candidates) == 0 {
 		return false, nil

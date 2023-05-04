@@ -25,6 +25,8 @@ import (
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/samber/lo"
+
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
@@ -82,10 +84,15 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 			return false, fmt.Errorf("constructing validation candidates, %w", err)
 		}
 	}
-	nodes, err := filterCandidates(ctx, v.kubeClient, v.recorder, cmd.candidates)
+	pdbs, err := NewPDBLimits(ctx, v.kubeClient)
 	if err != nil {
-		return false, fmt.Errorf("filtering candidates, %w", err)
+		return false, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
+
+	nodes := lo.Filter(cmd.candidates, func(cn *Candidate, _ int) bool {
+		return isCandidateDeprovisionable(cn, v.recorder, pdbs)
+	})
+
 	// If we filtered out any candidates, return false as some nodes in the consolidation decision have changed.
 	if len(nodes) != len(cmd.candidates) {
 		return false, nil

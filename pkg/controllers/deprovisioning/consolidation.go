@@ -69,18 +69,13 @@ func (c *consolidation) String() string {
 	return metrics.ConsolidationReason
 }
 
-// sortAndFilterCandidates orders deprovisionable nodes by the disruptionCost, removing any that we already know won't
+// sortCandidates orders deprovisionable nodes by the disruptionCost, removing any that we already know won't
 // be viable consolidation options.
-func (c *consolidation) sortAndFilterCandidates(ctx context.Context, nodes []*Candidate) ([]*Candidate, error) {
-	candidates, err := filterCandidates(ctx, c.kubeClient, c.recorder, nodes)
-	if err != nil {
-		return nil, fmt.Errorf("filtering candidates, %w", err)
-	}
-
-	sort.Slice(candidates, func(i int, j int) bool {
-		return candidates[i].disruptionCost < candidates[j].disruptionCost
+func (c *consolidation) sortCandidates(nodes []*Candidate) []*Candidate {
+	sort.Slice(nodes, func(i int, j int) bool {
+		return nodes[i].disruptionCost < nodes[j].disruptionCost
 	})
-	return candidates, nil
+	return nodes
 }
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes

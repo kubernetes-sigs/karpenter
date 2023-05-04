@@ -44,11 +44,7 @@ func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	if m.cluster.Consolidated() {
 		return Command{}, nil
 	}
-	candidates, err := m.sortAndFilterCandidates(ctx, candidates)
-	if err != nil {
-		return Command{}, fmt.Errorf("sorting candidates, %w", err)
-	}
-	deprovisioningEligibleMachinesGauge.WithLabelValues(m.String()).Set(float64(len(candidates)))
+	candidates = m.sortCandidates(candidates)
 
 	// For now, we will consider up to every machine in the cluster, might be configurable in the future.
 	maxParallel := len(candidates)

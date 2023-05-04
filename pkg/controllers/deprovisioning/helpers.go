@@ -39,29 +39,21 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func filterCandidates(ctx context.Context, kubeClient client.Client, recorder events.Recorder, nodes []*Candidate) ([]*Candidate, error) {
-	pdbs, err := NewPDBLimits(ctx, kubeClient)
-	if err != nil {
-		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
-	}
-
+func isCandidateDeprovisionable(cn *Candidate, recorder events.Recorder, pdbs *PDBLimits) bool {
 	// filter out nodes that can't be terminated
-	nodes = lo.Filter(nodes, func(cn *Candidate, _ int) bool {
-		if !cn.Node.DeletionTimestamp.IsZero() {
-			recorder.Publish(deprovisioningevents.Blocked(cn.Node, cn.Machine, "in the process of deletion")...)
-			return false
-		}
-		if pdb, ok := pdbs.CanEvictPods(cn.pods); !ok {
-			recorder.Publish(deprovisioningevents.Blocked(cn.Node, cn.Machine, fmt.Sprintf("pdb %s prevents pod evictions", pdb))...)
-			return false
-		}
-		if p, ok := hasDoNotEvictPod(cn); ok {
-			recorder.Publish(deprovisioningevents.Blocked(cn.Node, cn.Machine, fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name))...)
-			return false
-		}
-		return true
-	})
-	return nodes, nil
+	if !cn.Node.DeletionTimestamp.IsZero() {
+		recorder.Publish(deprovisioningevents.Blocked(cn.Node, cn.Machine, "in the process of deletion")...)
+		return false
+	}
+	if pdb, ok := pdbs.CanEvictPods(cn.pods); !ok {
+		recorder.Publish(deprovisioningevents.Blocked(cn.Node, cn.Machine, fmt.Sprintf("pdb %s prevents pod evictions", pdb))...)
+		return false
+	}
+	if p, ok := hasDoNotEvictPod(cn); ok {
+		recorder.Publish(deprovisioningevents.Blocked(cn.Node, cn.Machine, fmt.Sprintf("pod %s/%s has do not evict annotation", p.Namespace, p.Name))...)
+		return false
+	}
+	return true
 }
 
 //nolint:gocyclo
@@ -182,8 +174,13 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 	if err != nil {
 		return nil, err
 	}
+	pdbs, err := NewPDBLimits(ctx, kubeClient)
+	if err != nil {
+		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
+	}
+
 	candidates := lo.FilterMap(cluster.Nodes(), func(n *state.StateNode, _ int) (*Candidate, bool) {
-		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, provisionerMap, provisionerToInstanceTypes)
+		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, provisionerMap, provisionerToInstanceTypes, pdbs)
 		return cn, e == nil
 	})
 	// Filter only the valid candidates that we should deprovision

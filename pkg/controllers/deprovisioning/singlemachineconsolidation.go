@@ -44,11 +44,7 @@ func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 	if c.cluster.Consolidated() {
 		return Command{}, nil
 	}
-	candidates, err := c.sortAndFilterCandidates(ctx, candidates)
-	if err != nil {
-		return Command{}, fmt.Errorf("sorting candidates, %w", err)
-	}
-	deprovisioningEligibleMachinesGauge.WithLabelValues(c.String()).Set(float64(len(candidates)))
+	candidates = c.sortCandidates(candidates)
 
 	v := NewValidation(consolidationTTL, c.clock, c.cluster, c.kubeClient, c.provisioner, c.cloudProvider, c.recorder)
 	for _, candidate := range candidates {

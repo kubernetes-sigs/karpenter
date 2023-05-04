@@ -54,7 +54,7 @@ type Candidate struct {
 
 //nolint:gocyclo
 func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode,
-	provisionerMap map[string]*v1alpha5.Provisioner, provisionerToInstanceTypes map[string]map[string]*cloudprovider.InstanceType) (*Candidate, error) {
+	provisionerMap map[string]*v1alpha5.Provisioner, provisionerToInstanceTypes map[string]map[string]*cloudprovider.InstanceType, pdbs *PDBLimits) (*Candidate, error) {
 
 	if node.Node == nil || node.Machine == nil {
 		return nil, fmt.Errorf("state node doesn't contain both a node and a machine")
@@ -119,7 +119,10 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		pods:         pods,
 	}
 	cn.disruptionCost = disruptionCost(ctx, pods) * cn.lifetimeRemaining(clk)
-	return cn, nil
+	if isCandidateDeprovisionable(cn, recorder, pdbs) {
+		return cn, nil
+	}
+	return nil, nil
 }
 
 // lifetimeRemaining calculates the fraction of node lifetime remaining in the range [0.0, 1.0].  If the TTLSecondsUntilExpired
