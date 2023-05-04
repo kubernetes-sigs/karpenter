@@ -110,7 +110,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	if err != nil {
 		// if a candidate node is now deleting, just retry
 		if errors.Is(err, errCandidateDeleting) {
-			return Command{action: actionDoNothing}, nil
+			return Command{}, nil
 		}
 		return Command{}, err
 	}
@@ -121,14 +121,13 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		if len(candidates) == 1 {
 			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, candidates[0].Machine, results.PodSchedulingErrors())...)
 		}
-		return Command{action: actionDoNothing}, nil
+		return Command{}, nil
 	}
 
 	// were we able to schedule all the pods on the inflight candidates?
 	if len(results.NewMachines) == 0 {
 		return Command{
 			candidates: candidates,
-			action:     actionDelete,
 		}, nil
 	}
 
@@ -137,7 +136,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		if len(candidates) == 1 {
 			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, candidates[0].Machine, fmt.Sprintf("can't remove without creating %d candidates", len(results.NewMachines)))...)
 		}
-		return Command{action: actionDoNothing}, nil
+		return Command{}, nil
 	}
 
 	// get the current node price based on the offering
@@ -152,7 +151,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, candidates[0].Machine, "can't replace with a cheaper node")...)
 		}
 		// no instance types remain after filtering by price
-		return Command{action: actionDoNothing}, nil
+		return Command{}, nil
 	}
 
 	// If the existing candidates are all spot and the replacement is spot, we don't consolidate.  We don't have a reliable
@@ -170,7 +169,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		if len(candidates) == 1 {
 			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, candidates[0].Machine, "can't replace a spot node with a spot node")...)
 		}
-		return Command{action: actionDoNothing}, nil
+		return Command{}, nil
 	}
 
 	// We are consolidating a node from OD -> [OD,Spot] but have filtered the instance types by cost based on the
@@ -184,7 +183,6 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 
 	return Command{
 		candidates:   candidates,
-		action:       actionReplace,
 		replacements: results.NewMachines,
 	}, nil
 }

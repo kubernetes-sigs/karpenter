@@ -136,38 +136,33 @@ func (c *Candidate) lifetimeRemaining(clock clock.Clock) float64 {
 	return remaining
 }
 
-type action byte
-
-const (
-	actionDelete action = iota
-	actionReplace
-	actionDoNothing
-)
-
-func (a action) String() string {
-	switch a {
-	// Deprovisioning action with no replacement machines
-	case actionDelete:
-		return "delete"
-	// Deprovisioning action with replacement machines
-	case actionReplace:
-		return "replace"
-	case actionDoNothing:
-		return "do nothing"
-	default:
-		return fmt.Sprintf("unknown (%d)", a)
-	}
-}
-
 type Command struct {
 	candidates   []*Candidate
-	action       action
 	replacements []*scheduling.Machine
+}
+
+type Action string
+
+var (
+	NoOpAction    Action = "no-op"
+	ReplaceAction Action = "replace"
+	DeleteAction  Action = "delete"
+)
+
+func (o Command) Action() Action {
+	switch {
+	case len(o.candidates) > 0 && len(o.replacements) > 0:
+		return ReplaceAction
+	case len(o.candidates) > 0 && len(o.replacements) == 0:
+		return DeleteAction
+	default:
+		return NoOpAction
+	}
 }
 
 func (o Command) String() string {
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "%s, terminating %d machines ", o.action, len(o.candidates))
+	fmt.Fprintf(&buf, "%s, terminating %d machines ", o.Action(), len(o.candidates))
 	for i, old := range o.candidates {
 		if i != 0 {
 			fmt.Fprint(&buf, ", ")

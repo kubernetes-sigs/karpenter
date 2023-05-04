@@ -43,7 +43,7 @@ func NewEmptyMachineConsolidation(clk clock.Clock, cluster *state.Cluster, kubeC
 // ComputeCommand generates a deprovisioning command given deprovisionable machines
 func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	if c.cluster.Consolidated() {
-		return Command{action: actionDoNothing}, nil
+		return Command{}, nil
 	}
 	candidates, err := c.sortAndFilterCandidates(ctx, candidates)
 	if err != nil {
@@ -53,12 +53,11 @@ func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	// select the entirely empty nodes
 	emptyCandidates := lo.Filter(candidates, func(n *Candidate, _ int) bool { return len(n.pods) == 0 })
 	if len(emptyCandidates) == 0 {
-		return Command{action: actionDoNothing}, nil
+		return Command{}, nil
 	}
 
 	cmd := Command{
 		candidates: emptyCandidates,
-		action:     actionDelete,
 	}
 
 	// empty machine consolidation doesn't use Validation as we get to take advantage of cluster.IsNodeNominated.  This

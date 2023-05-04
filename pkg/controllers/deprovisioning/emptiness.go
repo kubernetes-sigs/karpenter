@@ -67,12 +67,8 @@ func (e *Emptiness) ComputeCommand(_ context.Context, candidates ...*Candidate) 
 		return cn.Machine.DeletionTimestamp.IsZero() && len(cn.pods) == 0
 	})
 
-	if len(emptyCandidates) == 0 {
-		return Command{action: actionDoNothing}, nil
-	}
 	return Command{
 		candidates: emptyCandidates,
-		action:     actionDelete,
 	}, nil
 }
 
