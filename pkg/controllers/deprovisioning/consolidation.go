@@ -69,8 +69,7 @@ func (c *consolidation) String() string {
 	return metrics.ConsolidationReason
 }
 
-// sortCandidates orders deprovisionable nodes by the disruptionCost, removing any that we already know won't
-// be viable consolidation options.
+// sortCandidates orders deprovisionable nodes by the disruptionCost.
 func (c *consolidation) sortCandidates(nodes []*Candidate) []*Candidate {
 	sort.Slice(nodes, func(i int, j int) bool {
 		return nodes[i].disruptionCost < nodes[j].disruptionCost
