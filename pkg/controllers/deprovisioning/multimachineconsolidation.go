@@ -96,14 +96,14 @@ func (m *MultiMachineConsolidation) firstNMachineConsolidationOption(ctx context
 
 		// ensure that the action is sensical for replacements, see explanation on filterOutSameType for why this is
 		// required
-		instanceTypeFiltered := false
+		replacementHasValidInstanceTypes := false
 		if cmd.Action() == ReplaceAction {
 			cmd.replacements[0].InstanceTypeOptions = filterOutSameType(cmd.replacements[0], candidatesToConsolidate)
-			instanceTypeFiltered = len(cmd.replacements[0].InstanceTypeOptions) == 0
+			replacementHasValidInstanceTypes = len(cmd.replacements[0].InstanceTypeOptions) > 0
 		}
 
-		// instanceTypeFiltered will be false if the replacement action has valid instance types remaining after filtering.
-		if !instanceTypeFiltered || cmd.Action() == DeleteAction {
+		// replacementHasValidInstanceTypes will be false if the replacement action has valid instance types remaining after filtering.
+		if replacementHasValidInstanceTypes || cmd.Action() == DeleteAction {
 			// we can consolidate machines [0,mid]
 			lastSavedCommand = cmd
 			min = mid + 1
