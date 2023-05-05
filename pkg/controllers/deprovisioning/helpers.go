@@ -184,7 +184,7 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 		return cn, e == nil
 	})
 	// Filter only the valid candidates that we should deprovision
-	return lo.Filter(candidates, func(c *Candidate, _ int) bool { return shouldDeprovision(ctx, c) }), nil
+	return lo.Filter(candidates, func(c *Candidate, _ int) bool { return c != nil && shouldDeprovision(ctx, c) }), nil
 }
 
 // buildProvisionerMap builds a provName -> provisioner map and a provName -> instanceName -> instance type map
