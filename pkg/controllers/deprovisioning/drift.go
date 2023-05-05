@@ -24,7 +24,6 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -50,11 +49,7 @@ func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *pro
 }
 
 // ShouldDeprovision is a predicate used to filter deprovisionable machines
-func (d *Drift) ShouldDeprovision(ctx context.Context, c *Candidate) bool {
-	// Look up the feature flag to see if we should deprovision the machine because of drift.
-	if !settings.FromContext(ctx).DriftEnabled {
-		return false
-	}
+func (d *Drift) ShouldDeprovision(_ context.Context, c *Candidate) bool {
 	cond := c.Machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)
 	return cond.IsTrue() && cond.Reason == v1alpha5.VoluntarilyDisruptedReasonDrifted
 }

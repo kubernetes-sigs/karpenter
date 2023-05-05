@@ -47,7 +47,7 @@ var _ corecontroller.TypedController[*v1alpha5.Machine] = (*Controller)(nil)
 
 // Controller is a disruption controller that adds StatusConditions to Machines when they meet the
 // disruption criteria for that disruption type
-// i.e. When the Machine has surpassed its owning provisioner's expirationTTL, then it is marked as "VoluntarilyDisrupted"
+// e.g. When the Machine has surpassed its owning provisioner's expirationTTL, then it is marked as "VoluntarilyDisrupted"
 // in the StatusConditions with "Expired" as the reason
 type Controller struct {
 	kubeClient client.Client
@@ -68,7 +68,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 }
 
 func (c *Controller) Name() string {
-	return "machine_disruption"
+	return "machine.disruption"
 }
 
 // Reconcile executes a reallocation control loop for the resource
@@ -135,8 +135,9 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 					node := &v1.Node{}
 					if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: name}, node); err != nil {
 						if !errors.IsNotFound(err) {
-							logging.FromContext(ctx).Errorf("Failed to get node when mapping expiration watch events, %s", err)
+							logging.FromContext(ctx).Errorf("failed to get node when mapping expiration watch events, %s", err)
 						}
+						return requests
 					}
 					machineList := &v1alpha5.MachineList{}
 					if err := c.kubeClient.List(ctx, machineList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {

@@ -28,7 +28,6 @@ import (
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
@@ -61,24 +60,6 @@ var _ = Describe("Drift", func() {
 			},
 		})
 		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonDrifted, "")
-	})
-	It("should ignore drifted nodes if the feature flag is disabled", func() {
-		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
-		ExpectApplied(ctx, env.Client, machine, node, prov)
-
-		// inform cluster state about nodes and machines
-		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
-
-		fakeClock.Step(10 * time.Minute)
-
-		var wg sync.WaitGroup
-		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
-		wg.Wait()
-
-		// Expect to not create or delete more machines
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
-		ExpectExists(ctx, env.Client, machine)
 	})
 	It("should ignore nodes with the disrupted annotation key, but not the drifted value", func() {
 		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, "bad-value", "")
@@ -347,13 +328,14 @@ var _ = Describe("Drift", func() {
 					},
 				},
 			},
+			// Make each pod request only fit on a single node
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("30")},
+			},
 		})
 
 		machine2, node2 := test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionExpiredAnnotationValue,
-				},
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,

@@ -41,12 +41,13 @@ func (e *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 	if voluntarilyDisrupted.IsTrue() && voluntarilyDisrupted.Reason != v1alpha5.VoluntarilyDisruptedReasonEmpty {
 		return reconcile.Result{}, nil
 	}
+	hasEmptyCondition := voluntarilyDisrupted.IsTrue()
 
 	// From here there are three scenarios to handle:
 	// 1. If TTLSecondsAfterEmpty is not configured, but the node is empty,
 	//    remove the annotation so another disruption controller can annotate the node.
 	if provisioner.Spec.TTLSecondsAfterEmpty == nil {
-		if voluntarilyDisrupted.IsTrue() {
+		if hasEmptyCondition {
 			_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineVoluntarilyDisrupted)
 			logging.FromContext(ctx).Debugf("removing emptiness status condition from machine as emptiness has been disabled")
 		}
@@ -77,13 +78,13 @@ func (e *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 	emptinessTTLTime := emptyAt.Add(time.Duration(ptr.Int64Value(provisioner.Spec.TTLSecondsAfterEmpty)) * time.Second)
 
 	// 2. Otherwise, if the node is expired, but doesn't have the annotation, add it.
-	if e.clock.Now().After(emptinessTTLTime) && !voluntarilyDisrupted.IsTrue() {
+	if e.clock.Now().After(emptinessTTLTime) && !hasEmptyCondition {
 		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonEmpty, "")
 		logging.FromContext(ctx).Debugf("marking machine as empty")
 		return reconcile.Result{}, nil
 	}
 	// 3. Finally, if the node isn't expired, but has the annotation, remove it.
-	if !e.clock.Now().After(emptinessTTLTime) && voluntarilyDisrupted.IsTrue() {
+	if !e.clock.Now().After(emptinessTTLTime) && hasEmptyCondition {
 		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineVoluntarilyDisrupted)
 		logging.FromContext(ctx).Debugf("removing empty annotation from node")
 	}

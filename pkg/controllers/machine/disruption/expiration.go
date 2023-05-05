@@ -40,12 +40,13 @@ func (e *Expiration) Reconcile(ctx context.Context, provisioner *v1alpha5.Provis
 	if voluntarilyDisrupted.IsTrue() && voluntarilyDisrupted.Reason != v1alpha5.VoluntarilyDisruptedReasonExpired {
 		return reconcile.Result{}, nil
 	}
+	hasExpiredCondition := voluntarilyDisrupted.IsTrue()
 
 	// From here there are three scenarios to handle:
 	// 1. If TTLSecondsUntilExpired is not configured, but the node is expired,
 	//    remove the annotation so another disruption controller can annotate the node.
 	if provisioner.Spec.TTLSecondsUntilExpired == nil {
-		if voluntarilyDisrupted.IsTrue() {
+		if hasExpiredCondition {
 			_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineVoluntarilyDisrupted)
 			logging.FromContext(ctx).Debugf("removing expiration status condition from machine as expiration has been disabled")
 		}
@@ -66,13 +67,13 @@ func (e *Expiration) Reconcile(ctx context.Context, provisioner *v1alpha5.Provis
 	}
 
 	// 2. Otherwise, if the node is expired, but doesn't have the annotation, add it.
-	if expired && !voluntarilyDisrupted.IsTrue() {
+	if expired && !hasExpiredCondition {
 		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonExpired, "")
 		logging.FromContext(ctx).Debugf("marking machine as expired")
 		return reconcile.Result{}, nil
 	}
 	// 3. Finally, if the node isn't expired, but has the annotation, remove it.
-	if !expired && voluntarilyDisrupted.IsTrue() {
+	if !expired && hasExpiredCondition {
 		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineVoluntarilyDisrupted)
 		logging.FromContext(ctx).Debugf("removing expired status condition from machine")
 	}

@@ -37,7 +37,7 @@ func NewEmptiness(clk clock.Clock) *Emptiness {
 }
 
 // ShouldDeprovision is a predicate used to filter deprovisionable machines
-func (e *Emptiness) ShouldDeprovision(ctx context.Context, c *Candidate) bool {
+func (e *Emptiness) ShouldDeprovision(_ context.Context, c *Candidate) bool {
 	cond := c.Machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)
 	return cond.IsTrue() && cond.Reason == v1alpha5.VoluntarilyDisruptedReasonEmpty
 }
