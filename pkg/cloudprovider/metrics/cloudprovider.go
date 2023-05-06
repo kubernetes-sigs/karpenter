@@ -31,6 +31,12 @@ const (
 	metricLabelController = "controller"
 	metricLabelMethod     = "method"
 	metricLabelProvider   = "provider"
+	metricLabelError      = "error"
+	// MetricLabelErrorDefaultVal is the default string value that represents "error type unknown"
+	MetricLabelErrorDefaultVal = ""
+	// Well-known metricLabelError values
+	MachineNotFoundError      = "MachineNotFoundError"
+	InsufficientCapacityError = "InsufficientCapacityError"
 )
 
 // decorator implements CloudProvider
@@ -50,8 +56,25 @@ var methodDurationHistogramVec = prometheus.NewHistogramVec(
 	},
 )
 
+var (
+	errorsTotalCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "cloudprovider",
+			Name:      "errors_total",
+			Help:      "Total number of errors returned from CloudProvider calls.",
+		},
+		[]string{
+			metricLabelController,
+			metricLabelMethod,
+			metricLabelProvider,
+			metricLabelError,
+		},
+	)
+)
+
 func init() {
-	crmetrics.Registry.MustRegister(methodDurationHistogramVec)
+	crmetrics.Registry.MustRegister(methodDurationHistogramVec, errorsTotalCounter)
 }
 
 type decorator struct {
@@ -70,31 +93,93 @@ func Decorate(cloudProvider cloudprovider.CloudProvider) cloudprovider.CloudProv
 }
 
 func (d *decorator) Create(ctx context.Context, machine *v1alpha5.Machine) (*v1alpha5.Machine, error) {
-	defer metrics.Measure(methodDurationHistogramVec.WithLabelValues(injection.GetControllerName(ctx), "Create", d.Name()))()
-	return d.CloudProvider.Create(ctx, machine)
+	method := "Create"
+	defer metrics.Measure(methodDurationHistogramVec.With(getLabelsMapForDuration(ctx, d, method)))()
+	machine, err := d.CloudProvider.Create(ctx, machine)
+	if err != nil {
+		errorsTotalCounter.With(getLabelsMapForError(ctx, d, method, err)).Inc()
+	}
+	return machine, err
 }
 
 func (d *decorator) Delete(ctx context.Context, machine *v1alpha5.Machine) error {
-	defer metrics.Measure(methodDurationHistogramVec.WithLabelValues(injection.GetControllerName(ctx), "Delete", d.Name()))()
-	return d.CloudProvider.Delete(ctx, machine)
+	method := "Delete"
+	defer metrics.Measure(methodDurationHistogramVec.With(getLabelsMapForDuration(ctx, d, method)))()
+	err := d.CloudProvider.Delete(ctx, machine)
+	if err != nil {
+		errorsTotalCounter.With(getLabelsMapForError(ctx, d, method, err)).Inc()
+	}
+	return err
 }
 
 func (d *decorator) Get(ctx context.Context, id string) (*v1alpha5.Machine, error) {
-	defer metrics.Measure(methodDurationHistogramVec.WithLabelValues(injection.GetControllerName(ctx), "Get", d.Name()))()
-	return d.CloudProvider.Get(ctx, id)
+	method := "Get"
+	defer metrics.Measure(methodDurationHistogramVec.With(getLabelsMapForDuration(ctx, d, method)))()
+	machine, err := d.CloudProvider.Get(ctx, id)
+	if err != nil {
+		errorsTotalCounter.With(getLabelsMapForError(ctx, d, method, err)).Inc()
+	}
+	return machine, err
 }
 
 func (d *decorator) List(ctx context.Context) ([]*v1alpha5.Machine, error) {
-	defer metrics.Measure(methodDurationHistogramVec.WithLabelValues(injection.GetControllerName(ctx), "List", d.Name()))()
-	return d.CloudProvider.List(ctx)
+	method := "List"
+	defer metrics.Measure(methodDurationHistogramVec.With(getLabelsMapForDuration(ctx, d, method)))()
+	machines, err := d.CloudProvider.List(ctx)
+	if err != nil {
+		errorsTotalCounter.With(getLabelsMapForError(ctx, d, method, err)).Inc()
+	}
+	return machines, err
 }
 
 func (d *decorator) GetInstanceTypes(ctx context.Context, provisioner *v1alpha5.Provisioner) ([]*cloudprovider.InstanceType, error) {
-	defer metrics.Measure(methodDurationHistogramVec.WithLabelValues(injection.GetControllerName(ctx), "GetInstanceTypes", d.Name()))()
-	return d.CloudProvider.GetInstanceTypes(ctx, provisioner)
+	method := "GetInstanceTypes"
+	defer metrics.Measure(methodDurationHistogramVec.With(getLabelsMapForDuration(ctx, d, method)))()
+	instanceType, err := d.CloudProvider.GetInstanceTypes(ctx, provisioner)
+	if err != nil {
+		errorsTotalCounter.With(getLabelsMapForError(ctx, d, method, err)).Inc()
+	}
+	return instanceType, err
 }
 
 func (d *decorator) IsMachineDrifted(ctx context.Context, machine *v1alpha5.Machine) (bool, error) {
-	defer metrics.Measure(methodDurationHistogramVec.WithLabelValues(injection.GetControllerName(ctx), "IsMachineDrifted", d.Name()))()
-	return d.CloudProvider.IsMachineDrifted(ctx, machine)
+	method := "IsMachineDrifted"
+	defer metrics.Measure(methodDurationHistogramVec.With(getLabelsMapForDuration(ctx, d, method)))()
+	isDrifted, err := d.CloudProvider.IsMachineDrifted(ctx, machine)
+	if err != nil {
+		errorsTotalCounter.With(getLabelsMapForError(ctx, d, method, err)).Inc()
+	}
+	return isDrifted, err
+}
+
+// getLabelsMapForDuration is a convenience func that constructs a map[string]string
+// for a prometheus Label map used to compose a duration metric spec
+func getLabelsMapForDuration(ctx context.Context, d *decorator, method string) map[string]string {
+	return prometheus.Labels{
+		metricLabelController: injection.GetControllerName(ctx),
+		metricLabelMethod:     method,
+		metricLabelProvider:   d.Name(),
+	}
+}
+
+// getLabelsMapForError is a convenience func that constructs a map[string]string
+// for a prometheus Label map used to compose a counter metric spec
+func getLabelsMapForError(ctx context.Context, d *decorator, method string, err error) map[string]string {
+	return prometheus.Labels{
+		metricLabelController: injection.GetControllerName(ctx),
+		metricLabelMethod:     method,
+		metricLabelProvider:   d.Name(),
+		metricLabelError:      GetErrorTypeLabelValue(err),
+	}
+}
+
+// GetErrorTypeLabelValue is a convenience func that returns
+// a string representation of well-known CloudProvider error types
+func GetErrorTypeLabelValue(err error) string {
+	if cloudprovider.IsInsufficientCapacityError(err) {
+		return InsufficientCapacityError
+	} else if cloudprovider.IsMachineNotFoundError(err) {
+		return MachineNotFoundError
+	}
+	return MetricLabelErrorDefaultVal
 }
