@@ -71,7 +71,6 @@ func (d *Drift) ComputeCommand(ctx context.Context, nodes ...*Candidate) (Comman
 	}); len(empty) > 0 {
 		return Command{
 			candidates: empty,
-			action:     actionDelete,
 		}, nil
 	}
 
@@ -92,16 +91,14 @@ func (d *Drift) ComputeCommand(ctx context.Context, nodes ...*Candidate) (Comman
 		if len(results.NewMachines) == 0 {
 			return Command{
 				candidates: []*Candidate{candidate},
-				action:     actionDelete,
 			}, nil
 		}
 		return Command{
 			candidates:   []*Candidate{candidate},
-			action:       actionReplace,
 			replacements: results.NewMachines,
 		}, nil
 	}
-	return Command{action: actionDoNothing}, nil
+	return Command{}, nil
 }
 
 // String is the string representation of the deprovisioner

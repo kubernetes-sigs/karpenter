@@ -41,7 +41,7 @@ func NewMultiMachineConsolidation(clk clock.Clock, cluster *state.Cluster, kubeC
 
 func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	if m.cluster.Consolidated() {
-		return Command{action: actionDoNothing}, nil
+		return Command{}, nil
 	}
 	candidates, err := m.sortAndFilterCandidates(ctx, candidates)
 	if err != nil {
@@ -54,7 +54,7 @@ func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	if err != nil {
 		return Command{}, err
 	}
-	if cmd.action == actionDoNothing {
+	if cmd.Action() == NoOpAction {
 		return cmd, nil
 	}
 
@@ -75,37 +75,37 @@ func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 func (m *MultiMachineConsolidation) firstNMachineConsolidationOption(ctx context.Context, candidates []*Candidate, max int) (Command, error) {
 	// we always operate on at least two machines at once, for single machines standard consolidation will find all solutions
 	if len(candidates) < 2 {
-		return Command{action: actionDoNothing}, nil
+		return Command{}, nil
 	}
 	min := 1
 	if len(candidates) <= max {
 		max = len(candidates) - 1
 	}
 
-	lastSavedCommand := Command{action: actionDoNothing}
+	lastSavedCommand := Command{}
 	// binary search to find the maximum number of machines we can terminate
 	for min <= max {
 		mid := (min + max) / 2
 
 		candidatesToConsolidate := candidates[0 : mid+1]
 
-		action, err := m.computeConsolidation(ctx, candidatesToConsolidate...)
+		cmd, err := m.computeConsolidation(ctx, candidatesToConsolidate...)
 		if err != nil {
 			return Command{}, err
 		}
 
 		// ensure that the action is sensical for replacements, see explanation on filterOutSameType for why this is
 		// required
-		if action.action == actionReplace {
-			action.replacements[0].InstanceTypeOptions = filterOutSameType(action.replacements[0], candidatesToConsolidate)
-			if len(action.replacements[0].InstanceTypeOptions) == 0 {
-				action.action = actionDoNothing
-			}
+		replacementHasValidInstanceTypes := false
+		if cmd.Action() == ReplaceAction {
+			cmd.replacements[0].InstanceTypeOptions = filterOutSameType(cmd.replacements[0], candidatesToConsolidate)
+			replacementHasValidInstanceTypes = len(cmd.replacements[0].InstanceTypeOptions) > 0
 		}
 
-		if action.action == actionReplace || action.action == actionDelete {
+		// replacementHasValidInstanceTypes will be false if the replacement action has valid instance types remaining after filtering.
+		if replacementHasValidInstanceTypes || cmd.Action() == DeleteAction {
 			// we can consolidate machines [0,mid]
-			lastSavedCommand = action
+			lastSavedCommand = cmd
 			min = mid + 1
 		} else {
 			max = mid - 1
