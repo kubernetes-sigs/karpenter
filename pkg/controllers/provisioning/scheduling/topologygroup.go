@@ -55,6 +55,7 @@ type TopologyGroup struct {
 	Key        string
 	Type       TopologyType
 	maxSkew    int32
+	minDomains *int32
 	namespaces utilsets.String
 	selector   *metav1.LabelSelector
 	nodeFilter TopologyNodeFilter
@@ -63,7 +64,7 @@ type TopologyGroup struct {
 	domains map[string]int32       // TODO(ellistarn) explore replacing with a minheap
 }
 
-func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod, namespaces utilsets.String, labelSelector *metav1.LabelSelector, maxSkew int32, domains utilsets.String) *TopologyGroup {
+func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod, namespaces utilsets.String, labelSelector *metav1.LabelSelector, maxSkew int32, minDomains *int32, domains utilsets.String) *TopologyGroup {
 	domainCounts := map[string]int32{}
 	for domain := range domains {
 		domainCounts[domain] = 0
@@ -82,6 +83,7 @@ func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod
 		maxSkew:    maxSkew,
 		domains:    domainCounts,
 		owners:     map[types.UID]struct{}{},
+		minDomains: minDomains,
 	}
 }
 
@@ -152,6 +154,9 @@ func (t *TopologyGroup) Hash() uint64 {
 	}, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true}))
 }
 
+// nextDomainTopologySpread returns a scheduling.Requirement that includes a node domain that a pod should be scheduled to.
+// If there are multiple eligible domains, we return any random domain that satisfies the `maxSkew` configuration.
+// If there are no eligible domains, we return a `DoesNotExist` requirement, implying that we could not satisfy the topologySpread requirement.
 func (t *TopologyGroup) nextDomainTopologySpread(pod *v1.Pod, podDomains, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
 	// min count is calculated across all domains
 	min := t.domainMinCount(podDomains)
@@ -188,13 +193,18 @@ func (t *TopologyGroup) domainMinCount(domains *scheduling.Requirement) int32 {
 	}
 
 	min := int32(math.MaxInt32)
+	var numPodSupportedDomains int32
 	// determine our current min count
 	for domain, count := range t.domains {
 		if domains.Has(domain) {
+			numPodSupportedDomains++
 			if count < min {
 				min = count
 			}
 		}
+	}
+	if t.minDomains != nil && numPodSupportedDomains < *t.minDomains {
+		min = 0
 	}
 	return min
 }
