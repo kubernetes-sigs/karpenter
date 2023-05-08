@@ -20,8 +20,8 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -91,14 +91,14 @@ func (m *Machine) Add(ctx context.Context, pod *v1.Pod) error {
 
 	// Check instance type combinations
 	requests := resources.Merge(m.Requests, resources.RequestsForPods(pod))
-	instanceTypes := filterInstanceTypesByRequirements(m.InstanceTypeOptions, machineRequirements, requests)
-	if len(instanceTypes) == 0 {
-		return fmt.Errorf("no instance type satisfied resources %s and requirements %s", resources.String(resources.RequestsForPods(pod)), machineRequirements)
+	filtered := filterInstanceTypesByRequirements(m.InstanceTypeOptions, machineRequirements, requests)
+	if len(filtered.remaining) == 0 {
+		return fmt.Errorf("no instance type satisfied resources %s and requirements %s (%s)", resources.String(resources.RequestsForPods(pod)), machineRequirements, filtered.FailureReason())
 	}
 
 	// Update node
 	m.Pods = append(m.Pods, pod)
-	m.InstanceTypeOptions = instanceTypes
+	m.InstanceTypeOptions = filtered.remaining
 	m.Requests = requests
 	m.Requirements = machineRequirements
 	m.topology.Record(pod, machineRequirements)
@@ -129,10 +129,122 @@ func InstanceTypeList(instanceTypeOptions []*cloudprovider.InstanceType) string 
 	return itSb.String()
 }
 
-func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, requests v1.ResourceList) []*cloudprovider.InstanceType {
-	return lo.Filter(instanceTypes, func(instanceType *cloudprovider.InstanceType, _ int) bool {
-		return compatible(instanceType, requirements) && fits(instanceType, requests) && hasOffering(instanceType, requirements)
-	})
+type filterResults struct {
+	remaining []*cloudprovider.InstanceType
+	// Each of these three flags indicates if that particular criteria was met by at least one instance type
+	requirementsMet bool
+	fits            bool
+	hasOffering     bool
+
+	// requirementsAndFits indicates if a single instance type met the scheduling requirements and had enough resources
+	requirementsAndFits bool
+	// requirementsAndOffering indicates if a single instance type met the scheduling requirements and was a required offering
+	requirementsAndOffering bool
+	// fitsAndOffering indicates if a single instance type had enough resources and was a required offering
+	fitsAndOffering bool
+
+	requests v1.ResourceList
+}
+
+// FailureReason returns a presentable string explaining why all instance types were filtered out
+//
+//nolint:gocyclo
+func (r filterResults) FailureReason() string {
+	if len(r.remaining) > 0 {
+		return ""
+	}
+
+	// no instance type met any of the three criteria, meaning each criteria was enough to completely prevent
+	// this pod from scheduling
+	if !r.requirementsMet && !r.fits && !r.hasOffering {
+		return "no instance type met the scheduling requirements or had enough resources or had a required offering"
+	}
+
+	// check the other pairwise criteria
+	if !r.requirementsMet && !r.fits {
+		return "no instance type met the scheduling requirements or had enough resources"
+	}
+
+	if !r.requirementsMet && !r.hasOffering {
+		return "no instance type met the scheduling requirements or had a required offering"
+	}
+
+	if !r.fits && !r.hasOffering {
+		return "no instance type had enough resources or had a required offering"
+	}
+
+	// and then each individual criteria. These are sort of the same as above in that each one indicates that no
+	// instance type matched that criteria at all, so it was enough to exclude all instance types.  I think it's
+	// helpful to have these separate, since we can report the multiple excluding criteria above.
+	if !r.requirementsMet {
+		return "no instance type met all requirements"
+	}
+
+	if !r.fits {
+		msg := "no instance type has enough resources"
+		// special case for a user typo I saw reported once
+		if r.requests.Cpu().Cmp(resource.MustParse("1M")) >= 0 {
+			msg += " (CPU request >= 1 Million, m vs M typo?)"
+		}
+		return msg
+	}
+
+	if !r.hasOffering {
+		return "no instance type has the required offering"
+	}
+
+	// see if any pair of criteria was enough to exclude all instances
+	if r.requirementsAndFits {
+		return "no instance type which met the scheduling requirements and had enough resources, had a required offering"
+	}
+	if r.fitsAndOffering {
+		return "no instance type which had enough resources and the required offering met the scheduling requirements"
+	}
+	if r.requirementsAndOffering {
+		return "no instance type which met the scheduling requirements and the required offering had the required resources"
+	}
+
+	// finally all instances were filtered out, but we had at least one instance that met each criteria, and met each
+	// pairwise set of criteria, so the only thing that remains is no instance which met all three criteria simultaneously
+	return "no instance type met the requirements/resources/offering tuple"
+}
+
+//nolint:gocyclo
+func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, requests v1.ResourceList) filterResults {
+	results := filterResults{
+		requests:        requests,
+		requirementsMet: false,
+		fits:            false,
+		hasOffering:     false,
+
+		requirementsAndFits:     false,
+		requirementsAndOffering: false,
+		fitsAndOffering:         false,
+	}
+	for _, it := range instanceTypes {
+		// the tradeoff to not short circuiting on the filtering is that we can report much better error messages
+		// about why scheduling failed
+		itCompat := compatible(it, requirements)
+		itFits := fits(it, requests)
+		itHasOffering := hasOffering(it, requirements)
+
+		// track if any single instance type met a single criteria
+		results.requirementsMet = results.requirementsMet || itCompat
+		results.fits = results.fits || itFits
+		results.hasOffering = results.hasOffering || itHasOffering
+
+		// track if any single instance type met the three pairs of criteria
+		results.requirementsAndFits = results.requirementsAndFits || (itCompat && itFits && !itHasOffering)
+		results.requirementsAndOffering = results.requirementsAndOffering || (itCompat && itHasOffering && !itFits)
+		results.fitsAndOffering = results.fitsAndOffering || (itFits && itHasOffering && !itCompat)
+
+		// and if it met all criteria, we keep the instance type and continue filtering.  We now won't be reporting
+		// any errors.
+		if itCompat && itFits && itHasOffering {
+			results.remaining = append(results.remaining, it)
+		}
+	}
+	return results
 }
 
 func compatible(instanceType *cloudprovider.InstanceType, requirements scheduling.Requirements) bool {
