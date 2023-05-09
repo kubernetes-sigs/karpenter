@@ -145,7 +145,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 
 func (c *Controller) deprovision(ctx context.Context, deprovisioner Deprovisioner) (bool, error) {
 	defer metrics.Measure(deprovisioningDurationHistogram.WithLabelValues(deprovisioner.String()))()
-	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.clock, c.cloudProvider, deprovisioner.ShouldDeprovision)
+	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, deprovisioner.ShouldDeprovision)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}
@@ -172,7 +172,7 @@ func (c *Controller) deprovision(ctx context.Context, deprovisioner Deprovisione
 }
 
 func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, command Command) error {
-	deprovisioningActionsPerformedCounter.WithLabelValues(fmt.Sprintf("%s/%s", d, command.action)).Add(1)
+	deprovisioningActionsPerformedCounter.WithLabelValues(fmt.Sprintf("%s/%s", d, command.Action())).Add(1)
 	logging.FromContext(ctx).Infof("deprovisioning via %s %s", d, command)
 
 	reason := fmt.Sprintf("%s/%s", d, command.Action())
