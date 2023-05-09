@@ -85,7 +85,3 @@ func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	}
 	return cmd, nil
 }
-
-func (c *EmptyMachineConsolidation) String() string {
-	return "empty-consolidation"
-}

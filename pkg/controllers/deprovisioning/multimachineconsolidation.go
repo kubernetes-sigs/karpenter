@@ -165,7 +165,3 @@ func filterOutSameType(newMachine *scheduling.Machine, consolidate []*Candidate)
 
 	return filterByPrice(newMachine.InstanceTypeOptions, newMachine.Requirements, maxPrice)
 }
-
-func (c *MultiMachineConsolidation) String() string {
-	return "multi-consolidation"
-}

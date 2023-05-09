@@ -74,7 +74,3 @@ func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 	}
 	return Command{}, nil
 }
-
-func (c *SingleMachineConsolidation) String() string {
-	return "single-consolidation"
-}
