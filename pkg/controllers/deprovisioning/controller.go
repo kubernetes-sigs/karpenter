@@ -172,7 +172,7 @@ func (c *Controller) deprovision(ctx context.Context, deprovisioner Deprovisione
 }
 
 func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, command Command) error {
-	deprovisioningActionsPerformedCounter.WithLabelValues(fmt.Sprintf("%s/%s", d, command.Action())).Add(1)
+	deprovisioningActionsPerformedCounter.WithLabelValues(string(command.Action()), d.String()).Add(1)
 	logging.FromContext(ctx).Infof("deprovisioning via %s %s", d, command)
 
 	reason := fmt.Sprintf("%s/%s", d, command.Action())

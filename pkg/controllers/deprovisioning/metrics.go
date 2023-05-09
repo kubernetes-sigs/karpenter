@@ -31,6 +31,7 @@ func init() {
 const (
 	deprovisioningSubsystem = "deprovisioning"
 	deprovisionerLabel      = "deprovisioner"
+	actionLabel 			= "action"
 )
 
 var (
@@ -59,7 +60,7 @@ var (
 			Name:      "actions_performed",
 			Help:      "Number of deprovisioning actions performed. Labeled by deprovisioner.",
 		},
-		[]string{deprovisionerLabel},
+		[]string{actionLabel, deprovisionerLabel},
 	)
 	deprovisioningEligibleMachinesGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
