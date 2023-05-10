@@ -66,6 +66,7 @@ func (e *Emptiness) ComputeCommand(_ context.Context, candidates ...*Candidate) 
 	emptyCandidates := lo.Filter(candidates, func(cn *Candidate, _ int) bool {
 		return cn.Node.DeletionTimestamp.IsZero() && len(cn.pods) == 0
 	})
+	deprovisioningEligibleMachinesGauge.WithLabelValues(e.String()).Set(float64(len(candidates)))
 
 	if len(emptyCandidates) == 0 {
 		return Command{action: actionDoNothing}, nil
