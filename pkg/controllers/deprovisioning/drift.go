@@ -62,6 +62,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, nodes ...*Candidate) (Comman
 	if err != nil {
 		return Command{}, fmt.Errorf("filtering candidates, %w", err)
 	}
+	deprovisioningEligibleMachinesGauge.WithLabelValues(d.String()).Set(float64(len(candidates)))
 
 	for _, candidate := range candidates {
 		// Check if we need to create any machines.

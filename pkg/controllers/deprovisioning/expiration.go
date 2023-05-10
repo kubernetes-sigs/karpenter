@@ -83,6 +83,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, nodes ...*Candidate) (C
 	if err != nil {
 		return Command{}, fmt.Errorf("filtering candidates, %w", err)
 	}
+	deprovisioningEligibleMachinesGauge.WithLabelValues(e.String()).Set(float64(len(candidates)))
 
 	for _, candidate := range candidates {
 		// Check if we need to create any nodes.
