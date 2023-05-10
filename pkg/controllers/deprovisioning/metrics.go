@@ -31,27 +31,27 @@ func init() {
 const (
 	deprovisioningSubsystem = "deprovisioning"
 	deprovisionerLabel      = "deprovisioner"
-	actionLabel 			= "action"
+	actionLabel             = "action"
 )
 
 var (
-	deprovisioningDurationHistogram = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: deprovisioningSubsystem,
-			Name:      "evaluation_duration_seconds",
-			Help:      "Duration of the deprovisioning evaluation process in seconds. Labeled by deprovisioner",
-			Buckets:   metrics.DurationBuckets(),
+	deprovisioningDurationHistogram = prometheus.NewSummaryVec(
+		prometheus.SummaryOpts{
+			Namespace:  metrics.Namespace,
+			Subsystem:  deprovisioningSubsystem,
+			Name:       "evaluation_duration_seconds",
+			Help:       "Duration of the deprovisioning evaluation process in seconds. Labeled by deprovisioner",
+			Objectives: metrics.SummaryObjectives(),
 		},
 		[]string{deprovisionerLabel},
 	)
-	deprovisioningReplacementNodeInitializedHistogram = prometheus.NewHistogram(
-		prometheus.HistogramOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: deprovisioningSubsystem,
-			Name:      "replacement_machine_initialized_seconds",
-			Help:      "Amount of time required for a replacement machine to become initialized.",
-			Buckets:   metrics.DurationBuckets(),
+	deprovisioningReplacementNodeInitializedHistogram = prometheus.NewSummary(
+		prometheus.SummaryOpts{
+			Namespace:  metrics.Namespace,
+			Subsystem:  deprovisioningSubsystem,
+			Name:       "replacement_machine_initialized_seconds",
+			Help:       "Amount of time required for a replacement machine to become initialized.",
+			Objectives: metrics.SummaryObjectives(),
 		})
 	deprovisioningActionsPerformedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
