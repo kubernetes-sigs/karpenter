@@ -173,7 +173,8 @@ func (c *Controller) deprovision(ctx context.Context, deprovisioner Deprovisione
 
 func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, command Command) error {
 	deprovisioningActionsPerformedCounter.With(map[string]string{
-		actionLabel:        string(command.Action()),
+		// TODO: make this just command.Action() since we've added the deprovisioner as its own label.
+		actionLabel:        fmt.Sprintf("%s/%s", d, command.Action()),
 		deprovisionerLabel: d.String(),
 	}).Add(1)
 	logging.FromContext(ctx).Infof("deprovisioning via %s %s", d, command)
