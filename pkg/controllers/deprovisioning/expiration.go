@@ -85,6 +85,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, nodes ...*Candidate) (C
 	if err != nil {
 		return Command{}, fmt.Errorf("filtering candidates, %w", err)
 	}
+	deprovisioningEligibleMachinesGauge.WithLabelValues(e.String()).Set(float64(len(candidates)))
 
 	// Deprovision all empty expired nodes, as they require no scheduling simulations.
 	if empty := lo.Filter(candidates, func(c *Candidate, _ int) bool {

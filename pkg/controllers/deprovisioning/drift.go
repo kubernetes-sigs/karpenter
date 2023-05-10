@@ -64,6 +64,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, nodes ...*Candidate) (Comman
 	if err != nil {
 		return Command{}, fmt.Errorf("filtering candidates, %w", err)
 	}
+	deprovisioningEligibleMachinesGauge.WithLabelValues(d.String()).Set(float64(len(candidates)))
 
 	// Deprovision all empty drifted nodes, as they require no scheduling simulations.
 	if empty := lo.Filter(candidates, func(c *Candidate, _ int) bool {

@@ -104,7 +104,6 @@ func (c *consolidation) ShouldDeprovision(_ context.Context, cn *Candidate) bool
 //
 // nolint:gocyclo
 func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...*Candidate) (Command, error) {
-	defer metrics.Measure(deprovisioningDurationHistogram.WithLabelValues("Replace/Delete"))()
 	// Run scheduling simulation to compute consolidation option
 	results, err := simulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, candidates...)
 	if err != nil {

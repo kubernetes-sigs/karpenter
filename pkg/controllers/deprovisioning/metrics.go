@@ -25,36 +25,49 @@ func init() {
 	crmetrics.Registry.MustRegister(deprovisioningDurationHistogram)
 	crmetrics.Registry.MustRegister(deprovisioningReplacementNodeInitializedHistogram)
 	crmetrics.Registry.MustRegister(deprovisioningActionsPerformedCounter)
+	crmetrics.Registry.MustRegister(deprovisioningEligibleMachinesGauge)
 }
 
-const deprovisioningSubsystem = "deprovisioning"
-
-var deprovisioningDurationHistogram = prometheus.NewHistogramVec(
-	prometheus.HistogramOpts{
-		Namespace: metrics.Namespace,
-		Subsystem: deprovisioningSubsystem,
-		Name:      "evaluation_duration_seconds",
-		Help:      "Duration of the deprovisioning evaluation process in seconds.",
-		Buckets:   metrics.DurationBuckets(),
-	},
-	[]string{"method"},
+const (
+	deprovisioningSubsystem = "deprovisioning"
+	deprovisionerLabel      = "deprovisioner"
+	actionLabel             = "action"
 )
 
-var deprovisioningReplacementNodeInitializedHistogram = prometheus.NewHistogram(
-	prometheus.HistogramOpts{
-		Namespace: metrics.Namespace,
-		Subsystem: deprovisioningSubsystem,
-		Name:      "replacement_machine_initialized_seconds",
-		Help:      "Amount of time required for a replacement machine to become initialized.",
-		Buckets:   metrics.DurationBuckets(),
-	})
-
-var deprovisioningActionsPerformedCounter = prometheus.NewCounterVec(
-	prometheus.CounterOpts{
-		Namespace: metrics.Namespace,
-		Subsystem: deprovisioningSubsystem,
-		Name:      "actions_performed",
-		Help:      "Number of deprovisioning actions performed. Labeled by action.",
-	},
-	[]string{"action"},
+var (
+	deprovisioningDurationHistogram = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: deprovisioningSubsystem,
+			Name:      "evaluation_duration_seconds",
+			Help:      "Duration of the deprovisioning evaluation process in seconds.",
+			Buckets:   metrics.DurationBuckets(),
+		},
+		[]string{"method"})
+	deprovisioningReplacementNodeInitializedHistogram = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: deprovisioningSubsystem,
+			Name:      "replacement_machine_initialized_seconds",
+			Help:      "Amount of time required for a replacement machine to become initialized.",
+			Buckets:   metrics.DurationBuckets(),
+		})
+	deprovisioningActionsPerformedCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: deprovisioningSubsystem,
+			Name:      "actions_performed",
+			Help:      "Number of deprovisioning actions performed. Labeled by deprovisioner.",
+		},
+		[]string{actionLabel, deprovisionerLabel},
+	)
+	deprovisioningEligibleMachinesGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: deprovisioningSubsystem,
+			Name:      "eligible_machines",
+			Help:      "Number of machines eligible for deprovisioning by Karpenter. Labeled by deprovisioner",
+		},
+		[]string{deprovisionerLabel},
+	)
 )
