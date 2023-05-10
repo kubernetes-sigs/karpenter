@@ -176,7 +176,7 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 		// TODO: make this just command.Action() since we've added the deprovisioner as its own label.
 		actionLabel:        fmt.Sprintf("%s/%s", d, command.Action()),
 		deprovisionerLabel: d.String(),
-	}).Add(1)
+	}).Inc()
 	logging.FromContext(ctx).Infof("deprovisioning via %s %s", d, command)
 
 	reason := fmt.Sprintf("%s/%s", d, command.Action())
