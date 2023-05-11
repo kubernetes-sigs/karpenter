@@ -26,7 +26,7 @@ require (
 	k8s.io/csi-translation-lib v0.25.4
 	k8s.io/klog/v2 v2.100.1
 	k8s.io/utils v0.0.0-20221108210102-8e77b1f39fe2
-	knative.dev/pkg v0.0.0-20221123154742-05b694ec4d3a
+	knative.dev/pkg v0.0.0-20230502134655-db8a35330281
 	sigs.k8s.io/controller-runtime v0.13.1
 )
 
