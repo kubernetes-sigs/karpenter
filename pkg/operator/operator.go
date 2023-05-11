@@ -17,6 +17,8 @@ package operator
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"sync"
 	"time"
 
@@ -153,6 +155,8 @@ func (o *Operator) WithControllers(ctx context.Context, controllers ...corecontr
 
 func (o *Operator) WithWebhooks(webhooks ...knativeinjection.ControllerConstructor) *Operator {
 	o.webhooks = append(o.webhooks, webhooks...)
+	lo.Must0(o.Manager.AddReadyzCheck("webhooks", knativeChecker("readiness")))
+	lo.Must0(o.Manager.AddHealthzCheck("webhooks", knativeChecker("health")))
 	return o
 }
 
@@ -171,4 +175,23 @@ func (o *Operator) Start(ctx context.Context) {
 		}()
 	}
 	wg.Wait()
+}
+
+func knativeChecker(path string) healthz.Checker {
+	return func(req *http.Request) (err error) {
+		defer func() {
+			if err != nil {
+				fmt.Printf("probe failed: %s", err.Error())
+			}
+		}()
+		res, err := http.Get(fmt.Sprintf("http://:%d/%s", knativeinjection.HealthCheckDefaultPort, path))
+		if err != nil {
+			return err
+		}
+
+		if res.StatusCode != http.StatusOK {
+			return fmt.Errorf("%s probe failed, %s", path, lo.Must(io.ReadAll(res.Body)))
+		}
+		return nil
+	}
 }
