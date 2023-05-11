@@ -106,7 +106,7 @@ var (
 	)
 )
 
-func MustRegister() {
+func init() {
 	crmetrics.Registry.MustRegister(MachinesCreatedCounter, MachinesTerminatedCounter, MachinesLaunchedCounter,
 		MachinesRegisteredCounter, MachinesInitializedCounter, NodesCreatedCounter, NodesTerminatedCounter)
 }

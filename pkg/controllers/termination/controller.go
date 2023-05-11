@@ -125,6 +125,10 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *v1.Node) error {
 		metrics.NodesTerminatedCounter.With(prometheus.Labels{
 			metrics.ProvisionerLabel: n.Labels[v1alpha5.ProvisionerNameLabelKey],
 		}).Inc()
+		// We use stored.DeletionTimestamp since the api-server may give back a node after the patch without a deletionTimestamp
+		TerminationSummary.With(prometheus.Labels{
+			metrics.ProvisionerLabel: n.Labels[v1alpha5.ProvisionerNameLabelKey],
+		}).Observe(time.Since(stored.DeletionTimestamp.Time).Seconds())
 		logging.FromContext(ctx).Infof("deleted node")
 	}
 	return nil
