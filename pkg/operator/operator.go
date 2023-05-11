@@ -153,10 +153,10 @@ func (o *Operator) WithControllers(ctx context.Context, controllers ...corecontr
 	return o
 }
 
-func (o *Operator) WithWebhooks(ctx context.Context, webhooks ...knativeinjection.ControllerConstructor) *Operator {
+func (o *Operator) WithWebhooks(webhooks ...knativeinjection.ControllerConstructor) *Operator {
 	o.webhooks = append(o.webhooks, webhooks...)
-	lo.Must0(o.Manager.AddReadyzCheck("webhooks", knativeChecker(ctx, "readiness")))
-	lo.Must0(o.Manager.AddHealthzCheck("webhooks", knativeChecker(ctx, "health")))
+	lo.Must0(o.Manager.AddReadyzCheck("webhooks", knativeChecker("readiness")))
+	lo.Must0(o.Manager.AddHealthzCheck("webhooks", knativeChecker("health")))
 	return o
 }
 
@@ -177,13 +177,8 @@ func (o *Operator) Start(ctx context.Context) {
 	wg.Wait()
 }
 
-func knativeChecker(ctx context.Context, path string) healthz.Checker {
+func knativeChecker(path string) healthz.Checker {
 	return func(req *http.Request) (err error) {
-		defer func() {
-			if err != nil {
-				logging.FromContext(ctx).Errorf("probe failed: %s", err.Error())
-			}
-		}()
 		res, err := http.Get(fmt.Sprintf("http://:%d/%s", knativeinjection.HealthCheckDefaultPort, path))
 		if err != nil {
 			return err
