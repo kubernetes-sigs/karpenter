@@ -34,6 +34,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/termination"
 	"github.com/aws/karpenter-core/pkg/controllers/termination/terminator"
 	"github.com/aws/karpenter-core/pkg/events"
+	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
@@ -92,6 +93,10 @@ var _ = Describe("Termination", func() {
 		ExpectCleanedUp(ctx, env.Client)
 		fakeClock.SetTime(time.Now())
 		cloudProvider.Reset()
+
+		// Reset the metrics collectors
+		metrics.NodesTerminatedCounter.Reset()
+		termination.TerminationSummary.Reset()
 	})
 
 	Context("Reconciliation", func() {
@@ -428,6 +433,28 @@ var _ = Describe("Termination", func() {
 			fakeClock.SetTime(time.Now().Add(90 * time.Second))
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 			ExpectNotFound(ctx, env.Client, node)
+		})
+	})
+	Context("Metrics", func() {
+		It("should fire the terminationSummary metric when deleting nodes", func() {
+			ExpectApplied(ctx, env.Client, node)
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+
+			m, ok := FindMetricWithLabelValues("karpenter_nodes_termination_time_seconds", map[string]string{"provisioner": ""})
+			Expect(ok).To(BeTrue())
+			Expect(m.GetSummary().GetSampleCount()).To(BeNumerically("==", 1))
+		})
+		It("should fire the nodesTerminated counter metric when deleting nodes", func() {
+			ExpectApplied(ctx, env.Client, node)
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+
+			m, ok := FindMetricWithLabelValues("karpenter_nodes_terminated", map[string]string{"provisioner": ""})
+			Expect(ok).To(BeTrue())
+			Expect(lo.FromPtr(m.GetCounter().Value)).To(BeNumerically("==", 1))
 		})
 	})
 })
