@@ -35,13 +35,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/termination"
 	"github.com/aws/karpenter-core/pkg/controllers/termination/terminator"
 	"github.com/aws/karpenter-core/pkg/events"
-	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 )
-
-func init() {
-	metrics.MustRegister() // Registers cross-controller metrics
-}
 
 func NewControllers(
 	ctx context.Context,

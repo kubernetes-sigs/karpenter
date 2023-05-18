@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package terminator
+package termination
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
@@ -22,7 +22,7 @@ import (
 )
 
 var (
-	terminationSummary = prometheus.NewSummary(
+	TerminationSummary = prometheus.NewSummaryVec(
 		prometheus.SummaryOpts{
 			Namespace:  "karpenter",
 			Subsystem:  "nodes",
@@ -30,9 +30,10 @@ var (
 			Help:       "The time taken between a node's deletion request and the removal of its finalizer",
 			Objectives: metrics.SummaryObjectives(),
 		},
+		[]string{metrics.ProvisionerLabel},
 	)
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(terminationSummary)
+	crmetrics.Registry.MustRegister(TerminationSummary)
 }

@@ -31,11 +31,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/termination/terminator"
 	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/termination/terminator/events"
 	"github.com/aws/karpenter-core/pkg/events"
+	"github.com/aws/karpenter-core/pkg/metrics"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 )
@@ -104,6 +107,10 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *v1.Node) error {
 		if err := c.kubeClient.Patch(ctx, n, client.MergeFrom(stored)); err != nil {
 			return client.IgnoreNotFound(fmt.Errorf("patching node, %w", err))
 		}
+		// We use stored.DeletionTimestamp since the api-server may give back a node after the patch without a deletionTimestamp
+		TerminationSummary.With(prometheus.Labels{
+			metrics.ProvisionerLabel: n.Labels[v1alpha5.ProvisionerNameLabelKey],
+		}).Observe(time.Since(stored.DeletionTimestamp.Time).Seconds())
 		logging.FromContext(ctx).Infof("deleted node")
 	}
 	return nil
