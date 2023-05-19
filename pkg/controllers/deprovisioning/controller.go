@@ -143,7 +143,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	return reconcile.Result{RequeueAfter: pollingPeriod}, nil
 }
 
-func (c *Controller) deprovision(ctx context.Context, deprovisioner Deprovisioner) (bool, error) {
+func (c *Controller) deprovision(ctx context.Context, deprovisioner Deprovisioner) (bool, error) {	
 	defer metrics.Measure(deprovisioningDurationHistogram.WithLabelValues(deprovisioner.String()))()
 	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, deprovisioner.ShouldDeprovision)
 	if err != nil {
@@ -172,11 +172,14 @@ func (c *Controller) deprovision(ctx context.Context, deprovisioner Deprovisione
 }
 
 func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, command Command) error {
-	deprovisioningActionsPerformedCounter.With(map[string]string{
-		// TODO: make this just command.Action() since we've added the deprovisioner as its own label.
-		actionLabel:        fmt.Sprintf("%s/%s", d, command.Action()),
-		deprovisionerLabel: d.String(),
-	}).Inc()
+	for _, candidate := range command.candidates {
+		deprovisioningActionsPerformedCounter.With(map[string]string{
+			// TODO: make this just command.Action() since we've added the deprovisioner as its own label.
+			actionLabel:        fmt.Sprintf("%s/%s", d, command.Action()),
+			deprovisionerLabel: d.String(),
+			provisionerLabel:   candidate.provisioner.Name,
+		}).Inc()
+	}
 	logging.FromContext(ctx).Infof("deprovisioning via %s %s", d, command)
 
 	reason := fmt.Sprintf("%s/%s", d, command.Action())
@@ -208,6 +211,8 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 	// deleted.
 	for _, oldCandidate := range command.candidates {
 		c.waitForDeletion(ctx, oldCandidate.Machine)
+		// Machine no longer eligible for deprovisioning once it's gone
+		deprovisioningEligibleMachinesGauge.WithLabelValues(d.String(), oldCandidate.provisioner.Name).Dec()
 	}
 	return nil
 }

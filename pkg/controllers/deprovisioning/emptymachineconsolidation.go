@@ -49,8 +49,11 @@ func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	if err != nil {
 		return Command{}, fmt.Errorf("sorting candidates, %w", err)
 	}
-	deprovisioningEligibleMachinesGauge.WithLabelValues(c.String()).Set(float64(len(candidates)))
-
+	
+	groupedCandidates := GroupCandidatesByProvisioner(candidates)
+	for provisionerName, group := range groupedCandidates {
+		deprovisioningEligibleMachinesGauge.WithLabelValues(c.String(), provisionerName).Set(float64(len(group)))
+	}
 	// select the entirely empty nodes
 	emptyCandidates := lo.Filter(candidates, func(n *Candidate, _ int) bool { return len(n.pods) == 0 })
 	if len(emptyCandidates) == 0 {

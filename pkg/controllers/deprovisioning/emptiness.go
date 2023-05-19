@@ -66,8 +66,12 @@ func (e *Emptiness) ComputeCommand(_ context.Context, candidates ...*Candidate) 
 	emptyCandidates := lo.Filter(candidates, func(cn *Candidate, _ int) bool {
 		return cn.Machine.DeletionTimestamp.IsZero() && len(cn.pods) == 0
 	})
-	deprovisioningEligibleMachinesGauge.WithLabelValues(e.String()).Set(float64(len(candidates)))
 
+	groupedCandidates := GroupCandidatesByProvisioner(candidates)
+	for provisionerName, group := range groupedCandidates {
+		deprovisioningEligibleMachinesGauge.WithLabelValues(e.String(), provisionerName).Set(float64(len(group)))
+	}
+	
 	return Command{
 		candidates: emptyCandidates,
 	}, nil

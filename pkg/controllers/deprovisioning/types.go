@@ -136,6 +136,20 @@ func (c *Candidate) lifetimeRemaining(clock clock.Clock) float64 {
 	return remaining
 }
 
+// GroupCandidatesByProvisioner groups a list of candidates by provisioner name
+func GroupCandidatesByProvisioner(candidates []*Candidate) map[string][]*Candidate {
+	groupedCandidates := make(map[string][]*Candidate)
+
+	for _, candidate := range candidates {
+		provisionerName := candidate.provisioner.Name
+		groupedCandidates[provisionerName] = append(groupedCandidates[provisionerName], candidate)
+	}
+
+	return groupedCandidates
+}
+
+
+
 type Command struct {
 	candidates   []*Candidate
 	replacements []*scheduling.Machine

@@ -85,8 +85,11 @@ func (e *Expiration) ComputeCommand(ctx context.Context, nodes ...*Candidate) (C
 	if err != nil {
 		return Command{}, fmt.Errorf("filtering candidates, %w", err)
 	}
-	deprovisioningEligibleMachinesGauge.WithLabelValues(e.String()).Set(float64(len(candidates)))
-
+	
+	groupedCandidates := GroupCandidatesByProvisioner(candidates)
+	for provisionerName, group := range groupedCandidates {
+		deprovisioningEligibleMachinesGauge.WithLabelValues(e.String(), provisionerName).Set(float64(len(group)))
+	}
 	// Deprovision all empty expired nodes, as they require no scheduling simulations.
 	if empty := lo.Filter(candidates, func(c *Candidate, _ int) bool {
 		return len(c.pods) == 0

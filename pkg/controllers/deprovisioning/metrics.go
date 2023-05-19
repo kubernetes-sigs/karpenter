@@ -32,6 +32,7 @@ const (
 	deprovisioningSubsystem = "deprovisioning"
 	deprovisionerLabel      = "deprovisioner"
 	actionLabel             = "action"
+	provisionerLabel				= "provisioner"
 )
 
 var (
@@ -57,17 +58,17 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: deprovisioningSubsystem,
 			Name:      "actions_performed",
-			Help:      "Number of deprovisioning actions performed. Labeled by deprovisioner.",
+			Help:      "Number of deprovisioning actions performed. Labeled by deprovisioner and provisioner.",
 		},
-		[]string{actionLabel, deprovisionerLabel},
+		[]string{actionLabel, deprovisionerLabel, provisionerLabel},
 	)
 	deprovisioningEligibleMachinesGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: deprovisioningSubsystem,
 			Name:      "eligible_machines",
-			Help:      "Number of machines eligible for deprovisioning by Karpenter. Labeled by deprovisioner",
+			Help:      "Number of machines eligible for deprovisioning by Karpenter. Labeled by deprovisioner and provisioner.",
 		},
-		[]string{deprovisionerLabel},
+		[]string{deprovisionerLabel, provisionerLabel},
 	)
 )

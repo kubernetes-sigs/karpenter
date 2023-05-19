@@ -47,8 +47,11 @@ func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	if err != nil {
 		return Command{}, fmt.Errorf("sorting candidates, %w", err)
 	}
-	deprovisioningEligibleMachinesGauge.WithLabelValues(m.String()).Set(float64(len(candidates)))
-
+	
+	groupedCandidates := GroupCandidatesByProvisioner(candidates)
+	for provisionerName, group := range groupedCandidates {
+		deprovisioningEligibleMachinesGauge.WithLabelValues(m.String(), provisionerName).Set(float64(len(group)))
+	}
 	// For now, we will consider up to every machine in the cluster, might be configurable in the future.
 	maxParallel := len(candidates)
 	cmd, err := m.firstNMachineConsolidationOption(ctx, candidates, maxParallel)
