@@ -34,9 +34,10 @@ import (
 type Machine struct {
 	MachineTemplate
 
-	Pods          []*v1.Pod
-	topology      *Topology
-	hostPortUsage *scheduling.HostPortUsage
+	Pods            []*v1.Pod
+	topology        *Topology
+	hostPortUsage   *scheduling.HostPortUsage
+	daemonResources v1.ResourceList
 }
 
 var nodeID int64
@@ -56,6 +57,7 @@ func NewMachine(machineTemplate *MachineTemplate, topology *Topology, daemonReso
 		MachineTemplate: template,
 		hostPortUsage:   scheduling.NewHostPortUsage(),
 		topology:        topology,
+		daemonResources: daemonResources,
 	}
 }
 
@@ -93,7 +95,9 @@ func (m *Machine) Add(ctx context.Context, pod *v1.Pod) error {
 	requests := resources.Merge(m.Requests, resources.RequestsForPods(pod))
 	filtered := filterInstanceTypesByRequirements(m.InstanceTypeOptions, machineRequirements, requests)
 	if len(filtered.remaining) == 0 {
-		return fmt.Errorf("no instance type satisfied resources %s and requirements %s (%s)", resources.String(resources.RequestsForPods(pod)), machineRequirements, filtered.FailureReason())
+		// log the total resources being requested (daemonset + the pod)
+		cumulativeResources := resources.Merge(m.daemonResources, resources.RequestsForPods(pod))
+		return fmt.Errorf("no instance type satisfied resources %s and requirements %s (%s)", resources.String(cumulativeResources), machineRequirements, filtered.FailureReason())
 	}
 
 	// Update node
