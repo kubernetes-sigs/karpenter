@@ -125,19 +125,28 @@ func NodeForMachine(ctx context.Context, c client.Client, machine *v1alpha5.Mach
 	if err != nil {
 		return nil, err
 	}
+	// If the providerID is defined, use that value; else, use the machine linked annotation if it's on the machine
+	providerID := lo.Ternary(machine.Status.ProviderID != "", machine.Status.ProviderID, machine.Annotations[v1alpha5.MachineLinkedAnnotationKey])
 	if len(nodes) > 1 {
-		return nil, &DuplicateNodeError{ProviderID: machine.Status.ProviderID}
+		return nil, &DuplicateNodeError{ProviderID: providerID}
 	}
 	if len(nodes) == 0 {
-		return nil, &NodeNotFoundError{ProviderID: machine.Status.ProviderID}
+		return nil, &NodeNotFoundError{ProviderID: providerID}
 	}
 	return nodes[0], nil
 }
 
 // AllNodesForMachine is a helper function that takes a v1alpha5.Machine and finds ALL matching v1.Nodes by their providerID
+// If the providerID is not resolved for a Machine, then no Nodes will map to it
 func AllNodesForMachine(ctx context.Context, c client.Client, machine *v1alpha5.Machine) ([]*v1.Node, error) {
+	// If the providerID is defined, use that value; else, use the machine linked annotation if it's on the machine
+	providerID := lo.Ternary(machine.Status.ProviderID != "", machine.Status.ProviderID, machine.Annotations[v1alpha5.MachineLinkedAnnotationKey])
+	// Machines that have no resolved providerID have no nodes mapped to them
+	if providerID == "" {
+		return nil, nil
+	}
 	nodeList := v1.NodeList{}
-	if err := c.List(ctx, &nodeList, client.MatchingFields{"spec.providerID": machine.Status.ProviderID}); err != nil {
+	if err := c.List(ctx, &nodeList, client.MatchingFields{"spec.providerID": providerID}); err != nil {
 		return nil, fmt.Errorf("listing nodes, %w", err)
 	}
 	return lo.ToSlicePtr(nodeList.Items), nil
