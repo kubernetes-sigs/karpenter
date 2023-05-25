@@ -387,7 +387,27 @@ var _ = Describe("Topology", func() {
 			if env.Version.Minor() < 24 {
 				Skip("MinDomains TopologySpreadConstraint is only available starting in K8s >= 1.24.x")
 			}
-			var minDomains int32 = 4
+			var minDomains int32 = 3
+			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}
+			topology := []v1.TopologySpreadConstraint{{
+				TopologyKey:       v1.LabelTopologyZone,
+				WhenUnsatisfiable: v1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+				MinDomains:        &minDomains,
+			}}
+			ExpectApplied(ctx, env.Client, provisioner)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}, 3)...,
+			)
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1))
+		})
+		It("satisfied minDomains constraints (equal) should allow expected pod scheduling", func() {
+			if env.Version.Minor() < 24 {
+				Skip("MinDomains TopologySpreadConstraint is only available starting in K8s >= 1.24.x")
+			}
+			var minDomains int32 = 3
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}}
 			topology := []v1.TopologySpreadConstraint{{
@@ -399,20 +419,17 @@ var _ = Describe("Topology", func() {
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
-				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
-				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
-				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
-				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}, 11)...,
 			)
-			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 1))
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(4, 4, 3))
 		})
-		It("satisfied minDomains constraints should allow expected pod scheduling", func() {
+		It("satisfied minDomains constraints (greater than minimum) should allow expected pod scheduling", func() {
 			if env.Version.Minor() < 24 {
 				Skip("MinDomains TopologySpreadConstraint is only available starting in K8s >= 1.24.x")
 			}
-			var minDomains int32 = 4
+			var minDomains int32 = 2
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
-				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "test-zone-4"}}}
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}}
 			topology := []v1.TopologySpreadConstraint{{
 				TopologyKey:       v1.LabelTopologyZone,
 				WhenUnsatisfiable: v1.DoNotSchedule,
@@ -422,19 +439,9 @@ var _ = Describe("Topology", func() {
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
-				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
-				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
-				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
-				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
-				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
-				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
-				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
-				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
-				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
-				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
-				test.UnschedulablePod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}),
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}, 11)...,
 			)
-			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(3, 3, 3, 2))
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(4, 4, 3))
 		})
 	})
 
