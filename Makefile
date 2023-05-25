@@ -6,11 +6,7 @@ help: ## Display help
 presubmit: verify test licenses vulncheck ## Run all steps required for code to be checked in
 
 test: ## Run tests
-	go test ./... \
-		-race \
-		--ginkgo.focus="${FOCUS}" \
-		--ginkgo.v \
-		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
+	ginkgo --focus="${FOCUS}" -v --nodes=4 --race --cover --coverprofile=coverage.out ./...
 
 deflake: ## Run randomized, racing tests until the test fails to catch flakes
 	ginkgo \
