@@ -138,6 +138,15 @@ func UnschedulablePod(options ...PodOptions) *v1.Pod {
 	})...)
 }
 
+// UnschedulablePods returns slice of configurable length of identical test pods with a pending scheduling status condition
+func UnschedulablePods(options PodOptions, num int) []*v1.Pod {
+	var pods []*v1.Pod
+	for i := 0; i < num; i++ {
+		pods = append(pods, UnschedulablePod(options))
+	}
+	return pods
+}
+
 // PodDisruptionBudget creates a PodDisruptionBudget.  To function properly, it should have its status applied
 func PodDisruptionBudget(overrides ...PDBOptions) *policyv1.PodDisruptionBudget {
 	options := PDBOptions{}
