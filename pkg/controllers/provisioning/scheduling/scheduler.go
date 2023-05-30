@@ -250,7 +250,10 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 
 		machine := NewMachine(machineTemplate, s.topology, s.daemonOverhead[machineTemplate], instanceTypes)
 		if err := machine.Add(ctx, pod); err != nil {
-			errs = multierr.Append(errs, fmt.Errorf("incompatible with provisioner %q, %w", machineTemplate.ProvisionerName, err))
+			errs = multierr.Append(errs, fmt.Errorf("incompatible with provisioner %q, daemonset overhead=%s, %w",
+				machineTemplate.ProvisionerName,
+				resources.String(s.daemonOverhead[machineTemplate]),
+				err))
 			continue
 		}
 		// we will launch this machine and need to track its maximum possible resource usage against our remaining resources
