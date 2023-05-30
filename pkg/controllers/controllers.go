@@ -69,7 +69,7 @@ func NewControllers(
 		metricsprovisioner.NewController(kubeClient),
 		counter.NewController(kubeClient, cluster),
 		consistency.NewController(clock, kubeClient, recorder, cloudProvider),
-		machinelifecycle.NewController(clock, kubeClient, cloudProvider),
+		machinelifecycle.NewController(clock, kubeClient, cloudProvider, recorder),
 		machinegarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		machinetermination.NewController(kubeClient, cloudProvider),
 		machinedisruption.NewController(clock, kubeClient, cluster, cloudProvider),
