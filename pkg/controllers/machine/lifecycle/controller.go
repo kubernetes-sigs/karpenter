@@ -76,7 +76,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 }
 
 func (*Controller) Name() string {
-	return "machine_lifecycle"
+	return "machine.lifecycle"
 }
 
 func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {

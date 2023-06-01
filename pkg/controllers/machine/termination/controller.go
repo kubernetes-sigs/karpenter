@@ -59,7 +59,7 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 }
 
 func (*Controller) Name() string {
-	return "machine_termination"
+	return "machine.termination"
 }
 
 func (c *Controller) Reconcile(_ context.Context, _ *v1alpha5.Machine) (reconcile.Result, error) {
