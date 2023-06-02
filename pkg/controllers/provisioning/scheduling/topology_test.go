@@ -55,6 +55,9 @@ var _ = Describe("Topology", func() {
 	})
 
 	It("should not spread an invalid label selector", func() {
+		if env.Version.Minor() >= 24 {
+			Skip("Invalid label selector now is denied by admission in K8s >= 1.27.x")
+		}
 		topology := []v1.TopologySpreadConstraint{{
 			TopologyKey:       v1.LabelTopologyZone,
 			WhenUnsatisfiable: v1.DoNotSchedule,
