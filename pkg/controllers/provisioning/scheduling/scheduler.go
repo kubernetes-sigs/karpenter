@@ -241,7 +241,8 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 			instanceTypes = filterByRemainingResources(s.instanceTypes[machineTemplate.ProvisionerName], remaining)
 			if len(instanceTypes) == 0 {
 				errs = multierr.Append(errs, fmt.Errorf("all available instance types exceed limits for provisioner: %q", machineTemplate.ProvisionerName))
-				continue
+				// Return so we don't pick the same instance from a different provisioner
+				return errs
 			} else if len(s.instanceTypes[machineTemplate.ProvisionerName]) != len(instanceTypes) && !s.opts.SimulationMode {
 				logging.FromContext(ctx).With("provisioner", machineTemplate.ProvisionerName).Debugf("%d out of %d instance types were excluded because they would breach provisioner limits",
 					len(s.instanceTypes[machineTemplate.ProvisionerName])-len(instanceTypes), len(s.instanceTypes[machineTemplate.ProvisionerName]))
