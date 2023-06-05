@@ -2,13 +2,13 @@
 
 ## Problem (v0.21.0 - v0.28.x)
 
-Provisioners and AWSNodeTemplates (AWS) are [declarative APIs](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/#declarative-apis) that dictate the desired state of machines. User’s requirements for their machines as reflected in these CRDs can change over time. For example, users can add or remove labels or taints from their nodes, modify their instance requirements in their Provisioner, or modify the Subnets discovered by their AWSNodeTemplate. To enforce that requirements set in CRDs are applied to their fleet, users must manually terminate all out-of-spec nodes to rely on Karpenter to provision in-spec replacements.
+Provisioners and Provider-specific CRDs (AWSNodeTemplates in AWS) are [declarative APIs](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/#declarative-apis) that dictate the desired state of machines. User’s requirements for their machines as reflected in these CRDs can change over time. For example, users can add or remove labels or taints from their nodes, modify their machine requirements in their Provisioner, or modify the discovered networking resources in their providerRef. To enforce that requirements set in CRDs are applied to their fleet, users must manually terminate all out-of-spec machines to rely on Karpenter to provision in-spec replacements.
 
 Karpenter’s drift feature automates this process by automatically (1) detecting machines that have drifted and (2) safely replacing them with the [standard deprovisioning flow](https://karpenter.sh/preview/concepts/deprovisioning/#control-flow).
 
 ## Recommended Solution
 
-Karpenter automatically detects when machines no longer match their corresponding specification in the Provisioner or AWSNodeTemplate. When this occurs, Karpenter triggers the standard deprovisioning workflow on the machine. Karpenter Drift will not add API, it will only build on top of existing APIs, and be enabled by default. More on this decision below in [API Choices](#🔑-api-choices).
+Karpenter automatically detects when machines no longer match their corresponding specification in the Provisioner and ProviderRef. When this occurs, Karpenter triggers the standard deprovisioning workflow on the machine. Karpenter Drift will not add API, it will only build on top of existing APIs, and be enabled by default. More on this decision below in [API Choices](#🔑-api-choices).
 
 Karpenter Drift will classify each CRD field as a (1) Static, (2) Dynamic, or (3) Behavioral field and will treat them differently. Static Drift will be a one-way reconciliation, triggered only by CRD changes. Dynamic Drift will be a two-way reconciliation, triggered by machine/node/instance changes and CRD changes.
 
@@ -16,11 +16,11 @@ Karpenter Drift will classify each CRD field as a (1) Static, (2) Dynamic, or (3
 
 (2) Dynamic Fields can correspond to multiple values and must be handled differently. Dynamic fields can create cases where drift occurs without changes to CRDs, or where CRD changes do not result in drift.
 
-For example, if a machine has `node.kubernetes.io/instance-type: m5.large`, and requirements change from `node.kubernetes.io/instance-type In [m5.large]` to `node.kubernetes.io/instance-type In [m5.large, m5.2xlarge]`, the machine will not be drifted because it's value is still compatible with the new requirements. Conversely, if a machine is using `ami: ami-abc`, but a new AMI is published, Karpenter's `amiSelector` will discover that the new correct value is `ami: ami-xyz`, and detect the machine as drifted.
+For example, if a machine has `node.kubernetes.io/instance-type: m5.large`, and requirements change from `node.kubernetes.io/instance-type In [m5.large]` to `node.kubernetes.io/instance-type In [m5.large, m5.2xlarge]`, the machine will not be drifted because it's value is still compatible with the new requirements. Conversely, for an AWS Installation, if a machine is using a machine image `ami: ami-abc`, but a new image is published, Karpenter's `AWSNodeTemplate.amiSelector` will discover that the new correct value is `ami: ami-xyz`, and detect the machine as drifted.
 
 (3) Behavioral Fields are treated as over-arching settings on the Provisioner to dictate how Karpenter behaves. These fields don’t correspond to settings on the machine or instance. They’re set by the user to control Karpenter’s Provisioning and Deprovisioning logic. Since these don’t map to a desired state of machines, these fields will not be considered for Drift.
 
-Each of the currently defined fields in Karpenter CRDs will be classified as follows:
+Each of the currently defined fields in Karpenter's existing CRDs will be classified as follows (AWS Fields included here as well):
 
 ```
 |                            | Static | Dynamic | Behavioral |
@@ -76,11 +76,6 @@ As a reference, this is how Kubernetes Deployments work. A user configures a `Po
 
 ## 🔑 In-place Drift
 
-Some machine settings that are generated from the fields in the Provisioner and AWSNodeTemplate could be drifted in-place. For example, Kubernetes supports editing the metadata of nodes (e.g. labels, annotations) without having to delete and recreate it. If a user adds a new distinct key-value pair to their Provisioner labels, Karpenter could simply add the label in-place, without having to rely on the [standard deprovisioning flow](https://karpenter.sh/preview/concepts/deprovisioning/#control-flow). The same would be possible if a user adds a new distinct key-value pair to their AWSNodeTemplate tags. Yet, in-place tagging may fail as there are tag limits on EC2 instances.
+Some machine settings that are generated from the fields in the Provisioner and ProviderRef could be drifted in-place. For example, Kubernetes supports editing the metadata of nodes (e.g. labels, annotations) without having to delete and recreate it. If a user adds a new distinct key-value pair to their Provisioner labels, Karpenter could simply add the label in-place, without having to rely on the [standard deprovisioning flow](https://karpenter.sh/preview/concepts/deprovisioning/#control-flow). The same would be possible if a user adds a new distinct key-value pair to their AWSNodeTemplate tags. Yet, in-place tagging may fail as there are tag limits on AWS EC2 instances.
 
 Since each CRD field comes with different use-cases, and the standard deprovisioning flow is to replace machines that have drifted, any special cases of in-place drift mechanism will need to be separately designed and implemented as special deprovisioning logic. For initial design and implementation, Drift will only replace machines, and in-place drift can be designed in the future.
-
-
-Notes
-
-* Add Examples of Reasonable Static Drift
