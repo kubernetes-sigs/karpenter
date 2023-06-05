@@ -78,7 +78,7 @@ As a reference, this is how Kubernetes Deployments work. A user configures a `Po
 
 Some machine settings that are generated from the fields in the Provisioner and AWSNodeTemplate could be drifted in-place. For example, Kubernetes supports editing the metadata of nodes (e.g. labels, annotations) without having to delete and recreate it. If a user adds a new distinct key-value pair to their Provisioner labels, Karpenter could simply add the label in-place, without having to rely on the [standard deprovisioning flow](https://karpenter.sh/preview/concepts/deprovisioning/#control-flow). The same would be possible if a user adds a new distinct key-value pair to their AWSNodeTemplate tags. Yet, in-place tagging may fail as there are tag limits on EC2 instances.
 
-Since each CRD field comes with different use-cases, and the standard deprovisioning flow is to replace nodes that have drifted, any special cases of in-place drift mechanism will need to be separately designed and implemented as special deprovisioning logic. For initial design and implementation, Drift will only replace nodes, and in-place drift can be designed in the future.
+Since each CRD field comes with different use-cases, and the standard deprovisioning flow is to replace machines that have drifted, any special cases of in-place drift mechanism will need to be separately designed and implemented as special deprovisioning logic. For initial design and implementation, Drift will only replace machines, and in-place drift can be designed in the future.
 
 
 Notes
