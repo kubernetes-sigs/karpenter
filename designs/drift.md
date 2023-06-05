@@ -4,7 +4,7 @@
 
 Provisioners and AWSNodeTemplates (AWS) are [declarative APIs](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/#declarative-apis) that dictate the desired state of machines. User’s requirements for their machines as reflected in these CRDs can change over time. For example, users can add or remove labels or taints from their nodes, modify their instance requirements in their Provisioner, or modify the Subnets discovered by their AWSNodeTemplate. To enforce that requirements set in CRDs are applied to their fleet, users must manually terminate all out-of-spec nodes to rely on Karpenter to provision in-spec replacements.
 
-Karpenter’s drift feature automates this process by automatically (1) detecting machines that have drifted and (2) safely replacing them.
+Karpenter’s drift feature automates this process by automatically (1) detecting machines that have drifted and (2) safely replacing them with the [standard deprovisioning flow](https://karpenter.sh/preview/concepts/deprovisioning/#control-flow).
 
 ## Recommended Solution
 
