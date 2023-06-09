@@ -2516,9 +2516,9 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		// controller should be blocking during the timeout
 		Expect(finished.Load()).To(BeFalse())
 		// and the node should not be deleted yet
-		ExpectExists(ctx, env.Client, node1)
-		ExpectExists(ctx, env.Client, node2)
-		ExpectExists(ctx, env.Client, node3)
+		ExpectExists(ctx, env.Client, machine1)
+		ExpectExists(ctx, env.Client, machine2)
+		ExpectExists(ctx, env.Client, machine3)
 
 		var extraPods []*v1.Pod
 		for i := 0; i < 2; i++ {
@@ -2534,6 +2534,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		// single machine consolidation
 		ExpectManualBinding(ctx, env.Client, extraPods[0], node1)
 		ExpectManualBinding(ctx, env.Client, extraPods[1], node2)
+
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
 
@@ -2549,10 +2550,14 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 		wg.Wait()
 
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine1, machine2, machine3)
+
 		// should have 2 nodes after single machine consolidation deletes one
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(2))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
 		// and delete node3 in single machine consolidation
-		ExpectNotFound(ctx, env.Client, node3)
+		ExpectNotFound(ctx, env.Client, machine3, node3)
 	})
 })
 
