@@ -66,7 +66,7 @@ func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	}
 
 	if !isValid {
-		return Command{}, fmt.Errorf("command is no longer valid, %s", cmd)
+		return Command{}, NewValidationError(fmt.Sprintf("command is no longer valid, %s", cmd))
 	}
 	return cmd, nil
 }

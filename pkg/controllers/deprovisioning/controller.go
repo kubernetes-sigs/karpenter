@@ -16,6 +16,7 @@ package deprovisioning
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -25,7 +26,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
@@ -124,10 +125,17 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	}
 	// Attempt different deprovisioning methods. We'll only let one method perform an action
 	isConsolidated := c.cluster.Consolidated()
-	for _, d := range c.deprovisioners {
+	for i, d := range c.deprovisioners {
 		c.recordRun(fmt.Sprintf("%T", d))
 		success, err := c.deprovision(ctx, d)
 		if err != nil {
+			var validationErr *ValidationError
+			// if the consolidation action fails validation, continue to the next deprovisioner
+			// when it's not the last one in the chain
+			if i != len(c.deprovisioners)-1 && errors.As(err, &validationErr) {
+				logging.FromContext(ctx).Infof("consolidation validation failed, %s", err)
+				continue
+			}
 			return reconcile.Result{}, fmt.Errorf("deprovisioning via %q, %w", d, err)
 		}
 		if success {
@@ -192,7 +200,7 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 		c.recorder.Publish(deprovisioningevents.Terminating(candidate.Node, candidate.Machine, command.String())...)
 
 		if err := c.kubeClient.Delete(ctx, candidate.Machine); err != nil {
-			if errors.IsNotFound(err) {
+			if apierrors.IsNotFound(err) {
 				continue
 			}
 			logging.FromContext(ctx).Errorf("terminating machine, %s", err)
@@ -261,7 +269,7 @@ func (c *Controller) waitForReadiness(ctx context.Context, action Command, name 
 		if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: name}, machine); err != nil {
 			// If the machine was deleted after a few seconds (to give the cache time to update), then we assume
 			// that the machine was deleted due to an Insufficient Capacity error
-			if errors.IsNotFound(err) && c.clock.Since(pollStart) > time.Second*5 {
+			if apierrors.IsNotFound(err) && c.clock.Since(pollStart) > time.Second*5 {
 				return retry.Unrecoverable(fmt.Errorf("getting machine, %w", err))
 			}
 			return fmt.Errorf("getting machine, %w", err)
@@ -286,7 +294,7 @@ func (c *Controller) waitForDeletion(ctx context.Context, machine *v1alpha5.Mach
 		m := &v1alpha5.Machine{}
 		nerr := c.kubeClient.Get(ctx, client.ObjectKeyFromObject(machine), m)
 		// We expect the not machine found error, at which point we know the machine is deleted.
-		if errors.IsNotFound(nerr) {
+		if apierrors.IsNotFound(nerr) {
 			return nil
 		}
 		// make the user aware of why deprovisioning is paused

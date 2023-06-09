@@ -32,6 +32,21 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
+// ValidationError is an error type for consolidation validation errors
+type ValidationError struct {
+	Message string
+}
+
+func (e *ValidationError) Error() string {
+	return e.Message
+}
+
+func NewValidationError(message string) *ValidationError {
+	return &ValidationError{
+		Message: message,
+	}
+}
+
 // Validation is used to perform validation on a consolidation command.  It makes an assumption that when re-used, all
 // of the commands passed to IsValid were constructed based off of the same consolidation state.  This allows it to
 // skip the validation TTL for all but the first command.
