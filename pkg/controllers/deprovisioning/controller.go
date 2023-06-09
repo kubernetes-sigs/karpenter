@@ -25,7 +25,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
@@ -192,7 +192,7 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 		c.recorder.Publish(deprovisioningevents.Terminating(candidate.Node, candidate.Machine, command.String())...)
 
 		if err := c.kubeClient.Delete(ctx, candidate.Machine); err != nil {
-			if apierrors.IsNotFound(err) {
+			if errors.IsNotFound(err) {
 				continue
 			}
 			logging.FromContext(ctx).Errorf("terminating machine, %s", err)
@@ -261,7 +261,7 @@ func (c *Controller) waitForReadiness(ctx context.Context, action Command, name 
 		if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: name}, machine); err != nil {
 			// If the machine was deleted after a few seconds (to give the cache time to update), then we assume
 			// that the machine was deleted due to an Insufficient Capacity error
-			if apierrors.IsNotFound(err) && c.clock.Since(pollStart) > time.Second*5 {
+			if errors.IsNotFound(err) && c.clock.Since(pollStart) > time.Second*5 {
 				return retry.Unrecoverable(fmt.Errorf("getting machine, %w", err))
 			}
 			return fmt.Errorf("getting machine, %w", err)
@@ -286,7 +286,7 @@ func (c *Controller) waitForDeletion(ctx context.Context, machine *v1alpha5.Mach
 		m := &v1alpha5.Machine{}
 		nerr := c.kubeClient.Get(ctx, client.ObjectKeyFromObject(machine), m)
 		// We expect the not machine found error, at which point we know the machine is deleted.
-		if apierrors.IsNotFound(nerr) {
+		if errors.IsNotFound(nerr) {
 			return nil
 		}
 		// make the user aware of why deprovisioning is paused
