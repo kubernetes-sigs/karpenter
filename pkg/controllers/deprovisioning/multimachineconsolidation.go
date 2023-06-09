@@ -21,6 +21,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
+	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -66,7 +67,8 @@ func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	}
 
 	if !isValid {
-		return Command{}, fmt.Errorf("command is no longer valid, %s", cmd)
+		logging.FromContext(ctx).Debugf("consolidation command is no longer valid, %s", cmd)
+		return Command{}, nil
 	}
 	return cmd, nil
 }

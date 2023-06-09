@@ -2471,6 +2471,94 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		// and delete the two large ones
 		ExpectNotFound(ctx, env.Client, machine1, node1, machine2, node2)
 	})
+	It("should continue to single machine consolidation when multi-machine consolidation fails validation after the node ttl", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		pods := test.Pods(3, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}}})
+
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], machine1, node1, machine2, node2, machine3, node3, prov)
+
+		// bind pods to nodes
+		ExpectManualBinding(ctx, env.Client, pods[0], node1)
+		ExpectManualBinding(ctx, env.Client, pods[1], node2)
+		ExpectManualBinding(ctx, env.Client, pods[2], node3)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2, node3}, []*v1alpha5.Machine{machine1, machine2, machine3})
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		finished := atomic.Bool{}
+		go func() {
+			defer GinkgoRecover()
+			defer wg.Done()
+			defer finished.Store(true)
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+		}()
+
+		// wait for the controller to block on the validation timeout
+		Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
+		// controller should be blocking during the timeout
+		Expect(finished.Load()).To(BeFalse())
+		// and the node should not be deleted yet
+		ExpectExists(ctx, env.Client, machine1)
+		ExpectExists(ctx, env.Client, machine2)
+		ExpectExists(ctx, env.Client, machine3)
+
+		var extraPods []*v1.Pod
+		for i := 0; i < 2; i++ {
+			extraPods = append(extraPods, test.Pod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{v1.ResourceCPU: *resource.NewQuantity(1, resource.DecimalSI)},
+				},
+			}))
+		}
+		ExpectApplied(ctx, env.Client, extraPods[0], extraPods[1])
+		// bind the extra pods to node1 and node 2 to make the consolidation decision invalid
+		// we bind to 2 nodes so we can deterministically expect that node3 is consolidated in
+		// single machine consolidation
+		ExpectManualBinding(ctx, env.Client, extraPods[0], node1)
+		ExpectManualBinding(ctx, env.Client, extraPods[1], node2)
+
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
+
+		// advance the clock so that the timeout expires for multi-machine consolidation
+		fakeClock.Step(31 * time.Second)
+
+		// wait for the controller to block on the validation timeout for single machine consolidation
+		Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
+		// advance the clock so that the timeout expires for single machine consolidation
+		fakeClock.Step(31 * time.Second)
+
+		// controller should finish
+		Eventually(finished.Load, 10*time.Second).Should(BeTrue())
+		wg.Wait()
+
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine1, machine2, machine3)
+
+		// should have 2 nodes after single machine consolidation deletes one
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(2))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+		// and delete node3 in single machine consolidation
+		ExpectNotFound(ctx, env.Client, machine3, node3)
+	})
 })
 
 func leastExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
