@@ -16,7 +16,6 @@ package deprovisioning
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -125,17 +124,10 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	}
 	// Attempt different deprovisioning methods. We'll only let one method perform an action
 	isConsolidated := c.cluster.Consolidated()
-	for i, d := range c.deprovisioners {
+	for _, d := range c.deprovisioners {
 		c.recordRun(fmt.Sprintf("%T", d))
 		success, err := c.deprovision(ctx, d)
 		if err != nil {
-			var validationErr *ValidationError
-			// if the consolidation action fails validation, continue to the next deprovisioner
-			// when it's not the last one in the chain
-			if i != len(c.deprovisioners)-1 && errors.As(err, &validationErr) {
-				logging.FromContext(ctx).Infof("consolidation validation failed, %s", err)
-				continue
-			}
 			return reconcile.Result{}, fmt.Errorf("deprovisioning via %q, %w", d, err)
 		}
 		if success {

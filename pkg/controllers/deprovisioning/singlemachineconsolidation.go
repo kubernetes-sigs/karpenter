@@ -68,7 +68,7 @@ func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 			continue
 		}
 		if !isValid {
-			return Command{}, NewValidationError(fmt.Sprintf("command is no longer valid, %s", cmd))
+			return Command{}, fmt.Errorf("command is no longer valid, %s", cmd)
 		}
 		return cmd, nil
 	}
