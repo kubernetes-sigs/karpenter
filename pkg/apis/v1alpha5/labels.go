@@ -33,7 +33,6 @@ const (
 // Karpenter specific domains and labels
 const (
 	ProvisionerNameLabelKey = Group + "/provisioner-name"
-	ManagedByLabelKey       = Group + "/managed-by"
 	LabelNodeInitialized    = Group + "/initialized"
 	LabelCapacityType       = Group + "/capacity-type"
 )
@@ -45,6 +44,7 @@ const (
 	EmptinessTimestampAnnotationKey   = Group + "/emptiness-timestamp"
 	VoluntaryDisruptionAnnotationKey  = Group + "/voluntary-disruption"
 	MachineLinkedAnnotationKey        = Group + "/linked"
+	MachineManagedByAnnotationKey     = Group + "/managed-by"
 
 	ProviderCompatabilityAnnotationKey = CompatabilityGroup + "/provider"
 
