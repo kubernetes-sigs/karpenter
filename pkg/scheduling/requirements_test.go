@@ -406,6 +406,28 @@ var _ = Describe("Requirements", func() {
 			Expect(reqs.NodeSelectorRequirements()).To(HaveLen(14))
 		})
 	})
+	Context("Stringify Requirements", func() {
+		It("should print Requirements in the same order", func() {
+			reqs := NewRequirements(
+				NewRequirement("exists", v1.NodeSelectorOpExists),
+				NewRequirement("doesNotExist", v1.NodeSelectorOpDoesNotExist),
+				NewRequirement("inA", v1.NodeSelectorOpIn, "A"),
+				NewRequirement("inB", v1.NodeSelectorOpIn, "B"),
+				NewRequirement("inAB", v1.NodeSelectorOpIn, "A", "B"),
+				NewRequirement("notInA", v1.NodeSelectorOpNotIn, "A"),
+				NewRequirement("in1", v1.NodeSelectorOpIn, "1"),
+				NewRequirement("in9", v1.NodeSelectorOpIn, "9"),
+				NewRequirement("in19", v1.NodeSelectorOpIn, "1", "9"),
+				NewRequirement("notIn12", v1.NodeSelectorOpNotIn, "1", "2"),
+				NewRequirement("greaterThan1", v1.NodeSelectorOpGt, "1"),
+				NewRequirement("greaterThan9", v1.NodeSelectorOpGt, "9"),
+				NewRequirement("lessThan1", v1.NodeSelectorOpLt, "1"),
+				NewRequirement("lessThan9", v1.NodeSelectorOpLt, "9"),
+			)
+
+			Expect(reqs.String()).To(Equal("doesNotExist DoesNotExist, exists Exists, greaterThan1 Exists >1, greaterThan9 Exists >9, in1 In [1], in19 In [1 9], in9 In [9], inA In [A], inAB In [A B], inB In [B], lessThan1 Exists <1, lessThan9 Exists <9, notIn12 NotIn [1 2], notInA NotIn [A]"))
+		})
+	})
 })
 
 // Keeping this in case we need it, I ran for 1m+ samples and had no issues

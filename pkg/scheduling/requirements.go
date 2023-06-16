@@ -219,5 +219,7 @@ func (r Requirements) Labels() map[string]string {
 
 func (r Requirements) String() string {
 	requirements := lo.Reject(r.Values(), func(requirement *Requirement, _ int) bool { return v1alpha5.RestrictedLabels.Has(requirement.Key) })
-	return strings.Join(lo.Map(requirements, func(requirement *Requirement, _ int) string { return requirement.String() }), ", ")
+	stringRequirements := lo.Map(requirements, func(requirement *Requirement, _ int) string { return requirement.String() })
+	sort.Strings(stringRequirements)
+	return strings.Join(stringRequirements, ", ")
 }
