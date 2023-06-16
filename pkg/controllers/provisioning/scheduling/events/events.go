@@ -17,6 +17,7 @@ package events
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/flowcontrol"
@@ -52,6 +53,7 @@ func PodFailedToSchedule(pod *v1.Pod, err error) events.Event {
 		Type:           v1.EventTypeWarning,
 		Reason:         "FailedScheduling",
 		Message:        fmt.Sprintf("Failed to schedule pod, %s", err),
-		DedupeValues:   []string{string(pod.UID), err.Error()},
+		DedupeValues:   []string{string(pod.UID)},
+		DedupeTimeout:  5 * time.Minute,
 	}
 }
