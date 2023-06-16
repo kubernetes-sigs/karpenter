@@ -56,7 +56,7 @@ func (d *Drift) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner
 
 	drifted, err := d.cloudProvider.IsMachineDrifted(ctx, machine.NewFromNode(node))
 	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("getting drift for node, %w", err)
+		return reconcile.Result{}, cloudprovider.IgnoreMachineNotFoundError(fmt.Errorf("getting drift for node, %w", err))
 	}
 	// 2. Otherwise, if the node isn't drifted, but has the annotation, remove it.
 	if !drifted && hasAnnotation {
