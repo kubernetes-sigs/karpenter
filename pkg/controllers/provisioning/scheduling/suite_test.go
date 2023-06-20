@@ -29,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
+	cloudproviderapi "k8s.io/cloud-provider/api"
 	clock "k8s.io/utils/clock/testing"
 	"knative.dev/pkg/ptr"
 
@@ -2084,6 +2085,7 @@ var _ = Describe("In-Flight Nodes", func() {
 			node1.Spec.Taints = []v1.Taint{
 				{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
 				{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
+				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
 			}
 			ExpectApplied(ctx, env.Client, node1)
 			// Schedule to In Flight Machine
