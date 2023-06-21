@@ -36,6 +36,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 	"github.com/aws/karpenter-core/pkg/utils/result"
 )
 
@@ -128,27 +129,8 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 			}),
 		).
 		Watches(
-			// Reconcile machine when a pod assigned to an associated node changes.
-			&source.Kind{Type: &v1.Pod{}},
-			handler.EnqueueRequestsFromMapFunc(func(o client.Object) (requests []reconcile.Request) {
-				if name := o.(*v1.Pod).Spec.NodeName; name != "" {
-					node := &v1.Node{}
-					if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: name}, node); err != nil {
-						if !errors.IsNotFound(err) {
-							logging.FromContext(ctx).Errorf("failed to get node when mapping expiration watch events, %s", err)
-						}
-						return requests
-					}
-					machineList := &v1alpha5.MachineList{}
-					if err := c.kubeClient.List(ctx, machineList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
-						logging.FromContext(ctx).Errorf("Failed to list machines when mapping watch events, %s", err)
-						return requests
-					}
-					return lo.Map(machineList.Items, func(machine v1alpha5.Machine, _ int) reconcile.Request {
-						return reconcile.Request{NamespacedName: types.NamespacedName{Name: machine.Name}}
-					})
-				}
-				return requests
-			}),
-		))
+			&source.Kind{Type: &v1.Node{}},
+			machineutil.NodeEventHandler(ctx, c.kubeClient),
+		),
+	)
 }

@@ -77,13 +77,13 @@ func (e *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 	}
 	emptinessTTLTime := emptyAt.Add(time.Duration(ptr.Int64Value(provisioner.Spec.TTLSecondsAfterEmpty)) * time.Second)
 
-	// 2. Otherwise, if the node is expired, but doesn't have the annotation, add it.
+	// 2. Otherwise, if the node is after emptiness expiration, but doesn't have the annotation, add it.
 	if e.clock.Now().After(emptinessTTLTime) && !hasEmptyCondition {
 		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonEmpty, "")
 		logging.FromContext(ctx).Debugf("marking machine as empty")
 		return reconcile.Result{}, nil
 	}
-	// 3. Finally, if the node isn't expired, but has the annotation, remove it.
+	// 3. Finally, if the node isn't after emptiness expiration, but has the annotation, remove it.
 	if !e.clock.Now().After(emptinessTTLTime) && hasEmptyCondition {
 		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineVoluntarilyDisrupted)
 		logging.FromContext(ctx).Debugf("removing empty annotation from node")
