@@ -1,5 +1,7 @@
 # Deprovisioning - Drift
 
+This will be a living document, where Karpenter details the key design choices for Drift, Karpenter's mechanism to assert created machines match the corresponding CRDs. At its inception, this doc only included AWS fields. Future cloud providers should add to this document to add to the table below, as well as in their respective website.
+
 ## Problem (v0.21.0 - v0.28.x)
 
 Provisioners and Provider-specific CRDs (AWSNodeTemplates in AWS) are [declarative APIs](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/#declarative-apis) that dictate the desired state of machines. User’s requirements for their machines as reflected in these CRDs can change over time. For example, users can add or remove labels or taints from their nodes, modify their machine requirements in their Provisioner, or modify the discovered networking resources in their providerRef. To enforce that requirements set in CRDs are applied to their fleet, users must manually terminate all out-of-spec machines to rely on Karpenter to provision in-spec replacements.
@@ -10,7 +12,7 @@ Karpenter’s drift feature automates this process by automatically (1) detectin
 
 Karpenter automatically detects when machines no longer match their corresponding specification in the Provisioner and ProviderRef. When this occurs, Karpenter triggers the standard deprovisioning workflow on the machine. Karpenter Drift will not add API, it will only build on top of existing APIs, and be enabled by default. More on this decision below in [API Choices](#🔑-api-choices).
 
-Karpenter Drift will classify each CRD field as a (1) Static, (2) Dynamic, or (3) Behavioral field and will treat them differently. Static Drift will be a one-way reconciliation, triggered only by CRD changes. Dynamic Drift will be a two-way reconciliation, triggered by machine/node/instance changes and CRD changes.
+Karpenter Drift will classify each CRD field as a (1) Static, (2) Dynamic, or (3) Behavioral field and will treat them differently. Static Drift will be a one-way reconciliation, triggered only by CRD changes. Dynamic Drift will be a two-way reconciliation, triggered by machine/node/cloud provider changes and CRD changes.
 
 (1) For Static Fields, values in the CRDs are reflected in the machine in the same way that they’re set. A machine will be detected as drifted if the values in the CRDs do not match the values in the machine. Yet, since some external controllers directly edit the associated cloud provider machine or node, this is expanded to be more flexible below in [Static Field Flexibility](#🔑-in-place-drift).
 
@@ -37,7 +39,7 @@ Each of the currently defined fields in Karpenter's existing CRDs will be classi
 | Consolidation              |        |         |      x     |
 | TTLSecondsUntilExpired     |        |         |      x     |
 | TTLSecondsAfterEmpty       |        |         |      x     |
-| - AWSNodeTemplate Fields - |   ---  |   ---   |     ---    |
+| - AWS Fields -             |   ---  |   ---   |     ---    |
 | Subnet Selector            |        |    x    |            |
 | Security Group Selector    |        |    x    |            |
 | Instance Profile           |    x   |         |            |
@@ -56,7 +58,7 @@ Design Questions
 
 Drift is an existing mechanism in Karpenter and relies on standard Provisioning CRDs in Karpenter - Provisioners and AWSNodeTemplates. Drift is toggled through a feature gate in the `karpenter-global-settings` ConfigMap.
 
-Once Drift is implemented as described above, the Drift feature gate will be removed, and Drift will be enabled by default. There will be no API additions.
+Once Drift is implemented as described above, the absence of the feature gate will be enabled Drift by default. To allow users to opt-out, users will be able to configure their `karpenter-global-settings` ConfigMap to disable this. There will be no API additions.
 
 In the future, users may want Karpenter to not Drift certain fields. This promotes users to not rely on CRDs as declarative sources of truth, breaking the contract that Drift defines. If a user request to opt out a field from Drift is validated, Karpenter should first rely on other Deprovisioning control mechanisms to enable this. Otherwise, Karpenter could consider adding a setting in the `karpenter-global-settings` ConfigMap to selectively toggle this.
 
@@ -76,6 +78,10 @@ As a reference, this is how Kubernetes Deployments work. A user configures a `Po
 
 ## 🔑 In-place Drift
 
-Some machine settings that are generated from the fields in the Provisioner and ProviderRef could be drifted in-place. For example, Kubernetes supports editing the metadata of nodes (e.g. labels, annotations) without having to delete and recreate it. If a user adds a new distinct key-value pair to their Provisioner labels, Karpenter could simply add the label in-place, without having to rely on the [standard deprovisioning flow](https://karpenter.sh/preview/concepts/deprovisioning/#control-flow). The same would be possible if a user adds a new distinct key-value pair to their AWSNodeTemplate tags. Yet, in-place tagging may fail as there are tag limits on AWS EC2 instances.
+Some machine settings that are generated from the fields in the Provisioner and ProviderRef could be drifted in-place.
+
+For example, Kubernetes supports editing the metadata of nodes (e.g. labels, annotations) without having to delete and recreate it. If a user adds a new distinct key-value pair to their Provisioner labels, Karpenter could simply add the label in-place, without having to rely on the [standard deprovisioning flow](https://karpenter.sh/preview/concepts/deprovisioning/#control-flow). Yet, modifying labels after nodes and pods after joined the cluster may have unexpected interactions with scheduling constraints, since previous scheduling decisions were not based on the added/removed labels.
+
+The same would be possible if a user adds a new distinct key-value pair to their AWSNodeTemplate tags. Yet, in-place tagging may fail as there are tag limits on AWS EC2 instances.
 
 Since each CRD field comes with different use-cases, and the standard deprovisioning flow is to replace machines that have drifted, any special cases of in-place drift mechanism will need to be separately designed and implemented as special deprovisioning logic. For initial design and implementation, Drift will only replace machines, and in-place drift can be designed in the future.
