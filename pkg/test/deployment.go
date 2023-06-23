@@ -56,10 +56,8 @@ func Deployment(overrides ...DeploymentOptions) *appsv1.Deployment {
 			Replicas: ptr.Int32(options.Replicas),
 			Selector: &metav1.LabelSelector{MatchLabels: options.PodOptions.Labels},
 			Template: v1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: options.PodOptions.Labels,
-				},
-				Spec: pod.Spec,
+				ObjectMeta: ObjectMeta(options.PodOptions.ObjectMeta),
+				Spec:       pod.Spec,
 			},
 		},
 	}
