@@ -70,11 +70,11 @@ func (c *consolidation) String() string {
 }
 
 // sortCandidates orders deprovisionable nodes by the disruptionCost.
-func (c *consolidation) sortCandidates(nodes []*Candidate) []*Candidate {
-	sort.Slice(nodes, func(i int, j int) bool {
-		return nodes[i].disruptionCost < nodes[j].disruptionCost
+func (c *consolidation) sortCandidates(candidates []*Candidate) []*Candidate {
+	sort.Slice(candidates, func(i int, j int) bool {
+		return candidates[i].disruptionCost < candidates[j].disruptionCost
 	})
-	return nodes
+	return candidates
 }
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes

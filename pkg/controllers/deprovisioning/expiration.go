@@ -67,14 +67,14 @@ func (e *Expiration) ShouldDeprovision(ctx context.Context, c *Candidate) bool {
 }
 
 // ComputeCommand generates a deprovisioning command given deprovisionable nodes
-func (e *Expiration) ComputeCommand(ctx context.Context, nodes ...*Candidate) (Command, error) {
+func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	// Order expired nodes by when they've expired
-	sort.Slice(nodes, func(i int, j int) bool {
-		return node.GetExpirationTime(nodes[i].Node, nodes[i].provisioner).Before(node.GetExpirationTime(nodes[j].Node, nodes[j].provisioner))
+	sort.Slice(candidates, func(i int, j int) bool {
+		return node.GetExpirationTime(candidates[i].Node, candidates[i].provisioner).Before(node.GetExpirationTime(candidates[j].Node, candidates[j].provisioner))
 	})
 
 	// Deprovision all empty expired nodes, as they require no scheduling simulations.
-	if empty := lo.Filter(nodes, func(c *Candidate, _ int) bool {
+	if empty := lo.Filter(candidates, func(c *Candidate, _ int) bool {
 		return len(c.pods) == 0
 	}); len(empty) > 0 {
 		return Command{
@@ -82,7 +82,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, nodes ...*Candidate) (C
 		}, nil
 	}
 
-	for _, candidate := range nodes {
+	for _, candidate := range candidates {
 		// Check if we need to create any nodes.
 		results, err := simulateScheduling(ctx, e.kubeClient, e.cluster, e.provisioner, candidate)
 		if err != nil {
@@ -97,8 +97,8 @@ func (e *Expiration) ComputeCommand(ctx context.Context, nodes ...*Candidate) (C
 			logging.FromContext(ctx).With("node", candidate.Name).Debugf("continuing to expire node after scheduling simulation failed to schedule all pods, %s", results.PodSchedulingErrors())
 		}
 
-		logging.FromContext(ctx).With("ttl", time.Duration(ptr.Int64Value(nodes[0].provisioner.Spec.TTLSecondsUntilExpired))*time.Second).
-			With("delay", time.Since(node.GetExpirationTime(nodes[0].Node, nodes[0].provisioner))).Infof("triggering termination for expired node after TTL")
+		logging.FromContext(ctx).With("ttl", time.Duration(ptr.Int64Value(candidates[0].provisioner.Spec.TTLSecondsUntilExpired))*time.Second).
+			With("delay", time.Since(node.GetExpirationTime(candidates[0].Node, candidates[0].provisioner))).Infof("triggering termination for expired node after TTL")
 		return Command{
 			candidates:   []*Candidate{candidate},
 			replacements: results.NewMachines,
