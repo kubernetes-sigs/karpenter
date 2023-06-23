@@ -1843,8 +1843,8 @@ var _ = Describe("In-Flight Nodes", func() {
 
 			// Make one of the nodes and machines initialized
 			elem := rand.Intn(100) //nolint:gosec
-			ExpectMakeMachinesReady(ctx, env.Client, machines[elem])
-			ExpectMakeNodesReady(ctx, env.Client, nodes[elem])
+			ExpectMakeMachinesInitialized(ctx, env.Client, machines[elem])
+			ExpectMakeNodesInitialized(ctx, env.Client, nodes[elem])
 			ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machines[elem]))
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[elem]))
 
@@ -1881,8 +1881,8 @@ var _ = Describe("In-Flight Nodes", func() {
 			}
 
 			// Make one of the nodes and machines initialized
-			ExpectMakeMachinesReady(ctx, env.Client, machines[elem])
-			ExpectMakeNodesReady(ctx, env.Client, node)
+			ExpectMakeMachinesInitialized(ctx, env.Client, machines[elem])
+			ExpectMakeNodesInitialized(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machines[elem]))
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 

@@ -72,7 +72,7 @@ var _ = Describe("Expiration", func() {
 		ExpectApplied(ctx, env.Client, machine, node, prov)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 
@@ -85,7 +85,7 @@ var _ = Describe("Expiration", func() {
 		ExpectApplied(ctx, env.Client, machine, node, prov)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 
@@ -98,7 +98,7 @@ var _ = Describe("Expiration", func() {
 		ExpectApplied(ctx, env.Client, machine, node, prov)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
@@ -142,7 +142,7 @@ var _ = Describe("Expiration", func() {
 		ExpectApplied(ctx, env.Client, prov)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, nodes, machines)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, nodes, machines)
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
@@ -223,7 +223,7 @@ var _ = Describe("Expiration", func() {
 		ExpectManualBinding(ctx, env.Client, pods[1], nodeNotExpire)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{nodeToExpire, nodeNotExpire}, []*v1alpha5.Machine{machineToExpire, machineNotExpire})
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{nodeToExpire, nodeNotExpire}, []*v1alpha5.Machine{machineToExpire, machineNotExpire})
 
 		// deprovisioning won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
@@ -269,7 +269,7 @@ var _ = Describe("Expiration", func() {
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		// deprovisioning won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
@@ -321,7 +321,7 @@ var _ = Describe("Expiration", func() {
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
@@ -413,7 +413,7 @@ var _ = Describe("Expiration", func() {
 		ExpectManualBinding(ctx, env.Client, pods[2], node)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		// deprovisioning won't delete the old machine until the new machine is ready
 		var wg sync.WaitGroup

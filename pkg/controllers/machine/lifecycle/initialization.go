@@ -28,6 +28,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/metrics"
+	"github.com/aws/karpenter-core/pkg/scheduling"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 	nodeutil "github.com/aws/karpenter-core/pkg/utils/node"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
@@ -61,12 +62,16 @@ func (i *Initialization) Reconcile(ctx context.Context, machine *v1alpha5.Machin
 		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "NodeNotReady", "Node status is NotReady")
 		return reconcile.Result{}, nil
 	}
-	if taint, ok := IsStartupTaintRemoved(node, machine); !ok {
-		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "StartupTaintsExist", "StartupTaint '%s' still exists", formatTaint(taint))
+	if taint, ok := StartupTaintsRemoved(node, machine); !ok {
+		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "StartupTaintsExist", "StartupTaint %q still exists", formatTaint(taint))
+		return reconcile.Result{}, nil
+	}
+	if taint, ok := KnownEphemeralTaintsRemoved(node); !ok {
+		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "KnownEphemeralTaintsExist", "KnownEphemeralTaint %q still exists", formatTaint(taint))
 		return reconcile.Result{}, nil
 	}
 	if name, ok := RequestedResourcesRegistered(node, machine); !ok {
-		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "ResourceNotRegistered", "Resource '%s' was requested but not registered", name)
+		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "ResourceNotRegistered", "Resource %q was requested but not registered", name)
 		return reconcile.Result{}, nil
 	}
 	stored := node.DeepCopy()
@@ -84,9 +89,22 @@ func (i *Initialization) Reconcile(ctx context.Context, machine *v1alpha5.Machin
 	return reconcile.Result{}, nil
 }
 
-// IsStartupTaintRemoved returns true if there are no startup taints registered for the provisioner, or if all startup
+// KnownEphemeralTaintsRemoved validates whether all the ephemeral taints are removed
+func KnownEphemeralTaintsRemoved(node *v1.Node) (*v1.Taint, bool) {
+	for _, knownTaint := range scheduling.KnownEphemeralTaints {
+		// if the node still has a known ephemeral taint applied, it's not ready
+		for i := range node.Spec.Taints {
+			if knownTaint.MatchTaint(&node.Spec.Taints[i]) {
+				return &node.Spec.Taints[i], false
+			}
+		}
+	}
+	return nil, true
+}
+
+// StartupTaintsRemoved returns true if there are no startup taints registered for the provisioner, or if all startup
 // taints have been removed from the node
-func IsStartupTaintRemoved(node *v1.Node, machine *v1alpha5.Machine) (*v1.Taint, bool) {
+func StartupTaintsRemoved(node *v1.Node, machine *v1alpha5.Machine) (*v1.Taint, bool) {
 	if machine != nil {
 		for _, startupTaint := range machine.Spec.StartupTaints {
 			for i := range node.Spec.Taints {

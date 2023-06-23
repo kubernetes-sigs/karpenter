@@ -99,7 +99,8 @@ var _ = Describe("Controller", func() {
 					},
 				},
 			})
-			ExpectApplied(ctx, env.Client, node)
+			ExpectApplied(ctx, env.Client, provisioner, node)
+			ExpectMakeNodesInitialized(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			Expect(node.Annotations).ToNot(HaveKeyWithValue(v1alpha5.VoluntaryDisruptionAnnotationKey, v1alpha5.VoluntaryDisruptionDriftedAnnotationValue))
@@ -115,25 +116,39 @@ var _ = Describe("Controller", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, node)
+			ExpectMakeNodesInitialized(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			Expect(node.Annotations).ToNot(HaveKeyWithValue(v1alpha5.VoluntaryDisruptionAnnotationKey, v1alpha5.VoluntaryDisruptionDriftedAnnotationValue))
 		})
-		It("should annotate the node when it has drifted in the cloud provider", func() {
+		It("should not detect drift if the node isn't initialized", func() {
 			cp.Drifted = true
-			machine, node := test.MachineAndNode(v1alpha5.Machine{
+			node := test.Node(test.NodeOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
 						v1.LabelInstanceTypeStable:       test.RandomName(),
 					},
 				},
-				Status: v1alpha5.MachineStatus{
-					ProviderID: test.RandomProviderID(),
-				},
 			})
-			ExpectApplied(ctx, env.Client, provisioner, machine, node)
-			ExpectMakeMachinesReady(ctx, env.Client, machine)
+			ExpectApplied(ctx, env.Client, provisioner, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			Expect(node.Annotations).ToNot(HaveKeyWithValue(v1alpha5.VoluntaryDisruptionAnnotationKey, v1alpha5.VoluntaryDisruptionDriftedAnnotationValue))
+		})
+		It("should annotate the node when it has drifted in the cloud provider", func() {
+			cp.Drifted = true
+			node := test.Node(test.NodeOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       test.RandomName(),
+					},
+				},
+				ProviderID: test.RandomProviderID(),
+			})
+			ExpectApplied(ctx, env.Client, provisioner, node)
+			ExpectMakeNodesInitialized(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			Expect(node.Annotations).To(HaveKeyWithValue(v1alpha5.VoluntaryDisruptionAnnotationKey, v1alpha5.VoluntaryDisruptionDriftedAnnotationValue))
@@ -148,6 +163,7 @@ var _ = Describe("Controller", func() {
 				},
 			}})
 			ExpectApplied(ctx, env.Client, provisioner, node)
+			ExpectMakeNodesInitialized(ctx, env.Client, node)
 
 			// step forward to make the node expired
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
