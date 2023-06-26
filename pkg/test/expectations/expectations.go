@@ -53,6 +53,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
+	pscheduling "github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/test"
 )
 
@@ -358,17 +359,30 @@ func ExpectMachinesCascadeDeletion(ctx context.Context, c client.Client, machine
 	}
 }
 
-func ExpectMakeMachinesReady(ctx context.Context, c client.Client, machines ...*v1alpha5.Machine) {
-	ExpectMakeMachinesReadyWithOffset(1, ctx, c, machines...)
+func ExpectMakeMachinesInitialized(ctx context.Context, c client.Client, machines ...*v1alpha5.Machine) {
+	ExpectMakeMachinesInitializedWithOffset(1, ctx, c, machines...)
 }
 
-func ExpectMakeMachinesReadyWithOffset(offset int, ctx context.Context, c client.Client, machines ...*v1alpha5.Machine) {
+func ExpectMakeMachinesInitializedWithOffset(offset int, ctx context.Context, c client.Client, machines ...*v1alpha5.Machine) {
 	for i := range machines {
 		machines[i] = ExpectExistsWithOffset(offset+1, ctx, c, machines[i])
 		machines[i].StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
 		machines[i].StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
 		machines[i].StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
 		ExpectAppliedWithOffset(offset+1, ctx, c, machines[i])
+	}
+}
+
+func ExpectMakeNodesInitialized(ctx context.Context, c client.Client, nodes ...*v1.Node) {
+	ExpectMakeNodesInitializedWithOffset(1, ctx, c, nodes...)
+}
+
+func ExpectMakeNodesInitializedWithOffset(offset int, ctx context.Context, c client.Client, nodes ...*v1.Node) {
+	ExpectMakeNodesReadyWithOffset(offset+1, ctx, c, nodes...)
+
+	for i := range nodes {
+		nodes[i].Labels[v1alpha5.LabelNodeInitialized] = "true"
+		ExpectAppliedWithOffset(offset+1, ctx, c, nodes[i])
 	}
 }
 
@@ -392,8 +406,13 @@ func ExpectMakeNodesReadyWithOffset(offset int, ctx context.Context, c client.Cl
 		if nodes[i].Labels == nil {
 			nodes[i].Labels = map[string]string{}
 		}
-		nodes[i].Labels[v1alpha5.LabelNodeInitialized] = "true"
-		nodes[i].Spec.Taints = nil
+		// Remove any of the known ephemeral taints to make the Node ready
+		nodes[i].Spec.Taints = lo.Reject(nodes[i].Spec.Taints, func(taint v1.Taint, _ int) bool {
+			_, found := lo.Find(pscheduling.KnownEphemeralTaints, func(t v1.Taint) bool {
+				return t.MatchTaint(&taint)
+			})
+			return found
+		})
 		ExpectAppliedWithOffset(offset+1, ctx, c, nodes[i])
 	}
 }

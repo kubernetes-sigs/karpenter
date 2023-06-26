@@ -37,6 +37,11 @@ type Drift struct {
 }
 
 func (d *Drift) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner, node *v1.Node) (reconcile.Result, error) {
+	// node is not ready yet, so we don't consider it to be drifted
+	if node.Labels[v1alpha5.LabelNodeInitialized] != "true" {
+		return reconcile.Result{}, nil
+	}
+
 	// If the node is marked as voluntarily disrupted by another controller, do nothing.
 	val, hasAnnotation := node.Annotations[v1alpha5.VoluntaryDisruptionAnnotationKey]
 	if hasAnnotation && val != v1alpha5.VoluntaryDisruptionDriftedAnnotationValue {
@@ -53,7 +58,6 @@ func (d *Drift) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner
 		}
 		return reconcile.Result{}, nil
 	}
-
 	drifted, err := d.cloudProvider.IsMachineDrifted(ctx, machine.NewFromNode(node))
 	if err != nil {
 		return reconcile.Result{}, cloudprovider.IgnoreMachineNotFoundError(fmt.Errorf("getting drift for node, %w", err))
