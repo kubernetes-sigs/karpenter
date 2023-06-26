@@ -54,7 +54,7 @@ func (d *Drift) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner
 		return reconcile.Result{}, nil
 	}
 
-	drifted, err := d.cloudProvider.IsMachineDrifted(ctx, machine.NewFromNode(node))
+	drifted, err := d.isDrifted(ctx, provisioner, machine.NewFromNode(node))
 	if err != nil {
 		return reconcile.Result{}, cloudprovider.IgnoreMachineNotFoundError(fmt.Errorf("getting drift for node, %w", err))
 	}
@@ -72,4 +72,14 @@ func (d *Drift) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner
 
 	// Requeue after 5 minutes for the cache TTL
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+}
+
+// isDrifted will increase in scope to include more fields of the provisioner
+func (d *Drift) isDrifted(ctx context.Context, provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) (bool, error) {
+	cloudProviderDrifted, err := d.cloudProvider.IsMachineDrifted(ctx, machine)
+	if err != nil {
+		return false, err
+	}
+
+	return cloudProviderDrifted, nil
 }
