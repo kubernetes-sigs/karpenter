@@ -59,28 +59,10 @@ var _ = Describe("Drift", func() {
 				},
 			},
 		})
-		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonDrifted, "")
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
 	})
-	It("should ignore nodes with the disrupted annotation key, but not the drifted value", func() {
-		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, "bad-value", "")
-		ExpectApplied(ctx, env.Client, machine, node, prov)
-
-		// inform cluster state about nodes and machines
-		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
-
-		fakeClock.Step(10 * time.Minute)
-
-		var wg sync.WaitGroup
-		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
-		wg.Wait()
-
-		// Expect to not create or delete more machines
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
-		ExpectExists(ctx, env.Client, machine)
-	})
-	It("should ignore nodes without the disrupted annotation key", func() {
-		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineVoluntarilyDisrupted)
+	It("should ignore nodes without the drifted status condition", func() {
+		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineDrifted)
 		ExpectApplied(ctx, env.Client, machine, node, prov)
 
 		// inform cluster state about nodes and machines
@@ -136,7 +118,7 @@ var _ = Describe("Drift", func() {
 			},
 		})
 		for _, m := range machines {
-			m.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonDrifted, "")
+			m.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
 			ExpectApplied(ctx, env.Client, m)
 		}
 		for _, n := range nodes {
@@ -348,7 +330,7 @@ var _ = Describe("Drift", func() {
 				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
 			},
 		})
-		machine2.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonDrifted, "")
+		machine2.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
 
 		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], machine, node, machine2, node2, prov)
 

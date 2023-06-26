@@ -50,8 +50,7 @@ func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *pro
 
 // ShouldDeprovision is a predicate used to filter deprovisionable machines
 func (d *Drift) ShouldDeprovision(_ context.Context, c *Candidate) bool {
-	cond := c.Machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)
-	return cond.IsTrue() && cond.Reason == v1alpha5.VoluntarilyDisruptedReasonDrifted
+	return c.Machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).IsTrue()
 }
 
 // ComputeCommand generates a deprovisioning command given deprovisionable machines

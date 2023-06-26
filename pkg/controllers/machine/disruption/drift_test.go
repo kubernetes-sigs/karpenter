@@ -54,9 +54,7 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
-		cond := machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)
-		Expect(cond.IsTrue()).To(BeTrue())
-		Expect(cond.Reason).To(Equal(v1alpha5.VoluntarilyDisruptedReasonDrifted))
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).IsTrue()).To(BeTrue())
 	})
 	It("should not detect drift if the feature flag is disabled", func() {
 		cp.Drifted = true
@@ -65,18 +63,18 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)).To(BeNil())
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted)).To(BeNil())
 	})
 	It("should remove the status condition from the machine if the feature flag is disabled", func() {
 		cp.Drifted = true
 		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
-		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonDrifted, "")
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
 		ExpectApplied(ctx, env.Client, provisioner, machine)
 
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)).To(BeNil())
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted)).To(BeNil())
 	})
 	It("should not detect drift if the provisioner does not exist", func() {
 		cp.Drifted = true
@@ -84,16 +82,16 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)).To(BeNil())
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted)).To(BeNil())
 	})
 	It("should remove the status condition from the machine if the machine is no longer drifted", func() {
 		cp.Drifted = false
-		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonDrifted, "")
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
 		ExpectApplied(ctx, env.Client, provisioner, machine)
 
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)).To(BeNil())
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted)).To(BeNil())
 	})
 })

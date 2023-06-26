@@ -47,17 +47,12 @@ func (in *Machine) StatusConditions() apis.ConditionManager {
 }
 
 var (
-	MachineLaunched               apis.ConditionType = "MachineLaunched"
-	MachineRegistered             apis.ConditionType = "MachineRegistered"
-	MachineInitialized            apis.ConditionType = "MachineInitialized"
-	MachineInvoluntarilyDisrupted apis.ConditionType = "MachineInvoluntarilyDisrupted"
-	MachineVoluntarilyDisrupted   apis.ConditionType = "MachineVoluntarilyDisrupted"
-)
-
-var (
-	VoluntarilyDisruptedReasonEmpty   = "Empty"
-	VoluntarilyDisruptedReasonDrifted = "Drifted"
-	VoluntarilyDisruptedReasonExpired = "Expired"
+	MachineLaunched    apis.ConditionType = "MachineLaunched"
+	MachineRegistered  apis.ConditionType = "MachineRegistered"
+	MachineInitialized apis.ConditionType = "MachineInitialized"
+	MachineDrifted     apis.ConditionType = "MachineDrifted"
+	MachineEmpty       apis.ConditionType = "MachineEmpty"
+	MachineExpired     apis.ConditionType = "MachineExpired"
 )
 
 func (in *Machine) GetConditions() apis.Conditions {

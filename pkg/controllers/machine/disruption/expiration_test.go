@@ -45,13 +45,13 @@ var _ = Describe("Expiration", func() {
 	})
 
 	It("should remove the status condition from the machines when expiration is disabled", func() {
-		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonExpired, "")
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineExpired)
 		ExpectApplied(ctx, env.Client, provisioner, machine)
 
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)).To(BeNil())
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineExpired)).To(BeNil())
 	})
 	It("should mark machines as expired", func() {
 		provisioner.Spec.TTLSecondsUntilExpired = ptr.Int64(30)
@@ -62,19 +62,17 @@ var _ = Describe("Expiration", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
-		cond := machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)
-		Expect(cond.IsTrue()).To(BeTrue())
-		Expect(cond.Reason).To(Equal(v1alpha5.VoluntarilyDisruptedReasonExpired))
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineExpired).IsTrue()).To(BeTrue())
 	})
 	It("should remove the status condition from non-expired machines", func() {
 		provisioner.Spec.TTLSecondsUntilExpired = ptr.Int64(200)
-		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonExpired, "")
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineExpired)
 		ExpectApplied(ctx, env.Client, provisioner, machine)
 
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)).To(BeNil())
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineExpired)).To(BeNil())
 	})
 	It("should mark machines as expired if the node is expired but the machine isn't", func() {
 		provisioner.Spec.TTLSecondsUntilExpired = ptr.Int64(30)
@@ -86,9 +84,7 @@ var _ = Describe("Expiration", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
-		cond := machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)
-		Expect(cond.IsTrue()).To(BeTrue())
-		Expect(cond.Reason).To(Equal(v1alpha5.VoluntarilyDisruptedReasonExpired))
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineExpired).IsTrue()).To(BeTrue())
 	})
 	It("should mark machines as expired if the machine is expired but the node isn't", func() {
 		provisioner.Spec.TTLSecondsUntilExpired = ptr.Int64(30)
@@ -100,9 +96,7 @@ var _ = Describe("Expiration", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
-		cond := machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)
-		Expect(cond.IsTrue()).To(BeTrue())
-		Expect(cond.Reason).To(Equal(v1alpha5.VoluntarilyDisruptedReasonExpired))
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineExpired).IsTrue()).To(BeTrue())
 	})
 	It("should return the requeue interval for the time between now and when the machine expires", func() {
 		provisioner.Spec.TTLSecondsUntilExpired = ptr.Int64(200)

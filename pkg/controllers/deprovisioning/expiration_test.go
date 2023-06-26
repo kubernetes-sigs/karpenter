@@ -61,23 +61,10 @@ var _ = Describe("Expiration", func() {
 				},
 			},
 		})
-		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonExpired, "")
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineExpired)
 	})
-	It("should ignore nodes with the disruption annotation but different value", func() {
-		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonDrifted, "")
-		ExpectApplied(ctx, env.Client, machine, node, prov)
-
-		// inform cluster state about nodes and machines
-		ExpectMakeReadyAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
-
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
-
-		// Expect to not create or delete more machines
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		ExpectExists(ctx, env.Client, node)
-	})
-	It("should ignore nodes without the disruption annotation", func() {
-		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineVoluntarilyDisrupted)
+	It("should ignore nodes without the expired status condition", func() {
+		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineExpired)
 		ExpectApplied(ctx, env.Client, machine, node, prov)
 
 		// inform cluster state about nodes and machines
@@ -130,7 +117,7 @@ var _ = Describe("Expiration", func() {
 			},
 		})
 		for _, m := range machines {
-			m.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonExpired, "")
+			m.StatusConditions().MarkTrue(v1alpha5.MachineExpired)
 			ExpectApplied(ctx, env.Client, m)
 		}
 		for _, n := range nodes {
@@ -195,7 +182,7 @@ var _ = Describe("Expiration", func() {
 				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
 			},
 		})
-		machineToExpire.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonExpired, "")
+		machineToExpire.StatusConditions().MarkTrue(v1alpha5.MachineExpired)
 
 		machineNotExpire, nodeNotExpire := test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{

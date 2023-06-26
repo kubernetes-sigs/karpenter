@@ -36,19 +36,13 @@ type Emptiness struct {
 
 //nolint:gocyclo
 func (e *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	// If the node is marked as voluntarily disrupted by another controller, do nothing.
-	voluntarilyDisrupted := machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)
-	if voluntarilyDisrupted.IsTrue() && voluntarilyDisrupted.Reason != v1alpha5.VoluntarilyDisruptedReasonEmpty {
-		return reconcile.Result{}, nil
-	}
-	hasEmptyCondition := voluntarilyDisrupted.IsTrue()
-
+	hasEmptyCondition := machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty).IsTrue()
 	// From here there are three scenarios to handle:
 	// 1. If TTLSecondsAfterEmpty is not configured, but the node is empty,
 	//    remove the annotation so another disruption controller can annotate the node.
 	if provisioner.Spec.TTLSecondsAfterEmpty == nil {
 		if hasEmptyCondition {
-			_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineVoluntarilyDisrupted)
+			_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineEmpty)
 			logging.FromContext(ctx).Debugf("removing emptiness status condition from machine as emptiness has been disabled")
 		}
 		return reconcile.Result{}, nil
@@ -58,7 +52,7 @@ func (e *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 	node, err := machineutil.NodeForMachine(ctx, e.kubeClient, machine)
 	if err != nil {
 		if machineutil.IsDuplicateNodeError(err) || machineutil.IsNodeNotFoundError(err) {
-			_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineVoluntarilyDisrupted)
+			_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineEmpty)
 			return reconcile.Result{}, nil
 		}
 		return reconcile.Result{}, err
@@ -66,12 +60,12 @@ func (e *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 
 	emptinessTimestamp := node.Annotations[v1alpha5.EmptinessTimestampAnnotationKey]
 	if emptinessTimestamp == "" {
-		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineVoluntarilyDisrupted)
+		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineEmpty)
 		return reconcile.Result{}, nil
 	}
 	emptyAt, err := time.Parse(time.RFC3339, emptinessTimestamp)
 	if err != nil {
-		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineVoluntarilyDisrupted)
+		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineEmpty)
 		logging.FromContext(ctx).With("emptiness-timestamp", emptinessTimestamp).Errorf("unable to parse emptiness timestamp")
 		return reconcile.Result{}, nil //nolint:nilerr
 	}
@@ -79,14 +73,14 @@ func (e *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 
 	// 2. Otherwise, if the node is after emptiness expiration, but doesn't have the annotation, add it.
 	if e.clock.Now().After(emptinessTTLTime) && !hasEmptyCondition {
-		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonEmpty, "")
+		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineEmpty, "EmptinessTTLExceeded", "")
 		logging.FromContext(ctx).Debugf("marking machine as empty")
 		return reconcile.Result{}, nil
 	}
 	// 3. Finally, if the node isn't after emptiness expiration, but has the annotation, remove it.
 	if !e.clock.Now().After(emptinessTTLTime) && hasEmptyCondition {
-		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineVoluntarilyDisrupted)
-		logging.FromContext(ctx).Debugf("removing empty annotation from node")
+		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineEmpty)
+		logging.FromContext(ctx).Debugf("removing emptiness status condition from node")
 	}
 	return reconcile.Result{RequeueAfter: emptinessTTLTime.Sub(e.clock.Now())}, nil
 }

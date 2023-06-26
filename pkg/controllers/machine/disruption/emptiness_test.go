@@ -57,55 +57,53 @@ var _ = Describe("Emptiness", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
-		cond := machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)
-		Expect(cond.IsTrue()).To(BeTrue())
-		Expect(cond.Reason).To(Equal(v1alpha5.VoluntarilyDisruptedReasonEmpty))
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty).IsTrue()).To(BeTrue())
 	})
 	It("should remove the status condition from the machine when emptiness is disabled", func() {
-		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonEmpty, "")
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
 
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)).To(BeNil())
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty)).To(BeNil())
 	})
 	It("should remove the status conditions from the machine when the node doesn't exist", func() {
 		provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(30)
-		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonEmpty, "")
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
 		ExpectApplied(ctx, env.Client, provisioner, machine)
 
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)).To(BeNil())
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty)).To(BeNil())
 	})
 	It("should remove the status conditions from the machine when the node doesn't have the emptiness timestamp", func() {
 		provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(30)
-		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonEmpty, "")
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
 
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)).To(BeNil())
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty)).To(BeNil())
 	})
 	It("should remove the status conditions from the machine when the node timestamp can't be parsed", func() {
 		provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(30)
 		node.Annotations = lo.Assign(node.Annotations, map[string]string{
 			v1alpha5.EmptinessTimestampAnnotationKey: "bad-value",
 		})
-		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonEmpty, "")
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
 
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)).To(BeNil())
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty)).To(BeNil())
 	})
 	It("should remove the status condition from non-empty machines", func() {
 		provisioner.Spec.TTLSecondsUntilExpired = ptr.Int64(200)
-		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonEmpty, "")
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
 		node.Annotations = lo.Assign(node.Annotations, map[string]string{
 			v1alpha5.EmptinessTimestampAnnotationKey: fakeClock.Now().Add(time.Second * 100).Format(time.RFC3339),
 		})
@@ -114,7 +112,7 @@ var _ = Describe("Emptiness", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)).To(BeNil())
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty)).To(BeNil())
 	})
 	It("should return the requeue interval for the time between now and when the machine emptiness TTL expires", func() {
 		provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(200)

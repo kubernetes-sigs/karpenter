@@ -35,26 +35,20 @@ type Expiration struct {
 
 //nolint:gocyclo
 func (e *Expiration) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	// If the machine is marked as voluntarily disrupted by another controller, do nothing.
-	voluntarilyDisrupted := machine.StatusConditions().GetCondition(v1alpha5.MachineVoluntarilyDisrupted)
-	if voluntarilyDisrupted.IsTrue() && voluntarilyDisrupted.Reason != v1alpha5.VoluntarilyDisruptedReasonExpired {
-		return reconcile.Result{}, nil
-	}
-	hasExpiredCondition := voluntarilyDisrupted.IsTrue()
+	hasExpiredCondition := machine.StatusConditions().GetCondition(v1alpha5.MachineExpired).IsTrue()
 
 	// From here there are three scenarios to handle:
 	// 1. If TTLSecondsUntilExpired is not configured, but the node is expired,
 	//    remove the annotation so another disruption controller can annotate the node.
 	if provisioner.Spec.TTLSecondsUntilExpired == nil {
 		if hasExpiredCondition {
-			_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineVoluntarilyDisrupted)
+			_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineExpired)
 			logging.FromContext(ctx).Debugf("removing expiration status condition from machine as expiration has been disabled")
 		}
 		return reconcile.Result{}, nil
 	}
-
 	node, err := machineutil.NodeForMachine(ctx, e.kubeClient, machine)
-	if machineutil.IgnoreNodeNotFoundError(machineutil.IgnoreDuplicateNodeError(err)) != nil {
+	if machineutil.IgnoreNodeNotFoundError(err) != nil {
 		return reconcile.Result{}, err
 	}
 	// We do the expiration check in this way since there is still a migration path for creating Machines from Nodes
@@ -66,19 +60,18 @@ func (e *Expiration) Reconcile(ctx context.Context, provisioner *v1alpha5.Provis
 		expired = functional.IsExpired(node, e.clock, provisioner)
 	}
 
-	// 2. Otherwise, if the node is expired, but doesn't have the annotation, add it.
+	// 2. Otherwise, if the node is expired, but doesn't have the status condition, add it.
 	if expired && !hasExpiredCondition {
-		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineVoluntarilyDisrupted, v1alpha5.VoluntarilyDisruptedReasonExpired, "")
+		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineExpired, "ExpirationTTLExceeded", "")
 		logging.FromContext(ctx).Debugf("marking machine as expired")
 		return reconcile.Result{}, nil
 	}
-	// 3. Finally, if the node isn't expired, but has the annotation, remove it.
+	// 3. Finally, if the node isn't expired, but has the status condition, remove it.
 	if !expired && hasExpiredCondition {
-		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineVoluntarilyDisrupted)
+		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineExpired)
 		logging.FromContext(ctx).Debugf("removing expired status condition from machine")
 	}
-
-	// If the node isn't expired and doesn't have annotation, return.
+	// If the node isn't expired and doesn't have the status condition, return.
 	// Use t.Sub(time.Now()) instead of time.Until() to ensure we're using the injected clock.
 	return reconcile.Result{RequeueAfter: functional.GetExpirationTime(machine, provisioner).Sub(e.clock.Now())}, nil
 }
