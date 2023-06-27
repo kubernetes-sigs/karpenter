@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	cloudproviderapi "k8s.io/cloud-provider/api"
 	clock "k8s.io/utils/clock/testing"
 	"knative.dev/pkg/ptr"
 
@@ -371,6 +372,256 @@ var _ = Describe("Inflight Nodes", func() {
 			v1.ResourceMemory:           resource.MustParse("29250Mi"),
 			v1.ResourceEphemeralStorage: resource.MustParse("17800Mi"),
 		}, ExpectStateNodeExists(node).Allocatable())
+	})
+	It("should not return startup taints when the node isn't initialized", func() {
+		machine := test.Machine(v1alpha5.Machine{
+			Spec: v1alpha5.MachineSpec{
+				Requirements: []v1.NodeSelectorRequirement{
+					{
+						Key:      v1.LabelInstanceTypeStable,
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{cloudProvider.InstanceTypes[0].Name},
+					},
+					{
+						Key:      v1.LabelTopologyZone,
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{"test-zone-1"},
+					},
+				},
+				StartupTaints: []v1.Taint{
+					{
+						Key:    "custom-taint",
+						Value:  "custom-value",
+						Effect: v1.TaintEffectNoSchedule,
+					},
+					{
+						Key:    "custom-taint2",
+						Value:  "custom-value2",
+						Effect: v1.TaintEffectNoExecute,
+					},
+				},
+				MachineTemplateRef: &v1alpha5.MachineTemplateRef{
+					Name: "default",
+				},
+			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.RandomProviderID(),
+				Capacity: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("2"),
+					v1.ResourceMemory:           resource.MustParse("32Gi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+				},
+				Allocatable: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("1"),
+					v1.ResourceMemory:           resource.MustParse("30Gi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, machine)
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+
+		ExpectStateNodeCount("==", 1)
+		stateNode := ExpectStateNodeExistsForMachine(machine)
+		Expect(stateNode.Taints()).To(HaveLen(0))
+
+		node := test.Node(test.NodeOptions{
+			ProviderID: machine.Status.ProviderID,
+			Capacity: v1.ResourceList{
+				v1.ResourceCPU:              resource.MustParse("1800m"),
+				v1.ResourceMemory:           resource.MustParse("30500Mi"),
+				v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
+			},
+			Allocatable: v1.ResourceList{
+				v1.ResourceCPU:              resource.MustParse("900m"),
+				v1.ResourceMemory:           resource.MustParse("29250Mi"),
+				v1.ResourceEphemeralStorage: resource.MustParse("17800Mi"),
+			},
+			Taints: []v1.Taint{
+				{
+					Key:    "custom-taint",
+					Value:  "custom-value",
+					Effect: v1.TaintEffectNoSchedule,
+				},
+				{
+					Key:    "custom-taint2",
+					Value:  "custom-value2",
+					Effect: v1.TaintEffectNoExecute,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		ExpectStateNodeCount("==", 1)
+		stateNode = ExpectStateNodeExists(node)
+		Expect(stateNode.Taints()).To(HaveLen(0))
+	})
+	It("should return startup taints when the node is initialized", func() {
+		machine := test.Machine(v1alpha5.Machine{
+			Spec: v1alpha5.MachineSpec{
+				Requirements: []v1.NodeSelectorRequirement{
+					{
+						Key:      v1.LabelInstanceTypeStable,
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{cloudProvider.InstanceTypes[0].Name},
+					},
+					{
+						Key:      v1.LabelTopologyZone,
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{"test-zone-1"},
+					},
+				},
+				StartupTaints: []v1.Taint{
+					{
+						Key:    "custom-taint",
+						Value:  "custom-value",
+						Effect: v1.TaintEffectNoSchedule,
+					},
+					{
+						Key:    "custom-taint2",
+						Value:  "custom-value2",
+						Effect: v1.TaintEffectNoExecute,
+					},
+				},
+				MachineTemplateRef: &v1alpha5.MachineTemplateRef{
+					Name: "default",
+				},
+			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.RandomProviderID(),
+				Capacity: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("2"),
+					v1.ResourceMemory:           resource.MustParse("32Gi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+				},
+				Allocatable: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("1"),
+					v1.ResourceMemory:           resource.MustParse("30Gi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, machine)
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+
+		node := test.Node(test.NodeOptions{
+			ProviderID: machine.Status.ProviderID,
+			Capacity: v1.ResourceList{
+				v1.ResourceCPU:              resource.MustParse("1800m"),
+				v1.ResourceMemory:           resource.MustParse("30500Mi"),
+				v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
+			},
+			Allocatable: v1.ResourceList{
+				v1.ResourceCPU:              resource.MustParse("900m"),
+				v1.ResourceMemory:           resource.MustParse("29250Mi"),
+				v1.ResourceEphemeralStorage: resource.MustParse("17800Mi"),
+			},
+			Taints: []v1.Taint{
+				{
+					Key:    "custom-taint",
+					Value:  "custom-value",
+					Effect: v1.TaintEffectNoSchedule,
+				},
+				{
+					Key:    "custom-taint2",
+					Value:  "custom-value2",
+					Effect: v1.TaintEffectNoExecute,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+
+		ExpectStateNodeCount("==", 1)
+		stateNode := ExpectStateNodeExists(node)
+		Expect(stateNode.Taints()).To(HaveLen(2))
+		Expect(stateNode.Taints()).To(Equal([]v1.Taint{
+			{
+				Key:    "custom-taint",
+				Value:  "custom-value",
+				Effect: v1.TaintEffectNoSchedule,
+			},
+			{
+				Key:    "custom-taint2",
+				Value:  "custom-value2",
+				Effect: v1.TaintEffectNoExecute,
+			},
+		}))
+	})
+	It("should not return known ephemeral taints", func() {
+		machine := test.Machine(v1alpha5.Machine{
+			Spec: v1alpha5.MachineSpec{
+				Requirements: []v1.NodeSelectorRequirement{
+					{
+						Key:      v1.LabelInstanceTypeStable,
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{cloudProvider.InstanceTypes[0].Name},
+					},
+					{
+						Key:      v1.LabelTopologyZone,
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{"test-zone-1"},
+					},
+				},
+				MachineTemplateRef: &v1alpha5.MachineTemplateRef{
+					Name: "default",
+				},
+			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.RandomProviderID(),
+				Capacity: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("2"),
+					v1.ResourceMemory:           resource.MustParse("32Gi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+				},
+				Allocatable: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("1"),
+					v1.ResourceMemory:           resource.MustParse("30Gi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, machine)
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+
+		node := test.Node(test.NodeOptions{
+			ProviderID: machine.Status.ProviderID,
+			Capacity: v1.ResourceList{
+				v1.ResourceCPU:              resource.MustParse("1800m"),
+				v1.ResourceMemory:           resource.MustParse("30500Mi"),
+				v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
+			},
+			Allocatable: v1.ResourceList{
+				v1.ResourceCPU:              resource.MustParse("900m"),
+				v1.ResourceMemory:           resource.MustParse("29250Mi"),
+				v1.ResourceEphemeralStorage: resource.MustParse("17800Mi"),
+			},
+			Taints: []v1.Taint{
+				{
+					Key:    v1.TaintNodeNotReady,
+					Effect: v1.TaintEffectNoSchedule,
+				},
+				{
+					Key:    v1.TaintNodeUnreachable,
+					Effect: v1.TaintEffectNoSchedule,
+				},
+				{
+					Key:    cloudproviderapi.TaintExternalCloudProvider,
+					Effect: v1.TaintEffectNoSchedule,
+					Value:  "true",
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		ExpectStateNodeCount("==", 1)
+		stateNode := ExpectStateNodeExists(node)
+		Expect(stateNode.Taints()).To(HaveLen(0))
 	})
 	It("should combine the inflight capacity with node while node isn't initialized", func() {
 		machine := test.Machine(v1alpha5.Machine{

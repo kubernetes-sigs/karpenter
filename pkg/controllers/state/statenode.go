@@ -22,7 +22,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	cloudproviderapi "k8s.io/cloud-provider/api"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/settings"
@@ -167,14 +166,10 @@ func (in *StateNode) Labels() map[string]string {
 }
 
 func (in *StateNode) Taints() []v1.Taint {
-	ephemeralTaints := []v1.Taint{
-		{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
-		{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
-		{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
-	}
 	// Only consider startup taints until the node is initialized. Without this, if the startup taint is generic and
 	// re-appears on the node for a different reason (e.g. the node is cordoned) we will assume that pods can
 	// schedule against the node in the future incorrectly.
+	ephemeralTaints := scheduling.KnownEphemeralTaints
 	if !in.Initialized() && in.Owned() {
 		if in.Machine != nil {
 			ephemeralTaints = append(ephemeralTaints, in.Machine.Spec.StartupTaints...)
@@ -190,10 +185,10 @@ func (in *StateNode) Taints() []v1.Taint {
 		taints = in.Node.Spec.Taints
 	}
 	return lo.Reject(taints, func(taint v1.Taint, _ int) bool {
-		_, rejected := lo.Find(ephemeralTaints, func(t v1.Taint) bool {
-			return t.Key == taint.Key && t.Value == taint.Value && t.Effect == taint.Effect
+		_, found := lo.Find(ephemeralTaints, func(t v1.Taint) bool {
+			return t.MatchTaint(&taint)
 		})
-		return rejected
+		return found
 	})
 }
 

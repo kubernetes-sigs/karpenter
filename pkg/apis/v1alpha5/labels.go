@@ -42,15 +42,10 @@ const (
 	DoNotEvictPodAnnotationKey        = Group + "/do-not-evict"
 	DoNotConsolidateNodeAnnotationKey = Group + "/do-not-consolidate"
 	EmptinessTimestampAnnotationKey   = Group + "/emptiness-timestamp"
-	VoluntaryDisruptionAnnotationKey  = Group + "/voluntary-disruption"
 	MachineLinkedAnnotationKey        = Group + "/linked"
 	MachineManagedByAnnotationKey     = Group + "/managed-by"
 
 	ProviderCompatabilityAnnotationKey = CompatabilityGroup + "/provider"
-
-	// Karpenter specific annotation values
-	VoluntaryDisruptionDriftedAnnotationValue = "drifted"
-	VoluntaryDisruptionExpiredAnnotationValue = "expired"
 )
 
 // Karpenter specific finalizers

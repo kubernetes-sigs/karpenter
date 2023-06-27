@@ -145,7 +145,7 @@ var _ = Describe("Controller", func() {
 				v1.ResourcePods:   resource.MustParse("10"),
 			}
 			ExpectApplied(ctx, env.Client, provisioner, machine, node)
-			ExpectMakeMachinesReady(ctx, env.Client, machine)
+			ExpectMakeMachinesInitialized(ctx, env.Client, machine)
 			ExpectReconcileSucceeded(ctx, consistencyController, client.ObjectKeyFromObject(machine))
 			Expect(recorder.DetectedEvent("expected 128Gi of resource memory, but found 64Gi (50.0% of expected)")).To(BeTrue())
 		})

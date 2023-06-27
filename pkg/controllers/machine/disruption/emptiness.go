@@ -18,7 +18,9 @@ import (
 	"context"
 	"time"
 
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
+	"knative.dev/pkg/apis"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -73,7 +75,12 @@ func (e *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 
 	// 2. Otherwise, if the node is after emptiness expiration, but doesn't have the annotation, add it.
 	if e.clock.Now().After(emptinessTTLTime) && !hasEmptyCondition {
-		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineEmpty, "EmptinessTTLExceeded", "")
+		machine.StatusConditions().SetCondition(apis.Condition{
+			Type:     v1alpha5.MachineEmpty,
+			Status:   v1.ConditionTrue,
+			Reason:   "EmptinessTTLExceeded",
+			Severity: apis.ConditionSeverityWarning,
+		})
 		logging.FromContext(ctx).Debugf("marking machine as empty")
 		return reconcile.Result{}, nil
 	}

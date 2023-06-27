@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"time"
 
+	v1 "k8s.io/api/core/v1"
+	"knative.dev/pkg/apis"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -57,7 +59,12 @@ func (d *Drift) Reconcile(ctx context.Context, _ *v1alpha5.Provisioner, machine 
 		logging.FromContext(ctx).Debugf("removing drifted status condition from machine")
 		// 3. Finally, if the node is drifted, but doesn't have the annotation, add it.
 	} else if drifted && !hasDriftedCondition {
-		machine.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
+		machine.StatusConditions().SetCondition(apis.Condition{
+			Type:     v1alpha5.MachineDrifted,
+			Status:   v1.ConditionTrue,
+			Reason:   "NodeTemplateDrifted",
+			Severity: apis.ConditionSeverityWarning,
+		})
 		logging.FromContext(ctx).Debugf("marking machine as drifted")
 	}
 	// Requeue after 5 minutes for the cache TTL

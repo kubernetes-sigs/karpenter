@@ -17,7 +17,9 @@ package disruption
 import (
 	"context"
 
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
+	"knative.dev/pkg/apis"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -62,7 +64,12 @@ func (e *Expiration) Reconcile(ctx context.Context, provisioner *v1alpha5.Provis
 
 	// 2. Otherwise, if the node is expired, but doesn't have the status condition, add it.
 	if expired && !hasExpiredCondition {
-		machine.StatusConditions().MarkTrueWithReason(v1alpha5.MachineExpired, "ExpirationTTLExceeded", "")
+		machine.StatusConditions().SetCondition(apis.Condition{
+			Type:     v1alpha5.MachineExpired,
+			Status:   v1.ConditionTrue,
+			Reason:   "ExpirationTTLExceeded",
+			Severity: apis.ConditionSeverityWarning,
+		})
 		logging.FromContext(ctx).Debugf("marking machine as expired")
 		return reconcile.Result{}, nil
 	}

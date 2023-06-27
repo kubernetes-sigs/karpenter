@@ -20,7 +20,14 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
+	cloudproviderapi "k8s.io/cloud-provider/api"
 )
+
+var KnownEphemeralTaints = []v1.Taint{
+	{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
+	{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
+	{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+}
 
 // Taints is a decorated alias type for []v1.Taint
 type Taints []v1.Taint
