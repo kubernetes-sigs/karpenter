@@ -179,7 +179,7 @@ func (o *Operator) Start(ctx context.Context) {
 
 func knativeChecker(path string) healthz.Checker {
 	return func(req *http.Request) (err error) {
-		res, err := http.Get(fmt.Sprintf("http://:%d/%s", knativeinjection.HealthCheckDefaultPort, path))
+		res, err := http.Get(fmt.Sprintf("http://localhost:%d/%s", knativeinjection.HealthCheckDefaultPort, path))
 		if err != nil {
 			return err
 		}
