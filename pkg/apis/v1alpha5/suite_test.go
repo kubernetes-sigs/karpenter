@@ -12,10 +12,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha5
+package v1alpha5_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -23,10 +24,15 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/Pallinder/go-randomdata"
+	"github.com/mitchellh/hashstructure/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	. "knative.dev/pkg/logging/testing"
 	"knative.dev/pkg/ptr"
+
+	. "github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/test"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -519,5 +525,114 @@ var _ = Describe("Limits", func() {
 	It("should fail when usage is higher than limit", func() {
 		provisioner.Status.Resources = v1.ResourceList{"cpu": resource.MustParse("17")}
 		Expect(provisioner.Spec.Limits.ExceededBy(provisioner.Status.Resources)).To(MatchError("cpu resource usage of 17 exceeds limit of 16"))
+	})
+})
+
+var _ = Describe("Provisioner Annotation", func() {
+	var testProvisionerOptions test.ProvisionerOptions
+	var provisioner *Provisioner
+	BeforeEach(func() {
+		taints := []v1.Taint{
+			{
+				Key:    "keyValue1",
+				Effect: v1.TaintEffectNoExecute,
+			},
+			{
+				Key:    "keyValue2",
+				Effect: v1.TaintEffectNoExecute,
+			},
+		}
+		testProvisionerOptions = test.ProvisionerOptions{
+			Taints:        taints,
+			StartupTaints: taints,
+			Labels: map[string]string{
+				"keyLabel":  "valueLabel",
+				"keyLabel2": "valueLabel2",
+			},
+			Kubelet: &KubeletConfiguration{
+				MaxPods: ptr.Int32(10),
+			},
+			Annotations: map[string]string{
+				"keyAnnotation":  "valueAnnotation",
+				"keyAnnotation2": "valueAnnotation2",
+			},
+		}
+		provisioner = test.Provisioner(testProvisionerOptions)
+	})
+	It("should change hash when static fields are updated", func() {
+		expectedHash := provisioner.Hash()
+
+		// Change one static field for 5 provisioners
+		provisionerFieldToChange := []*Provisioner{
+			test.Provisioner(testProvisionerOptions, test.ProvisionerOptions{Annotations: map[string]string{"keyAnnotationTest": "valueAnnotationTest"}}),
+			test.Provisioner(testProvisionerOptions, test.ProvisionerOptions{Labels: map[string]string{"keyLabelTest": "valueLabelTest"}}),
+			test.Provisioner(testProvisionerOptions, test.ProvisionerOptions{Taints: []v1.Taint{{Key: "keytest2Taint", Effect: v1.TaintEffectNoExecute}}}),
+			test.Provisioner(testProvisionerOptions, test.ProvisionerOptions{StartupTaints: []v1.Taint{{Key: "keytest2StartupTaint", Effect: v1.TaintEffectNoExecute}}}),
+			test.Provisioner(testProvisionerOptions, test.ProvisionerOptions{Kubelet: &KubeletConfiguration{MaxPods: ptr.Int32(30)}}),
+		}
+
+		for _, updatedProvisioner := range provisionerFieldToChange {
+			actualHash := updatedProvisioner.Hash()
+			Expect(actualHash).ToNot(Equal(fmt.Sprint(expectedHash)))
+		}
+	})
+	It("should not change hash when behavior fields are updated", func() {
+		actualHash := provisioner.Hash()
+
+		expectedHash, err := hashstructure.Hash(provisioner.Spec, hashstructure.FormatV2, &hashstructure.HashOptions{
+			SlicesAsSets:    true,
+			IgnoreZeroValue: true,
+			ZeroNil:         true,
+		})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(actualHash).To(Equal(fmt.Sprint(expectedHash)))
+
+		// Update a behavior field
+		provisioner.Spec.Limits = &Limits{Resources: v1.ResourceList{"cpu": resource.MustParse("16")}}
+		provisioner.Spec.Consolidation = &Consolidation{Enabled: lo.ToPtr(true)}
+		provisioner.Spec.TTLSecondsAfterEmpty = lo.ToPtr(int64(30))
+		provisioner.Spec.TTLSecondsUntilExpired = lo.ToPtr(int64(50))
+		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
+			{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+			{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"1"}},
+			{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{"1"}},
+		}
+		provisioner.Spec.Weight = lo.ToPtr(int32(80))
+
+		actualHash = provisioner.Hash()
+		Expect(err).ToNot(HaveOccurred())
+		Expect(actualHash).To(Equal(fmt.Sprint(expectedHash)))
+	})
+	It("should expect two provisioner with the same spec to have the same provisioner hash", func() {
+		provisionerTwo := &Provisioner{
+			ObjectMeta: metav1.ObjectMeta{Name: strings.ToLower(randomdata.SillyName())},
+		}
+		provisionerTwo.Spec = provisioner.Spec
+
+		Expect(provisioner.Hash()).To(Equal(provisionerTwo.Hash()))
+	})
+	It("should expect hashes that are reordered to not produce a new hash", func() {
+		expectedHash := provisioner.Hash()
+		updatedTaints := []v1.Taint{
+			{
+				Key:    "keyValue2",
+				Effect: v1.TaintEffectNoExecute,
+			},
+			{
+				Key:    "keyValue1",
+				Effect: v1.TaintEffectNoExecute,
+			},
+		}
+
+		provisionerFieldToChange := []*Provisioner{
+			test.Provisioner(testProvisionerOptions, test.ProvisionerOptions{Annotations: map[string]string{"keyAnnotation2": "valueAnnotation2", "keyAnnotation": "valueAnnotation"}}),
+			test.Provisioner(testProvisionerOptions, test.ProvisionerOptions{Taints: updatedTaints}),
+			test.Provisioner(testProvisionerOptions, test.ProvisionerOptions{StartupTaints: updatedTaints}),
+		}
+
+		for _, updatedProvisioner := range provisionerFieldToChange {
+			actualHash := updatedProvisioner.Hash()
+			Expect(actualHash).To(Equal(fmt.Sprint(expectedHash)))
+		}
 	})
 })

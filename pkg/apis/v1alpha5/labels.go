@@ -45,6 +45,7 @@ const (
 	EmptinessTimestampAnnotationKey   = Group + "/emptiness-timestamp"
 	MachineLinkedAnnotationKey        = Group + "/linked"
 	MachineManagedByAnnotationKey     = Group + "/managed-by"
+	ProvisionerHashAnnotationKey      = Group + "/provisioner-hash"
 
 	ProviderCompatabilityAnnotationKey = CompatabilityGroup + "/provider"
 )
