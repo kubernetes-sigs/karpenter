@@ -72,6 +72,43 @@ var _ = Describe("Registration", func() {
 		node = ExpectExists(ctx, env.Client, node)
 		ExpectOwnerReferenceExists(node, machine)
 	})
+	It("should sync the karpenter.sh/registered label to the Node when the Node comes online", func() {
+		machine := test.Machine(v1alpha5.Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, provisioner, machine)
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		machine = ExpectExists(ctx, env.Client, machine)
+
+		node := test.Node(test.NodeOptions{ProviderID: machine.Status.ProviderID})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		node = ExpectExists(ctx, env.Client, node)
+		Expect(node.Labels).To(HaveKeyWithValue(v1alpha5.LabelNodeRegistered, "true"))
+	})
+	It("should sync the karpenter.sh/registered label to the Node if the Machine already registered", func() {
+		machine := test.Machine(v1alpha5.Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+				},
+			},
+		})
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
+
+		node := test.Node(test.NodeOptions{ProviderID: machine.Status.ProviderID})
+		ExpectApplied(ctx, env.Client, machine, node)
+
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		node = ExpectExists(ctx, env.Client, node)
+		Expect(node.Labels).To(HaveKeyWithValue(v1alpha5.LabelNodeRegistered, "true"))
+	})
 	It("should sync the labels to the Node when the Node comes online", func() {
 		machine := test.Machine(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{

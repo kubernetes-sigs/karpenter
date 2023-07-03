@@ -534,7 +534,9 @@ var _ = Describe("Inflight Nodes", func() {
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
+		ExpectMakeNodesInitialized(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 		ExpectStateNodeCount("==", 1)
 		stateNode := ExpectStateNodeExists(node)

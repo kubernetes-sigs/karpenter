@@ -1990,6 +1990,7 @@ var _ = Describe("In-Flight Nodes", func() {
 			machine1 := bindings.Get(initialPod).Machine
 			node1 := bindings.Get(initialPod).Node
 			machine1.StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
+			node1.Labels = lo.Assign(node1.Labels, map[string]string{v1alpha5.LabelNodeInitialized: "true"})
 
 			// delete the pod so that the node is empty
 			ExpectDeleted(ctx, env.Client, initialPod)
@@ -2057,6 +2058,8 @@ var _ = Describe("In-Flight Nodes", func() {
 			machine1 := bindings.Get(initialPod).Machine
 			node1 := bindings.Get(initialPod).Node
 			machine1.StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
+			node1.Labels = lo.Assign(node1.Labels, map[string]string{v1alpha5.LabelNodeInitialized: "true"})
+
 			node1.Spec.Taints = []v1.Taint{startupTaint}
 			node1.Status.Capacity = v1.ResourceList{v1.ResourcePods: resource.MustParse("10")}
 			ExpectApplied(ctx, env.Client, machine1, node1)

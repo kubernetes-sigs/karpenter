@@ -336,6 +336,7 @@ func ExpectMachineDeployedWithOffset(offset int, ctx context.Context, c client.C
 
 	// Mock the machine launch and node joining at the apiserver
 	node := test.MachineLinkedNode(m)
+	node.Labels = lo.Assign(node.Labels, map[string]string{v1alpha5.LabelNodeRegistered: "true"})
 	ExpectAppliedWithOffset(offset+1, ctx, c, m, node)
 	ExpectWithOffset(offset+1, cluster.UpdateNode(ctx, node)).To(Succeed())
 	cluster.UpdateMachine(m)
@@ -381,6 +382,7 @@ func ExpectMakeNodesInitializedWithOffset(offset int, ctx context.Context, c cli
 	ExpectMakeNodesReadyWithOffset(offset+1, ctx, c, nodes...)
 
 	for i := range nodes {
+		nodes[i].Labels[v1alpha5.LabelNodeRegistered] = "true"
 		nodes[i].Labels[v1alpha5.LabelNodeInitialized] = "true"
 		ExpectAppliedWithOffset(offset+1, ctx, c, nodes[i])
 	}
