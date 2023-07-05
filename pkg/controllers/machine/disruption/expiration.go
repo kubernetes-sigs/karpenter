@@ -29,7 +29,7 @@ import (
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 )
 
-// Expiration is a node sub-controller that annotates or de-annotates an expired node based on TTLSecondsUntilExpired
+// Expiration is a machine sub-controller that adds or removes status conditions on expired machines based on TTLSecondsUntilExpired
 type Expiration struct {
 	kubeClient client.Client
 	clock      clock.Clock
@@ -40,8 +40,7 @@ func (e *Expiration) Reconcile(ctx context.Context, provisioner *v1alpha5.Provis
 	hasExpiredCondition := machine.StatusConditions().GetCondition(v1alpha5.MachineExpired).IsTrue()
 
 	// From here there are three scenarios to handle:
-	// 1. If TTLSecondsUntilExpired is not configured, but the node is expired,
-	//    remove the annotation so another disruption controller can annotate the node.
+	// 1. If TTLSecondsUntilExpired is not configured, remove the expired status condition
 	if provisioner.Spec.TTLSecondsUntilExpired == nil {
 		if hasExpiredCondition {
 			_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineExpired)
@@ -62,7 +61,7 @@ func (e *Expiration) Reconcile(ctx context.Context, provisioner *v1alpha5.Provis
 		expired = functional.IsExpired(node, e.clock, provisioner)
 	}
 
-	// 2. Otherwise, if the node is expired, but doesn't have the status condition, add it.
+	// 2. Otherwise, if the machine is expired, but doesn't have the status condition, add it.
 	if expired && !hasExpiredCondition {
 		machine.StatusConditions().SetCondition(apis.Condition{
 			Type:     v1alpha5.MachineExpired,
@@ -73,12 +72,12 @@ func (e *Expiration) Reconcile(ctx context.Context, provisioner *v1alpha5.Provis
 		logging.FromContext(ctx).Debugf("marking machine as expired")
 		return reconcile.Result{}, nil
 	}
-	// 3. Finally, if the node isn't expired, but has the status condition, remove it.
+	// 3. Finally, if the machine isn't expired, but has the status condition, remove it.
 	if !expired && hasExpiredCondition {
 		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineExpired)
 		logging.FromContext(ctx).Debugf("removing expired status condition from machine")
 	}
-	// If the node isn't expired and doesn't have the status condition, return.
+	// If the machine isn't expired and doesn't have the status condition, return.
 	// Use t.Sub(time.Now()) instead of time.Until() to ensure we're using the injected clock.
 	return reconcile.Result{RequeueAfter: functional.GetExpirationTime(machine, provisioner).Sub(e.clock.Now())}, nil
 }

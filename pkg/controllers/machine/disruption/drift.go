@@ -29,6 +29,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 )
 
+// Drift is a machine sub-controller that adds or removes status conditions on drifted machines
 type Drift struct {
 	cloudProvider cloudprovider.CloudProvider
 }
@@ -39,8 +40,7 @@ func (d *Drift) Reconcile(ctx context.Context, _ *v1alpha5.Provisioner, machine 
 	}
 	hasDriftedCondition := machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).IsTrue()
 	// From here there are three scenarios to handle:
-	// 1. If drift is not enabled but the node is drifted, remove the annotation
-	//    so another disruption controller can annotate the node.
+	// 1. If drift is not enabled but the machine is drifted, remove the status condition
 	if !settings.FromContext(ctx).DriftEnabled {
 		if hasDriftedCondition {
 			_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineDrifted)
@@ -53,11 +53,11 @@ func (d *Drift) Reconcile(ctx context.Context, _ *v1alpha5.Provisioner, machine 
 	if err != nil {
 		return reconcile.Result{}, cloudprovider.IgnoreMachineNotFoundError(fmt.Errorf("getting drift for machine, %w", err))
 	}
-	// 2. Otherwise, if the node isn't drifted, but has the annotation, remove it.
+	// 2. Otherwise, if the machine isn't drifted, but has the annotation, remove it.
 	if !drifted && hasDriftedCondition {
 		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineDrifted)
 		logging.FromContext(ctx).Debugf("removing drifted status condition from machine")
-		// 3. Finally, if the node is drifted, but doesn't have the annotation, add it.
+		// 3. Finally, if the machine is drifted, but doesn't have the annotation, add it.
 	} else if drifted && !hasDriftedCondition {
 		machine.StatusConditions().SetCondition(apis.Condition{
 			Type:     v1alpha5.MachineDrifted,

@@ -30,7 +30,7 @@ import (
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 )
 
-// Emptiness is a node sub-controller that annotates or de-annotates an expired node based on TTLSecondsUntilExpired
+// Emptiness is a machine sub-controller that adds or removes status conditions on empty machines based on TTLSecondsAfterEmpty
 type Emptiness struct {
 	kubeClient client.Client
 	clock      clock.Clock
@@ -40,8 +40,7 @@ type Emptiness struct {
 func (e *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) (reconcile.Result, error) {
 	hasEmptyCondition := machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty).IsTrue()
 	// From here there are three scenarios to handle:
-	// 1. If TTLSecondsAfterEmpty is not configured, but the node is empty,
-	//    remove the annotation so another disruption controller can annotate the node.
+	// 1. If TTLSecondsAfterEmpty is not configured remove the emptiness status condition
 	if provisioner.Spec.TTLSecondsAfterEmpty == nil {
 		if hasEmptyCondition {
 			_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineEmpty)
@@ -73,7 +72,7 @@ func (e *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 	}
 	emptinessTTLTime := emptyAt.Add(time.Duration(ptr.Int64Value(provisioner.Spec.TTLSecondsAfterEmpty)) * time.Second)
 
-	// 2. Otherwise, if the node is after emptiness expiration, but doesn't have the annotation, add it.
+	// 2. Otherwise, if the node is after emptiness expiration, but doesn't have the status condition, add it.
 	if e.clock.Now().After(emptinessTTLTime) && !hasEmptyCondition {
 		machine.StatusConditions().SetCondition(apis.Condition{
 			Type:     v1alpha5.MachineEmpty,
@@ -84,7 +83,7 @@ func (e *Emptiness) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisi
 		logging.FromContext(ctx).Debugf("marking machine as empty")
 		return reconcile.Result{}, nil
 	}
-	// 3. Finally, if the node isn't after emptiness expiration, but has the annotation, remove it.
+	// 3. Finally, if the node isn't after emptiness expiration, but has the status condition, remove it.
 	if !e.clock.Now().After(emptinessTTLTime) && hasEmptyCondition {
 		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineEmpty)
 		logging.FromContext(ctx).Debugf("removing emptiness status condition from node")
