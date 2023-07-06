@@ -16,14 +16,8 @@ package functional
 
 import (
 	"strings"
-	"time"
 
 	"k8s.io/apimachinery/pkg/util/yaml"
-	"k8s.io/utils/clock"
-	"knative.dev/pkg/ptr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 )
 
 type Pair[A, B any] struct {
@@ -79,30 +73,4 @@ func FilterMap[K comparable, V any](m map[K]V, f func(K, V) bool) map[K]V {
 		}
 	}
 	return ret
-}
-
-func GetExpirationTime(obj client.Object, provisioner *v1alpha5.Provisioner) time.Time {
-	if provisioner == nil || provisioner.Spec.TTLSecondsUntilExpired == nil || obj == nil {
-		// If not defined, return some much larger time.
-		return time.Date(5000, 0, 0, 0, 0, 0, 0, time.UTC)
-	}
-	expirationTTL := time.Duration(ptr.Int64Value(provisioner.Spec.TTLSecondsUntilExpired)) * time.Second
-	return obj.GetCreationTimestamp().Add(expirationTTL)
-}
-
-func IsExpired(obj client.Object, clock clock.Clock, provisioner *v1alpha5.Provisioner) bool {
-	return clock.Now().After(GetExpirationTime(obj, provisioner))
-}
-
-func GetEmptinessTTLTime(obj client.Object, provisioner *v1alpha5.Provisioner) time.Time {
-	if provisioner == nil || provisioner.Spec.TTLSecondsAfterEmpty == nil || obj == nil {
-		// If not defined, return some much larger time.
-		return time.Date(5000, 0, 0, 0, 0, 0, 0, time.UTC)
-	}
-	expirationTTL := time.Duration(ptr.Int64Value(provisioner.Spec.TTLSecondsAfterEmpty)) * time.Second
-	return obj.GetCreationTimestamp().Add(expirationTTL)
-}
-
-func IsPastEmptinessTTL(obj client.Object, clock clock.Clock, provisioner *v1alpha5.Provisioner) bool {
-	return clock.Now().After(GetEmptinessTTLTime(obj, provisioner))
 }

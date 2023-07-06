@@ -28,6 +28,7 @@ import (
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
@@ -61,8 +62,41 @@ var _ = Describe("Drift", func() {
 		})
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
 	})
+	It("should ignore drifted nodes if the feature flag is disabled", func() {
+		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
+		ExpectApplied(ctx, env.Client, machine, node, prov)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
+		fakeClock.Step(10 * time.Minute)
+
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		wg.Wait()
+
+		// Expect to not create or delete more machines
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		ExpectExists(ctx, env.Client, machine)
+	})
 	It("should ignore nodes without the drifted status condition", func() {
 		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineDrifted)
+		ExpectApplied(ctx, env.Client, machine, node, prov)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
+		fakeClock.Step(10 * time.Minute)
+
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+		// Expect to not create or delete more machines
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		ExpectExists(ctx, env.Client, machine)
+	})
+	It("should ignore nodes with the drifted status condition set to false", func() {
+		machine.StatusConditions().MarkFalse(v1alpha5.MachineDrifted, "", "")
 		ExpectApplied(ctx, env.Client, machine, node, prov)
 
 		// inform cluster state about nodes and machines

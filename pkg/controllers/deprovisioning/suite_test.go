@@ -1601,7 +1601,7 @@ var _ = Describe("Topology Consideration", func() {
 	})
 })
 
-var _ = Describe("Empty Nodes", func() {
+var _ = Describe("Empty Nodes (Consolidation)", func() {
 	var prov *v1alpha5.Provisioner
 	var machine1, machine2 *v1alpha5.Machine
 	var node1, node2 *v1.Node
@@ -1686,38 +1686,6 @@ var _ = Describe("Empty Nodes", func() {
 		ExpectNotFound(ctx, env.Client, machine1)
 		ExpectNotFound(ctx, env.Client, machine2)
 	})
-	It("can delete empty nodes with TTLSecondsAfterEmpty with the emptiness timestamp", func() {
-		prov = test.Provisioner(test.ProvisionerOptions{TTLSecondsAfterEmpty: ptr.Int64(10)})
-
-		// Update the machine and node to be "owned" by the new provisioner and the node
-		// to be marked as empty
-		machine1.Labels = lo.Assign(machine1.Labels, map[string]string{
-			v1alpha5.ProvisionerNameLabelKey: prov.Name,
-		})
-		node1.Labels = lo.Assign(node1.Labels, map[string]string{
-			v1alpha5.ProvisionerNameLabelKey: prov.Name,
-		})
-		node1.Annotations = lo.Assign(node1.Annotations, map[string]string{
-			v1alpha5.EmptinessTimestampAnnotationKey: fakeClock.Now().Format(time.RFC3339),
-		})
-		ExpectApplied(ctx, env.Client, prov, machine1, node1)
-
-		// inform cluster state about nodes and machines
-		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
-
-		fakeClock.Step(10 * time.Minute)
-		wg := sync.WaitGroup{}
-		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
-
-		// Cascade any deletion of the machine to the node
-		ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
-
-		// we should delete the empty node
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		ExpectNotFound(ctx, env.Client, machine1, node1)
-	})
 	It("considers pending pods when consolidating", func() {
 		machine1, node1 = test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1772,6 +1740,84 @@ var _ = Describe("Empty Nodes", func() {
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 		ExpectExists(ctx, env.Client, machine1)
+	})
+})
+
+var _ = Describe("Empty Nodes (TTLSecondsAfterEmpty)", func() {
+	var prov *v1alpha5.Provisioner
+	var machine *v1alpha5.Machine
+	var node *v1.Node
+
+	BeforeEach(func() {
+		prov = test.Provisioner(test.ProvisionerOptions{
+			TTLSecondsAfterEmpty: ptr.Int64(30),
+		})
+		machine, node = test.MachineAndNode(v1alpha5.Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.RandomProviderID(),
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
+	})
+	It("can delete empty nodes with TTLSecondsAfterEmpty", func() {
+		ExpectApplied(ctx, env.Client, prov, machine, node)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
+		fakeClock.Step(10 * time.Minute)
+		wg := sync.WaitGroup{}
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+
+		// we should delete the empty node
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+		ExpectNotFound(ctx, env.Client, machine, node)
+	})
+	It("should ignore TTLSecondsAfterEmpty nodes without the empty status condition", func() {
+		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineEmpty)
+		ExpectApplied(ctx, env.Client, machine, node, prov)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+		// Expect to not create or delete more machines
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		ExpectExists(ctx, env.Client, machine)
+	})
+	It("should ignore TTLSecondsAfterEmpty nodes with the empty status condition set to false", func() {
+		machine.StatusConditions().MarkFalse(v1alpha5.MachineEmpty, "", "")
+		ExpectApplied(ctx, env.Client, machine, node, prov)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
+		fakeClock.Step(10 * time.Minute)
+
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+		// Expect to not create or delete more machines
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		ExpectExists(ctx, env.Client, machine)
 	})
 })
 

@@ -17,24 +17,25 @@ package disruption
 import (
 	"context"
 
-	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	"github.com/aws/karpenter-core/pkg/controllers/state"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 	"github.com/aws/karpenter-core/pkg/utils/result"
@@ -46,10 +47,8 @@ type machineReconciler interface {
 
 var _ corecontroller.TypedController[*v1alpha5.Machine] = (*Controller)(nil)
 
-// Controller is a disruption controller that adds StatusConditions to Machines when they meet the
-// disruption criteria for that disruption type
-// e.g. When the Machine has surpassed its owning provisioner's expirationTTL, then it is marked as "VoluntarilyDisrupted"
-// in the StatusConditions with "Expired" as the reason
+// Controller is a disruption controller that adds StatusConditions to Machines when they meet certain disruption conditions
+// e.g. When the Machine has surpassed its owning provisioner's expirationTTL, then it is marked as "Expired" in the StatusConditions
 type Controller struct {
 	kubeClient client.Client
 
@@ -58,13 +57,13 @@ type Controller struct {
 	emptiness  *Emptiness
 }
 
-// NewController constructs a nodeController instance
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
+// NewController constructs a machine disruption controller
+func NewController(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
 	return corecontroller.Typed[*v1alpha5.Machine](kubeClient, &Controller{
 		kubeClient: kubeClient,
 		drift:      &Drift{cloudProvider: cloudProvider},
 		expiration: &Expiration{kubeClient: kubeClient, clock: clk},
-		emptiness:  &Emptiness{kubeClient: kubeClient, clock: clk},
+		emptiness:  &Emptiness{kubeClient: kubeClient, cluster: cluster, clock: clk},
 	})
 }
 
@@ -72,7 +71,7 @@ func (c *Controller) Name() string {
 	return "machine.disruption"
 }
 
-// Reconcile executes a reallocation control loop for the resource
+// Reconcile executes a control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
 	stored := machine.DeepCopy()
 	if _, ok := machine.Labels[v1alpha5.ProvisionerNameLabelKey]; !ok {
@@ -112,25 +111,41 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontroller.Builder {
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
-		For(&v1alpha5.Machine{}).
+		For(&v1alpha5.Machine{}, builder.WithPredicates(
+			predicate.Or(
+				predicate.GenerationChangedPredicate{},
+				predicate.Funcs{
+					UpdateFunc: func(e event.UpdateEvent) bool {
+						oldMachine := e.ObjectOld.(*v1alpha5.Machine)
+						newMachine := e.ObjectNew.(*v1alpha5.Machine)
+
+						// One of the status conditions that affects disruption has changed
+						// which means that we should re-consider this for disruption
+						for _, cond := range v1alpha5.LivingConditions {
+							if !equality.Semantic.DeepEqual(
+								oldMachine.StatusConditions().GetCondition(cond),
+								newMachine.StatusConditions().GetCondition(cond),
+							) {
+								return true
+							}
+						}
+						return false
+					},
+				},
+			),
+		)).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Watches(
-			// Reconcile all machines related to a provisioner when it changes.
 			&source.Kind{Type: &v1alpha5.Provisioner{}},
-			handler.EnqueueRequestsFromMapFunc(func(o client.Object) (requests []reconcile.Request) {
-				machineList := &v1alpha5.MachineList{}
-				if err := c.kubeClient.List(ctx, machineList, client.MatchingLabels(map[string]string{v1alpha5.ProvisionerNameLabelKey: o.GetName()})); err != nil {
-					logging.FromContext(ctx).Errorf("Failed to list machines when mapping watch events, %s", err)
-					return requests
-				}
-				return lo.Map(machineList.Items, func(machine v1alpha5.Machine, _ int) reconcile.Request {
-					return reconcile.Request{NamespacedName: types.NamespacedName{Name: machine.Name}}
-				})
-			}),
+			machineutil.ProvisionerEventHandler(ctx, c.kubeClient),
 		).
 		Watches(
 			&source.Kind{Type: &v1.Node{}},
 			machineutil.NodeEventHandler(ctx, c.kubeClient),
+		).
+		Watches(
+			&source.Kind{Type: &v1.Pod{}},
+			machineutil.PodEventHandler(ctx, c.kubeClient),
 		),
 	)
 }

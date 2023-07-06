@@ -32,7 +32,6 @@ import (
 	metricspod "github.com/aws/karpenter-core/pkg/controllers/metrics/pod"
 	metricsprovisioner "github.com/aws/karpenter-core/pkg/controllers/metrics/provisioner"
 	metricsstate "github.com/aws/karpenter-core/pkg/controllers/metrics/state"
-	"github.com/aws/karpenter-core/pkg/controllers/node"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
@@ -65,7 +64,6 @@ func NewControllers(
 		informer.NewPodController(kubeClient, cluster),
 		informer.NewProvisionerController(kubeClient, cluster),
 		informer.NewMachineController(kubeClient, cluster),
-		node.NewController(clock, kubeClient, cluster),
 		termination.NewController(kubeClient, cloudProvider, terminator, recorder),
 		metricspod.NewController(kubeClient),
 		metricsprovisioner.NewController(kubeClient),
@@ -74,6 +72,6 @@ func NewControllers(
 		machinelifecycle.NewController(clock, kubeClient, cloudProvider),
 		machinegarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		machinetermination.NewController(kubeClient, cloudProvider),
-		machinedisruption.NewController(clock, kubeClient, cloudProvider),
+		machinedisruption.NewController(clock, kubeClient, cluster, cloudProvider),
 	}
 }

@@ -39,11 +39,13 @@ type MachineStatus struct {
 }
 
 func (in *Machine) StatusConditions() apis.ConditionManager {
-	return apis.NewLivingConditionSet(
-		MachineLaunched,
-		MachineRegistered,
-		MachineInitialized,
-	).Manage(in)
+	return apis.NewLivingConditionSet(LivingConditions...).Manage(in)
+}
+
+var LivingConditions = []apis.ConditionType{
+	MachineLaunched,
+	MachineRegistered,
+	MachineInitialized,
 }
 
 var (

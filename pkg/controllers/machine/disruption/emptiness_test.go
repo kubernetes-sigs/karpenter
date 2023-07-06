@@ -20,6 +20,7 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -37,64 +38,70 @@ var _ = Describe("Emptiness", func() {
 	var machine *v1alpha5.Machine
 	var node *v1.Node
 	BeforeEach(func() {
-		provisioner = test.Provisioner()
+		provisioner = test.Provisioner(test.ProvisionerOptions{
+			TTLSecondsAfterEmpty: ptr.Int64(30),
+		})
 		machine, node = test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name},
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1.LabelInstanceTypeStable:       "default-instance-type", // need the instance type for the cluster state update
+				},
 			},
 		})
 	})
 
 	It("should mark machines as empty", func() {
-		provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(30)
-		node.Annotations = lo.Assign(node.Annotations, map[string]string{
-			v1alpha5.EmptinessTimestampAnnotationKey: fakeClock.Now().Format(time.RFC3339),
-		})
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
+		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
 
-		// step forward to make the node expired
-		fakeClock.Step(60 * time.Second)
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty).IsTrue()).To(BeTrue())
 	})
 	It("should remove the status condition from the machine when emptiness is disabled", func() {
+		provisioner.Spec.TTLSecondsAfterEmpty = nil
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
+		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
 
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty)).To(BeNil())
 	})
-	It("should remove the status conditions from the machine when the node doesn't exist", func() {
+	It("should remove the status condition from the machine when the machine initialization condition is false", func() {
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
+		ExpectApplied(ctx, env.Client, provisioner, machine, node)
+		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
+		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "", "")
+		ExpectApplied(ctx, env.Client, machine)
+
+		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
+
+		machine = ExpectExists(ctx, env.Client, machine)
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty)).To(BeNil())
+	})
+	It("should remove the status condition from the machine when the machine initialization condition doesn't exist", func() {
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
+		ExpectApplied(ctx, env.Client, provisioner, machine, node)
+		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
+		machine.Status.Conditions = lo.Reject(machine.Status.Conditions, func(s apis.Condition, _ int) bool {
+			return s.Type == v1alpha5.MachineInitialized
+		})
+		ExpectApplied(ctx, env.Client, machine)
+
+		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
+
+		machine = ExpectExists(ctx, env.Client, machine)
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty)).To(BeNil())
+	})
+	It("should remove the status condition from the machine when the node doesn't exist", func() {
 		provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(30)
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
 		ExpectApplied(ctx, env.Client, provisioner, machine)
-
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
-
-		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty)).To(BeNil())
-	})
-	It("should remove the status conditions from the machine when the node doesn't have the emptiness timestamp", func() {
-		provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(30)
-		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
-		ExpectApplied(ctx, env.Client, provisioner, machine, node)
-
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
-
-		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty)).To(BeNil())
-	})
-	It("should remove the status conditions from the machine when the node timestamp can't be parsed", func() {
-		provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(30)
-		node.Annotations = lo.Assign(node.Annotations, map[string]string{
-			v1alpha5.EmptinessTimestampAnnotationKey: "bad-value",
-		})
-		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
-		ExpectApplied(ctx, env.Client, provisioner, machine, node)
+		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
 
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
@@ -102,28 +109,33 @@ var _ = Describe("Emptiness", func() {
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty)).To(BeNil())
 	})
 	It("should remove the status condition from non-empty machines", func() {
-		provisioner.Spec.TTLSecondsUntilExpired = ptr.Int64(200)
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
-		node.Annotations = lo.Assign(node.Annotations, map[string]string{
-			v1alpha5.EmptinessTimestampAnnotationKey: fakeClock.Now().Add(time.Second * 100).Format(time.RFC3339),
-		})
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
+		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
+
+		ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{
+			NodeName:   node.Name,
+			Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}},
+		}))
 
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty)).To(BeNil())
 	})
-	It("should return the requeue interval for the time between now and when the machine emptiness TTL expires", func() {
-		provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(200)
-		node.Annotations = lo.Assign(node.Annotations, map[string]string{
-			v1alpha5.EmptinessTimestampAnnotationKey: fakeClock.Now().Format(time.RFC3339),
-		})
+	It("should remove the status condition when the cluster state node is nominated", func() {
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
+		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
 
-		fakeClock.Step(time.Second * 100)
+		// Add the node to the cluster state and nominate it in the internal cluster state
+		Expect(cluster.UpdateNode(ctx, node)).To(Succeed())
+		cluster.NominateNodeForPod(ctx, node.Name)
 
 		result := ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
-		Expect(result.RequeueAfter).To(BeNumerically("~", time.Second*100, time.Second))
+		Expect(result.RequeueAfter).To(Equal(time.Second * 30))
+
+		machine = ExpectExists(ctx, env.Client, machine)
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty)).To(BeNil())
 	})
 })

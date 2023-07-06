@@ -35,6 +35,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/machine/disruption"
+	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
@@ -46,6 +47,7 @@ var ctx context.Context
 var disruptionController controller.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
+var cluster *state.Cluster
 var cp *fake.CloudProvider
 
 func TestAPIs(t *testing.T) {
@@ -63,7 +65,8 @@ var _ = BeforeSuite(func() {
 	}))
 	ctx = settings.ToContext(ctx, test.Settings())
 	cp = fake.NewCloudProvider()
-	disruptionController = disruption.NewController(fakeClock, env.Client, cp)
+	cluster = state.NewCluster(fakeClock, env.Client, cp)
+	disruptionController = disruption.NewController(fakeClock, env.Client, cluster, cp)
 })
 
 var _ = AfterSuite(func() {
@@ -77,6 +80,7 @@ var _ = BeforeEach(func() {
 var _ = AfterEach(func() {
 	fakeClock.SetTime(time.Now())
 	cp.Reset()
+	cluster.Reset()
 	ExpectCleanedUp(ctx, env.Client)
 })
 
@@ -92,8 +96,6 @@ var _ = Describe("Disruption", func() {
 				Labels: map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name},
 			},
 		})
-		// Machines are required to be launched before they can be evaluated for drift
-		machine.StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
 	})
 	It("should set multiple disruption conditions simultaneously", func() {
 		cp.Drifted = true
@@ -103,6 +105,7 @@ var _ = Describe("Disruption", func() {
 			v1alpha5.EmptinessTimestampAnnotationKey: fakeClock.Now().Format(time.RFC3339),
 		})
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
+		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
 
 		// step forward to make the node expired and empty
 		fakeClock.Step(60 * time.Second)
@@ -119,6 +122,7 @@ var _ = Describe("Disruption", func() {
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineExpired)
 
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
+		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
 
 		// Drift, Expiration, and Emptiness are disabled through configuration
 		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))

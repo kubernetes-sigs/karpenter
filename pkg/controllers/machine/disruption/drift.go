@@ -35,36 +35,44 @@ type Drift struct {
 }
 
 func (d *Drift) Reconcile(ctx context.Context, _ *v1alpha5.Provisioner, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	if !machine.StatusConditions().GetCondition(v1alpha5.MachineLaunched).IsTrue() {
-		return reconcile.Result{}, nil
-	}
-	hasDriftedCondition := machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).IsTrue()
+	hasDriftedCondition := machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted) != nil
+
 	// From here there are three scenarios to handle:
 	// 1. If drift is not enabled but the machine is drifted, remove the status condition
 	if !settings.FromContext(ctx).DriftEnabled {
+		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineDrifted)
 		if hasDriftedCondition {
-			_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineDrifted)
 			logging.FromContext(ctx).Debugf("removing drift status condition from machine as drift has been disabled")
 		}
 		return reconcile.Result{}, nil
 	}
-
+	// 2. If Machine is not launched, remove the drift status condition
+	if launchCond := machine.StatusConditions().GetCondition(v1alpha5.MachineLaunched); launchCond == nil || launchCond.IsFalse() {
+		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineDrifted)
+		if hasDriftedCondition {
+			logging.FromContext(ctx).Debugf("removing drift status condition from machine as machine isn't launched")
+		}
+		return reconcile.Result{}, nil
+	}
 	drifted, err := d.cloudProvider.IsMachineDrifted(ctx, machine)
 	if err != nil {
 		return reconcile.Result{}, cloudprovider.IgnoreMachineNotFoundError(fmt.Errorf("getting drift for machine, %w", err))
 	}
-	// 2. Otherwise, if the machine isn't drifted, but has the annotation, remove it.
-	if !drifted && hasDriftedCondition {
+	// 3. Otherwise, if the machine isn't drifted, but has the status condition, remove it.
+	if !drifted {
 		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineDrifted)
-		logging.FromContext(ctx).Debugf("removing drifted status condition from machine")
-		// 3. Finally, if the machine is drifted, but doesn't have the annotation, add it.
-	} else if drifted && !hasDriftedCondition {
-		machine.StatusConditions().SetCondition(apis.Condition{
-			Type:     v1alpha5.MachineDrifted,
-			Status:   v1.ConditionTrue,
-			Reason:   "NodeTemplateDrifted",
-			Severity: apis.ConditionSeverityWarning,
-		})
+		if hasDriftedCondition {
+			logging.FromContext(ctx).Debugf("removing drifted status condition from machine")
+		}
+		return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+	}
+	// 4. Finally, if the machine is drifted, but doesn't have status condition, add it.
+	machine.StatusConditions().SetCondition(apis.Condition{
+		Type:     v1alpha5.MachineDrifted,
+		Status:   v1.ConditionTrue,
+		Severity: apis.ConditionSeverityWarning,
+	})
+	if !hasDriftedCondition {
 		logging.FromContext(ctx).Debugf("marking machine as drifted")
 	}
 	// Requeue after 5 minutes for the cache TTL
