@@ -153,10 +153,12 @@ func (o *Operator) WithControllers(ctx context.Context, controllers ...corecontr
 	return o
 }
 
-func (o *Operator) WithWebhooks(webhooks ...knativeinjection.ControllerConstructor) *Operator {
-	o.webhooks = append(o.webhooks, webhooks...)
-	lo.Must0(o.Manager.AddReadyzCheck("webhooks", knativeChecker("readiness")))
-	lo.Must0(o.Manager.AddHealthzCheck("webhooks", knativeChecker("health")))
+func (o *Operator) WithWebhooks(ctx context.Context, webhooks ...knativeinjection.ControllerConstructor) *Operator {
+	if !injection.GetOptions(ctx).DisableWebhook {
+		o.webhooks = append(o.webhooks, webhooks...)
+		lo.Must0(o.Manager.AddReadyzCheck("webhooks", knativeChecker("readiness")))
+		lo.Must0(o.Manager.AddHealthzCheck("webhooks", knativeChecker("health")))
+	}
 	return o
 }
 
@@ -167,7 +169,9 @@ func (o *Operator) Start(ctx context.Context) {
 		defer wg.Done()
 		lo.Must0(o.Manager.Start(ctx))
 	}()
-	if !injection.GetOptions(ctx).DisableWebhook {
+	if injection.GetOptions(ctx).DisableWebhook {
+		logging.FromContext(ctx).Infof("webhook disabled")
+	} else {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -179,7 +183,7 @@ func (o *Operator) Start(ctx context.Context) {
 
 func knativeChecker(path string) healthz.Checker {
 	return func(req *http.Request) (err error) {
-		res, err := http.Get(fmt.Sprintf("http://:%d/%s", knativeinjection.HealthCheckDefaultPort, path))
+		res, err := http.Get(fmt.Sprintf("http://localhost:%d/%s", knativeinjection.HealthCheckDefaultPort, path))
 		if err != nil {
 			return err
 		}
