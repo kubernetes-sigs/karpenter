@@ -16,6 +16,7 @@ package deprovisioning_test
 
 import (
 	"sync"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -46,9 +47,6 @@ var _ = Describe("Expiration", func() {
 		})
 		machine, node = test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionExpiredAnnotationValue,
-				},
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
@@ -64,24 +62,10 @@ var _ = Describe("Expiration", func() {
 				},
 			},
 		})
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineExpired)
 	})
-	It("should ignore nodes with the disruption annotation but different value", func() {
-		node.Annotations = lo.Assign(node.Annotations, map[string]string{
-			v1alpha5.VoluntaryDisruptionAnnotationKey: "wrong-value",
-		})
-		ExpectApplied(ctx, env.Client, machine, node, prov)
-
-		// inform cluster state about nodes and machines
-		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
-
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
-
-		// Expect to not create or delete more machines
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		ExpectExists(ctx, env.Client, node)
-	})
-	It("should ignore nodes without the disruption annotation", func() {
-		delete(node.Annotations, v1alpha5.VoluntaryDisruptionAnnotationKey)
+	It("should ignore nodes without the expired status condition", func() {
+		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineExpired)
 		ExpectApplied(ctx, env.Client, machine, node, prov)
 
 		// inform cluster state about nodes and machines
@@ -92,6 +76,21 @@ var _ = Describe("Expiration", func() {
 		// Expect to not create or delete more machines
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		ExpectExists(ctx, env.Client, machine)
+	})
+	It("should ignore nodes with the expired status condition set to false", func() {
+		machine.StatusConditions().MarkFalse(v1alpha5.MachineExpired, "", "")
+		ExpectApplied(ctx, env.Client, machine, node, prov)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
+		fakeClock.Step(10 * time.Minute)
+
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+		// Expect to not create or delete more machines
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		ExpectExists(ctx, env.Client, machine)
 	})
 	It("can delete expired nodes", func() {
@@ -116,9 +115,6 @@ var _ = Describe("Expiration", func() {
 	It("should deprovision all empty expired nodes in parallel", func() {
 		machines, nodes := test.MachinesAndNodes(100, v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionExpiredAnnotationValue,
-				},
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
@@ -134,6 +130,7 @@ var _ = Describe("Expiration", func() {
 			},
 		})
 		for _, m := range machines {
+			m.StatusConditions().MarkTrue(v1alpha5.MachineExpired)
 			ExpectApplied(ctx, env.Client, m)
 		}
 		for _, n := range nodes {
@@ -186,9 +183,6 @@ var _ = Describe("Expiration", func() {
 
 		machineToExpire, nodeToExpire := test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionExpiredAnnotationValue,
-				},
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: expireProv.Name,
 					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
@@ -201,6 +195,8 @@ var _ = Describe("Expiration", func() {
 				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
 			},
 		})
+		machineToExpire.StatusConditions().MarkTrue(v1alpha5.MachineExpired)
+
 		machineNotExpire, nodeNotExpire := test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -388,23 +384,19 @@ var _ = Describe("Expiration", func() {
 				Requests: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("2")},
 			},
 		})
-		machine, node := test.MachineAndNode(v1alpha5.Machine{
-			ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionExpiredAnnotationValue,
-				},
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       currentInstance.Name,
-					v1alpha5.LabelCapacityType:       currentInstance.Offerings[0].CapacityType,
-					v1.LabelTopologyZone:             currentInstance.Offerings[0].Zone,
-				},
-			},
-			Status: v1alpha5.MachineStatus{
-				ProviderID:  test.RandomProviderID(),
-				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("8")},
-			},
+		machine.Labels = lo.Assign(machine.Labels, map[string]string{
+			v1.LabelInstanceTypeStable: currentInstance.Name,
+			v1alpha5.LabelCapacityType: currentInstance.Offerings[0].CapacityType,
+			v1.LabelTopologyZone:       currentInstance.Offerings[0].Zone,
 		})
+		machine.Status.Allocatable = map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("8")}
+		node.Labels = lo.Assign(node.Labels, map[string]string{
+			v1.LabelInstanceTypeStable: currentInstance.Name,
+			v1alpha5.LabelCapacityType: currentInstance.Offerings[0].CapacityType,
+			v1.LabelTopologyZone:       currentInstance.Offerings[0].Zone,
+		})
+		node.Status.Allocatable = map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("8")}
+
 		ExpectApplied(ctx, env.Client, rs, machine, node, prov, pods[0], pods[1], pods[2])
 
 		// bind pods to node

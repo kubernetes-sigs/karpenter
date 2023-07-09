@@ -35,7 +35,7 @@ func NewNodeShape(provider cloudprovider.CloudProvider) Check {
 	}
 }
 
-func (n *NodeShape) Check(ctx context.Context, node *v1.Node, machine *v1alpha5.Machine) ([]Issue, error) {
+func (n *NodeShape) Check(_ context.Context, node *v1.Node, machine *v1alpha5.Machine) ([]Issue, error) {
 	// ignore machines that are deleting
 	if !machine.DeletionTimestamp.IsZero() {
 		return nil, nil

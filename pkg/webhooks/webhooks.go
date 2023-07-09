@@ -38,7 +38,7 @@ func NewWebhooks() []knativeinjection.ControllerConstructor {
 	}
 }
 
-func NewCRDValidationWebhook(ctx context.Context, w configmap.Watcher) *controller.Impl {
+func NewCRDValidationWebhook(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 	return validation.NewAdmissionController(ctx,
 		"validation.webhook.karpenter.sh",
 		"/validate/karpenter.sh",
@@ -48,7 +48,7 @@ func NewCRDValidationWebhook(ctx context.Context, w configmap.Watcher) *controll
 	)
 }
 
-func NewConfigValidationWebhook(ctx context.Context, cmw configmap.Watcher) *controller.Impl {
+func NewConfigValidationWebhook(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 	return configmaps.NewAdmissionController(ctx,
 		"validation.webhook.config.karpenter.sh",
 		"/validate/config.karpenter.sh",

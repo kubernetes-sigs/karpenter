@@ -18,10 +18,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/clock"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -51,6 +54,29 @@ func EventHandler(ctx context.Context, c client.Client) handler.EventHandler {
 	})
 }
 
+// PodEventHandler is a watcher on v1.Pods that maps Pods to Machine based on the node names
+// and enqueues reconcile.Requests for the Machines
+func PodEventHandler(ctx context.Context, c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(o client.Object) (requests []reconcile.Request) {
+		if name := o.(*v1.Pod).Spec.NodeName; name != "" {
+			node := &v1.Node{}
+			if err := c.Get(ctx, types.NamespacedName{Name: name}, node); err != nil {
+				return []reconcile.Request{}
+			}
+			machineList := &v1alpha5.MachineList{}
+			if err := c.List(ctx, machineList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
+				return []reconcile.Request{}
+			}
+			return lo.Map(machineList.Items, func(m v1alpha5.Machine, _ int) reconcile.Request {
+				return reconcile.Request{
+					NamespacedName: client.ObjectKeyFromObject(&m),
+				}
+			})
+		}
+		return requests
+	})
+}
+
 // NodeEventHandler is a watcher on v1.Node that maps Nodes to Machines based on provider ids
 // and enqueues reconcile.Requests for the Machines
 func NodeEventHandler(ctx context.Context, c client.Client) handler.EventHandler {
@@ -64,6 +90,20 @@ func NodeEventHandler(ctx context.Context, c client.Client) handler.EventHandler
 			return reconcile.Request{
 				NamespacedName: client.ObjectKeyFromObject(&m),
 			}
+		})
+	})
+}
+
+// ProvisionerEventHandler is a watcher on v1alpha5.Machine that maps Provisioner to Machines based
+// on the v1alpha5.ProvsionerNameLabelKey and enqueues reconcile.Requests for the Machine
+func ProvisionerEventHandler(ctx context.Context, c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(o client.Object) (requests []reconcile.Request) {
+		machineList := &v1alpha5.MachineList{}
+		if err := c.List(ctx, machineList, client.MatchingLabels(map[string]string{v1alpha5.ProvisionerNameLabelKey: o.GetName()})); err != nil {
+			return requests
+		}
+		return lo.Map(machineList.Items, func(machine v1alpha5.Machine, _ int) reconcile.Request {
+			return reconcile.Request{NamespacedName: types.NamespacedName{Name: machine.Name}}
 		})
 	})
 }
@@ -204,4 +244,23 @@ func NewFromNode(node *v1.Node) *v1alpha5.Machine {
 	m.StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
 	m.StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
 	return m
+}
+
+func IsPastEmptinessTTL(machine *v1alpha5.Machine, clock clock.Clock, provisioner *v1alpha5.Provisioner) bool {
+	return machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty) != nil &&
+		machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty).IsTrue() &&
+		!clock.Now().Before(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty).LastTransitionTime.Inner.Add(time.Duration(lo.FromPtr(provisioner.Spec.TTLSecondsAfterEmpty))*time.Second))
+}
+
+func IsExpired(obj client.Object, clock clock.Clock, provisioner *v1alpha5.Provisioner) bool {
+	return clock.Now().After(GetExpirationTime(obj, provisioner))
+}
+
+func GetExpirationTime(obj client.Object, provisioner *v1alpha5.Provisioner) time.Time {
+	if provisioner == nil || provisioner.Spec.TTLSecondsUntilExpired == nil || obj == nil {
+		// If not defined, return some much larger time.
+		return time.Date(5000, 0, 0, 0, 0, 0, 0, time.UTC)
+	}
+	expirationTTL := time.Duration(ptr.Int64Value(provisioner.Spec.TTLSecondsUntilExpired)) * time.Second
+	return obj.GetCreationTimestamp().Add(expirationTTL)
 }

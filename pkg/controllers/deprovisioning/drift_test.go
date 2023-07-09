@@ -45,9 +45,6 @@ var _ = Describe("Drift", func() {
 		prov = test.Provisioner()
 		machine, node = test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
-				},
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
@@ -63,6 +60,7 @@ var _ = Describe("Drift", func() {
 				},
 			},
 		})
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
 	})
 	It("should ignore drifted nodes if the feature flag is disabled", func() {
 		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
@@ -82,10 +80,8 @@ var _ = Describe("Drift", func() {
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		ExpectExists(ctx, env.Client, machine)
 	})
-	It("should ignore nodes with the disrupted annotation key, but not the drifted value", func() {
-		node.Annotations = lo.Assign(node.Annotations, map[string]string{
-			v1alpha5.VoluntaryDisruptionAnnotationKey: "wrong-value",
-		})
+	It("should ignore nodes without the drifted status condition", func() {
+		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineDrifted)
 		ExpectApplied(ctx, env.Client, machine, node, prov)
 
 		// inform cluster state about nodes and machines
@@ -93,17 +89,14 @@ var _ = Describe("Drift", func() {
 
 		fakeClock.Step(10 * time.Minute)
 
-		var wg sync.WaitGroup
-		ExpectTriggerVerifyAction(&wg)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
-		wg.Wait()
 
 		// Expect to not create or delete more machines
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		ExpectExists(ctx, env.Client, machine)
 	})
-	It("should ignore nodes without the disrupted annotation key", func() {
-		delete(node.Annotations, v1alpha5.VoluntaryDisruptionAnnotationKey)
+	It("should ignore nodes with the drifted status condition set to false", func() {
+		machine.StatusConditions().MarkFalse(v1alpha5.MachineDrifted, "", "")
 		ExpectApplied(ctx, env.Client, machine, node, prov)
 
 		// inform cluster state about nodes and machines
@@ -118,9 +111,6 @@ var _ = Describe("Drift", func() {
 		ExpectExists(ctx, env.Client, machine)
 	})
 	It("can delete drifted nodes", func() {
-		node.Annotations = lo.Assign(node.Annotations, map[string]string{
-			v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
-		})
 		ExpectApplied(ctx, env.Client, machine, node, prov)
 
 		// inform cluster state about nodes and machines
@@ -144,9 +134,6 @@ var _ = Describe("Drift", func() {
 	It("should deprovision all empty drifted nodes in parallel", func() {
 		machines, nodes := test.MachinesAndNodes(100, v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
-				},
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
@@ -162,6 +149,7 @@ var _ = Describe("Drift", func() {
 			},
 		})
 		for _, m := range machines {
+			m.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
 			ExpectApplied(ctx, env.Client, m)
 		}
 		for _, n := range nodes {
@@ -206,9 +194,6 @@ var _ = Describe("Drift", func() {
 					},
 				}}})
 
-		node.Annotations = lo.Assign(node.Annotations, map[string]string{
-			v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
-		})
 		ExpectApplied(ctx, env.Client, rs, pod, machine, node, prov)
 
 		// bind the pods to the node
@@ -294,23 +279,19 @@ var _ = Describe("Drift", func() {
 			},
 		})
 
-		machine, node = test.MachineAndNode(v1alpha5.Machine{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       currentInstance.Name,
-					v1alpha5.LabelCapacityType:       currentInstance.Offerings[0].CapacityType,
-					v1.LabelTopologyZone:             currentInstance.Offerings[0].Zone,
-				},
-			},
-			Status: v1alpha5.MachineStatus{
-				ProviderID:  test.RandomProviderID(),
-				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("8")},
-			},
+		machine.Labels = lo.Assign(machine.Labels, map[string]string{
+			v1.LabelInstanceTypeStable: currentInstance.Name,
+			v1alpha5.LabelCapacityType: currentInstance.Offerings[0].CapacityType,
+			v1.LabelTopologyZone:       currentInstance.Offerings[0].Zone,
 		})
-		node.Annotations = lo.Assign(node.Annotations, map[string]string{
-			v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionDriftedAnnotationValue,
+		machine.Status.Allocatable = map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("8")}
+		node.Labels = lo.Assign(node.Labels, map[string]string{
+			v1.LabelInstanceTypeStable: currentInstance.Name,
+			v1alpha5.LabelCapacityType: currentInstance.Offerings[0].CapacityType,
+			v1.LabelTopologyZone:       currentInstance.Offerings[0].Zone,
 		})
+		node.Status.Allocatable = map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("8")}
+
 		ExpectApplied(ctx, env.Client, rs, machine, node, prov, pods[0], pods[1], pods[2])
 
 		// bind the pods to the node
@@ -360,13 +341,14 @@ var _ = Describe("Drift", func() {
 					},
 				},
 			},
+			// Make each pod request only fit on a single node
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("30")},
+			},
 		})
 
 		machine2, node2 := test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{
-					v1alpha5.VoluntaryDisruptionAnnotationKey: v1alpha5.VoluntaryDisruptionExpiredAnnotationValue,
-				},
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
 					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
@@ -379,6 +361,7 @@ var _ = Describe("Drift", func() {
 				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
 			},
 		})
+		machine2.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
 
 		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], machine, node, machine2, node2, prov)
 
