@@ -156,8 +156,8 @@ func (o *Operator) WithControllers(ctx context.Context, controllers ...corecontr
 func (o *Operator) WithWebhooks(ctx context.Context, webhooks ...knativeinjection.ControllerConstructor) *Operator {
 	if !injection.GetOptions(ctx).DisableWebhook {
 		o.webhooks = append(o.webhooks, webhooks...)
-		lo.Must0(o.Manager.AddReadyzCheck("webhooks", knativeChecker("readiness")))
-		lo.Must0(o.Manager.AddHealthzCheck("webhooks", knativeChecker("health")))
+		lo.Must0(o.Manager.AddReadyzCheck("webhooks", webhookChecker(ctx)))
+		lo.Must0(o.Manager.AddHealthzCheck("webhooks", webhookChecker(ctx)))
 	}
 	return o
 }
@@ -175,20 +175,25 @@ func (o *Operator) Start(ctx context.Context) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			sharedmain.MainWithConfig(ctx, "webhook", o.GetConfig(), o.webhooks...)
+			sharedmain.MainWithConfig(sharedmain.WithHealthProbesDisabled(ctx), "webhook", o.GetConfig(), o.webhooks...)
 		}()
 	}
 	wg.Wait()
 }
 
-func knativeChecker(path string) healthz.Checker {
+func webhookChecker(ctx context.Context) healthz.Checker {
+	// TODO: Add knative health check port for webhooks when health port can be configured
+	// Issue: https://github.com/knative/pkg/issues/2765
 	return func(req *http.Request) (err error) {
-		res, err := http.Get(fmt.Sprintf("http://localhost:%d/%s", knativeinjection.HealthCheckDefaultPort, path))
+		res, err := http.Get(fmt.Sprintf("http://localhost:%d", injection.GetOptions(ctx).WebhookPort))
+		// If the webhook connection errors out, liveness/readiness should fail
 		if err != nil {
 			return err
 		}
-		if res.StatusCode != http.StatusOK {
-			return fmt.Errorf("%s probe failed, %s", path, lo.Must(io.ReadAll(res.Body)))
+		// If there is a server-side error or path not found,
+		// consider liveness to have failed
+		if res.StatusCode >= 500 || res.StatusCode == 404 {
+			return fmt.Errorf("webhook probe failed, %s", lo.Must(io.ReadAll(res.Body)))
 		}
 		return nil
 	}
