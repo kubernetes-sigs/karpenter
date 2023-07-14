@@ -41,7 +41,9 @@ type Registration struct {
 
 func (r *Registration) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
 	if machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
-		return reconcile.Result{}, nil
+		// TODO @joinnis: Remove the back-propagation of this label onto the Node once all Nodes are guaranteed to have this label
+		// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
+		return reconcile.Result{}, r.backPropagateRegistrationLabel(ctx, machine)
 	}
 	if !machine.StatusConditions().GetCondition(v1alpha5.MachineLaunched).IsTrue() {
 		machine.StatusConditions().MarkFalse(v1alpha5.MachineRegistered, "MachineNotLaunched", "Machine is not launched")
@@ -105,9 +107,31 @@ func (r *Registration) syncNode(ctx context.Context, machine *v1alpha5.Machine, 
 		node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(machine.Spec.Taints)
 		node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(machine.Spec.StartupTaints)
 	}
+	node.Labels = lo.Assign(node.Labels, map[string]string{
+		v1alpha5.LabelNodeRegistered: "true",
+	})
 	if !equality.Semantic.DeepEqual(stored, node) {
 		if err := r.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 			return fmt.Errorf("syncing node labels, %w", err)
+		}
+	}
+	return nil
+}
+
+// backPropagateRegistrationLabel ports the `karpenter.sh/registered` label onto nodes that are registered by the Machine
+// but don't have this label on the Node yet
+func (r *Registration) backPropagateRegistrationLabel(ctx context.Context, machine *v1alpha5.Machine) error {
+	node, err := machineutil.NodeForMachine(ctx, r.kubeClient, machine)
+	stored := node.DeepCopy()
+	if err != nil {
+		return machineutil.IgnoreDuplicateNodeError(machineutil.IgnoreNodeNotFoundError(err))
+	}
+	node.Labels = lo.Assign(node.Labels, map[string]string{
+		v1alpha5.LabelNodeRegistered: "true",
+	})
+	if !equality.Semantic.DeepEqual(stored, node) {
+		if err := r.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+			return fmt.Errorf("syncing node registration label, %w", err)
 		}
 	}
 	return nil

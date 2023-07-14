@@ -114,7 +114,9 @@ func (in *StateNode) Name() string {
 	if in.Machine == nil {
 		return in.Node.Name
 	}
-	if !in.Machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
+	// TODO @joinnis: The !in.Initialized() check can be removed when we can assume that all nodes have the v1alpha5.NodeRegisteredLabel on them
+	// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
+	if !in.Registered() && !in.Initialized() {
 		return in.Machine.Name
 	}
 	return in.Node.Name
@@ -144,14 +146,16 @@ func (in *StateNode) Annotations() map[string]string {
 	if in.Machine == nil {
 		return in.Node.Annotations
 	}
-	if !in.Machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
+	// TODO @joinnis: The !in.Initialized() check can be removed when we can assume that all nodes have the v1alpha5.NodeRegisteredLabel on them
+	// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
+	if !in.Registered() && !in.Initialized() {
 		return in.Machine.Annotations
 	}
 	return in.Node.Annotations
 }
 
 func (in *StateNode) Labels() map[string]string {
-	// If the machine exists and the state node isn't initialized
+	// If the machine exists and the state node isn't registered
 	// use the machine representation of the labels
 	if in.Node == nil {
 		return in.Machine.Labels
@@ -159,7 +163,9 @@ func (in *StateNode) Labels() map[string]string {
 	if in.Machine == nil {
 		return in.Node.Labels
 	}
-	if !in.Machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered).IsTrue() {
+	// TODO @joinnis: The !in.Initialized() check can be removed when we can assume that all nodes have the v1alpha5.NodeRegisteredLabel on them
+	// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
+	if !in.Registered() && !in.Initialized() {
 		return in.Machine.Labels
 	}
 	return in.Node.Labels
@@ -179,7 +185,9 @@ func (in *StateNode) Taints() []v1.Taint {
 	}
 
 	var taints []v1.Taint
-	if !in.Initialized() && in.Machine != nil {
+	// TODO @joinnis: The !in.Initialized() check can be removed when we can assume that all nodes have the v1alpha5.NodeRegisteredLabel on them
+	// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
+	if !in.Registered() && !in.Initialized() && in.Machine != nil {
 		taints = in.Machine.Spec.Taints
 	} else {
 		taints = in.Node.Spec.Taints
@@ -192,13 +200,14 @@ func (in *StateNode) Taints() []v1.Taint {
 	})
 }
 
-func (in *StateNode) Initialized() bool {
-	if in.Machine != nil {
-		if in.Node != nil && in.Machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).IsTrue() {
-			return true
-		}
-		return false
+func (in *StateNode) Registered() bool {
+	if in.Node != nil {
+		return in.Node.Labels[v1alpha5.LabelNodeRegistered] == "true"
 	}
+	return false
+}
+
+func (in *StateNode) Initialized() bool {
 	if in.Node != nil {
 		return in.Node.Labels[v1alpha5.LabelNodeInitialized] == "true"
 	}
