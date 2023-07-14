@@ -22,6 +22,7 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -32,6 +33,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	machinegarbagecollection "github.com/aws/karpenter-core/pkg/controllers/machine/garbagecollection"
 	machinelifecycle "github.com/aws/karpenter-core/pkg/controllers/machine/lifecycle"
+	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
@@ -67,7 +69,7 @@ var _ = BeforeSuite(func() {
 
 	cloudProvider = fake.NewCloudProvider()
 	garbageCollectionController = machinegarbagecollection.NewController(fakeClock, env.Client, cloudProvider)
-	machineController = machinelifecycle.NewController(fakeClock, env.Client, cloudProvider)
+	machineController = machinelifecycle.NewController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
 })
 
 var _ = AfterSuite(func() {

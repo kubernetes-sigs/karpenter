@@ -28,6 +28,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 )
@@ -36,6 +37,7 @@ type Launch struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	cache         *cache.Cache // exists due to eventual consistency on the cache
+	recorder      events.Recorder
 }
 
 func (l *Launch) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
@@ -103,19 +105,28 @@ func (l *Launch) linkMachine(ctx context.Context, machine *v1alpha5.Machine) (*v
 func (l *Launch) launchMachine(ctx context.Context, machine *v1alpha5.Machine) (*v1alpha5.Machine, error) {
 	created, err := l.cloudProvider.Create(ctx, machine)
 	if err != nil {
-		if !cloudprovider.IsInsufficientCapacityError(err) {
+		switch {
+		case cloudprovider.IsInsufficientCapacityError(err):
+			l.recorder.Publish(events.Event{
+				InvolvedObject: machine,
+				Type:           v1.EventTypeWarning,
+				Reason:         "InsufficientCapacityError",
+				Message:        fmt.Sprintf("Machine %s event: %s", machine.Name, err),
+				DedupeValues:   []string{machine.Name},
+			})
+			logging.FromContext(ctx).Error(err)
+			if err = l.kubeClient.Delete(ctx, machine); err != nil {
+				return nil, client.IgnoreNotFound(err)
+			}
+			metrics.MachinesTerminatedCounter.With(prometheus.Labels{
+				metrics.ReasonLabel:      "insufficient_capacity",
+				metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
+			}).Inc()
+			return nil, nil
+		default:
 			machine.StatusConditions().MarkFalse(v1alpha5.MachineLaunched, "LaunchFailed", truncateMessage(err.Error()))
 			return nil, fmt.Errorf("creating machine, %w", err)
 		}
-		logging.FromContext(ctx).Error(err)
-		if err = l.kubeClient.Delete(ctx, machine); err != nil {
-			return nil, client.IgnoreNotFound(err)
-		}
-		metrics.MachinesTerminatedCounter.With(prometheus.Labels{
-			metrics.ReasonLabel:      "insufficient_capacity",
-			metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
-		}).Inc()
-		return nil, nil
 	}
 	logging.FromContext(ctx).With(
 		"provider-id", created.Status.ProviderID,

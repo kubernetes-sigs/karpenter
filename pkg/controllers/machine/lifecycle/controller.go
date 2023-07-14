@@ -40,6 +40,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 	"github.com/aws/karpenter-core/pkg/utils/result"
@@ -64,11 +65,11 @@ type Controller struct {
 	liveness       *Liveness
 }
 
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) corecontroller.Controller {
 	return corecontroller.Typed[*v1alpha5.Machine](kubeClient, &Controller{
 		kubeClient: kubeClient,
 
-		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Minute, time.Second*10)},
+		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Minute, time.Second*10), recorder: recorder},
 		registration:   &Registration{kubeClient: kubeClient},
 		initialization: &Initialization{kubeClient: kubeClient},
 		liveness:       &Liveness{clock: clk, kubeClient: kubeClient},
