@@ -26,6 +26,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
 	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
@@ -93,6 +94,7 @@ type StateNode struct {
 }
 
 func NewNode() *StateNode {
+	metrics.ClusterStateNodesGauge.WithLabelValues().Inc()
 	return &StateNode{
 		inflightAllocatable: v1.ResourceList{},
 		inflightCapacity:    v1.ResourceList{},

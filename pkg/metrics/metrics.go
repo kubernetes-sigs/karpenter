@@ -22,6 +22,7 @@ import (
 const (
 	nodeSubsystem    = "nodes"
 	machineSubsystem = "machines"
+	stateSubsystem   = "cluster_state"
 )
 
 var (
@@ -104,9 +105,19 @@ var (
 			ProvisionerLabel,
 		},
 	)
+
+	ClusterStateNodesGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: Namespace,
+			Subsystem: stateSubsystem,
+			Name:      "nodes_total",
+			Help:      "Number of nodes in karpenter's cluster state",
+		},
+		[]string{},
+	)
 )
 
 func init() {
 	crmetrics.Registry.MustRegister(MachinesCreatedCounter, MachinesTerminatedCounter, MachinesLaunchedCounter,
-		MachinesRegisteredCounter, MachinesInitializedCounter, NodesCreatedCounter, NodesTerminatedCounter)
+		MachinesRegisteredCounter, MachinesInitializedCounter, NodesCreatedCounter, NodesTerminatedCounter, ClusterStateNodesGauge)
 }

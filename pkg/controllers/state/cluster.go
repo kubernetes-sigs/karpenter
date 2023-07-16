@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -240,7 +241,7 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 func (c *Cluster) DeleteNode(name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
+	metrics.ClusterStateNodesGauge.WithLabelValues().Dec()
 	c.cleanupNode(name)
 }
 
