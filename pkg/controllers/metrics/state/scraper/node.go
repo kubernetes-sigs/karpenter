@@ -150,9 +150,9 @@ func NewNodeScraper(cluster *state.Cluster) *NodeScraper {
 }
 
 func (ns *NodeScraper) Scrape(_ context.Context) {
-	currentGaugeLabels := make(map[*prometheus.GaugeVec]sets.String)
+	currentGaugeLabels := make(map[*prometheus.GaugeVec]sets.Set[string])
 	forEachGaugeVec(func(g *prometheus.GaugeVec) {
-		currentGaugeLabels[g] = sets.NewString()
+		currentGaugeLabels[g] = sets.New[string]()
 	})
 
 	// Populate metrics
@@ -179,7 +179,7 @@ func (ns *NodeScraper) Scrape(_ context.Context) {
 
 	// Remove stale gauges
 	forEachGaugeVec(func(g *prometheus.GaugeVec) {
-		for labelsKey := range sets.NewString(lo.Keys(ns.gaugeLabels[g])...).Difference(currentGaugeLabels[g]) {
+		for labelsKey := range sets.New(lo.Keys(ns.gaugeLabels[g])...).Difference(currentGaugeLabels[g]) {
 			g.Delete(ns.gaugeLabels[g][labelsKey])
 			delete(ns.gaugeLabels[g], labelsKey)
 		}
@@ -188,7 +188,7 @@ func (ns *NodeScraper) Scrape(_ context.Context) {
 
 // set the value for the node gauge and returns a slice of the labels for the gauges set
 func (ns *NodeScraper) set(gaugeVec *prometheus.GaugeVec, node *v1.Node, resourceList v1.ResourceList) []prometheus.Labels {
-	gaugeLabels := []prometheus.Labels{}
+	var gaugeLabels []prometheus.Labels
 	for resourceName, quantity := range resourceList {
 		// Reformat resource type to be consistent with Prometheus naming conventions (snake_case)
 		resourceLabels := ns.getNodeLabels(node, strings.ReplaceAll(strings.ToLower(string(resourceName)), "-", "_"))

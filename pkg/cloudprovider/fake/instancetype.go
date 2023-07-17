@@ -19,10 +19,10 @@ import (
 	"strings"
 
 	"github.com/samber/lo"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	utilsets "k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -71,12 +71,12 @@ func NewInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 		options.Architecture = "amd64"
 	}
 	if options.OperatingSystems.Len() == 0 {
-		options.OperatingSystems = utilsets.NewString(string(v1.Linux), string(v1.Windows), "darwin")
+		options.OperatingSystems = sets.New(string(v1.Linux), string(v1.Windows), "darwin")
 	}
 	requirements := scheduling.NewRequirements(
 		scheduling.NewRequirement(v1.LabelInstanceTypeStable, v1.NodeSelectorOpIn, options.Name),
 		scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, options.Architecture),
-		scheduling.NewRequirement(v1.LabelOSStable, v1.NodeSelectorOpIn, options.OperatingSystems.List()...),
+		scheduling.NewRequirement(v1.LabelOSStable, v1.NodeSelectorOpIn, sets.List(options.OperatingSystems)...),
 		scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string { return o.Zone })...),
 		scheduling.NewRequirement(v1alpha5.LabelCapacityType, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string { return o.CapacityType })...),
 		scheduling.NewRequirement(LabelInstanceSize, v1.NodeSelectorOpDoesNotExist),
@@ -112,10 +112,10 @@ func InstanceTypesAssorted() []*cloudprovider.InstanceType {
 		for _, mem := range []int{1, 2, 4, 8, 16, 32, 64, 128} {
 			for _, zone := range []string{"test-zone-1", "test-zone-2", "test-zone-3"} {
 				for _, ct := range []string{v1alpha5.CapacityTypeSpot, v1alpha5.CapacityTypeOnDemand} {
-					for _, os := range []utilsets.String{utilsets.NewString(string(v1.Linux)), utilsets.NewString(string(v1.Windows))} {
+					for _, os := range []sets.Set[string]{sets.New(string(v1.Linux)), sets.New(string(v1.Windows))} {
 						for _, arch := range []string{v1alpha5.ArchitectureAmd64, v1alpha5.ArchitectureArm64} {
 							opts := InstanceTypeOptions{
-								Name:             fmt.Sprintf("%d-cpu-%d-mem-%s-%s-%s-%s", cpu, mem, arch, strings.Join(os.List(), ","), zone, ct),
+								Name:             fmt.Sprintf("%d-cpu-%d-mem-%s-%s-%s-%s", cpu, mem, arch, strings.Join(sets.List(os), ","), zone, ct),
 								Architecture:     arch,
 								OperatingSystems: os,
 								Resources: v1.ResourceList{
@@ -167,7 +167,7 @@ type InstanceTypeOptions struct {
 	Name             string
 	Offerings        cloudprovider.Offerings
 	Architecture     string
-	OperatingSystems utilsets.String
+	OperatingSystems sets.Set[string]
 	Resources        v1.ResourceList
 }
 

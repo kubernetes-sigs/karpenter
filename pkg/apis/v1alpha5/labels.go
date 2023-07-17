@@ -73,7 +73,7 @@ var (
 	// WellKnownLabels are labels that belong to the RestrictedLabelDomains but allowed.
 	// Karpenter is aware of these labels, and they can be used to further narrow down
 	// the range of the corresponding values by either provisioner or pods.
-	WellKnownLabels = sets.NewString(
+	WellKnownLabels = sets.New(
 		ProvisionerNameLabelKey,
 		v1.LabelTopologyZone,
 		v1.LabelTopologyRegion,
@@ -107,7 +107,7 @@ func IsRestrictedLabel(key string) error {
 		return nil
 	}
 	if IsRestrictedNodeLabel(key) {
-		return fmt.Errorf("label %s is restricted; specify a well known label: %v, or a custom label that does not use a restricted domain: %v", key, WellKnownLabels.List(), RestrictedLabelDomains.List())
+		return fmt.Errorf("label %s is restricted; specify a well known label: %v, or a custom label that does not use a restricted domain: %v", key, sets.List(WellKnownLabels), RestrictedLabelDomains.List())
 	}
 	return nil
 }

@@ -24,7 +24,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
-	utilsets "k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/aws/karpenter-core/pkg/scheduling"
 )
@@ -56,7 +56,7 @@ type TopologyGroup struct {
 	Type       TopologyType
 	maxSkew    int32
 	minDomains *int32
-	namespaces utilsets.String
+	namespaces sets.Set[string]
 	selector   *metav1.LabelSelector
 	nodeFilter TopologyNodeFilter
 	// Index
@@ -64,7 +64,7 @@ type TopologyGroup struct {
 	domains map[string]int32       // TODO(ellistarn) explore replacing with a minheap
 }
 
-func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod, namespaces utilsets.String, labelSelector *metav1.LabelSelector, maxSkew int32, minDomains *int32, domains utilsets.String) *TopologyGroup {
+func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod, namespaces sets.Set[string], labelSelector *metav1.LabelSelector, maxSkew int32, minDomains *int32, domains sets.Set[string]) *TopologyGroup {
 	domainCounts := map[string]int32{}
 	for domain := range domains {
 		domainCounts[domain] = 0
@@ -140,7 +140,7 @@ func (t *TopologyGroup) Hash() uint64 {
 	return lo.Must(hashstructure.Hash(struct {
 		TopologyKey   string
 		Type          TopologyType
-		Namespaces    utilsets.String
+		Namespaces    sets.Set[string]
 		LabelSelector *metav1.LabelSelector
 		MaxSkew       int32
 		NodeFilter    TopologyNodeFilter

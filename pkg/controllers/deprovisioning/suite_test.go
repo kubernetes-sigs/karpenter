@@ -1401,7 +1401,7 @@ var _ = Describe("Topology Consideration", func() {
 	var prov *v1alpha5.Provisioner
 	var zone1Machine, zone2Machine, zone3Machine *v1alpha5.Machine
 	var zone1Node, zone2Node, zone3Node *v1.Node
-	var oldMachineNames sets.String
+	var oldMachineNames sets.Set[string]
 
 	BeforeEach(func() {
 		testZone1Instance := leastExpensiveInstanceWithZone("test-zone-1")
@@ -1453,7 +1453,7 @@ var _ = Describe("Topology Consideration", func() {
 				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("1")},
 			},
 		})
-		oldMachineNames = sets.NewString(zone1Machine.Name, zone2Machine.Name, zone3Machine.Name)
+		oldMachineNames = sets.New(zone1Machine.Name, zone2Machine.Name, zone3Machine.Name)
 	})
 	It("can replace node maintaining zonal topology spread", func() {
 		labels := map[string]string{

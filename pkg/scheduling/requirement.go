@@ -31,7 +31,7 @@ import (
 type Requirement struct {
 	Key         string
 	complement  bool
-	values      sets.String
+	values      sets.Set[string]
 	greaterThan *int
 	lessThan    *int
 }
@@ -42,7 +42,7 @@ func NewRequirement(key string, operator v1.NodeSelectorOperator, values ...stri
 	}
 	r := &Requirement{
 		Key:        key,
-		values:     sets.NewString(),
+		values:     sets.New[string](),
 		complement: true,
 	}
 	if operator == v1.NodeSelectorOpIn || operator == v1.NodeSelectorOpDoesNotExist {
@@ -82,7 +82,7 @@ func (r *Requirement) NodeSelectorRequirement() v1.NodeSelectorRequirement {
 			return v1.NodeSelectorRequirement{
 				Key:      r.Key,
 				Operator: v1.NodeSelectorOpNotIn,
-				Values:   r.values.List(),
+				Values:   sets.List(r.values),
 			}
 		default:
 			return v1.NodeSelectorRequirement{
@@ -96,7 +96,7 @@ func (r *Requirement) NodeSelectorRequirement() v1.NodeSelectorRequirement {
 			return v1.NodeSelectorRequirement{
 				Key:      r.Key,
 				Operator: v1.NodeSelectorOpIn,
-				Values:   r.values.List(),
+				Values:   sets.List(r.values),
 			}
 		default:
 			return v1.NodeSelectorRequirement{
@@ -121,7 +121,7 @@ func (r *Requirement) Intersection(requirement *Requirement) *Requirement {
 	}
 
 	// Values
-	var values sets.String
+	var values sets.Set[string]
 	if r.complement && requirement.complement {
 		values = r.values.Union(requirement.values)
 	} else if r.complement && !requirement.complement {
@@ -204,7 +204,7 @@ func (r *Requirement) String() string {
 	case v1.NodeSelectorOpExists, v1.NodeSelectorOpDoesNotExist:
 		s = fmt.Sprintf("%s %s", r.Key, r.Operator())
 	default:
-		values := r.values.List()
+		values := sets.List(r.values)
 		if length := len(values); length > 5 {
 			values = append(values[:5], fmt.Sprintf("and %d others", length-5))
 		}

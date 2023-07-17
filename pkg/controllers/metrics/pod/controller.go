@@ -80,7 +80,7 @@ type Controller struct {
 	// labelsMap keeps track of the pod gauge for gauge deletion
 	// podKey (types.NamespacedName) -> prometheus.Labels
 	labelsMap   sync.Map
-	pendingPods sets.String
+	pendingPods sets.Set[string]
 }
 
 func init() {
@@ -107,7 +107,7 @@ func labelNames() []string {
 func NewController(kubeClient client.Client) controller.Controller {
 	return &Controller{
 		kubeClient:  kubeClient,
-		pendingPods: sets.NewString(),
+		pendingPods: sets.New[string](),
 	}
 }
 

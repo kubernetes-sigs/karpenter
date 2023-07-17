@@ -94,8 +94,8 @@ func (r Requirements) Add(requirements ...*Requirement) {
 }
 
 // Keys returns unique set of the label keys from the requirements
-func (r Requirements) Keys() sets.String {
-	keys := sets.NewString()
+func (r Requirements) Keys() sets.Set[string] {
+	keys := sets.New[string]()
 	for key := range r {
 		keys.Insert(key)
 	}

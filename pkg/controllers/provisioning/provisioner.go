@@ -201,7 +201,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	var machines []*scheduler.MachineTemplate
 	var provisionerList v1alpha5.ProvisionerList
 	instanceTypes := map[string][]*cloudprovider.InstanceType{}
-	domains := map[string]sets.String{}
+	domains := map[string]sets.Set[string]{}
 	if err := p.kubeClient.List(ctx, &provisionerList); err != nil {
 		return nil, fmt.Errorf("listing provisioners, %w", err)
 	}
@@ -238,7 +238,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 				//This resulted in a lot of memory pressure on the heap and poor performance
 				//https://github.com/aws/karpenter/issues/3565
 				if domains[key] == nil {
-					domains[key] = sets.NewString(requirement.Values()...)
+					domains[key] = sets.New(requirement.Values()...)
 				} else {
 					domains[key].Insert(requirement.Values()...)
 				}
@@ -249,7 +249,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 			if requirement.Operator() == v1.NodeSelectorOpIn {
 				//The following is a performance optimisation, for the explanation see the comment above
 				if domains[key] == nil {
-					domains[key] = sets.NewString(requirement.Values()...)
+					domains[key] = sets.New(requirement.Values()...)
 				} else {
 					domains[key].Insert(requirement.Values()...)
 				}
