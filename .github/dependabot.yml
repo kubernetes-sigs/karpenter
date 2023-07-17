@@ -4,14 +4,27 @@ updates:
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
-      interval: "monthly"
-    # Interdependent, only get the PR from one (k8s.io/api), so we are aware of the K8s client updates
-    ignore:
-      - dependency-name: "k8s.io/apimachinery"
-      - dependency-name: "k8s.io/client-go"
-      - dependency-name: "sigs.k8s.io/controller-runtime"
-      - dependency-name: "k8s.io/apiextensions-apiserver"
+      interval: "weekly"
+    groups:
+      # Group updates together, so that they are all applied in a single PR.
+      # Grouped updates are currently in beta and is subject to change.
+      # xref: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#groups
+      k8s:
+        patterns:
+          - "k8s.io/*"
+          - "sigs.k8s.io/*"
+          - "knative.dev/*"
+      all:
+        patterns:
+          - "*"
   - package-ecosystem: "github-actions"
-    directory: "/.github"
+    directory: "/"
     schedule:
-      interval: "monthly"
+      interval: "weekly"
+    groups:
+      # Group updates together, so that they are all applied in a single PR.
+      # Grouped updates are currently in beta and is subject to change.
+      # xref: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#groups
+      actions:
+        patterns:
+          - "*"
