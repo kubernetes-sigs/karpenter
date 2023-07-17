@@ -555,7 +555,7 @@ var _ = Describe("Instance Type Selection", func() {
 			fake.NewInstanceType(fake.InstanceTypeOptions{
 				Name:             "test-instance1",
 				Architecture:     "amd64",
-				OperatingSystems: sets.NewString(string(v1.Linux)),
+				OperatingSystems: sets.New(string(v1.Linux)),
 				Resources: v1.ResourceList{
 					v1.ResourceCPU:    resource.MustParse("1"),
 					v1.ResourceMemory: resource.MustParse("1Gi"),
@@ -568,7 +568,7 @@ var _ = Describe("Instance Type Selection", func() {
 			fake.NewInstanceType(fake.InstanceTypeOptions{
 				Name:             "test-instance2",
 				Architecture:     "amd64",
-				OperatingSystems: sets.NewString(string(v1.Linux)),
+				OperatingSystems: sets.New(string(v1.Linux)),
 				Resources: v1.ResourceList{
 					v1.ResourceCPU:    resource.MustParse("1"),
 					v1.ResourceMemory: resource.MustParse("1Gi"),

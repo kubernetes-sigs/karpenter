@@ -57,12 +57,12 @@ func NewVolumeUsage() *VolumeUsage {
 	}
 }
 
-type volumes map[string]sets.String
+type volumes map[string]sets.Set[string]
 
 func (u volumes) Add(provisioner string, pvcID string) {
 	existing, ok := u[provisioner]
 	if !ok {
-		existing = sets.NewString()
+		existing = sets.New[string]()
 		u[provisioner] = existing
 	}
 	existing.Insert(pvcID)
@@ -71,15 +71,15 @@ func (u volumes) Add(provisioner string, pvcID string) {
 func (u volumes) union(vol volumes) volumes {
 	cp := volumes{}
 	for k, v := range u {
-		cp[k] = sets.NewString(v.List()...)
+		cp[k] = sets.New(sets.List(v)...)
 	}
 	for k, v := range vol {
 		existing, ok := cp[k]
 		if !ok {
-			existing = sets.NewString()
+			existing = sets.New[string]()
 			cp[k] = existing
 		}
-		existing.Insert(v.List()...)
+		existing.Insert(sets.List(v)...)
 	}
 	return cp
 }
@@ -88,17 +88,17 @@ func (u volumes) insert(volumes volumes) {
 	for k, v := range volumes {
 		existing, ok := u[k]
 		if !ok {
-			existing = sets.NewString()
+			existing = sets.New[string]()
 			u[k] = existing
 		}
-		existing.Insert(v.List()...)
+		existing.Insert(sets.List(v)...)
 	}
 }
 
 func (u volumes) copy() volumes {
 	cp := volumes{}
 	for k, v := range u {
-		cp[k] = sets.NewString(v.List()...)
+		cp[k] = sets.New(sets.List(v)...)
 	}
 	return cp
 }

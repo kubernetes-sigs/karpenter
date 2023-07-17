@@ -243,7 +243,7 @@ var _ = Describe("Validation", func() {
 			}
 		})
 		It("should allow well known label exceptions", func() {
-			for label := range WellKnownLabels.Difference(sets.NewString(ProvisionerNameLabelKey)) {
+			for label := range WellKnownLabels.Difference(sets.New(ProvisionerNameLabelKey)) {
 				provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 					{Key: label, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
 				}

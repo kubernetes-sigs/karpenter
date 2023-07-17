@@ -66,9 +66,6 @@ func (c *CacheSyncingClient) Delete(ctx context.Context, obj client.Object, opts
 			}
 			return fmt.Errorf("getting object, %w", err)
 		}
-		if !obj.GetDeletionTimestamp().IsZero() {
-			return nil
-		}
 		return fmt.Errorf("object still exists")
 	}, pollingOptions...)
 	return nil
@@ -131,7 +128,11 @@ type cacheSyncingStatusWriter struct {
 	client client.Client
 }
 
-func (c *cacheSyncingStatusWriter) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
+func (c *cacheSyncingStatusWriter) Create(_ context.Context, _ client.Object, _ client.Object, _ ...client.SubResourceCreateOption) error {
+	panic("create on cacheSyncingStatusWriter isn't supported")
+}
+
+func (c *cacheSyncingStatusWriter) Update(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
 	if err := c.client.Status().Update(ctx, obj, opts...); err != nil {
 		return err
 	}
@@ -141,7 +142,7 @@ func (c *cacheSyncingStatusWriter) Update(ctx context.Context, obj client.Object
 	return nil
 }
 
-func (c *cacheSyncingStatusWriter) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+func (c *cacheSyncingStatusWriter) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
 	if err := c.client.Status().Patch(ctx, obj, patch, opts...); err != nil {
 		return err
 	}

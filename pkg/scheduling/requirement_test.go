@@ -68,7 +68,7 @@ var _ = Describe("Requirement", func() {
 					},
 				}),
 			} {
-				Expect(r.Keys().List()).To(ConsistOf(
+				Expect(sets.List(r.Keys())).To(ConsistOf(
 					v1.LabelArchStable,
 					v1.LabelOSStable,
 					v1.LabelInstanceTypeStable,
@@ -164,7 +164,7 @@ var _ = Describe("Requirement", func() {
 			Expect(notInA.Intersection(in1)).To(Equal(in1))
 			Expect(notInA.Intersection(in9)).To(Equal(in9))
 			Expect(notInA.Intersection(in19)).To(Equal(in19))
-			Expect(notInA.Intersection(notIn12)).To(Equal(&Requirement{Key: "key", complement: true, values: sets.NewString("A", "1", "2")}))
+			Expect(notInA.Intersection(notIn12)).To(Equal(&Requirement{Key: "key", complement: true, values: sets.New("A", "1", "2")}))
 			Expect(notInA.Intersection(greaterThan1)).To(Equal(greaterThan1))
 			Expect(notInA.Intersection(greaterThan9)).To(Equal(greaterThan9))
 			Expect(notInA.Intersection(lessThan1)).To(Equal(lessThan1))
@@ -220,15 +220,15 @@ var _ = Describe("Requirement", func() {
 			Expect(notIn12.Intersection(inA)).To(Equal(inA))
 			Expect(notIn12.Intersection(inB)).To(Equal(inB))
 			Expect(notIn12.Intersection(inAB)).To(Equal(inAB))
-			Expect(notIn12.Intersection(notInA)).To(Equal(&Requirement{Key: "key", complement: true, values: sets.NewString("A", "1", "2")}))
+			Expect(notIn12.Intersection(notInA)).To(Equal(&Requirement{Key: "key", complement: true, values: sets.New("A", "1", "2")}))
 			Expect(notIn12.Intersection(in1)).To(Equal(doesNotExist))
 			Expect(notIn12.Intersection(in9)).To(Equal(in9))
 			Expect(notIn12.Intersection(in19)).To(Equal(in9))
 			Expect(notIn12.Intersection(notIn12)).To(Equal(notIn12))
-			Expect(notIn12.Intersection(greaterThan1)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, values: sets.NewString("2")}))
-			Expect(notIn12.Intersection(greaterThan9)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan9.greaterThan, values: sets.NewString()}))
-			Expect(notIn12.Intersection(lessThan1)).To(Equal(&Requirement{Key: "key", complement: true, lessThan: lessThan1.lessThan, values: sets.NewString()}))
-			Expect(notIn12.Intersection(lessThan9)).To(Equal(&Requirement{Key: "key", complement: true, lessThan: lessThan9.lessThan, values: sets.NewString("1", "2")}))
+			Expect(notIn12.Intersection(greaterThan1)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, values: sets.New("2")}))
+			Expect(notIn12.Intersection(greaterThan9)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan9.greaterThan, values: sets.New[string]()}))
+			Expect(notIn12.Intersection(lessThan1)).To(Equal(&Requirement{Key: "key", complement: true, lessThan: lessThan1.lessThan, values: sets.New[string]()}))
+			Expect(notIn12.Intersection(lessThan9)).To(Equal(&Requirement{Key: "key", complement: true, lessThan: lessThan9.lessThan, values: sets.New("1", "2")}))
 
 			Expect(greaterThan1.Intersection(exists)).To(Equal(greaterThan1))
 			Expect(greaterThan1.Intersection(doesNotExist)).To(Equal(doesNotExist))
@@ -239,11 +239,11 @@ var _ = Describe("Requirement", func() {
 			Expect(greaterThan1.Intersection(in1)).To(Equal(doesNotExist))
 			Expect(greaterThan1.Intersection(in9)).To(Equal(in9))
 			Expect(greaterThan1.Intersection(in19)).To(Equal(in9))
-			Expect(greaterThan1.Intersection(notIn12)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, values: sets.NewString("2")}))
+			Expect(greaterThan1.Intersection(notIn12)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, values: sets.New("2")}))
 			Expect(greaterThan1.Intersection(greaterThan1)).To(Equal(greaterThan1))
 			Expect(greaterThan1.Intersection(greaterThan9)).To(Equal(greaterThan9))
 			Expect(greaterThan1.Intersection(lessThan1)).To(Equal(doesNotExist))
-			Expect(greaterThan1.Intersection(lessThan9)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, lessThan: lessThan9.lessThan, values: sets.NewString()}))
+			Expect(greaterThan1.Intersection(lessThan9)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, lessThan: lessThan9.lessThan, values: sets.New[string]()}))
 
 			Expect(greaterThan9.Intersection(exists)).To(Equal(greaterThan9))
 			Expect(greaterThan9.Intersection(doesNotExist)).To(Equal(doesNotExist))
@@ -284,8 +284,8 @@ var _ = Describe("Requirement", func() {
 			Expect(lessThan9.Intersection(in1)).To(Equal(in1))
 			Expect(lessThan9.Intersection(in9)).To(Equal(doesNotExist))
 			Expect(lessThan9.Intersection(in19)).To(Equal(in1))
-			Expect(lessThan9.Intersection(notIn12)).To(Equal(&Requirement{Key: "key", complement: true, lessThan: lessThan9.lessThan, values: sets.NewString("1", "2")}))
-			Expect(lessThan9.Intersection(greaterThan1)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, lessThan: lessThan9.lessThan, values: sets.NewString()}))
+			Expect(lessThan9.Intersection(notIn12)).To(Equal(&Requirement{Key: "key", complement: true, lessThan: lessThan9.lessThan, values: sets.New("1", "2")}))
+			Expect(lessThan9.Intersection(greaterThan1)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, lessThan: lessThan9.lessThan, values: sets.New[string]()}))
 			Expect(lessThan9.Intersection(greaterThan9)).To(Equal(doesNotExist))
 			Expect(lessThan9.Intersection(lessThan1)).To(Equal(lessThan1))
 			Expect(lessThan9.Intersection(lessThan9)).To(Equal(lessThan9))

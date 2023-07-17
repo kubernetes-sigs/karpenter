@@ -28,7 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
-	utilsets "k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/utils/pod"
@@ -46,21 +46,21 @@ type Topology struct {
 	// in some cases.
 	inverseTopologies map[uint64]*TopologyGroup
 	// The universe of domains by topology key
-	domains map[string]utilsets.String
+	domains map[string]sets.Set[string]
 	// excludedPods are the pod UIDs of pods that are excluded from counting.  This is used so we can simulate
 	// moving pods to prevent them from being double counted.
-	excludedPods utilsets.String
+	excludedPods sets.Set[string]
 	cluster      *state.Cluster
 }
 
-func NewTopology(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, domains map[string]utilsets.String, pods []*v1.Pod) (*Topology, error) {
+func NewTopology(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, domains map[string]sets.Set[string], pods []*v1.Pod) (*Topology, error) {
 	t := &Topology{
 		kubeClient:        kubeClient,
 		cluster:           cluster,
 		domains:           domains,
 		topologies:        map[uint64]*TopologyGroup{},
 		inverseTopologies: map[uint64]*TopologyGroup{},
-		excludedPods:      utilsets.NewString(),
+		excludedPods:      sets.New[string](),
 	}
 
 	// these are the pods that we intend to schedule, so if they are currently in the cluster we shouldn't count them for
@@ -278,7 +278,7 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 func (t *Topology) newForTopologies(p *v1.Pod) []*TopologyGroup {
 	var topologyGroups []*TopologyGroup
 	for _, cs := range p.Spec.TopologySpreadConstraints {
-		topologyGroups = append(topologyGroups, NewTopologyGroup(TopologyTypeSpread, cs.TopologyKey, p, utilsets.NewString(p.Namespace), cs.LabelSelector, cs.MaxSkew, cs.MinDomains, t.domains[cs.TopologyKey]))
+		topologyGroups = append(topologyGroups, NewTopologyGroup(TopologyTypeSpread, cs.TopologyKey, p, sets.New(p.Namespace), cs.LabelSelector, cs.MaxSkew, cs.MinDomains, t.domains[cs.TopologyKey]))
 	}
 	return topologyGroups
 }
@@ -323,12 +323,12 @@ func (t *Topology) newForAffinities(ctx context.Context, p *v1.Pod) ([]*Topology
 
 // buildNamespaceList constructs a unique list of namespaces consisting of the pod's namespace and the optional list of
 // namespaces and those selected by the namespace selector
-func (t *Topology) buildNamespaceList(ctx context.Context, namespace string, namespaces []string, selector *metav1.LabelSelector) (utilsets.String, error) {
+func (t *Topology) buildNamespaceList(ctx context.Context, namespace string, namespaces []string, selector *metav1.LabelSelector) (sets.Set[string], error) {
 	if len(namespaces) == 0 && selector == nil {
-		return utilsets.NewString(namespace), nil
+		return sets.New(namespace), nil
 	}
 	if selector == nil {
-		return utilsets.NewString(namespaces...), nil
+		return sets.New(namespaces...), nil
 	}
 	var namespaceList v1.NamespaceList
 	labelSelector, err := metav1.LabelSelectorAsSelector(selector)
@@ -338,7 +338,7 @@ func (t *Topology) buildNamespaceList(ctx context.Context, namespace string, nam
 	if err := t.kubeClient.List(ctx, &namespaceList, &client.ListOptions{LabelSelector: labelSelector}); err != nil {
 		return nil, fmt.Errorf("listing namespaces, %w", err)
 	}
-	selected := utilsets.NewString()
+	selected := sets.New[string]()
 	for _, namespace := range namespaceList.Items {
 		selected.Insert(namespace.Name)
 	}
