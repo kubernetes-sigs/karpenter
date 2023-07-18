@@ -19,12 +19,12 @@ require (
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.24.0
 	golang.org/x/time v0.3.0
-	k8s.io/api v0.26.6
+	k8s.io/api v0.27.3
 	k8s.io/apiextensions-apiserver v0.26.6
-	k8s.io/apimachinery v0.26.6
+	k8s.io/apimachinery v0.27.3
 	k8s.io/client-go v0.26.6
 	k8s.io/cloud-provider v0.26.6
-	k8s.io/csi-translation-lib v0.26.6
+	k8s.io/csi-translation-lib v0.27.3
 	k8s.io/klog/v2 v2.100.1
 	k8s.io/utils v0.0.0-20230209194617-a36077c30491
 	knative.dev/pkg v0.0.0-20230712131115-7051d301e7f4
@@ -73,7 +73,6 @@ require (
 	github.com/prometheus/common v0.42.0 // indirect
 	github.com/prometheus/procfs v0.9.0 // indirect
 	github.com/prometheus/statsd_exporter v0.21.0 // indirect
-	github.com/rogpeppe/go-internal v1.10.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
