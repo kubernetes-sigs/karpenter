@@ -10,16 +10,16 @@ main() {
 }
 
 tools() {
-    go install github.com/google/go-licenses@v1.2.0
-    go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.51.1
-    go install github.com/google/ko@v0.11.2
-    go install github.com/mikefarah/yq/v4@v4.24.5
-    go install github.com/norwoodj/helm-docs/cmd/helm-docs@v1.8.1
-    go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.0.0-20220421205612-c162794a9b12
-    go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.11.3
-    go install github.com/sigstore/cosign/cmd/cosign@v1.10.0
-    go install github.com/gohugoio/hugo@v0.97.3+extended
-    go install golang.org/x/vuln/cmd/govulncheck@v0.0.0-20230215172424-8fb696828224
+    go install github.com/google/go-licenses@latest
+    go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+    go install github.com/google/ko@latest
+    go install github.com/mikefarah/yq/v4@latest
+    go install github.com/norwoodj/helm-docs/cmd/helm-docs@latest
+    go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+    go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
+    go install github.com/sigstore/cosign/cmd/cosign@latest
+    go install -tags extended github.com/gohugoio/hugo@v0.110.0
+    go install golang.org/x/vuln/cmd/govulncheck@latest
     go install github.com/onsi/ginkgo/v2/ginkgo@latest
 
     if ! echo "$PATH" | grep -q "${GOPATH:-undefined}/bin\|$HOME/go/bin"; then
