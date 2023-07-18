@@ -9,14 +9,18 @@ updates:
       # Group updates together, so that they are all applied in a single PR.
       # Grouped updates are currently in beta and is subject to change.
       # xref: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#groups
-      k8s:
+      k8s-go-deps:
         patterns:
           - "k8s.io/*"
           - "sigs.k8s.io/*"
           - "knative.dev/*"
-      all:
+      go-deps:
         patterns:
           - "*"
+        exclude-patterns:
+          - "k8s.io/*"
+          - "sigs.k8s.io/*"
+          - "knative.dev/*"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -25,6 +29,6 @@ updates:
       # Group updates together, so that they are all applied in a single PR.
       # Grouped updates are currently in beta and is subject to change.
       # xref: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#groups
-      actions:
+      actions-deps:
         patterns:
           - "*"
