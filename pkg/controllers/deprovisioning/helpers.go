@@ -30,6 +30,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/scheduling"
+	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
 
 	v1 "k8s.io/api/core/v1"
@@ -116,7 +117,7 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	// to schedule since we want to assume that we can delete a node and its pods will immediately
 	// move to an existing node which won't occur if that node isn't ready.
 	for _, n := range results.ExistingNodes {
-		if !n.Initialized() {
+		if !n.Initialized() || nodeutils.GetCondition(n.Node, v1.NodeReady).Status != v1.ConditionTrue {
 			for _, p := range n.Pods {
 				results.PodErrors[p] = fmt.Errorf("would schedule against a non-initialized node %s", n.Name())
 			}
