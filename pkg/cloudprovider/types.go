@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"sync"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -88,10 +89,20 @@ type InstanceType struct {
 	// Overhead is the amount of resource overhead expected to be used by kubelet and any other system daemons outside
 	// of Kubernetes.
 	Overhead *InstanceTypeOverhead
+
+	once        sync.Once
+	allocatable v1.ResourceList
+}
+
+// precompute is used to ensure we only compute the allocatable resources onces as its called many times
+// and the operation is fairly expensive.
+func (i *InstanceType) precompute() {
+	i.allocatable = resources.Subtract(i.Capacity, i.Overhead.Total())
 }
 
 func (i *InstanceType) Allocatable() v1.ResourceList {
-	return resources.Subtract(i.Capacity, i.Overhead.Total())
+	i.once.Do(i.precompute)
+	return i.allocatable.DeepCopy()
 }
 
 type InstanceTypeOverhead struct {
