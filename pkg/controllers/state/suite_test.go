@@ -1472,12 +1472,13 @@ var _ = Describe("Pod Anti-Affinity", func() {
 
 var _ = Describe("Provisioner Spec Updates", func() {
 	It("should cause consolidation state to change when a provisioner is updated", func() {
-		cluster.SetConsolidated(true)
+		cluster.MarkUnconsolidated()
 		fakeClock.Step(time.Minute)
 		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: ptr.Bool(true)}
 		ExpectApplied(ctx, env.Client, provisioner)
+		state := cluster.ConsolidationState()
 		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
-		Expect(cluster.Consolidated()).To(BeFalse())
+		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
 	})
 })
 
@@ -1761,23 +1762,26 @@ var _ = Describe("DaemonSet Controller", func() {
 
 var _ = Describe("Consolidated State", func() {
 	It("should update the consolidated value when setting consolidation", func() {
-		cluster.SetConsolidated(true)
-		Expect(cluster.Consolidated()).To(BeTrue())
+		state := cluster.ConsolidationState()
+		Expect(cluster.ConsolidationState()).To(Equal(state))
 
-		cluster.SetConsolidated(false)
-		Expect(cluster.Consolidated()).To(BeFalse())
+		// time must pass
+		fakeClock.Step(1 * time.Second)
+
+		cluster.MarkUnconsolidated()
+		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
 	})
 	It("should update the consolidated value when consolidation timeout (5m) has passed and state hasn't changed", func() {
-		cluster.SetConsolidated(true)
+		state := cluster.ConsolidationState()
 
 		fakeClock.Step(time.Minute)
-		Expect(cluster.Consolidated()).To(BeTrue())
+		Expect(cluster.ConsolidationState()).To(Equal(state))
 
 		fakeClock.Step(time.Minute * 3)
-		Expect(cluster.Consolidated()).To(BeTrue())
+		Expect(cluster.ConsolidationState()).To(Equal(state))
 
 		fakeClock.Step(time.Minute * 2)
-		Expect(cluster.Consolidated()).To(BeFalse())
+		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
 	})
 })
 

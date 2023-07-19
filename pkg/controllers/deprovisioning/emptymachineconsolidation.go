@@ -42,7 +42,7 @@ func NewEmptyMachineConsolidation(clk clock.Clock, cluster *state.Cluster, kubeC
 
 // ComputeCommand generates a deprovisioning command given deprovisionable machines
 func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
-	if c.cluster.Consolidated() {
+	if c.isConsolidated() {
 		return Command{}, nil
 	}
 	candidates, err := c.sortAndFilterCandidates(ctx, candidates)
@@ -54,6 +54,8 @@ func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	// select the entirely empty nodes
 	emptyCandidates := lo.Filter(candidates, func(n *Candidate, _ int) bool { return len(n.pods) == 0 })
 	if len(emptyCandidates) == 0 {
+		// none empty, so do nothing
+		c.markConsolidated()
 		return Command{}, nil
 	}
 

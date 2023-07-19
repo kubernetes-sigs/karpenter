@@ -45,19 +45,18 @@ type consolidation struct {
 	provisioner            *provisioning.Provisioner
 	cloudProvider          cloudprovider.CloudProvider
 	recorder               events.Recorder
-	lastConsolidationState int64
+	lastConsolidationState time.Time
 }
 
 func makeConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
 	cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) consolidation {
 	return consolidation{
-		clock:                  clock,
-		cluster:                cluster,
-		kubeClient:             kubeClient,
-		provisioner:            provisioner,
-		cloudProvider:          cloudProvider,
-		recorder:               recorder,
-		lastConsolidationState: 0,
+		clock:         clock,
+		cluster:       cluster,
+		kubeClient:    kubeClient,
+		provisioner:   provisioner,
+		cloudProvider: cloudProvider,
+		recorder:      recorder,
 	}
 }
 
@@ -81,6 +80,16 @@ func (c *consolidation) sortAndFilterCandidates(ctx context.Context, nodes []*Ca
 		return candidates[i].disruptionCost < candidates[j].disruptionCost
 	})
 	return candidates, nil
+}
+
+// isConsolidated returns true if nothing has changed since markConsolidated was called.
+func (c *consolidation) isConsolidated() bool {
+	return c.lastConsolidationState.Equal(c.cluster.ConsolidationState())
+}
+
+// markConsolidated records the current state of the cluster.
+func (c *consolidation) markConsolidated() {
+	c.lastConsolidationState = c.cluster.ConsolidationState()
 }
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes

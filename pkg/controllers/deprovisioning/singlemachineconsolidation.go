@@ -41,7 +41,7 @@ func NewSingleMachineConsolidation(clk clock.Clock, cluster *state.Cluster, kube
 // ComputeCommand generates a deprovisioning command given deprovisionable machines
 // nolint:gocyclo
 func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
-	if c.cluster.Consolidated() {
+	if c.isConsolidated() {
 		return Command{}, nil
 	}
 	candidates, err := c.sortAndFilterCandidates(ctx, candidates)
@@ -72,5 +72,7 @@ func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 		}
 		return cmd, nil
 	}
+	// couldn't remove any candidate
+	c.markConsolidated()
 	return Command{}, nil
 }
