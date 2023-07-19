@@ -123,7 +123,6 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}
 	// Attempt different deprovisioning methods. We'll only let one method perform an action
-	isConsolidated := c.cluster.Consolidated()
 	for _, d := range c.deprovisioners {
 		c.recordRun(fmt.Sprintf("%T", d))
 		success, err := c.deprovision(ctx, d)
@@ -135,10 +134,6 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		}
 	}
 
-	if !isConsolidated {
-		// Mark cluster as consolidated, only if the deprovisioners ran and were not able to perform any work.
-		c.cluster.SetConsolidated(true)
-	}
 	// All deprovisioners did nothing, so return nothing to do
 	return reconcile.Result{RequeueAfter: pollingPeriod}, nil
 }

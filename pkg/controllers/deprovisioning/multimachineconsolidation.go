@@ -41,7 +41,7 @@ func NewMultiMachineConsolidation(clk clock.Clock, cluster *state.Cluster, kubeC
 }
 
 func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
-	if m.cluster.Consolidated() {
+	if m.isConsolidated() {
 		return Command{}, nil
 	}
 	candidates, err := m.sortAndFilterCandidates(ctx, candidates)
@@ -56,7 +56,10 @@ func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	if err != nil {
 		return Command{}, err
 	}
+
 	if cmd.Action() == NoOpAction {
+		// couldn't identify any candidates
+		m.markConsolidated()
 		return cmd, nil
 	}
 

@@ -111,7 +111,7 @@ var _ = BeforeEach(func() {
 	}
 	fakeClock.SetTime(time.Now())
 	cluster.Reset()
-	cluster.SetConsolidated(false)
+	cluster.MarkUnconsolidated()
 
 	// Reset Feature Flags to test defaults
 	ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: true}))
@@ -137,26 +137,6 @@ var _ = BeforeEach(func() {
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 	cluster.Reset()
-})
-
-var _ = Describe("Consolidation State", func() {
-	It("should not reset consolidation state if consolidation hasn't run", func() {
-		// this assumes that the consolidation reset period is 5 minutes, which it is currently
-		_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
-		Expect(err).ToNot(HaveOccurred())
-		Expect(cluster.Consolidated()).To(BeTrue())
-		fakeClock.Step(1 * time.Minute)
-		Expect(cluster.Consolidated()).To(BeTrue())
-
-		// reconciling now shouldn't set the last consolidated time to current time, as consolidation isn't actually
-		// running since it last ran 1 minute ago
-		_, err = deprovisioningController.Reconcile(ctx, reconcile.Request{})
-		Expect(err).ToNot(HaveOccurred())
-		// but advancing the clock 4:30, so we are at 5:30 past the last run time should cause consolidated to return
-		// false
-		fakeClock.Step(4*time.Minute + 30*time.Second)
-		Expect(cluster.Consolidated()).To(BeFalse())
-	})
 })
 
 var _ = Describe("Pod Eviction Cost", func() {
@@ -357,7 +337,6 @@ var _ = Describe("Replace Nodes", func() {
 		fakeClock.Step(10 * time.Minute)
 
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
-		Expect(cluster.Consolidated()).To(BeTrue())
 
 		// we didn't create a new machine or delete the old one
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
@@ -626,8 +605,6 @@ var _ = Describe("Replace Nodes", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		wg.Wait()
 
-		Expect(cluster.Consolidated()).To(BeTrue())
-
 		// Expect to not create or delete more machines
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
@@ -741,8 +718,6 @@ var _ = Describe("Replace Nodes", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		wg.Wait()
 
-		Expect(cluster.Consolidated()).To(BeTrue())
-
 		// Expect to not create or delete more machines
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
@@ -808,7 +783,6 @@ var _ = Describe("Replace Nodes", func() {
 		go func() {
 			defer GinkgoRecover()
 			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
-			Expect(cluster.Consolidated()).To(BeFalse())
 			consolidationFinished.Store(true)
 		}()
 		wg.Wait()

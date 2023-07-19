@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/samber/lo"
@@ -55,11 +54,14 @@ type Cluster struct {
 	nameToProviderID map[string]string               // node name -> provider id
 	daemonSetPods    sync.Map                        // daemonSet -> existing pod
 
+	clusterStateMu sync.RWMutex // Separate mutex as this is called in some places that mu is held
+	// A monotonically increasing timestamp representing the time state of the
+	// cluster with respect to consolidation. This increases when something has
+	// changed about the cluster that might make consolidation possible. By recording
+	// the state, interested deprovisioners can check to see if this has changed to
+	// optimize and not try to deprovision if nothing about the cluster has changed.
+	clusterState     time.Time
 	antiAffinityPods sync.Map // pod namespaced name -> *v1.Pod of pods that have required anti affinities
-
-	// consolidatedAt is a timestamp marking the last time that we calculated consolidation off of the current cluster state
-	// This value is overridden with the 0 timestamp if we haven't calculated consolidation off of the current cluster state
-	consolidatedAt atomic.Int64
 }
 
 func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudProvider) *Cluster {
@@ -264,30 +266,38 @@ func (c *Cluster) DeletePod(podKey types.NamespacedName) {
 
 	c.antiAffinityPods.Delete(podKey)
 	c.updateNodeUsageFromPodCompletion(podKey)
-	c.SetConsolidated(false)
+	c.MarkUnconsolidated()
 }
 
-// SetConsolidated updates based on the following conditions:
-//  1. consolidated is TRUE: Updates the state to record that we have viewed this cluster state at this time
-//  2. consolidated is FALSE: Resets the value to mark that we haven't currently viewed this state or the state is in flux
-func (c *Cluster) SetConsolidated(consolidated bool) {
-	if consolidated {
-		c.consolidatedAt.Store(c.clock.Now().UnixMilli())
-	} else {
-		c.consolidatedAt.Store(0)
+// MarkUnconsolidated marks the cluster state as being unconsolidated.  This should be called in any situation where
+// something in the cluster has changed such that the cluster may have moved from a non-consolidatable to a consolidatable
+// state.
+func (c *Cluster) MarkUnconsolidated() time.Time {
+	newState := c.clock.Now()
+	c.clusterStateMu.Lock()
+	c.clusterState = newState
+	c.clusterStateMu.Unlock()
+	return newState
+}
+
+// ConsolidationState returns a timestamp of the last time that the cluster state with respect to consolidation changed.
+// If nothing changes, this timestamp resets after five minutes to force watchers that use this to defer work to
+// occasionally revalidate that nothing external (e.g. an instance type becoming available) has changed that now makes
+// it possible for them to operate. Time was chosen as the type here as it allows comparisons using the built-in
+// monotonic clock.
+func (c *Cluster) ConsolidationState() time.Time {
+	c.clusterStateMu.RLock()
+	state := c.clusterState
+	c.clusterStateMu.RUnlock()
+
+	// time.Time uses a monotonic clock for these comparisons
+	if c.clock.Since(state) < time.Minute*5 {
+		return state
 	}
-}
 
-// Consolidated returns whether the current cluster state has been observed for consolidation. If
-// consolidation can't occur and the state hasn't changed, there is no point in re-attempting consolidation. This
-// allows reducing overall CPU utilization by pausing consolidation when the cluster is in a static state.
-func (c *Cluster) Consolidated() bool {
-	// Either 5 minutes has elapsed since the last fully observed consolidation state OR
-	// the value is reset to 0 which means that we haven't observed this state.
-	// In either case, the time since the consolidatedAt value should be greater than the consolidation timeout (5m)
 	// This ensures that at least once every 5 minutes we consider consolidating our cluster in case something else has
 	// changed (e.g. instance type availability) that we can't detect which would allow consolidation to occur.
-	return c.clock.Since(time.UnixMilli(c.consolidatedAt.Load())) < time.Minute*5
+	return c.MarkUnconsolidated()
 }
 
 // Reset the cluster state for unit testing
@@ -373,7 +383,7 @@ func (c *Cluster) cleanupMachine(name string) {
 			c.nodes[id].Machine = nil
 		}
 		delete(c.nameToProviderID, name)
-		c.SetConsolidated(false)
+		c.MarkUnconsolidated()
 	}
 }
 
@@ -423,7 +433,7 @@ func (c *Cluster) cleanupNode(name string) {
 			c.nodes[id].Node = nil
 		}
 		delete(c.nameToProviderID, name)
-		c.SetConsolidated(false)
+		c.MarkUnconsolidated()
 	}
 }
 
@@ -543,7 +553,7 @@ func (c *Cluster) cleanupOldBindings(pod *v1.Pod) {
 		}
 	}
 	// new pod binding has occurred
-	c.SetConsolidated(false)
+	c.MarkUnconsolidated()
 }
 
 func (c *Cluster) updatePodAntiAffinities(pod *v1.Pod) {
@@ -560,15 +570,15 @@ func (c *Cluster) updatePodAntiAffinities(pod *v1.Pod) {
 
 func (c *Cluster) triggerConsolidationOnChange(old, new *StateNode) {
 	if old == nil || new == nil {
-		c.SetConsolidated(false)
+		c.MarkUnconsolidated()
 		return
 	}
 	if old.Initialized() != new.Initialized() {
-		c.SetConsolidated(false)
+		c.MarkUnconsolidated()
 		return
 	}
 	if old.MarkedForDeletion() != new.MarkedForDeletion() {
-		c.SetConsolidated(false)
+		c.MarkUnconsolidated()
 		return
 	}
 }
