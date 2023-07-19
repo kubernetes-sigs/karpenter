@@ -16,8 +16,10 @@ package v1alpha5
 
 import (
 	"encoding/json"
+	"fmt"
 	"sort"
 
+	"github.com/mitchellh/hashstructure/v2"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -41,15 +43,15 @@ type ProvisionerSpec struct {
 	// have matching tolerations. Additional taints will be created that match
 	// pod tolerations on a per-node basis.
 	// +optional
-	Taints []v1.Taint `json:"taints,omitempty"`
+	Taints []v1.Taint `json:"taints,omitempty" hash:"set"`
 	// StartupTaints are taints that are applied to nodes upon startup which are expected to be removed automatically
 	// within a short period of time, typically by a DaemonSet that tolerates the taint. These are commonly used by
 	// daemonsets to allow initialization and enforce startup ordering.  StartupTaints are ignored for provisioning
 	// purposes in that pods are not required to tolerate a StartupTaint in order to have nodes provisioned for them.
 	// +optional
-	StartupTaints []v1.Taint `json:"startupTaints,omitempty"`
+	StartupTaints []v1.Taint `json:"startupTaints,omitempty" hash:"set"`
 	// Requirements are layered with Labels and applied to every node.
-	Requirements []v1.NodeSelectorRequirement `json:"requirements,omitempty"`
+	Requirements []v1.NodeSelectorRequirement `json:"requirements,omitempty" hash:"ignore"`
 	// KubeletConfiguration are options passed to the kubelet when provisioning nodes
 	//+optional
 	KubeletConfiguration *KubeletConfiguration `json:"kubeletConfiguration,omitempty"`
@@ -67,7 +69,7 @@ type ProvisionerSpec struct {
 	//
 	// Termination due to no utilization is disabled if this field is not set.
 	// +optional
-	TTLSecondsAfterEmpty *int64 `json:"ttlSecondsAfterEmpty,omitempty"`
+	TTLSecondsAfterEmpty *int64 `json:"ttlSecondsAfterEmpty,omitempty" hash:"ignore"`
 	// TTLSecondsUntilExpired is the number of seconds the controller will wait
 	// before terminating a node, measured from when the node is created. This
 	// is useful to implement features like eventually consistent node upgrade,
@@ -75,9 +77,9 @@ type ProvisionerSpec struct {
 	//
 	// Termination due to expiration is disabled if this field is not set.
 	// +optional
-	TTLSecondsUntilExpired *int64 `json:"ttlSecondsUntilExpired,omitempty"`
+	TTLSecondsUntilExpired *int64 `json:"ttlSecondsUntilExpired,omitempty" hash:"ignore"`
 	// Limits define a set of bounds for provisioning capacity.
-	Limits *Limits `json:"limits,omitempty"`
+	Limits *Limits `json:"limits,omitempty" hash:"ignore"`
 	// Weight is the priority given to the provisioner during scheduling. A higher
 	// numerical weight indicates that this provisioner will be ordered
 	// ahead of other provisioners with lower weights. A provisioner with no weight
@@ -85,10 +87,20 @@ type ProvisionerSpec struct {
 	// +kubebuilder:validation:Minimum:=1
 	// +kubebuilder:validation:Maximum:=100
 	// +optional
-	Weight *int32 `json:"weight,omitempty"`
+	Weight *int32 `json:"weight,omitempty" hash:"ignore"`
 	// Consolidation are the consolidation parameters
 	// +optional
-	Consolidation *Consolidation `json:"consolidation,omitempty"`
+	Consolidation *Consolidation `json:"consolidation,omitempty" hash:"ignore"`
+}
+
+func (p *Provisioner) Hash() string {
+	hash, _ := hashstructure.Hash(p.Spec, hashstructure.FormatV2, &hashstructure.HashOptions{
+		SlicesAsSets:    true,
+		IgnoreZeroValue: true,
+		ZeroNil:         true,
+	})
+
+	return fmt.Sprint(hash)
 }
 
 type Consolidation struct {

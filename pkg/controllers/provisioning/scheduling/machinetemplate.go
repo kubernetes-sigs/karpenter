@@ -81,11 +81,16 @@ func (i *MachineTemplate) ToMachine(owner *v1alpha5.Provisioner) *v1alpha5.Machi
 	i.Requirements.Add(scheduling.NewRequirement(v1.LabelInstanceTypeStable, v1.NodeSelectorOpIn, lo.Map(instanceTypes, func(i *cloudprovider.InstanceType, _ int) string {
 		return i.Name
 	})...))
+	provisionerDriftHash := owner.Hash()
 	m := &v1alpha5.Machine{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: fmt.Sprintf("%s-", i.ProvisionerName),
-			Annotations:  lo.Assign(i.Annotations, v1alpha5.ProviderAnnotation(i.Provider)),
-			Labels:       i.Labels,
+			Annotations: lo.Assign(
+				i.Annotations,
+				v1alpha5.ProviderAnnotation(i.Provider),
+				map[string]string{v1alpha5.ProvisionerHashAnnotationKey: provisionerDriftHash},
+			),
+			Labels: i.Labels,
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion:         v1alpha5.SchemeGroupVersion.String(),
