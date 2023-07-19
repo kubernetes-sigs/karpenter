@@ -190,10 +190,15 @@ func webhookChecker(ctx context.Context) healthz.Checker {
 		if err != nil {
 			return err
 		}
+		// Close the body to avoid leaking file descriptors
+		// Always read the body so we can re-use the connection: https://stackoverflow.com/questions/17948827/reusing-http-connections-in-go
+		_, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+
 		// If there is a server-side error or path not found,
 		// consider liveness to have failed
 		if res.StatusCode >= 500 || res.StatusCode == 404 {
-			return fmt.Errorf("webhook probe failed, %s", lo.Must(io.ReadAll(res.Body)))
+			return fmt.Errorf("webhook probe failed with status code %d", res.StatusCode)
 		}
 		return nil
 	}
