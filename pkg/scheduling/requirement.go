@@ -40,6 +40,20 @@ func NewRequirement(key string, operator v1.NodeSelectorOperator, values ...stri
 	if normalized, ok := v1alpha5.NormalizedLabels[key]; ok {
 		key = normalized
 	}
+
+	// This is a super-common case, so optimize for it an inline everything.
+	if operator == v1.NodeSelectorOpIn {
+		s := make(sets.Set[string], len(values))
+		for _, value := range values {
+			s[value] = sets.Empty{}
+		}
+		return &Requirement{
+			Key:        key,
+			values:     s,
+			complement: false,
+		}
+	}
+
 	r := &Requirement{
 		Key:        key,
 		values:     sets.New[string](),
