@@ -59,6 +59,25 @@ func Merge(resources ...v1.ResourceList) v1.ResourceList {
 	return result
 }
 
+// MergeInto sums the resources from src into dest, modifying dest. If you need to repeatedly sum
+// multiple resource lists, it allocates less to continually sum into an existing list as opposed to
+// constructing a new one for each sum like Merge
+func MergeInto(dest v1.ResourceList, src v1.ResourceList) v1.ResourceList {
+	if dest == nil {
+		sz := len(dest)
+		if len(src) > sz {
+			sz = len(src)
+		}
+		dest = make(v1.ResourceList, sz)
+	}
+	for resourceName, quantity := range src {
+		current := dest[resourceName]
+		current.Add(quantity)
+		dest[resourceName] = current
+	}
+	return dest
+}
+
 func Subtract(lhs, rhs v1.ResourceList) v1.ResourceList {
 	result := make(v1.ResourceList, len(lhs))
 	for k, v := range lhs {

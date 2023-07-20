@@ -296,7 +296,11 @@ func (in *StateNode) VolumeLimits() scheduling.VolumeCount {
 }
 
 func (in *StateNode) PodRequests() v1.ResourceList {
-	return resources.Merge(lo.Values(in.podRequests)...)
+	var totalRequests v1.ResourceList
+	for _, requests := range in.podRequests {
+		totalRequests = resources.MergeInto(totalRequests, requests)
+	}
+	return totalRequests
 }
 
 func (in *StateNode) PodLimits() v1.ResourceList {
