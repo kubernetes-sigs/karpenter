@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/samber/lo"
 	csitranslation "k8s.io/csi-translation-lib"
@@ -29,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/aws/karpenter-core/pkg/utils/atomic"
 	"github.com/aws/karpenter-core/pkg/utils/pretty"
 )
 
@@ -48,6 +50,14 @@ var changeMonitor = pretty.NewChangeMonitor()
 type VolumeUsage struct {
 	volumes    volumes
 	podVolumes map[types.NamespacedName]volumes
+}
+
+// Cache the lookup of our default storage class, global atomic cache since the volume usage is per node
+var defaultStorageClass = atomic.NewCachedVariable[string](1 * time.Minute)
+
+// ResetDefaultStorageClass is intended to be called from unit tests to reset the default storage class
+func ResetDefaultStorageClass() {
+	defaultStorageClass.Reset()
 }
 
 func NewVolumeUsage() *VolumeUsage {
@@ -205,6 +215,10 @@ func (v *VolumeUsage) validate(ctx context.Context, kubeClient client.Client, po
 }
 
 func (v *VolumeUsage) discoverDefaultStorageClassName(ctx context.Context, kubeClient client.Client) (*string, error) {
+	if name, ok := defaultStorageClass.Get(); ok {
+		return &name, nil
+	}
+
 	storageClassList := &storagev1.StorageClassList{}
 	if err := kubeClient.List(ctx, storageClassList); err != nil {
 		return nil, err
@@ -221,6 +235,7 @@ func (v *VolumeUsage) discoverDefaultStorageClassName(ctx context.Context, kubeC
 	sort.Slice(defaults, func(i, j int) bool {
 		return defaults[i].CreationTimestamp.After(defaults[j].CreationTimestamp.Time)
 	})
+	defaultStorageClass.Set(defaults[0].Name)
 	return lo.ToPtr(defaults[0].Name), nil
 }
 

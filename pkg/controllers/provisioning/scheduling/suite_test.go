@@ -108,6 +108,7 @@ var _ = BeforeEach(func() {
 	newCP := fake.CloudProvider{}
 	cloudProvider.InstanceTypes, _ = newCP.GetInstanceTypes(context.Background(), nil)
 	cloudProvider.CreateCalls = nil
+	pscheduling.ResetDefaultStorageClass()
 })
 
 var _ = AfterEach(func() {
