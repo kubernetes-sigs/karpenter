@@ -105,7 +105,8 @@ func (p *Provisioner) Trigger() {
 }
 
 func (p *Provisioner) Builder(_ context.Context, mgr manager.Manager) controller.Builder {
-	return controller.NewSingletonManagedBy(mgr)
+	return controller.NewSingletonManagedBy(mgr).
+		WithRateLimiter(controller.NewDisabledRateLimiter())
 }
 
 func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (result reconcile.Result, err error) {
@@ -198,26 +199,29 @@ func (p *Provisioner) consolidationWarnings(ctx context.Context, po v1.Pod) {
 //nolint:gocyclo
 func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNodes []*state.StateNode, opts scheduler.SchedulerOptions) (*scheduler.Scheduler, error) {
 	// Build node templates
-	var machines []*scheduler.MachineTemplate
-	var provisionerList v1alpha5.ProvisionerList
+	var machineTemplates []*scheduler.MachineTemplate
 	instanceTypes := map[string][]*cloudprovider.InstanceType{}
 	domains := map[string]sets.Set[string]{}
-	if err := p.kubeClient.List(ctx, &provisionerList); err != nil {
+
+	provisionerList := &v1alpha5.ProvisionerList{}
+	if err := p.kubeClient.List(ctx, provisionerList); err != nil {
 		return nil, fmt.Errorf("listing provisioners, %w", err)
+	}
+	provisionerList.Items = lo.Filter(provisionerList.Items, func(p v1alpha5.Provisioner, _ int) bool {
+		return p.DeletionTimestamp.IsZero()
+	})
+	if len(provisionerList.Items) == 0 {
+		return nil, fmt.Errorf("no provisioners found")
 	}
 
 	// nodeTemplates generated from provisioners are ordered by weight
 	// since they are stored within a slice and scheduling
 	// will always attempt to schedule on the first nodeTemplate
 	provisionerList.OrderByWeight()
-
 	for i := range provisionerList.Items {
 		provisioner := &provisionerList.Items[i]
-		if !provisioner.DeletionTimestamp.IsZero() {
-			continue
-		}
 		// Create node template
-		machines = append(machines, scheduler.NewMachineTemplate(provisioner))
+		machineTemplates = append(machineTemplates, scheduler.NewMachineTemplate(provisioner))
 		// Get instance type options
 		instanceTypeOptions, err := p.cloudProvider.GetInstanceTypes(ctx, provisioner)
 		if err != nil {
@@ -257,10 +261,6 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 		}
 	}
 
-	if len(machines) == 0 {
-		return nil, fmt.Errorf("no provisioners found")
-	}
-
 	// inject topology constraints
 	pods = p.injectTopology(ctx, pods)
 
@@ -273,7 +273,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	if err != nil {
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
-	return scheduler.NewScheduler(ctx, p.kubeClient, machines, provisionerList.Items, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, opts), nil
+	return scheduler.NewScheduler(ctx, p.kubeClient, machineTemplates, provisionerList.Items, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, opts), nil
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (*scheduler.Results, error) {

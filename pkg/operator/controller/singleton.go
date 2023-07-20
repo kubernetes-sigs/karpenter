@@ -30,8 +30,10 @@ import (
 	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
+// SingletonBuilder builds a Singleton controller using a Manager and a Reconciler
 type SingletonBuilder struct {
-	mgr manager.Manager
+	mgr         manager.Manager
+	rateLimiter ratelimiter.RateLimiter
 }
 
 func NewSingletonManagedBy(m manager.Manager) SingletonBuilder {
@@ -40,19 +42,29 @@ func NewSingletonManagedBy(m manager.Manager) SingletonBuilder {
 	}
 }
 
-func (b SingletonBuilder) Complete(r Reconciler) error {
-	return b.mgr.Add(newSingleton(r))
+func (b SingletonBuilder) WithRateLimiter(rateLimiter ratelimiter.RateLimiter) SingletonBuilder {
+	b.rateLimiter = rateLimiter
+	return b
 }
 
+func (b SingletonBuilder) Complete(r Reconciler) error {
+	return b.mgr.Add(newSingleton(r, b.rateLimiter))
+}
+
+// Singleton is a controller that runs a single thread for a single reconcile loop and runs persistently
+// A singleton controller is not initiated by any watch event but is started as soon as the manager starts
 type Singleton struct {
 	Reconciler
 	rateLimiter ratelimiter.RateLimiter
 }
 
-func newSingleton(r Reconciler) *Singleton {
+func newSingleton(r Reconciler, rateLimiter ratelimiter.RateLimiter) *Singleton {
 	s := &Singleton{
 		Reconciler:  r,
-		rateLimiter: workqueue.DefaultItemBasedRateLimiter(),
+		rateLimiter: rateLimiter,
+	}
+	if s.rateLimiter == nil {
+		s.rateLimiter = workqueue.DefaultItemBasedRateLimiter()
 	}
 	s.initMetrics()
 	return s
