@@ -23,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
@@ -65,6 +66,7 @@ func (c *Controller) Reconcile(ctx context.Context, p *v1alpha5.Provisioner) (re
 func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
+		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		For(&v1alpha5.Provisioner{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
 	)

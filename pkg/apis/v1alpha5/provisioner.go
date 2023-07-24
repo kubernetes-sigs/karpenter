@@ -43,13 +43,13 @@ type ProvisionerSpec struct {
 	// have matching tolerations. Additional taints will be created that match
 	// pod tolerations on a per-node basis.
 	// +optional
-	Taints []v1.Taint `json:"taints,omitempty" hash:"set"`
+	Taints []v1.Taint `json:"taints,omitempty"`
 	// StartupTaints are taints that are applied to nodes upon startup which are expected to be removed automatically
 	// within a short period of time, typically by a DaemonSet that tolerates the taint. These are commonly used by
 	// daemonsets to allow initialization and enforce startup ordering.  StartupTaints are ignored for provisioning
 	// purposes in that pods are not required to tolerate a StartupTaint in order to have nodes provisioned for them.
 	// +optional
-	StartupTaints []v1.Taint `json:"startupTaints,omitempty" hash:"set"`
+	StartupTaints []v1.Taint `json:"startupTaints,omitempty"`
 	// Requirements are layered with Labels and applied to every node.
 	Requirements []v1.NodeSelectorRequirement `json:"requirements,omitempty" hash:"ignore"`
 	// KubeletConfiguration are options passed to the kubelet when provisioning nodes
@@ -57,11 +57,11 @@ type ProvisionerSpec struct {
 	KubeletConfiguration *KubeletConfiguration `json:"kubeletConfiguration,omitempty"`
 	// Provider contains fields specific to your cloudprovider.
 	// +kubebuilder:pruning:PreserveUnknownFields
-	Provider *Provider `json:"provider,omitempty"`
+	Provider *Provider `json:"provider,omitempty" hash:"ignore"`
 	// ProviderRef is a reference to a dedicated CRD for the chosen provider, that holds
 	// additional configuration options
 	// +optional
-	ProviderRef *MachineTemplateRef `json:"providerRef,omitempty"`
+	ProviderRef *MachineTemplateRef `json:"providerRef,omitempty" hash:"ignore"`
 	// TTLSecondsAfterEmpty is the number of seconds the controller will wait
 	// before attempting to delete a node, measured from when the node is
 	// detected to be empty. A Node is considered to be empty when it does not

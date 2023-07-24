@@ -34,7 +34,7 @@ type Drift struct {
 	cloudProvider cloudprovider.CloudProvider
 }
 
-func (d *Drift) Reconcile(ctx context.Context, _ *v1alpha5.Provisioner, machine *v1alpha5.Machine) (reconcile.Result, error) {
+func (d *Drift) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) (reconcile.Result, error) {
 	hasDriftedCondition := machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted) != nil
 
 	// From here there are three scenarios to handle:
@@ -54,7 +54,7 @@ func (d *Drift) Reconcile(ctx context.Context, _ *v1alpha5.Provisioner, machine 
 		}
 		return reconcile.Result{}, nil
 	}
-	drifted, err := d.cloudProvider.IsMachineDrifted(ctx, machine)
+	drifted, err := d.isDrifted(ctx, provisioner, machine)
 	if err != nil {
 		return reconcile.Result{}, cloudprovider.IgnoreMachineNotFoundError(fmt.Errorf("getting drift for machine, %w", err))
 	}
@@ -77,4 +77,26 @@ func (d *Drift) Reconcile(ctx context.Context, _ *v1alpha5.Provisioner, machine 
 	}
 	// Requeue after 5 minutes for the cache TTL
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+}
+
+// isDrifted will check if a machine is drifted from the fields in the provisioner.Spec and
+// the cloudprovider
+func (d *Drift) isDrifted(ctx context.Context, provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) (bool, error) {
+	cloudProviderDrifted, err := d.cloudProvider.IsMachineDrifted(ctx, machine)
+	if err != nil {
+		return false, err
+	}
+
+	return cloudProviderDrifted || areStaticFieldsDrifted(provisioner, machine), nil
+}
+
+// Eligible fields for static drift are described in the docs
+// https://karpenter.sh/docs/concepts/deprovisioning/#drift
+func areStaticFieldsDrifted(provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) bool {
+	provisionerHash, foundHashProvisioner := provisioner.Annotations[v1alpha5.ProvisionerHashAnnotationKey]
+	machineHash, foundHashMachine := machine.Annotations[v1alpha5.ProvisionerHashAnnotationKey]
+	if !foundHashProvisioner || !foundHashMachine {
+		return false
+	}
+	return provisionerHash != machineHash
 }
