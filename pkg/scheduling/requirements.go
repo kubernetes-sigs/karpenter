@@ -119,10 +119,23 @@ func (r Requirements) Get(key string) *Requirement {
 	return r[key]
 }
 
-// Compatible ensures the provided requirements can be met.
+// Compatible ensures the provided requirements can loosely be met.
 func (r Requirements) Compatible(requirements Requirements) (errs error) {
 	// Custom Labels must intersect, but if not defined are denied.
 	for key := range requirements.Keys().Difference(v1alpha5.WellKnownLabels) {
+		if operator := requirements.Get(key).Operator(); r.Has(key) || operator == v1.NodeSelectorOpNotIn || operator == v1.NodeSelectorOpDoesNotExist {
+			continue
+		}
+		errs = multierr.Append(errs, fmt.Errorf("label %q does not have known values%s", key, labelHint(r, key)))
+	}
+	// Well Known Labels must intersect, but if not defined, are allowed.
+	return multierr.Append(errs, r.Intersects(requirements))
+}
+
+// StrictlyCompatible ensures all the provided requirements can strictly be met.
+func (r Requirements) StrictlyCompatible(requirements Requirements) (errs error) {
+	// All requirements in the passed through requirements should be defined in "r"
+	for key := range requirements.Keys() {
 		if operator := requirements.Get(key).Operator(); r.Has(key) || operator == v1.NodeSelectorOpNotIn || operator == v1.NodeSelectorOpDoesNotExist {
 			continue
 		}

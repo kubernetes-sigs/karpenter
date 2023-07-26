@@ -127,7 +127,212 @@ var _ = Describe("Drift", func() {
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted)).To(BeNil())
 	})
-	Context("Static Drift", func() {
+	Context("NodeRequirement Drift", func() {
+		DescribeTable("",
+			func(oldProvisionerReq []v1.NodeSelectorRequirement, newProvisionerReq []v1.NodeSelectorRequirement, machineLabels map[string]string, drifted bool) {
+				cp.Drifted = false
+				provisioner.Spec.Requirements = oldProvisionerReq
+				machine.Labels = lo.Assign(machine.Labels, machineLabels)
+
+				ExpectApplied(ctx, env.Client, provisioner, machine)
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
+				machine = ExpectExists(ctx, env.Client, machine)
+				Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted)).To(BeNil())
+
+				provisioner.Spec.Requirements = newProvisionerReq
+				ExpectApplied(ctx, env.Client, provisioner)
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
+				machine = ExpectExists(ctx, env.Client, machine)
+				if drifted {
+					Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).IsTrue()).To(BeTrue())
+				} else {
+					Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted)).To(BeNil())
+				}
+			},
+			Entry(
+				"should return drifted if the provisioner node requirement is updated",
+				[]v1.NodeSelectorRequirement{
+					{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand}},
+					{Key: v1.LabelArchStable, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.ArchitectureAmd64}},
+					{Key: v1.LabelOSStable, Operator: v1.NodeSelectorOpIn, Values: []string{string(v1.Linux)}},
+				},
+				[]v1.NodeSelectorRequirement{
+					{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeSpot}},
+				},
+				map[string]string{
+					v1alpha5.LabelCapacityType: v1alpha5.CapacityTypeOnDemand,
+					v1.LabelArchStable:         v1alpha5.ArchitectureAmd64,
+					v1.LabelOSStable:           string(v1.Linux),
+				},
+				true),
+			Entry(
+				"should return drifted if a new node requirement is added",
+				[]v1.NodeSelectorRequirement{
+					{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand}},
+					{Key: v1.LabelOSStable, Operator: v1.NodeSelectorOpIn, Values: []string{string(v1.Linux)}},
+				},
+				[]v1.NodeSelectorRequirement{
+					{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand}},
+					{Key: v1.LabelOSStable, Operator: v1.NodeSelectorOpIn, Values: []string{string(v1.Linux)}},
+					{Key: v1.LabelArchStable, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.ArchitectureAmd64}},
+				},
+				map[string]string{
+					v1alpha5.LabelCapacityType: v1alpha5.CapacityTypeOnDemand,
+					v1.LabelOSStable:           string(v1.Linux),
+				},
+				true,
+			),
+			Entry(
+				"should return drifted if a node requirement is reduced",
+				[]v1.NodeSelectorRequirement{
+					{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand}},
+					{Key: v1.LabelOSStable, Operator: v1.NodeSelectorOpIn, Values: []string{string(v1.Linux), string(v1.Windows)}},
+				},
+				[]v1.NodeSelectorRequirement{
+					{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand}},
+					{Key: v1.LabelOSStable, Operator: v1.NodeSelectorOpIn, Values: []string{string(v1.Windows)}},
+				},
+				map[string]string{
+					v1alpha5.LabelCapacityType: v1alpha5.CapacityTypeOnDemand,
+					v1.LabelOSStable:           string(v1.Linux),
+				},
+				true,
+			),
+			Entry(
+				"should not return drifted if a node requirement is expanded",
+				[]v1.NodeSelectorRequirement{
+					{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand}},
+					{Key: v1.LabelOSStable, Operator: v1.NodeSelectorOpIn, Values: []string{string(v1.Linux)}},
+				},
+				[]v1.NodeSelectorRequirement{
+					{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand}},
+					{Key: v1.LabelOSStable, Operator: v1.NodeSelectorOpIn, Values: []string{string(v1.Linux), string(v1.Windows)}},
+				},
+				map[string]string{
+					v1alpha5.LabelCapacityType: v1alpha5.CapacityTypeOnDemand,
+					v1.LabelOSStable:           string(v1.Linux),
+				},
+				false,
+			),
+			Entry(
+				"should not return drifted if a node requirement set to Exists",
+				[]v1.NodeSelectorRequirement{
+					{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand}},
+					{Key: v1.LabelOSStable, Operator: v1.NodeSelectorOpIn, Values: []string{string(v1.Linux)}},
+				},
+				[]v1.NodeSelectorRequirement{
+					{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand}},
+					{Key: v1.LabelOSStable, Operator: v1.NodeSelectorOpExists, Values: []string{}},
+				},
+				map[string]string{
+					v1alpha5.LabelCapacityType: v1alpha5.CapacityTypeOnDemand,
+					v1.LabelOSStable:           string(v1.Linux),
+				},
+				false,
+			),
+			Entry(
+				"should return drifted if a node requirement set to DoesNotExists",
+				[]v1.NodeSelectorRequirement{
+					{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand}},
+					{Key: v1.LabelOSStable, Operator: v1.NodeSelectorOpIn, Values: []string{string(v1.Linux)}},
+				},
+				[]v1.NodeSelectorRequirement{
+					{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand}},
+					{Key: v1.LabelOSStable, Operator: v1.NodeSelectorOpDoesNotExist, Values: []string{}},
+				},
+				map[string]string{
+					v1alpha5.LabelCapacityType: v1alpha5.CapacityTypeOnDemand,
+					v1.LabelOSStable:           string(v1.Linux),
+				},
+				true,
+			),
+			Entry(
+				"should not return drifted if a machine is grater then node requirement",
+				[]v1.NodeSelectorRequirement{
+					{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand}},
+					{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpGt, Values: []string{"2"}},
+				},
+				[]v1.NodeSelectorRequirement{
+					{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand}},
+					{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpGt, Values: []string{"10"}},
+				},
+				map[string]string{
+					v1alpha5.LabelCapacityType: v1alpha5.CapacityTypeOnDemand,
+					v1.LabelInstanceTypeStable: "5",
+				},
+				true,
+			),
+			Entry(
+				"should not return drifted if a machine is less then node requirement",
+				[]v1.NodeSelectorRequirement{
+					{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand}},
+					{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpLt, Values: []string{"5"}},
+				},
+				[]v1.NodeSelectorRequirement{
+					{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand}},
+					{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpLt, Values: []string{"1"}},
+				},
+				map[string]string{
+					v1alpha5.LabelCapacityType: v1alpha5.CapacityTypeOnDemand,
+					v1.LabelInstanceTypeStable: "2",
+				},
+				true,
+			),
+		)
+		It("should return drifted only on machines that are drifted from an updated provisioner", func() {
+			cp.Drifted = false
+			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
+				{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand}},
+				{Key: v1.LabelOSStable, Operator: v1.NodeSelectorOpIn, Values: []string{string(v1.Linux), string(v1.Windows)}},
+			}
+			machine.Labels = lo.Assign(machine.Labels, map[string]string{
+				v1alpha5.LabelCapacityType: v1alpha5.CapacityTypeOnDemand,
+				v1.LabelOSStable:           string(v1.Linux),
+			})
+			machineTwo, _ := test.MachineAndNode(v1alpha5.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       test.RandomName(),
+						v1alpha5.LabelCapacityType:       v1alpha5.CapacityTypeOnDemand,
+						v1.LabelOSStable:                 string(v1.Windows),
+					},
+					Annotations: map[string]string{
+						v1alpha5.ProvisionerHashAnnotationKey: provisioner.Hash(),
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			machineTwo.StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
+			ExpectApplied(ctx, env.Client, provisioner, machine, machineTwo)
+
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machineTwo))
+			machine = ExpectExists(ctx, env.Client, machine)
+			machineTwo = ExpectExists(ctx, env.Client, machineTwo)
+			Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted)).To(BeNil())
+			Expect(machineTwo.StatusConditions().GetCondition(v1alpha5.MachineDrifted)).To(BeNil())
+
+			// Removed Windows OS
+			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
+				{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand}},
+				{Key: v1.LabelOSStable, Operator: v1.NodeSelectorOpIn, Values: []string{string(v1.Linux)}},
+			}
+			ExpectApplied(ctx, env.Client, provisioner)
+
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
+			machine = ExpectExists(ctx, env.Client, machine)
+			Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted)).To(BeNil())
+
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machineTwo))
+			machineTwo = ExpectExists(ctx, env.Client, machineTwo)
+			Expect(machineTwo.StatusConditions().GetCondition(v1alpha5.MachineDrifted).IsTrue()).To(BeTrue())
+		})
+
+	})
+	Context("Provisioner Static Drift", func() {
 		var testProvisionerOptions test.ProvisionerOptions
 		var provisionerController controller.Controller
 		BeforeEach(func() {
