@@ -110,6 +110,7 @@ func NewOperator() (context.Context, *Operator) {
 		LeaderElection:             opts.EnableLeaderElection,
 		LeaderElectionID:           "karpenter-leader-election",
 		LeaderElectionResourceLock: resourcelock.LeasesResourceLock,
+		LeaderElectionNamespace:    system.Namespace(),
 		Scheme:                     scheme.Scheme,
 		MetricsBindAddress:         fmt.Sprintf(":%d", opts.MetricsPort),
 		HealthProbeBindAddress:     fmt.Sprintf(":%d", opts.HealthProbePort),
