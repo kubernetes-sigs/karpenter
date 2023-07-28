@@ -12,16 +12,22 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha5
+package v1beta1
 
 import (
+	"encoding/json"
+
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 )
 
-// MachineSpec describes the desired state of the Machine
-type MachineSpec struct {
-	// Taints will be applied to the machine's node.
+// NodeClaimSpec describes the desired state of the NodeClaim
+type NodeClaimSpec struct {
+	// Taints will be applied to the NodeClaim's node.
 	// +optional
 	Taints []v1.Taint `json:"taints,omitempty"`
 	// StartupTaints are taints that are applied to nodes upon startup which are expected to be removed automatically
@@ -30,15 +36,37 @@ type MachineSpec struct {
 	// purposes in that pods are not required to tolerate a StartupTaint in order to have nodes provisioned for them.
 	// +optional
 	StartupTaints []v1.Taint `json:"startupTaints,omitempty"`
-	// Requirements are layered with Labels and applied to every node.
-	Requirements []v1.NodeSelectorRequirement `json:"requirements,omitempty"`
-	// Resources models the resource requirements for the Machine to launch
-	Resources ResourceRequirements `json:"resources,omitempty"`
-	// Kubelet are options passed to the kubelet when provisioning nodes
+	// Requirements are layered with GetLabels and applied to every node.
 	// +optional
-	Kubelet *KubeletConfiguration `json:"kubelet,omitempty"`
-	// MachineTemplateRef is a reference to an object that defines provider specific configuration
-	MachineTemplateRef *MachineTemplateRef `json:"machineTemplateRef,omitempty"`
+	Requirements []v1.NodeSelectorRequirement `json:"requirements,omitempty"`
+	// Resources models the resource requirements for the NodeClaim to launch
+	// +optional
+	Resources ResourceRequirements `json:"resources,omitempty"`
+	// KubeletConfiguration are options passed to the kubelet when provisioning nodes
+	// +optional
+	KubeletConfiguration *KubeletConfiguration `json:"kubeletConfiguration,omitempty"`
+	// NodeClass is a reference to an object that defines provider specific configuration
+	// +required
+	NodeClass *NodeClassRef `json:"nodeClass"`
+	// Provider stores CloudProvider-specific details from a conversion from a v1alpha5.Provisioner
+	// TODO @joinnis: Remove this field when v1alpha5 is unsupported in a future version of Karpenter
+	Provider *Provider `json:"-"`
+}
+
+func ProviderAnnotation(p *v1alpha5.Provider) map[string]string {
+	if p == nil {
+		return nil
+	}
+	raw := lo.Must(json.Marshal(p)) // Provider should already have been validated so this shouldn't fail
+	return map[string]string{ProviderCompatabilityAnnotationKey: string(raw)}
+}
+
+// ResourceRequirements models the required resources for the NodeClaim to launch
+// Ths will eventually be transformed into v1.ResourceRequirements when we support resources.limits
+type ResourceRequirements struct {
+	// Requests describes the minimum required resources for the NodeClaim to launch
+	// +optional
+	Requests v1.ResourceList `json:"requests,omitempty"`
 }
 
 // KubeletConfiguration defines args to be used when configuring kubelet on provisioned nodes.
@@ -106,8 +134,9 @@ type KubeletConfiguration struct {
 	CPUCFSQuota *bool `json:"cpuCFSQuota,omitempty"`
 }
 
-type MachineTemplateRef struct {
+type NodeClassRef struct {
 	// Kind of the referent; More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds"
+	// +optional
 	Kind string `json:"kind,omitempty"`
 	// Name of the referent; More info: http://kubernetes.io/docs/user-guide/identifiers#names
 	// +required
@@ -115,42 +144,45 @@ type MachineTemplateRef struct {
 	// API version of the referent
 	// +optional
 	APIVersion string `json:"apiVersion,omitempty"`
+	// IsNodeTemplate tells Karpenter whether the in-memory representation of this object
+	// is actually referring to a NodeTemplate object. This value is not actually part of the v1beta1 public-facing API
+	// TODO @joinnis: Remove this field when v1alpha5 is unsupported in a future version of Karpenter
+	IsNodeTemplate bool `json:"-"`
 }
 
-// ResourceRequirements models the required resources for the Machine to launch
-// Ths will eventually be transformed into v1.ResourceRequirements when we support resources.limits
-type ResourceRequirements struct {
-	// Requests describes the minimum required resources for the Machine to launch
-	// +optional
-	Requests v1.ResourceList `json:"requests,omitempty"`
-}
+// +kubebuilder:object:generate=false
+type Provider = runtime.RawExtension
 
-// TODO @joinnis: Mark this version as deprecated when v1beta1 APIs are formally released
-
-// Machine is the Schema for the Machines API
+// NodeClaim is the Schema for the NodeClaims API
 // +kubebuilder:object:root=true
-// +kubebuilder:resource:path=machines,scope=Cluster,categories=karpenter
+// +kubebuilder:resource:path=nodeclaims,scope=Cluster,categories=karpenter,shortName={nc,ncs}
 // +kubebuilder:subresource:status
+// +kubebuilder:storageversion
 // +kubebuilder:printcolumn:name="Type",type="string",JSONPath=".metadata.labels.node\\.kubernetes\\.io/instance-type",description=""
 // +kubebuilder:printcolumn:name="Zone",type="string",JSONPath=".metadata.labels.topology\\.kubernetes\\.io/zone",description=""
 // +kubebuilder:printcolumn:name="Node",type="string",JSONPath=".status.nodeName",description=""
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type==\"Ready\")].status",description=""
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description=""
 // +kubebuilder:printcolumn:name="Capacity",type="string",JSONPath=".metadata.labels.karpenter\\.sh/capacity-type",priority=1,description=""
-// +kubebuilder:printcolumn:name="Provisioner",type="string",JSONPath=".metadata.labels.karpenter\\.sh/provisioner-name",priority=1,description=""
-// +kubebuilder:printcolumn:name="Template",type="string",JSONPath=".spec.machineTemplateRef.name",priority=1,description=""
-type Machine struct {
+// +kubebuilder:printcolumn:name="NodePool",type="string",JSONPath=".metadata.labels.karpenter\\.sh/nodepool",priority=1,description=""
+// +kubebuilder:printcolumn:name="NodeClass",type="string",JSONPath=".spec.nodeClass.name",priority=1,description=""
+type NodeClaim struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   MachineSpec   `json:"spec,omitempty"`
-	Status MachineStatus `json:"status,omitempty"`
+	Spec   NodeClaimSpec   `json:"spec,omitempty"`
+	Status NodeClaimStatus `json:"status,omitempty"`
+
+	// IsMachine tells Karpenter whether the in-memory representation of this object
+	// is actually referring to a NodeClaim object. This value is not actually part of the v1beta1 public-facing API
+	// TODO @joinnis: Remove this field when v1alpha5 is unsupported in a future version of Karpenter
+	IsMachine bool `json:"-"`
 }
 
-// MachineList contains a list of Provisioner
+// NodeClaimList contains a list of NodeClaims
 // +kubebuilder:object:root=true
-type MachineList struct {
+type NodeClaimList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []Machine `json:"items"`
+	Items           []NodeClaim `json:"items"`
 }
