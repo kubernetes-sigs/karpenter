@@ -176,7 +176,7 @@ func (in *StateNode) Taints() []v1.Taint {
 	// re-appears on the node for a different reason (e.g. the node is cordoned) we will assume that pods can
 	// schedule against the node in the future incorrectly.
 	ephemeralTaints := scheduling.KnownEphemeralTaints
-	if !in.Initialized() && in.Owned() {
+	if !in.Initialized() && in.Managed() {
 		if in.Machine != nil {
 			ephemeralTaints = append(ephemeralTaints, in.Machine.Spec.StartupTaints...)
 		} else {
@@ -201,17 +201,21 @@ func (in *StateNode) Taints() []v1.Taint {
 }
 
 func (in *StateNode) Registered() bool {
-	if in.Node != nil {
-		return in.Node.Labels[v1alpha5.LabelNodeRegistered] == "true"
+	// Node is managed by Karpenter, so we can check for the Registered label
+	if in.Managed() {
+		return in.Node != nil && in.Node.Labels[v1alpha5.LabelNodeRegistered] == "true"
 	}
-	return false
+	// Nodes not managed by Karpenter are always considered Registered
+	return true
 }
 
 func (in *StateNode) Initialized() bool {
-	if in.Node != nil {
-		return in.Node.Labels[v1alpha5.LabelNodeInitialized] == "true"
+	// Node is managed by Karpenter, so we can check for the Initialized label
+	if in.Managed() {
+		return in.Node != nil && in.Node.Labels[v1alpha5.LabelNodeInitialized] == "true"
 	}
-	return false
+	// Nodes not managed by Karpenter are always considered Initialized
+	return true
 }
 
 func (in *StateNode) Capacity() v1.ResourceList {
@@ -229,7 +233,7 @@ func (in *StateNode) Capacity() v1.ResourceList {
 		return in.Machine.Status.Capacity
 	}
 	// TODO @joinnis: Remove this when machine migration is complete
-	if !in.Initialized() && in.Owned() {
+	if !in.Initialized() && in.Managed() {
 		// Override any zero quantity values in the node status
 		ret := lo.Assign(in.Node.Status.Capacity)
 		for resourceName, quantity := range in.inflightCapacity {
@@ -257,7 +261,7 @@ func (in *StateNode) Allocatable() v1.ResourceList {
 		return in.Machine.Status.Allocatable
 	}
 	// TODO @joinnis: Remove this when machine migration is complete
-	if !in.Initialized() && in.Owned() {
+	if !in.Initialized() && in.Managed() {
 		// Override any zero quantity values in the node status
 		ret := lo.Assign(in.Node.Status.Allocatable)
 		for resourceName, quantity := range in.inflightAllocatable {
@@ -325,8 +329,9 @@ func (in *StateNode) Nominated() bool {
 	return in.nominatedUntil.After(time.Now())
 }
 
-func (in *StateNode) Owned() bool {
-	return in.Labels()[v1alpha5.ProvisionerNameLabelKey] != ""
+func (in *StateNode) Managed() bool {
+	return in.Machine != nil ||
+		(in.Node != nil && in.Node.Labels[v1alpha5.ProvisionerNameLabelKey] != "")
 }
 
 func (in *StateNode) updateForPod(ctx context.Context, kubeClient client.Client, pod *v1.Pod) {

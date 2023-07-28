@@ -438,7 +438,7 @@ func (c *Cluster) cleanupNode(name string) {
 }
 
 func (c *Cluster) populateStartupTaints(ctx context.Context, n *StateNode) error {
-	if !n.Owned() {
+	if n.Labels()[v1alpha5.ProvisionerNameLabelKey] == "" {
 		return nil
 	}
 	provisioner := &v1alpha5.Provisioner{}
@@ -450,7 +450,7 @@ func (c *Cluster) populateStartupTaints(ctx context.Context, n *StateNode) error
 }
 
 func (c *Cluster) populateInflight(ctx context.Context, n *StateNode) error {
-	if !n.Owned() {
+	if n.Labels()[v1alpha5.ProvisionerNameLabelKey] == "" {
 		return nil
 	}
 	provisioner := &v1alpha5.Provisioner{}

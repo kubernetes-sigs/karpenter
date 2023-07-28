@@ -905,6 +905,60 @@ var _ = Describe("Delete Node", func() {
 		// and delete the old one
 		ExpectNotFound(ctx, env.Client, machine2, node2)
 	})
+	It("can delete nodes, when non-Karpenter capacity can fit pods", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		unmanagedNode := test.Node(test.NodeOptions{
+			ProviderID: test.RandomProviderID(),
+			Allocatable: map[v1.ResourceName]resource.Quantity{
+				v1.ResourceCPU:  resource.MustParse("32"),
+				v1.ResourcePods: resource.MustParse("100"),
+			},
+		})
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		pods := test.Pods(3, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], machine1, node1, unmanagedNode, prov)
+
+		// bind pods to node
+		ExpectManualBinding(ctx, env.Client, pods[0], node1)
+		ExpectManualBinding(ctx, env.Client, pods[1], node1)
+		ExpectManualBinding(ctx, env.Client, pods[2], node1)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, unmanagedNode}, []*v1alpha5.Machine{machine1})
+
+		fakeClock.Step(10 * time.Minute)
+
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+		wg.Wait()
+
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
+
+		// we can fit all of our pod capacity on the unmanaged node
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		// and delete the old one
+		ExpectNotFound(ctx, env.Client, machine1, node1)
+	})
 	It("can delete nodes, considers PDB", func() {
 		var nl v1.NodeList
 		Expect(env.Client.List(ctx, &nl)).To(Succeed())

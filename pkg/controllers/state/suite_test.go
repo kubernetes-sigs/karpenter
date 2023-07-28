@@ -239,7 +239,7 @@ var _ = Describe("Inflight Nodes", func() {
 		Expect(stateNode.HostName()).To(Equal("custom-host-name"))
 		Expect(stateNode.Annotations()).To(HaveKeyWithValue(v1alpha5.DoNotConsolidateNodeAnnotationKey, "true"))
 		Expect(stateNode.Initialized()).To(BeFalse())
-		Expect(stateNode.Owned()).To(BeTrue())
+		Expect(stateNode.Managed()).To(BeTrue())
 	})
 	It("should model the inflight capacity/allocatable as the machine capacity/allocatable", func() {
 		machine := test.Machine(v1alpha5.Machine{

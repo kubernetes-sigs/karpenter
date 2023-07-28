@@ -265,12 +265,7 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 }
 
 func (s *Scheduler) calculateExistingMachines(stateNodes []*state.StateNode, daemonSetPods []*v1.Pod) {
-	// create our existing nodes
 	for _, node := range stateNodes {
-		if !node.Owned() {
-			// ignoring this node as it wasn't launched by us
-			continue
-		}
 		// Calculate any daemonsets that should schedule to the inflight node
 		var daemons []*v1.Pod
 		for _, p := range daemonSetPods {
