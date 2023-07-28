@@ -16,6 +16,7 @@ package provisioning
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -195,29 +196,34 @@ func (p *Provisioner) consolidationWarnings(ctx context.Context, po v1.Pod) {
 	}
 }
 
+var ErrProvisionersNotFound = errors.New("no provisioners found")
+
 //nolint:gocyclo
 func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNodes []*state.StateNode, opts scheduler.SchedulerOptions) (*scheduler.Scheduler, error) {
 	// Build node templates
-	var machines []*scheduler.MachineTemplate
-	var provisionerList v1alpha5.ProvisionerList
+	var machineTemplates []*scheduler.MachineTemplate
 	instanceTypes := map[string][]*cloudprovider.InstanceType{}
 	domains := map[string]sets.Set[string]{}
-	if err := p.kubeClient.List(ctx, &provisionerList); err != nil {
+
+	provisionerList := &v1alpha5.ProvisionerList{}
+	if err := p.kubeClient.List(ctx, provisionerList); err != nil {
 		return nil, fmt.Errorf("listing provisioners, %w", err)
+	}
+	provisionerList.Items = lo.Filter(provisionerList.Items, func(p v1alpha5.Provisioner, _ int) bool {
+		return p.DeletionTimestamp.IsZero()
+	})
+	if len(provisionerList.Items) == 0 {
+		return nil, ErrProvisionersNotFound
 	}
 
 	// nodeTemplates generated from provisioners are ordered by weight
 	// since they are stored within a slice and scheduling
 	// will always attempt to schedule on the first nodeTemplate
 	provisionerList.OrderByWeight()
-
 	for i := range provisionerList.Items {
 		provisioner := &provisionerList.Items[i]
-		if !provisioner.DeletionTimestamp.IsZero() {
-			continue
-		}
 		// Create node template
-		machines = append(machines, scheduler.NewMachineTemplate(provisioner))
+		machineTemplates = append(machineTemplates, scheduler.NewMachineTemplate(provisioner))
 		// Get instance type options
 		instanceTypeOptions, err := p.cloudProvider.GetInstanceTypes(ctx, provisioner)
 		if err != nil {
@@ -257,10 +263,6 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 		}
 	}
 
-	if len(machines) == 0 {
-		return nil, fmt.Errorf("no provisioners found")
-	}
-
 	// inject topology constraints
 	pods = p.injectTopology(ctx, pods)
 
@@ -273,7 +275,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	if err != nil {
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
-	return scheduler.NewScheduler(ctx, p.kubeClient, machines, provisionerList.Items, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, opts), nil
+	return scheduler.NewScheduler(ctx, p.kubeClient, machineTemplates, provisionerList.Items, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, opts), nil
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (*scheduler.Results, error) {
@@ -308,11 +310,15 @@ func (p *Provisioner) Schedule(ctx context.Context) (*scheduler.Results, error) 
 	if len(pods) == 0 {
 		return &scheduler.Results{}, nil
 	}
-	scheduler, err := p.NewScheduler(ctx, pods, nodes.Active(), scheduler.SchedulerOptions{})
+	s, err := p.NewScheduler(ctx, pods, nodes.Active(), scheduler.SchedulerOptions{})
 	if err != nil {
+		if errors.Is(err, ErrProvisionersNotFound) {
+			logging.FromContext(ctx).Warn(ErrProvisionersNotFound)
+			return &scheduler.Results{}, nil
+		}
 		return nil, fmt.Errorf("creating scheduler, %w", err)
 	}
-	return scheduler.Solve(ctx, pods)
+	return s.Solve(ctx, pods)
 }
 
 func (p *Provisioner) Launch(ctx context.Context, m *scheduler.Machine, opts ...functional.Option[LaunchOptions]) (string, error) {
