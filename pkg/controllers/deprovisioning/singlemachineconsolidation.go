@@ -16,7 +16,9 @@ package deprovisioning
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
@@ -27,6 +29,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 )
+
+const SingleMachineConsolidationTimeoutDuration = 5 * time.Minute
 
 // SingleMachineConsolidation is the consolidation controller that performs single machine consolidation.
 type SingleMachineConsolidation struct {
@@ -51,26 +55,37 @@ func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 	deprovisioningEligibleMachinesGauge.WithLabelValues(c.String()).Set(float64(len(candidates)))
 
 	v := NewValidation(consolidationTTL, c.clock, c.cluster, c.kubeClient, c.provisioner, c.cloudProvider, c.recorder)
-	for _, candidate := range candidates {
-		// compute a possible consolidation option
-		cmd, err := c.computeConsolidation(ctx, candidate)
-		if err != nil {
-			logging.FromContext(ctx).Errorf("computing consolidation %s", err)
-			continue
-		}
-		if cmd.Action() == NoOpAction {
-			continue
-		}
 
-		isValid, err := v.IsValid(ctx, cmd)
-		if err != nil {
-			return Command{}, fmt.Errorf("validating consolidation, %w", err)
-		}
-		if !isValid {
-			logging.FromContext(ctx).Debugf("abandoning single machine consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+	timer := c.clock.After(SingleMachineConsolidationTimeoutDuration)
+	// binary search to find the maximum number of machines we can terminate
+	for _, candidate := range candidates {
+		select {
+		case <-ctx.Done():
+			return Command{}, errors.New("context canceled")
+		case <-timer:
+			deprovisioningConsolidationTimeoutsCounter.WithLabelValues("multi-machine").Inc()
 			return Command{}, nil
+		default:
+			// compute a possible consolidation option
+			cmd, err := c.computeConsolidation(ctx, candidate)
+			if err != nil {
+				logging.FromContext(ctx).Errorf("computing consolidation %s", err)
+				continue
+			}
+			if cmd.Action() == NoOpAction {
+				continue
+			}
+
+			isValid, err := v.IsValid(ctx, cmd)
+			if err != nil {
+				return Command{}, fmt.Errorf("validating consolidation, %w", err)
+			}
+			if !isValid {
+				logging.FromContext(ctx).Debugf("abandoning single machine consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+				return Command{}, nil
+			}
+			return cmd, nil
 		}
-		return cmd, nil
 	}
 	// couldn't remove any candidate
 	c.markConsolidated()

@@ -2352,6 +2352,203 @@ var _ = Describe("Consolidation TTL", func() {
 	})
 })
 
+var _ = Describe("Consolidation Timeout", func() {
+	var prov *v1alpha5.Provisioner
+	BeforeEach(func() {
+		prov = test.Provisioner(test.ProvisionerOptions{Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)}})
+		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
+	})
+	It("should return the last valid command when multi-machine consolidation times out", func() {
+		numNodes := 100
+		labels := map[string]string{
+			"app": "test",
+		}
+		// Make 100 nodes, half cheap, half expensive.
+		machines, nodes := test.MachinesAndNodes(numNodes, v1alpha5.Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
+				},
+			},
+			Status: v1alpha5.MachineStatus{
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			}},
+		)
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		pods := test.Pods(numNodes, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}},
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: v1.ResourceList{
+					v1.ResourceCPU: resource.MustParse("10m"),
+				},
+			},
+		})
+
+		ExpectApplied(ctx, env.Client, rs, prov)
+		for _, machine := range machines {
+			ExpectApplied(ctx, env.Client, machine)
+		}
+		for _, node := range nodes {
+			ExpectApplied(ctx, env.Client, node)
+		}
+		for i, pod := range pods {
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectManualBinding(ctx, env.Client, pod, nodes[i])
+		}
+
+		// inform cluster state about nodes and machines
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, nodes, machines)
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		finished := atomic.Bool{}
+		go func() {
+			defer GinkgoRecover()
+			defer wg.Done()
+			defer finished.Store(true)
+			_, _ = deprovisioningController.Reconcile(ctx, reconcile.Request{})
+		}()
+
+		// wait for the controller to block on the validation timeout
+		Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
+		// controller should be blocking during the timeout
+		Expect(finished.Load()).To(BeFalse())
+
+		// advance the clock so that the timeout expires
+		fakeClock.Step(deprovisioning.MultiMachineConsolidationTimeoutDuration)
+
+		// and the node should not be deleted yet
+		for i := range machines {
+			ExpectExists(ctx, env.Client, machines[i])
+		}
+
+		// advance the clock so that the timeout expires
+		fakeClock.Step(5 * time.Minute)
+		// controller should finish
+		Eventually(finished.Load, 60*time.Second).Should(BeTrue())
+		wg.Wait()
+
+		// should have at least two nodes deleted from multi machine consolidation
+		Expect(len(ExpectMachines(ctx, env.Client))).To(BeNumerically("<=", numNodes-2))
+	})
+	It("should exit single-machine consolidation if it times out", func() {
+		numNodes := 100
+		labels := map[string]string{
+			"app": "test",
+		}
+		// Make 100 nodes, half cheap, half expensive.
+		machines, nodes := test.MachinesAndNodes(numNodes, v1alpha5.Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       leastExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             leastExpensiveOffering.Zone,
+				},
+			},
+			Status: v1alpha5.MachineStatus{
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			}},
+		)
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		pods := test.Pods(numNodes, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}},
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: v1.ResourceList{
+					// Make the pods more than half of the allocatable so that only one machine can be done at any time
+					v1.ResourceCPU: resource.MustParse("20"),
+				},
+			},
+		})
+
+		ExpectApplied(ctx, env.Client, rs, prov)
+		for _, machine := range machines {
+			ExpectApplied(ctx, env.Client, machine)
+		}
+		for _, node := range nodes {
+			ExpectApplied(ctx, env.Client, node)
+		}
+		for i, pod := range pods {
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectManualBinding(ctx, env.Client, pod, nodes[i])
+		}
+
+		// inform cluster state about nodes and machines
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, nodes, machines)
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		finished := atomic.Bool{}
+		go func() {
+			defer GinkgoRecover()
+			defer wg.Done()
+			defer finished.Store(true)
+			_, _ = deprovisioningController.Reconcile(ctx, reconcile.Request{})
+		}()
+
+		// wait for the controller to block on the validation timeout
+		Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
+		// controller should be blocking during the timeout
+		Expect(finished.Load()).To(BeFalse())
+
+		// advance the clock so that the timeout expires for multi-machine
+		fakeClock.Step(deprovisioning.MultiMachineConsolidationTimeoutDuration)
+
+		// and the node should not be deleted yet
+		for i := range machines {
+			ExpectExists(ctx, env.Client, machines[i])
+		}
+
+		// wait for the controller to block on the validation timeout
+		Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
+		// controller should be blocking during the timeout
+		Expect(finished.Load()).To(BeFalse())
+
+		// advance the clock so that the timeout expires for multi-machine
+		fakeClock.Step(deprovisioning.SingleMachineConsolidationTimeoutDuration)
+
+		// controller should finish
+		Eventually(finished.Load, 60*time.Second).Should(BeTrue())
+		wg.Wait()
+
+		// should have no machines deleted from multi machine consolidation
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(numNodes))
+	})
+})
+
 var _ = Describe("Parallelization", func() {
 	var prov *v1alpha5.Provisioner
 	var machine *v1alpha5.Machine

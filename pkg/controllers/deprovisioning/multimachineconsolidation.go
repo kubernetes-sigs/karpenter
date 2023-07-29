@@ -16,8 +16,10 @@ package deprovisioning
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
+	"time"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
@@ -30,6 +32,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 )
+
+const MultiMachineConsolidationTimeoutDuration = 1 * time.Minute
 
 type MultiMachineConsolidation struct {
 	consolidation
@@ -52,6 +56,7 @@ func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 
 	// For now, we will consider up to every machine in the cluster, might be configurable in the future.
 	maxParallel := len(candidates)
+
 	cmd, err := m.firstNMachineConsolidationOption(ctx, candidates, maxParallel)
 	if err != nil {
 		return Command{}, err
@@ -89,32 +94,42 @@ func (m *MultiMachineConsolidation) firstNMachineConsolidationOption(ctx context
 	}
 
 	lastSavedCommand := Command{}
+	// Only allow Multi Machine Consolidation to run for 5 minutes.
+	timer := m.clock.After(MultiMachineConsolidationTimeoutDuration)
 	// binary search to find the maximum number of machines we can terminate
 	for min <= max {
-		mid := (min + max) / 2
+		select {
+		case <-ctx.Done():
+			return Command{}, errors.New("context canceled")
+		case <-timer:
+			deprovisioningConsolidationTimeoutsCounter.WithLabelValues("multi-machine").Inc()
+			return lastSavedCommand, nil
+		default:
+			mid := (min + max) / 2
 
-		candidatesToConsolidate := candidates[0 : mid+1]
+			candidatesToConsolidate := candidates[0 : mid+1]
 
-		cmd, err := m.computeConsolidation(ctx, candidatesToConsolidate...)
-		if err != nil {
-			return Command{}, err
-		}
+			cmd, err := m.computeConsolidation(ctx, candidatesToConsolidate...)
+			if err != nil {
+				return Command{}, err
+			}
 
-		// ensure that the action is sensical for replacements, see explanation on filterOutSameType for why this is
-		// required
-		replacementHasValidInstanceTypes := false
-		if cmd.Action() == ReplaceAction {
-			cmd.replacements[0].InstanceTypeOptions = filterOutSameType(cmd.replacements[0], candidatesToConsolidate)
-			replacementHasValidInstanceTypes = len(cmd.replacements[0].InstanceTypeOptions) > 0
-		}
+			// ensure that the action is sensical for replacements, see explanation on filterOutSameType for why this is
+			// required
+			replacementHasValidInstanceTypes := false
+			if cmd.Action() == ReplaceAction {
+				cmd.replacements[0].InstanceTypeOptions = filterOutSameType(cmd.replacements[0], candidatesToConsolidate)
+				replacementHasValidInstanceTypes = len(cmd.replacements[0].InstanceTypeOptions) > 0
+			}
 
-		// replacementHasValidInstanceTypes will be false if the replacement action has valid instance types remaining after filtering.
-		if replacementHasValidInstanceTypes || cmd.Action() == DeleteAction {
-			// we can consolidate machines [0,mid]
-			lastSavedCommand = cmd
-			min = mid + 1
-		} else {
-			max = mid - 1
+			// replacementHasValidInstanceTypes will be false if the replacement action has valid instance types remaining after filtering.
+			if replacementHasValidInstanceTypes || cmd.Action() == DeleteAction {
+				// we can consolidate machines [0,mid]
+				lastSavedCommand = cmd
+				min = mid + 1
+			} else {
+				max = mid - 1
+			}
 		}
 	}
 	return lastSavedCommand, nil
