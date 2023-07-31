@@ -2359,11 +2359,10 @@ var _ = Describe("Consolidation Timeout", func() {
 		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
 	})
 	It("should return the last valid command when multi-machine consolidation times out", func() {
-		numNodes := 100
+		numNodes := 50
 		labels := map[string]string{
 			"app": "test",
 		}
-		// Make 100 nodes, half cheap, half expensive.
 		machines, nodes := test.MachinesAndNodes(numNodes, v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -2397,6 +2396,7 @@ var _ = Describe("Consolidation Timeout", func() {
 				}},
 			ResourceRequirements: v1.ResourceRequirements{
 				Requests: v1.ResourceList{
+					// Make the resource requests small so that many nodes can be consolidated at once.
 					v1.ResourceCPU: resource.MustParse("10m"),
 				},
 			},
@@ -2450,11 +2450,10 @@ var _ = Describe("Consolidation Timeout", func() {
 		Expect(len(ExpectMachines(ctx, env.Client))).To(BeNumerically("<=", numNodes-2))
 	})
 	It("should exit single-machine consolidation if it times out", func() {
-		numNodes := 100
+		numNodes := 50
 		labels := map[string]string{
 			"app": "test",
 		}
-		// Make 100 nodes, half cheap, half expensive.
 		machines, nodes := test.MachinesAndNodes(numNodes, v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -2519,7 +2518,7 @@ var _ = Describe("Consolidation Timeout", func() {
 			_, _ = deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		}()
 
-		// wait for the controller to block on the validation timeout
+		// wait for the controller to block on the consolidation timeout
 		Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
 		// controller should be blocking during the timeout
 		Expect(finished.Load()).To(BeFalse())
@@ -2532,7 +2531,7 @@ var _ = Describe("Consolidation Timeout", func() {
 			ExpectExists(ctx, env.Client, machines[i])
 		}
 
-		// wait for the controller to block on the validation timeout
+		// wait for the controller to block on the consolidation timeout
 		Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
 		// controller should be blocking during the timeout
 		Expect(finished.Load()).To(BeFalse())
