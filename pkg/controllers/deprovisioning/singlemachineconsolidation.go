@@ -56,6 +56,7 @@ func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 
 	v := NewValidation(consolidationTTL, c.clock, c.cluster, c.kubeClient, c.provisioner, c.cloudProvider, c.recorder)
 
+	// Set a timeout
 	timer := c.clock.After(SingleMachineConsolidationTimeoutDuration)
 	// binary search to find the maximum number of machines we can terminate
 	for _, candidate := range candidates {

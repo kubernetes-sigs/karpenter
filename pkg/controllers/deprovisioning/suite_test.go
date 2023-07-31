@@ -1984,84 +1984,6 @@ var _ = Describe("Empty Nodes (Consolidation)", func() {
 	})
 })
 
-var _ = Describe("Empty Nodes (TTLSecondsAfterEmpty)", func() {
-	var prov *v1alpha5.Provisioner
-	var machine *v1alpha5.Machine
-	var node *v1.Node
-
-	BeforeEach(func() {
-		prov = test.Provisioner(test.ProvisionerOptions{
-			TTLSecondsAfterEmpty: ptr.Int64(30),
-		})
-		machine, node = test.MachineAndNode(v1alpha5.Machine{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-				},
-			},
-			Status: v1alpha5.MachineStatus{
-				ProviderID: test.RandomProviderID(),
-				Allocatable: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU:  resource.MustParse("32"),
-					v1.ResourcePods: resource.MustParse("100"),
-				},
-			},
-		})
-		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
-	})
-	It("can delete empty nodes with TTLSecondsAfterEmpty", func() {
-		ExpectApplied(ctx, env.Client, prov, machine, node)
-
-		// inform cluster state about nodes and machines
-		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
-
-		fakeClock.Step(10 * time.Minute)
-		wg := sync.WaitGroup{}
-		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
-
-		// Cascade any deletion of the machine to the node
-		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
-
-		// we should delete the empty node
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		ExpectNotFound(ctx, env.Client, machine, node)
-	})
-	It("should ignore TTLSecondsAfterEmpty nodes without the empty status condition", func() {
-		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineEmpty)
-		ExpectApplied(ctx, env.Client, machine, node, prov)
-
-		// inform cluster state about nodes and machines
-		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
-
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
-
-		// Expect to not create or delete more machines
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		ExpectExists(ctx, env.Client, machine)
-	})
-	It("should ignore TTLSecondsAfterEmpty nodes with the empty status condition set to false", func() {
-		machine.StatusConditions().MarkFalse(v1alpha5.MachineEmpty, "", "")
-		ExpectApplied(ctx, env.Client, machine, node, prov)
-
-		// inform cluster state about nodes and machines
-		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
-
-		fakeClock.Step(10 * time.Minute)
-
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
-
-		// Expect to not create or delete more machines
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
-		ExpectExists(ctx, env.Client, machine)
-	})
-})
-
 var _ = Describe("Consolidation TTL", func() {
 	var prov *v1alpha5.Provisioner
 	var machine1, machine2 *v1alpha5.Machine
@@ -2171,6 +2093,14 @@ var _ = Describe("Consolidation TTL", func() {
 		Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
 		// controller should be blocking during the timeout
 		Expect(finished.Load()).To(BeFalse())
+
+		ExpectTriggerVerifyAction(&wg)
+
+		// wait for the controller to block on the validation timeout
+		Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
+		// controller should be blocking during the timeout
+		Expect(finished.Load()).To(BeFalse())
+
 		// and the node should not be deleted yet
 		ExpectExists(ctx, env.Client, node1)
 
@@ -2296,8 +2226,21 @@ var _ = Describe("Consolidation TTL", func() {
 		ExpectExists(ctx, env.Client, machine1)
 		ExpectExists(ctx, env.Client, machine2)
 
-		// advance the clock so that the timeout expires
-		fakeClock.Step(31 * time.Second)
+		// Increment time so that the multi-machine will finish
+		ExpectTriggerVerifyAction(&wg)
+
+		// wait for the controller to block on the validation timeout
+		Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
+		// controller should be blocking during the timeout
+		Expect(finished.Load()).To(BeFalse())
+
+		// and the node should not be deleted yet
+		ExpectExists(ctx, env.Client, machine1)
+		ExpectExists(ctx, env.Client, machine2)
+
+		// Increment time so that validation will finish
+		ExpectTriggerVerifyAction(&wg)
+
 		// controller should finish
 		Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 		wg.Wait()
@@ -2359,7 +2302,7 @@ var _ = Describe("Consolidation Timeout", func() {
 		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
 	})
 	It("should return the last valid command when multi-machine consolidation times out", func() {
-		numNodes := 50
+		numNodes := 100
 		labels := map[string]string{
 			"app": "test",
 		}
@@ -2450,7 +2393,7 @@ var _ = Describe("Consolidation Timeout", func() {
 		Expect(len(ExpectMachines(ctx, env.Client))).To(BeNumerically("<=", numNodes-2))
 	})
 	It("should exit single-machine consolidation if it times out", func() {
-		numNodes := 50
+		numNodes := 100
 		labels := map[string]string{
 			"app": "test",
 		}
@@ -2941,8 +2884,21 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		ExpectExists(ctx, env.Client, machine1)
 		ExpectExists(ctx, env.Client, machine2)
 
-		// advance the clock so that the timeout expires
+		// Increment time so that the multi-machine will finish
+		ExpectTriggerVerifyAction(&wg)
+
+		// wait for the controller to block on the validation timeout
+		Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
+		// controller should be blocking during the timeout
+		Expect(finished.Load()).To(BeFalse())
+
+		// and the node should not be deleted yet
+		ExpectExists(ctx, env.Client, machine1)
+		ExpectExists(ctx, env.Client, machine2)
+
+		// Wait on Validation
 		fakeClock.Step(31 * time.Second)
+
 		// controller should finish
 		Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 		wg.Wait()
@@ -3069,6 +3025,9 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
 		// controller should be blocking during the timeout
 		Expect(finished.Load()).To(BeFalse())
+
+		ExpectTriggerVerifyAction(&wg)
+
 		// and the node should not be deleted yet
 		ExpectExists(ctx, env.Client, machine1)
 		ExpectExists(ctx, env.Client, machine2)
@@ -3092,8 +3051,17 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
 
-		// advance the clock so that the timeout expires for multi-machine consolidation
+		// wait for the controller to block on the validation timeout for multi machine consolidation
+		Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
+		// advance the clock so that the validation expires for multi-machine consolidation
 		fakeClock.Step(31 * time.Second)
+
+		// and the node should not be deleted yet
+		ExpectExists(ctx, env.Client, machine1)
+		ExpectExists(ctx, env.Client, machine2)
+		ExpectExists(ctx, env.Client, machine3)
+
+		ExpectTriggerVerifyAction(&wg)
 
 		// wait for the controller to block on the validation timeout for single machine consolidation
 		Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())

@@ -94,7 +94,7 @@ func (m *MultiMachineConsolidation) firstNMachineConsolidationOption(ctx context
 	}
 
 	lastSavedCommand := Command{}
-	// Only allow Multi Machine Consolidation to run for 5 minutes.
+	// Set a timeout
 	timer := m.clock.After(MultiMachineConsolidationTimeoutDuration)
 	// binary search to find the maximum number of machines we can terminate
 	for min <= max {
