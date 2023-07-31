@@ -66,11 +66,14 @@ var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 // waitRetryOptions are the retry options used when waiting on a machine to become ready or to be deleted
 // readiness can take some time as the node needs to come up, have any daemonset extended resoruce plugins register, etc.
 // deletion can take some time in the case of restrictive PDBs that throttle the rate at which the node is drained
-var waitRetryOptions = []retry.Option{
-	retry.Delay(2 * time.Second),
-	retry.LastErrorOnly(true),
-	retry.Attempts(60),
-	retry.MaxDelay(10 * time.Second), // 22 + (60-5)*10 =~ 9.5 minutes in total
+func waitRetryOptions(ctx context.Context) []retry.Option {
+	return []retry.Option{
+		retry.Context(ctx),
+		retry.Delay(2 * time.Second),
+		retry.LastErrorOnly(true),
+		retry.Attempts(60),
+		retry.MaxDelay(10 * time.Second), // 22 + (60-5)*10 =~ 9.5 minutes in total
+	}
 }
 
 func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
@@ -270,7 +273,7 @@ func (c *Controller) waitForReadiness(ctx context.Context, action Command, name 
 			return fmt.Errorf("machine is not initialized")
 		}
 		return nil
-	}, waitRetryOptions...)
+	}, waitRetryOptions(ctx)...)
 }
 
 // waitForDeletion waits for the specified machine to be removed from the API server. This deletion can take some period
@@ -291,7 +294,7 @@ func (c *Controller) waitForDeletion(ctx context.Context, machine *v1alpha5.Mach
 		}
 		// the machine still exists
 		return fmt.Errorf("expected machine to be not found")
-	}, waitRetryOptions...,
+	}, waitRetryOptions(ctx)...,
 	); err != nil {
 		logging.FromContext(ctx).Errorf("Waiting on machine deletion, %s", err)
 	}
