@@ -2443,7 +2443,7 @@ var _ = Describe("Consolidation Timeout", func() {
 		// advance the clock so that the timeout expires
 		fakeClock.Step(5 * time.Minute)
 		// controller should finish
-		Eventually(finished.Load, 60*time.Second).Should(BeTrue())
+		Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 		wg.Wait()
 
 		// should have at least two nodes deleted from multi machine consolidation
@@ -2541,7 +2541,7 @@ var _ = Describe("Consolidation Timeout", func() {
 		fakeClock.Step(deprovisioning.SingleMachineConsolidationTimeoutDuration)
 
 		// controller should finish
-		Eventually(finished.Load, 60*time.Second).Should(BeTrue())
+		Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 		wg.Wait()
 
 		// should have no machines deleted from multi machine consolidation
