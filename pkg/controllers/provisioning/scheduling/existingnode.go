@@ -110,6 +110,8 @@ func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v
 	n.requirements = nodeRequirements
 	n.topology.Record(pod, nodeRequirements)
 	n.HostPortUsage().Add(ctx, pod)
-	n.VolumeUsage().Add(ctx, kubeClient, pod)
+	if err := n.VolumeUsage().Add(ctx, kubeClient, pod); err != nil {
+		return fmt.Errorf("tracking volume usage, %w", err)
+	}
 	return nil
 }

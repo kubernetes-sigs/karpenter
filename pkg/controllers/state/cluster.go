@@ -501,7 +501,9 @@ func (c *Cluster) populateResourceRequests(ctx context.Context, n *StateNode) er
 			continue
 		}
 		c.cleanupOldBindings(pod)
-		n.updateForPod(ctx, c.kubeClient, pod)
+		if err := n.updateForPod(ctx, c.kubeClient, pod); err != nil {
+			return err
+		}
 		c.bindings[client.ObjectKeyFromObject(pod)] = pod.Spec.NodeName
 	}
 	return nil
@@ -521,7 +523,9 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 		return errors.NewNotFound(schema.GroupResource{Resource: "Machine"}, pod.Spec.NodeName)
 	}
 	c.cleanupOldBindings(pod)
-	n.updateForPod(ctx, c.kubeClient, pod)
+	if err := n.updateForPod(ctx, c.kubeClient, pod); err != nil {
+		return err
+	}
 	c.bindings[client.ObjectKeyFromObject(pod)] = pod.Spec.NodeName
 	return nil
 }

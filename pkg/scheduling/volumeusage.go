@@ -94,13 +94,14 @@ func (u volumes) copy() volumes {
 	return cp
 }
 
-func (v *VolumeUsage) Add(ctx context.Context, kubeClient client.Client, pod *v1.Pod) {
-	podVolumes, err := v.validate(ctx, kubeClient, pod)
+func (v *VolumeUsage) Add(ctx context.Context, kubeClient client.Client, pod *v1.Pod) error {
+	podVolumes, err := v.getPodVolumes(ctx, kubeClient, pod)
 	if err != nil {
-		logging.FromContext(ctx).Errorf("inconsistent state error adding volume, %s, please file an issue", err)
+		return fmt.Errorf("getting pod volume claims, %w", err)
 	}
 	v.podVolumes[client.ObjectKeyFromObject(pod)] = podVolumes
 	v.volumes = v.volumes.union(podVolumes)
+	return nil
 }
 
 // VolumeCount stores a mapping between the driver name that provides volumes
@@ -137,9 +138,9 @@ func (c VolumeCount) Fits(rhs VolumeCount) bool {
 }
 
 func (v *VolumeUsage) Validate(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (VolumeCount, error) {
-	podVolumes, err := v.validate(ctx, kubeClient, pod)
+	podVolumes, err := v.getPodVolumes(ctx, kubeClient, pod)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("getting volumes for pod, %w", err)
 	}
 	result := VolumeCount{}
 	for k, v := range v.volumes.union(podVolumes) {
@@ -149,7 +150,7 @@ func (v *VolumeUsage) Validate(ctx context.Context, kubeClient client.Client, po
 }
 
 //nolint:gocyclo
-func (v *VolumeUsage) validate(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (volumes, error) {
+func (v *VolumeUsage) getPodVolumes(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (volumes, error) {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("pod", pod.Name))
 	podPVCs := volumes{}
 	defaultStorageClassName, err := DiscoverDefaultStorageClassName(ctx, kubeClient)

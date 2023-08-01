@@ -16,6 +16,7 @@ package state
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/samber/lo"
@@ -334,7 +335,7 @@ func (in *StateNode) Managed() bool {
 		(in.Node != nil && in.Node.Labels[v1alpha5.ProvisionerNameLabelKey] != "")
 }
 
-func (in *StateNode) updateForPod(ctx context.Context, kubeClient client.Client, pod *v1.Pod) {
+func (in *StateNode) updateForPod(ctx context.Context, kubeClient client.Client, pod *v1.Pod) error {
 	podKey := client.ObjectKeyFromObject(pod)
 
 	in.podRequests[podKey] = resources.RequestsForPods(pod)
@@ -345,7 +346,10 @@ func (in *StateNode) updateForPod(ctx context.Context, kubeClient client.Client,
 		in.daemonSetLimits[podKey] = resources.LimitsForPods(pod)
 	}
 	in.hostPortUsage.Add(ctx, pod)
-	in.volumeUsage.Add(ctx, kubeClient, pod)
+	if err := in.volumeUsage.Add(ctx, kubeClient, pod); err != nil {
+		return fmt.Errorf("tracking volume usage, %w", err)
+	}
+	return nil
 }
 
 func (in *StateNode) cleanupForPod(podKey types.NamespacedName) {
