@@ -46,6 +46,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/machine/lifecycle"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
@@ -209,6 +210,8 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 		&storagev1.StorageClass{},
 		&v1alpha5.Provisioner{},
 		&v1alpha5.Machine{},
+		&v1beta1.NodePool{},
+		&v1beta1.NodeClaim{},
 	} {
 		for _, namespace := range namespaces.Items {
 			wg.Add(1)

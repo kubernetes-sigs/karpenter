@@ -77,7 +77,7 @@ func NewKubeletConfiguration(kc *v1beta1.KubeletConfiguration) *v1alpha5.Kubelet
 	}
 }
 
-func NewProviderRef(nc *v1beta1.NodeClassRef) *v1alpha5.MachineTemplateRef {
+func NewProviderRef(nc *v1beta1.NodeClassReference) *v1alpha5.MachineTemplateRef {
 	if nc == nil {
 		return nil
 	}
@@ -92,8 +92,4 @@ func NewLimits(limits v1.ResourceList) *v1alpha5.Limits {
 	return &v1alpha5.Limits{
 		Resources: limits,
 	}
-}
-
-func NewConsolidation() *v1alpha5.Consolidation {
-	return &v1alpha5.Consolidation{}
 }

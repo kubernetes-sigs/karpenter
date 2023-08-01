@@ -178,8 +178,8 @@ func AllNodesForMachine(ctx context.Context, c client.Client, machine *v1alpha5.
 // Deprecated: This Machine generator function can be removed when v1beta1 migration has completed.
 func New(node *v1.Node, provisioner *v1alpha5.Provisioner) *v1alpha5.Machine {
 	machine := NewFromNode(node)
-	machine.Annotations = lo.Assign(provisioner.Annotations, v1alpha5.ProviderAnnotation(provisioner.Spec.Provider))
-	machine.Labels = lo.Assign(provisioner.Labels, map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name})
+	machine.Annotations = lo.Assign(provisioner.Spec.Annotations, v1alpha5.ProviderAnnotation(provisioner.Spec.Provider))
+	machine.Labels = lo.Assign(provisioner.Spec.Labels, map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name})
 	machine.OwnerReferences = []metav1.OwnerReference{
 		{
 			APIVersion:         v1alpha5.SchemeGroupVersion.String(),
@@ -295,7 +295,7 @@ func NewKubeletConfiguration(kc *v1beta1.KubeletConfiguration) *v1alpha5.Kubelet
 	}
 }
 
-func NewMachineTemplateRef(ncr *v1beta1.NodeClassRef) *v1alpha5.MachineTemplateRef {
+func NewMachineTemplateRef(ncr *v1beta1.NodeClassReference) *v1alpha5.MachineTemplateRef {
 	if ncr == nil {
 		return nil
 	}

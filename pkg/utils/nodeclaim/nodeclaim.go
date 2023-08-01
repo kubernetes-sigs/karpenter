@@ -193,7 +193,7 @@ func New(machine *v1alpha5.Machine) *v1beta1.NodeClaim {
 				Requests: machine.Spec.Resources.Requests,
 			},
 			KubeletConfiguration: NewKubeletConfiguration(machine.Spec.Kubelet),
-			NodeClass:            NewNodeClassRef(machine.Spec.MachineTemplateRef),
+			NodeClass:            NewNodeClassReference(machine.Spec.MachineTemplateRef),
 		},
 		Status: v1beta1.NodeClaimStatus{
 			NodeName:    machine.Status.NodeName,
@@ -248,11 +248,11 @@ func NewKubeletConfiguration(kc *v1alpha5.KubeletConfiguration) *v1beta1.Kubelet
 	}
 }
 
-func NewNodeClassRef(mtr *v1alpha5.MachineTemplateRef) *v1beta1.NodeClassRef {
+func NewNodeClassReference(mtr *v1alpha5.MachineTemplateRef) *v1beta1.NodeClassReference {
 	if mtr == nil {
 		return nil
 	}
-	return &v1beta1.NodeClassRef{
+	return &v1beta1.NodeClassReference{
 		Kind:           mtr.Kind,
 		Name:           mtr.Name,
 		APIVersion:     mtr.APIVersion,
@@ -263,7 +263,7 @@ func NewNodeClassRef(mtr *v1alpha5.MachineTemplateRef) *v1beta1.NodeClassRef {
 // NewFromNode converts a node into a pseudo-NodeClaim using known values from the node
 // Deprecated: This NodeClaim generator function can be removed when v1beta1 migration has completed.
 func NewFromNode(node *v1.Node) *v1beta1.NodeClaim {
-	m := &v1beta1.NodeClaim{
+	nc := &v1beta1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        node.Name,
 			Annotations: node.Annotations,
@@ -285,11 +285,11 @@ func NewFromNode(node *v1.Node) *v1beta1.NodeClaim {
 		},
 	}
 	if _, ok := node.Labels[v1beta1.NodeInitializedLabelKey]; ok {
-		m.StatusConditions().MarkTrue(v1beta1.NodeInitialized)
+		nc.StatusConditions().MarkTrue(v1beta1.NodeInitialized)
 	}
-	m.StatusConditions().MarkTrue(v1beta1.NodeLaunched)
-	m.StatusConditions().MarkTrue(v1beta1.NodeRegistered)
-	return m
+	nc.StatusConditions().MarkTrue(v1beta1.NodeLaunched)
+	nc.StatusConditions().MarkTrue(v1beta1.NodeRegistered)
+	return nc
 }
 
 func Get(ctx context.Context, c client.Client, key Key) (*v1beta1.NodeClaim, error) {
@@ -459,14 +459,14 @@ func Owner(ctx context.Context, c client.Client, obj interface{ GetLabels() map[
 	return nil, fmt.Errorf("object has no owner")
 }
 
-func OwnerName(obj interface{ GetLabels() map[string]string }) (string, error) {
+func OwnerName(obj interface{ GetLabels() map[string]string }) string {
 	if v, ok := obj.GetLabels()[v1beta1.NodePoolLabelKey]; ok {
-		return v, nil
+		return v
 	}
 	if v, ok := obj.GetLabels()[v1alpha5.ProvisionerNameLabelKey]; ok {
-		return v, nil
+		return v
 	}
-	return "", fmt.Errorf("object has no owner")
+	return ""
 }
 
 func IsExpired(obj client.Object, clock clock.Clock, nodePool *v1beta1.NodePool) bool {

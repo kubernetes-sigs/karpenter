@@ -22,6 +22,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 )
 
 type NodeOptions struct {
@@ -63,6 +64,22 @@ func Node(overrides ...NodeOptions) *v1.Node {
 			Conditions:  []v1.NodeCondition{{Type: v1.NodeReady, Status: options.ReadyStatus, Reason: options.ReadyReason}},
 		},
 	}
+}
+
+func NodeClaimLinkedNode(nodeClaim *v1beta1.NodeClaim) *v1.Node {
+	return Node(
+		NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels:      nodeClaim.Labels,
+				Annotations: nodeClaim.Annotations,
+				Finalizers:  nodeClaim.Finalizers,
+			},
+			Taints:      append(nodeClaim.Spec.Taints, nodeClaim.Spec.StartupTaints...),
+			Capacity:    nodeClaim.Status.Capacity,
+			Allocatable: nodeClaim.Status.Allocatable,
+			ProviderID:  nodeClaim.Status.ProviderID,
+		},
+	)
 }
 
 func MachineLinkedNode(machine *v1alpha5.Machine) *v1.Node {

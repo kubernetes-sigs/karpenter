@@ -33,25 +33,22 @@ type Key struct {
 	IsProvisioner bool
 }
 
-func KeyFromNodePool(nodePool *v1beta1.NodePool) Key {
-	return Key{Name: nodePool.Name, IsProvisioner: nodePool.IsProvisioner}
-}
-
 func New(provisioner *v1alpha5.Provisioner) *v1beta1.NodePool {
 	np := &v1beta1.NodePool{
 		ObjectMeta: provisioner.ObjectMeta,
 		Spec: v1beta1.NodePoolSpec{
 			Template: v1beta1.NodeClaimTemplate{
 				ObjectMeta: metav1.ObjectMeta{
-					Annotations: lo.Assign(provisioner.Annotations, v1beta1.ProviderAnnotation(provisioner.Spec.Provider)),
-					Labels:      provisioner.Labels,
+					Annotations: provisioner.Spec.Annotations,
+					Labels:      provisioner.Spec.Labels,
 				},
 				Spec: v1beta1.NodeClaimSpec{
-					Taints:        provisioner.Spec.Taints,
-					StartupTaints: provisioner.Spec.StartupTaints,
-					Requirements:  provisioner.Spec.Requirements,
-					NodeClass:     NewNodeClassRef(provisioner.Spec.ProviderRef),
-					Provider:      provisioner.Spec.Provider,
+					Taints:               provisioner.Spec.Taints,
+					StartupTaints:        provisioner.Spec.StartupTaints,
+					Requirements:         provisioner.Spec.Requirements,
+					KubeletConfiguration: NewKubeletConfiguration(provisioner.Spec.KubeletConfiguration),
+					NodeClass:            NewNodeClassReference(provisioner.Spec.ProviderRef),
+					Provider:             provisioner.Spec.Provider,
 				},
 			},
 			Weight: provisioner.Spec.Weight,
@@ -79,11 +76,32 @@ func New(provisioner *v1alpha5.Provisioner) *v1beta1.NodePool {
 	return np
 }
 
-func NewNodeClassRef(pr *v1alpha5.MachineTemplateRef) *v1beta1.NodeClassRef {
+func NewKubeletConfiguration(kc *v1alpha5.KubeletConfiguration) *v1beta1.KubeletConfiguration {
+	if kc == nil {
+		return nil
+	}
+	return &v1beta1.KubeletConfiguration{
+		ClusterDNS:                  kc.ClusterDNS,
+		ContainerRuntime:            kc.ContainerRuntime,
+		MaxPods:                     kc.MaxPods,
+		PodsPerCore:                 kc.PodsPerCore,
+		SystemReserved:              kc.SystemReserved,
+		KubeReserved:                kc.KubeReserved,
+		EvictionHard:                kc.EvictionHard,
+		EvictionSoft:                kc.EvictionSoft,
+		EvictionSoftGracePeriod:     kc.EvictionSoftGracePeriod,
+		EvictionMaxPodGracePeriod:   kc.EvictionMaxPodGracePeriod,
+		ImageGCHighThresholdPercent: kc.ImageGCHighThresholdPercent,
+		ImageGCLowThresholdPercent:  kc.ImageGCLowThresholdPercent,
+		CPUCFSQuota:                 kc.CPUCFSQuota,
+	}
+}
+
+func NewNodeClassReference(pr *v1alpha5.MachineTemplateRef) *v1beta1.NodeClassReference {
 	if pr == nil {
 		return nil
 	}
-	return &v1beta1.NodeClassRef{
+	return &v1beta1.NodeClassReference{
 		Kind:       pr.Kind,
 		Name:       pr.Name,
 		APIVersion: pr.APIVersion,
