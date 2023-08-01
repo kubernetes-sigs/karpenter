@@ -28,7 +28,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 )
 
-const DiscoveryLabel = v1alpha5.TestingGroup + "/test-id"
+const DiscoveryLabel = v1alpha5.TestingGroup + "/cluster"
 
 var (
 	sequentialNumber     = 0
