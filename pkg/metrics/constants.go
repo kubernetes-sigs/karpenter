@@ -25,6 +25,7 @@ const (
 	Namespace = "karpenter"
 
 	ProvisionerLabel = "provisioner"
+	NodePoolLabel    = "nodepool"
 	ReasonLabel      = "reason"
 
 	// Reasons for CREATE/DELETE shared metrics

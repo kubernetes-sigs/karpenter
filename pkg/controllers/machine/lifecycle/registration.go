@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
@@ -76,6 +77,7 @@ func (r *Registration) Reconcile(ctx context.Context, machine *v1alpha5.Machine)
 	// If the machine is linked, then the node already existed so we don't mark it as created
 	if _, ok := machine.Annotations[v1alpha5.MachineLinkedAnnotationKey]; !ok {
 		metrics.NodesCreatedCounter.With(prometheus.Labels{
+			metrics.NodePoolLabel:    machine.Labels[v1beta1.NodePoolLabelKey],
 			metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
 		}).Inc()
 	}
