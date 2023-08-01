@@ -27,6 +27,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	"github.com/aws/karpenter-core/pkg/scheduling"
 )
 
 // Drift is a machine sub-controller that adds or removes status conditions on drifted machines
@@ -87,7 +88,7 @@ func (d *Drift) isDrifted(ctx context.Context, provisioner *v1alpha5.Provisioner
 		return false, err
 	}
 
-	return cloudProviderDrifted || areStaticFieldsDrifted(provisioner, machine), nil
+	return cloudProviderDrifted || areStaticFieldsDrifted(provisioner, machine) || areNodeRequirementsDrifted(provisioner, machine), nil
 }
 
 // Eligible fields for static drift are described in the docs
@@ -99,4 +100,12 @@ func areStaticFieldsDrifted(provisioner *v1alpha5.Provisioner, machine *v1alpha5
 		return false
 	}
 	return provisionerHash != machineHash
+}
+
+func areNodeRequirementsDrifted(provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) bool {
+	provisionerReq := scheduling.NewNodeSelectorRequirements(provisioner.Spec.Requirements...)
+	machineReq := scheduling.NewLabelRequirements(machine.Labels)
+
+	// Every provisioner requirement is compatible with the Machine label set
+	return machineReq.StrictlyCompatible(provisionerReq) != nil
 }
