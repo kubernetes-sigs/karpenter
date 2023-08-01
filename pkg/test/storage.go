@@ -18,6 +18,7 @@ import (
 	"fmt"
 
 	"github.com/imdario/mergo"
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -27,9 +28,10 @@ import (
 
 type PersistentVolumeOptions struct {
 	metav1.ObjectMeta
-	Zones            []string
-	StorageClassName string
-	Driver           string
+	Zones              []string
+	StorageClassName   string
+	Driver             string
+	UseAWSInTreeDriver bool
 }
 
 func PersistentVolume(overrides ...PersistentVolumeOptions) *v1.PersistentVolume {
@@ -39,21 +41,34 @@ func PersistentVolume(overrides ...PersistentVolumeOptions) *v1.PersistentVolume
 			panic(fmt.Sprintf("Failed to merge options: %s", err))
 		}
 	}
-	if options.Driver == "" {
-		options.Driver = "test.driver"
+	// Determine the PersistentVolumeSource based on the options
+	var source v1.PersistentVolumeSource
+	switch {
+	case options.UseAWSInTreeDriver:
+		source = v1.PersistentVolumeSource{
+			AWSElasticBlockStore: &v1.AWSElasticBlockStoreVolumeSource{
+				FSType:   "ext4",
+				VolumeID: RandomProviderID(),
+			},
+		}
+	default:
+		source = v1.PersistentVolumeSource{
+			CSI: &v1.CSIPersistentVolumeSource{
+				Driver:       lo.Ternary(options.Driver != "", options.Driver, "test.driver"),
+				VolumeHandle: "test-handle",
+			},
+		}
 	}
-
 	var nodeAffinity *v1.VolumeNodeAffinity
 	if len(options.Zones) != 0 {
 		nodeAffinity = &v1.VolumeNodeAffinity{Required: &v1.NodeSelector{NodeSelectorTerms: []v1.NodeSelectorTerm{{MatchExpressions: []v1.NodeSelectorRequirement{
 			{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: options.Zones},
 		}}}}}
 	}
-
 	return &v1.PersistentVolume{
 		ObjectMeta: NamespacedObjectMeta(metav1.ObjectMeta{}),
 		Spec: v1.PersistentVolumeSpec{
-			PersistentVolumeSource: v1.PersistentVolumeSource{CSI: &v1.CSIPersistentVolumeSource{Driver: options.Driver, VolumeHandle: "test-handle"}},
+			PersistentVolumeSource: source,
 			StorageClassName:       options.StorageClassName,
 			AccessModes:            []v1.PersistentVolumeAccessMode{v1.ReadWriteOnce},
 			Capacity:               v1.ResourceList{v1.ResourceStorage: resource.MustParse("100Gi")},
