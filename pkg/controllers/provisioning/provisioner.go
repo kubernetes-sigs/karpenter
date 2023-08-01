@@ -313,7 +313,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (*scheduler.Results, error) 
 	s, err := p.NewScheduler(ctx, pods, nodes.Active(), scheduler.SchedulerOptions{})
 	if err != nil {
 		if errors.Is(err, ErrProvisionersNotFound) {
-			logging.FromContext(ctx).Warn(ErrProvisionersNotFound)
+			logging.FromContext(ctx).Info(ErrProvisionersNotFound)
 			return &scheduler.Results{}, nil
 		}
 		return nil, fmt.Errorf("creating scheduler, %w", err)
