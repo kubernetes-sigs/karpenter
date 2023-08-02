@@ -121,7 +121,7 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	instanceTypes := fake.InstanceTypes(instanceCount)
 	cloudProvider = fake.NewCloudProvider()
 	cloudProvider.InstanceTypes = instanceTypes
-	scheduler := scheduling.NewScheduler(ctx, nil, []*scheduling.MachineTemplate{scheduling.NewMachineTemplate(provisioner)},
+	scheduler := scheduling.NewScheduler(ctx, nil, []*scheduling.NodeClaimTemplate{scheduling.NewNodeClaimTemplate(provisioner)},
 		nil, state.NewCluster(&clock.RealClock{}, nil, cloudProvider), nil, &scheduling.Topology{},
 		map[string][]*cloudprovider.InstanceType{provisioner.Name: instanceTypes}, nil,
 		events.NewRecorder(&record.FakeRecorder{}),
@@ -144,10 +144,10 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 			minPods := math.MaxInt64
 			maxPods := 0
 			var podCounts []int
-			for _, n := range results.NewMachines {
+			for _, n := range results.NewNodeClaims {
 				podCounts = append(podCounts, len(n.Pods))
 				podsScheduledInRound1 += len(n.Pods)
-				nodesInRound1 = len(results.NewMachines)
+				nodesInRound1 = len(results.NewNodeClaims)
 				if len(n.Pods) > maxPods {
 					maxPods = len(n.Pods)
 				}

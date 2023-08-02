@@ -28,7 +28,7 @@ import (
 	"k8s.io/client-go/util/flowcontrol"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	schedulingevents "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling/events"
+	schedulingevents "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/termination/terminator/events"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/test"
@@ -81,17 +81,17 @@ var _ = BeforeEach(func() {
 })
 
 var _ = Describe("Event Creation", func() {
-	It("should create a NominatePod event", func() {
-		eventRecorder.Publish(schedulingevents.NominatePod(PodWithUID(), NodeWithUID(), MachineWithUID()))
-		Expect(internalRecorder.Calls(schedulingevents.NominatePod(PodWithUID(), NodeWithUID(), MachineWithUID()).Reason)).To(Equal(1))
+	It("should create a NominatePodEvent event", func() {
+		eventRecorder.Publish(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), MachineWithUID()))
+		Expect(internalRecorder.Calls(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), MachineWithUID()).Reason)).To(Equal(1))
 	})
 	It("should create a EvictPod event", func() {
 		eventRecorder.Publish(terminatorevents.EvictPod(PodWithUID()))
 		Expect(internalRecorder.Calls(terminatorevents.EvictPod(PodWithUID()).Reason)).To(Equal(1))
 	})
-	It("should create a PodFailedToSchedule event", func() {
-		eventRecorder.Publish(schedulingevents.PodFailedToSchedule(PodWithUID(), fmt.Errorf("")))
-		Expect(internalRecorder.Calls(schedulingevents.PodFailedToSchedule(PodWithUID(), fmt.Errorf("")).Reason)).To(Equal(1))
+	It("should create a PodFailedToScheduleEvent event", func() {
+		eventRecorder.Publish(schedulingevents.PodFailedToScheduleEvent(PodWithUID(), fmt.Errorf("")))
+		Expect(internalRecorder.Calls(schedulingevents.PodFailedToScheduleEvent(PodWithUID(), fmt.Errorf("")).Reason)).To(Equal(1))
 	})
 	It("should create a NodeFailedToDrain event", func() {
 		eventRecorder.Publish(terminatorevents.NodeFailedToDrain(NodeWithUID(), fmt.Errorf("")))
@@ -134,19 +134,19 @@ var _ = Describe("Dedupe", func() {
 var _ = Describe("Rate Limiting", func() {
 	It("should only create max-burst when many events are created quickly", func() {
 		for i := 0; i < 100; i++ {
-			eventRecorder.Publish(schedulingevents.NominatePod(PodWithUID(), NodeWithUID(), MachineWithUID()))
+			eventRecorder.Publish(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), MachineWithUID()))
 		}
-		Expect(internalRecorder.Calls(schedulingevents.NominatePod(PodWithUID(), NodeWithUID(), MachineWithUID()).Reason)).To(Equal(10))
+		Expect(internalRecorder.Calls(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), MachineWithUID()).Reason)).To(Equal(10))
 
 	})
 	It("should allow many events over time due to smoothed rate limiting", func() {
 		for i := 0; i < 3; i++ {
 			for j := 0; j < 5; j++ {
-				eventRecorder.Publish(schedulingevents.NominatePod(PodWithUID(), NodeWithUID(), MachineWithUID()))
+				eventRecorder.Publish(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), MachineWithUID()))
 			}
 			time.Sleep(time.Second)
 		}
-		Expect(internalRecorder.Calls(schedulingevents.NominatePod(PodWithUID(), NodeWithUID(), MachineWithUID()).Reason)).To(Equal(15))
+		Expect(internalRecorder.Calls(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), MachineWithUID()).Reason)).To(Equal(15))
 	})
 })
 

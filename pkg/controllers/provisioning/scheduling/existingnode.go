@@ -88,7 +88,7 @@ func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v
 
 	nodeRequirements := scheduling.NewRequirements(n.requirements.Values()...)
 	podRequirements := scheduling.NewPodRequirements(pod)
-	// Check Machine Affinity Requirements
+	// Check NodeClaim Affinity Requirements
 	if err = nodeRequirements.StrictlyCompatible(podRequirements); err != nil {
 		return err
 	}

@@ -27,8 +27,10 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
+	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
@@ -121,6 +123,16 @@ func (in *StateNode) Name() string {
 		return in.Machine.Name
 	}
 	return in.Node.Name
+}
+
+func (in *StateNode) OwnerKey() nodepoolutil.Key {
+	if in.Labels()[v1alpha5.ProvisionerNameLabelKey] != "" {
+		return nodepoolutil.Key{Name: in.Labels()[v1alpha5.ProvisionerNameLabelKey], IsProvisioner: true}
+	}
+	if in.Labels()[v1beta1.NodePoolLabelKey] != "" {
+		return nodepoolutil.Key{Name: in.Labels()[v1beta1.NodePoolLabelKey], IsProvisioner: false}
+	}
+	return nodepoolutil.Key{}
 }
 
 // Pods gets the pods assigned to the Node based on the kubernetes api-server bindings

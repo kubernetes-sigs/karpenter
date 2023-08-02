@@ -110,7 +110,6 @@ var _ = BeforeEach(func() {
 	newCP := fake.CloudProvider{}
 	cloudProvider.InstanceTypes, _ = newCP.GetInstanceTypes(context.Background(), nil)
 	cloudProvider.CreateCalls = nil
-	pscheduling.ResetDefaultStorageClass()
 })
 
 var _ = AfterEach(func() {
@@ -1852,6 +1851,79 @@ var _ = Describe("In-Flight Nodes", func() {
 		node2 := ExpectScheduled(ctx, env.Client, secondPod)
 		Expect(node1.Name).ToNot(Equal(node2.Name))
 	})
+	Context("Ordering Existing Machines", func() {
+		It("should order initialized nodes for scheduling un-initialized nodes", func() {
+			ExpectApplied(ctx, env.Client, provisioner)
+
+			var machines []*v1alpha5.NodeClaim
+			var nodes []*v1.Node
+			for i := 0; i < 100; i++ {
+				m := test.Machine(v1alpha5.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						},
+					},
+				})
+				ExpectApplied(ctx, env.Client, m)
+				m, n := ExpectMachineDeployed(ctx, env.Client, cluster, cloudProvider, m)
+				machines = append(machines, m)
+				nodes = append(nodes, n)
+			}
+
+			// Make one of the nodes and machines initialized
+			elem := rand.Intn(100) //nolint:gosec
+			ExpectMakeMachinesInitialized(ctx, env.Client, machines[elem])
+			ExpectMakeNodesInitialized(ctx, env.Client, nodes[elem])
+			ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machines[elem]))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[elem]))
+
+			pod := test.UnschedulablePod()
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			scheduledNode := ExpectScheduled(ctx, env.Client, pod)
+
+			// Expect that the scheduled node is equal to the ready node since it's initialized
+			Expect(scheduledNode.Name).To(Equal(nodes[elem].Name))
+		})
+		It("should order initialized nodes for scheduling un-initialized nodes when all other nodes are inflight", func() {
+			ExpectApplied(ctx, env.Client, provisioner)
+
+			var machines []*v1alpha5.NodeClaim
+			var node *v1.Node
+			elem := rand.Intn(100) // The machine/node that will be marked as initialized
+			for i := 0; i < 100; i++ {
+				m := test.Machine(v1alpha5.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						},
+					},
+				})
+				ExpectApplied(ctx, env.Client, m)
+				if i == elem {
+					m, node = ExpectMachineDeployed(ctx, env.Client, cluster, cloudProvider, m)
+				} else {
+					var err error
+					m, err = ExpectMachineDeployedNoNode(ctx, env.Client, cluster, cloudProvider, m)
+					Expect(err).ToNot(HaveOccurred())
+				}
+				machines = append(machines, m)
+			}
+
+			// Make one of the nodes and machines initialized
+			ExpectMakeMachinesInitialized(ctx, env.Client, machines[elem])
+			ExpectMakeNodesInitialized(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machines[elem]))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+			pod := test.UnschedulablePod()
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			scheduledNode := ExpectScheduled(ctx, env.Client, pod)
+
+			// Expect that the scheduled node is equal to node3 since it's initialized
+			Expect(scheduledNode.Name).To(Equal(node.Name))
+		})
+	})
 	Context("Topology", func() {
 		It("should balance pods across zones with in-flight newNodes", func() {
 			labels := map[string]string{"foo": "bar"}
@@ -2036,7 +2108,7 @@ var _ = Describe("In-Flight Nodes", func() {
 			}}
 			ExpectApplied(ctx, env.Client, provisioner)
 
-			// Schedule to New Machine
+			// Schedule to New NodeClaim
 			pod := test.UnschedulablePod(opts)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node1 := ExpectScheduled(ctx, env.Client, pod)
@@ -2049,7 +2121,7 @@ var _ = Describe("In-Flight Nodes", func() {
 				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
 			}
 			ExpectApplied(ctx, env.Client, node1)
-			// Schedule to In Flight Machine
+			// Schedule to In Flight NodeClaim
 			pod = test.UnschedulablePod(opts)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node2 := ExpectScheduled(ctx, env.Client, pod)
@@ -2775,7 +2847,7 @@ var _ = Describe("VolumeUsage", func() {
 		Expect(nodeList.Items).To(HaveLen(1))
 	})
 	It("should launch nodes for pods with ephemeral volume using the specified storage class name", func() {
-		// Launch an initial pod onto a node and register the CSI Node with a volume count limit of 1
+		// Launch an initial pod onto a node and register the CSI NodeClaim with a volume count limit of 1
 		sc := test.StorageClass(test.StorageClassOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "my-storage-class",
@@ -2872,7 +2944,7 @@ var _ = Describe("VolumeUsage", func() {
 		Expect(node.Name).ToNot(Equal(node2.Name))
 	})
 	It("should launch nodes for pods with ephemeral volume using a default storage class", func() {
-		// Launch an initial pod onto a node and register the CSI Node with a volume count limit of 1
+		// Launch an initial pod onto a node and register the CSI NodeClaim with a volume count limit of 1
 		sc := test.StorageClass(test.StorageClassOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "default-storage-class",

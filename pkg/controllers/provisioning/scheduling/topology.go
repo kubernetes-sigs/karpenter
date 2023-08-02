@@ -254,7 +254,7 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 			return fmt.Errorf("getting node %s, %w", p.Spec.NodeName, err)
 		}
 		domain, ok := node.Labels[tg.Key]
-		// Kubelet sets the hostname label, but the node may not be ready yet so there is no label.  We fall back and just
+		// KubeletConfiguration sets the hostname label, but the node may not be ready yet so there is no label.  We fall back and just
 		// treat the node name as the label.  It probably is in most cases, but even if not we at least count the existence
 		// of the pods in some domain, even if not in the correct one.  This is needed to handle the case of pods with
 		// self-affinity only fulfilling that affinity if all domains are empty.

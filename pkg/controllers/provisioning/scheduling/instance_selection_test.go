@@ -595,7 +595,7 @@ var _ = Describe("Instance Type Selection", func() {
 	})
 })
 
-func supportedInstanceTypes(machine *v1alpha5.Machine) (res []*cloudprovider.InstanceType) {
+func supportedInstanceTypes(machine *v1alpha5.NodeClaim) (res []*cloudprovider.InstanceType) {
 	reqs := scheduling.NewNodeSelectorRequirements(machine.Spec.Requirements...)
 	return lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
 		return reqs.Get(v1.LabelInstanceTypeStable).Has(i.Name)

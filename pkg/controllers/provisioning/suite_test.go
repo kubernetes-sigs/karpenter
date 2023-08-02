@@ -176,7 +176,7 @@ var _ = Describe("Provisioning", func() {
 		}
 	})
 	It("should provision multiple nodes when maxPods is set", func() {
-		// Kubelet configuration is actually not observed here, the scheduler is relying on the
+		// KubeletConfiguration configuration is actually not observed here, the scheduler is relying on the
 		// pods resource value which is statically set in the fake cloudprovider
 		ExpectApplied(ctx, env.Client, test.Provisioner(test.ProvisionerOptions{
 			Kubelet: &v1alpha5.KubeletConfiguration{MaxPods: ptr.Int32(1)},
@@ -591,13 +591,13 @@ var _ = Describe("Provisioning", func() {
 	Context("Annotations", func() {
 		It("should annotate nodes", func() {
 			provisioner := test.Provisioner(test.ProvisionerOptions{
-				Annotations: map[string]string{v1alpha5.DoNotConsolidateNodeAnnotationKey: "true"},
+				Annotations: map[string]string{v1alpha5.DoNotDisruptAnnotationKey: "true"},
 			})
 			ExpectApplied(ctx, env.Client, provisioner)
 			pod := test.UnschedulablePod()
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
-			Expect(node.Annotations).To(HaveKeyWithValue(v1alpha5.DoNotConsolidateNodeAnnotationKey, "true"))
+			Expect(node.Annotations).To(HaveKeyWithValue(v1alpha5.DoNotDisruptAnnotationKey, "true"))
 		})
 	})
 	Context("Labels", func() {
@@ -684,7 +684,7 @@ var _ = Describe("Provisioning", func() {
 			}
 		})
 	})
-	Context("Machine Creation", func() {
+	Context("NodeClaim Creation", func() {
 		It("should create a machine request with expected requirements", func() {
 			provisioner := test.Provisioner()
 			ExpectApplied(ctx, env.Client, provisioner)
@@ -1346,7 +1346,7 @@ var _ = Describe("Multiple Provisioners", func() {
 	})
 })
 
-func ExpectMachineRequirements(machine *v1alpha5.Machine, requirements ...v1.NodeSelectorRequirement) {
+func ExpectMachineRequirements(machine *v1alpha5.NodeClaim, requirements ...v1.NodeSelectorRequirement) {
 	for _, requirement := range requirements {
 		req, ok := lo.Find(machine.Spec.Requirements, func(r v1.NodeSelectorRequirement) bool {
 			return r.Key == requirement.Key && r.Operator == requirement.Operator
@@ -1360,7 +1360,7 @@ func ExpectMachineRequirements(machine *v1alpha5.Machine, requirements ...v1.Nod
 	}
 }
 
-func ExpectMachineRequests(machine *v1alpha5.Machine, resources v1.ResourceList) {
+func ExpectMachineRequests(machine *v1alpha5.NodeClaim, resources v1.ResourceList) {
 	for name, value := range resources {
 		v := machine.Spec.Resources.Requests[name]
 		ExpectWithOffset(1, v.AsApproximateFloat64()).To(BeNumerically("~", value.AsApproximateFloat64(), 10))
