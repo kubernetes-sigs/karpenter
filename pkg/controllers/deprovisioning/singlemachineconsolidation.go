@@ -64,11 +64,11 @@ func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 
 		isValid, err := v.IsValid(ctx, cmd)
 		if err != nil {
-			logging.FromContext(ctx).Errorf("validating consolidation %s", err)
-			continue
+			return Command{}, fmt.Errorf("validating consolidation, %w", err)
 		}
 		if !isValid {
-			return Command{}, fmt.Errorf("command is no longer valid, %s", cmd)
+			logging.FromContext(ctx).Debugf("abandoning single machine consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+			return Command{}, nil
 		}
 		return cmd, nil
 	}

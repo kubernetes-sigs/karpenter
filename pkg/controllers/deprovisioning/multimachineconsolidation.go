@@ -70,7 +70,7 @@ func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	}
 
 	if !isValid {
-		logging.FromContext(ctx).Debugf("consolidation command is no longer valid, %s", cmd)
+		logging.FromContext(ctx).Debugf("abandoning multi machine consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
 		return Command{}, nil
 	}
 	return cmd, nil
