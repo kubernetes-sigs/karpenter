@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/termination/terminator"
 	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/termination/terminator/events"
@@ -123,6 +124,7 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *v1.Node) error {
 			return client.IgnoreNotFound(fmt.Errorf("patching node, %w", err))
 		}
 		metrics.NodesTerminatedCounter.With(prometheus.Labels{
+			metrics.NodePoolLabel:    n.Labels[v1beta1.NodePoolLabelKey],
 			metrics.ProvisionerLabel: n.Labels[v1alpha5.ProvisionerNameLabelKey],
 		}).Inc()
 		// We use stored.DeletionTimestamp since the api-server may give back a node after the patch without a deletionTimestamp

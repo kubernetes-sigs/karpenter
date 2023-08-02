@@ -15,14 +15,9 @@ limitations under the License.
 package v1beta1
 
 import (
-	"encoding/json"
-
-	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 )
 
 // NodeClaimSpec describes the desired state of the NodeClaim
@@ -47,18 +42,10 @@ type NodeClaimSpec struct {
 	KubeletConfiguration *KubeletConfiguration `json:"kubeletConfiguration,omitempty"`
 	// NodeClass is a reference to an object that defines provider specific configuration
 	// +required
-	NodeClass *NodeClassRef `json:"nodeClass"`
+	NodeClass *NodeClassReference `json:"nodeClass"`
 	// Provider stores CloudProvider-specific details from a conversion from a v1alpha5.Provisioner
 	// TODO @joinnis: Remove this field when v1alpha5 is unsupported in a future version of Karpenter
 	Provider *Provider `json:"-"`
-}
-
-func ProviderAnnotation(p *v1alpha5.Provider) map[string]string {
-	if p == nil {
-		return nil
-	}
-	raw := lo.Must(json.Marshal(p)) // Provider should already have been validated so this shouldn't fail
-	return map[string]string{ProviderCompatabilityAnnotationKey: string(raw)}
 }
 
 // ResourceRequirements models the required resources for the NodeClaim to launch
@@ -134,7 +121,7 @@ type KubeletConfiguration struct {
 	CPUCFSQuota *bool `json:"cpuCFSQuota,omitempty"`
 }
 
-type NodeClassRef struct {
+type NodeClassReference struct {
 	// Kind of the referent; More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds"
 	// +optional
 	Kind string `json:"kind,omitempty"`
