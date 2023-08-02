@@ -1951,7 +1951,7 @@ var _ = Describe("Consolidation TTL", func() {
 			defer wg.Done()
 			defer finished.Store(true)
 			_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
-			Expect(err).To(HaveOccurred())
+			Expect(err).ToNot(HaveOccurred())
 		}()
 
 		// wait for the deprovisioningController to block on the validation timeout
@@ -2098,7 +2098,7 @@ var _ = Describe("Consolidation TTL", func() {
 		ExpectNotFound(ctx, env.Client, machine2, node2)
 	})
 	It("should not consolidate if the action becomes invalid during the node TTL wait", func() {
-		pod := test.Pod()
+		pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"}}})
 		ExpectApplied(ctx, env.Client, machine1, node1, prov, pod)
 
 		// inform cluster state about nodes and machines
@@ -2112,7 +2112,7 @@ var _ = Describe("Consolidation TTL", func() {
 			defer wg.Done()
 			defer finished.Store(true)
 			_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
-			Expect(err).To(HaveOccurred())
+			Expect(err).ToNot(HaveOccurred())
 		}()
 
 		// wait for the deprovisioningController to block on the validation timeout
@@ -2546,6 +2546,75 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 		// and delete the two large ones
 		ExpectNotFound(ctx, env.Client, machine1, node1, machine2, node2)
+	})
+	It("should continue to multi-machine consolidation when emptiness fails validation after the node ttl", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		pods := test.Pods(3, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}}})
+
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], machine1, node1, machine2, node2, machine3, node3, prov)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2, node3}, []*v1alpha5.Machine{machine1, machine2, machine3})
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		finished := atomic.Bool{}
+		go func() {
+			defer GinkgoRecover()
+			defer wg.Done()
+			defer finished.Store(true)
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+		}()
+
+		// wait for the controller to block on the validation timeout
+		Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
+		// controller should be blocking during the timeout
+		Expect(finished.Load()).To(BeFalse())
+		// and the node should not be deleted yet
+		ExpectExists(ctx, env.Client, machine1)
+		ExpectExists(ctx, env.Client, machine2)
+		ExpectExists(ctx, env.Client, machine3)
+
+		// bind pods to nodes
+		ExpectManualBinding(ctx, env.Client, pods[0], node1)
+		ExpectManualBinding(ctx, env.Client, pods[1], node2)
+		ExpectManualBinding(ctx, env.Client, pods[2], node3)
+
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node3))
+		// advance the clock so that the timeout expires for emptiness
+		Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
+		fakeClock.Step(31 * time.Second)
+
+		// Succeed on multi node consolidation
+		Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
+		fakeClock.Step(31 * time.Second)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+		Eventually(finished.Load, 10*time.Second).Should(BeTrue())
+
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine1, machine2, machine3)
+
+		// should have 2 nodes after multi machine consolidation deletes one
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		// and delete node3 in single machine consolidation
+		ExpectNotFound(ctx, env.Client, machine2, node2, machine3, node3)
 	})
 	It("should continue to single machine consolidation when multi-machine consolidation fails validation after the node ttl", func() {
 		labels := map[string]string{

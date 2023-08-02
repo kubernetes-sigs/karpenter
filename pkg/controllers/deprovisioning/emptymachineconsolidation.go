@@ -82,7 +82,8 @@ func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	// the machine isn't a target of a recent scheduling simulation
 	for _, n := range candidatesToDelete {
 		if len(n.pods) != 0 || c.cluster.IsNodeNominated(n.Name()) {
-			return Command{}, fmt.Errorf("command is no longer valid, %s", cmd)
+			logging.FromContext(ctx).Debugf("abandoning empty machine consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+			return Command{}, nil
 		}
 	}
 	return cmd, nil
