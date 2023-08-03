@@ -1855,10 +1855,10 @@ var _ = Describe("In-Flight Nodes", func() {
 		It("should order initialized nodes for scheduling un-initialized nodes", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
 
-			var machines []*v1alpha5.NodeClaim
+			var machines []*v1alpha5.Machine
 			var nodes []*v1.Node
 			for i := 0; i < 100; i++ {
-				m := test.Machine(v1alpha5.NodeClaim{
+				m := test.Machine(v1alpha5.Machine{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
 							v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
@@ -1888,11 +1888,11 @@ var _ = Describe("In-Flight Nodes", func() {
 		It("should order initialized nodes for scheduling un-initialized nodes when all other nodes are inflight", func() {
 			ExpectApplied(ctx, env.Client, provisioner)
 
-			var machines []*v1alpha5.NodeClaim
+			var machines []*v1alpha5.Machine
 			var node *v1.Node
 			elem := rand.Intn(100) // The machine/node that will be marked as initialized
 			for i := 0; i < 100; i++ {
-				m := test.Machine(v1alpha5.NodeClaim{
+				m := test.Machine(v1alpha5.Machine{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
 							v1alpha5.ProvisionerNameLabelKey: provisioner.Name,

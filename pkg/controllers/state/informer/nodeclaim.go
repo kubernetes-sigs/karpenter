@@ -25,48 +25,47 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
 
-// MachineController reconciles machine for the purpose of maintaining state.
-type MachineController struct {
+// NodeClaimController reconciles NodeClaims for the purpose of maintaining state.
+type NodeClaimController struct {
 	kubeClient client.Client
 	cluster    *state.Cluster
 }
 
-// NewMachineController constructs a controller instance
-func NewMachineController(kubeClient client.Client, cluster *state.Cluster) corecontroller.Controller {
-	return &MachineController{
+// NewNodeClaimController constructs a controller instance
+func NewNodeClaimController(kubeClient client.Client, cluster *state.Cluster) corecontroller.Controller {
+	return &NodeClaimController{
 		kubeClient: kubeClient,
 		cluster:    cluster,
 	}
 }
 
-func (c *MachineController) Name() string {
-	return "state.machine"
+func (c *NodeClaimController) Name() string {
+	return "state.nodeclaim"
 }
 
-func (c *MachineController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("machine", req.NamespacedName.Name))
-	machine := &v1alpha5.Machine{}
-	if err := c.kubeClient.Get(ctx, req.NamespacedName, machine); err != nil {
+func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("nodeclaim", req.NamespacedName.Name))
+	nodeClaim := &v1beta1.NodeClaim{}
+	if err := c.kubeClient.Get(ctx, req.NamespacedName, nodeClaim); err != nil {
 		if errors.IsNotFound(err) {
 			// notify cluster state of the node deletion
 			c.cluster.DeleteNodeClaim(req.Name)
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	c.cluster.UpdateNodeClaim(nodeclaimutil.New(machine))
+	c.cluster.UpdateNodeClaim(nodeClaim)
 	// ensure it's aware of any nodes we discover, this is a no-op if the node is already known to our cluster state
 	return reconcile.Result{RequeueAfter: stateRetryPeriod}, nil
 }
 
-func (c *MachineController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
+func (c *NodeClaimController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
-		For(&v1alpha5.Machine{}).
+		For(&v1beta1.NodeClaim{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))
 }

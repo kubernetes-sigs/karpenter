@@ -27,6 +27,7 @@ import (
 
 	"github.com/samber/lo"
 
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
@@ -43,6 +44,11 @@ type MultiMachineConsolidation struct {
 func NewMultiMachineConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client,
 	provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder) *MultiMachineConsolidation {
 	return &MultiMachineConsolidation{makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
+}
+
+func (m *MultiMachineConsolidation) ShouldDeprovision(ctx context.Context, cn *Candidate) bool {
+	return m.consolidation.ShouldDeprovision(ctx, cn) &&
+		cn.nodePool.Spec.Deprovisioning.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenUnderutilized
 }
 
 func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
@@ -70,14 +76,14 @@ func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 		return cmd, nil
 	}
 
-	v := NewValidation(consolidationTTL, m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder)
+	v := NewValidation(consolidationTTL(cmd.candidates), m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder)
 	isValid, err := v.IsValid(ctx, cmd)
 	if err != nil {
 		return Command{}, fmt.Errorf("validating, %w", err)
 	}
 
 	if !isValid {
-		logging.FromContext(ctx).Debugf("abandoning multi machine consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+		logging.FromContext(ctx).Debugf("consolidation command is no longer valid, %s", cmd)
 		return Command{}, nil
 	}
 	return cmd, nil
@@ -153,7 +159,7 @@ func (m *MultiMachineConsolidation) firstNMachineConsolidationOption(ctx context
 // This code sees that t3a.small is the cheapest type in both lists and filters it and anything more expensive out
 // leaving the valid consolidation:
 // machines=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.nano
-func filterOutSameType(newMachine *scheduling.Machine, consolidate []*Candidate) []*cloudprovider.InstanceType {
+func filterOutSameType(newMachine *scheduling.NodeClaim, consolidate []*Candidate) []*cloudprovider.InstanceType {
 	existingInstanceTypes := sets.NewString()
 	pricesByInstanceType := map[string]float64{}
 

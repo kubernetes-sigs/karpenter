@@ -88,7 +88,7 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 		strictPodRequirements = scheduling.NewStrictPodRequirements(pod)
 	}
 	// Check Topology Requirements
-	topologyRequirements, err := m.topology.AddRequirements(strictPodRequirements, nodeClaimRequirements, pod)
+	topologyRequirements, err := n.topology.AddRequirements(strictPodRequirements, nodeClaimRequirements, pod)
 	if err != nil {
 		return err
 	}

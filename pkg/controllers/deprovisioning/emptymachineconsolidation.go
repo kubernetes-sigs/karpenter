@@ -66,10 +66,13 @@ func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	// empty machine consolidation doesn't use Validation as we get to take advantage of cluster.IsNodeNominated.  This
 	// lets us avoid a scheduling simulation (which is performed periodically while pending pods exist and drives
 	// cluster.IsNodeNominated already).
+	ttl := lo.MaxBy(emptyCandidates, func(a, b *Candidate) bool {
+		return a.nodePool.Spec.Deprovisioning.ConsolidationTTL.Duration > b.nodePool.Spec.Deprovisioning.ConsolidationTTL.Duration
+	}).nodePool.Spec.Deprovisioning.ConsolidationTTL.Duration
 	select {
 	case <-ctx.Done():
 		return Command{}, errors.New("interrupted")
-	case <-c.clock.After(consolidationTTL):
+	case <-c.clock.After(ttl):
 	}
 	validationCandidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, c.ShouldDeprovision)
 	if err != nil {
@@ -78,13 +81,11 @@ func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	}
 	candidatesToDelete := mapCandidates(cmd.candidates, validationCandidates)
 
-	// the deletion of empty machines is easy to validate, we just ensure that all the candidatesToDelete are still empty and that
-	// the machine isn't a target of a recent scheduling simulation
-	for _, n := range candidatesToDelete {
-		if len(n.pods) != 0 || c.cluster.IsNodeNominated(n.Name()) {
-			logging.FromContext(ctx).Debugf("abandoning empty machine consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
-			return Command{}, nil
-		}
-	}
+	// The deletion of empty machines is easy to validate, we just ensure that:
+	// 1. All the candidatesToDelete are still empty
+	// 2. The node isn't a target of a recent scheduling simulation
+	cmd.candidates = lo.Filter(candidatesToDelete, func(n *Candidate, _ int) bool {
+		return len(n.pods) == 0 && !c.cluster.IsNodeNominated(n.Name())
+	})
 	return cmd, nil
 }

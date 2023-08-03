@@ -23,6 +23,7 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -41,31 +42,34 @@ func NewSingleMachineConsolidation(clk clock.Clock, cluster *state.Cluster, kube
 	return &SingleMachineConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
 }
 
+func (s *SingleMachineConsolidation) ShouldDeprovision(ctx context.Context, cn *Candidate) bool {
+	return s.consolidation.ShouldDeprovision(ctx, cn) &&
+		cn.nodePool.Spec.Deprovisioning.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenUnderutilized
+}
+
 // ComputeCommand generates a deprovisioning command given deprovisionable machines
 // nolint:gocyclo
-func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
-	if c.isConsolidated() {
+func (s *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
+	if s.isConsolidated() {
 		return Command{}, nil
 	}
-	candidates, err := c.sortAndFilterCandidates(ctx, candidates)
+	candidates, err := s.sortAndFilterCandidates(ctx, candidates)
 	if err != nil {
 		return Command{}, fmt.Errorf("sorting candidates, %w", err)
 	}
-	deprovisioningEligibleMachinesGauge.WithLabelValues(c.String()).Set(float64(len(candidates)))
-
-	v := NewValidation(consolidationTTL, c.clock, c.cluster, c.kubeClient, c.provisioner, c.cloudProvider, c.recorder)
+	deprovisioningEligibleMachinesGauge.WithLabelValues(s.String()).Set(float64(len(candidates)))
 
 	// Set a timeout
-	timeout := c.clock.Now().Add(SingleMachineConsolidationTimeoutDuration)
+	timeout := s.clock.Now().Add(SingleMachineConsolidationTimeoutDuration)
 	// binary search to find the maximum number of machines we can terminate
 	for i, candidate := range candidates {
-		if c.clock.Now().After(timeout) {
+		if s.clock.Now().After(timeout) {
 			deprovisioningConsolidationTimeoutsCounter.WithLabelValues(singleMachineConsolidationLabelValue).Inc()
 			logging.FromContext(ctx).Debugf("abandoning single-machine consolidation due to timeout after evaluating %d candidates", i)
 			return Command{}, nil
 		}
 		// compute a possible consolidation option
-		cmd, err := c.computeConsolidation(ctx, candidate)
+		cmd, err := s.computeConsolidation(ctx, candidate)
 		if err != nil {
 			logging.FromContext(ctx).Errorf("computing consolidation %s", err)
 			continue
@@ -74,17 +78,18 @@ func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 			continue
 		}
 
+		v := NewValidation(consolidationTTL(cmd.candidates), s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder)
 		isValid, err := v.IsValid(ctx, cmd)
 		if err != nil {
-			return Command{}, fmt.Errorf("validating consolidation, %w", err)
+			logging.FromContext(ctx).Errorf("validating consolidation %s", err)
+			continue
 		}
 		if !isValid {
-			logging.FromContext(ctx).Debugf("abandoning single machine consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
-			return Command{}, nil
+			return Command{}, fmt.Errorf("command is no longer valid, %s", cmd)
 		}
 		return cmd, nil
 	}
 	// couldn't remove any candidate
-	c.markConsolidated()
+	s.markConsolidated()
 	return Command{}, nil
 }

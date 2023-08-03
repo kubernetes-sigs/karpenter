@@ -1346,7 +1346,7 @@ var _ = Describe("Multiple Provisioners", func() {
 	})
 })
 
-func ExpectMachineRequirements(machine *v1alpha5.NodeClaim, requirements ...v1.NodeSelectorRequirement) {
+func ExpectMachineRequirements(machine *v1alpha5.Machine, requirements ...v1.NodeSelectorRequirement) {
 	for _, requirement := range requirements {
 		req, ok := lo.Find(machine.Spec.Requirements, func(r v1.NodeSelectorRequirement) bool {
 			return r.Key == requirement.Key && r.Operator == requirement.Operator
@@ -1360,7 +1360,7 @@ func ExpectMachineRequirements(machine *v1alpha5.NodeClaim, requirements ...v1.N
 	}
 }
 
-func ExpectMachineRequests(machine *v1alpha5.NodeClaim, resources v1.ResourceList) {
+func ExpectMachineRequests(machine *v1alpha5.Machine, resources v1.ResourceList) {
 	for name, value := range resources {
 		v := machine.Spec.Resources.Requests[name]
 		ExpectWithOffset(1, v.AsApproximateFloat64()).To(BeNumerically("~", value.AsApproximateFloat64(), 10))

@@ -19,10 +19,11 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"time"
 
 	"github.com/samber/lo"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
@@ -30,8 +31,9 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/scheduling"
-	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
+	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
+	provisionerutil "github.com/aws/karpenter-core/pkg/utils/provisioner"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -49,15 +51,15 @@ func filterCandidates(ctx context.Context, kubeClient client.Client, recorder ev
 	// filter out nodes that can't be terminated
 	nodes = lo.Filter(nodes, func(cn *Candidate, _ int) bool {
 		if !cn.Node.DeletionTimestamp.IsZero() {
-			recorder.Publish(deprovisioningevents.Blocked(cn.Node, cn.Machine, "Node in the process of deletion")...)
+			recorder.Publish(deprovisioningevents.Blocked(cn.Node, cn.NodeClaim, "Node in the process of deletion")...)
 			return false
 		}
 		if pdb, ok := pdbs.CanEvictPods(cn.pods); !ok {
-			recorder.Publish(deprovisioningevents.Blocked(cn.Node, cn.Machine, fmt.Sprintf("PDB %q prevents pod evictions", pdb))...)
+			recorder.Publish(deprovisioningevents.Blocked(cn.Node, cn.NodeClaim, fmt.Sprintf("PDB %q prevents pod evictions", pdb))...)
 			return false
 		}
 		if p, ok := hasDoNotEvictPod(cn); ok {
-			recorder.Publish(deprovisioningevents.Blocked(cn.Node, cn.Machine, fmt.Sprintf("Pod %q has do not evict annotation", client.ObjectKeyFromObject(p)))...)
+			recorder.Publish(deprovisioningevents.Blocked(cn.Node, cn.NodeClaim, fmt.Sprintf("Pod %q has do not evict annotation", client.ObjectKeyFromObject(p)))...)
 			return false
 		}
 		return true
@@ -116,7 +118,7 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	// to schedule since we want to assume that we can delete a node and its pods will immediately
 	// move to an existing node which won't occur if that node isn't ready.
 	for _, n := range results.ExistingNodes {
-		if !n.Initialized() || nodeutils.GetCondition(n.Node, v1.NodeReady).Status != v1.ConditionTrue {
+		if !n.Initialized() {
 			for _, p := range n.Pods {
 				results.PodErrors[p] = fmt.Errorf("would schedule against a non-initialized node %s", n.Name())
 			}
@@ -176,42 +178,43 @@ func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
 	return cost
 }
 
-// GetCandidates returns nodes that appear to be currently deprovisionable based off of their provisioner
+// GetCandidates returns nodes that appear to be currently deprovisionable based off of their nodePool
 func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter) ([]*Candidate, error) {
-	provisionerMap, provisionerToInstanceTypes, err := buildProvisionerMap(ctx, kubeClient, cloudProvider)
+	nodePoolMap, nodePoolToInstanceTypesMap, err := buildNodePoolMap(ctx, kubeClient, cloudProvider)
 	if err != nil {
 		return nil, err
 	}
 	candidates := lo.FilterMap(cluster.Nodes(), func(n *state.StateNode, _ int) (*Candidate, bool) {
-		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, provisionerMap, provisionerToInstanceTypes)
+		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, nodePoolMap, nodePoolToInstanceTypesMap)
 		return cn, e == nil
 	})
 	// Filter only the valid candidates that we should deprovision
 	return lo.Filter(candidates, func(c *Candidate, _ int) bool { return shouldDeprovision(ctx, c) }), nil
 }
 
-// buildProvisionerMap builds a provName -> provisioner map and a provName -> instanceName -> instance type map
-func buildProvisionerMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[string]*v1alpha5.Provisioner, map[string]map[string]*cloudprovider.InstanceType, error) {
-	provisioners := map[string]*v1alpha5.Provisioner{}
-	var provList v1alpha5.ProvisionerList
-	if err := kubeClient.List(ctx, &provList); err != nil {
-		return nil, nil, fmt.Errorf("listing provisioners, %w", err)
+// buildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map
+func buildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[nodepoolutil.Key]*v1beta1.NodePool, map[nodepoolutil.Key]map[string]*cloudprovider.InstanceType, error) {
+	nodePoolMap := map[nodepoolutil.Key]*v1beta1.NodePool{}
+	nodePoolList, err := nodepoolutil.List(ctx, kubeClient)
+	if err != nil {
+		return nil, nil, fmt.Errorf("listing node pools, %w", err)
 	}
-	instanceTypesByProvisioner := map[string]map[string]*cloudprovider.InstanceType{}
-	for i := range provList.Items {
-		p := &provList.Items[i]
-		provisioners[p.Name] = p
+	nodePoolToInstanceTypesMap := map[nodepoolutil.Key]map[string]*cloudprovider.InstanceType{}
+	for i := range nodePoolList.Items {
+		np := &nodePoolList.Items[i]
+		key := nodepoolutil.Key{Name: np.Name, IsProvisioner: np.IsProvisioner}
+		nodePoolMap[key] = np
 
-		provInstanceTypes, err := cloudProvider.GetInstanceTypes(ctx, p)
+		provInstanceTypes, err := cloudProvider.GetInstanceTypes(ctx, provisionerutil.New(np))
 		if err != nil {
-			return nil, nil, fmt.Errorf("listing instance types for %s, %w", p.Name, err)
+			return nil, nil, fmt.Errorf("listing instance types for %s, %w", np.Name, err)
 		}
-		instanceTypesByProvisioner[p.Name] = map[string]*cloudprovider.InstanceType{}
+		nodePoolToInstanceTypesMap[key] = map[string]*cloudprovider.InstanceType{}
 		for _, it := range provInstanceTypes {
-			instanceTypesByProvisioner[p.Name][it.Name] = it
+			nodePoolToInstanceTypesMap[key][it.Name] = it
 		}
 	}
-	return provisioners, instanceTypesByProvisioner, nil
+	return nodePoolMap, nodePoolToInstanceTypesMap, nil
 }
 
 // mapCandidates maps the list of proposed candidates with the current state
@@ -227,9 +230,9 @@ func mapCandidates(proposed, current []*Candidate) []*Candidate {
 // to get the launch price; else, it uses the on-demand launch price
 func worstLaunchPrice(ofs []cloudprovider.Offering, reqs scheduling.Requirements) float64 {
 	// We prefer to launch spot offerings, so we will get the worst price based on the node requirements
-	if reqs.Get(v1alpha5.LabelCapacityType).Has(v1alpha5.CapacityTypeSpot) {
+	if reqs.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeSpot) {
 		spotOfferings := lo.Filter(ofs, func(of cloudprovider.Offering, _ int) bool {
-			return of.CapacityType == v1alpha5.CapacityTypeSpot && reqs.Get(v1.LabelTopologyZone).Has(of.Zone)
+			return of.CapacityType == v1beta1.CapacityTypeSpot && reqs.Get(v1.LabelTopologyZone).Has(of.Zone)
 		})
 		if len(spotOfferings) > 0 {
 			return lo.MaxBy(spotOfferings, func(of1, of2 cloudprovider.Offering) bool {
@@ -237,9 +240,9 @@ func worstLaunchPrice(ofs []cloudprovider.Offering, reqs scheduling.Requirements
 			}).Price
 		}
 	}
-	if reqs.Get(v1alpha5.LabelCapacityType).Has(v1alpha5.CapacityTypeOnDemand) {
+	if reqs.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeOnDemand) {
 		onDemandOfferings := lo.Filter(ofs, func(of cloudprovider.Offering, _ int) bool {
-			return of.CapacityType == v1alpha5.CapacityTypeOnDemand && reqs.Get(v1.LabelTopologyZone).Has(of.Zone)
+			return of.CapacityType == v1beta1.CapacityTypeOnDemand && reqs.Get(v1.LabelTopologyZone).Has(of.Zone)
 		})
 		if len(onDemandOfferings) > 0 {
 			return lo.MaxBy(onDemandOfferings, func(of1, of2 cloudprovider.Offering) bool {
@@ -258,6 +261,12 @@ func clamp(min, val, max float64) float64 {
 		return max
 	}
 	return val
+}
+
+func consolidationTTL(candidates []*Candidate) time.Duration {
+	return lo.MaxBy(candidates, func(a, b *Candidate) bool {
+		return a.nodePool.Spec.Deprovisioning.ConsolidationTTL.Duration > b.nodePool.Spec.Deprovisioning.ConsolidationTTL.Duration
+	}).nodePool.Spec.Deprovisioning.ConsolidationTTL.Duration
 }
 
 func hasDoNotEvictPod(c *Candidate) (*v1.Pod, bool) {

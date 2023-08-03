@@ -19,7 +19,7 @@ limitations under the License.
 package state
 
 import (
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"k8s.io/api/core/v1"
 	resource "k8s.io/apimachinery/pkg/api/resource"
@@ -34,9 +34,9 @@ func (in *StateNode) DeepCopyInto(out *StateNode) {
 		*out = new(v1.Node)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.Machine != nil {
-		in, out := &in.Machine, &out.Machine
-		*out = new(v1alpha5.Machine)
+	if in.NodeClaim != nil {
+		in, out := &in.NodeClaim, &out.NodeClaim
+		*out = new(v1beta1.NodeClaim)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.inflightAllocatable != nil {

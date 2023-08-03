@@ -23,10 +23,10 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
@@ -60,9 +60,6 @@ func makeConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient cli
 	}
 }
 
-// consolidationTTL is the TTL between creating a consolidation command and validating that it still works.
-const consolidationTTL = 15 * time.Second
-
 // string is the string representation of the deprovisioner
 func (c *consolidation) String() string {
 	return metrics.ConsolidationReason
@@ -94,16 +91,16 @@ func (c *consolidation) markConsolidated() {
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes
 func (c *consolidation) ShouldDeprovision(_ context.Context, cn *Candidate) bool {
-	if val, ok := cn.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey]; ok {
-		c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.Machine, fmt.Sprintf("%s annotation exists", v1alpha5.DoNotConsolidateNodeAnnotationKey))...)
-		return val != "true"
-	}
-	if cn.provisioner == nil {
-		c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.Machine, "provisioner is unknown")...)
+	if cn.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey] == "true" {
+		c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s annotation exists", v1alpha5.DoNotConsolidateNodeAnnotationKey))...)
 		return false
 	}
-	if cn.provisioner.Spec.Consolidation == nil || !ptr.BoolValue(cn.provisioner.Spec.Consolidation.Enabled) {
-		c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.Machine, fmt.Sprintf("provisioner %s has consolidation disabled", cn.provisioner.Name))...)
+	if cn.Annotations()[v1beta1.DoNotDisruptAnnotationKey] == "true" {
+		c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s annotation exists", v1beta1.DoNotDisruptAnnotationKey))...)
+		return false
+	}
+	if cn.nodePool.Spec.Deprovisioning.ConsolidationPolicy != v1beta1.ConsolidationPolicyNever {
+		c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("nodePool %s has consolidation disabled", cn.nodePool.Name))...)
 		return false
 	}
 	return true
@@ -127,22 +124,22 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	if !results.AllNonPendingPodsScheduled() {
 		// This method is used by multi-node consolidation as well, so we'll only report in the single node case
 		if len(candidates) == 1 {
-			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, candidates[0].Machine, results.PodSchedulingErrors())...)
+			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, results.PodSchedulingErrors())...)
 		}
 		return Command{}, nil
 	}
 
 	// were we able to schedule all the pods on the inflight candidates?
-	if len(results.NewMachines) == 0 {
+	if len(results.NewNodeClaims) == 0 {
 		return Command{
 			candidates: candidates,
 		}, nil
 	}
 
 	// we're not going to turn a single node into multiple candidates
-	if len(results.NewMachines) != 1 {
+	if len(results.NewNodeClaims) != 1 {
 		if len(candidates) == 1 {
-			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, candidates[0].Machine, fmt.Sprintf("can't remove without creating %d candidates", len(results.NewMachines)))...)
+			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("can't remove without creating %d candidates", len(results.NewNodeClaims)))...)
 		}
 		return Command{}, nil
 	}
@@ -153,10 +150,10 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	if err != nil {
 		return Command{}, fmt.Errorf("getting offering price from candidate node, %w", err)
 	}
-	results.NewMachines[0].InstanceTypeOptions = filterByPrice(results.NewMachines[0].InstanceTypeOptions, results.NewMachines[0].Requirements, nodesPrice)
-	if len(results.NewMachines[0].InstanceTypeOptions) == 0 {
+	results.NewNodeClaims[0].InstanceTypeOptions = filterByPrice(results.NewNodeClaims[0].InstanceTypeOptions, results.NewNodeClaims[0].Requirements, nodesPrice)
+	if len(results.NewNodeClaims[0].InstanceTypeOptions) == 0 {
 		if len(candidates) == 1 {
-			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, candidates[0].Machine, "can't replace with a cheaper node")...)
+			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "can't replace with a cheaper node")...)
 		}
 		// no instance types remain after filtering by price
 		return Command{}, nil
@@ -173,9 +170,9 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	}
 
 	if allExistingAreSpot &&
-		results.NewMachines[0].Requirements.Get(v1alpha5.LabelCapacityType).Has(v1alpha5.CapacityTypeSpot) {
+		results.NewNodeClaims[0].Requirements.Get(v1alpha5.LabelCapacityType).Has(v1alpha5.CapacityTypeSpot) {
 		if len(candidates) == 1 {
-			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, candidates[0].Machine, "can't replace a spot node with a spot node")...)
+			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "can't replace a spot node with a spot node")...)
 		}
 		return Command{}, nil
 	}
@@ -184,14 +181,14 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	// assumption, that the spot variant will launch. We also need to add a requirement to the node to ensure that if
 	// spot capacity is insufficient we don't replace the node with a more expensive on-demand node.  Instead the launch
 	// should fail and we'll just leave the node alone.
-	ctReq := results.NewMachines[0].Requirements.Get(v1alpha5.LabelCapacityType)
+	ctReq := results.NewNodeClaims[0].Requirements.Get(v1alpha5.LabelCapacityType)
 	if ctReq.Has(v1alpha5.CapacityTypeSpot) && ctReq.Has(v1alpha5.CapacityTypeOnDemand) {
-		results.NewMachines[0].Requirements.Add(scheduling.NewRequirement(v1alpha5.LabelCapacityType, v1.NodeSelectorOpIn, v1alpha5.CapacityTypeSpot))
+		results.NewNodeClaims[0].Requirements.Add(scheduling.NewRequirement(v1alpha5.LabelCapacityType, v1.NodeSelectorOpIn, v1alpha5.CapacityTypeSpot))
 	}
 
 	return Command{
 		candidates:   candidates,
-		replacements: results.NewMachines,
+		replacements: results.NewNodeClaims,
 	}, nil
 }
 

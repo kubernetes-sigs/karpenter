@@ -281,14 +281,14 @@ func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c cli
 		log.Printf("error provisioning in test, %s", err)
 		return bindings
 	}
-	for _, m := range results.NewMachines {
+	for _, m := range results.NewNodeClaims {
 		// TODO: Check the error on the provisioner launch
-		name, err := provisioner.Launch(ctx, m, provisioning.WithReason(metrics.ProvisioningReason))
+		key, err := provisioner.Launch(ctx, m, provisioning.WithReason(metrics.ProvisioningReason))
 		if err != nil {
 			return bindings
 		}
 		machine := &v1alpha5.Machine{}
-		ExpectWithOffset(offset+1, c.Get(ctx, types.NamespacedName{Name: name}, machine)).To(Succeed())
+		ExpectWithOffset(offset+1, c.Get(ctx, types.NamespacedName{Name: key.Name}, machine)).To(Succeed())
 		machine, node := ExpectMachineDeployedWithOffset(offset+1, ctx, c, cluster, cloudProvider, machine)
 		if machine != nil && node != nil {
 			for _, pod := range m.Pods {
@@ -303,7 +303,7 @@ func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c cli
 		for _, pod := range node.Pods {
 			bindings[pod] = &Binding{
 				Node:    node.Node,
-				Machine: node.Machine,
+				Machine: machineutil.NewFromNodeClaim(node.NodeClaim),
 			}
 		}
 	}
@@ -326,7 +326,7 @@ func ExpectMachineDeployedNoNodeWithOffset(offset int, ctx context.Context, c cl
 	m = machineutil.NewFromNodeClaim(lifecycle.PopulateNodeClaimDetails(nodeclaimutil.New(m), nodeclaimutil.New(resolved)))
 	m.StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
 	ExpectAppliedWithOffset(offset+1, ctx, c, m)
-	cluster.UpdateMachine(m)
+	cluster.UpdateNodeClaim(nodeclaimutil.New(m))
 	return m, nil
 }
 
@@ -346,7 +346,7 @@ func ExpectMachineDeployedWithOffset(offset int, ctx context.Context, c client.C
 	node.Labels = lo.Assign(node.Labels, map[string]string{v1alpha5.LabelNodeRegistered: "true"})
 	ExpectAppliedWithOffset(offset+1, ctx, c, m, node)
 	ExpectWithOffset(offset+1, cluster.UpdateNode(ctx, node)).To(Succeed())
-	cluster.UpdateMachine(m)
+	cluster.UpdateNodeClaim(nodeclaimutil.New(m))
 	return m, node
 }
 
