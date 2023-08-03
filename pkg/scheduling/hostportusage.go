@@ -15,13 +15,11 @@ limitations under the License.
 package scheduling
 
 import (
-	"context"
 	"fmt"
 	"net"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -29,20 +27,20 @@ import (
 // to the node must be unique. We need to track this to keep an accurate concept of what pods can potentially schedule
 // together.
 type HostPortUsage struct {
-	reserved map[types.NamespacedName][]entry
+	reserved map[types.NamespacedName][]HostPort
 }
 
-type entry struct {
+type HostPort struct {
 	ip       net.IP
 	port     int32
 	protocol v1.Protocol
 }
 
-func (e entry) String() string {
+func (e HostPort) String() string {
 	return fmt.Sprintf("IP=%s Port=%d Proto=%s", e.ip, e.port, e.protocol)
 }
 
-func (e entry) matches(rhs entry) bool {
+func (e HostPort) matches(rhs HostPort) bool {
 	if e.protocol != rhs.protocol {
 		return false
 	}
@@ -58,27 +56,16 @@ func (e entry) matches(rhs entry) bool {
 
 func NewHostPortUsage() *HostPortUsage {
 	return &HostPortUsage{
-		reserved: map[types.NamespacedName][]entry{},
+		reserved: map[types.NamespacedName][]HostPort{},
 	}
 }
 
-// Add adds a port to the HostPortUsage, returning an error in the case of a conflict
-func (u *HostPortUsage) Add(ctx context.Context, pod *v1.Pod) {
-	newUsage, err := u.validate(pod)
-	if err != nil {
-		logging.FromContext(ctx).Errorf("invariant violated registering host port usage, %s, please file an issue", err)
-	}
-	u.reserved[client.ObjectKeyFromObject(pod)] = newUsage
+// Add adds a port to the HostPortUsage
+func (u *HostPortUsage) Add(pod *v1.Pod, hostPorts []HostPort) {
+	u.reserved[client.ObjectKeyFromObject(pod)] = hostPorts
 }
 
-// Validate performs host port conflict validation to allow for determining if we can schedule the pod to the node
-// before doing so.
-func (u *HostPortUsage) Validate(pod *v1.Pod) error {
-	_, err := u.validate(pod)
-	return err
-}
-
-func (u *HostPortUsage) validate(pod *v1.Pod) ([]entry, error) {
+func (u *HostPortUsage) Get(pod *v1.Pod) ([]HostPort, error) {
 	newUsage := getHostPorts(pod)
 	for _, newEntry := range newUsage {
 		for podKey, entries := range u.reserved {
@@ -107,10 +94,10 @@ func (u *HostPortUsage) DeepCopy() *HostPortUsage {
 }
 
 func (u *HostPortUsage) DeepCopyInto(out *HostPortUsage) {
-	out.reserved = map[types.NamespacedName][]entry{}
+	out.reserved = map[types.NamespacedName][]HostPort{}
 	for k, v := range u.reserved {
 		for _, e := range v {
-			out.reserved[k] = append(out.reserved[k], entry{
+			out.reserved[k] = append(out.reserved[k], HostPort{
 				ip:       e.ip,
 				port:     e.port,
 				protocol: e.protocol,
@@ -119,8 +106,8 @@ func (u *HostPortUsage) DeepCopyInto(out *HostPortUsage) {
 	}
 }
 
-func getHostPorts(pod *v1.Pod) []entry {
-	var usage []entry
+func getHostPorts(pod *v1.Pod) []HostPort {
+	var usage []HostPort
 	for _, c := range pod.Spec.Containers {
 		for _, p := range c.Ports {
 			if p.HostPort == 0 {
@@ -133,7 +120,7 @@ func getHostPorts(pod *v1.Pod) []entry {
 			if hostIP == "" {
 				hostIP = "0.0.0.0"
 			}
-			usage = append(usage, entry{
+			usage = append(usage, HostPort{
 				ip:       net.ParseIP(hostIP),
 				port:     p.HostPort,
 				protocol: p.Protocol,

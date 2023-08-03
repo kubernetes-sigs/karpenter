@@ -69,6 +69,8 @@ func (n StateNodes) Pods(ctx context.Context, c client.Client) ([]*v1.Pod, error
 // compute topology information.
 // +k8s:deepcopy-gen=true
 // nolint: revive
+//
+//go:generate controller-gen object:headerFile="../../../hack/boilerplate.go.txt" paths="."
 type StateNode struct {
 	Node    *v1.Node
 	Machine *v1alpha5.Machine
@@ -87,7 +89,6 @@ type StateNode struct {
 
 	hostPortUsage *scheduling.HostPortUsage
 	volumeUsage   *scheduling.VolumeUsage
-	volumeLimits  scheduling.VolumeCount
 
 	markedForDeletion bool
 	nominatedUntil    metav1.Time
@@ -104,7 +105,6 @@ func NewNode() *StateNode {
 		podLimits:           map[types.NamespacedName]v1.ResourceList{},
 		hostPortUsage:       &scheduling.HostPortUsage{},
 		volumeUsage:         scheduling.NewVolumeUsage(),
-		volumeLimits:        scheduling.VolumeCount{},
 	}
 }
 
@@ -296,10 +296,6 @@ func (in *StateNode) VolumeUsage() *scheduling.VolumeUsage {
 	return in.volumeUsage
 }
 
-func (in *StateNode) VolumeLimits() scheduling.VolumeCount {
-	return in.volumeLimits
-}
-
 func (in *StateNode) PodRequests() v1.ResourceList {
 	var totalRequests v1.ResourceList
 	for _, requests := range in.podRequests {
@@ -345,10 +341,17 @@ func (in *StateNode) updateForPod(ctx context.Context, kubeClient client.Client,
 		in.daemonSetRequests[podKey] = resources.RequestsForPods(pod)
 		in.daemonSetLimits[podKey] = resources.LimitsForPods(pod)
 	}
-	in.hostPortUsage.Add(ctx, pod)
-	if err := in.volumeUsage.Add(ctx, kubeClient, pod); err != nil {
+	hostPorts, err := in.hostPortUsage.Get(pod)
+	if err != nil {
+		return fmt.Errorf("tracking host port usage, %w", err)
+	}
+	in.hostPortUsage.Add(pod, hostPorts)
+
+	volumes, err := in.volumeUsage.Get(ctx, kubeClient, pod)
+	if err != nil {
 		return fmt.Errorf("tracking volume usage, %w", err)
 	}
+	in.volumeUsage.Add(pod, volumes)
 	return nil
 }
 

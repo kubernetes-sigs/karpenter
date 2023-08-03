@@ -407,7 +407,6 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *
 		podLimits:           map[types.NamespacedName]v1.ResourceList{},
 		hostPortUsage:       scheduling.NewHostPortUsage(),
 		volumeUsage:         scheduling.NewVolumeUsage(),
-		volumeLimits:        scheduling.VolumeCount{},
 		markedForDeletion:   oldNode.markedForDeletion,
 		nominatedUntil:      oldNode.nominatedUntil,
 	}
@@ -485,7 +484,7 @@ func (c *Cluster) populateVolumeLimits(ctx context.Context, n *StateNode) error 
 		if driver.Allocatable == nil {
 			continue
 		}
-		n.volumeLimits[driver.Name] = int(ptr.Int32Value(driver.Allocatable.Count))
+		n.volumeUsage.AddLimit(driver.Name, int(ptr.Int32Value(driver.Allocatable.Count)))
 	}
 	return nil
 }

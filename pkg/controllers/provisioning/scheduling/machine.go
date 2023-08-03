@@ -61,14 +61,15 @@ func NewMachine(machineTemplate *MachineTemplate, topology *Topology, daemonReso
 	}
 }
 
-func (m *Machine) Add(ctx context.Context, pod *v1.Pod) error {
+func (m *Machine) Add(_ context.Context, pod *v1.Pod) error {
 	// Check Taints
 	if err := m.Taints.Tolerates(pod); err != nil {
 		return err
 	}
 
 	// exposed host ports on the node
-	if err := m.hostPortUsage.Validate(pod); err != nil {
+	hostPorts, err := m.hostPortUsage.Get(pod)
+	if err != nil {
 		return err
 	}
 
@@ -106,7 +107,7 @@ func (m *Machine) Add(ctx context.Context, pod *v1.Pod) error {
 	m.Requests = requests
 	m.Requirements = machineRequirements
 	m.topology.Record(pod, machineRequirements)
-	m.hostPortUsage.Add(ctx, pod)
+	m.hostPortUsage.Add(pod, hostPorts)
 	return nil
 }
 

@@ -29,7 +29,7 @@ var _ = Describe("HostPortUsage", func() {
 			ipVal := net.IPv4(10, 0, 0, 0)
 			portVal := int32(4443)
 			protocolVal := v1.ProtocolTCP
-			e := entry{
+			e := HostPort{
 				ip:       ipVal,
 				port:     portVal,
 				protocol: protocolVal,
@@ -40,7 +40,7 @@ var _ = Describe("HostPortUsage", func() {
 			ipVal := net.IPv4(10, 0, 0, 0)
 			portVal := int32(4443)
 			protocolVal := v1.ProtocolTCP
-			e1 := entry{
+			e1 := HostPort{
 				ip:       ipVal,
 				port:     portVal,
 				protocol: protocolVal,
@@ -53,12 +53,12 @@ var _ = Describe("HostPortUsage", func() {
 			ipVal := net.IPv4(10, 0, 0, 0)
 			portVal := int32(4443)
 			protocolVal := v1.ProtocolTCP
-			e1 := entry{
+			e1 := HostPort{
 				ip:       ipVal,
 				port:     portVal,
 				protocol: protocolVal,
 			}
-			e2 := entry{
+			e2 := HostPort{
 				ip:       net.IPv4zero,
 				port:     portVal,
 				protocol: protocolVal,
@@ -73,7 +73,7 @@ var _ = Describe("HostPortUsage", func() {
 			ipVal := net.IPv4(10, 0, 0, 0)
 			portVal := int32(4443)
 			protocolVal := v1.ProtocolTCP
-			e1 := entry{
+			e1 := HostPort{
 				ip:       ipVal,
 				port:     portVal,
 				protocol: protocolVal,
@@ -87,7 +87,7 @@ var _ = Describe("HostPortUsage", func() {
 			ipVal := net.IPv4(10, 0, 0, 0)
 			portVal := int32(4443)
 			protocolVal := v1.ProtocolTCP
-			e1 := entry{
+			e1 := HostPort{
 				ip:       ipVal,
 				port:     portVal,
 				protocol: protocolVal,

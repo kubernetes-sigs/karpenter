@@ -37,20 +37,22 @@ var translator = csitranslation.New()
 // type. We need to be aware and track the mounted volume usage to inform our awareness of which pods can schedule to
 // which nodes.
 type VolumeUsage struct {
-	volumes    volumes
-	podVolumes map[types.NamespacedName]volumes
+	volumes    Volumes
+	podVolumes map[types.NamespacedName]Volumes
+	limits     map[string]int
 }
 
 func NewVolumeUsage() *VolumeUsage {
 	return &VolumeUsage{
-		volumes:    volumes{},
-		podVolumes: map[types.NamespacedName]volumes{},
+		volumes:    Volumes{},
+		podVolumes: map[types.NamespacedName]Volumes{},
+		limits:     map[string]int{},
 	}
 }
 
-type volumes map[string]sets.Set[string]
+type Volumes map[string]sets.Set[string]
 
-func (u volumes) Add(provisioner string, pvcID string) {
+func (u Volumes) Add(provisioner string, pvcID string) {
 	existing, ok := u[provisioner]
 	if !ok {
 		existing = sets.New[string]()
@@ -59,8 +61,8 @@ func (u volumes) Add(provisioner string, pvcID string) {
 	existing.Insert(pvcID)
 }
 
-func (u volumes) union(vol volumes) volumes {
-	cp := volumes{}
+func (u Volumes) union(vol Volumes) Volumes {
+	cp := Volumes{}
 	for k, v := range u {
 		cp[k] = sets.New(sets.List(v)...)
 	}
@@ -75,7 +77,7 @@ func (u volumes) union(vol volumes) volumes {
 	return cp
 }
 
-func (u volumes) insert(volumes volumes) {
+func (u Volumes) insert(volumes Volumes) {
 	for k, v := range volumes {
 		existing, ok := u[k]
 		if !ok {
@@ -86,73 +88,40 @@ func (u volumes) insert(volumes volumes) {
 	}
 }
 
-func (u volumes) copy() volumes {
-	cp := volumes{}
+func (u Volumes) copy() Volumes {
+	cp := Volumes{}
 	for k, v := range u {
 		cp[k] = sets.New(sets.List(v)...)
 	}
 	return cp
 }
 
-func (v *VolumeUsage) Add(ctx context.Context, kubeClient client.Client, pod *v1.Pod) error {
-	podVolumes, err := v.getPodVolumes(ctx, kubeClient, pod)
-	if err != nil {
-		return fmt.Errorf("getting pod volume claims, %w", err)
-	}
-	v.podVolumes[client.ObjectKeyFromObject(pod)] = podVolumes
-	v.volumes = v.volumes.union(podVolumes)
-	return nil
-}
-
-// VolumeCount stores a mapping between the driver name that provides volumes
-// and the number of volumes associated with that driver
-type VolumeCount map[string]int
-
-// Exceeds returns true if the volume count exceeds the limits provided.  If there is no value for a storage provider, it
-// is treated as unlimited.
-func (c VolumeCount) Exceeds(limits VolumeCount) bool {
-	for k, v := range c {
-		limit, hasLimit := limits[k]
-		if !hasLimit {
-			continue
-		}
-		if v > limit {
-			return true
-		}
-	}
-	return false
-}
-
-// Fits returns true if the rhs 'fits' within the volume count.
-func (c VolumeCount) Fits(rhs VolumeCount) bool {
-	for k, v := range rhs {
-		limit, hasLimit := c[k]
-		if !hasLimit {
-			continue
-		}
-		if v > limit {
-			return false
-		}
-	}
-	return true
-}
-
-func (v *VolumeUsage) Validate(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (VolumeCount, error) {
-	podVolumes, err := v.getPodVolumes(ctx, kubeClient, pod)
+func (v *VolumeUsage) Get(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (Volumes, error) {
+	podVolumes, err := v.volumesFor(ctx, kubeClient, pod)
 	if err != nil {
 		return nil, fmt.Errorf("getting volumes for pod, %w", err)
 	}
-	result := VolumeCount{}
-	for k, v := range v.volumes.union(podVolumes) {
-		result[k] += len(v)
+	for k, volumes := range v.volumes.union(podVolumes) {
+		if limit, hasLimit := v.limits[k]; hasLimit && len(volumes) > limit {
+			return nil, fmt.Errorf("would exceed volume limit for %s, %d > %d", k, len(volumes), limit)
+		}
 	}
-	return result, nil
+	return podVolumes, nil
+}
+
+func (v *VolumeUsage) AddLimit(storageDriver string, value int) {
+	v.limits[storageDriver] = value
+}
+
+func (v *VolumeUsage) Add(pod *v1.Pod, volumes Volumes) {
+	v.podVolumes[client.ObjectKeyFromObject(pod)] = volumes
+	v.volumes = v.volumes.union(volumes)
 }
 
 //nolint:gocyclo
-func (v *VolumeUsage) getPodVolumes(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (volumes, error) {
+func (v *VolumeUsage) volumesFor(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (Volumes, error) {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("pod", pod.Name))
-	podPVCs := volumes{}
+	podPVCs := Volumes{}
 	defaultStorageClassName, err := DiscoverDefaultStorageClassName(ctx, kubeClient)
 	if err != nil {
 		return nil, fmt.Errorf("discovering default storage class, %w", err)
@@ -250,7 +219,7 @@ func (v *VolumeUsage) driverFromVolume(ctx context.Context, kubeClient client.Cl
 func (v *VolumeUsage) DeletePod(key types.NamespacedName) {
 	delete(v.podVolumes, key)
 	// volume names could be duplicated, so we re-create our volumes
-	v.volumes = volumes{}
+	v.volumes = Volumes{}
 	for _, c := range v.podVolumes {
 		v.volumes.insert(c)
 	}
@@ -267,7 +236,7 @@ func (v *VolumeUsage) DeepCopy() *VolumeUsage {
 
 func (v *VolumeUsage) DeepCopyInto(out *VolumeUsage) {
 	out.volumes = v.volumes.copy()
-	out.podVolumes = map[types.NamespacedName]volumes{}
+	out.podVolumes = map[types.NamespacedName]Volumes{}
 	for k, v := range v.podVolumes {
 		out.podVolumes[k] = v.copy()
 	}
