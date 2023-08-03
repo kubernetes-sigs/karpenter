@@ -22,6 +22,7 @@ import (
 
 	"github.com/samber/lo"
 	csitranslation "k8s.io/csi-translation-lib"
+	"k8s.io/csi-translation-lib/plugins"
 	"knative.dev/pkg/logging"
 
 	v1 "k8s.io/api/core/v1"
@@ -31,7 +32,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/utils/atomic"
-	"github.com/aws/karpenter-core/pkg/utils/pretty"
 )
 
 const (
@@ -40,9 +40,6 @@ const (
 
 // translator is a CSI Translator that translates in-tree plugin names to their out-of-tree CSI driver names
 var translator = csitranslation.New()
-
-// changeMonitor is a change monitor for global volumeUsage logging
-var changeMonitor = pretty.NewChangeMonitor()
 
 // VolumeUsage tracks volume limits on a per node basis.  The number of volumes that can be mounted varies by instance
 // type. We need to be aware and track the mounted volume usage to inform our awareness of which pods can schedule to
@@ -177,30 +174,25 @@ func (v *VolumeUsage) validate(ctx context.Context, kubeClient client.Client, po
 	}
 	for _, volume := range pod.Spec.Volumes {
 		ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("volume", volume.Name))
-		var pvcID string
-		var storageClassName *string
-		var volumeName string
+		var pvcID, storageClassName, volumeName string
 		var pvc v1.PersistentVolumeClaim
 		if volume.PersistentVolumeClaim != nil {
-			if err := kubeClient.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: volume.PersistentVolumeClaim.ClaimName}, &pvc); err != nil {
+			if err = kubeClient.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: volume.PersistentVolumeClaim.ClaimName}, &pvc); err != nil {
 				return nil, err
 			}
 			pvcID = fmt.Sprintf("%s/%s", pod.Namespace, volume.PersistentVolumeClaim.ClaimName)
-			storageClassName = pvc.Spec.StorageClassName
-			if storageClassName == nil || *storageClassName == "" {
-				storageClassName = defaultStorageClassName
-			}
+			storageClassName = lo.FromPtr(pvc.Spec.StorageClassName)
 			volumeName = pvc.Spec.VolumeName
 		} else if volume.Ephemeral != nil {
 			// generated name per https://kubernetes.io/docs/concepts/storage/ephemeral-volumes/#persistentvolumeclaim-naming
 			pvcID = fmt.Sprintf("%s/%s-%s", pod.Namespace, pod.Name, volume.Name)
-			storageClassName = volume.Ephemeral.VolumeClaimTemplate.Spec.StorageClassName
-			if storageClassName == nil || *storageClassName == "" {
-				storageClassName = defaultStorageClassName
-			}
+			storageClassName = lo.FromPtr(volume.Ephemeral.VolumeClaimTemplate.Spec.StorageClassName)
 			volumeName = volume.Ephemeral.VolumeClaimTemplate.Spec.VolumeName
 		} else {
 			continue
+		}
+		if storageClassName == "" {
+			storageClassName = defaultStorageClassName
 		}
 		driverName, err := v.resolveDriver(ctx, kubeClient, volumeName, storageClassName)
 		if err != nil {
@@ -214,21 +206,21 @@ func (v *VolumeUsage) validate(ctx context.Context, kubeClient client.Client, po
 	return podPVCs, nil
 }
 
-func (v *VolumeUsage) discoverDefaultStorageClassName(ctx context.Context, kubeClient client.Client) (*string, error) {
+func (v *VolumeUsage) discoverDefaultStorageClassName(ctx context.Context, kubeClient client.Client) (string, error) {
 	if name, ok := defaultStorageClass.Get(); ok {
-		return &name, nil
+		return name, nil
 	}
 
 	storageClassList := &storagev1.StorageClassList{}
 	if err := kubeClient.List(ctx, storageClassList); err != nil {
-		return nil, err
+		return "", err
 	}
 	// Find all StorageClasses that have the default annotation
 	defaults := lo.Filter(storageClassList.Items, func(sc storagev1.StorageClass, _ int) bool {
 		return sc.Annotations[IsDefaultStorageClassAnnotation] == "true"
 	})
 	if len(defaults) == 0 {
-		return nil, nil
+		return "", nil
 	}
 	// Sort the default StorageClasses by timestamp and take the newest one
 	// https://github.com/kubernetes/kubernetes/pull/110559
@@ -236,13 +228,13 @@ func (v *VolumeUsage) discoverDefaultStorageClassName(ctx context.Context, kubeC
 		return defaults[i].CreationTimestamp.After(defaults[j].CreationTimestamp.Time)
 	})
 	defaultStorageClass.Set(defaults[0].Name)
-	return lo.ToPtr(defaults[0].Name), nil
+	return defaults[0].Name, nil
 }
 
 // resolveDriver resolves the storage driver name in the following order:
 //  1. If the PV associated with the pod volume is using CSI.driver in its spec, then use that name
 //  2. If the StorageClass associated with the PV has a Provisioner
-func (v *VolumeUsage) resolveDriver(ctx context.Context, kubeClient client.Client, volumeName string, storageClassName *string) (string, error) {
+func (v *VolumeUsage) resolveDriver(ctx context.Context, kubeClient client.Client, volumeName string, storageClassName string) (string, error) {
 	// We can track the volume usage by the CSI Driver name which is pulled from the storage class for dynamic
 	// volumes, or if it's bound/static we can pull the volume name
 	if volumeName != "" {
@@ -254,8 +246,8 @@ func (v *VolumeUsage) resolveDriver(ctx context.Context, kubeClient client.Clien
 			return driverName, nil
 		}
 	}
-	if storageClassName != nil && *storageClassName != "" {
-		driverName, err := v.driverFromSC(ctx, kubeClient, *storageClassName)
+	if storageClassName != "" {
+		driverName, err := v.driverFromSC(ctx, kubeClient, storageClassName)
 		if err != nil {
 			return "", err
 		}
@@ -276,9 +268,7 @@ func (v *VolumeUsage) driverFromSC(ctx context.Context, kubeClient client.Client
 	}
 	// Check if the provisioner name is an in-tree plugin name
 	if csiName, err := translator.GetCSINameFromInTreeName(sc.Provisioner); err == nil {
-		if changeMonitor.HasChanged(fmt.Sprintf("sc/%s", storageClassName), nil) {
-			logging.FromContext(ctx).With("storage-class", sc.Name, "provisioner", sc.Provisioner).Errorf("StorageClass .spec.provisioner uses an in-tree storage plugin which is unsupported by Karpenter and is deprecated by Kubernetes. Scale-ups may fail because Karpenter will not discover driver limits. Create a new StorageClass with a .spec.provisioner referencing the CSI driver plugin name '%s'.", csiName)
-		}
+		return csiName, nil
 	}
 	return sc.Provisioner, nil
 }
@@ -292,9 +282,7 @@ func (v *VolumeUsage) driverFromVolume(ctx context.Context, kubeClient client.Cl
 	if pv.Spec.CSI != nil {
 		return pv.Spec.CSI.Driver, nil
 	} else if pv.Spec.AWSElasticBlockStore != nil {
-		if changeMonitor.HasChanged(fmt.Sprintf("pv/%s", pv.Name), nil) {
-			logging.FromContext(ctx).With("persistent-volume", pv.Name).Errorf("PersistentVolume source 'AWSElasticBlockStore' uses an in-tree storage plugin which is unsupported by Karpenter and is deprecated by Kubernetes. Scale-ups may fail because Karpenter will not discover driver limits. Use a PersistentVolume that references the 'CSI' volume source for Karpenter auto-scaling support.")
-		}
+		return plugins.AWSEBSDriverName, nil
 	}
 	return "", nil
 }
