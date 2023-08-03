@@ -272,7 +272,7 @@ func (s *Scheduler) calculateExistingMachines(stateNodes []*state.StateNode, dae
 			if err := scheduling.Taints(node.Taints()).Tolerates(p); err != nil {
 				continue
 			}
-			if err := scheduling.NewLabelRequirements(node.Labels()).Compatible(scheduling.NewPodRequirements(p)); err != nil {
+			if err := scheduling.NewLabelRequirements(node.Labels()).StrictlyCompatible(scheduling.NewPodRequirements(p)); err != nil {
 				continue
 			}
 			daemons = append(daemons, p)
