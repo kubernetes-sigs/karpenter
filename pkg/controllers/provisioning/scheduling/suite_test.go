@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 	cloudproviderapi "k8s.io/cloud-provider/api"
+	"k8s.io/csi-translation-lib/plugins"
 	clock "k8s.io/utils/clock/testing"
 	"knative.dev/pkg/ptr"
 
@@ -2588,8 +2589,7 @@ var _ = Describe("No Pre-Binding", func() {
 })
 
 var _ = Describe("VolumeUsage", func() {
-	It("should launch multiple newNodes if required due to volume limits", func() {
-		const csiProvider = "fake.csi.provider"
+	BeforeEach(func() {
 		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 			fake.NewInstanceType(
 				fake.InstanceTypeOptions{
@@ -2600,8 +2600,9 @@ var _ = Describe("VolumeUsage", func() {
 					},
 				}),
 		}
-
 		provisioner.Spec.Limits = nil
+	})
+	It("should launch multiple newNodes if required due to volume limits", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
 		initialPod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
@@ -2653,19 +2654,6 @@ var _ = Describe("VolumeUsage", func() {
 		Expect(nodeList.Items).To(HaveLen(2))
 	})
 	It("should launch a single node if all pods use the same PVC", func() {
-		const csiProvider = "fake.csi.provider"
-		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-			fake.NewInstanceType(
-				fake.InstanceTypeOptions{
-					Name: "instance-type",
-					Resources: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:  resource.MustParse("1024"),
-						v1.ResourcePods: resource.MustParse("1024"),
-					},
-				}),
-		}
-
-		provisioner.Spec.Limits = nil
 		ExpectApplied(ctx, env.Client, provisioner)
 		initialPod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
@@ -2709,7 +2697,7 @@ var _ = Describe("VolumeUsage", func() {
 		var pods []*v1.Pod
 		for i := 0; i < 100; i++ {
 			pods = append(pods, test.UnschedulablePod(test.PodOptions{
-				PersistentVolumeClaims: []string{pvc.Name, pvc.Name},
+				PersistentVolumeClaims: []string{pvc.Name},
 			}))
 		}
 		ExpectApplied(ctx, env.Client, provisioner)
@@ -2719,87 +2707,7 @@ var _ = Describe("VolumeUsage", func() {
 		// 100 of the same PVC should all be schedulable on the same node
 		Expect(nodeList.Items).To(HaveLen(1))
 	})
-	It("should not fail for non-dynamic PVCs", func() {
-		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-			fake.NewInstanceType(
-				fake.InstanceTypeOptions{
-					Name: "instance-type",
-					Resources: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:  resource.MustParse("1024"),
-						v1.ResourcePods: resource.MustParse("1024"),
-					},
-				}),
-		}
-
-		provisioner.Spec.Limits = nil
-		ExpectApplied(ctx, env.Client, provisioner)
-		initialPod := test.UnschedulablePod()
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
-		node := ExpectScheduled(ctx, env.Client, initialPod)
-		csiNode := &storagev1.CSINode{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: node.Name,
-			},
-			Spec: storagev1.CSINodeSpec{
-				Drivers: []storagev1.CSINodeDriver{
-					{
-						Name:   csiProvider,
-						NodeID: "fake-node-id",
-						Allocatable: &storagev1.VolumeNodeResources{
-							Count: ptr.Int32(10),
-						},
-					},
-				},
-			},
-		}
-		ExpectApplied(ctx, env.Client, csiNode)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-
-		sc := test.StorageClass(test.StorageClassOptions{
-			ObjectMeta:  metav1.ObjectMeta{Name: "my-storage-class"},
-			Provisioner: ptr.String(csiProvider),
-			Zones:       []string{"test-zone-1"}})
-		ExpectApplied(ctx, env.Client, sc)
-
-		pv := test.PersistentVolume(test.PersistentVolumeOptions{
-			ObjectMeta: metav1.ObjectMeta{Name: "my-volume"},
-			Driver:     csiProvider,
-			Zones:      []string{"test-zone-1"}})
-
-		pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-			ObjectMeta:       metav1.ObjectMeta{Name: "my-claim"},
-			VolumeName:       pv.Name,
-			StorageClassName: ptr.String(""),
-		})
-		ExpectApplied(ctx, env.Client, pv, pvc)
-
-		var pods []*v1.Pod
-		for i := 0; i < 5; i++ {
-			pods = append(pods, test.UnschedulablePod(test.PodOptions{
-				PersistentVolumeClaims: []string{pvc.Name, pvc.Name},
-			}))
-		}
-		ExpectApplied(ctx, env.Client, provisioner)
-		_ = ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
-
-		var nodeList v1.NodeList
-		Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
-		// 5 of the same PVC should all be schedulable on the same node
-		Expect(nodeList.Items).To(HaveLen(1))
-	})
 	It("should not fail for NFS volumes", func() {
-		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-			fake.NewInstanceType(
-				fake.InstanceTypeOptions{
-					Name: "instance-type",
-					Resources: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:  resource.MustParse("1024"),
-						v1.ResourcePods: resource.MustParse("1024"),
-					},
-				}),
-		}
-
-		provisioner.Spec.Limits = nil
 		ExpectApplied(ctx, env.Client, provisioner)
 		initialPod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
@@ -2929,7 +2837,7 @@ var _ = Describe("VolumeUsage", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, sc, provisioner, pod)
+		ExpectApplied(ctx, env.Client, provisioner, pod)
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		node2 := ExpectScheduled(ctx, env.Client, pod)
 		Expect(node.Name).ToNot(Equal(node2.Name))
@@ -3010,12 +2918,16 @@ var _ = Describe("VolumeUsage", func() {
 				},
 			},
 		})
+
 		ExpectApplied(ctx, env.Client, sc, provisioner, pod)
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		node2 := ExpectScheduled(ctx, env.Client, pod)
 		Expect(node.Name).ToNot(Equal(node2.Name))
 	})
 	It("should launch nodes for pods with ephemeral volume using the newest storage class", func() {
+		if env.Version.Minor() < 26 {
+			Skip("Multiple default storage classes is only available in K8s >= 1.26.x")
+		}
 		// Launch an initial pod onto a node and register the CSI Node with a volume count limit of 1
 		sc := test.StorageClass(test.StorageClassOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -3147,6 +3059,151 @@ var _ = Describe("VolumeUsage", func() {
 		Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 		// no nodes should be created as the storage class doesn't eixst
 		Expect(nodeList.Items).To(HaveLen(0))
+	})
+	Context("CSIMigration", func() {
+		It("should launch nodes for pods with non-dynamic PVC using a migrated PVC/PV", func() {
+			// We should assume that this PVC/PV is using CSI driver implicitly to limit pod scheduling
+			// Launch an initial pod onto a node and register the CSI Node with a volume count limit of 1
+			sc := test.StorageClass(test.StorageClassOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "in-tree-storage-class",
+					Annotations: map[string]string{
+						pscheduling.IsDefaultStorageClassAnnotation: "true",
+					},
+				},
+				Provisioner: ptr.String(plugins.AWSEBSInTreePluginName),
+				Zones:       []string{"test-zone-1"}})
+			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				StorageClassName: ptr.String(sc.Name),
+			})
+			ExpectApplied(ctx, env.Client, provisioner, sc, pvc)
+			initialPod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{pvc.Name},
+			})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
+			node := ExpectScheduled(ctx, env.Client, initialPod)
+			csiNode := &storagev1.CSINode{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: node.Name,
+				},
+				Spec: storagev1.CSINodeSpec{
+					Drivers: []storagev1.CSINodeDriver{
+						{
+							Name:   plugins.AWSEBSDriverName,
+							NodeID: "fake-node-id",
+							Allocatable: &storagev1.VolumeNodeResources{
+								Count: ptr.Int32(1),
+							},
+						},
+					},
+				},
+			}
+			pv := test.PersistentVolume(test.PersistentVolumeOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "my-volume",
+				},
+				Zones:              []string{"test-zone-1"},
+				UseAWSInTreeDriver: true,
+			})
+			ExpectApplied(ctx, env.Client, csiNode, pvc, pv)
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+			pvc2 := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				StorageClassName: ptr.String(sc.Name),
+			})
+			pod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{pvc2.Name},
+			})
+			ExpectApplied(ctx, env.Client, pvc2, pod)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node2 := ExpectScheduled(ctx, env.Client, pod)
+			Expect(node.Name).ToNot(Equal(node2.Name))
+		})
+		It("should launch nodes for pods with ephemeral volume using a migrated PVC/PV", func() {
+			// We should assume that this PVC/PV is using CSI driver implicitly to limit pod scheduling
+			// Launch an initial pod onto a node and register the CSI Node with a volume count limit of 1
+			sc := test.StorageClass(test.StorageClassOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "in-tree-storage-class",
+					Annotations: map[string]string{
+						pscheduling.IsDefaultStorageClassAnnotation: "true",
+					},
+				},
+				Provisioner: ptr.String(plugins.AWSEBSInTreePluginName),
+				Zones:       []string{"test-zone-1"}})
+
+			initialPod := test.UnschedulablePod(test.PodOptions{})
+			// Pod has an ephemeral volume claim that references the in-tree storage provider
+			initialPod.Spec.Volumes = append(initialPod.Spec.Volumes, v1.Volume{
+				Name: "tmp-ephemeral",
+				VolumeSource: v1.VolumeSource{
+					Ephemeral: &v1.EphemeralVolumeSource{
+						VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
+							Spec: v1.PersistentVolumeClaimSpec{
+								AccessModes: []v1.PersistentVolumeAccessMode{
+									v1.ReadWriteOnce,
+								},
+								Resources: v1.ResourceRequirements{
+									Requests: v1.ResourceList{
+										v1.ResourceStorage: resource.MustParse("1Gi"),
+									},
+								},
+								StorageClassName: ptr.String(sc.Name),
+							},
+						},
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, provisioner, sc, initialPod)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
+			node := ExpectScheduled(ctx, env.Client, initialPod)
+			csiNode := &storagev1.CSINode{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: node.Name,
+				},
+				Spec: storagev1.CSINodeSpec{
+					Drivers: []storagev1.CSINodeDriver{
+						{
+							Name:   plugins.AWSEBSDriverName,
+							NodeID: "fake-node-id",
+							Allocatable: &storagev1.VolumeNodeResources{
+								Count: ptr.Int32(1),
+							},
+						},
+					},
+				},
+			}
+			ExpectApplied(ctx, env.Client, csiNode)
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+			pod := test.UnschedulablePod(test.PodOptions{})
+			// Pod has an ephemeral volume claim that reference the in-tree storage provider
+			pod.Spec.Volumes = append(pod.Spec.Volumes, v1.Volume{
+				Name: "tmp-ephemeral",
+				VolumeSource: v1.VolumeSource{
+					Ephemeral: &v1.EphemeralVolumeSource{
+						VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
+							Spec: v1.PersistentVolumeClaimSpec{
+								AccessModes: []v1.PersistentVolumeAccessMode{
+									v1.ReadWriteOnce,
+								},
+								Resources: v1.ResourceRequirements{
+									Requests: v1.ResourceList{
+										v1.ResourceStorage: resource.MustParse("1Gi"),
+									},
+								},
+								StorageClassName: ptr.String(sc.Name),
+							},
+						},
+					},
+				},
+			})
+			// Pod should not schedule to the first node since we should realize that we have hit our volume limits
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node2 := ExpectScheduled(ctx, env.Client, pod)
+			Expect(node.Name).ToNot(Equal(node2.Name))
+		})
 	})
 })
 
