@@ -228,6 +228,10 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 	defer c.mu.Unlock()
 
 	if node.Spec.ProviderID == "" {
+		// If we know that we own this node, we shouldn't allow the providerID to be empty
+		if node.Labels[v1alpha5.ProvisionerNameLabelKey] != "" {
+			return nil
+		}
 		node.Spec.ProviderID = node.Name
 	}
 	n, err := c.newStateFromNode(ctx, node, c.nodes[node.Spec.ProviderID])

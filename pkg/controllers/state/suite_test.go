@@ -101,6 +101,7 @@ var _ = Describe("Inflight Nodes", func() {
 				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
 				v1.LabelInstanceTypeStable:       instanceType.Name,
 			}},
+			ProviderID: test.RandomProviderID(),
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
@@ -122,6 +123,7 @@ var _ = Describe("Inflight Nodes", func() {
 			Capacity: v1.ResourceList{
 				v1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
 			},
+			ProviderID: test.RandomProviderID(),
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
@@ -756,7 +758,9 @@ var _ = Describe("Node Resource Level", func() {
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
-			}})
+			},
+			ProviderID: test.RandomProviderID(),
+		})
 		ExpectApplied(ctx, env.Client, pod1, pod2)
 		ExpectApplied(ctx, env.Client, node)
 
@@ -787,7 +791,9 @@ var _ = Describe("Node Resource Level", func() {
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
-			}})
+			},
+			ProviderID: test.RandomProviderID(),
+		})
 		ExpectApplied(ctx, env.Client, pod1, pod2)
 		ExpectApplied(ctx, env.Client, node)
 
@@ -825,7 +831,9 @@ var _ = Describe("Node Resource Level", func() {
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
-			}})
+			},
+			ProviderID: test.RandomProviderID(),
+		})
 
 		// simulate a node that already exists in our cluster
 		ExpectApplied(ctx, env.Client, pod1, pod2)
@@ -857,7 +865,9 @@ var _ = Describe("Node Resource Level", func() {
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
-			}})
+			},
+			ProviderID: test.RandomProviderID(),
+		})
 		ExpectApplied(ctx, env.Client, pod1, pod2)
 		ExpectApplied(ctx, env.Client, node)
 
@@ -904,6 +914,7 @@ var _ = Describe("Node Resource Level", func() {
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
 			},
+			ProviderID: test.RandomProviderID(),
 		})
 		ExpectApplied(ctx, env.Client, pod1, pod2)
 		ExpectApplied(ctx, env.Client, node)
@@ -933,7 +944,9 @@ var _ = Describe("Node Resource Level", func() {
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
-			}})
+			},
+			ProviderID: test.RandomProviderID(),
+		})
 		ExpectApplied(ctx, env.Client, pod1)
 		ExpectApplied(ctx, env.Client, node)
 
@@ -973,7 +986,9 @@ var _ = Describe("Node Resource Level", func() {
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
-			}})
+			},
+			ProviderID: test.RandomProviderID(),
+		})
 		ExpectApplied(ctx, env.Client, pod1, node1)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node1))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
@@ -997,7 +1012,9 @@ var _ = Describe("Node Resource Level", func() {
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("8"),
-			}})
+			},
+			ProviderID: test.RandomProviderID(),
+		})
 
 		// and the pod can only bind to node2 due to the resource request
 		pod2 := test.UnschedulablePod(test.PodOptions{
@@ -1047,7 +1064,9 @@ var _ = Describe("Node Resource Level", func() {
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:  resource.MustParse("200"),
 				v1.ResourcePods: resource.MustParse("500"),
-			}})
+			},
+			ProviderID: test.RandomProviderID(),
+		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectResources(v1.ResourceList{
@@ -1136,7 +1155,9 @@ var _ = Describe("Node Resource Level", func() {
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU:    resource.MustParse("4"),
 				v1.ResourceMemory: resource.MustParse("8Gi"),
-			}})
+			},
+			ProviderID: test.RandomProviderID(),
+		})
 		ExpectApplied(ctx, env.Client, pod1, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
@@ -1180,8 +1201,9 @@ var _ = Describe("Node Resource Level", func() {
 			},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
-			}},
-		)
+			},
+			ProviderID: test.RandomProviderID(),
+		})
 		ExpectApplied(ctx, env.Client, node)
 
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
@@ -1262,8 +1284,9 @@ var _ = Describe("Node Resource Level", func() {
 			},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
-			}},
-		)
+			},
+			ProviderID: test.RandomProviderID(),
+		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
@@ -1318,7 +1341,9 @@ var _ = Describe("Pod Anti-Affinity", func() {
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
-			}})
+			},
+			ProviderID: test.RandomProviderID(),
+		})
 
 		ExpectApplied(ctx, env.Client, pod)
 		ExpectApplied(ctx, env.Client, node)
@@ -1360,7 +1385,9 @@ var _ = Describe("Pod Anti-Affinity", func() {
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
-			}})
+			},
+			ProviderID: test.RandomProviderID(),
+		})
 
 		ExpectApplied(ctx, env.Client, pod)
 		ExpectApplied(ctx, env.Client, node)
@@ -1399,7 +1426,9 @@ var _ = Describe("Pod Anti-Affinity", func() {
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
-			}})
+			},
+			ProviderID: test.RandomProviderID(),
+		})
 
 		ExpectApplied(ctx, env.Client, pod)
 		ExpectApplied(ctx, env.Client, node)
@@ -1448,7 +1477,9 @@ var _ = Describe("Pod Anti-Affinity", func() {
 			}},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
-			}})
+			},
+			ProviderID: test.RandomProviderID(),
+		})
 
 		ExpectApplied(ctx, env.Client, pod)
 		ExpectApplied(ctx, env.Client, node)
