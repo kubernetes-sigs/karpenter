@@ -116,8 +116,8 @@ func List(ctx context.Context, c client.Client, opts ...client.ListOption) (*v1b
 	convertedNodePools := lo.Map(provisionerList.Items, func(p v1alpha5.Provisioner, _ int) v1beta1.NodePool {
 		return *New(&p)
 	})
-	nodePoolList := &v1beta1.NodePoolList{}
 	// TODO @joinnis: Add NodePools to this List() function when releasing v1beta1 APIs
+	nodePoolList := &v1beta1.NodePoolList{}
 	nodePoolList.Items = append(nodePoolList.Items, convertedNodePools...)
 	return nodePoolList, nil
 }

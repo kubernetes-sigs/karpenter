@@ -315,8 +315,8 @@ func List(ctx context.Context, c client.Client, opts ...client.ListOption) (*v1b
 	convertedNodeClaims := lo.Map(machineList.Items, func(m v1alpha5.Machine, _ int) v1beta1.NodeClaim {
 		return *New(&m)
 	})
-	nodeClaimList := &v1beta1.NodeClaimList{}
 	// TODO @joinnis: Add NodeClaims to this List() function when releasing v1beta1 APIs
+	nodeClaimList := &v1beta1.NodeClaimList{}
 	nodeClaimList.Items = append(nodeClaimList.Items, convertedNodeClaims...)
 	return nodeClaimList, nil
 }

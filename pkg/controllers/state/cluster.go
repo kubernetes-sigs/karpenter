@@ -83,14 +83,10 @@ func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudPro
 // have the same representation in the cluster state. This is to ensure that our view
 // of the cluster is as close to correct as it can be when we begin to perform operations
 // utilizing the cluster state as our source of truth
+// TODO @joinnis: Add NodeClaims to this Synced() function when releasing v1beta1 APIs
 func (c *Cluster) Synced(ctx context.Context) bool {
 	machineList := &v1alpha5.MachineList{}
 	if err := c.kubeClient.List(ctx, machineList); err != nil {
-		logging.FromContext(ctx).Errorf("checking cluster state sync, %v", err)
-		return false
-	}
-	nodeClaimList := &v1beta1.NodeClaimList{}
-	if err := c.kubeClient.List(ctx, nodeClaimList); err != nil {
 		logging.FromContext(ctx).Errorf("checking cluster state sync, %v", err)
 		return false
 	}
@@ -110,13 +106,6 @@ func (c *Cluster) Synced(ctx context.Context) bool {
 			return false
 		}
 		names.Insert(machine.Name)
-	}
-	for _, nodeClaim := range nodeClaimList.Items {
-		// If the machine hasn't resolved its provider id, then it hasn't resolved its status
-		if nodeClaim.Status.ProviderID == "" {
-			return false
-		}
-		names.Insert(nodeClaim.Name)
 	}
 	for _, node := range nodeList.Items {
 		names.Insert(node.Name)

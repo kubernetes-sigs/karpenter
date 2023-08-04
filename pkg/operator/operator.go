@@ -146,6 +146,7 @@ func NewOperator() (context.Context, *Operator) {
 	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1alpha5.Machine{}, "status.providerID", func(o client.Object) []string {
 		return []string{o.(*v1alpha5.Machine).Status.ProviderID}
 	}), "failed to setup machine provider id indexer")
+	// TODO @joinnis: Add field indexer for NodeClaim .status.providerID
 
 	lo.Must0(mgr.AddReadyzCheck("manager", func(req *http.Request) error {
 		return lo.Ternary(mgr.GetCache().WaitForCacheSync(req.Context()), nil, fmt.Errorf("failed to sync caches"))
