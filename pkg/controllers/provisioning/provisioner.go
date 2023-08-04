@@ -16,6 +16,7 @@ package provisioning
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -162,7 +163,7 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*v1.Pod, error) {
 	var pods []*v1.Pod
 	for i := range podList.Items {
 		po := podList.Items[i]
-		// filter for provisionable pods first so we don't check for validity/PVCs on pods we won't provision anyway
+		// filter for provisionable pods first, so we don't check for validity/PVCs on pods we won't provision anyway
 		// (e.g. those owned by daemonsets)
 		if !pod.IsProvisionable(&po) {
 			continue
@@ -199,6 +200,8 @@ func (p *Provisioner) consolidationWarnings(ctx context.Context, po v1.Pod) {
 	}
 }
 
+var ErrProvisionersNotFound = errors.New("no provisioners found")
+
 //nolint:gocyclo
 func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNodes []*state.StateNode, opts scheduler.SchedulerOptions) (*scheduler.Scheduler, error) {
 	// Build node templates
@@ -209,6 +212,12 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	nodePoolList, err := nodepoolutil.List(ctx, p.kubeClient)
 	if err != nil {
 		return nil, err
+	}
+	nodePoolList.Items = lo.Filter(nodePoolList.Items, func(n v1beta1.NodePool, _ int) bool {
+		return n.DeletionTimestamp.IsZero()
+	})
+	if len(nodePoolList.Items) == 0 {
+		return nil, ErrProvisionersNotFound
 	}
 
 	// nodeTemplates generated from NodePools are ordered by weight
@@ -262,10 +271,6 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 		}
 	}
 
-	if len(nodeClaimTemplates) == 0 {
-		return nil, fmt.Errorf("no provisioners found")
-	}
-
 	// inject topology constraints
 	pods = p.injectTopology(ctx, pods)
 
@@ -313,26 +318,29 @@ func (p *Provisioner) Schedule(ctx context.Context) (*scheduler.Results, error) 
 	if len(pods) == 0 {
 		return &scheduler.Results{}, nil
 	}
-	scheduler, err := p.NewScheduler(ctx, pods, nodes.Active(), scheduler.SchedulerOptions{})
+	s, err := p.NewScheduler(ctx, pods, nodes.Active(), scheduler.SchedulerOptions{})
 	if err != nil {
+		if errors.Is(err, ErrProvisionersNotFound) {
+			logging.FromContext(ctx).Info(ErrProvisionersNotFound)
+			return &scheduler.Results{}, nil
+		}
 		return nil, fmt.Errorf("creating scheduler, %w", err)
 	}
-	return scheduler.Solve(ctx, pods)
+	return s.Solve(ctx, pods)
 }
 
 func (p *Provisioner) Launch(ctx context.Context, n *scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) (nodeclaimutil.Key, error) {
-	if n.FromProvisioner {
+	if n.OwnerKey.IsProvisioner {
 		return p.launchMachine(ctx, n, opts...)
-	} else {
-		return p.launchNodeClaim(ctx, n, opts...)
 	}
+	return p.launchNodeClaim(ctx, n, opts...)
 }
 
 func (p *Provisioner) launchMachine(ctx context.Context, n *scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) (nodeclaimutil.Key, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", n.OwnerName))
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", n.OwnerKey.Name))
 	options := functional.ResolveOptions(opts...)
 	latest := &v1alpha5.Provisioner{}
-	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: n.OwnerName}, latest); err != nil {
+	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: n.OwnerKey.Name}, latest); err != nil {
 		return nodeclaimutil.Key{}, fmt.Errorf("getting current resource usage, %w", err)
 	}
 	if err := latest.Spec.Limits.ExceededBy(latest.Status.Resources); err != nil {
@@ -351,17 +359,17 @@ func (p *Provisioner) launchMachine(ctx context.Context, n *scheduler.NodeClaim,
 	}).Inc()
 	if functional.ResolveOptions(opts...).RecordPodNomination {
 		for _, pod := range n.Pods {
-			p.recorder.Publish(scheduler.NominatePodEvent(pod, nil, machine))
+			p.recorder.Publish(scheduler.NominatePodEvent(pod, nil, nodeclaimutil.New(machine)))
 		}
 	}
 	return nodeclaimutil.Key{Name: machine.Name, IsMachine: true}, nil
 }
 
 func (p *Provisioner) launchNodeClaim(ctx context.Context, n *scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) (nodeclaimutil.Key, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("nodepool", n.OwnerName))
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("nodepool", n.OwnerKey.Name))
 	options := functional.ResolveOptions(opts...)
 	latest := &v1beta1.NodePool{}
-	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: n.OwnerName}, latest); err != nil {
+	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: n.OwnerKey.Name}, latest); err != nil {
 		return nodeclaimutil.Key{}, fmt.Errorf("getting current resource usage, %w", err)
 	}
 	if err := latest.Spec.Limits.ExceededBy(latest.Status.Resources); err != nil {

@@ -244,32 +244,30 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 	// Create new node
 	var errs error
 	for _, nodeClaimTemplate := range s.nodeClaimTemplates {
-		instanceTypes := s.instanceTypes[nodeClaimTemplate.OwnerKey()]
+		instanceTypes := s.instanceTypes[nodeClaimTemplate.OwnerKey]
 		// if limits have been applied to the provisioner, ensure we filter instance types to avoid violating those limits
-		if remaining, ok := s.remainingResources[nodeClaimTemplate.OwnerKey()]; ok {
-			instanceTypes = filterByRemainingResources(s.instanceTypes[nodeClaimTemplate.OwnerKey()], remaining)
+		if remaining, ok := s.remainingResources[nodeClaimTemplate.OwnerKey]; ok {
+			instanceTypes = filterByRemainingResources(s.instanceTypes[nodeClaimTemplate.OwnerKey], remaining)
 			if len(instanceTypes) == 0 {
-				errs = multierr.Append(errs, fmt.Errorf("all available instance types exceed limits for %s: %q", nodeClaimTemplate.OwnerKind(), nodeClaimTemplate.OwnerName))
+				errs = multierr.Append(errs, fmt.Errorf("all available instance types exceed limits for %s: %q", nodeClaimTemplate.OwnerKind(), nodeClaimTemplate.OwnerKey.Name))
 				continue
-			} else if len(s.instanceTypes[nodeClaimTemplate.OwnerKey()]) != len(instanceTypes) && !s.opts.SimulationMode {
-				logging.FromContext(ctx).With(nodeClaimTemplate.OwnerKind(), nodeClaimTemplate.OwnerName).Debugf("%d out of %d instance types were excluded because they would breach limits",
-					len(s.instanceTypes[nodeClaimTemplate.OwnerKey()])-len(instanceTypes), len(s.instanceTypes[nodeClaimTemplate.OwnerKey()]))
+			} else if len(s.instanceTypes[nodeClaimTemplate.OwnerKey]) != len(instanceTypes) && !s.opts.SimulationMode {
+				logging.FromContext(ctx).With(nodeClaimTemplate.OwnerKind(), nodeClaimTemplate.OwnerKey.Name).Debugf("%d out of %d instance types were excluded because they would breach limits",
+					len(s.instanceTypes[nodeClaimTemplate.OwnerKey])-len(instanceTypes), len(s.instanceTypes[nodeClaimTemplate.OwnerKey]))
 			}
 		}
-
-		// TODO @joinnis: Replace instances of provisioner with the new naming convention
 		nodeClaim := NewNodeClaim(nodeClaimTemplate, s.topology, s.daemonOverhead[nodeClaimTemplate], instanceTypes)
 		if err := nodeClaim.Add(pod); err != nil {
 			errs = multierr.Append(errs, fmt.Errorf("incompatible with %s %q, daemonset overhead=%s, %w",
 				nodeClaimTemplate.OwnerKind(),
-				nodeClaimTemplate.OwnerName,
+				nodeClaimTemplate.OwnerKey.Name,
 				resources.String(s.daemonOverhead[nodeClaimTemplate]),
 				err))
 			continue
 		}
 		// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
 		s.newNodeClaims = append(s.newNodeClaims, nodeClaim)
-		s.remainingResources[nodeClaimTemplate.OwnerKey()] = subtractMax(s.remainingResources[nodeClaimTemplate.OwnerKey()], nodeClaim.InstanceTypeOptions)
+		s.remainingResources[nodeClaimTemplate.OwnerKey] = subtractMax(s.remainingResources[nodeClaimTemplate.OwnerKey], nodeClaim.InstanceTypeOptions)
 		return nil
 	}
 	return errs
@@ -278,10 +276,6 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 func (s *Scheduler) calculateExistingNodeClaims(stateNodes []*state.StateNode, daemonSetPods []*v1.Pod) {
 	// create our existing nodes
 	for _, node := range stateNodes {
-		if !node.Managed() {
-			// ignoring this node as it wasn't launched by us
-			continue
-		}
 		// Calculate any daemonsets that should schedule to the inflight node
 		var daemons []*v1.Pod
 		for _, p := range daemonSetPods {

@@ -31,6 +31,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/scheduling"
+	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
 	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
 	provisionerutil "github.com/aws/karpenter-core/pkg/utils/provisioner"
@@ -118,7 +119,7 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	// to schedule since we want to assume that we can delete a node and its pods will immediately
 	// move to an existing node which won't occur if that node isn't ready.
 	for _, n := range results.ExistingNodes {
-		if !n.Initialized() {
+		if !n.Initialized() || nodeutils.GetCondition(n.Node, v1.NodeReady).Status != v1.ConditionTrue {
 			for _, p := range n.Pods {
 				results.PodErrors[p] = fmt.Errorf("would schedule against a non-initialized node %s", n.Name())
 			}
@@ -205,12 +206,12 @@ func buildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 		key := nodepoolutil.Key{Name: np.Name, IsProvisioner: np.IsProvisioner}
 		nodePoolMap[key] = np
 
-		provInstanceTypes, err := cloudProvider.GetInstanceTypes(ctx, provisionerutil.New(np))
+		nodePoolInstanceTypes, err := cloudProvider.GetInstanceTypes(ctx, provisionerutil.New(np))
 		if err != nil {
 			return nil, nil, fmt.Errorf("listing instance types for %s, %w", np.Name, err)
 		}
 		nodePoolToInstanceTypesMap[key] = map[string]*cloudprovider.InstanceType{}
-		for _, it := range provInstanceTypes {
+		for _, it := range nodePoolInstanceTypes {
 			nodePoolToInstanceTypesMap[key][it.Name] = it
 		}
 	}

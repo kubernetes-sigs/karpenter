@@ -111,9 +111,6 @@ func (v *Validation) ShouldDeprovision(_ context.Context, c *Candidate) bool {
 	if c.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey] == "true" {
 		return false
 	}
-	if c.Annotations()[v1beta1.DoNotDisruptAnnotationKey] == "true" {
-		return false
-	}
 	return c.nodePool.Spec.Deprovisioning.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenUnderutilized
 }
 

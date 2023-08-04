@@ -49,7 +49,7 @@ func NewController(kubeClient client.Client, provisioner *Provisioner, recorder 
 }
 
 func (c *Controller) Name() string {
-	return "provisioner.trigger"
+	return "provisioner_trigger"
 }
 
 // Reconcile the resource

@@ -90,17 +90,17 @@ func (c *consolidation) markConsolidated() {
 }
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes
-func (c *consolidation) ShouldDeprovision(_ context.Context, cn *Candidate) bool {
+func (c *consolidation) shouldDeprovision(_ context.Context, cn *Candidate, isEmptyConsolidation bool) bool {
 	if cn.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey] == "true" {
 		c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s annotation exists", v1alpha5.DoNotConsolidateNodeAnnotationKey))...)
 		return false
 	}
-	if cn.Annotations()[v1beta1.DoNotDisruptAnnotationKey] == "true" {
-		c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s annotation exists", v1beta1.DoNotDisruptAnnotationKey))...)
+	if cn.nodePool.Spec.Deprovisioning.ConsolidationPolicy == v1beta1.ConsolidationPolicyNever {
+		c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("nodepool %s has all consolidation disabled by consolidation policy: %s", cn.nodePool.Name, cn.nodePool.Spec.Deprovisioning.ConsolidationPolicy))...)
 		return false
 	}
-	if cn.nodePool.Spec.Deprovisioning.ConsolidationPolicy != v1beta1.ConsolidationPolicyNever {
-		c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("nodePool %s has consolidation disabled", cn.nodePool.Name))...)
+	if !isEmptyConsolidation && cn.nodePool.Spec.Deprovisioning.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenEmpty {
+		c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("nodepool %s has underutilized consolidation disabled by consolidation policy: %s", cn.nodePool.Name, cn.nodePool.Spec.Deprovisioning.ConsolidationPolicy))...)
 		return false
 	}
 	return true

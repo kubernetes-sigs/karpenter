@@ -94,7 +94,7 @@ func byCPUAndMemoryDescending(pods []*v1.Pod) func(i int, j int) bool {
 			return true
 		}
 
-		// If all else is equal, give a consistent ordering. This reduces the number of NominatePodEvent events as we
+		// If all else is equal, give a consistent ordering. This reduces the number of NominatePod events as we
 		// de-duplicate those based on identical content.
 
 		// unfortunately creation timestamp only has a 1-second resolution, so we would still re-order pods created

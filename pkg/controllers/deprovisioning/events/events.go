@@ -37,16 +37,14 @@ func Launching(nodeClaim *v1beta1.NodeClaim, reason string) events.Event {
 			Message:        fmt.Sprintf("Launching Machine: %s", cases.Title(language.Und, cases.NoLower).String(reason)),
 			DedupeValues:   []string{string(machine.UID), reason},
 		}
-	} else {
-		return events.Event{
-			InvolvedObject: nodeClaim,
-			Type:           v1.EventTypeNormal,
-			Reason:         "DeprovisioningLaunching",
-			Message:        fmt.Sprintf("Launching NodeClaim: %s", cases.Title(language.Und, cases.NoLower).String(reason)),
-			DedupeValues:   []string{string(nodeClaim.UID), reason},
-		}
 	}
-
+	return events.Event{
+		InvolvedObject: nodeClaim,
+		Type:           v1.EventTypeNormal,
+		Reason:         "DeprovisioningLaunching",
+		Message:        fmt.Sprintf("Launching NodeClaim: %s", cases.Title(language.Und, cases.NoLower).String(reason)),
+		DedupeValues:   []string{string(nodeClaim.UID), reason},
+	}
 }
 
 func WaitingOnReadiness(nodeClaim *v1beta1.NodeClaim) events.Event {
@@ -59,16 +57,14 @@ func WaitingOnReadiness(nodeClaim *v1beta1.NodeClaim) events.Event {
 			Message:        "Waiting on readiness to continue deprovisioning",
 			DedupeValues:   []string{string(machine.UID)},
 		}
-	} else {
-		return events.Event{
-			InvolvedObject: nodeClaim,
-			Type:           v1.EventTypeNormal,
-			Reason:         "DeprovisioningWaitingReadiness",
-			Message:        "Waiting on readiness to continue deprovisioning",
-			DedupeValues:   []string{string(nodeClaim.UID)},
-		}
 	}
-
+	return events.Event{
+		InvolvedObject: nodeClaim,
+		Type:           v1.EventTypeNormal,
+		Reason:         "DeprovisioningWaitingReadiness",
+		Message:        "Waiting on readiness to continue deprovisioning",
+		DedupeValues:   []string{string(nodeClaim.UID)},
+	}
 }
 
 func WaitingOnDeletion(nodeClaim *v1beta1.NodeClaim) events.Event {
@@ -81,16 +77,14 @@ func WaitingOnDeletion(nodeClaim *v1beta1.NodeClaim) events.Event {
 			Message:        "Waiting on deletion to continue deprovisioning",
 			DedupeValues:   []string{string(machine.UID)},
 		}
-	} else {
-		return events.Event{
-			InvolvedObject: nodeClaim,
-			Type:           v1.EventTypeNormal,
-			Reason:         "DeprovisioningWaitingDeletion",
-			Message:        "Waiting on deletion to continue deprovisioning",
-			DedupeValues:   []string{string(nodeClaim.UID)},
-		}
 	}
-
+	return events.Event{
+		InvolvedObject: nodeClaim,
+		Type:           v1.EventTypeNormal,
+		Reason:         "DeprovisioningWaitingDeletion",
+		Message:        "Waiting on deletion to continue deprovisioning",
+		DedupeValues:   []string{string(nodeClaim.UID)},
+	}
 }
 
 func Terminating(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) []events.Event {

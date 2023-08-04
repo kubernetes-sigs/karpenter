@@ -40,6 +40,10 @@ func NewEmptyMachineConsolidation(clk clock.Clock, cluster *state.Cluster, kubeC
 	return &EmptyMachineConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
 }
 
+func (c *EmptyMachineConsolidation) ShouldDeprovision(ctx context.Context, cn *Candidate) bool {
+	return c.shouldDeprovision(ctx, cn, true)
+}
+
 // ComputeCommand generates a deprovisioning command given deprovisionable machines
 func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	if c.isConsolidated() {
@@ -66,13 +70,10 @@ func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	// empty machine consolidation doesn't use Validation as we get to take advantage of cluster.IsNodeNominated.  This
 	// lets us avoid a scheduling simulation (which is performed periodically while pending pods exist and drives
 	// cluster.IsNodeNominated already).
-	ttl := lo.MaxBy(emptyCandidates, func(a, b *Candidate) bool {
-		return a.nodePool.Spec.Deprovisioning.ConsolidationTTL.Duration > b.nodePool.Spec.Deprovisioning.ConsolidationTTL.Duration
-	}).nodePool.Spec.Deprovisioning.ConsolidationTTL.Duration
 	select {
 	case <-ctx.Done():
 		return Command{}, errors.New("interrupted")
-	case <-c.clock.After(ttl):
+	case <-c.clock.After(consolidationTTL(emptyCandidates)):
 	}
 	validationCandidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, c.ShouldDeprovision)
 	if err != nil {
@@ -84,8 +85,11 @@ func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	// The deletion of empty machines is easy to validate, we just ensure that:
 	// 1. All the candidatesToDelete are still empty
 	// 2. The node isn't a target of a recent scheduling simulation
-	cmd.candidates = lo.Filter(candidatesToDelete, func(n *Candidate, _ int) bool {
-		return len(n.pods) == 0 && !c.cluster.IsNodeNominated(n.Name())
-	})
+	for _, n := range candidatesToDelete {
+		if len(n.pods) != 0 || c.cluster.IsNodeNominated(n.Name()) {
+			logging.FromContext(ctx).Debugf("abandoning empty machine consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+			return Command{}, nil
+		}
+	}
 	return cmd, nil
 }

@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
@@ -31,6 +32,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
+	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 )
 
@@ -74,16 +76,8 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		recorder.Publish(deprovisioningevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Disruption is blocked with the %q annotation", v1beta1.DoNotDisruptAnnotationKey))...)
 		return nil, fmt.Errorf("disruption is blocked thorugh the %q annotation", v1beta1.DoNotDisruptAnnotationKey)
 	}
-
-	var ownerName string
-	var isProvisionerOwner bool
-	if name := node.Labels()[v1alpha5.ProvisionerNameLabelKey]; name != "" {
-		ownerName = name
-		isProvisionerOwner = true
-	} else if name = node.Labels()[v1beta1.NodePoolLabelKey]; name != "" {
-		ownerName = name
-		isProvisionerOwner = false
-	} else {
+	ownerKey := nodeclaimutil.OwnerKey(node)
+	if ownerKey.Name == "" {
 		return nil, fmt.Errorf("state node doesn't have the Karpenter owner label")
 	}
 
@@ -98,12 +92,12 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		}
 	}
 
-	nodePool := nodePoolMap[nodepoolutil.Key{Name: ownerName, IsProvisioner: isProvisionerOwner}]
-	instanceTypeMap := nodePoolToInstanceTypesMap[nodepoolutil.Key{Name: ownerName, IsProvisioner: isProvisionerOwner}]
+	nodePool := nodePoolMap[ownerKey]
+	instanceTypeMap := nodePoolToInstanceTypesMap[ownerKey]
 	// skip any nodes where we can't determine the nodePool
 	if nodePool == nil || instanceTypeMap == nil {
-		recorder.Publish(deprovisioningevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Owning NodePool %q not found", ownerName))...)
-		return nil, fmt.Errorf("NodePool %q can't be resolved for state node", ownerName)
+		recorder.Publish(deprovisioningevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Owning %s %q not found", lo.Ternary(ownerKey.IsProvisioner, "provisioner", "nodepool"), ownerKey.Name))...)
+		return nil, fmt.Errorf("%s %q can't be resolved for state node", lo.Ternary(ownerKey.IsProvisioner, "provisioner", "nodepool"), ownerKey.Name)
 	}
 	instanceType := instanceTypeMap[node.Labels()[v1.LabelInstanceTypeStable]]
 	// skip any nodes that we can't determine the instance of
@@ -139,9 +133,9 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 func (c *Candidate) lifetimeRemaining(clock clock.Clock) float64 {
 	remaining := 1.0
 	if c.nodePool.Spec.Deprovisioning.ExpirationTTL.Duration > 0 {
-		ageSeconds := clock.Since(c.Node.CreationTimestamp.Time).Seconds()
+		ageInSeconds := clock.Since(c.Node.CreationTimestamp.Time).Seconds()
 		totalLifetimeSeconds := c.nodePool.Spec.Deprovisioning.ExpirationTTL.Duration.Seconds()
-		lifetimeRemainingSeconds := totalLifetimeSeconds - ageSeconds
+		lifetimeRemainingSeconds := totalLifetimeSeconds - ageInSeconds
 		remaining = clamp(0.0, lifetimeRemainingSeconds/totalLifetimeSeconds, 1.0)
 	}
 	return remaining
@@ -173,7 +167,7 @@ func (o Command) Action() Action {
 
 func (o Command) String() string {
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "%s, terminating %d nodeclaims/machines ", o.Action(), len(o.candidates))
+	fmt.Fprintf(&buf, "%s, terminating %d machines ", o.Action(), len(o.candidates))
 	for i, old := range o.candidates {
 		if i != 0 {
 			fmt.Fprint(&buf, ", ")

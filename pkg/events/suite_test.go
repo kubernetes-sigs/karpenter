@@ -27,7 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/util/flowcontrol"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	schedulingevents "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/termination/terminator/events"
 	"github.com/aws/karpenter-core/pkg/events"
@@ -81,15 +81,15 @@ var _ = BeforeEach(func() {
 })
 
 var _ = Describe("Event Creation", func() {
-	It("should create a NominatePodEvent event", func() {
-		eventRecorder.Publish(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), MachineWithUID()))
-		Expect(internalRecorder.Calls(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), MachineWithUID()).Reason)).To(Equal(1))
+	It("should create a NominatePod event", func() {
+		eventRecorder.Publish(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), NodeClaimWithUID()))
+		Expect(internalRecorder.Calls(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), NodeClaimWithUID()).Reason)).To(Equal(1))
 	})
 	It("should create a EvictPod event", func() {
 		eventRecorder.Publish(terminatorevents.EvictPod(PodWithUID()))
 		Expect(internalRecorder.Calls(terminatorevents.EvictPod(PodWithUID()).Reason)).To(Equal(1))
 	})
-	It("should create a PodFailedToScheduleEvent event", func() {
+	It("should create a PodFailedToSchedule event", func() {
 		eventRecorder.Publish(schedulingevents.PodFailedToScheduleEvent(PodWithUID(), fmt.Errorf("")))
 		Expect(internalRecorder.Calls(schedulingevents.PodFailedToScheduleEvent(PodWithUID(), fmt.Errorf("")).Reason)).To(Equal(1))
 	})
@@ -134,19 +134,19 @@ var _ = Describe("Dedupe", func() {
 var _ = Describe("Rate Limiting", func() {
 	It("should only create max-burst when many events are created quickly", func() {
 		for i := 0; i < 100; i++ {
-			eventRecorder.Publish(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), MachineWithUID()))
+			eventRecorder.Publish(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), NodeClaimWithUID()))
 		}
-		Expect(internalRecorder.Calls(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), MachineWithUID()).Reason)).To(Equal(10))
+		Expect(internalRecorder.Calls(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), NodeClaimWithUID()).Reason)).To(Equal(10))
 
 	})
 	It("should allow many events over time due to smoothed rate limiting", func() {
 		for i := 0; i < 3; i++ {
 			for j := 0; j < 5; j++ {
-				eventRecorder.Publish(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), MachineWithUID()))
+				eventRecorder.Publish(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), NodeClaimWithUID()))
 			}
 			time.Sleep(time.Second)
 		}
-		Expect(internalRecorder.Calls(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), MachineWithUID()).Reason)).To(Equal(15))
+		Expect(internalRecorder.Calls(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), NodeClaimWithUID()).Reason)).To(Equal(15))
 	})
 })
 
@@ -162,8 +162,8 @@ func NodeWithUID() *v1.Node {
 	return n
 }
 
-func MachineWithUID() *v1alpha5.Machine {
-	m := test.Machine()
-	m.UID = uuid.NewUUID()
-	return m
+func NodeClaimWithUID() *v1beta1.NodeClaim {
+	nc := test.NodeClaim()
+	nc.UID = uuid.NewUUID()
+	return nc
 }

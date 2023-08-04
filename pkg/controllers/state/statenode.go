@@ -167,6 +167,11 @@ func (in *StateNode) Annotations() map[string]string {
 	return in.Node.Annotations
 }
 
+// GetLabels exists to conform to the GetLabels() function on the metav1.Object interface
+func (in *StateNode) GetLabels() map[string]string {
+	return in.Labels()
+}
+
 func (in *StateNode) Labels() map[string]string {
 	// If the machine exists and the state node isn't registered
 	// use the machine representation of the labels
@@ -309,7 +314,11 @@ func (in *StateNode) VolumeUsage() *scheduling.VolumeUsage {
 }
 
 func (in *StateNode) PodRequests() v1.ResourceList {
-	return resources.Merge(lo.Values(in.podRequests)...)
+	var totalRequests v1.ResourceList
+	for _, requests := range in.podRequests {
+		totalRequests = resources.MergeInto(totalRequests, requests)
+	}
+	return totalRequests
 }
 
 func (in *StateNode) PodLimits() v1.ResourceList {

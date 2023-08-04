@@ -19,12 +19,12 @@ import (
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"knative.dev/pkg/ptr"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 )
@@ -35,36 +35,29 @@ import (
 type NodeClaimTemplate struct {
 	v1beta1.NodeClaimTemplate
 
-	OwnerName           string
+	OwnerKey            nodepoolutil.Key
 	InstanceTypeOptions cloudprovider.InstanceTypes
 	Requirements        scheduling.Requirements
-
-	FromProvisioner bool // Whether this NodeClaimTemplate comes from a real NodePool or a converted NodePool
 }
 
 func NewNodeClaimTemplate(nodePool *v1beta1.NodePool) *NodeClaimTemplate {
 	nct := &NodeClaimTemplate{
 		NodeClaimTemplate: nodePool.Spec.Template,
-		OwnerName:         nodePool.Name,
+		OwnerKey:          nodepoolutil.Key{Name: nodePool.Name, IsProvisioner: nodePool.IsProvisioner},
 		Requirements:      scheduling.NewRequirements(),
-		FromProvisioner:   nodePool.IsProvisioner,
 	}
 	if nodePool.IsProvisioner {
 		nct.Labels = lo.Assign(nct.Labels, map[string]string{v1alpha5.ProvisionerNameLabelKey: nodePool.Name})
 	} else {
 		nct.Labels = lo.Assign(nct.Labels, map[string]string{v1beta1.NodePoolLabelKey: nodePool.Name})
 	}
-	nct.Requirements.Add(scheduling.NewNodeSelectorRequirements(nodePool.Spec.Template.Spec.Requirements...).Values()...)
-	nct.Requirements.Add(scheduling.NewLabelRequirements(nodePool.Spec.Template.Labels).Values()...)
+	nct.Requirements.Add(scheduling.NewNodeSelectorRequirements(nct.Spec.Requirements...).Values()...)
+	nct.Requirements.Add(scheduling.NewLabelRequirements(nct.Labels).Values()...)
 	return nct
 }
 
-func (i *NodeClaimTemplate) OwnerKey() nodepoolutil.Key {
-	return nodepoolutil.Key{Name: i.OwnerName, IsProvisioner: i.FromProvisioner}
-}
-
 func (i *NodeClaimTemplate) OwnerKind() string {
-	return lo.Ternary(i.FromProvisioner, "provisioner", "nodepool")
+	return lo.Ternary(i.OwnerKey.IsProvisioner, "provisioner", "nodepool")
 }
 
 func (i *NodeClaimTemplate) ToNodeClaim(nodePool *v1beta1.NodePool) *v1beta1.NodeClaim {
@@ -74,16 +67,25 @@ func (i *NodeClaimTemplate) ToNodeClaim(nodePool *v1beta1.NodePool) *v1beta1.Nod
 		return i.Name
 	})...))
 
-	m := &v1beta1.NodeClaim{
-		ObjectMeta: i.ObjectMeta,
-		Spec:       i.Spec,
+	nc := &v1beta1.NodeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: fmt.Sprintf("%s-", i.OwnerKey.Name),
+			Annotations:  lo.Assign(i.Annotations, map[string]string{v1beta1.NodePoolHashAnnotationKey: nodePool.Hash()}),
+			Labels:       i.Labels,
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion:         v1beta1.SchemeGroupVersion.String(),
+					Kind:               "NodePool",
+					Name:               nodePool.Name,
+					UID:                nodePool.UID,
+					BlockOwnerDeletion: ptr.Bool(true),
+				},
+			},
+		},
+		Spec: i.Spec,
 	}
-	// TODO @joinnis: Figure out how to calculate the NodePool hash
-	// m.Annotations = lo.Assign(m.Annotations, map[string]string{v1alpha5.ProvisionerHashAnnotationKey: provisionerDriftHash})
-	m.ObjectMeta.GenerateName = fmt.Sprintf("%s-", i.OwnerName)
-	m.Spec.Requirements = i.Requirements.NodeSelectorRequirements()
-	lo.Must0(controllerutil.SetOwnerReference(nodePool, m, scheme.Scheme))
-	return m
+	nc.Spec.Requirements = i.Requirements.NodeSelectorRequirements()
+	return nc
 }
 
 func (i *NodeClaimTemplate) ToMachine(provisioner *v1alpha5.Provisioner) *v1alpha5.Machine {
@@ -94,7 +96,20 @@ func (i *NodeClaimTemplate) ToMachine(provisioner *v1alpha5.Provisioner) *v1alph
 	})...))
 
 	m := &v1alpha5.Machine{
-		ObjectMeta: i.ObjectMeta,
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: fmt.Sprintf("%s-", i.OwnerKey.Name),
+			Annotations:  lo.Assign(i.Annotations, map[string]string{v1alpha5.ProvisionerHashAnnotationKey: provisioner.Hash()}, v1alpha5.ProviderAnnotation(i.Spec.Provider)),
+			Labels:       i.Labels,
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion:         v1alpha5.SchemeGroupVersion.String(),
+					Kind:               "Provisioner",
+					Name:               provisioner.Name,
+					UID:                provisioner.UID,
+					BlockOwnerDeletion: ptr.Bool(true),
+				},
+			},
+		},
 		Spec: v1alpha5.MachineSpec{
 			Taints:        i.NodeClaimTemplate.Spec.Taints,
 			StartupTaints: i.NodeClaimTemplate.Spec.StartupTaints,
@@ -128,9 +143,5 @@ func (i *NodeClaimTemplate) ToMachine(provisioner *v1alpha5.Provisioner) *v1alph
 			APIVersion: i.NodeClaimTemplate.Spec.NodeClass.APIVersion,
 		}
 	}
-	// TODO @joinnis: Figure out how to calculate the Provisioner hash
-	// m.Annotations = lo.Assign(m.Annotations, map[string]string{v1alpha5.ProvisionerHashAnnotationKey: provisionerDriftHash})
-	m.ObjectMeta.GenerateName = fmt.Sprintf("%s-", i.OwnerName)
-	lo.Must0(controllerutil.SetOwnerReference(provisioner, m, scheme.Scheme))
 	return m
 }

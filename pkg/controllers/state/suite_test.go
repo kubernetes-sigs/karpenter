@@ -406,7 +406,7 @@ var _ = Describe("Inflight Nodes", func() {
 		machine := test.Machine(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Annotations: map[string]string{
-					v1alpha5.DoNotDisruptAnnotationKey: "true",
+					v1alpha5.DoNotConsolidateNodeAnnotationKey: "true",
 				},
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: "default",
@@ -462,7 +462,7 @@ var _ = Describe("Inflight Nodes", func() {
 		Expect(stateNode.Labels()).To(HaveKeyWithValue(v1.LabelTopologyRegion, "test-region"))
 		Expect(stateNode.Labels()).To(HaveKeyWithValue(v1.LabelHostname, "custom-host-name"))
 		Expect(stateNode.HostName()).To(Equal("custom-host-name"))
-		Expect(stateNode.Annotations()).To(HaveKeyWithValue(v1alpha5.DoNotDisruptAnnotationKey, "true"))
+		Expect(stateNode.Annotations()).To(HaveKeyWithValue(v1alpha5.DoNotConsolidateNodeAnnotationKey, "true"))
 		Expect(stateNode.Initialized()).To(BeFalse())
 		Expect(stateNode.Managed()).To(BeTrue())
 	})
@@ -904,7 +904,7 @@ var _ = Describe("Inflight Nodes", func() {
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectStateNodeCount("==", 1)
 
-		// NodeClaim isn't initialized yet so the resources should remain as the in-flight resources
+		// Machine isn't initialized yet so the resources should remain as the in-flight resources
 		ExpectResources(v1.ResourceList{
 			v1.ResourceCPU:              resource.MustParse("1800m"),
 			v1.ResourceMemory:           resource.MustParse("32Gi"),

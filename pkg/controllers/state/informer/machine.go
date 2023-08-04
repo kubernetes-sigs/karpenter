@@ -46,7 +46,7 @@ func NewMachineController(kubeClient client.Client, cluster *state.Cluster) core
 }
 
 func (c *MachineController) Name() string {
-	return "state.machine"
+	return "machine-state"
 }
 
 func (c *MachineController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {

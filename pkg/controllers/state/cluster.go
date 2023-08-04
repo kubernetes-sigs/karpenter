@@ -39,7 +39,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
+	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
 	provisionerutil "github.com/aws/karpenter-core/pkg/utils/provisioner"
 	"github.com/aws/karpenter-core/pkg/utils/sets"
@@ -233,7 +233,7 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 
 	if node.Spec.ProviderID == "" {
 		// If we know that we own this node, we shouldn't allow the providerID to be empty
-		if node.Labels[v1alpha5.ProvisionerNameLabelKey] != "" {
+		if node.Labels[v1alpha5.ProvisionerNameLabelKey] != "" || node.Labels[v1beta1.NodePoolLabelKey] != "" {
 			return nil
 		}
 		node.Spec.ProviderID = node.Name
@@ -448,35 +448,26 @@ func (c *Cluster) cleanupNode(name string) {
 }
 
 func (c *Cluster) populateStartupTaints(ctx context.Context, n *StateNode) error {
-	if !n.Managed() {
+	if nodeclaimutil.OwnerKey(n).Name == "" {
 		return nil
 	}
-	provisioner := &v1alpha5.Provisioner{}
-	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Labels()[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
-		return client.IgnoreNotFound(fmt.Errorf("getting provisioner, %w", err))
+	owner, err := nodeclaimutil.Owner(ctx, c.kubeClient, n)
+	if err != nil {
+		return client.IgnoreNotFound(err)
 	}
-	n.startupTaints = provisioner.Spec.StartupTaints
+	n.startupTaints = owner.Spec.Template.Spec.StartupTaints
 	return nil
 }
 
 func (c *Cluster) populateInflight(ctx context.Context, n *StateNode) error {
-	if !n.Managed() {
+	if nodeclaimutil.OwnerKey(n).Name == "" {
 		return nil
 	}
-	nodePool := &v1beta1.NodePool{}
-	if name := n.Labels()[v1alpha5.ProvisionerNameLabelKey]; name != "" {
-		provisioner := &v1alpha5.Provisioner{}
-		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: name}, provisioner); err != nil {
-			return client.IgnoreNotFound(fmt.Errorf("getting provisioner, %w", err))
-		}
-		nodePool = nodepoolutil.New(provisioner)
+	owner, err := nodeclaimutil.Owner(ctx, c.kubeClient, n)
+	if err != nil {
+		return client.IgnoreNotFound(err)
 	}
-	if name := n.Labels()[v1beta1.NodePoolLabelKey]; name != "" {
-		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: name}, nodePool); err != nil {
-			return client.IgnoreNotFound(fmt.Errorf("getting nodePool, %w", err))
-		}
-	}
-	instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, provisionerutil.New(nodePool))
+	instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, provisionerutil.New(owner))
 	if err != nil {
 		return err
 	}
@@ -535,7 +526,7 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 	n, ok := c.nodes[c.nameToProviderID[pod.Spec.NodeName]]
 	if !ok {
 		// the node must exist for us to update the resource requests on the node
-		return errors.NewNotFound(schema.GroupResource{Resource: "NodeClaim"}, pod.Spec.NodeName)
+		return errors.NewNotFound(schema.GroupResource{Resource: "Node"}, pod.Spec.NodeName)
 	}
 	if err := n.updateForPod(ctx, c.kubeClient, pod); err != nil {
 		return err

@@ -279,13 +279,13 @@ func (c *Controller) waitForReadiness(ctx context.Context, key nodeclaimutil.Key
 // it's actually deleted.
 func (c *Controller) waitForDeletion(ctx context.Context, nodeClaim *v1beta1.NodeClaim) {
 	if err := retry.Do(func() error {
-		nodeClaim, nerr := nodeclaimutil.Get(ctx, c.kubeClient, nodeclaimutil.Key{Name: nodeClaim.Name, IsMachine: nodeClaim.IsMachine})
+		nc, nerr := nodeclaimutil.Get(ctx, c.kubeClient, nodeclaimutil.Key{Name: nodeClaim.Name, IsMachine: nodeClaim.IsMachine})
 		// We expect the not machine found error, at which point we know the machine is deleted.
 		if errors.IsNotFound(nerr) {
 			return nil
 		}
 		// make the user aware of why deprovisioning is paused
-		c.recorder.Publish(deprovisioningevents.WaitingOnDeletion(nodeClaim))
+		c.recorder.Publish(deprovisioningevents.WaitingOnDeletion(nc))
 		if nerr != nil {
 			return fmt.Errorf("expected machine to be not found, %w", nerr)
 		}

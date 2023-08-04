@@ -23,7 +23,6 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -43,8 +42,7 @@ func NewSingleMachineConsolidation(clk clock.Clock, cluster *state.Cluster, kube
 }
 
 func (s *SingleMachineConsolidation) ShouldDeprovision(ctx context.Context, cn *Candidate) bool {
-	return s.consolidation.ShouldDeprovision(ctx, cn) &&
-		cn.nodePool.Spec.Deprovisioning.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenUnderutilized
+	return s.consolidation.shouldDeprovision(ctx, cn, false)
 }
 
 // ComputeCommand generates a deprovisioning command given deprovisionable machines
@@ -81,11 +79,11 @@ func (s *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 		v := NewValidation(consolidationTTL(cmd.candidates), s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder)
 		isValid, err := v.IsValid(ctx, cmd)
 		if err != nil {
-			logging.FromContext(ctx).Errorf("validating consolidation %s", err)
-			continue
+			return Command{}, fmt.Errorf("validating consolidation, %w", err)
 		}
 		if !isValid {
-			return Command{}, fmt.Errorf("command is no longer valid, %s", cmd)
+			logging.FromContext(ctx).Debugf("abandoning single machine consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+			return Command{}, nil
 		}
 		return cmd, nil
 	}

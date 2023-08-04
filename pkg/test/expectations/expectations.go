@@ -302,8 +302,10 @@ func ExpectProvisionedNoBindingWithOffset(offset int, ctx context.Context, c cli
 	for _, node := range results.ExistingNodes {
 		for _, pod := range node.Pods {
 			bindings[pod] = &Binding{
-				Node:    node.Node,
-				Machine: machineutil.NewFromNodeClaim(node.NodeClaim),
+				Node: node.Node,
+			}
+			if node.NodeClaim != nil {
+				bindings[pod].Machine = machineutil.NewFromNodeClaim(node.NodeClaim)
 			}
 		}
 	}

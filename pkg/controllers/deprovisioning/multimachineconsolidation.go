@@ -27,7 +27,6 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
@@ -47,8 +46,7 @@ func NewMultiMachineConsolidation(clk clock.Clock, cluster *state.Cluster, kubeC
 }
 
 func (m *MultiMachineConsolidation) ShouldDeprovision(ctx context.Context, cn *Candidate) bool {
-	return m.consolidation.ShouldDeprovision(ctx, cn) &&
-		cn.nodePool.Spec.Deprovisioning.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenUnderutilized
+	return m.shouldDeprovision(ctx, cn, false)
 }
 
 func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
@@ -83,7 +81,7 @@ func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	}
 
 	if !isValid {
-		logging.FromContext(ctx).Debugf("consolidation command is no longer valid, %s", cmd)
+		logging.FromContext(ctx).Debugf("abandoning multi machine consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
 		return Command{}, nil
 	}
 	return cmd, nil

@@ -554,8 +554,9 @@ var _ = Describe("NodeClaimUtils", func() {
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
-		name := nodeclaimutil.OwnerName(nodeClaim)
-		Expect(name).To(Equal(nodePool.Name))
+		ownerKey := nodeclaimutil.OwnerKey(nodeClaim)
+		Expect(ownerKey.Name).To(Equal(nodePool.Name))
+		Expect(ownerKey.IsProvisioner).To(BeFalse())
 
 		owner, err := nodeclaimutil.Owner(ctx, env.Client, nodeClaim)
 		Expect(err).ToNot(HaveOccurred())
@@ -572,8 +573,9 @@ var _ = Describe("NodeClaimUtils", func() {
 		})
 		ExpectApplied(ctx, env.Client, provisioner, machine)
 
-		name := nodeclaimutil.OwnerName(machine)
-		Expect(name).To(Equal(provisioner.Name))
+		ownerKey := nodeclaimutil.OwnerKey(machine)
+		Expect(ownerKey.Name).To(Equal(provisioner.Name))
+		Expect(ownerKey.IsProvisioner).To(BeTrue())
 
 		owner, err := nodeclaimutil.Owner(ctx, env.Client, machine)
 		Expect(err).ToNot(HaveOccurred())

@@ -176,7 +176,7 @@ var _ = Describe("Provisioning", func() {
 		}
 	})
 	It("should provision multiple nodes when maxPods is set", func() {
-		// KubeletConfiguration configuration is actually not observed here, the scheduler is relying on the
+		// KubeletConfiguration is actually not observed here, the scheduler is relying on the
 		// pods resource value which is statically set in the fake cloudprovider
 		ExpectApplied(ctx, env.Client, test.Provisioner(test.ProvisionerOptions{
 			Kubelet: &v1alpha5.KubeletConfiguration{MaxPods: ptr.Int32(1)},
@@ -591,13 +591,13 @@ var _ = Describe("Provisioning", func() {
 	Context("Annotations", func() {
 		It("should annotate nodes", func() {
 			provisioner := test.Provisioner(test.ProvisionerOptions{
-				Annotations: map[string]string{v1alpha5.DoNotDisruptAnnotationKey: "true"},
+				Annotations: map[string]string{v1alpha5.DoNotConsolidateNodeAnnotationKey: "true"},
 			})
 			ExpectApplied(ctx, env.Client, provisioner)
 			pod := test.UnschedulablePod()
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
-			Expect(node.Annotations).To(HaveKeyWithValue(v1alpha5.DoNotDisruptAnnotationKey, "true"))
+			Expect(node.Annotations).To(HaveKeyWithValue(v1alpha5.DoNotConsolidateNodeAnnotationKey, "true"))
 		})
 	})
 	Context("Labels", func() {
@@ -684,7 +684,7 @@ var _ = Describe("Provisioning", func() {
 			}
 		})
 	})
-	Context("NodeClaim Creation", func() {
+	Context("Machine Creation", func() {
 		It("should create a machine request with expected requirements", func() {
 			provisioner := test.Provisioner()
 			ExpectApplied(ctx, env.Client, provisioner)
