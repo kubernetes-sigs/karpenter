@@ -27,6 +27,7 @@ const (
 	ProvisionerLabel = "provisioner"
 	NodePoolLabel    = "nodepool"
 	ReasonLabel      = "reason"
+	TypeLabel        = "type"
 
 	// Reasons for CREATE/DELETE shared metrics
 	ConsolidationReason = "consolidation"

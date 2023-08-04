@@ -26,10 +26,18 @@ import (
 
 	"github.com/samber/lo"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
+)
+
+const (
+	ProvisionerStaticallyDrifted cloudprovider.DriftReason = "ProvisionerStaticallyDrifted"
+	NodeRequirementDrifted       cloudprovider.DriftReason = "NodeRequirementDrifted"
 )
 
 // Drift is a machine sub-controller that adds or removes status conditions on drifted machines
@@ -78,6 +86,14 @@ func (d *Drift) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner
 	})
 	if !hasDriftedCondition {
 		logging.FromContext(ctx).Debugf("marking machine as drifted")
+		metrics.MachinesDisruptedCounter.With(prometheus.Labels{
+			metrics.TypeLabel:        metrics.DriftReason,
+			metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
+		}).Inc()
+		metrics.MachinesDriftedCounter.With(prometheus.Labels{
+			metrics.TypeLabel:        string(driftedReason),
+			metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
+		}).Inc()
 	}
 	// Requeue after 5 minutes for the cache TTL
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
@@ -107,7 +123,7 @@ func areStaticFieldsDrifted(provisioner *v1alpha5.Provisioner, machine *v1alpha5
 		return ""
 	}
 	if provisionerHash != machineHash {
-		return ProvisionerStaticDrift
+		return ProvisionerStaticallyDrifted
 	}
 
 	return ""
@@ -119,7 +135,7 @@ func areNodeRequirementsDrifted(provisioner *v1alpha5.Provisioner, machine *v1al
 
 	// Every provisioner requirement is compatible with the Machine label set
 	if machineReq.StrictlyCompatible(provisionerReq) != nil {
-		return NodeRequirementDrift
+		return NodeRequirementDrifted
 	}
 
 	return ""
