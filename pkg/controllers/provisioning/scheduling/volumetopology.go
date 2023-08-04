@@ -24,6 +24,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/aws/karpenter-core/pkg/scheduling"
 )
 
 func NewVolumeTopology(kubeClient client.Client) *VolumeTopology {
@@ -69,26 +71,30 @@ func (v *VolumeTopology) Inject(ctx context.Context, pod *v1.Pod) error {
 }
 
 func (v *VolumeTopology) getRequirements(ctx context.Context, pod *v1.Pod, volume v1.Volume) ([]v1.NodeSelectorRequirement, error) {
-	// Get VolumeName and StorageClass name from volume
+	defaultStorageClassName, err := scheduling.DiscoverDefaultStorageClassName(ctx, v.kubeClient)
+	if err != nil {
+		return nil, fmt.Errorf("discovering default storage class, %w", err)
+	}
+
+	// Get VolumeName and StorageClass name from PVC
 	pvc := &v1.PersistentVolumeClaim{}
 	switch {
 	case volume.PersistentVolumeClaim != nil:
-		if err := v.kubeClient.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: volume.PersistentVolumeClaim.ClaimName}, pvc); err != nil {
+		if err = v.kubeClient.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: volume.PersistentVolumeClaim.ClaimName}, pvc); err != nil {
 			return nil, fmt.Errorf("discovering persistent volume claim, %w", err)
 		}
 	case volume.Ephemeral != nil:
 		// generated name per https://kubernetes.io/docs/concepts/storage/ephemeral-volumes/#persistentvolumeclaim-naming
-		if err := v.kubeClient.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: fmt.Sprintf("%s-%s", pod.Name, volume.Name)}, pvc); err != nil {
-			return nil, fmt.Errorf("discovering persistent volume claim, %w", err)
+		if err = v.kubeClient.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: fmt.Sprintf("%s-%s", pod.Name, volume.Name)}, pvc); err != nil {
+			return nil, fmt.Errorf("discovering persistent volume claim for ephemeral volume, %w", err)
 		}
 	default:
 		return nil, nil
 	}
 	storageClassName := lo.FromPtr(pvc.Spec.StorageClassName)
-	// TODO @joinnis: Do default storage class name discovery
-	//if storageClassName == "" {
-	//
-	//}
+	if storageClassName == "" {
+		storageClassName = defaultStorageClassName
+	}
 	// Persistent Volume Requirements
 	if pvc.Spec.VolumeName != "" {
 		requirements, err := v.getPersistentVolumeRequirements(ctx, pod, pvc.Spec.VolumeName)

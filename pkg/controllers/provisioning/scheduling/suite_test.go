@@ -2392,6 +2392,96 @@ var _ = Describe("Existing Nodes", func() {
 		// Expect that the scheduled node is equal to the ready node since it's initialized
 		Expect(scheduledNode.Name).To(Equal(nodes[elem].Name))
 	})
+	It("should consider a pod incompatible with an existing node but compatible with Provisioner", func() {
+		machine, node := test.MachineAndNode(v1alpha5.Machine{
+			Status: v1alpha5.MachineStatus{
+				Allocatable: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("10"),
+					v1.ResourceMemory: resource.MustParse("10Gi"),
+					v1.ResourcePods:   resource.MustParse("110"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, machine, node)
+		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
+		ExpectMakeNodesInitialized(ctx, env.Client, node)
+
+		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+		pod := test.UnschedulablePod(test.PodOptions{
+			NodeRequirements: []v1.NodeSelectorRequirement{
+				{
+					Key:      v1.LabelTopologyZone,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{"test-zone-1"},
+				},
+			},
+		})
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		ExpectNotScheduled(ctx, env.Client, pod)
+
+		ExpectApplied(ctx, env.Client, provisioner)
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		ExpectScheduled(ctx, env.Client, pod)
+	})
+	Context("Daemonsets", func() {
+		It("should not subtract daemonset overhead that is not strictly compatible with an existing node", func() {
+			machine, node := test.MachineAndNode(v1alpha5.Machine{
+				Status: v1alpha5.MachineStatus{
+					Allocatable: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("1"),
+						v1.ResourceMemory: resource.MustParse("1Gi"),
+						v1.ResourcePods:   resource.MustParse("110"),
+					},
+				},
+			})
+			// This DaemonSet is not compatible with the existing Machine/Node
+			ds := test.DaemonSet(
+				test.DaemonSetOptions{PodOptions: test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("100"),
+						v1.ResourceMemory: resource.MustParse("100Gi")},
+					},
+					NodeRequirements: []v1.NodeSelectorRequirement{
+						{
+							Key:      v1.LabelTopologyZone,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+						},
+					},
+				}},
+			)
+			ExpectApplied(ctx, env.Client, provisioner, machine, node, ds)
+			ExpectMakeMachinesInitialized(ctx, env.Client, machine)
+			ExpectMakeNodesInitialized(ctx, env.Client, node)
+
+			ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
+			pod := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("1"),
+					v1.ResourceMemory: resource.MustParse("1Gi")},
+				},
+			})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			scheduledNode := ExpectScheduled(ctx, env.Client, pod)
+			Expect(scheduledNode.Name).To(Equal(node.Name))
+
+			// Add another pod and expect that pod not to schedule against a Provisioner since we will model the DS against the Provisioner
+			// In this case, the DS overhead will take over the entire capacity for every "theoretical node" so we can't schedule a new pod to any new Node
+			pod2 := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("1"),
+					v1.ResourceMemory: resource.MustParse("1Gi")},
+				},
+			})
+			ExpectApplied(ctx, env.Client, provisioner)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod2)
+			ExpectNotScheduled(ctx, env.Client, pod2)
+		})
+	})
 })
 
 var _ = Describe("No Pre-Binding", func() {
@@ -2785,12 +2875,7 @@ var _ = Describe("VolumeUsage", func() {
 				},
 			},
 		})
-		pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: fmt.Sprintf("%s-%s", initialPod.Name, initialPod.Spec.Volumes[0].Name),
-			},
-		})
-		ExpectApplied(ctx, env.Client, provisioner, sc, pvc, initialPod)
+		ExpectApplied(ctx, env.Client, provisioner, sc, initialPod)
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
 		node := ExpectScheduled(ctx, env.Client, initialPod)
 		csiNode := &storagev1.CSINode{
