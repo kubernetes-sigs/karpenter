@@ -56,7 +56,7 @@ var _ = Describe("Drift", func() {
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
 	})
 	It("should detect drift", func() {
-		cp.Drifted = true
+		cp.Drifted = "drifted"
 		ExpectApplied(ctx, env.Client, provisioner, machine)
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
@@ -64,7 +64,7 @@ var _ = Describe("Drift", func() {
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).IsTrue()).To(BeTrue())
 	})
 	It("should not detect drift if the feature flag is disabled", func() {
-		cp.Drifted = true
+		cp.Drifted = "drifted"
 		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
 		ExpectApplied(ctx, env.Client, provisioner, machine)
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
@@ -73,7 +73,7 @@ var _ = Describe("Drift", func() {
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted)).To(BeNil())
 	})
 	It("should remove the status condition from the machine if the feature flag is disabled", func() {
-		cp.Drifted = true
+		cp.Drifted = "drifted"
 		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
 		ExpectApplied(ctx, env.Client, provisioner, machine)
@@ -84,7 +84,7 @@ var _ = Describe("Drift", func() {
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted)).To(BeNil())
 	})
 	It("should remove the status condition from the machine when the machine launch condition is false", func() {
-		cp.Drifted = true
+		cp.Drifted = "drifted"
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
 		machine.StatusConditions().MarkFalse(v1alpha5.MachineLaunched, "", "")
@@ -96,7 +96,7 @@ var _ = Describe("Drift", func() {
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted)).To(BeNil())
 	})
 	It("should remove the status condition from the machine when the machine launch condition doesn't exist", func() {
-		cp.Drifted = true
+		cp.Drifted = "drifted"
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
 		machine.Status.Conditions = lo.Reject(machine.Status.Conditions, func(s apis.Condition, _ int) bool {
@@ -110,7 +110,7 @@ var _ = Describe("Drift", func() {
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted)).To(BeNil())
 	})
 	It("should not detect drift if the provisioner does not exist", func() {
-		cp.Drifted = true
+		cp.Drifted = "drifted"
 		ExpectApplied(ctx, env.Client, machine)
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
@@ -118,7 +118,7 @@ var _ = Describe("Drift", func() {
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted)).To(BeNil())
 	})
 	It("should remove the status condition from the machine if the machine is no longer drifted", func() {
-		cp.Drifted = false
+		cp.Drifted = ""
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
 		ExpectApplied(ctx, env.Client, provisioner, machine)
 
@@ -130,7 +130,7 @@ var _ = Describe("Drift", func() {
 	Context("NodeRequirement Drift", func() {
 		DescribeTable("",
 			func(oldProvisionerReq []v1.NodeSelectorRequirement, newProvisionerReq []v1.NodeSelectorRequirement, machineLabels map[string]string, drifted bool) {
-				cp.Drifted = false
+				cp.Drifted = ""
 				provisioner.Spec.Requirements = oldProvisionerReq
 				machine.Labels = lo.Assign(machine.Labels, machineLabels)
 
@@ -280,7 +280,7 @@ var _ = Describe("Drift", func() {
 			),
 		)
 		It("should return drifted only on machines that are drifted from an updated provisioner", func() {
-			cp.Drifted = false
+			cp.Drifted = ""
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{v1alpha5.CapacityTypeOnDemand}},
 				{Key: v1.LabelOSStable, Operator: v1.NodeSelectorOpIn, Values: []string{string(v1.Linux), string(v1.Windows)}},
@@ -336,7 +336,7 @@ var _ = Describe("Drift", func() {
 		var testProvisionerOptions test.ProvisionerOptions
 		var provisionerController controller.Controller
 		BeforeEach(func() {
-			cp.Drifted = false
+			cp.Drifted = ""
 			provisionerController = controllerprov.NewController(env.Client)
 			testProvisionerOptions = test.ProvisionerOptions{
 				ObjectMeta: provisioner.ObjectMeta,

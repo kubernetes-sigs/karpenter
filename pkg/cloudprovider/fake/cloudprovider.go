@@ -48,7 +48,7 @@ type CloudProvider struct {
 	DeleteCalls        []*v1alpha5.Machine
 
 	CreatedMachines map[string]*v1alpha5.Machine
-	Drifted         bool
+	Drifted         cloudprovider.DriftReason
 }
 
 func NewCloudProvider() *CloudProvider {
@@ -67,7 +67,7 @@ func (c *CloudProvider) Reset() {
 	c.AllowedCreateCalls = math.MaxInt
 	c.NextCreateErr = nil
 	c.DeleteCalls = []*v1alpha5.Machine{}
-	c.Drifted = false
+	c.Drifted = "drifted"
 }
 
 func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (*v1alpha5.Machine, error) {
@@ -207,7 +207,7 @@ func (c *CloudProvider) Delete(_ context.Context, m *v1alpha5.Machine) error {
 	return cloudprovider.NewMachineNotFoundError(fmt.Errorf("no machine exists with provider id '%s'", m.Status.ProviderID))
 }
 
-func (c *CloudProvider) IsMachineDrifted(context.Context, *v1alpha5.Machine) (bool, error) {
+func (c *CloudProvider) IsMachineDrifted(context.Context, *v1alpha5.Machine) (cloudprovider.DriftReason, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 

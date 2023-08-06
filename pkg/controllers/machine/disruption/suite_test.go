@@ -98,7 +98,7 @@ var _ = Describe("Disruption", func() {
 		})
 	})
 	It("should set multiple disruption conditions simultaneously", func() {
-		cp.Drifted = true
+		cp.Drifted = "drifted"
 		provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(30)
 		provisioner.Spec.TTLSecondsUntilExpired = ptr.Int64(30)
 		node.Annotations = lo.Assign(node.Annotations, map[string]string{
