@@ -358,16 +358,20 @@ func (c *Cluster) newStateFromMachine(machine *v1alpha5.Machine, oldNode *StateN
 		oldNode = NewNode()
 	}
 	n := &StateNode{
-		Node:              oldNode.Node,
-		Machine:           machine,
-		hostPortUsage:     oldNode.hostPortUsage,
-		volumeUsage:       oldNode.volumeUsage,
-		daemonSetRequests: oldNode.daemonSetRequests,
-		daemonSetLimits:   oldNode.daemonSetLimits,
-		podRequests:       oldNode.podRequests,
-		podLimits:         oldNode.podLimits,
-		markedForDeletion: oldNode.markedForDeletion,
-		nominatedUntil:    oldNode.nominatedUntil,
+		Node:                oldNode.Node,
+		Machine:             machine,
+		inflightAllocatable: oldNode.inflightAllocatable,
+		inflightCapacity:    oldNode.inflightCapacity,
+		startupTaints:       oldNode.startupTaints,
+		hostPortUsage:       oldNode.hostPortUsage,
+		volumeUsage:         oldNode.volumeUsage,
+		volumeLimits:        oldNode.volumeLimits,
+		daemonSetRequests:   oldNode.daemonSetRequests,
+		daemonSetLimits:     oldNode.daemonSetLimits,
+		podRequests:         oldNode.podRequests,
+		podLimits:           oldNode.podLimits,
+		markedForDeletion:   oldNode.markedForDeletion,
+		nominatedUntil:      oldNode.nominatedUntil,
 	}
 	// Cleanup the old machine with its old providerID if its providerID changes
 	// This can happen since nodes don't get created with providerIDs. Rather, CCM picks up the
