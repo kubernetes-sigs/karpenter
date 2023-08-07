@@ -15,7 +15,6 @@ limitations under the License.
 package scheduling
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -61,7 +60,7 @@ func NewMachine(machineTemplate *MachineTemplate, topology *Topology, daemonReso
 	}
 }
 
-func (m *Machine) Add(_ context.Context, pod *v1.Pod) error {
+func (m *Machine) Add(pod *v1.Pod) error {
 	// Check Taints
 	if err := m.Taints.Tolerates(pod); err != nil {
 		return err

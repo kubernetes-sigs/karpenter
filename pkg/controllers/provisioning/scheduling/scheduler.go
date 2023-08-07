@@ -227,7 +227,7 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 
 	// Pick existing node that we are about to create
 	for _, machine := range s.newMachines {
-		if err := machine.Add(ctx, pod); err == nil {
+		if err := machine.Add(pod); err == nil {
 			return nil
 		}
 	}
@@ -249,7 +249,7 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 		}
 
 		machine := NewMachine(machineTemplate, s.topology, s.daemonOverhead[machineTemplate], instanceTypes)
-		if err := machine.Add(ctx, pod); err != nil {
+		if err := machine.Add(pod); err != nil {
 			errs = multierr.Append(errs, fmt.Errorf("incompatible with provisioner %q, daemonset overhead=%s, %w",
 				machineTemplate.ProvisionerName,
 				resources.String(s.daemonOverhead[machineTemplate]),

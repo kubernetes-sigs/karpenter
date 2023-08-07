@@ -33,6 +33,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
+//go:generate controller-gen object:headerFile="../../../hack/boilerplate.go.txt" paths="."
+
 // StateNodes is a typed version of a list of *Node
 // nolint: revive
 type StateNodes []*StateNode
@@ -69,8 +71,6 @@ func (n StateNodes) Pods(ctx context.Context, c client.Client) ([]*v1.Pod, error
 // compute topology information.
 // +k8s:deepcopy-gen=true
 // nolint: revive
-//
-//go:generate controller-gen object:headerFile="../../../hack/boilerplate.go.txt" paths="."
 type StateNode struct {
 	Node    *v1.Node
 	Machine *v1alpha5.Machine
@@ -106,15 +106,6 @@ func NewNode() *StateNode {
 		hostPortUsage:       scheduling.NewHostPortUsage(),
 		volumeUsage:         scheduling.NewVolumeUsage(),
 	}
-}
-
-func (in *StateNode) ResetRequestsAndUsage() {
-	in.daemonSetRequests = map[types.NamespacedName]v1.ResourceList{}
-	in.daemonSetLimits = map[types.NamespacedName]v1.ResourceList{}
-	in.podRequests = map[types.NamespacedName]v1.ResourceList{}
-	in.podLimits = map[types.NamespacedName]v1.ResourceList{}
-	in.hostPortUsage = scheduling.NewHostPortUsage()
-	in.volumeUsage = scheduling.NewVolumeUsage()
 }
 
 func (in *StateNode) Name() string {
@@ -341,17 +332,18 @@ func (in *StateNode) Managed() bool {
 }
 
 func (in *StateNode) updateForPod(ctx context.Context, kubeClient client.Client, pod *v1.Pod) error {
+	podKey := client.ObjectKeyFromObject(pod)
 	hostPorts := scheduling.GetHostPorts(pod)
 	volumes, err := scheduling.GetVolumes(ctx, kubeClient, pod)
 	if err != nil {
 		return fmt.Errorf("tracking volume usage, %w", err)
 	}
-	in.podRequests[client.ObjectKeyFromObject(pod)] = resources.RequestsForPods(pod)
-	in.podLimits[client.ObjectKeyFromObject(pod)] = resources.LimitsForPods(pod)
+	in.podRequests[podKey] = resources.RequestsForPods(pod)
+	in.podLimits[podKey] = resources.LimitsForPods(pod)
 	// if it's a daemonset, we track what it has requested separately
 	if podutils.IsOwnedByDaemonSet(pod) {
-		in.daemonSetRequests[client.ObjectKeyFromObject(pod)] = resources.RequestsForPods(pod)
-		in.daemonSetLimits[client.ObjectKeyFromObject(pod)] = resources.LimitsForPods(pod)
+		in.daemonSetRequests[podKey] = resources.RequestsForPods(pod)
+		in.daemonSetLimits[podKey] = resources.LimitsForPods(pod)
 	}
 	in.hostPortUsage.Add(pod, hostPorts)
 	in.volumeUsage.Add(pod, volumes)

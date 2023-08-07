@@ -16,26 +16,57 @@ package scheduling
 
 import (
 	"fmt"
+	"net"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+//go:generate controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="."
+
 // HostPortUsage tracks HostPort usage within a node. On a node, each <hostIP, hostPort, protocol> used by pods bound
 // to the node must be unique. We need to track this to keep an accurate concept of what pods can potentially schedule
 // together.
 // +k8s:deepcopy-gen=true
-//
-//go:generate controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="."
 type HostPortUsage struct {
 	reserved map[types.NamespacedName][]HostPort
+}
+
+// +k8s:deepcopy-gen=true
+type HostPort struct {
+	IP       net.IP
+	Port     int32
+	Protocol v1.Protocol
+}
+
+func (p HostPort) String() string {
+	return fmt.Sprintf("IP=%s Port=%d Proto=%s", p.IP, p.Port, p.Protocol)
+}
+
+func (p HostPort) Matches(rhs HostPort) bool {
+	if p.Protocol != rhs.Protocol {
+		return false
+	}
+	if p.Port != rhs.Port {
+		return false
+	}
+	// If IPs are unequal, they don't match unless one is an unspecified address "0.0.0.0" or the IPv6 address "::".
+	if !p.IP.Equal(rhs.IP) && !p.IP.IsUnspecified() && !rhs.IP.IsUnspecified() {
+		return false
+	}
+	return true
 }
 
 func NewHostPortUsage() *HostPortUsage {
 	return &HostPortUsage{
 		reserved: map[types.NamespacedName][]HostPort{},
 	}
+}
+
+// Add adds a port to the HostPortUsage
+func (u *HostPortUsage) Add(usedBy *v1.Pod, ports []HostPort) {
+	u.reserved[client.ObjectKeyFromObject(usedBy)] = ports
 }
 
 func (u *HostPortUsage) Conflicts(usedBy *v1.Pod, ports []HostPort) error {
@@ -51,12 +82,31 @@ func (u *HostPortUsage) Conflicts(usedBy *v1.Pod, ports []HostPort) error {
 	return nil
 }
 
-// Add adds a port to the HostPortUsage
-func (u *HostPortUsage) Add(usedBy *v1.Pod, ports []HostPort) {
-	u.reserved[client.ObjectKeyFromObject(usedBy)] = ports
-}
-
 // DeletePod deletes all host port usage from the HostPortUsage that were created by the pod with the given name.
 func (u *HostPortUsage) DeletePod(key types.NamespacedName) {
 	delete(u.reserved, key)
+}
+
+func GetHostPorts(pod *v1.Pod) []HostPort {
+	var usage []HostPort
+	for _, c := range pod.Spec.Containers {
+		for _, p := range c.Ports {
+			if p.HostPort == 0 {
+				continue
+			}
+			// Per the K8s docs, "If you don't specify the hostIP and Protocol explicitly, Kubernetes will use 0.0.0.0
+			// as the default hostIP and TCP as the default Protocol." In testing, and looking at the code the Protocol
+			// is defaulted to TCP, but it leaves the IP empty.
+			hostIP := p.HostIP
+			if hostIP == "" {
+				hostIP = "0.0.0.0"
+			}
+			usage = append(usage, HostPort{
+				IP:       net.ParseIP(hostIP),
+				Port:     p.HostPort,
+				Protocol: p.Protocol,
+			})
+		}
+	}
+	return usage
 }

@@ -37,6 +37,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	"github.com/aws/karpenter-core/pkg/scheduling"
 	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
 	"github.com/aws/karpenter-core/pkg/utils/sets"
 )
@@ -353,13 +354,24 @@ func (c *Cluster) DeleteDaemonSet(key types.NamespacedName) {
 // you will hit race conditions and data corruption
 
 func (c *Cluster) newStateFromMachine(machine *v1alpha5.Machine, oldNode *StateNode) *StateNode {
-	var n *StateNode
 	if oldNode == nil {
-		n = NewNode()
-	} else {
-		n = oldNode.DeepCopy()
+		oldNode = NewNode()
 	}
-	n.Machine = machine
+	n := &StateNode{
+		Node:                oldNode.Node,
+		Machine:             machine,
+		inflightAllocatable: oldNode.inflightAllocatable,
+		inflightCapacity:    oldNode.inflightCapacity,
+		startupTaints:       oldNode.startupTaints,
+		daemonSetRequests:   oldNode.daemonSetRequests,
+		daemonSetLimits:     oldNode.daemonSetLimits,
+		podRequests:         oldNode.podRequests,
+		podLimits:           oldNode.podLimits,
+		hostPortUsage:       oldNode.hostPortUsage,
+		volumeUsage:         oldNode.volumeUsage,
+		markedForDeletion:   oldNode.markedForDeletion,
+		nominatedUntil:      oldNode.nominatedUntil,
+	}
 	// Cleanup the old machine with its old providerID if its providerID changes
 	// This can happen since nodes don't get created with providerIDs. Rather, CCM picks up the
 	// created node and injects the providerID into the spec.providerID
@@ -383,14 +395,24 @@ func (c *Cluster) cleanupMachine(name string) {
 }
 
 func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *StateNode) (*StateNode, error) {
-	var n *StateNode
 	if oldNode == nil {
-		n = NewNode()
-	} else {
-		n = oldNode.DeepCopy()
+		oldNode = NewNode()
 	}
-	n.Node = node
-	n.ResetRequestsAndUsage()
+	n := &StateNode{
+		Node:                node,
+		Machine:             oldNode.Machine,
+		inflightAllocatable: oldNode.inflightAllocatable,
+		inflightCapacity:    oldNode.inflightCapacity,
+		startupTaints:       oldNode.startupTaints,
+		daemonSetRequests:   map[types.NamespacedName]v1.ResourceList{},
+		daemonSetLimits:     map[types.NamespacedName]v1.ResourceList{},
+		podRequests:         map[types.NamespacedName]v1.ResourceList{},
+		podLimits:           map[types.NamespacedName]v1.ResourceList{},
+		hostPortUsage:       scheduling.NewHostPortUsage(),
+		volumeUsage:         scheduling.NewVolumeUsage(),
+		markedForDeletion:   oldNode.markedForDeletion,
+		nominatedUntil:      oldNode.nominatedUntil,
+	}
 	if err := multierr.Combine(
 		c.populateStartupTaints(ctx, n),
 		c.populateInflight(ctx, n),
