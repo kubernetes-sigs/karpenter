@@ -30,6 +30,7 @@ licenses: download ## Verifies dependency licenses
 verify: ## Verify code. Includes codegen, dependencies, linting, formatting, etc
 	go mod tidy
 	go generate ./...
+	@perl -i -pe 's/sets.Set/sets.Set[string]/g' pkg/scheduling/zz_generated.deepcopy.go # Use perl instead of sed due to https://stackoverflow.com/questions/4247068/sed-command-with-i-option-failing-on-mac-but-works-on-linux
 	hack/boilerplate.sh
 	go vet ./...
 	golangci-lint run

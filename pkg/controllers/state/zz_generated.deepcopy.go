@@ -21,6 +21,7 @@ package state
 
 import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/scheduling"
 	"k8s.io/api/core/v1"
 	resource "k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
@@ -130,11 +131,13 @@ func (in *StateNode) DeepCopyInto(out *StateNode) {
 	}
 	if in.hostPortUsage != nil {
 		in, out := &in.hostPortUsage, &out.hostPortUsage
-		*out = (*in).DeepCopy()
+		*out = new(scheduling.HostPortUsage)
+		(*in).DeepCopyInto(*out)
 	}
 	if in.volumeUsage != nil {
 		in, out := &in.volumeUsage, &out.volumeUsage
-		*out = (*in).DeepCopy()
+		*out = new(scheduling.VolumeUsage)
+		(*in).DeepCopyInto(*out)
 	}
 	in.nominatedUntil.DeepCopyInto(&out.nominatedUntil)
 }

@@ -25,6 +25,9 @@ import (
 // VolumeUsage tracks volume limits on a per node basis.  The number of volumes that can be mounted varies by instance
 // type. We need to be aware and track the mounted volume usage to inform our awareness of which pods can schedule to
 // which nodes.
+// +k8s:deepcopy-gen=true
+//
+//go:generate controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="."
 type VolumeUsage struct {
 	volumes    Volumes
 	podVolumes map[types.NamespacedName]Volumes
@@ -63,22 +66,5 @@ func (v *VolumeUsage) DeletePod(key types.NamespacedName) {
 	v.volumes = Volumes{}
 	for _, c := range v.podVolumes {
 		v.volumes.Insert(c)
-	}
-}
-
-func (v *VolumeUsage) DeepCopy() *VolumeUsage {
-	if v == nil {
-		return nil
-	}
-	out := &VolumeUsage{}
-	v.DeepCopyInto(out)
-	return out
-}
-
-func (v *VolumeUsage) DeepCopyInto(out *VolumeUsage) {
-	out.volumes = v.volumes.Copy()
-	out.podVolumes = map[types.NamespacedName]Volumes{}
-	for k, v := range v.podVolumes {
-		out.podVolumes[k] = v.Copy()
 	}
 }

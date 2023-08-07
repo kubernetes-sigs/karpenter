@@ -21,6 +21,9 @@ import (
 	v1 "k8s.io/api/core/v1"
 )
 
+// +k8s:deepcopy-gen=true
+//
+//go:generate controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="."
 type HostPort struct {
 	IP       net.IP
 	Port     int32

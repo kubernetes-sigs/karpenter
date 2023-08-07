@@ -25,6 +25,9 @@ import (
 // HostPortUsage tracks HostPort usage within a node. On a node, each <hostIP, hostPort, protocol> used by pods bound
 // to the node must be unique. We need to track this to keep an accurate concept of what pods can potentially schedule
 // together.
+// +k8s:deepcopy-gen=true
+//
+//go:generate controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="."
 type HostPortUsage struct {
 	reserved map[types.NamespacedName][]HostPort
 }
@@ -56,22 +59,4 @@ func (u *HostPortUsage) Add(usedBy *v1.Pod, ports []HostPort) {
 // DeletePod deletes all host port usage from the HostPortUsage that were created by the pod with the given name.
 func (u *HostPortUsage) DeletePod(key types.NamespacedName) {
 	delete(u.reserved, key)
-}
-
-func (u *HostPortUsage) DeepCopy() *HostPortUsage {
-	if u == nil {
-		return nil
-	}
-	out := &HostPortUsage{}
-	u.DeepCopyInto(out)
-	return out
-}
-
-func (u *HostPortUsage) DeepCopyInto(out *HostPortUsage) {
-	out.reserved = map[types.NamespacedName][]HostPort{}
-	for k, v := range u.reserved {
-		for _, p := range v {
-			out.reserved[k] = append(out.reserved[k], p.DeepCopy())
-		}
-	}
 }

@@ -147,20 +147,20 @@ func (s *ProvisionerSpec) validateTaints() (errs *apis.FieldError) {
 func (s *ProvisionerSpec) validateTaintsField(taints []v1.Taint, existing map[taintKeyEffect]struct{}, fieldName string) *apis.FieldError {
 	var errs *apis.FieldError
 	for i, taint := range taints {
-		// Conflicts Key
+		// Validate Key
 		if len(taint.Key) == 0 {
 			errs = errs.Also(apis.ErrInvalidArrayValue(errs, fieldName, i))
 		}
 		for _, err := range validation.IsQualifiedName(taint.Key) {
 			errs = errs.Also(apis.ErrInvalidArrayValue(err, fieldName, i))
 		}
-		// Conflicts Value
+		// Validate Value
 		if len(taint.Value) != 0 {
 			for _, err := range validation.IsQualifiedName(taint.Value) {
 				errs = errs.Also(apis.ErrInvalidArrayValue(err, fieldName, i))
 			}
 		}
-		// Conflicts effect
+		// Validate effect
 		switch taint.Effect {
 		case v1.TaintEffectNoSchedule, v1.TaintEffectPreferNoSchedule, v1.TaintEffectNoExecute, "":
 		default:
@@ -320,7 +320,7 @@ func ValidateRequirement(requirement v1.NodeSelectorRequirement) error { //nolin
 	return errs
 }
 
-// Conflicts validateImageGCHighThresholdPercent
+// Validate validateImageGCHighThresholdPercent
 func (kc *KubeletConfiguration) validateImageGCHighThresholdPercent() (errs *apis.FieldError) {
 	if kc.ImageGCHighThresholdPercent != nil && ptr.Int32Value(kc.ImageGCHighThresholdPercent) < ptr.Int32Value(kc.ImageGCLowThresholdPercent) {
 		return errs.Also(apis.ErrInvalidValue("must be greater than imageGCLowThresholdPercent", "imageGCHighThresholdPercent"))
@@ -329,7 +329,7 @@ func (kc *KubeletConfiguration) validateImageGCHighThresholdPercent() (errs *api
 	return errs
 }
 
-// Conflicts imageGCLowThresholdPercent
+// Validate imageGCLowThresholdPercent
 func (kc *KubeletConfiguration) validateImageGCLowThresholdPercent() (errs *apis.FieldError) {
 	if kc.ImageGCHighThresholdPercent != nil && ptr.Int32Value(kc.ImageGCLowThresholdPercent) > ptr.Int32Value(kc.ImageGCHighThresholdPercent) {
 		return errs.Also(apis.ErrInvalidValue("must be less than imageGCHighThresholdPercent", "imageGCLowThresholdPercent"))

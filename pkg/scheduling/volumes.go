@@ -48,6 +48,9 @@ func ResetDefaultStorageClass() {
 	defaultStorageClass.Reset()
 }
 
+// +k8s:deepcopy-gen=true
+//
+//go:generate controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="."
 type Volumes map[string]sets.Set[string]
 
 func (u Volumes) Add(provisioner string, pvcID string) {
