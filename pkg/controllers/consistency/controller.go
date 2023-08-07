@@ -33,13 +33,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
+	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
-
-var _ corecontroller.TypedController[*v1alpha5.Machine] = (*Controller)(nil)
 
 type Controller struct {
 	clock       clock.Clock
@@ -54,16 +54,16 @@ type Issue string
 type Check interface {
 	// Check performs the consistency check, this should return a list of slice discovered, or an empty
 	// slice if no issues were found
-	Check(context.Context, *v1.Node, *v1alpha5.Machine) ([]Issue, error)
+	Check(context.Context, *v1.Node, *v1beta1.NodeClaim) ([]Issue, error)
 }
 
 // scanPeriod is how often we inspect and report issues that are found.
 const scanPeriod = 10 * time.Minute
 
 func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Recorder,
-	provider cloudprovider.CloudProvider) corecontroller.Controller {
+	provider cloudprovider.CloudProvider) *Controller {
 
-	return corecontroller.Typed[*v1alpha5.Machine](kubeClient, &Controller{
+	return &Controller{
 		clock:       clk,
 		kubeClient:  kubeClient,
 		recorder:    recorder,
@@ -71,20 +71,16 @@ func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Re
 		checks: []Check{
 			NewTermination(kubeClient),
 			NewNodeShape(provider),
-		}},
-	)
+		},
+	}
 }
 
-func (c *Controller) Name() string {
-	return "consistency"
-}
-
-func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	if machine.Status.ProviderID == "" {
+func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
+	if nodeClaim.Status.ProviderID == "" {
 		return reconcile.Result{}, nil
 	}
 	// If we get an event before we should check for consistency checks, we ignore and wait
-	if lastTime, ok := c.lastScanned.Get(client.ObjectKeyFromObject(machine).String()); ok {
+	if lastTime, ok := c.lastScanned.Get(string(nodeClaim.UID)); ok {
 		if lastTime, ok := lastTime.(time.Time); ok {
 			remaining := scanPeriod - c.clock.Since(lastTime)
 			return reconcile.Result{RequeueAfter: remaining}, nil
@@ -92,29 +88,81 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 		// the above should always succeed
 		return reconcile.Result{RequeueAfter: scanPeriod}, nil
 	}
-	c.lastScanned.SetDefault(client.ObjectKeyFromObject(machine).String(), c.clock.Now())
+	c.lastScanned.SetDefault(string(nodeClaim.UID), c.clock.Now())
 
-	// We assume the invariant that there is a single node for a single machine. If this invariant is violated,
-	// then we assume this is bubbled up through the machine lifecycle controller and don't perform consistency checks
-	node, err := machineutil.NodeForMachine(ctx, c.kubeClient, machine)
+	// We assume the invariant that there is a single node for a single nodeClaim. If this invariant is violated,
+	// then we assume this is bubbled up through the nodeClaim lifecycle controller and don't perform consistency checks
+	node, err := nodeclaimutil.NodeForNodeClaim(ctx, c.kubeClient, nodeClaim)
 	if err != nil {
-		return reconcile.Result{}, machineutil.IgnoreDuplicateNodeError(machineutil.IgnoreNodeNotFoundError(err))
+		return reconcile.Result{}, nodeclaimutil.IgnoreDuplicateNodeError(nodeclaimutil.IgnoreNodeNotFoundError(err))
 	}
 	for _, check := range c.checks {
-		issues, err := check.Check(ctx, node, machine)
+		issues, err := check.Check(ctx, node, nodeClaim)
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("checking node with %T, %w", check, err)
 		}
 		for _, issue := range issues {
 			logging.FromContext(ctx).Errorf("check failed, %s", issue)
 			consistencyErrors.With(prometheus.Labels{checkLabel: reflect.TypeOf(check).Elem().Name()}).Inc()
-			c.recorder.Publish(CheckEvent(machine, string(issue)))
+			c.recorder.Publish(FailedConsistencyCheckEvent(nodeClaim, string(issue)))
 		}
 	}
 	return reconcile.Result{RequeueAfter: scanPeriod}, nil
 }
 
-func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontroller.Builder {
+type NodeClaimController struct {
+	*Controller
+}
+
+func NewNodeClaimController(clk clock.Clock, kubeClient client.Client, recorder events.Recorder,
+	provider cloudprovider.CloudProvider) corecontroller.Controller {
+
+	return corecontroller.Typed[*v1beta1.NodeClaim](kubeClient, &NodeClaimController{
+		Controller: NewController(clk, kubeClient, recorder, provider),
+	})
+}
+
+func (c *NodeClaimController) Name() string {
+	return "consistency"
+}
+
+func (c *NodeClaimController) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
+	return c.Controller.Reconcile(ctx, nodeClaim)
+}
+
+func (c *NodeClaimController) Builder(ctx context.Context, m manager.Manager) corecontroller.Builder {
+	return corecontroller.Adapt(controllerruntime.
+		NewControllerManagedBy(m).
+		For(&v1beta1.NodeClaim{}).
+		Watches(
+			&source.Kind{Type: &v1.Node{}},
+			nodeclaimutil.NodeEventHandler(ctx, c.kubeClient),
+		).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
+	)
+}
+
+type MachineController struct {
+	*Controller
+}
+
+func NewMachineController(clk clock.Clock, kubeClient client.Client, recorder events.Recorder,
+	provider cloudprovider.CloudProvider) corecontroller.Controller {
+
+	return corecontroller.Typed[*v1alpha5.Machine](kubeClient, &MachineController{
+		Controller: NewController(clk, kubeClient, recorder, provider),
+	})
+}
+
+func (c *MachineController) Name() string {
+	return "consistency"
+}
+
+func (c *MachineController) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
+	return c.Controller.Reconcile(ctx, nodeclaimutil.New(machine))
+}
+
+func (c *MachineController) Builder(ctx context.Context, m manager.Manager) corecontroller.Builder {
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1alpha5.Machine{}).
