@@ -64,7 +64,8 @@ func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 		case <-ctx.Done():
 			return Command{}, errors.New("context canceled")
 		case <-timer:
-			deprovisioningConsolidationTimeoutsCounter.WithLabelValues("multi-machine").Inc()
+			deprovisioningConsolidationTimeoutsCounter.WithLabelValues("single-machine").Inc()
+			logging.FromContext(ctx).Debug("abandoning single-machine consolidation due to timeout")
 			return Command{}, nil
 		default:
 			// compute a possible consolidation option

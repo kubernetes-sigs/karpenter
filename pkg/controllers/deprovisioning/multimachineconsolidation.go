@@ -33,7 +33,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
-const MultiMachineConsolidationTimeoutDuration = 1 * time.Minute
+const MultiMachineConsolidationTimeoutDuration = 2 * time.Minute
 
 type MultiMachineConsolidation struct {
 	consolidation
@@ -103,10 +103,10 @@ func (m *MultiMachineConsolidation) firstNMachineConsolidationOption(ctx context
 			return Command{}, errors.New("context canceled")
 		case <-timer:
 			deprovisioningConsolidationTimeoutsCounter.WithLabelValues("multi-machine").Inc()
+			logging.FromContext(ctx).Debugf("abandoning multi-machine consolidation due to timeout, returning lastSavedCommand %s", lastSavedCommand)
 			return lastSavedCommand, nil
 		default:
 			mid := (min + max) / 2
-
 			candidatesToConsolidate := candidates[0 : mid+1]
 
 			cmd, err := m.computeConsolidation(ctx, candidatesToConsolidate...)

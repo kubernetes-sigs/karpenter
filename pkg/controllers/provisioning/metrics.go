@@ -23,6 +23,7 @@ import (
 
 func init() {
 	crmetrics.Registry.MustRegister(schedulingDuration)
+	crmetrics.Registry.MustRegister(schedulingDurationSummary)
 }
 
 var schedulingDuration = prometheus.NewHistogram(
@@ -32,5 +33,14 @@ var schedulingDuration = prometheus.NewHistogram(
 		Name:      "scheduling_duration_seconds",
 		Help:      "Duration of scheduling process in seconds. Broken down by provisioner and error.",
 		Buckets:   metrics.DurationBuckets(),
+	},
+)
+
+var schedulingDurationSummary = prometheus.NewSummary(
+	prometheus.SummaryOpts{
+		Namespace: metrics.Namespace,
+		Subsystem: "provisioner",
+		Name:      "scheduling_duration_summary_seconds",
+		Help:      "Duration of scheduling process in seconds. Broken down by provisioner and error.",
 	},
 )
