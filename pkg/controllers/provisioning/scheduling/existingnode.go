@@ -64,17 +64,18 @@ func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v
 	if err := scheduling.Taints(n.Taints()).Tolerates(pod); err != nil {
 		return err
 	}
-
-	// determine the host ports that will be used if the pod schedules
-	hostPorts, err := n.HostPortUsage().Get(pod)
+	// determine the volumes that will be mounted if the pod schedules
+	volumes, err := scheduling.GetVolumes(ctx, kubeClient, pod)
 	if err != nil {
 		return err
 	}
-
-	// determine the volumes that will be mounted if the pod schedules
-	volumes, err := n.VolumeUsage().Get(ctx, kubeClient, pod)
-	if err != nil {
-		return err
+	// determine the host ports that will be used if the pod schedules
+	hostPorts := scheduling.GetHostPorts(pod)
+	if err = n.VolumeUsage().ExceedsLimits(volumes); err != nil {
+		return fmt.Errorf("checking volume usage, %w", err)
+	}
+	if err = n.HostPortUsage().Conflicts(pod, hostPorts); err != nil {
+		return fmt.Errorf("checking host port usage, %w", err)
 	}
 
 	// check resource requests first since that's a pretty likely reason the pod won't schedule on an in-flight

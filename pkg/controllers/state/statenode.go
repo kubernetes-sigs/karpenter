@@ -103,9 +103,18 @@ func NewNode() *StateNode {
 		daemonSetLimits:     map[types.NamespacedName]v1.ResourceList{},
 		podRequests:         map[types.NamespacedName]v1.ResourceList{},
 		podLimits:           map[types.NamespacedName]v1.ResourceList{},
-		hostPortUsage:       &scheduling.HostPortUsage{},
+		hostPortUsage:       scheduling.NewHostPortUsage(),
 		volumeUsage:         scheduling.NewVolumeUsage(),
 	}
+}
+
+func (in *StateNode) ResetRequestsAndUsage() {
+	in.daemonSetRequests = map[types.NamespacedName]v1.ResourceList{}
+	in.daemonSetLimits = map[types.NamespacedName]v1.ResourceList{}
+	in.podRequests = map[types.NamespacedName]v1.ResourceList{}
+	in.podLimits = map[types.NamespacedName]v1.ResourceList{}
+	in.hostPortUsage = scheduling.NewHostPortUsage()
+	in.volumeUsage = scheduling.NewVolumeUsage()
 }
 
 func (in *StateNode) Name() string {
@@ -332,25 +341,19 @@ func (in *StateNode) Managed() bool {
 }
 
 func (in *StateNode) updateForPod(ctx context.Context, kubeClient client.Client, pod *v1.Pod) error {
-	podKey := client.ObjectKeyFromObject(pod)
-
-	in.podRequests[podKey] = resources.RequestsForPods(pod)
-	in.podLimits[podKey] = resources.LimitsForPods(pod)
-	// if it's a daemonset, we track what it has requested separately
-	if podutils.IsOwnedByDaemonSet(pod) {
-		in.daemonSetRequests[podKey] = resources.RequestsForPods(pod)
-		in.daemonSetLimits[podKey] = resources.LimitsForPods(pod)
-	}
-	hostPorts, err := in.hostPortUsage.Get(pod)
-	if err != nil {
-		return fmt.Errorf("tracking host port usage, %w", err)
-	}
-	in.hostPortUsage.Add(pod, hostPorts)
-
-	volumes, err := in.volumeUsage.Get(ctx, kubeClient, pod)
+	hostPorts := scheduling.GetHostPorts(pod)
+	volumes, err := scheduling.GetVolumes(ctx, kubeClient, pod)
 	if err != nil {
 		return fmt.Errorf("tracking volume usage, %w", err)
 	}
+	in.podRequests[client.ObjectKeyFromObject(pod)] = resources.RequestsForPods(pod)
+	in.podLimits[client.ObjectKeyFromObject(pod)] = resources.LimitsForPods(pod)
+	// if it's a daemonset, we track what it has requested separately
+	if podutils.IsOwnedByDaemonSet(pod) {
+		in.daemonSetRequests[client.ObjectKeyFromObject(pod)] = resources.RequestsForPods(pod)
+		in.daemonSetLimits[client.ObjectKeyFromObject(pod)] = resources.LimitsForPods(pod)
+	}
+	in.hostPortUsage.Add(pod, hostPorts)
 	in.volumeUsage.Add(pod, volumes)
 	return nil
 }

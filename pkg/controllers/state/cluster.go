@@ -37,7 +37,6 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/scheduling"
 	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
 	"github.com/aws/karpenter-core/pkg/utils/sets"
 )
@@ -354,21 +353,13 @@ func (c *Cluster) DeleteDaemonSet(key types.NamespacedName) {
 // you will hit race conditions and data corruption
 
 func (c *Cluster) newStateFromMachine(machine *v1alpha5.Machine, oldNode *StateNode) *StateNode {
+	var n *StateNode
 	if oldNode == nil {
-		oldNode = NewNode()
+		n = NewNode()
+	} else {
+		n = oldNode.DeepCopy()
 	}
-	n := &StateNode{
-		Node:              oldNode.Node,
-		Machine:           machine,
-		hostPortUsage:     oldNode.hostPortUsage,
-		volumeUsage:       oldNode.volumeUsage,
-		daemonSetRequests: oldNode.daemonSetRequests,
-		daemonSetLimits:   oldNode.daemonSetLimits,
-		podRequests:       oldNode.podRequests,
-		podLimits:         oldNode.podLimits,
-		markedForDeletion: oldNode.markedForDeletion,
-		nominatedUntil:    oldNode.nominatedUntil,
-	}
+	n.Machine = machine
 	// Cleanup the old machine with its old providerID if its providerID changes
 	// This can happen since nodes don't get created with providerIDs. Rather, CCM picks up the
 	// created node and injects the providerID into the spec.providerID
@@ -392,24 +383,14 @@ func (c *Cluster) cleanupMachine(name string) {
 }
 
 func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *StateNode) (*StateNode, error) {
+	var n *StateNode
 	if oldNode == nil {
-		oldNode = NewNode()
+		n = NewNode()
+	} else {
+		n = oldNode.DeepCopy()
 	}
-	n := &StateNode{
-		Node:                node,
-		Machine:             oldNode.Machine,
-		inflightAllocatable: oldNode.inflightAllocatable,
-		inflightCapacity:    oldNode.inflightCapacity,
-		startupTaints:       oldNode.startupTaints,
-		daemonSetRequests:   map[types.NamespacedName]v1.ResourceList{},
-		daemonSetLimits:     map[types.NamespacedName]v1.ResourceList{},
-		podRequests:         map[types.NamespacedName]v1.ResourceList{},
-		podLimits:           map[types.NamespacedName]v1.ResourceList{},
-		hostPortUsage:       scheduling.NewHostPortUsage(),
-		volumeUsage:         scheduling.NewVolumeUsage(),
-		markedForDeletion:   oldNode.markedForDeletion,
-		nominatedUntil:      oldNode.nominatedUntil,
-	}
+	n.Node = node
+	n.ResetRequestsAndUsage()
 	if err := multierr.Combine(
 		c.populateStartupTaints(ctx, n),
 		c.populateInflight(ctx, n),
@@ -499,10 +480,10 @@ func (c *Cluster) populateResourceRequests(ctx context.Context, n *StateNode) er
 		if podutils.IsTerminal(pod) {
 			continue
 		}
-		c.cleanupOldBindings(pod)
 		if err := n.updateForPod(ctx, c.kubeClient, pod); err != nil {
 			return err
 		}
+		c.cleanupOldBindings(pod)
 		c.bindings[client.ObjectKeyFromObject(pod)] = pod.Spec.NodeName
 	}
 	return nil
@@ -521,10 +502,10 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 		// the node must exist for us to update the resource requests on the node
 		return errors.NewNotFound(schema.GroupResource{Resource: "Machine"}, pod.Spec.NodeName)
 	}
-	c.cleanupOldBindings(pod)
 	if err := n.updateForPod(ctx, c.kubeClient, pod); err != nil {
 		return err
 	}
+	c.cleanupOldBindings(pod)
 	c.bindings[client.ObjectKeyFromObject(pod)] = pod.Spec.NodeName
 	return nil
 }

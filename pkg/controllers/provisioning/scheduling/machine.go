@@ -68,9 +68,9 @@ func (m *Machine) Add(_ context.Context, pod *v1.Pod) error {
 	}
 
 	// exposed host ports on the node
-	hostPorts, err := m.hostPortUsage.Get(pod)
-	if err != nil {
-		return err
+	hostPorts := scheduling.GetHostPorts(pod)
+	if err := m.hostPortUsage.Conflicts(pod, hostPorts); err != nil {
+		return fmt.Errorf("checking host port usage, %w", err)
 	}
 
 	machineRequirements := scheduling.NewRequirements(m.Requirements.Values()...)

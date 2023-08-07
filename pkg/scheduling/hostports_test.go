@@ -30,9 +30,9 @@ var _ = Describe("HostPortUsage", func() {
 			portVal := int32(4443)
 			protocolVal := v1.ProtocolTCP
 			e := HostPort{
-				ip:       ipVal,
-				port:     portVal,
-				protocol: protocolVal,
+				IP:       ipVal,
+				Port:     portVal,
+				Protocol: protocolVal,
 			}
 			Expect(e.String()).To(Equal(fmt.Sprintf("IP=%s Port=%d Proto=%s", ipVal, portVal, protocolVal)))
 		})
@@ -41,61 +41,61 @@ var _ = Describe("HostPortUsage", func() {
 			portVal := int32(4443)
 			protocolVal := v1.ProtocolTCP
 			e1 := HostPort{
-				ip:       ipVal,
-				port:     portVal,
-				protocol: protocolVal,
+				IP:       ipVal,
+				Port:     portVal,
+				Protocol: protocolVal,
 			}
 			e2 := e1
-			Expect(e1.matches(e2)).To(BeTrue())
-			Expect(e2.matches(e1)).To(BeTrue())
+			Expect(e1.Matches(e2)).To(BeTrue())
+			Expect(e2.Matches(e1)).To(BeTrue())
 		})
 		It("if any one IP has an unspecified IPv4 or IPv6 address, they match", func() {
 			ipVal := net.IPv4(10, 0, 0, 0)
 			portVal := int32(4443)
 			protocolVal := v1.ProtocolTCP
 			e1 := HostPort{
-				ip:       ipVal,
-				port:     portVal,
-				protocol: protocolVal,
+				IP:       ipVal,
+				Port:     portVal,
+				Protocol: protocolVal,
 			}
 			e2 := HostPort{
-				ip:       net.IPv4zero,
-				port:     portVal,
-				protocol: protocolVal,
+				IP:       net.IPv4zero,
+				Port:     portVal,
+				Protocol: protocolVal,
 			}
-			Expect(e1.matches(e2)).To(BeTrue())
-			Expect(e2.matches(e1)).To(BeTrue())
-			e2.ip = net.IPv6zero
-			Expect(e1.matches(e2)).To(BeTrue())
-			Expect(e2.matches(e1)).To(BeTrue())
+			Expect(e1.Matches(e2)).To(BeTrue())
+			Expect(e2.Matches(e1)).To(BeTrue())
+			e2.IP = net.IPv6zero
+			Expect(e1.Matches(e2)).To(BeTrue())
+			Expect(e2.Matches(e1)).To(BeTrue())
 		})
 		It("mismatched protocols don't match", func() {
 			ipVal := net.IPv4(10, 0, 0, 0)
 			portVal := int32(4443)
 			protocolVal := v1.ProtocolTCP
 			e1 := HostPort{
-				ip:       ipVal,
-				port:     portVal,
-				protocol: protocolVal,
+				IP:       ipVal,
+				Port:     portVal,
+				Protocol: protocolVal,
 			}
 			e2 := e1
-			e2.protocol = v1.ProtocolSCTP
-			Expect(e1.matches(e2)).To(BeFalse())
-			Expect(e2.matches(e1)).To(BeFalse())
+			e2.Protocol = v1.ProtocolSCTP
+			Expect(e1.Matches(e2)).To(BeFalse())
+			Expect(e2.Matches(e1)).To(BeFalse())
 		})
 		It("mismatched ports don't match", func() {
 			ipVal := net.IPv4(10, 0, 0, 0)
 			portVal := int32(4443)
 			protocolVal := v1.ProtocolTCP
 			e1 := HostPort{
-				ip:       ipVal,
-				port:     portVal,
-				protocol: protocolVal,
+				IP:       ipVal,
+				Port:     portVal,
+				Protocol: protocolVal,
 			}
 			e2 := e1
-			e2.port = int32(443)
-			Expect(e1.matches(e2)).To(BeFalse())
-			Expect(e2.matches(e1)).To(BeFalse())
+			e2.Port = int32(443)
+			Expect(e1.Matches(e2)).To(BeFalse())
+			Expect(e2.Matches(e1)).To(BeFalse())
 		})
 	})
 })
