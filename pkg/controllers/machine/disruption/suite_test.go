@@ -34,7 +34,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
-	"github.com/aws/karpenter-core/pkg/controllers/machine/disruption"
+	nodeclaimdisruption "github.com/aws/karpenter-core/pkg/controllers/machine/disruption"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
@@ -66,7 +66,7 @@ var _ = BeforeSuite(func() {
 	ctx = settings.ToContext(ctx, test.Settings())
 	cp = fake.NewCloudProvider()
 	cluster = state.NewCluster(fakeClock, env.Client, cp)
-	disruptionController = disruption.NewController(fakeClock, env.Client, cluster, cp)
+	disruptionController = nodeclaimdisruption.NewMachineController(fakeClock, env.Client, cluster, cp)
 })
 
 var _ = AfterSuite(func() {

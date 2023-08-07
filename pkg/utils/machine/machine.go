@@ -302,25 +302,6 @@ func NewMachineTemplateRef(ncr *v1beta1.NodeClassReference) *v1alpha5.MachineTem
 	}
 }
 
-func IsExpired(obj client.Object, clock clock.Clock, provisioner *v1alpha5.Provisioner) bool {
-	return clock.Now().After(GetExpirationTime(obj, provisioner))
-}
-
-func GetExpirationTime(obj client.Object, provisioner *v1alpha5.Provisioner) time.Time {
-	if provisioner == nil || provisioner.Spec.TTLSecondsUntilExpired == nil || obj == nil {
-		// If not defined, return some much larger time.
-		return time.Date(5000, 0, 0, 0, 0, 0, 0, time.UTC)
-	}
-	expirationTTL := time.Duration(ptr.Int64Value(provisioner.Spec.TTLSecondsUntilExpired)) * time.Second
-	return obj.GetCreationTimestamp().Add(expirationTTL)
-}
-func GetDriftedTime(nodeClaim *v1alpha5.Machine) time.Time {
-	if nodeClaim.StatusConditions().GetCondition(v1alpha5.MachineDrifted).IsTrue() {
-		return nodeClaim.StatusConditions().GetCondition(v1alpha5.MachineDrifted).LastTransitionTime.Inner.Time
-	}
-	return time.Date(5000, 0, 0, 0, 0, 0, 0, time.UTC)
-}
-
 func IsPastEmptinessTTL(nodeClaim *v1alpha5.Machine, clock clock.Clock, provisioner *v1alpha5.Provisioner) bool {
 	return nodeClaim.StatusConditions().GetCondition(v1alpha5.MachineEmpty) != nil &&
 		nodeClaim.StatusConditions().GetCondition(v1alpha5.MachineEmpty).IsTrue() &&

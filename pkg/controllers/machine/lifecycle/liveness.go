@@ -18,14 +18,13 @@ import (
 	"context"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/metrics"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
 
 type Liveness struct {
@@ -34,29 +33,27 @@ type Liveness struct {
 }
 
 // registrationTTL is a heuristic time that we expect the node to register within
-// If we don't see the node within this time, then we should delete the machine and try again
+// If we don't see the node within this time, then we should delete the NodeClaim and try again
 const registrationTTL = time.Minute * 15
 
-func (r *Liveness) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	registered := machine.StatusConditions().GetCondition(v1alpha5.MachineRegistered)
+func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
+	registered := nodeClaim.StatusConditions().GetCondition(v1beta1.NodeRegistered)
 	if registered.IsTrue() {
 		return reconcile.Result{}, nil
 	}
 	if registered == nil {
 		return reconcile.Result{Requeue: true}, nil
 	}
-	// If the MachineRegistered statusCondition hasn't gone True during the TTL since we first updated it, we should terminate the machine
-	if r.clock.Since(registered.LastTransitionTime.Inner.Time) < registrationTTL {
-		return reconcile.Result{RequeueAfter: registrationTTL - r.clock.Since(registered.LastTransitionTime.Inner.Time)}, nil
+	// If the NodeRegistered statusCondition hasn't gone True during the TTL since we first updated it, we should terminate the NodeClaim
+	if l.clock.Since(registered.LastTransitionTime.Inner.Time) < registrationTTL {
+		return reconcile.Result{RequeueAfter: registrationTTL - l.clock.Since(registered.LastTransitionTime.Inner.Time)}, nil
 	}
-	// Delete the machine if we believe the machine won't register since we haven't seen the node
-	if err := r.kubeClient.Delete(ctx, machine); err != nil {
+	// Delete the NodeClaim if we believe the NodeClaim won't register since we haven't seen the node
+	if err := nodeclaimutil.Delete(ctx, l.kubeClient, nodeClaim); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	logging.FromContext(ctx).With("ttl", registrationTTL).Debugf("terminating machine due to registration ttl")
-	metrics.MachinesTerminatedCounter.With(prometheus.Labels{
-		metrics.ReasonLabel:      "liveness",
-		metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
-	}).Inc()
+	logging.FromContext(ctx).With("ttl", registrationTTL).Debugf("terminating due to registration ttl")
+	nodeclaimutil.TerminatedCounter(nodeClaim, "liveness").Inc()
+
 	return reconcile.Result{}, nil
 }

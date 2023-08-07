@@ -21,7 +21,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -34,21 +33,21 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
+	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 	"github.com/aws/karpenter-core/pkg/utils/result"
 )
 
-type machineReconciler interface {
-	Reconcile(context.Context, *v1alpha5.Provisioner, *v1alpha5.Machine) (reconcile.Result, error)
+type nodeClaimReconciler interface {
+	Reconcile(context.Context, *v1beta1.NodePool, *v1beta1.NodeClaim) (reconcile.Result, error)
 }
 
-var _ corecontroller.TypedController[*v1alpha5.Machine] = (*Controller)(nil)
-
 // Controller is a disruption controller that adds StatusConditions to Machines when they meet certain disruption conditions
-// e.g. When the Machine has surpassed its owning provisioner's expirationTTL, then it is marked as "Expired" in the StatusConditions
+// e.g. When the NodeClaim has surpassed its owning provisioner's expirationTTL, then it is marked as "Expired" in the StatusConditions
 type Controller struct {
 	kubeClient client.Client
 
@@ -58,47 +57,40 @@ type Controller struct {
 }
 
 // NewController constructs a machine disruption controller
-func NewController(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
-	return corecontroller.Typed[*v1alpha5.Machine](kubeClient, &Controller{
+func NewController(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider) *Controller {
+	return &Controller{
 		kubeClient: kubeClient,
 		drift:      &Drift{cloudProvider: cloudProvider},
 		expiration: &Expiration{kubeClient: kubeClient, clock: clk},
 		emptiness:  &Emptiness{kubeClient: kubeClient, cluster: cluster, clock: clk},
-	})
-}
-
-func (c *Controller) Name() string {
-	return "machine.disruption"
+	}
 }
 
 // Reconcile executes a control loop for the resource
-func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	stored := machine.DeepCopy()
-	if _, ok := machine.Labels[v1alpha5.ProvisionerNameLabelKey]; !ok {
+func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
+	if !nodeClaim.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, nil
-	}
-	if !machine.DeletionTimestamp.IsZero() {
-		return reconcile.Result{}, nil
-	}
-	provisioner := &v1alpha5.Provisioner{}
-	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: machine.Labels[v1alpha5.ProvisionerNameLabelKey]}, provisioner); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
+	stored := nodeClaim.DeepCopy()
+	nodePool, err := nodeclaimutil.Owner(ctx, c.kubeClient, nodeClaim)
+	if err != nil {
+		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
 	var results []reconcile.Result
 	var errs error
-	reconcilers := []machineReconciler{
+	reconcilers := []nodeClaimReconciler{
 		c.expiration,
 		c.drift,
 		c.emptiness,
 	}
 	for _, reconciler := range reconcilers {
-		res, err := reconciler.Reconcile(ctx, provisioner, machine)
+		res, err := reconciler.Reconcile(ctx, nodePool, nodeClaim)
 		errs = multierr.Append(errs, err)
 		results = append(results, res)
 	}
-	if !equality.Semantic.DeepEqual(stored, machine) {
-		if err := c.kubeClient.Status().Update(ctx, machine); err != nil {
+	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
+		if err = nodeclaimutil.UpdateStatus(ctx, c.kubeClient, nodeClaim); err != nil {
 			if errors.IsConflict(err) {
 				return reconcile.Result{Requeue: true}, nil
 			}
@@ -106,6 +98,88 @@ func (c *Controller) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (
 		}
 	}
 	return result.Min(results...), errs
+}
+
+var _ corecontroller.TypedController[*v1beta1.NodeClaim] = (*NodeClaimController)(nil)
+
+type NodeClaimController struct {
+	*Controller
+}
+
+func NewNodeClaimController(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
+	return corecontroller.Typed[*v1beta1.NodeClaim](kubeClient, &NodeClaimController{
+		Controller: NewController(clk, kubeClient, cluster, cloudProvider),
+	})
+}
+
+func (c *NodeClaimController) Name() string {
+	return "nodeclaim.disruption"
+}
+
+func (c *NodeClaimController) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
+	return c.Controller.Reconcile(ctx, nodeClaim)
+}
+
+func (c *NodeClaimController) Builder(ctx context.Context, m manager.Manager) corecontroller.Builder {
+	return corecontroller.Adapt(controllerruntime.
+		NewControllerManagedBy(m).
+		For(&v1beta1.NodeClaim{}, builder.WithPredicates(
+			predicate.Or(
+				predicate.GenerationChangedPredicate{},
+				predicate.Funcs{
+					UpdateFunc: func(e event.UpdateEvent) bool {
+						oldNodeClaim := e.ObjectOld.(*v1beta1.NodeClaim)
+						newNodeClaim := e.ObjectNew.(*v1beta1.NodeClaim)
+
+						// One of the status conditions that affects disruption has changed
+						// which means that we should re-consider this for disruption
+						for _, cond := range v1beta1.LivingConditions {
+							if !equality.Semantic.DeepEqual(
+								oldNodeClaim.StatusConditions().GetCondition(cond),
+								newNodeClaim.StatusConditions().GetCondition(cond),
+							) {
+								return true
+							}
+						}
+						return false
+					},
+				},
+			),
+		)).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		Watches(
+			&source.Kind{Type: &v1beta1.NodePool{}},
+			nodeclaimutil.NodePoolEventHandler(ctx, c.kubeClient),
+		).
+		Watches(
+			&source.Kind{Type: &v1.Node{}},
+			nodeclaimutil.NodeEventHandler(ctx, c.kubeClient),
+		).
+		Watches(
+			&source.Kind{Type: &v1.Pod{}},
+			nodeclaimutil.PodEventHandler(ctx, c.kubeClient),
+		),
+	)
+}
+
+var _ corecontroller.TypedController[*v1alpha5.Machine] = (*MachineController)(nil)
+
+type MachineController struct {
+	*Controller
+}
+
+func NewMachineController(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
+	return corecontroller.Typed[*v1alpha5.Machine](kubeClient, &MachineController{
+		Controller: NewController(clk, kubeClient, cluster, cloudProvider),
+	})
+}
+
+func (c *MachineController) Name() string {
+	return "machine.disruption"
+}
+
+func (c *MachineController) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
+	return c.Controller.Reconcile(ctx, nodeclaimutil.New(machine))
 }
 
 func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontroller.Builder {

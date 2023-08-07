@@ -28,8 +28,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/metrics"
-	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 )
 
 // Expiration is a machine sub-controller that adds or removes status conditions on expired machines based on TTLSecondsUntilExpired
@@ -39,53 +39,50 @@ type Expiration struct {
 }
 
 //nolint:gocyclo
-func (e *Expiration) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	hasExpiredCondition := machine.StatusConditions().GetCondition(v1alpha5.MachineExpired) != nil
+func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
+	hasExpiredCondition := nodeClaim.StatusConditions().GetCondition(v1beta1.NodeExpired) != nil
 
 	// From here there are three scenarios to handle:
-	// 1. If TTLSecondsUntilExpired is not configured, remove the expired status condition
-	if provisioner.Spec.TTLSecondsUntilExpired == nil {
-		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineExpired)
+	// 1. If ExpirationTTL is not configured, remove the expired status condition
+	if nodePool.Spec.Deprovisioning.ExpirationTTL.Duration < 0 {
+		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.NodeExpired)
 		if hasExpiredCondition {
-			logging.FromContext(ctx).Debugf("removing expiration status condition from machine as expiration has been disabled")
+			logging.FromContext(ctx).Debugf("removing expiration status condition, expiration has been disabled")
 		}
 		return reconcile.Result{}, nil
 	}
-	node, err := machineutil.NodeForMachine(ctx, e.kubeClient, machine)
-	if machineutil.IgnoreNodeNotFoundError(machineutil.IgnoreDuplicateNodeError(err)) != nil {
+	node, err := nodeclaimutil.NodeForNodeClaim(ctx, e.kubeClient, nodeClaim)
+	if nodeclaimutil.IgnoreNodeNotFoundError(nodeclaimutil.IgnoreDuplicateNodeError(err)) != nil {
 		return reconcile.Result{}, err
 	}
 	// We do the expiration check in this way since there is still a migration path for creating Machines from Nodes
 	// In this case, we need to make sure that we take the older of the two for expiration
 	// TODO @joinnis: This check that takes the minimum between the Node and Machine CreationTimestamps can be removed
 	// once machine migration is ripped out, which should happen when apis and Karpenter are promoted to v1
-	var expired bool
 	var expirationTime time.Time
-	if node == nil || machine.CreationTimestamp.Before(&node.CreationTimestamp) {
-		expired = machineutil.IsExpired(machine, e.clock, provisioner)
-		expirationTime = machineutil.GetExpirationTime(machine, provisioner)
+	if node == nil || nodeClaim.CreationTimestamp.Before(&node.CreationTimestamp) {
+		expirationTime = nodeClaim.CreationTimestamp.Add(nodePool.Spec.Deprovisioning.ExpirationTTL.Duration)
 	} else {
-		expired = machineutil.IsExpired(node, e.clock, provisioner)
-		expirationTime = machineutil.GetExpirationTime(machine, provisioner)
+		expirationTime = node.CreationTimestamp.Add(nodePool.Spec.Deprovisioning.ExpirationTTL.Duration)
 	}
-	// 2. If the machine isn't expired, remove the status condition.
-	if !expired {
-		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineExpired)
+	// 2. If the NodeClaim isn't expired, remove the status condition.
+	if e.clock.Now().Before(expirationTime) {
+		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.NodeExpired)
 		if hasExpiredCondition {
-			logging.FromContext(ctx).Debugf("removing expired status condition from machine")
+			logging.FromContext(ctx).Debugf("removing expired status condition, not expired")
 		}
-		// If the machine isn't expired and doesn't have the status condition, return.
+		// If the NodeClaim isn't expired and doesn't have the status condition, return.
 		// Use t.Sub(clock.Now()) instead of time.Until() to ensure we're using the injected clock.
 		return reconcile.Result{RequeueAfter: expirationTime.Sub(e.clock.Now())}, nil
 	}
-	// 3. Otherwise, if the machine is expired, but doesn't have the status condition, add it.
-	machine.StatusConditions().SetCondition(apis.Condition{
-		Type:     v1alpha5.MachineExpired,
+	// 3. Otherwise, if the NodeClaim is expired, but doesn't have the status condition, add it.
+	nodeClaim.StatusConditions().SetCondition(apis.Condition{
+		Type:     v1beta1.NodeExpired,
 		Status:   v1.ConditionTrue,
 		Severity: apis.ConditionSeverityWarning,
 	})
 	if !hasExpiredCondition {
-		logging.FromContext(ctx).Debugf("marking machine as expired")
+		logging.FromContext(ctx).Debugf("marking expired")
 		metrics.MachinesDisruptedCounter.With(prometheus.Labels{
 			metrics.TypeLabel:        metrics.ExpirationReason,
 			metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],

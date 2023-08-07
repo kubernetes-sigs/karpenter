@@ -31,8 +31,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
-	machinegarbagecollection "github.com/aws/karpenter-core/pkg/controllers/machine/garbagecollection"
-	machinelifecycle "github.com/aws/karpenter-core/pkg/controllers/machine/lifecycle"
+	nodeclaimgarbagecollection "github.com/aws/karpenter-core/pkg/controllers/machine/garbagecollection"
+	nodeclaimlifcycle "github.com/aws/karpenter-core/pkg/controllers/machine/lifecycle"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
@@ -68,8 +68,8 @@ var _ = BeforeSuite(func() {
 	ctx = settings.ToContext(ctx, test.Settings())
 
 	cloudProvider = fake.NewCloudProvider()
-	garbageCollectionController = machinegarbagecollection.NewController(fakeClock, env.Client, cloudProvider)
-	machineController = machinelifecycle.NewController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
+	garbageCollectionController = nodeclaimgarbagecollection.NewController(fakeClock, env.Client, cloudProvider)
+	machineController = nodeclaimlifcycle.NewMachineController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
 })
 
 var _ = AfterSuite(func() {

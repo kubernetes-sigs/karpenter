@@ -30,9 +30,11 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
+	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 )
 
 const (
@@ -45,47 +47,47 @@ type Drift struct {
 	cloudProvider cloudprovider.CloudProvider
 }
 
-func (d *Drift) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	hasDriftedCondition := machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted) != nil
+func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
+	hasDriftedCondition := nodeClaim.StatusConditions().GetCondition(v1beta1.NodeDrifted) != nil
 
 	// From here there are three scenarios to handle:
-	// 1. If drift is not enabled but the machine is drifted, remove the status condition
+	// 1. If drift is not enabled but the NodeClaim is drifted, remove the status condition
 	if !settings.FromContext(ctx).DriftEnabled {
-		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineDrifted)
+		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.NodeDrifted)
 		if hasDriftedCondition {
-			logging.FromContext(ctx).Debugf("removing drift status condition from machine as drift has been disabled")
+			logging.FromContext(ctx).Debugf("removing drift status condition, drift has been disabled")
 		}
 		return reconcile.Result{}, nil
 	}
-	// 2. If Machine is not launched, remove the drift status condition
-	if launchCond := machine.StatusConditions().GetCondition(v1alpha5.MachineLaunched); launchCond == nil || launchCond.IsFalse() {
-		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineDrifted)
+	// 2. If NodeClaim is not launched, remove the drift status condition
+	if launchCond := nodeClaim.StatusConditions().GetCondition(v1beta1.NodeLaunched); launchCond == nil || launchCond.IsFalse() {
+		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.NodeDrifted)
 		if hasDriftedCondition {
-			logging.FromContext(ctx).Debugf("removing drift status condition from machine as machine isn't launched")
+			logging.FromContext(ctx).Debugf("removing drift status condition, isn't launched")
 		}
 		return reconcile.Result{}, nil
 	}
-	driftedReason, err := d.isDrifted(ctx, provisioner, machine)
+	driftedReason, err := d.isDrifted(ctx, nodePool, nodeClaim)
 	if err != nil {
-		return reconcile.Result{}, cloudprovider.IgnoreMachineNotFoundError(fmt.Errorf("getting drift for machine, %w", err))
+		return reconcile.Result{}, cloudprovider.IgnoreMachineNotFoundError(fmt.Errorf("getting drift, %w", err))
 	}
-	// 3. Otherwise, if the machine isn't drifted, but has the status condition, remove it.
+	// 3. Otherwise, if the NodeClaim isn't drifted, but has the status condition, remove it.
 	if driftedReason == "" {
-		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineDrifted)
+		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.NodeDrifted)
 		if hasDriftedCondition {
-			logging.FromContext(ctx).Debugf("removing drifted status condition from machine")
+			logging.FromContext(ctx).Debugf("removing drifted status condition, not drifted")
 		}
 		return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
-	// 4. Finally, if the machine is drifted, but doesn't have status condition, add it.
-	machine.StatusConditions().SetCondition(apis.Condition{
-		Type:     v1alpha5.MachineDrifted,
+	// 4. Finally, if the NodeClaim is drifted, but doesn't have status condition, add it.
+	nodeClaim.StatusConditions().SetCondition(apis.Condition{
+		Type:     v1beta1.NodeDrifted,
 		Status:   v1.ConditionTrue,
 		Severity: apis.ConditionSeverityWarning,
 		Reason:   string(driftedReason),
 	})
 	if !hasDriftedCondition {
-		logging.FromContext(ctx).Debugf("marking machine as drifted")
+		logging.FromContext(ctx).Debugf("marking drifted")
 		metrics.MachinesDisruptedCounter.With(prometheus.Labels{
 			metrics.TypeLabel:        metrics.DriftReason,
 			metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
@@ -101,15 +103,15 @@ func (d *Drift) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner
 
 // isDrifted will check if a machine is drifted from the fields in the provisioner.Spec and
 // the cloudprovider
-func (d *Drift) isDrifted(ctx context.Context, provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) (cloudprovider.DriftReason, error) {
+func (d *Drift) isDrifted(ctx context.Context, nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) (cloudprovider.DriftReason, error) {
 	// First check for static drift or node requirements have drifted to save on API calls.
-	if reason := lo.FindOrElse([]cloudprovider.DriftReason{areStaticFieldsDrifted(provisioner, machine), areNodeRequirementsDrifted(provisioner, machine)}, "", func(i cloudprovider.DriftReason) bool {
+	if reason := lo.FindOrElse([]cloudprovider.DriftReason{areStaticFieldsDrifted(nodePool, nodeClaim), areNodeRequirementsDrifted(nodePool, nodeClaim)}, "", func(i cloudprovider.DriftReason) bool {
 		return i != ""
 	}); reason != "" {
 		return reason, nil
 	}
 
-	driftedReason, err := d.cloudProvider.IsMachineDrifted(ctx, machine)
+	driftedReason, err := d.cloudProvider.IsMachineDrifted(ctx, machineutil.NewFromNodeClaim(nodeClaim))
 	if err != nil {
 		return "", err
 	}
@@ -118,9 +120,9 @@ func (d *Drift) isDrifted(ctx context.Context, provisioner *v1alpha5.Provisioner
 
 // Eligible fields for static drift are described in the docs
 // https://karpenter.sh/docs/concepts/deprovisioning/#drift
-func areStaticFieldsDrifted(provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) cloudprovider.DriftReason {
-	provisionerHash, foundHashProvisioner := provisioner.Annotations[v1alpha5.ProvisionerHashAnnotationKey]
-	machineHash, foundHashMachine := machine.Annotations[v1alpha5.ProvisionerHashAnnotationKey]
+func areStaticFieldsDrifted(nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) cloudprovider.DriftReason {
+	provisionerHash, foundHashProvisioner := nodePool.Annotations[v1alpha5.ProvisionerHashAnnotationKey]
+	machineHash, foundHashMachine := nodeClaim.Annotations[v1alpha5.ProvisionerHashAnnotationKey]
 	if !foundHashProvisioner || !foundHashMachine {
 		return ""
 	}
@@ -131,9 +133,9 @@ func areStaticFieldsDrifted(provisioner *v1alpha5.Provisioner, machine *v1alpha5
 	return ""
 }
 
-func areNodeRequirementsDrifted(provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) cloudprovider.DriftReason {
-	provisionerReq := scheduling.NewNodeSelectorRequirements(provisioner.Spec.Requirements...)
-	machineReq := scheduling.NewLabelRequirements(machine.Labels)
+func areNodeRequirementsDrifted(nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) cloudprovider.DriftReason {
+	provisionerReq := scheduling.NewNodeSelectorRequirements(nodePool.Spec.Template.Spec.Requirements...)
+	machineReq := scheduling.NewLabelRequirements(nodeClaim.Labels)
 
 	// Every provisioner requirement is compatible with the Machine label set
 	if machineReq.StrictlyCompatible(provisionerReq) != nil {
