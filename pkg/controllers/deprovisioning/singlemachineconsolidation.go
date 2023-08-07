@@ -59,13 +59,13 @@ func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 	// Set a timeout
 	timer := c.clock.After(SingleMachineConsolidationTimeoutDuration)
 	// binary search to find the maximum number of machines we can terminate
-	for _, candidate := range candidates {
+	for i, candidate := range candidates {
 		select {
 		case <-ctx.Done():
 			return Command{}, errors.New("context canceled")
 		case <-timer:
 			deprovisioningConsolidationTimeoutsCounter.WithLabelValues("single-machine").Inc()
-			logging.FromContext(ctx).Debug("abandoning single-machine consolidation due to timeout")
+			logging.FromContext(ctx).Debugf("abandoning single-machine consolidation due to timeout after evaluating %d candidates", i)
 			return Command{}, nil
 		default:
 			// compute a possible consolidation option
