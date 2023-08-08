@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	nodev1 "k8s.io/api/node/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1441,6 +1442,34 @@ var _ = Describe("Binpacking", func() {
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		node := ExpectScheduled(ctx, env.Client, pod)
 		Expect(node.Labels[v1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
+	})
+	It("should take pod runtime class into consideration", func() {
+		ExpectApplied(ctx, env.Client, provisioner)
+		pod := test.UnschedulablePod(
+			test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
+				Requests: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU: resource.MustParse("1"),
+				},
+			}})
+		// the pod has overhead of 2 CPUs
+		runtimeClass := &nodev1.RuntimeClass{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "my-runtime-class",
+			},
+			Handler: "default",
+			Overhead: &nodev1.Overhead{
+				PodFixed: v1.ResourceList{
+					v1.ResourceCPU: resource.MustParse("2"),
+				},
+			},
+		}
+		pod.Spec.RuntimeClassName = &runtimeClass.Name
+		ExpectApplied(ctx, env.Client, runtimeClass)
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		node := ExpectScheduled(ctx, env.Client, pod)
+		// overhead of 2 + request of 1 = at least 3 CPUs, so it won't fit on small-instance-type which it otherwise
+		// would
+		Expect(node.Labels[v1.LabelInstanceTypeStable]).To(Equal("default-instance-type"))
 	})
 	It("should schedule multiple small pods on the smallest possible instance type", func() {
 		opts := test.PodOptions{
