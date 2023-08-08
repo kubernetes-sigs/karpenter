@@ -81,8 +81,14 @@ func (m *Machine) Add(ctx context.Context, pod *v1.Pod) error {
 	}
 	machineRequirements.Add(podRequirements.Values()...)
 
+	strictPodRequirements := podRequirements
+	if scheduling.HasPreferredNodeAffinity(pod) {
+		// strictPodRequirements is important as it ensures we don't inadvertently restrict the possible pod domains by a
+		// preferred node affinity.  Only required node affinities can actually reduce pod domains.
+		strictPodRequirements = scheduling.NewStrictPodRequirements(pod)
+	}
 	// Check Topology Requirements
-	topologyRequirements, err := m.topology.AddRequirements(podRequirements, machineRequirements, pod)
+	topologyRequirements, err := m.topology.AddRequirements(strictPodRequirements, machineRequirements, pod)
 	if err != nil {
 		return err
 	}

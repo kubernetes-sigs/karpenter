@@ -57,24 +57,51 @@ func NewLabelRequirements(labels map[string]string) Requirements {
 	return requirements
 }
 
-// NewPodRequirements constructs requirements from a pod
+// NewPodRequirements constructs requirements from a pod and treats any preferred requirements as required.
 func NewPodRequirements(pod *v1.Pod) Requirements {
+	return newPodRequirements(pod, podRequirementTypeAll)
+}
+
+// NewStrictPodRequirements constructs requirements from a pod and only includes true requirements (not preferences).
+func NewStrictPodRequirements(pod *v1.Pod) Requirements {
+	return newPodRequirements(pod, podRequirementTypeRequiredOnly)
+}
+
+type podRequirementType byte
+
+const (
+	podRequirementTypeAll = iota
+	podRequirementTypeRequiredOnly
+)
+
+func newPodRequirements(pod *v1.Pod, typ podRequirementType) Requirements {
 	requirements := NewLabelRequirements(pod.Spec.NodeSelector)
 	if pod.Spec.Affinity == nil || pod.Spec.Affinity.NodeAffinity == nil {
 		return requirements
 	}
-	// The legal operators for pod affinity and anti-affinity are In, NotIn, Exists, DoesNotExist.
-	// Select heaviest preference and treat as a requirement. An outer loop will iteratively unconstrain them if unsatisfiable.
-	if preferred := pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution; len(preferred) > 0 {
-		sort.Slice(preferred, func(i int, j int) bool { return preferred[i].Weight > preferred[j].Weight })
-		requirements.Add(NewNodeSelectorRequirements(preferred[0].Preference.MatchExpressions...).Values()...)
+	if typ == podRequirementTypeAll {
+		// The legal operators for pod affinity and anti-affinity are In, NotIn, Exists, DoesNotExist.
+		// Select heaviest preference and treat as a requirement. An outer loop will iteratively unconstrain them if unsatisfiable.
+		if preferred := pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution; len(preferred) > 0 {
+			sort.Slice(preferred, func(i int, j int) bool { return preferred[i].Weight > preferred[j].Weight })
+			requirements.Add(NewNodeSelectorRequirements(preferred[0].Preference.MatchExpressions...).Values()...)
+		}
 	}
+
 	// Select first requirement. An outer loop will iteratively remove OR requirements if unsatisfiable
 	if pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil &&
 		len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) > 0 {
 		requirements.Add(NewNodeSelectorRequirements(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions...).Values()...)
 	}
 	return requirements
+}
+
+// HasPreferredNodeAffinity returns true if the pod has a preferred node affinity term
+func HasPreferredNodeAffinity(p *v1.Pod) bool {
+	if p == nil {
+		return false
+	}
+	return p.Spec.Affinity != nil && p.Spec.Affinity.NodeAffinity != nil && len(p.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution) > 0
 }
 
 func (r Requirements) NodeSelectorRequirements() []v1.NodeSelectorRequirement {

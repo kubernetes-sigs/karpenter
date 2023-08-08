@@ -94,8 +94,15 @@ func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v
 	}
 	nodeRequirements.Add(podRequirements.Values()...)
 
+	strictPodRequirements := podRequirements
+	if scheduling.HasPreferredNodeAffinity(pod) {
+		// strictPodRequirements is important as it ensures we don't inadvertently restrict the possible pod domains by a
+		// preferred node affinity.  Only required node affinities can actually reduce pod domains.
+		strictPodRequirements = scheduling.NewStrictPodRequirements(pod)
+	}
+
 	// Check Topology Requirements
-	topologyRequirements, err := n.topology.AddRequirements(podRequirements, nodeRequirements, pod)
+	topologyRequirements, err := n.topology.AddRequirements(strictPodRequirements, nodeRequirements, pod)
 	if err != nil {
 		return err
 	}
