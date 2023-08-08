@@ -20,6 +20,7 @@ import (
 	"github.com/imdario/mergo"
 	v1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
@@ -43,6 +44,7 @@ type PodOptions struct {
 	TopologySpreadConstraints     []v1.TopologySpreadConstraint
 	Tolerations                   []v1.Toleration
 	PersistentVolumeClaims        []string
+	EphemeralVolumeTemplates      []EphemeralVolumeTemplateOptions
 	Conditions                    []v1.PodCondition
 	Phase                         v1.PodPhase
 	RestartPolicy                 v1.RestartPolicy
@@ -55,6 +57,10 @@ type PDBOptions struct {
 	MinAvailable   *intstr.IntOrString
 	MaxUnavailable *intstr.IntOrString
 	Status         *policyv1.PodDisruptionBudgetStatus
+}
+
+type EphemeralVolumeTemplateOptions struct {
+	StorageClassName *string
 }
 
 // Pod creates a test pod with defaults that can be overridden by PodOptions.
@@ -74,6 +80,28 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 		volumes = append(volumes, v1.Volume{
 			Name:         RandomName(),
 			VolumeSource: v1.VolumeSource{PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{ClaimName: pvc}},
+		})
+	}
+	for _, evt := range options.EphemeralVolumeTemplates {
+		volumes = append(volumes, v1.Volume{
+			Name: RandomName(),
+			VolumeSource: v1.VolumeSource{
+				Ephemeral: &v1.EphemeralVolumeSource{
+					VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
+						Spec: v1.PersistentVolumeClaimSpec{
+							AccessModes: []v1.PersistentVolumeAccessMode{
+								v1.ReadWriteOnce,
+							},
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{
+									v1.ResourceStorage: resource.MustParse("1Gi"),
+								},
+							},
+							StorageClassName: evt.StorageClassName,
+						},
+					},
+				},
+			},
 		})
 	}
 
