@@ -80,6 +80,57 @@ var _ = Describe("Drift", func() {
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		ExpectExists(ctx, env.Client, machine)
 	})
+	It("should continue to the next drifted node if the first cannot reschedule all pods", func() {
+		pod := test.Pod(test.PodOptions{
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: v1.ResourceList{
+					v1.ResourceCPU: resource.MustParse("150"),
+				},
+			},
+		})
+		podToExpire := test.Pod(test.PodOptions{
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: v1.ResourceList{
+					v1.ResourceCPU: resource.MustParse("1"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, machine, node, prov, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
+		machine2, node2 := test.MachineAndNode(v1alpha5.Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.RandomProviderID(),
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("1"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		machine2.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
+		ExpectApplied(ctx, env.Client, machine2, node2, podToExpire)
+		ExpectManualBinding(ctx, env.Client, podToExpire, node2)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node2}, []*v1alpha5.Machine{machine2})
+
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		ExpectExists(ctx, env.Client, machine)
+	})
 	It("should ignore nodes without the drifted status condition", func() {
 		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineDrifted)
 		ExpectApplied(ctx, env.Client, machine, node, prov)
