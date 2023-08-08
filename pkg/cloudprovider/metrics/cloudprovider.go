@@ -142,7 +142,7 @@ func (d *decorator) GetInstanceTypes(ctx context.Context, provisioner *v1alpha5.
 	return instanceType, err
 }
 
-func (d *decorator) IsMachineDrifted(ctx context.Context, machine *v1alpha5.Machine) (bool, error) {
+func (d *decorator) IsMachineDrifted(ctx context.Context, machine *v1alpha5.Machine) (cloudprovider.DriftReason, error) {
 	method := "IsMachineDrifted"
 	defer metrics.Measure(methodDurationHistogramVec.With(getLabelsMapForDuration(ctx, d, method)))()
 	isDrifted, err := d.CloudProvider.IsMachineDrifted(ctx, machine)

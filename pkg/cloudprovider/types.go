@@ -30,6 +30,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
+type DriftReason string
+
 // CloudProvider interface is implemented by cloud providers to support provisioning.
 type CloudProvider interface {
 	// Create launches a machine with the given resource requests and requirements and returns a hydrated
@@ -48,7 +50,7 @@ type CloudProvider interface {
 	GetInstanceTypes(context.Context, *v1alpha5.Provisioner) ([]*InstanceType, error)
 	// IsMachineDrifted returns whether a machine has drifted from the provisioning requirements
 	// it is tied to.
-	IsMachineDrifted(context.Context, *v1alpha5.Machine) (bool, error)
+	IsMachineDrifted(context.Context, *v1alpha5.Machine) (DriftReason, error)
 	// Name returns the CloudProvider implementation name.
 	Name() string
 }

@@ -24,6 +24,8 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/samber/lo"
+
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -60,7 +62,7 @@ func (d *Drift) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner
 		return reconcile.Result{}, cloudprovider.IgnoreMachineNotFoundError(fmt.Errorf("getting drift for machine, %w", err))
 	}
 	// 3. Otherwise, if the machine isn't drifted, but has the status condition, remove it.
-	if !drifted {
+	if drifted == NotDrifted {
 		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineDrifted)
 		if hasDriftedCondition {
 			logging.FromContext(ctx).Debugf("removing drifted status condition from machine")
@@ -82,30 +84,42 @@ func (d *Drift) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner
 
 // isDrifted will check if a machine is drifted from the fields in the provisioner.Spec and
 // the cloudprovider
-func (d *Drift) isDrifted(ctx context.Context, provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) (bool, error) {
-	cloudProviderDrifted, err := d.cloudProvider.IsMachineDrifted(ctx, machine)
+func (d *Drift) isDrifted(ctx context.Context, provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) (cloudprovider.DriftReason, error) {
+	driftedReason, err := d.cloudProvider.IsMachineDrifted(ctx, machine)
 	if err != nil {
-		return false, err
+		return NotDrifted, err
 	}
 
-	return cloudProviderDrifted || areStaticFieldsDrifted(provisioner, machine) || areNodeRequirementsDrifted(provisioner, machine), nil
+	reason := lo.FindOrElse([]cloudprovider.DriftReason{driftedReason, areStaticFieldsDrifted(provisioner, machine), areNodeRequirementsDrifted(provisioner, machine)}, NotDrifted, func(i cloudprovider.DriftReason) bool {
+		return i != NotDrifted
+	})
+
+	return reason, nil
 }
 
 // Eligible fields for static drift are described in the docs
 // https://karpenter.sh/docs/concepts/deprovisioning/#drift
-func areStaticFieldsDrifted(provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) bool {
+func areStaticFieldsDrifted(provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) cloudprovider.DriftReason {
 	provisionerHash, foundHashProvisioner := provisioner.Annotations[v1alpha5.ProvisionerHashAnnotationKey]
 	machineHash, foundHashMachine := machine.Annotations[v1alpha5.ProvisionerHashAnnotationKey]
 	if !foundHashProvisioner || !foundHashMachine {
-		return false
+		return NotDrifted
 	}
-	return provisionerHash != machineHash
+	if provisionerHash != machineHash {
+		return StaticDrift
+	}
+
+	return NotDrifted
 }
 
-func areNodeRequirementsDrifted(provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) bool {
+func areNodeRequirementsDrifted(provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) cloudprovider.DriftReason {
 	provisionerReq := scheduling.NewNodeSelectorRequirements(provisioner.Spec.Requirements...)
 	machineReq := scheduling.NewLabelRequirements(machine.Labels)
 
 	// Every provisioner requirement is compatible with the Machine label set
-	return machineReq.StrictlyCompatible(provisionerReq) != nil
+	if machineReq.StrictlyCompatible(provisionerReq) != nil {
+		return NodeRequirementDrift
+	}
+
+	return NotDrifted
 }
