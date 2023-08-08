@@ -97,12 +97,15 @@ func Subtract(lhs, rhs v1.ResourceList) v1.ResourceList {
 func Ceiling(pod *v1.Pod) v1.ResourceRequirements {
 	var resources v1.ResourceRequirements
 	for _, container := range pod.Spec.Containers {
-		resources.Requests = Merge(resources.Requests, MergeResourceLimitsIntoRequests(container))
-		resources.Limits = Merge(resources.Limits, container.Resources.Limits)
+		resources.Requests = MergeInto(resources.Requests, MergeResourceLimitsIntoRequests(container))
+		resources.Limits = MergeInto(resources.Limits, container.Resources.Limits)
 	}
 	for _, container := range pod.Spec.InitContainers {
 		resources.Requests = MaxResources(resources.Requests, MergeResourceLimitsIntoRequests(container))
 		resources.Limits = MaxResources(resources.Limits, container.Resources.Limits)
+	}
+	if pod.Spec.Overhead != nil {
+		resources.Requests = MergeInto(resources.Requests, pod.Spec.Overhead)
 	}
 	return resources
 }

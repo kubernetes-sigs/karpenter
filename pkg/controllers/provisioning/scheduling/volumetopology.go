@@ -18,11 +18,14 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/aws/karpenter-core/pkg/scheduling"
 )
 
 func NewVolumeTopology(kubeClient client.Client) *VolumeTopology {
@@ -68,25 +71,41 @@ func (v *VolumeTopology) Inject(ctx context.Context, pod *v1.Pod) error {
 }
 
 func (v *VolumeTopology) getRequirements(ctx context.Context, pod *v1.Pod, volume v1.Volume) ([]v1.NodeSelectorRequirement, error) {
-	// Get PVC
-	if volume.PersistentVolumeClaim == nil {
+	defaultStorageClassName, err := scheduling.DiscoverDefaultStorageClassName(ctx, v.kubeClient)
+	if err != nil {
+		return nil, fmt.Errorf("discovering default storage class, %w", err)
+	}
+
+	// Get VolumeName and StorageClass name from PVC
+	pvc := &v1.PersistentVolumeClaim{}
+	switch {
+	case volume.PersistentVolumeClaim != nil:
+		if err = v.kubeClient.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: volume.PersistentVolumeClaim.ClaimName}, pvc); err != nil {
+			return nil, fmt.Errorf("discovering persistent volume claim, %w", err)
+		}
+	case volume.Ephemeral != nil:
+		// generated name per https://kubernetes.io/docs/concepts/storage/ephemeral-volumes/#persistentvolumeclaim-naming
+		if err = v.kubeClient.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: fmt.Sprintf("%s-%s", pod.Name, volume.Name)}, pvc); err != nil {
+			return nil, fmt.Errorf("discovering persistent volume claim for ephemeral volume, %w", err)
+		}
+	default:
 		return nil, nil
 	}
-	pvc, err := v.getPersistentVolumeClaim(ctx, pod, volume)
-	if err != nil {
-		return nil, err
+	storageClassName := lo.FromPtr(pvc.Spec.StorageClassName)
+	if storageClassName == "" {
+		storageClassName = defaultStorageClassName
 	}
 	// Persistent Volume Requirements
 	if pvc.Spec.VolumeName != "" {
-		requirements, err := v.getPersistentVolumeRequirements(ctx, pod, pvc)
+		requirements, err := v.getPersistentVolumeRequirements(ctx, pod, pvc.Spec.VolumeName)
 		if err != nil {
 			return nil, fmt.Errorf("getting existing requirements, %w", err)
 		}
 		return requirements, nil
 	}
 	// Storage Class Requirements
-	if ptr.StringValue(pvc.Spec.StorageClassName) != "" {
-		requirements, err := v.getStorageClassRequirements(ctx, pvc)
+	if storageClassName != "" {
+		requirements, err := v.getStorageClassRequirements(ctx, storageClassName)
 		if err != nil {
 			return nil, err
 		}
@@ -95,10 +114,10 @@ func (v *VolumeTopology) getRequirements(ctx context.Context, pod *v1.Pod, volum
 	return nil, nil
 }
 
-func (v *VolumeTopology) getStorageClassRequirements(ctx context.Context, pvc *v1.PersistentVolumeClaim) ([]v1.NodeSelectorRequirement, error) {
+func (v *VolumeTopology) getStorageClassRequirements(ctx context.Context, storageClassName string) ([]v1.NodeSelectorRequirement, error) {
 	storageClass := &storagev1.StorageClass{}
-	if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: ptr.StringValue(pvc.Spec.StorageClassName)}, storageClass); err != nil {
-		return nil, fmt.Errorf("getting storage class %q, %w", ptr.StringValue(pvc.Spec.StorageClassName), err)
+	if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: storageClassName}, storageClass); err != nil {
+		return nil, fmt.Errorf("getting storage class %q, %w", storageClassName, err)
 	}
 	var requirements []v1.NodeSelectorRequirement
 	if len(storageClass.AllowedTopologies) > 0 {
@@ -110,10 +129,10 @@ func (v *VolumeTopology) getStorageClassRequirements(ctx context.Context, pvc *v
 	return requirements, nil
 }
 
-func (v *VolumeTopology) getPersistentVolumeRequirements(ctx context.Context, pod *v1.Pod, pvc *v1.PersistentVolumeClaim) ([]v1.NodeSelectorRequirement, error) {
+func (v *VolumeTopology) getPersistentVolumeRequirements(ctx context.Context, pod *v1.Pod, volumeName string) ([]v1.NodeSelectorRequirement, error) {
 	pv := &v1.PersistentVolume{}
-	if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: pvc.Spec.VolumeName, Namespace: pod.Namespace}, pv); err != nil {
-		return nil, fmt.Errorf("getting persistent volume %q, %w", pvc.Spec.VolumeName, err)
+	if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: volumeName, Namespace: pod.Namespace}, pv); err != nil {
+		return nil, fmt.Errorf("getting persistent volume %q, %w", volumeName, err)
 	}
 	if pv.Spec.NodeAffinity == nil {
 		return nil, nil

@@ -17,6 +17,7 @@ package provisioning_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -1024,6 +1025,28 @@ var _ = Describe("Volume Topology Requirements", func() {
 		node := ExpectScheduled(ctx, env.Client, pod)
 		Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
 	})
+	It("should schedule to storage class zones if volume does not exist (ephemeral volume)", func() {
+		pod := test.UnschedulablePod(test.PodOptions{
+			EphemeralVolumeTemplates: []test.EphemeralVolumeTemplateOptions{
+				{
+					StorageClassName: &storageClass.Name,
+				},
+			},
+			NodeRequirements: []v1.NodeSelectorRequirement{{
+				Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-3"},
+			}},
+		})
+		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: fmt.Sprintf("%s-%s", pod.Name, pod.Spec.Volumes[0].Name),
+			},
+			StorageClassName: &storageClass.Name,
+		})
+		ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, persistentVolumeClaim)
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		node := ExpectScheduled(ctx, env.Client, pod)
+		Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
+	})
 	It("should not schedule if storage class zones are incompatible", func() {
 		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{StorageClassName: &storageClass.Name})
 		ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, persistentVolumeClaim)
@@ -1033,6 +1056,27 @@ var _ = Describe("Volume Topology Requirements", func() {
 				Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"},
 			}},
 		})
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		ExpectNotScheduled(ctx, env.Client, pod)
+	})
+	It("should not schedule if storage class zones are incompatible (ephemeral volume)", func() {
+		pod := test.UnschedulablePod(test.PodOptions{
+			EphemeralVolumeTemplates: []test.EphemeralVolumeTemplateOptions{
+				{
+					StorageClassName: &storageClass.Name,
+				},
+			},
+			NodeRequirements: []v1.NodeSelectorRequirement{{
+				Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"},
+			}},
+		})
+		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: fmt.Sprintf("%s-%s", pod.Name, pod.Spec.Volumes[0].Name),
+			},
+			StorageClassName: &storageClass.Name,
+		})
+		ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, persistentVolumeClaim)
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		ExpectNotScheduled(ctx, env.Client, pod)
 	})
@@ -1047,6 +1091,27 @@ var _ = Describe("Volume Topology Requirements", func() {
 		node := ExpectScheduled(ctx, env.Client, pod)
 		Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
 	})
+	It("should schedule to volume zones if volume already bound (ephemeral volume)", func() {
+		pod := test.UnschedulablePod(test.PodOptions{
+			EphemeralVolumeTemplates: []test.EphemeralVolumeTemplateOptions{
+				{
+					StorageClassName: &storageClass.Name,
+				},
+			},
+		})
+		persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{Zones: []string{"test-zone-3"}})
+		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: fmt.Sprintf("%s-%s", pod.Name, pod.Spec.Volumes[0].Name),
+			},
+			VolumeName:       persistentVolume.Name,
+			StorageClassName: &storageClass.Name,
+		})
+		ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, pod, persistentVolumeClaim, persistentVolume)
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		node := ExpectScheduled(ctx, env.Client, pod)
+		Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
+	})
 	It("should not schedule if volume zones are incompatible", func() {
 		persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{Zones: []string{"test-zone-3"}})
 		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{VolumeName: persistentVolume.Name, StorageClassName: &storageClass.Name})
@@ -1057,6 +1122,29 @@ var _ = Describe("Volume Topology Requirements", func() {
 				Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"},
 			}},
 		})
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		ExpectNotScheduled(ctx, env.Client, pod)
+	})
+	It("should not schedule if volume zones are incompatible (ephemeral volume)", func() {
+		pod := test.UnschedulablePod(test.PodOptions{
+			EphemeralVolumeTemplates: []test.EphemeralVolumeTemplateOptions{
+				{
+					StorageClassName: &storageClass.Name,
+				},
+			},
+			NodeRequirements: []v1.NodeSelectorRequirement{{
+				Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"},
+			}},
+		})
+		persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{Zones: []string{"test-zone-3"}})
+		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: fmt.Sprintf("%s-%s", pod.Name, pod.Spec.Volumes[0].Name),
+			},
+			VolumeName:       persistentVolume.Name,
+			StorageClassName: &storageClass.Name,
+		})
+		ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, pod, persistentVolumeClaim, persistentVolume)
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		ExpectNotScheduled(ctx, env.Client, pod)
 	})

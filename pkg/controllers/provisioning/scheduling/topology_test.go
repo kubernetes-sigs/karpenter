@@ -1097,7 +1097,7 @@ var _ = Describe("Topology", func() {
 	})
 
 	// https://kubernetes.io/docs/concepts/workloads/pods/pod-topology-spread-constraints/#interaction-with-node-affinity-and-node-selectors
-	Context("Combined Zonal Topology and Machine Affinity", func() {
+	Context("Combined Zonal Topology and Node Affinity", func() {
 		It("should limit spread options by nodeSelector", func() {
 			topology := []v1.TopologySpreadConstraint{{
 				TopologyKey:       v1.LabelTopologyZone,
@@ -1214,7 +1214,7 @@ var _ = Describe("Topology", func() {
 	})
 
 	// https://kubernetes.io/docs/concepts/workloads/pods/pod-topology-spread-constraints/#interaction-with-node-affinity-and-node-selectors
-	Context("Combined Capacity Type Topology and Machine Affinity", func() {
+	Context("Combined Capacity Type Topology and Node Affinity", func() {
 		It("should limit spread options by nodeSelector", func() {
 			topology := []v1.TopologySpreadConstraint{{
 				TopologyKey:       v1alpha5.LabelCapacityType,
