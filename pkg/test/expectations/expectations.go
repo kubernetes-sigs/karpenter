@@ -29,6 +29,7 @@ import (
 	"github.com/samber/lo"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
+	nodev1 "k8s.io/api/node/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -204,6 +205,7 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 		&v1.Pod{},
 		&v1.Node{},
 		&appsv1.DaemonSet{},
+		&nodev1.RuntimeClass{},
 		&policyv1.PodDisruptionBudget{},
 		&v1.PersistentVolumeClaim{},
 		&v1.PersistentVolume{},
