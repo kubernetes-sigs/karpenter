@@ -18,6 +18,7 @@ import (
 	"fmt"
 
 	"github.com/imdario/mergo"
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -45,6 +46,7 @@ type PodOptions struct {
 	Tolerations                   []v1.Toleration
 	PersistentVolumeClaims        []string
 	EphemeralVolumeTemplates      []EphemeralVolumeTemplateOptions
+	HostPorts                     []int32
 	Conditions                    []v1.PodCondition
 	Phase                         v1.PodPhase
 	RestartPolicy                 v1.RestartPolicy
@@ -116,6 +118,13 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 				Name:      RandomName(),
 				Image:     options.Image,
 				Resources: options.ResourceRequirements,
+				Ports: lo.Map(options.HostPorts, func(p int32, _ int) v1.ContainerPort {
+					return v1.ContainerPort{
+						HostPort:      p,
+						Protocol:      v1.ProtocolTCP,
+						ContainerPort: int32(80),
+					}
+				}),
 			}},
 			NodeName:                      options.NodeName,
 			Volumes:                       volumes,

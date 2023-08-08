@@ -15,7 +15,6 @@ limitations under the License.
 package scheduling
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -61,15 +60,16 @@ func NewMachine(machineTemplate *MachineTemplate, topology *Topology, daemonReso
 	}
 }
 
-func (m *Machine) Add(ctx context.Context, pod *v1.Pod) error {
+func (m *Machine) Add(pod *v1.Pod) error {
 	// Check Taints
 	if err := m.Taints.Tolerates(pod); err != nil {
 		return err
 	}
 
 	// exposed host ports on the node
-	if err := m.hostPortUsage.Validate(pod); err != nil {
-		return err
+	hostPorts := scheduling.GetHostPorts(pod)
+	if err := m.hostPortUsage.Conflicts(pod, hostPorts); err != nil {
+		return fmt.Errorf("checking host port usage, %w", err)
 	}
 
 	machineRequirements := scheduling.NewRequirements(m.Requirements.Values()...)
@@ -106,7 +106,7 @@ func (m *Machine) Add(ctx context.Context, pod *v1.Pod) error {
 	m.Requests = requests
 	m.Requirements = machineRequirements
 	m.topology.Record(pod, machineRequirements)
-	m.hostPortUsage.Add(ctx, pod)
+	m.hostPortUsage.Add(pod, hostPorts)
 	return nil
 }
 

@@ -18,9 +18,12 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"net"
 	"testing"
 	"time"
 
+	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	cloudproviderapi "k8s.io/cloud-provider/api"
 	clock "k8s.io/utils/clock/testing"
 	"knative.dev/pkg/ptr"
@@ -31,6 +34,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
+	"github.com/aws/karpenter-core/pkg/scheduling"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 
@@ -60,6 +64,8 @@ var provisionerController controller.Controller
 var daemonsetController controller.Controller
 var cloudProvider *fake.CloudProvider
 var provisioner *v1alpha5.Provisioner
+
+const csiProvider = "fake.csi.provider"
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -91,6 +97,223 @@ var _ = BeforeEach(func() {
 })
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
+})
+
+var _ = Describe("Volume Usage/Limits", func() {
+	var machine *v1alpha5.Machine
+	var node *v1.Node
+	var csiNode *storagev1.CSINode
+	var sc *storagev1.StorageClass
+	BeforeEach(func() {
+		instanceType := cloudProvider.InstanceTypes[0]
+		machine, node = test.MachineAndNode(v1alpha5.Machine{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+				v1.LabelInstanceTypeStable:       instanceType.Name,
+			}},
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.RandomProviderID(),
+			},
+		})
+		sc = test.StorageClass(test.StorageClassOptions{
+			ObjectMeta:  metav1.ObjectMeta{Name: "my-storage-class"},
+			Provisioner: ptr.String(csiProvider),
+			Zones:       []string{"test-zone-1"},
+		})
+		csiNode = &storagev1.CSINode{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: node.Name,
+			},
+			Spec: storagev1.CSINodeSpec{
+				Drivers: []storagev1.CSINodeDriver{
+					{
+						Name:   csiProvider,
+						NodeID: "fake-node-id",
+						Allocatable: &storagev1.VolumeNodeResources{
+							Count: ptr.Int32(10),
+						},
+					},
+				},
+			},
+		}
+	})
+	It("should hydrate the volume usage on a Node update", func() {
+		ExpectApplied(ctx, env.Client, sc, node, csiNode)
+		for i := 0; i < 10; i++ {
+			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				StorageClassName: ptr.String(sc.Name),
+			})
+			pod := test.Pod(test.PodOptions{
+				PersistentVolumeClaims: []string{pvc.Name},
+			})
+			ExpectApplied(ctx, env.Client, pvc, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+		}
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectStateNodeCount("==", 1)
+		stateNode := ExpectStateNodeExists(node)
+
+		// Adding more volumes should cause an error since we are at the volume limits
+		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.Volumes{
+			csiProvider: sets.New("test"),
+		})).ToNot(BeNil())
+	})
+	It("should maintain the volume usage state when receiving Machine updates", func() {
+		ExpectApplied(ctx, env.Client, sc, machine, node, csiNode)
+		for i := 0; i < 10; i++ {
+			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				StorageClassName: ptr.String(sc.Name),
+			})
+			pod := test.Pod(test.PodOptions{
+				PersistentVolumeClaims: []string{pvc.Name},
+			})
+			ExpectApplied(ctx, env.Client, pvc, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+		}
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectStateNodeCount("==", 1)
+		stateNode := ExpectStateNodeExists(node)
+
+		// Adding more volumes should cause an error since we are at the volume limits
+		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.Volumes{
+			csiProvider: sets.New("test"),
+		})).ToNot(BeNil())
+
+		// Reconcile the machine one more time to ensure that we maintain our volume usage state
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+
+		// Ensure that we still consider adding another volume to the node breaching our volume limits
+		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.Volumes{
+			csiProvider: sets.New("test"),
+		})).ToNot(BeNil())
+	})
+	It("should ignore the volume usage limits breach if the pod update is for an already tracked pod", func() {
+		ExpectApplied(ctx, env.Client, sc, machine, node, csiNode)
+		var pvcs []*v1.PersistentVolumeClaim
+		for i := 0; i < 10; i++ {
+			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				StorageClassName: ptr.String(sc.Name),
+			})
+			pod := test.Pod(test.PodOptions{
+				PersistentVolumeClaims: []string{pvc.Name},
+			})
+			pvcs = append(pvcs, pvc)
+			ExpectApplied(ctx, env.Client, pvc, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+		}
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectStateNodeCount("==", 1)
+		stateNode := ExpectStateNodeExists(node)
+
+		// Adding more volumes should not cause an error since this PVC volume is already tracked
+		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.Volumes{
+			csiProvider: sets.New(client.ObjectKeyFromObject(pvcs[5]).String()),
+		})).To(BeNil())
+	})
+})
+
+var _ = Describe("HostPort Usage", func() {
+	var machine *v1alpha5.Machine
+	var node *v1.Node
+	BeforeEach(func() {
+		instanceType := cloudProvider.InstanceTypes[0]
+		machine, node = test.MachineAndNode(v1alpha5.Machine{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+				v1.LabelInstanceTypeStable:       instanceType.Name,
+			}},
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.RandomProviderID(),
+			},
+		})
+	})
+	It("should hydrate the HostPort usage on a Node update", func() {
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		for i := 0; i < 10; i++ {
+			pod := test.Pod(test.PodOptions{
+				HostPorts: []int32{int32(i)},
+			})
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+		}
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectStateNodeCount("==", 1)
+		stateNode := ExpectStateNodeExists(node)
+
+		// Adding a conflicting host port should cause an error
+		Expect(stateNode.HostPortUsage().Conflicts(test.Pod(), []scheduling.HostPort{
+			{
+				IP:       net.IP("0.0.0.0"),
+				Port:     int32(5),
+				Protocol: v1.ProtocolTCP,
+			},
+		})).ToNot(BeNil())
+	})
+	It("should maintain the host port usage state when receiving Machine updates", func() {
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		for i := 0; i < 10; i++ {
+			pod := test.Pod(test.PodOptions{
+				HostPorts: []int32{int32(i)},
+			})
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+		}
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectStateNodeCount("==", 1)
+		stateNode := ExpectStateNodeExists(node)
+
+		// Adding a conflicting host port should cause an error
+		Expect(stateNode.HostPortUsage().Conflicts(test.Pod(), []scheduling.HostPort{
+			{
+				IP:       net.IP("0.0.0.0"),
+				Port:     int32(5),
+				Protocol: v1.ProtocolTCP,
+			},
+		})).ToNot(BeNil())
+
+		// Reconcile the machine one more time to ensure that we maintain our volume usage state
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+
+		// Ensure that we still consider the host port usage addition an error
+		Expect(stateNode.HostPortUsage().Conflicts(test.Pod(), []scheduling.HostPort{
+			{
+				IP:       net.IP("0.0.0.0"),
+				Port:     int32(5),
+				Protocol: v1.ProtocolTCP,
+			},
+		})).ToNot(BeNil())
+	})
+	It("should ignore the host port usage conflict if the pod update is for an already tracked pod", func() {
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		var pods []*v1.Pod
+		for i := 0; i < 10; i++ {
+			pod := test.Pod(test.PodOptions{
+				HostPorts: []int32{int32(i)},
+			})
+			pods = append(pods, pod)
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+		}
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectStateNodeCount("==", 1)
+		stateNode := ExpectStateNodeExists(node)
+
+		// Adding a conflicting host port should not cause an error since this port is already tracked for the pod
+		Expect(stateNode.HostPortUsage().Conflicts(pods[5], []scheduling.HostPort{
+			{
+				IP:       net.IP("0.0.0.0"),
+				Port:     int32(5),
+				Protocol: v1.ProtocolTCP,
+			},
+		})).To(BeNil())
+	})
 })
 
 var _ = Describe("Inflight Nodes", func() {

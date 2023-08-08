@@ -16,6 +16,7 @@ package state
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/samber/lo"
@@ -31,6 +32,8 @@ import (
 	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
+
+//go:generate controller-gen object:headerFile="../../../hack/boilerplate.go.txt" paths="."
 
 // StateNodes is a typed version of a list of *Node
 // nolint: revive
@@ -86,7 +89,6 @@ type StateNode struct {
 
 	hostPortUsage *scheduling.HostPortUsage
 	volumeUsage   *scheduling.VolumeUsage
-	volumeLimits  scheduling.VolumeCount
 
 	markedForDeletion bool
 	nominatedUntil    metav1.Time
@@ -101,9 +103,8 @@ func NewNode() *StateNode {
 		daemonSetLimits:     map[types.NamespacedName]v1.ResourceList{},
 		podRequests:         map[types.NamespacedName]v1.ResourceList{},
 		podLimits:           map[types.NamespacedName]v1.ResourceList{},
-		hostPortUsage:       &scheduling.HostPortUsage{},
+		hostPortUsage:       scheduling.NewHostPortUsage(),
 		volumeUsage:         scheduling.NewVolumeUsage(),
-		volumeLimits:        scheduling.VolumeCount{},
 	}
 }
 
@@ -295,10 +296,6 @@ func (in *StateNode) VolumeUsage() *scheduling.VolumeUsage {
 	return in.volumeUsage
 }
 
-func (in *StateNode) VolumeLimits() scheduling.VolumeCount {
-	return in.volumeLimits
-}
-
 func (in *StateNode) PodRequests() v1.ResourceList {
 	var totalRequests v1.ResourceList
 	for _, requests := range in.podRequests {
@@ -334,9 +331,13 @@ func (in *StateNode) Managed() bool {
 		(in.Node != nil && in.Node.Labels[v1alpha5.ProvisionerNameLabelKey] != "")
 }
 
-func (in *StateNode) updateForPod(ctx context.Context, kubeClient client.Client, pod *v1.Pod) {
+func (in *StateNode) updateForPod(ctx context.Context, kubeClient client.Client, pod *v1.Pod) error {
 	podKey := client.ObjectKeyFromObject(pod)
-
+	hostPorts := scheduling.GetHostPorts(pod)
+	volumes, err := scheduling.GetVolumes(ctx, kubeClient, pod)
+	if err != nil {
+		return fmt.Errorf("tracking volume usage, %w", err)
+	}
 	in.podRequests[podKey] = resources.RequestsForPods(pod)
 	in.podLimits[podKey] = resources.LimitsForPods(pod)
 	// if it's a daemonset, we track what it has requested separately
@@ -344,8 +345,9 @@ func (in *StateNode) updateForPod(ctx context.Context, kubeClient client.Client,
 		in.daemonSetRequests[podKey] = resources.RequestsForPods(pod)
 		in.daemonSetLimits[podKey] = resources.LimitsForPods(pod)
 	}
-	in.hostPortUsage.Add(ctx, pod)
-	in.volumeUsage.Add(ctx, kubeClient, pod)
+	in.hostPortUsage.Add(pod, hostPorts)
+	in.volumeUsage.Add(pod, volumes)
+	return nil
 }
 
 func (in *StateNode) cleanupForPod(podKey types.NamespacedName) {

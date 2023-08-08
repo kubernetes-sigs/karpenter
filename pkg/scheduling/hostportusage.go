@@ -15,42 +15,44 @@ limitations under the License.
 package scheduling
 
 import (
-	"context"
 	"fmt"
 	"net"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+//go:generate controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="."
 
 // HostPortUsage tracks HostPort usage within a node. On a node, each <hostIP, hostPort, protocol> used by pods bound
 // to the node must be unique. We need to track this to keep an accurate concept of what pods can potentially schedule
 // together.
+// +k8s:deepcopy-gen=true
 type HostPortUsage struct {
-	reserved map[types.NamespacedName][]entry
+	reserved map[types.NamespacedName][]HostPort
 }
 
-type entry struct {
-	ip       net.IP
-	port     int32
-	protocol v1.Protocol
+// +k8s:deepcopy-gen=true
+type HostPort struct {
+	IP       net.IP
+	Port     int32
+	Protocol v1.Protocol
 }
 
-func (e entry) String() string {
-	return fmt.Sprintf("IP=%s Port=%d Proto=%s", e.ip, e.port, e.protocol)
+func (p HostPort) String() string {
+	return fmt.Sprintf("IP=%s Port=%d Proto=%s", p.IP, p.Port, p.Protocol)
 }
 
-func (e entry) matches(rhs entry) bool {
-	if e.protocol != rhs.protocol {
+func (p HostPort) Matches(rhs HostPort) bool {
+	if p.Protocol != rhs.Protocol {
 		return false
 	}
-	if e.port != rhs.port {
+	if p.Port != rhs.Port {
 		return false
 	}
 	// If IPs are unequal, they don't match unless one is an unspecified address "0.0.0.0" or the IPv6 address "::".
-	if !e.ip.Equal(rhs.ip) && !e.ip.IsUnspecified() && !rhs.ip.IsUnspecified() {
+	if !p.IP.Equal(rhs.IP) && !p.IP.IsUnspecified() && !rhs.IP.IsUnspecified() {
 		return false
 	}
 	return true
@@ -58,38 +60,26 @@ func (e entry) matches(rhs entry) bool {
 
 func NewHostPortUsage() *HostPortUsage {
 	return &HostPortUsage{
-		reserved: map[types.NamespacedName][]entry{},
+		reserved: map[types.NamespacedName][]HostPort{},
 	}
 }
 
-// Add adds a port to the HostPortUsage, returning an error in the case of a conflict
-func (u *HostPortUsage) Add(ctx context.Context, pod *v1.Pod) {
-	newUsage, err := u.validate(pod)
-	if err != nil {
-		logging.FromContext(ctx).Errorf("invariant violated registering host port usage, %s, please file an issue", err)
-	}
-	u.reserved[client.ObjectKeyFromObject(pod)] = newUsage
+// Add adds a port to the HostPortUsage
+func (u *HostPortUsage) Add(usedBy *v1.Pod, ports []HostPort) {
+	u.reserved[client.ObjectKeyFromObject(usedBy)] = ports
 }
 
-// Validate performs host port conflict validation to allow for determining if we can schedule the pod to the node
-// before doing so.
-func (u *HostPortUsage) Validate(pod *v1.Pod) error {
-	_, err := u.validate(pod)
-	return err
-}
-
-func (u *HostPortUsage) validate(pod *v1.Pod) ([]entry, error) {
-	newUsage := getHostPorts(pod)
-	for _, newEntry := range newUsage {
+func (u *HostPortUsage) Conflicts(usedBy *v1.Pod, ports []HostPort) error {
+	for _, newEntry := range ports {
 		for podKey, entries := range u.reserved {
 			for _, existing := range entries {
-				if newEntry.matches(existing) && podKey != client.ObjectKeyFromObject(pod) {
-					return nil, fmt.Errorf("%s conflicts with existing HostPort configuration %s", newEntry, existing)
+				if newEntry.Matches(existing) && podKey != client.ObjectKeyFromObject(usedBy) {
+					return fmt.Errorf("%s conflicts with existing HostPort configuration %s", newEntry, existing)
 				}
 			}
 		}
 	}
-	return newUsage, nil
+	return nil
 }
 
 // DeletePod deletes all host port usage from the HostPortUsage that were created by the pod with the given name.
@@ -97,46 +87,24 @@ func (u *HostPortUsage) DeletePod(key types.NamespacedName) {
 	delete(u.reserved, key)
 }
 
-func (u *HostPortUsage) DeepCopy() *HostPortUsage {
-	if u == nil {
-		return nil
-	}
-	out := &HostPortUsage{}
-	u.DeepCopyInto(out)
-	return out
-}
-
-func (u *HostPortUsage) DeepCopyInto(out *HostPortUsage) {
-	out.reserved = map[types.NamespacedName][]entry{}
-	for k, v := range u.reserved {
-		for _, e := range v {
-			out.reserved[k] = append(out.reserved[k], entry{
-				ip:       e.ip,
-				port:     e.port,
-				protocol: e.protocol,
-			})
-		}
-	}
-}
-
-func getHostPorts(pod *v1.Pod) []entry {
-	var usage []entry
+func GetHostPorts(pod *v1.Pod) []HostPort {
+	var usage []HostPort
 	for _, c := range pod.Spec.Containers {
 		for _, p := range c.Ports {
 			if p.HostPort == 0 {
 				continue
 			}
-			// Per the K8s docs, "If you don't specify the hostIP and protocol explicitly, Kubernetes will use 0.0.0.0
-			// as the default hostIP and TCP as the default protocol." In testing, and looking at the code the protocol
+			// Per the K8s docs, "If you don't specify the hostIP and Protocol explicitly, Kubernetes will use 0.0.0.0
+			// as the default hostIP and TCP as the default Protocol." In testing, and looking at the code the Protocol
 			// is defaulted to TCP, but it leaves the IP empty.
 			hostIP := p.HostIP
 			if hostIP == "" {
 				hostIP = "0.0.0.0"
 			}
-			usage = append(usage, entry{
-				ip:       net.ParseIP(hostIP),
-				port:     p.HostPort,
-				protocol: p.Protocol,
+			usage = append(usage, HostPort{
+				IP:       net.ParseIP(hostIP),
+				Port:     p.HostPort,
+				Protocol: p.Protocol,
 			})
 		}
 	}

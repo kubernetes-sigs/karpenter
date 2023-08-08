@@ -358,16 +358,19 @@ func (c *Cluster) newStateFromMachine(machine *v1alpha5.Machine, oldNode *StateN
 		oldNode = NewNode()
 	}
 	n := &StateNode{
-		Node:              oldNode.Node,
-		Machine:           machine,
-		hostPortUsage:     oldNode.hostPortUsage,
-		volumeUsage:       oldNode.volumeUsage,
-		daemonSetRequests: oldNode.daemonSetRequests,
-		daemonSetLimits:   oldNode.daemonSetLimits,
-		podRequests:       oldNode.podRequests,
-		podLimits:         oldNode.podLimits,
-		markedForDeletion: oldNode.markedForDeletion,
-		nominatedUntil:    oldNode.nominatedUntil,
+		Node:                oldNode.Node,
+		Machine:             machine,
+		inflightAllocatable: oldNode.inflightAllocatable,
+		inflightCapacity:    oldNode.inflightCapacity,
+		startupTaints:       oldNode.startupTaints,
+		daemonSetRequests:   oldNode.daemonSetRequests,
+		daemonSetLimits:     oldNode.daemonSetLimits,
+		podRequests:         oldNode.podRequests,
+		podLimits:           oldNode.podLimits,
+		hostPortUsage:       oldNode.hostPortUsage,
+		volumeUsage:         oldNode.volumeUsage,
+		markedForDeletion:   oldNode.markedForDeletion,
+		nominatedUntil:      oldNode.nominatedUntil,
 	}
 	// Cleanup the old machine with its old providerID if its providerID changes
 	// This can happen since nodes don't get created with providerIDs. Rather, CCM picks up the
@@ -407,7 +410,6 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *
 		podLimits:           map[types.NamespacedName]v1.ResourceList{},
 		hostPortUsage:       scheduling.NewHostPortUsage(),
 		volumeUsage:         scheduling.NewVolumeUsage(),
-		volumeLimits:        scheduling.VolumeCount{},
 		markedForDeletion:   oldNode.markedForDeletion,
 		nominatedUntil:      oldNode.nominatedUntil,
 	}
@@ -485,7 +487,7 @@ func (c *Cluster) populateVolumeLimits(ctx context.Context, n *StateNode) error 
 		if driver.Allocatable == nil {
 			continue
 		}
-		n.volumeLimits[driver.Name] = int(ptr.Int32Value(driver.Allocatable.Count))
+		n.volumeUsage.AddLimit(driver.Name, int(ptr.Int32Value(driver.Allocatable.Count)))
 	}
 	return nil
 }
@@ -500,8 +502,10 @@ func (c *Cluster) populateResourceRequests(ctx context.Context, n *StateNode) er
 		if podutils.IsTerminal(pod) {
 			continue
 		}
+		if err := n.updateForPod(ctx, c.kubeClient, pod); err != nil {
+			return err
+		}
 		c.cleanupOldBindings(pod)
-		n.updateForPod(ctx, c.kubeClient, pod)
 		c.bindings[client.ObjectKeyFromObject(pod)] = pod.Spec.NodeName
 	}
 	return nil
@@ -520,8 +524,10 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 		// the node must exist for us to update the resource requests on the node
 		return errors.NewNotFound(schema.GroupResource{Resource: "Machine"}, pod.Spec.NodeName)
 	}
+	if err := n.updateForPod(ctx, c.kubeClient, pod); err != nil {
+		return err
+	}
 	c.cleanupOldBindings(pod)
-	n.updateForPod(ctx, c.kubeClient, pod)
 	c.bindings[client.ObjectKeyFromObject(pod)] = pod.Spec.NodeName
 	return nil
 }
