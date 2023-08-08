@@ -18,13 +18,16 @@ import (
 	"context"
 	"time"
 
+	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/utils/functional"
+	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -39,8 +42,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
-var _ corecontroller.TypedController[*v1alpha5.Provisioner] = (*Controller)(nil)
-
 // Controller for the resource
 type Controller struct {
 	kubeClient client.Client
@@ -48,37 +49,33 @@ type Controller struct {
 }
 
 // NewController is a constructor
-func NewController(kubeClient client.Client, cluster *state.Cluster) corecontroller.Controller {
-	return corecontroller.Typed[*v1alpha5.Provisioner](kubeClient, &Controller{
+func NewController(kubeClient client.Client, cluster *state.Cluster) *Controller {
+	return &Controller{
 		kubeClient: kubeClient,
 		cluster:    cluster,
-	})
-}
-
-func (c *Controller) Name() string {
-	return "counter"
+	}
 }
 
 // Reconcile a control loop for the resource
-func (c *Controller) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) (reconcile.Result, error) {
 	// We need to ensure that our internal cluster state mechanism is synced before we proceed
 	// Otherwise, we have the potential to patch over the status with a lower value for the provisioner resource
 	// counts on startup
 	if !c.cluster.Synced(ctx) {
 		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}
-	stored := provisioner.DeepCopy()
+	stored := nodePool.DeepCopy()
 	// Determine resource usage and update provisioner.status.resources
-	provisioner.Status.Resources = c.resourceCountsFor(provisioner.Name)
-	if !equality.Semantic.DeepEqual(stored, provisioner) {
-		if err := c.kubeClient.Status().Patch(ctx, provisioner, client.MergeFrom(stored)); err != nil {
-			return reconcile.Result{}, err
+	nodePool.Status.Resources = c.resourceCountsFor(lo.Ternary(nodePool.IsProvisioner, v1alpha5.ProvisionerNameLabelKey, v1beta1.NodePoolLabelKey), nodePool.Name)
+	if !equality.Semantic.DeepEqual(stored, nodePool) {
+		if err := nodepoolutil.PatchStatus(ctx, c.kubeClient, stored, nodePool); err != nil {
+			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 	}
 	return reconcile.Result{}, nil
 }
 
-func (c *Controller) resourceCountsFor(provisionerName string) v1.ResourceList {
+func (c *Controller) resourceCountsFor(ownerLabel string, ownerName string) v1.ResourceList {
 	var res v1.ResourceList
 	// Record all resources provisioned by the provisioners, we look at the cluster state nodes as their capacity
 	// is accurately reported even for nodes that haven't fully started yet. This allows us to update our provisioner
@@ -89,15 +86,67 @@ func (c *Controller) resourceCountsFor(provisionerName string) v1.ResourceList {
 		if n.MarkedForDeletion() {
 			return true
 		}
-		if n.Labels()[v1alpha5.ProvisionerNameLabelKey] == provisionerName {
-			res = resources.Merge(res, n.Capacity())
+		if n.Labels()[ownerLabel] == ownerName {
+			res = resources.MergeInto(res, n.Capacity())
 		}
 		return true
 	})
 	return functional.FilterMap(res, func(_ v1.ResourceName, v resource.Quantity) bool { return !v.IsZero() })
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
+type NodePoolController struct {
+	*Controller
+}
+
+func NewNodePoolController(kubeClient client.Client, cluster *state.Cluster) corecontroller.Controller {
+	return corecontroller.Typed[*v1beta1.NodePool](kubeClient, &NodePoolController{
+		Controller: NewController(kubeClient, cluster),
+	})
+}
+
+func (c *NodePoolController) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) (reconcile.Result, error) {
+	return c.Controller.Reconcile(ctx, nodePool)
+}
+
+func (c *NodePoolController) Name() string {
+	return "counter"
+}
+
+func (c *NodePoolController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
+	return corecontroller.Adapt(controllerruntime.
+		NewControllerManagedBy(m).
+		For(&v1beta1.NodePool{}).
+		Watches(
+			&source.Kind{Type: &v1.Node{}},
+			handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
+				if name, ok := o.GetLabels()[v1beta1.NodePoolLabelKey]; ok {
+					return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: name}}}
+				}
+				return nil
+			}),
+		).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))
+}
+
+type ProvisionerController struct {
+	*Controller
+}
+
+func NewProvisionerController(kubeClient client.Client, cluster *state.Cluster) corecontroller.Controller {
+	return corecontroller.Typed[*v1alpha5.Provisioner](kubeClient, &ProvisionerController{
+		Controller: NewController(kubeClient, cluster),
+	})
+}
+
+func (c *ProvisionerController) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner) (reconcile.Result, error) {
+	return c.Controller.Reconcile(ctx, nodepoolutil.New(provisioner))
+}
+
+func (c *ProvisionerController) Name() string {
+	return "counter"
+}
+
+func (c *ProvisionerController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1alpha5.Provisioner{}).
