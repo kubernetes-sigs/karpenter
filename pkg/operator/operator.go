@@ -137,6 +137,12 @@ func NewOperator() (context.Context, *Operator) {
 		return []string{o.(*v1alpha5.Machine).Status.ProviderID}
 	}), "failed to setup machine provider id indexer")
 
+	lo.Must0(mgr.AddReadyzCheck("manager", func(req *http.Request) error {
+		return lo.Ternary(mgr.GetCache().WaitForCacheSync(req.Context()), nil, fmt.Errorf("failed to sync caches"))
+	}))
+	lo.Must0(mgr.AddHealthzCheck("healthz", healthz.Ping))
+	lo.Must0(mgr.AddReadyzCheck("readyz", healthz.Ping))
+
 	return ctx, &Operator{
 		Manager:             mgr,
 		KubernetesInterface: kubernetesInterface,
@@ -147,10 +153,8 @@ func NewOperator() (context.Context, *Operator) {
 
 func (o *Operator) WithControllers(ctx context.Context, controllers ...corecontroller.Controller) *Operator {
 	for _, c := range controllers {
-		lo.Must0(c.Builder(ctx, o.Manager).Complete(c), "failed to register controller")
+		lo.Must0(c.Builder(ctx, o.Manager).Complete(c))
 	}
-	lo.Must0(o.Manager.AddHealthzCheck("healthz", healthz.Ping), "failed to setup liveness probe")
-	lo.Must0(o.Manager.AddReadyzCheck("readyz", healthz.Ping), "failed to setup readiness probe")
 	return o
 }
 

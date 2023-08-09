@@ -19,7 +19,6 @@ import (
 )
 
 const (
-	StaticDrift          cloudprovider.DriftReason = "StaticDrift"
-	NodeRequirementDrift cloudprovider.DriftReason = "NodeRequirementDrift"
-	NotDrifted           cloudprovider.DriftReason = ""
+	ProvisionerStaticDrift cloudprovider.DriftReason = "ProvisionerStaticDrift"
+	NodeRequirementDrift   cloudprovider.DriftReason = "NodeRequirementDrift"
 )
