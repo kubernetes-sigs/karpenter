@@ -343,6 +343,113 @@ var _ = Describe("Replace Nodes", func() {
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 		ExpectExists(ctx, env.Client, machine)
 	})
+	It("can replace nodes, considers PDB policy", func() {
+		if env.Version.Minor() < 27 {
+			Skip("PDB policy ony enabled by default for K8s >= 1.27.x")
+		}
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+		pods := test.Pods(3, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}}})
+
+		pdb := test.PodDisruptionBudget(test.PDBOptions{
+			Labels:         labels,
+			MaxUnavailable: fromInt(0),
+			Status: &policyv1.PodDisruptionBudgetStatus{
+				ObservedGeneration: 1,
+				DisruptionsAllowed: 0,
+				CurrentHealthy:     1,
+				DesiredHealthy:     1,
+				ExpectedPods:       1,
+			},
+		})
+		alwaysAllow := policyv1.AlwaysAllow
+		pdb.Spec.UnhealthyPodEvictionPolicy = &alwaysAllow
+
+		prov := test.Provisioner(test.ProvisionerOptions{
+			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
+		})
+		machine, node := test.MachineAndNode(v1alpha5.Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.RandomProviderID(),
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], machine, node, prov, pdb)
+
+		// bind pods to node
+		ExpectManualBinding(ctx, env.Client, pods[0], node)
+		ExpectManualBinding(ctx, env.Client, pods[1], node)
+		ExpectManualBinding(ctx, env.Client, pods[2], node)
+
+		// set all of these pods to unhealthy so the PDB won't stop their eviction
+		for _, p := range pods {
+			p.Status.Conditions = []v1.PodCondition{
+				{
+					Type:               v1.PodReady,
+					Status:             v1.ConditionFalse,
+					LastProbeTime:      metav1.Now(),
+					LastTransitionTime: metav1.Now(),
+				},
+			}
+			ExpectApplied(ctx, env.Client, p)
+		}
+
+		// inform cluster state about nodes and machines
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
+		fakeClock.Step(10 * time.Minute)
+
+		// consolidation won't delete the old machine until the new machine is ready
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+		wg.Wait()
+
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+
+		// should create a new machine as there is a cheaper one that can hold the pod
+		machines := ExpectMachines(ctx, env.Client)
+		nodes := ExpectNodes(ctx, env.Client)
+		Expect(machines).To(HaveLen(1))
+		Expect(nodes).To(HaveLen(1))
+
+		// we didn't create a new machine or delete the old one
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		ExpectNotFound(ctx, env.Client, machine)
+	})
 	It("can replace nodes, PDB namespace must match", func() {
 		labels := map[string]string{
 			"app": "test",
@@ -2736,6 +2843,7 @@ func hasZone(ofs []cloudprovider.Offering, zone string) bool {
 	return false
 }
 
+//nolint:unparam
 func fromInt(i int) *intstr.IntOrString {
 	v := intstr.FromInt(i)
 	return &v
