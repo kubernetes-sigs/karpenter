@@ -21,5 +21,4 @@ import (
 const (
 	StaticDrift          cloudprovider.DriftReason = "StaticDrift"
 	NodeRequirementDrift cloudprovider.DriftReason = "NodeRequirementDrift"
-	NotDrifted           cloudprovider.DriftReason = ""
 )

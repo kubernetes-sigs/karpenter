@@ -57,12 +57,12 @@ func (d *Drift) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner
 		}
 		return reconcile.Result{}, nil
 	}
-	drifted, err := d.isDrifted(ctx, provisioner, machine)
+	driftedReason, err := d.isDrifted(ctx, provisioner, machine)
 	if err != nil {
 		return reconcile.Result{}, cloudprovider.IgnoreMachineNotFoundError(fmt.Errorf("getting drift for machine, %w", err))
 	}
 	// 3. Otherwise, if the machine isn't drifted, but has the status condition, remove it.
-	if drifted == NotDrifted {
+	if driftedReason == "" {
 		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineDrifted)
 		if hasDriftedCondition {
 			logging.FromContext(ctx).Debugf("removing drifted status condition from machine")
@@ -74,6 +74,7 @@ func (d *Drift) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner
 		Type:     v1alpha5.MachineDrifted,
 		Status:   v1.ConditionTrue,
 		Severity: apis.ConditionSeverityWarning,
+		Reason:   string(driftedReason),
 	})
 	if !hasDriftedCondition {
 		logging.FromContext(ctx).Debugf("marking machine as drifted")
@@ -87,11 +88,11 @@ func (d *Drift) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner
 func (d *Drift) isDrifted(ctx context.Context, provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) (cloudprovider.DriftReason, error) {
 	driftedReason, err := d.cloudProvider.IsMachineDrifted(ctx, machine)
 	if err != nil {
-		return NotDrifted, err
+		return "", err
 	}
 
-	reason := lo.FindOrElse([]cloudprovider.DriftReason{driftedReason, areStaticFieldsDrifted(provisioner, machine), areNodeRequirementsDrifted(provisioner, machine)}, NotDrifted, func(i cloudprovider.DriftReason) bool {
-		return i != NotDrifted
+	reason := lo.FindOrElse([]cloudprovider.DriftReason{driftedReason, areStaticFieldsDrifted(provisioner, machine), areNodeRequirementsDrifted(provisioner, machine)}, "", func(i cloudprovider.DriftReason) bool {
+		return i != ""
 	})
 
 	return reason, nil
@@ -103,13 +104,13 @@ func areStaticFieldsDrifted(provisioner *v1alpha5.Provisioner, machine *v1alpha5
 	provisionerHash, foundHashProvisioner := provisioner.Annotations[v1alpha5.ProvisionerHashAnnotationKey]
 	machineHash, foundHashMachine := machine.Annotations[v1alpha5.ProvisionerHashAnnotationKey]
 	if !foundHashProvisioner || !foundHashMachine {
-		return NotDrifted
+		return ""
 	}
 	if provisionerHash != machineHash {
 		return StaticDrift
 	}
 
-	return NotDrifted
+	return ""
 }
 
 func areNodeRequirementsDrifted(provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) cloudprovider.DriftReason {
@@ -121,5 +122,5 @@ func areNodeRequirementsDrifted(provisioner *v1alpha5.Provisioner, machine *v1al
 		return NodeRequirementDrift
 	}
 
-	return NotDrifted
+	return ""
 }
