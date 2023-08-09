@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -26,10 +27,12 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
+	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 )
 
 // Drift is a subreconciler that deletes drifted machines.
@@ -56,11 +59,23 @@ func (d *Drift) ShouldDeprovision(ctx context.Context, c *Candidate) bool {
 		c.Machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).IsTrue()
 }
 
-// ComputeCommand generates a deprovisioning command given deprovisionable machines
-func (d *Drift) ComputeCommand(ctx context.Context, nodes ...*Candidate) (Command, error) {
+// SortCandidates orders drifted nodes by when they've drifted
+func (d *Drift) filterAndSortCandidates(ctx context.Context, nodes []*Candidate) ([]*Candidate, error) {
 	candidates, err := filterCandidates(ctx, d.kubeClient, d.recorder, nodes)
 	if err != nil {
-		return Command{}, fmt.Errorf("filtering candidates, %w", err)
+		return nil, fmt.Errorf("filtering candidates, %w", err)
+	}
+	sort.Slice(candidates, func(i int, j int) bool {
+		return machineutil.GetDriftedTime(candidates[i].Machine).Before(machineutil.GetDriftedTime(candidates[j].Machine))
+	})
+	return candidates, nil
+}
+
+// ComputeCommand generates a deprovisioning command given deprovisionable machines
+func (d *Drift) ComputeCommand(ctx context.Context, nodes ...*Candidate) (Command, error) {
+	candidates, err := d.filterAndSortCandidates(ctx, nodes)
+	if err != nil {
+		return Command{}, err
 	}
 	deprovisioningEligibleMachinesGauge.WithLabelValues(d.String()).Set(float64(len(candidates)))
 
@@ -85,7 +100,9 @@ func (d *Drift) ComputeCommand(ctx context.Context, nodes ...*Candidate) (Comman
 		}
 		// Log when all pods can't schedule, as the command will get executed immediately.
 		if !results.AllPodsScheduled() {
-			logging.FromContext(ctx).With("machine", candidate.Machine.Name, "node", candidate.Node.Name).Debug("Continuing to terminate drifted machine after scheduling simulation failed to schedule all pods %s", results.PodSchedulingErrors())
+			logging.FromContext(ctx).With("machine", candidate.Machine.Name, "node", candidate.Node.Name).Debugf("cannot terminate drifted machine since scheduling simulation failed to schedule all pods %s", results.PodSchedulingErrors())
+			d.recorder.Publish(deprovisioningevents.Blocked(candidate.Node, candidate.Machine, "scheduling simulation failed to schedule all pods")...)
+			continue
 		}
 		if len(results.NewMachines) == 0 {
 			return Command{

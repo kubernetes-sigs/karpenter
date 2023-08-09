@@ -44,6 +44,9 @@ var _ = Describe("Expiration", func() {
 	BeforeEach(func() {
 		prov = test.Provisioner(test.ProvisionerOptions{
 			TTLSecondsUntilExpired: ptr.Int64(30),
+			Limits: v1.ResourceList{
+				v1.ResourceCPU: resource.MustParse("100"),
+			},
 		})
 		machine, node = test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
@@ -77,6 +80,65 @@ var _ = Describe("Expiration", func() {
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 		ExpectExists(ctx, env.Client, machine)
+	})
+	It("should continue to the next expired node if the first cannot reschedule all pods", func() {
+		pod := test.Pod(test.PodOptions{
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: v1.ResourceList{
+					v1.ResourceCPU: resource.MustParse("150"),
+				},
+			},
+		})
+		podToExpire := test.Pod(test.PodOptions{
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: v1.ResourceList{
+					v1.ResourceCPU: resource.MustParse("1"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, machine, node, prov, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
+		machine2, node2 := test.MachineAndNode(v1alpha5.Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.RandomProviderID(),
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("1"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		machine2.StatusConditions().MarkTrue(v1alpha5.MachineExpired)
+		ExpectApplied(ctx, env.Client, machine2, node2, podToExpire)
+		ExpectManualBinding(ctx, env.Client, podToExpire, node2)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node2}, []*v1alpha5.Machine{machine2})
+
+		// deprovisioning won't delete the old node until the new node is ready
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		wg.Wait()
+
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine, machine2)
+
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(2))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+		ExpectExists(ctx, env.Client, machine)
+		ExpectNotFound(ctx, env.Client, machine2)
 	})
 	It("should ignore nodes with the expired status condition set to false", func() {
 		machine.StatusConditions().MarkFalse(v1alpha5.MachineExpired, "", "")

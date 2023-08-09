@@ -30,6 +30,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
@@ -105,7 +106,9 @@ func (e *Expiration) ComputeCommand(ctx context.Context, nodes ...*Candidate) (C
 		}
 		// Log when all pods can't schedule, as the command will get executed immediately.
 		if !results.AllPodsScheduled() {
-			logging.FromContext(ctx).With("node", candidate.Name).Debugf("continuing to expire node after scheduling simulation failed to schedule all pods, %s", results.PodSchedulingErrors())
+			logging.FromContext(ctx).With("machine", candidate.Machine.Name, "node", candidate.Node.Name).Debugf("cannot terminate expired machine since scheduling simulation failed to schedule all pods, %s", results.PodSchedulingErrors())
+			e.recorder.Publish(deprovisioningevents.Blocked(candidate.Node, candidate.Machine, "scheduling simulation failed to schedule all pods")...)
+			continue
 		}
 
 		logging.FromContext(ctx).With("ttl", time.Duration(ptr.Int64Value(candidates[0].provisioner.Spec.TTLSecondsUntilExpired))*time.Second).
