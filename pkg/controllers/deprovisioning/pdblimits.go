@@ -59,7 +59,20 @@ func (s *PDBLimits) CanEvictPods(pods []*v1.Pod) (client.ObjectKey, bool) {
 		for _, pdb := range s.pdbs {
 			if pdb.name.Namespace == pod.ObjectMeta.Namespace {
 				if pdb.selector.Matches(labels.Set(pod.Labels)) {
-					if pdb.disruptionsAllowed == 0 {
+
+					// if the PDB policy is set to allow evicting unhealthy pods, then it won't stop us from
+					// evicting unhealthy pods
+					ignorePod := false
+					if pdb.canAlwaysEvictUnhealthyPods {
+						for _, c := range pod.Status.Conditions {
+							if c.Type == v1.PodReady && c.Status == v1.ConditionFalse {
+								ignorePod = true
+								continue
+							}
+						}
+					}
+
+					if !ignorePod && pdb.disruptionsAllowed == 0 {
 						return pdb.name, false
 					}
 				}
@@ -70,9 +83,10 @@ func (s *PDBLimits) CanEvictPods(pods []*v1.Pod) (client.ObjectKey, bool) {
 }
 
 type pdbItem struct {
-	name               client.ObjectKey
-	selector           labels.Selector
-	disruptionsAllowed int32
+	name                        client.ObjectKey
+	selector                    labels.Selector
+	disruptionsAllowed          int32
+	canAlwaysEvictUnhealthyPods bool
 }
 
 func newPdb(pdb policyv1.PodDisruptionBudget) (*pdbItem, error) {
@@ -80,9 +94,15 @@ func newPdb(pdb policyv1.PodDisruptionBudget) (*pdbItem, error) {
 	if err != nil {
 		return nil, err
 	}
+	canAlwaysEvictUnhealthyPods := false
+
+	if pdb.Spec.UnhealthyPodEvictionPolicy != nil && *pdb.Spec.UnhealthyPodEvictionPolicy == policyv1.AlwaysAllow {
+		canAlwaysEvictUnhealthyPods = true
+	}
 	return &pdbItem{
-		name:               client.ObjectKeyFromObject(&pdb),
-		selector:           selector,
-		disruptionsAllowed: pdb.Status.DisruptionsAllowed,
+		name:                        client.ObjectKeyFromObject(&pdb),
+		selector:                    selector,
+		disruptionsAllowed:          pdb.Status.DisruptionsAllowed,
+		canAlwaysEvictUnhealthyPods: canAlwaysEvictUnhealthyPods,
 	}, nil
 }
