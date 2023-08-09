@@ -126,11 +126,19 @@ var _ = Describe("Expiration", func() {
 		// inform cluster state about nodes and machines
 		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node2}, []*v1alpha5.Machine{machine2})
 
+		// deprovisioning won't delete the old node until the new node is ready
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		wg.Wait()
 
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine, machine2)
+
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(2))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
 		ExpectExists(ctx, env.Client, machine)
+		ExpectNotFound(ctx, env.Client, machine2)
 	})
 	It("should ignore nodes with the expired status condition set to false", func() {
 		machine.StatusConditions().MarkFalse(v1alpha5.MachineExpired, "", "")
