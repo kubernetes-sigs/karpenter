@@ -32,6 +32,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/scheduling"
+	"github.com/aws/karpenter-core/pkg/utils/pod"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
@@ -102,8 +103,16 @@ type Results struct {
 	PodErrors     map[*v1.Pod]error
 }
 
-func (r Results) AllPodsScheduled() bool {
-	return len(r.PodErrors) == 0
+// AllNonPendingPodsScheduled returns true if all of the non-pending pods scheduled.  This is useful in consolidation as
+// we don't care if a pod was pending before consolidation and will still be pending after. It may be a pod that we
+// can't schedule at all and don't want it to block consolidation.
+func (r Results) AllNonPendingPodsScheduled() bool {
+	for p := range r.PodErrors {
+		if !pod.IsProvisionable(p) {
+			return false
+		}
+	}
+	return true
 }
 
 // PodSchedulingErrors creates a string that describes why pods wouldn't schedule that is suitable for presentation

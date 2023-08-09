@@ -128,7 +128,7 @@ func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidate
 	if err != nil {
 		return false, fmt.Errorf("simluating scheduling, %w", err)
 	}
-	if !results.AllPodsScheduled() {
+	if !results.AllNonPendingPodsScheduled() {
 		return false, nil
 	}
 
