@@ -319,8 +319,7 @@ func GetExpirationTime(obj client.Object, provisioner *v1alpha5.Provisioner) tim
 	return obj.GetCreationTimestamp().Add(expirationTTL)
 }
 func GetDriftedTime(nodeClaim *v1alpha5.Machine) time.Time {
-	if nodeClaim.StatusConditions().GetCondition(v1alpha5.MachineDrifted) != nil &&
-		nodeClaim.StatusConditions().GetCondition(v1alpha5.MachineDrifted).IsTrue() {
+	if nodeClaim.StatusConditions().GetCondition(v1alpha5.MachineDrifted).IsTrue() {
 		return nodeClaim.StatusConditions().GetCondition(v1alpha5.MachineDrifted).LastTransitionTime.Inner.Time
 	}
 	return time.Date(5000, 0, 0, 0, 0, 0, 0, time.UTC)
