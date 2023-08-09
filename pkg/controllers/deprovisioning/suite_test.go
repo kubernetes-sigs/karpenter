@@ -1430,6 +1430,108 @@ var _ = Describe("Delete Node", func() {
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(100))
 		ExpectNotFound(ctx, env.Client, consolidatableMachine, consolidatableNode)
 	})
+	It("can delete nodes with a permanently pending pod", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		pods := test.Pods(3, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}}})
+
+		pending := test.UnschedulablePod(test.PodOptions{
+			NodeSelector: map[string]string{
+				"non-existent": "node-label",
+			},
+		})
+
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], machine1, node1, machine2, node2, prov, pending)
+
+		// bind pods to node
+		ExpectManualBinding(ctx, env.Client, pods[0], node1)
+		ExpectManualBinding(ctx, env.Client, pods[1], node1)
+		ExpectManualBinding(ctx, env.Client, pods[2], node2)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+
+		fakeClock.Step(10 * time.Minute)
+
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+		wg.Wait()
+
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine2)
+
+		// we don't need a new node, but we should evict everything off one of node2 which only has a single pod
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		// and delete the old one
+		ExpectNotFound(ctx, env.Client, machine2, node2)
+
+		// pending pod is still here and hasn't been scheduled anywayre
+		pending = ExpectPodExists(ctx, env.Client, pending.Name, pending.Namespace)
+		Expect(pending.Spec.NodeName).To(BeEmpty())
+	})
+	It("won't delete nodes if it would make a non-pending pod go pending", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		pods := test.Pods(3, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}}})
+
+		// setup labels and node selectors so we force the pods onto the nodes we want
+		node1.Labels["foo"] = "1"
+		node2.Labels["foo"] = "2"
+
+		pods[0].Spec.NodeSelector = map[string]string{"foo": "1"}
+		pods[1].Spec.NodeSelector = map[string]string{"foo": "1"}
+		pods[2].Spec.NodeSelector = map[string]string{"foo": "2"}
+
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], machine1, node1, machine2, node2, prov)
+
+		// bind pods to node
+		ExpectManualBinding(ctx, env.Client, pods[0], node1)
+		ExpectManualBinding(ctx, env.Client, pods[1], node1)
+		ExpectManualBinding(ctx, env.Client, pods[2], node2)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+
+		fakeClock.Step(10 * time.Minute)
+
+		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+
+		// No node can be deleted as it would cause one of the three pods to go pending
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(2))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+	})
 })
 
 var _ = Describe("Node Lifetime Consideration", func() {
@@ -1822,20 +1924,28 @@ var _ = Describe("Empty Nodes (Consolidation)", func() {
 		ExpectNotFound(ctx, env.Client, machine2)
 	})
 	It("considers pending pods when consolidating", func() {
+		largeTypes := lo.Filter(cloudProvider.InstanceTypes, func(item *cloudprovider.InstanceType, index int) bool {
+			return item.Capacity.Cpu().Cmp(resource.MustParse("64")) >= 0
+		})
+		sort.Slice(largeTypes, func(i, j int) bool {
+			return largeTypes[i].Offerings[0].Price < largeTypes[j].Offerings[0].Price
+		})
+
+		largeCheapType := largeTypes[0]
 		machine1, node1 = test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					v1.LabelInstanceTypeStable:       largeCheapType.Name,
+					v1alpha5.LabelCapacityType:       largeCheapType.Offerings[0].CapacityType,
+					v1.LabelTopologyZone:             largeCheapType.Offerings[0].Zone,
 				},
 			},
 			Status: v1alpha5.MachineStatus{
 				ProviderID: test.RandomProviderID(),
 				Allocatable: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU:  resource.MustParse("128"),
-					v1.ResourcePods: resource.MustParse("100"),
+					v1.ResourceCPU:  *largeCheapType.Capacity.Cpu(),
+					v1.ResourcePods: *largeCheapType.Capacity.Pods(),
 				},
 			},
 		})
@@ -1851,7 +1961,7 @@ var _ = Describe("Empty Nodes (Consolidation)", func() {
 		unsched := test.UnschedulablePod(test.PodOptions{
 			ResourceRequirements: v1.ResourceRequirements{
 				Requests: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("125"),
+					v1.ResourceCPU: resource.MustParse("62"),
 				},
 			},
 		})
@@ -1864,11 +1974,7 @@ var _ = Describe("Empty Nodes (Consolidation)", func() {
 		// inform cluster state about nodes and machines
 		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
 
-		fakeClock.Step(10 * time.Minute)
-		var wg sync.WaitGroup
-		ExpectTriggerVerifyAction(&wg)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
-		wg.Wait()
 
 		// we don't need any new nodes and consolidation should notice the huge pending pod that needs the large
 		// node to schedule, which prevents the large expensive node from being replaced
