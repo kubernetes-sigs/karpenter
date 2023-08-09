@@ -107,7 +107,7 @@ func areStaticFieldsDrifted(provisioner *v1alpha5.Provisioner, machine *v1alpha5
 		return ""
 	}
 	if provisionerHash != machineHash {
-		return StaticDrift
+		return ProvisionerStaticDrift
 	}
 
 	return ""
