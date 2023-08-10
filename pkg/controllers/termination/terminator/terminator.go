@@ -26,6 +26,8 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	"github.com/aws/karpenter-core/pkg/scheduling"
 	podutil "github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
@@ -59,7 +61,7 @@ func (t *Terminator) Cordon(ctx context.Context, node *v1.Node) error {
 		if err := t.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 			return err
 		}
-		logging.FromContext(ctx).Infof("cordoned node")
+		logging.FromContext(ctx).Infof("cordoned")
 	}
 	return nil
 }
@@ -67,52 +69,42 @@ func (t *Terminator) Cordon(ctx context.Context, node *v1.Node) error {
 // Drain evicts pods from the node and returns true when all pods are evicted
 // https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
 func (t *Terminator) Drain(ctx context.Context, node *v1.Node) error {
-	// Get evictable pods
-	pods, err := t.getPods(ctx, node)
-	if err != nil {
-		return fmt.Errorf("listing pods for node, %w", err)
-	}
-	var podsToEvict []*v1.Pod
-	// Skip node due to pods that are not able to be evicted
-	for _, p := range pods {
-		// Ignore if unschedulable is tolerated, since they will reschedule
-		if podutil.ToleratesUnschedulableTaint(p) {
-			continue
-		}
-		// Ignore static mirror pods
-		if podutil.IsOwnedByNode(p) {
-			continue
-		}
-		podsToEvict = append(podsToEvict, p)
-	}
-	// Enqueue for eviction
-	t.evict(podsToEvict)
-
-	if len(podsToEvict) > 0 {
-		return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", len(podsToEvict)))
-	}
-	return nil
-}
-
-// getPods returns a list of evictable pods for the node
-func (t *Terminator) getPods(ctx context.Context, node *v1.Node) ([]*v1.Pod, error) {
 	podList := &v1.PodList{}
 	if err := t.kubeClient.List(ctx, podList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
-		return nil, fmt.Errorf("listing pods on node, %w", err)
+		return fmt.Errorf("listing pods on node, %w", err)
 	}
-	var pods []*v1.Pod
-	for _, p := range podList.Items {
-		// Ignore if the pod is complete and doesn't need to be evicted
-		if podutil.IsTerminal(lo.ToPtr(p)) {
-			continue
-		}
-		// Ignore if kubelet is partitioned and pods are beyond graceful termination window
-		if t.isStuckTerminating(lo.ToPtr(p)) {
-			continue
-		}
-		pods = append(pods, lo.ToPtr(p))
+
+	pods := lo.Map(podList.Items, func(pod v1.Pod, _ int) *v1.Pod { return lo.ToPtr(pod) })
+	pods = lo.Reject(pods, func(p *v1.Pod, _ int) bool { return podutil.IsNotDrainable(p) }) // Ignore pods that can't be drained
+	pods = lo.Reject(pods, func(p *v1.Pod, _ int) bool { return t.isStuckTerminating(p) })   // Ignore pods that are stuck terminating
+
+	// Successfully Drained
+	if len(pods) == 0 {
+		return nil
 	}
-	return pods, nil
+	// Find any evictable pods, and evict them
+	if evictable := lo.Reject(pods, func(p *v1.Pod, _ int) bool { return podutil.IsNotEvictable(p) }); len(evictable) > 0 {
+		t.evict(evictable)
+		return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", len(evictable)))
+	}
+
+	// Taint NoExecute to trigger graceful deletion for remaining pods
+	if err := t.Taint(ctx, node, v1beta1.TaintShuttingDown); err != nil {
+		return fmt.Errorf("tainting node %s, %w", v1beta1.TaintShuttingDown.ToString(), err)
+	}
+	return NewNodeDrainError(fmt.Errorf("%d pods are gracefully shutting down", len(pods)))
+}
+
+func (t *Terminator) Taint(ctx context.Context, node *v1.Node, taint v1.Taint) error {
+	mutated := node.DeepCopy()
+	mutated.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(scheduling.Taints{taint})
+	if !equality.Semantic.DeepEqual(mutated, node) {
+		if err := t.kubeClient.Patch(ctx, mutated, client.MergeFrom(node)); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		logging.FromContext(ctx).Infof("tainted %s", taint.ToString())
+	}
+	return nil
 }
 
 func (t *Terminator) evict(pods []*v1.Pod) {

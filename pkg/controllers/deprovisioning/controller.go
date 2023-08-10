@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
@@ -189,7 +190,9 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 	for _, candidate := range command.candidates {
 		c.recorder.Publish(deprovisioningevents.Terminating(candidate.Node, candidate.Machine, reason)...)
 
-		if err := c.kubeClient.Delete(ctx, candidate.Machine); err != nil {
+		node := candidate.Node.DeepCopy()
+		node.Spec.Taints = append(node.Spec.Taints, v1.Taint{Key: v1beta1.TaintKeyTermination, Value: v1beta1.TaintValueDraining, Effect: v1.TaintEffectNoSchedule})
+		if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(candidate.Node)); err != nil {
 			if errors.IsNotFound(err) {
 				continue
 			}

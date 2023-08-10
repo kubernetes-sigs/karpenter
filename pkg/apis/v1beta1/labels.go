@@ -38,6 +38,16 @@ const (
 	CapacityTypeLabelKey    = Group + "/capacity-type"
 )
 
+var (
+	TaintKeyTermination    = Group + "/termination"
+	TaintValueCandidate    = Group + "candidate"
+	TaintValueDraining     = Group + "draining"
+	TaintValueShuttingDown = Group + "shutting-down"
+	TaintCandidate         = v1.Taint{Key: TaintKeyTermination, Value: TaintValueCandidate, Effect: v1.TaintEffectNoSchedule}
+	TaintDraining          = v1.Taint{Key: TaintKeyTermination, Value: TaintValueDraining, Effect: v1.TaintEffectNoSchedule}
+	TaintShuttingDown      = v1.Taint{Key: TaintKeyTermination, Value: TaintValueShuttingDown, Effect: v1.TaintEffectNoExecute}
+)
+
 // Karpenter specific annotations
 const (
 	DoNotDisruptAnnotationKey          = Group + "/do-not-disrupt"

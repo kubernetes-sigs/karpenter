@@ -169,7 +169,7 @@ func ExpectAppliedWithOffset(offset int, ctx context.Context, c client.Client, o
 
 func ExpectDeleted(ctx context.Context, c client.Client, objects ...client.Object) {
 	for _, object := range objects {
-		if err := c.Delete(ctx, object, &client.DeleteOptions{GracePeriodSeconds: ptr.Int64(0)}); !errors.IsNotFound(err) {
+		if err := c.Delete(ctx, object, client.GracePeriodSeconds(0)); !errors.IsNotFound(err) {
 			ExpectWithOffset(1, err).To(BeNil())
 		}
 		ExpectNotFoundWithOffset(1, ctx, c, object)

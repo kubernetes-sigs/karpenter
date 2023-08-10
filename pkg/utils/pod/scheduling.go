@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 )
 
@@ -86,9 +87,14 @@ func HasDoNotEvict(pod *v1.Pod) bool {
 	return pod.Annotations[v1alpha5.DoNotEvictPodAnnotationKey] == "true"
 }
 
-// HasUnschedulableToleration returns true if the pod tolerates node.kubernetes.io/unschedulable taint
-func ToleratesUnschedulableTaint(pod *v1.Pod) bool {
-	return (scheduling.Taints{{Key: v1.TaintNodeUnschedulable, Effect: v1.TaintEffectNoSchedule}}).Tolerates(pod) == nil
+func IsNotEvictable(pod *v1.Pod) bool {
+	return (scheduling.Taints{{Key: v1.TaintNodeUnschedulable, Effect: v1.TaintEffectNoSchedule}}).Tolerates(pod) == nil ||
+		IsOwnedByNode(pod) ||
+		IsTerminal(pod)
+}
+
+func IsNotDrainable(pod *v1.Pod) bool {
+	return (scheduling.Taints{{Key: v1beta1.TaintKeyTermination, Effect: v1.TaintEffectNoExecute}}).Tolerates(pod) == nil
 }
 
 // HasRequiredPodAntiAffinity returns true if a non-empty PodAntiAffinity/RequiredDuringSchedulingIgnoredDuringExecution

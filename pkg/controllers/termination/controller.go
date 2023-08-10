@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -67,45 +68,59 @@ func (c *Controller) Name() string {
 	return "termination"
 }
 
-func (c *Controller) Reconcile(_ context.Context, _ *v1.Node) (reconcile.Result, error) {
-	return reconcile.Result{}, nil
-}
-
-//nolint:gocyclo
-func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Result, error) {
-	if !controllerutil.ContainsFinalizer(node, v1alpha5.TerminationFinalizer) {
+func (c *Controller) Reconcile(ctx context.Context, n *v1.Node) (reconcile.Result, error) {
+	if !lo.ContainsBy(n.Spec.Taints, func(taint v1.Taint) bool { return taint.Key == v1beta1.TaintKeyTermination }) {
 		return reconcile.Result{}, nil
 	}
-	if err := c.deleteAllMachines(ctx, node); err != nil {
-		return reconcile.Result{}, fmt.Errorf("deleting machines, %w", err)
+
+	if _, err := c.cloudProvider.Get(ctx, n.Spec.ProviderID); err != nil {
+		if cloudprovider.IsMachineNotFoundError(err) {
+			if err := c.kubeClient.Delete(ctx, n); err != nil {
+				return reconcile.Result{}, fmt.Errorf("terminating node, %w", err)
+			}
+			return reconcile.Result{}, nil
+		}
+		return reconcile.Result{}, fmt.Errorf("getting machine, %w", err)
 	}
-	if err := c.terminator.Cordon(ctx, node); err != nil {
+
+	if err := c.terminator.Cordon(ctx, n); err != nil {
 		return reconcile.Result{}, fmt.Errorf("cordoning node, %w", err)
 	}
-	if err := c.terminator.Drain(ctx, node); err != nil {
+	if err := c.terminator.Drain(ctx, n); err != nil {
 		if !terminator.IsNodeDrainError(err) {
 			return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 		}
-		c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
-		// If the underlying machine no longer exists.
-		if _, err := c.cloudProvider.Get(ctx, node.Spec.ProviderID); err != nil {
+		c.recorder.Publish(terminatorevents.NodeFailedToDrain(n, err))
+		if _, err := c.cloudProvider.Get(ctx, n.Spec.ProviderID); err != nil {
 			if cloudprovider.IsMachineNotFoundError(err) {
-				return reconcile.Result{}, c.removeFinalizer(ctx, node)
+				return reconcile.Result{}, c.kubeClient.Delete(ctx, n)
 			}
 			return reconcile.Result{}, fmt.Errorf("getting machine, %w", err)
 		}
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
-
-	if err := c.cloudProvider.Delete(ctx, machineutil.NewFromNode(node)); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
-		return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
+	if err := c.kubeClient.Delete(ctx, n); err != nil {
+		return reconcile.Result{}, fmt.Errorf("terminating node, %w", err)
 	}
-	return reconcile.Result{}, c.removeFinalizer(ctx, node)
+	return reconcile.Result{}, nil
 }
 
-func (c *Controller) deleteAllMachines(ctx context.Context, node *v1.Node) error {
+func (c *Controller) Finalize(ctx context.Context, n *v1.Node) (reconcile.Result, error) {
+	if !controllerutil.ContainsFinalizer(n, v1alpha5.TerminationFinalizer) {
+		return reconcile.Result{}, nil
+	}
+	if err := c.deleteAllMachines(ctx, n); err != nil {
+		return reconcile.Result{}, fmt.Errorf("deleting machines, %w", err)
+	}
+	if err := c.cloudProvider.Delete(ctx, machineutil.NewFromNode(n)); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
+		return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
+	}
+	return reconcile.Result{}, c.removeFinalizer(ctx, n)
+}
+
+func (c *Controller) deleteAllMachines(ctx context.Context, n *v1.Node) error {
 	machineList := &v1alpha5.MachineList{}
-	if err := c.kubeClient.List(ctx, machineList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
+	if err := c.kubeClient.List(ctx, machineList, client.MatchingFields{"status.providerID": n.Spec.ProviderID}); err != nil {
 		return err
 	}
 	for i := range machineList.Items {
