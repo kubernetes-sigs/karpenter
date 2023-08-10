@@ -159,7 +159,7 @@ var _ = Describe("Termination", func() {
 		_, err = cloudProvider.Get(ctx, machine.Status.ProviderID)
 		Expect(cloudprovider.IsMachineNotFoundError(err)).To(BeTrue())
 	})
-	It("should delete the Node if the Machine is linked but doesn't have its providerID resolved yet", func() {
+	It("should delete the Instance if the Machine is linked but doesn't have its providerID resolved yet", func() {
 		node := test.MachineLinkedNode(machine)
 
 		machine.Annotations = lo.Assign(machine.Annotations, map[string]string{v1alpha5.MachineLinkedAnnotationKey: machine.Status.ProviderID})
@@ -168,12 +168,8 @@ var _ = Describe("Termination", func() {
 
 		// Expect the machine to be gone
 		Expect(env.Client.Delete(ctx, machine)).To(Succeed())
-		ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(machine)) // triggers the node deletion
-		ExpectFinalizersRemoved(ctx, env.Client, node)
-		ExpectNotFound(ctx, env.Client, node)
-
-		ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(machine)) // now all nodes are gone so machine deletion continues
-		ExpectNotFound(ctx, env.Client, machine, node)
+		ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(machine)) // triggers the machine deletion
+		ExpectNotFound(ctx, env.Client, machine)
 
 		// Expect the machine to be gone from the cloudprovider
 		_, err := cloudProvider.Get(ctx, machine.Annotations[v1alpha5.MachineLinkedAnnotationKey])
