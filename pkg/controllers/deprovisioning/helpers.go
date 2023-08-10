@@ -90,24 +90,24 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
 	}
-	// start by getting all pending pods
-	pods, err := provisioner.GetPendingPods(ctx)
+	// start by getting all pending pendingPods
+	pendingPods, err := provisioner.GetPendingPods(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("determining pending pods, %w", err)
 	}
 
 	// Add all pods on candidates first.
-	podsToDelete := []*v1.Pod{}
+	pods := []*v1.Pod{}
 	for _, n := range candidates {
-		podsToDelete = append(podsToDelete, n.pods...)
+		pods = append(pods, n.pods...)
 	}
 	// Copy the array so we can check which pods scheduled later.
-	candidatePods := podsToDelete
+	candidatePods := pods
 	// Add in pending pods
-	podsToDelete = append(podsToDelete, pods...)
+	pods = append(pods, pendingPods...)
 	// Add in pods on deleting nodes
-	podsToDelete = append(podsToDelete, deletingNodePods...)
-	scheduler, err := provisioner.NewScheduler(ctx, pods, stateNodes, pscheduling.SchedulerOptions{
+	pods = append(pods, deletingNodePods...)
+	scheduler, err := provisioner.NewScheduler(ctx, pendingPods, stateNodes, pscheduling.SchedulerOptions{
 		SimulationMode: true,
 	})
 
@@ -115,7 +115,7 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return nil, fmt.Errorf("creating scheduler, %w", err)
 	}
 
-	results, err := scheduler.Solve(ctx, podsToDelete)
+	results, err := scheduler.Solve(ctx, pods)
 	if err != nil {
 		return nil, fmt.Errorf("simulating scheduling, %w", err)
 	}
