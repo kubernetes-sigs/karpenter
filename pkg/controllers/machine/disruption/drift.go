@@ -102,16 +102,18 @@ func (d *Drift) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner
 // isDrifted will check if a machine is drifted from the fields in the provisioner.Spec and
 // the cloudprovider
 func (d *Drift) isDrifted(ctx context.Context, provisioner *v1alpha5.Provisioner, machine *v1alpha5.Machine) (cloudprovider.DriftReason, error) {
+	// First check for static drift or node requirements have drifted to save on API calls.
+	if reason := lo.FindOrElse([]cloudprovider.DriftReason{areStaticFieldsDrifted(provisioner, machine), areNodeRequirementsDrifted(provisioner, machine)}, "", func(i cloudprovider.DriftReason) bool {
+		return i != ""
+	}); reason != "" {
+		return reason, nil
+	}
+
 	driftedReason, err := d.cloudProvider.IsMachineDrifted(ctx, machine)
 	if err != nil {
 		return "", err
 	}
-
-	reason := lo.FindOrElse([]cloudprovider.DriftReason{driftedReason, areStaticFieldsDrifted(provisioner, machine), areNodeRequirementsDrifted(provisioner, machine)}, "", func(i cloudprovider.DriftReason) bool {
-		return i != ""
-	})
-
-	return reason, nil
+	return driftedReason, nil
 }
 
 // Eligible fields for static drift are described in the docs
