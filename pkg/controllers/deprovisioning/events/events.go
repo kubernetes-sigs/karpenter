@@ -75,6 +75,8 @@ func Terminating(node *v1.Node, machine *v1alpha5.Machine, reason string) []even
 	}
 }
 
+// Unconsolidatable is an event that informs the user that a Machine/Node combination cannot be consolidated
+// due to the state of the Machine/Node or due to some state of the pods that are scheduled to the Machine/Node
 func Unconsolidatable(node *v1.Node, machine *v1alpha5.Machine, reason string) []events.Event {
 	return []events.Event{
 		{
@@ -96,21 +98,23 @@ func Unconsolidatable(node *v1.Node, machine *v1alpha5.Machine, reason string) [
 	}
 }
 
+// Blocked is an event that informs the user that a Machine/Node combination is blocked on deprovisioning
+// due to the state of the Machine/Node or due to some state of the pods that are scheduled to the Machine/Node
 func Blocked(node *v1.Node, machine *v1alpha5.Machine, reason string) []events.Event {
 	return []events.Event{
 		{
 			InvolvedObject: node,
 			Type:           v1.EventTypeNormal,
 			Reason:         "DeprovisioningBlocked",
-			Message:        fmt.Sprintf("Cannot deprovision node due to %s", reason),
-			DedupeValues:   []string{node.Name, reason},
+			Message:        fmt.Sprintf("Cannot deprovision node due to: %s", reason),
+			DedupeValues:   []string{node.Name},
 		},
 		{
 			InvolvedObject: machine,
 			Type:           v1.EventTypeNormal,
 			Reason:         "DeprovisioningBlocked",
-			Message:        fmt.Sprintf("Cannot deprovision machine due to %s", reason),
-			DedupeValues:   []string{machine.Name, reason},
+			Message:        fmt.Sprintf("Cannot deprovision machine due to: %s", reason),
+			DedupeValues:   []string{machine.Name},
 		},
 	}
 }
