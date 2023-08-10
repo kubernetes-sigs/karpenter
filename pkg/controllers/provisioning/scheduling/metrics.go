@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package provisioning
+package scheduling
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
@@ -22,24 +22,28 @@ import (
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(SchedulingDuration)
-	crmetrics.Registry.MustRegister(SchedulingDurationSummary)
+	crmetrics.Registry.MustRegister(SchedulingSimulationDuration)
+	crmetrics.Registry.MustRegister(SchedulingSimulationDurationSummary)
 }
 
-var SchedulingDuration = prometheus.NewHistogram(
-	prometheus.HistogramOpts{
+var SchedulingSimulationDuration = prometheus.NewHistogramVec(
+	prometheus.HistogramVecOpts{
 		Namespace: metrics.Namespace,
 		Subsystem: "provisioner",
-		Name:      "scheduling_duration_seconds",
+		Name:      "scheduling_simulation_duration_seconds",
 		Help:      "Duration of scheduling process in seconds.",
 		Buckets:   metrics.DurationBuckets(),
 	},
+	[]
+
 )
-var SchedulingDurationSummary = prometheus.NewSummary(
-	prometheus.SummaryOpts{
+
+var SchedulingSimulationDurationSummary = prometheus.NewHistogram(
+	prometheus.HistogramOpts{
 		Namespace: metrics.Namespace,
 		Subsystem: "provisioner",
-		Name:      "scheduling_summary_duration_seconds",
+		Name:      "scheduling_simulation_summary_duration_seconds",
 		Help:      "Duration of scheduling process in seconds.",
+		Buckets:   metrics.DurationBuckets(),
 	},
 )

@@ -31,6 +31,7 @@ import (
 	schedulingevents "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling/events"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
+	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
@@ -136,6 +137,8 @@ func (r Results) PodSchedulingErrors() string {
 }
 
 func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) (*Results, error) {
+	defer metrics.Measure(SchedulingSimulationDuration)()
+	defer metrics.Measure(SchedulingSimulationDurationSummary)()
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
 	// issues including pods with affinity to another pod in the batch. We could topo-sort to solve this, but it wouldn't
 	// solve the problem of scheduling pods where a particular order is needed to prevent a max-skew violation. E.g. if we
