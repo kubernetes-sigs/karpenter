@@ -90,7 +90,7 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
 	}
-	// start by getting all pending pendingPods
+	// start by getting all pending pods
 	pendingPods, err := provisioner.GetPendingPods(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("determining pending pods, %w", err)
