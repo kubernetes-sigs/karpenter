@@ -187,7 +187,7 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 	}
 
 	for _, candidate := range command.candidates {
-		c.recorder.Publish(deprovisioningevents.Terminating(candidate.Node, candidate.Machine, command.String())...)
+		c.recorder.Publish(deprovisioningevents.Terminating(candidate.Node, candidate.Machine, reason)...)
 
 		if err := c.kubeClient.Delete(ctx, candidate.Machine); err != nil {
 			if errors.IsNotFound(err) {
@@ -239,7 +239,7 @@ func (c *Controller) launchReplacementMachines(ctx context.Context, action Comma
 	workqueue.ParallelizeUntil(ctx, len(machineNames), len(machineNames), func(i int) {
 		// machine never became ready or the machines that we tried to launch got Insufficient Capacity or some
 		// other transient error
-		errs[i] = c.waitForReadiness(ctx, action, machineNames[i])
+		errs[i] = c.waitForReadiness(ctx, machineNames[i], reason)
 	})
 	if err = multierr.Combine(errs...); err != nil {
 		c.cluster.UnmarkForDeletion(candidateNodeNames...)
@@ -250,7 +250,7 @@ func (c *Controller) launchReplacementMachines(ctx context.Context, action Comma
 }
 
 // TODO @njtran: Allow to bypass this check for certain deprovisioners
-func (c *Controller) waitForReadiness(ctx context.Context, action Command, name string) error {
+func (c *Controller) waitForReadiness(ctx context.Context, name string, reason string) error {
 	// Wait for the machine to be initialized
 	var once sync.Once
 	pollStart := time.Now()
@@ -265,7 +265,7 @@ func (c *Controller) waitForReadiness(ctx context.Context, action Command, name 
 			return fmt.Errorf("getting machine, %w", err)
 		}
 		once.Do(func() {
-			c.recorder.Publish(deprovisioningevents.Launching(machine, action.String()))
+			c.recorder.Publish(deprovisioningevents.Launching(machine, reason))
 		})
 		if !machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).IsTrue() {
 			// make the user aware of why deprovisioning is paused
