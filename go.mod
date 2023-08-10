@@ -18,6 +18,7 @@ require (
 	github.com/samber/lo v1.38.1
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.24.0
+	golang.org/x/text v0.11.0
 	golang.org/x/time v0.3.0
 	k8s.io/api v0.26.6
 	k8s.io/apiextensions-apiserver v0.26.6
@@ -84,7 +85,6 @@ require (
 	golang.org/x/sync v0.2.0 // indirect
 	golang.org/x/sys v0.10.0 // indirect
 	golang.org/x/term v0.10.0 // indirect
-	golang.org/x/text v0.11.0 // indirect
 	golang.org/x/tools v0.9.3 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.2.0 // indirect
 	google.golang.org/api v0.124.0 // indirect

@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"time"
 
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 	v1 "k8s.io/api/core/v1"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
@@ -29,7 +31,7 @@ func Launching(machine *v1alpha5.Machine, reason string) events.Event {
 		InvolvedObject: machine,
 		Type:           v1.EventTypeNormal,
 		Reason:         "DeprovisioningLaunching",
-		Message:        fmt.Sprintf("Launching machine for %s", reason),
+		Message:        fmt.Sprintf("Launching machine: %s", cases.Title(language.Und, cases.NoLower).String(reason)),
 		DedupeValues:   []string{machine.Name, reason},
 	}
 }
@@ -60,14 +62,14 @@ func Terminating(node *v1.Node, machine *v1alpha5.Machine, reason string) []even
 			InvolvedObject: node,
 			Type:           v1.EventTypeNormal,
 			Reason:         "DeprovisioningTerminating",
-			Message:        fmt.Sprintf("Deprovisioning node via %s", reason),
+			Message:        fmt.Sprintf("Deprovisioning node: %s", cases.Title(language.Und, cases.NoLower).String(reason)),
 			DedupeValues:   []string{node.Name, reason},
 		},
 		{
 			InvolvedObject: machine,
 			Type:           v1.EventTypeNormal,
 			Reason:         "DeprovisioningTerminating",
-			Message:        fmt.Sprintf("Deprovisioning machine via %s", reason),
+			Message:        fmt.Sprintf("Deprovisioning machine: %s", cases.Title(language.Und, cases.NoLower).String(reason)),
 			DedupeValues:   []string{machine.Name, reason},
 		},
 	}
