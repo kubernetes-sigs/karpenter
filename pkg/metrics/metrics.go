@@ -43,7 +43,7 @@ var (
 			Namespace: Namespace,
 			Subsystem: nodeClaimSubsystem,
 			Name:      "terminated",
-			Help:      "Number of machines terminated in total by Karpenter. Labeled by reason the machine was terminated.",
+			Help:      "Number of machines terminated in total by Karpenter. Labeled by reason the machine was terminated and the owning provisioner .",
 		},
 		[]string{
 			ReasonLabel,
@@ -125,7 +125,7 @@ var (
 			Namespace: Namespace,
 			Subsystem: machineSubsystem,
 			Name:      "terminated",
-			Help:      "Number of machines terminated in total by Karpenter. Labeled by reason the machine was terminated.",
+			Help:      "Number of machines terminated in total by Karpenter. Labeled by reason the machine was terminated and the owning provisioner.",
 		},
 		[]string{
 			ReasonLabel,
@@ -165,10 +165,34 @@ var (
 			ProvisionerLabel,
 		},
 	)
+	MachinesDisruptedCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: machineSubsystem,
+			Name:      "disrupted",
+			Help:      "Number of machines disrupted in total by Karpenter. Labeled by disruption type of the machine and the owning provisioner.",
+		},
+		[]string{
+			TypeLabel,
+			ProvisionerLabel,
+		},
+	)
+	MachinesDriftedCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: machineSubsystem,
+			Name:      "drifted",
+			Help:      "Number of machine drifted reasons in total by Karpenter. Labeled by drift type of the machine and the owning provisioner..",
+		},
+		[]string{
+			TypeLabel,
+			ProvisionerLabel,
+		},
+	)
 )
 
 func init() {
 	crmetrics.Registry.MustRegister(NodeClaimsCreatedCounter, NodeClaimsTerminatedCounter, NodeClaimsLaunchedCounter,
 		NodeClaimsRegisteredCounter, NodeClaimsInitializedCounter, MachinesCreatedCounter, MachinesTerminatedCounter,
-		MachinesLaunchedCounter, MachinesRegisteredCounter, MachinesInitializedCounter, NodesCreatedCounter, NodesTerminatedCounter)
+		MachinesLaunchedCounter, MachinesRegisteredCounter, MachinesInitializedCounter, MachinesDisruptedCounter, MachinesDriftedCounter, NodesCreatedCounter, NodesTerminatedCounter)
 }

@@ -25,7 +25,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/metrics"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 )
 
@@ -83,7 +86,10 @@ func (e *Expiration) Reconcile(ctx context.Context, provisioner *v1alpha5.Provis
 	})
 	if !hasExpiredCondition {
 		logging.FromContext(ctx).Debugf("marking machine as expired")
+		metrics.MachinesDisruptedCounter.With(prometheus.Labels{
+			metrics.TypeLabel:        metrics.ExpirationReason,
+			metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
+		}).Inc()
 	}
-
 	return reconcile.Result{}, nil
 }
