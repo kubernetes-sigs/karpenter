@@ -31,7 +31,7 @@ var (
 			Namespace: Namespace,
 			Subsystem: nodeClaimSubsystem,
 			Name:      "created",
-			Help:      "Number of machines created in total by Karpenter. Labeled by reason the machine was created and the owning provisioner.",
+			Help:      "Number of nodeclaims created in total by Karpenter. Labeled by reason the nodeclaim was created and the owning nodepool.",
 		},
 		[]string{
 			ReasonLabel,
@@ -43,7 +43,7 @@ var (
 			Namespace: Namespace,
 			Subsystem: nodeClaimSubsystem,
 			Name:      "terminated",
-			Help:      "Number of machines terminated in total by Karpenter. Labeled by reason the machine was terminated and the owning provisioner .",
+			Help:      "Number of nodeclaims terminated in total by Karpenter. Labeled by reason the nodeclaim was terminated and the owning nodepool.",
 		},
 		[]string{
 			ReasonLabel,
@@ -55,7 +55,7 @@ var (
 			Namespace: Namespace,
 			Subsystem: nodeClaimSubsystem,
 			Name:      "launched",
-			Help:      "Number of machines launched in total by Karpenter. Labeled by the owning provisioner.",
+			Help:      "Number of nodeclaims launched in total by Karpenter. Labeled by the owning nodepool.",
 		},
 		[]string{
 			NodePoolLabel,
@@ -66,7 +66,7 @@ var (
 			Namespace: Namespace,
 			Subsystem: nodeClaimSubsystem,
 			Name:      "registered",
-			Help:      "Number of machines registered in total by Karpenter. Labeled by the owning provisioner.",
+			Help:      "Number of nodeclaims registered in total by Karpenter. Labeled by the owning nodepool.",
 		},
 		[]string{
 			NodePoolLabel,
@@ -77,9 +77,33 @@ var (
 			Namespace: Namespace,
 			Subsystem: nodeClaimSubsystem,
 			Name:      "initialized",
-			Help:      "Number of machines initialized in total by Karpenter. Labeled by the owning provisioner.",
+			Help:      "Number of nodeclaims initialized in total by Karpenter. Labeled by the owning nodepool.",
 		},
 		[]string{
+			NodePoolLabel,
+		},
+	)
+	NodeClaimsDisruptedCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: nodeClaimSubsystem,
+			Name:      "disrupted",
+			Help:      "Number of nodeclaims disrupted in total by Karpenter. Labeled by disruption type of the nodeclaim and the owning nodepool.",
+		},
+		[]string{
+			TypeLabel,
+			NodePoolLabel,
+		},
+	)
+	NodeClaimsDriftedCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: nodeClaimSubsystem,
+			Name:      "drifted",
+			Help:      "Number of nodeclaims drifted reasons in total by Karpenter. Labeled by drift type of the nodeclaim and the owning nodepool.",
+		},
+		[]string{
+			TypeLabel,
 			NodePoolLabel,
 		},
 	)
@@ -193,6 +217,7 @@ var (
 
 func init() {
 	crmetrics.Registry.MustRegister(NodeClaimsCreatedCounter, NodeClaimsTerminatedCounter, NodeClaimsLaunchedCounter,
-		NodeClaimsRegisteredCounter, NodeClaimsInitializedCounter, MachinesCreatedCounter, MachinesTerminatedCounter,
-		MachinesLaunchedCounter, MachinesRegisteredCounter, MachinesInitializedCounter, MachinesDisruptedCounter, MachinesDriftedCounter, NodesCreatedCounter, NodesTerminatedCounter)
+		NodeClaimsRegisteredCounter, NodeClaimsInitializedCounter, NodeClaimsDisruptedCounter, NodeClaimsDriftedCounter,
+		MachinesCreatedCounter, MachinesTerminatedCounter, MachinesLaunchedCounter, MachinesRegisteredCounter, MachinesInitializedCounter,
+		MachinesDisruptedCounter, MachinesDriftedCounter, NodesCreatedCounter, NodesTerminatedCounter)
 }

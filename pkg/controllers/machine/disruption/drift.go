@@ -26,8 +26,6 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/prometheus/client_golang/prometheus"
-
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
@@ -35,6 +33,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
+	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
 
 const (
@@ -88,14 +87,8 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 	})
 	if !hasDriftedCondition {
 		logging.FromContext(ctx).Debugf("marking drifted")
-		metrics.MachinesDisruptedCounter.With(prometheus.Labels{
-			metrics.TypeLabel:        metrics.DriftReason,
-			metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
-		}).Inc()
-		metrics.MachinesDriftedCounter.With(prometheus.Labels{
-			metrics.TypeLabel:        string(driftedReason),
-			metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
-		}).Inc()
+		nodeclaimutil.DisruptedCounter(nodeClaim, metrics.DriftReason).Inc()
+		nodeclaimutil.DriftedCounter(nodeClaim, string(driftedReason)).Inc()
 	}
 	// Requeue after 5 minutes for the cache TTL
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil

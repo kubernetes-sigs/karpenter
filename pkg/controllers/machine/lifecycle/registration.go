@@ -66,7 +66,7 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeCla
 	if err = r.syncNode(ctx, nodeClaim, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("syncing node, %w", err)
 	}
-	logging.FromContext(ctx).Debugf("registered")
+	logging.FromContext(ctx).Debugf("registered %s", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"))
 	nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeRegistered)
 	nodeClaim.Status.NodeName = node.Name
 

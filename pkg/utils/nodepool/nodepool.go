@@ -117,9 +117,7 @@ func List(ctx context.Context, c client.Client, opts ...client.ListOption) (*v1b
 		return *New(&p)
 	})
 	nodePoolList := &v1beta1.NodePoolList{}
-	if err := c.List(ctx, nodePoolList, opts...); err != nil {
-		return nil, err
-	}
+	// TODO @joinnis: Add NodePools to this List() function when releasing v1beta1 APIs
 	nodePoolList.Items = append(nodePoolList.Items, convertedNodePools...)
 	return nodePoolList, nil
 }

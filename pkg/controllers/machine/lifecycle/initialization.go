@@ -79,7 +79,7 @@ func (i *Initialization) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeC
 			return reconcile.Result{}, err
 		}
 	}
-	logging.FromContext(ctx).Debugf("initialized")
+	logging.FromContext(ctx).Debugf("initialized %s", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"))
 	nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeInitialized)
 	nodeclaimutil.InitializedCounter(nodeClaim).Inc()
 	return reconcile.Result{}, nil

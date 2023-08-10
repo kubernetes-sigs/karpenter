@@ -95,7 +95,7 @@ func (l *Launch) linkNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 		"instance-type", created.Labels[v1.LabelInstanceTypeStable],
 		"zone", created.Labels[v1.LabelTopologyZone],
 		"capacity-type", created.Labels[v1alpha5.LabelCapacityType],
-		"allocatable", created.Status.Allocatable).Infof("linked")
+		"allocatable", created.Status.Allocatable).Infof("linked %s", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"))
 	return nodeclaimutil.New(created), nil
 }
 
@@ -113,7 +113,7 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeCla
 			return nil, nil
 		default:
 			nodeClaim.StatusConditions().MarkFalse(v1beta1.NodeLaunched, "LaunchFailed", truncateMessage(err.Error()))
-			return nil, fmt.Errorf("creating, %w", err)
+			return nil, fmt.Errorf("creating %s, %w", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"), err)
 		}
 	}
 	logging.FromContext(ctx).With(
@@ -121,7 +121,7 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeCla
 		"instance-type", created.Labels[v1.LabelInstanceTypeStable],
 		"zone", created.Labels[v1.LabelTopologyZone],
 		"capacity-type", created.Labels[v1beta1.CapacityTypeLabelKey],
-		"allocatable", created.Status.Allocatable).Infof("launched")
+		"allocatable", created.Status.Allocatable).Infof("launched %s", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"))
 	return nodeclaimutil.New(created), nil
 }
 

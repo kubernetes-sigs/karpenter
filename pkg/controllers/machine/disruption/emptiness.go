@@ -26,9 +26,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/prometheus/client_golang/prometheus"
-
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/metrics"
@@ -108,10 +105,7 @@ func (e *Emptiness) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, n
 	})
 	if !hasEmptyCondition {
 		logging.FromContext(ctx).Debugf("marking empty")
-		metrics.MachinesDisruptedCounter.With(prometheus.Labels{
-			metrics.TypeLabel:        metrics.EmptinessReason,
-			metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
-		}).Inc()
+		nodeclaimutil.DisruptedCounter(nodeClaim, metrics.EmptinessReason).Inc()
 	}
 	return reconcile.Result{}, nil
 }

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -96,7 +97,7 @@ func (c *Controller) Finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 		if err = nodeclaimutil.Patch(ctx, c.kubeClient, stored, nodeClaim); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("removing termination finalizer, %w", err))
 		}
-		logging.FromContext(ctx).Infof("deleted")
+		logging.FromContext(ctx).Infof("deleted %s", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"))
 	}
 	return reconcile.Result{}, nil
 }

@@ -316,9 +316,7 @@ func List(ctx context.Context, c client.Client, opts ...client.ListOption) (*v1b
 		return *New(&m)
 	})
 	nodeClaimList := &v1beta1.NodeClaimList{}
-	if err := c.List(ctx, nodeClaimList, opts...); err != nil {
-		return nil, err
-	}
+	// TODO @joinnis: Add NodeClaims to this List() function when releasing v1beta1 APIs
 	nodeClaimList.Items = append(nodeClaimList.Items, convertedNodeClaims...)
 	return nodeClaimList, nil
 }
@@ -412,6 +410,32 @@ func TerminatedCounter(nodeClaim *v1beta1.NodeClaim, reason string) prometheus.C
 	}
 	return metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
 		metrics.ReasonLabel:   reason,
+		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+	})
+}
+
+func DisruptedCounter(nodeClaim *v1beta1.NodeClaim, disruptionType string) prometheus.Counter {
+	if nodeClaim.IsMachine {
+		return metrics.MachinesDisruptedCounter.With(prometheus.Labels{
+			metrics.TypeLabel:        disruptionType,
+			metrics.ProvisionerLabel: nodeClaim.Labels[v1alpha5.ProvisionerNameLabelKey],
+		})
+	}
+	return metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
+		metrics.TypeLabel:     disruptionType,
+		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+	})
+}
+
+func DriftedCounter(nodeClaim *v1beta1.NodeClaim, driftType string) prometheus.Counter {
+	if nodeClaim.IsMachine {
+		return metrics.MachinesDriftedCounter.With(prometheus.Labels{
+			metrics.TypeLabel:        driftType,
+			metrics.ProvisionerLabel: nodeClaim.Labels[v1alpha5.ProvisionerNameLabelKey],
+		})
+	}
+	return metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
+		metrics.TypeLabel:     driftType,
 		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
 	})
 }

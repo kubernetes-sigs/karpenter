@@ -83,14 +83,11 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		}
 		logging.FromContext(ctx).
 			With(
-				lo.Ternary(nodeClaims[i].IsMachine, "machine", "nodeclaim"),
-				nodeClaims[i].Name,
-				"provider-id",
-				nodeClaims[i].Status.ProviderID,
-				lo.Ternary(nodeClaims[i].IsMachine, "provisioner", "nodepool"),
-				nodeclaimutil.OwnerName(nodeClaims[i]),
+				lo.Ternary(nodeClaims[i].IsMachine, "machine", "nodeclaim"), nodeClaims[i].Name,
+				"provider-id", nodeClaims[i].Status.ProviderID,
+				lo.Ternary(nodeClaims[i].IsMachine, "provisioner", "nodepool"), nodeclaimutil.OwnerName(nodeClaims[i]),
 			).
-			Debugf("garbage collecting with no cloudprovider representation")
+			Debugf("garbage collecting %s with no cloudprovider representation", lo.Ternary(nodeClaims[i].IsMachine, "machine", "nodeclaim"))
 		nodeclaimutil.TerminatedCounter(nodeClaims[i], "garbage_collected").Inc()
 	})
 	return reconcile.Result{RequeueAfter: time.Minute * 2}, multierr.Combine(errs...)
