@@ -96,10 +96,17 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return nil, fmt.Errorf("determining pending pods, %w", err)
 	}
 
+	// Add all pods on candidates first.
+	podsToDelete := []*v1.Pod{}
 	for _, n := range candidates {
-		pods = append(pods, n.pods...)
+		podsToDelete = append(podsToDelete, n.pods...)
 	}
-	pods = append(pods, deletingNodePods...)
+	// Copy the array so we can check which pods scheduled later.
+	candidatePods := podsToDelete
+	// Add in pending pods
+	podsToDelete = append(podsToDelete, pods...)
+	// Add in pods on deleting nodes
+	podsToDelete = append(podsToDelete, deletingNodePods...)
 	scheduler, err := provisioner.NewScheduler(ctx, pods, stateNodes, pscheduling.SchedulerOptions{
 		SimulationMode: true,
 	})
@@ -108,9 +115,23 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return nil, fmt.Errorf("creating scheduler, %w", err)
 	}
 
-	results, err := scheduler.Solve(ctx, pods)
+	results, err := scheduler.Solve(ctx, podsToDelete)
 	if err != nil {
 		return nil, fmt.Errorf("simulating scheduling, %w", err)
+	}
+	if !results.AllPodsScheduled() {
+		candidatePodFailure := false
+		// If any of the pods on the candidates we're deprovisioning couldn't reschedule
+		for _, p := range candidatePods {
+			if err, ok := results.PodErrors[p]; ok && err != nil {
+				candidatePodFailure = true
+				break
+			}
+		}
+		// If all the pod errors are on deleting nodes or pending pods, ignore them
+		if !candidatePodFailure {
+			results.PodErrors = nil
+		}
 	}
 
 	// check if the scheduling relied on an existing node that isn't ready yet, if so we fail
