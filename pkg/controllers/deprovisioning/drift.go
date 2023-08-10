@@ -32,7 +32,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
-	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 )
 
 // Drift is a subreconciler that deletes drifted machines.
@@ -66,7 +65,8 @@ func (d *Drift) filterAndSortCandidates(ctx context.Context, nodes []*Candidate)
 		return nil, fmt.Errorf("filtering candidates, %w", err)
 	}
 	sort.Slice(candidates, func(i int, j int) bool {
-		return machineutil.GetDriftedTime(candidates[i].Machine).Before(machineutil.GetDriftedTime(candidates[j].Machine))
+		return candidates[i].Machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).LastTransitionTime.Inner.Time.Before(
+			candidates[j].Machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).LastTransitionTime.Inner.Time)
 	})
 	return candidates, nil
 }

@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -216,14 +217,9 @@ var _ = Describe("Expiration", func() {
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
 	})
 	It("should expire one non-empty node at a time, starting with most expired", func() {
-		expireProv := test.Provisioner(test.ProvisionerOptions{
-			TTLSecondsUntilExpired: ptr.Int64(100),
-		})
-
 		labels := map[string]string{
 			"app": "test",
 		}
-
 		// create our RS so we can link a pod to it
 		rs := test.ReplicaSet()
 		ExpectApplied(ctx, env.Client, rs)
@@ -241,25 +237,12 @@ var _ = Describe("Expiration", func() {
 					},
 				},
 			},
-		})
-
-		machineToExpire, nodeToExpire := test.MachineAndNode(v1alpha5.Machine{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: expireProv.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-				},
-			},
-			Status: v1alpha5.MachineStatus{
-				ProviderID:  test.RandomProviderID(),
-				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+			// Make each pod request only fit on a single node
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("30")},
 			},
 		})
-		machineToExpire.StatusConditions().MarkTrue(v1alpha5.MachineExpired)
-
-		machineNotExpire, nodeNotExpire := test.MachineAndNode(v1alpha5.Machine{
+		machine2, node2 := test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: prov.Name,
@@ -273,15 +256,20 @@ var _ = Describe("Expiration", func() {
 				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
 			},
 		})
+		machine2.Status.Conditions = append(machine2.Status.Conditions, apis.Condition{
+			Type:               v1alpha5.MachineExpired,
+			Status:             v1.ConditionTrue,
+			LastTransitionTime: apis.VolatileTime{Inner: metav1.Time{Time: time.Now().Add(-time.Hour)}},
+		})
 
-		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], machineToExpire, nodeToExpire, machineNotExpire, nodeNotExpire, expireProv, prov)
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], machine, machine2, node, node2, prov)
 
 		// bind pods to node so that they're not empty and don't deprovision in parallel.
-		ExpectManualBinding(ctx, env.Client, pods[0], nodeToExpire)
-		ExpectManualBinding(ctx, env.Client, pods[1], nodeNotExpire)
+		ExpectManualBinding(ctx, env.Client, pods[0], node)
+		ExpectManualBinding(ctx, env.Client, pods[1], node2)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{nodeToExpire, nodeNotExpire}, []*v1alpha5.Machine{machineToExpire, machineNotExpire})
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node, node2}, []*v1alpha5.Machine{machine, machine2})
 
 		// deprovisioning won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
@@ -291,12 +279,14 @@ var _ = Describe("Expiration", func() {
 		wg.Wait()
 
 		// Cascade any deletion of the machine to the node
-		ExpectMachinesCascadeDeletion(ctx, env.Client, machineToExpire)
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine2)
 
 		// Expect that one of the expired machines is gone
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(2))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
-		ExpectNotFound(ctx, env.Client, machineToExpire, nodeToExpire)
+		ExpectNotFound(ctx, env.Client, machine2, node2)
+		ExpectExists(ctx, env.Client, machine)
+		ExpectExists(ctx, env.Client, node)
 	})
 	It("can replace node for expiration", func() {
 		labels := map[string]string{

@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -420,7 +421,11 @@ var _ = Describe("Drift", func() {
 				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
 			},
 		})
-		machine2.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
+		machine2.Status.Conditions = append(machine2.Status.Conditions, apis.Condition{
+			Type:               v1alpha5.MachineDrifted,
+			Status:             v1.ConditionTrue,
+			LastTransitionTime: apis.VolatileTime{Inner: metav1.Time{Time: time.Now().Add(-time.Hour)}},
+		})
 
 		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], machine, node, machine2, node2, prov)
 
@@ -441,17 +446,10 @@ var _ = Describe("Drift", func() {
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine, machine2)
 
-		nodes := ExpectNodes(ctx, env.Client)
-		_, ok1 := lo.Find(nodes, func(n *v1.Node) bool {
-			return n.Name == node.Name
-		})
-		_, ok2 := lo.Find(nodes, func(n *v1.Node) bool {
-			return n.Name == node2.Name
-		})
-		// Expect that the first drifted machines is gone and replaced
-		Expect(ok1).To(BeFalse())
-		Expect(ok2).To(BeTrue())
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(2))
+		ExpectNotFound(ctx, env.Client, machine2, node2)
+		ExpectExists(ctx, env.Client, machine)
+		ExpectExists(ctx, env.Client, node)
 	})
 })
