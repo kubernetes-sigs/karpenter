@@ -28,6 +28,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/controllers/machine/disruption"
 	controllerprov "github.com/aws/karpenter-core/pkg/controllers/provisioner"
 	"github.com/aws/karpenter-core/pkg/test"
 
@@ -62,6 +63,33 @@ var _ = Describe("Drift", func() {
 
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).IsTrue()).To(BeTrue())
+	})
+	It("should detect static drift before cloud provider drift", func() {
+		cp.Drifted = "drifted"
+		provisioner.Annotations = lo.Assign(provisioner.Annotations, map[string]string{
+			v1alpha5.ProvisionerHashAnnotationKey: "123456789",
+		})
+		ExpectApplied(ctx, env.Client, provisioner, machine)
+		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
+
+		machine = ExpectExists(ctx, env.Client, machine)
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).IsTrue()).To(BeTrue())
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).Reason).To(Equal(string(disruption.ProvisionerStaticallyDrifted)))
+	})
+	It("should detect node requirement drift before cloud provider drift", func() {
+		cp.Drifted = "drifted"
+		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
+			v1.NodeSelectorRequirement{
+				Key:      v1.LabelInstanceTypeStable,
+				Operator: v1.NodeSelectorOpDoesNotExist,
+			},
+		}
+		ExpectApplied(ctx, env.Client, provisioner, machine)
+		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
+
+		machine = ExpectExists(ctx, env.Client, machine)
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).IsTrue()).To(BeTrue())
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).Reason).To(Equal(string(disruption.NodeRequirementDrifted)))
 	})
 	It("should not detect drift if the feature flag is disabled", func() {
 		cp.Drifted = "drifted"
