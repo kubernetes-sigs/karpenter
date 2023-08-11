@@ -26,24 +26,21 @@ func init() {
 	crmetrics.Registry.MustRegister(SchedulingSimulationDurationSummary)
 }
 
-var SchedulingSimulationDuration = prometheus.NewHistogramVec(
-	prometheus.HistogramVecOpts{
+var SchedulingSimulationDuration = prometheus.NewHistogram(
+	prometheus.HistogramOpts{
 		Namespace: metrics.Namespace,
 		Subsystem: "provisioner",
 		Name:      "scheduling_simulation_duration_seconds",
 		Help:      "Duration of scheduling process in seconds.",
 		Buckets:   metrics.DurationBuckets(),
 	},
-	[]
-
 )
 
-var SchedulingSimulationDurationSummary = prometheus.NewHistogram(
-	prometheus.HistogramOpts{
+var SchedulingSimulationDurationSummary = prometheus.NewSummary(
+	prometheus.SummaryOpts{
 		Namespace: metrics.Namespace,
 		Subsystem: "provisioner",
 		Name:      "scheduling_simulation_summary_duration_seconds",
 		Help:      "Duration of scheduling process in seconds.",
-		Buckets:   metrics.DurationBuckets(),
 	},
 )

@@ -30,7 +30,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
-const SingleMachineConsolidationTimeoutDuration = 5 * time.Minute
+const SingleMachineConsolidationTimeoutDuration = 3 * time.Minute
 
 // SingleMachineConsolidation is the consolidation controller that performs single machine consolidation.
 type SingleMachineConsolidation struct {

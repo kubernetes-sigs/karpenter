@@ -33,7 +33,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
-const MultiMachineConsolidationTimeoutDuration = 1 * time.Minute
+const MultiMachineConsolidationTimeoutDuration = 2 * time.Second
 
 type MultiMachineConsolidation struct {
 	consolidation
