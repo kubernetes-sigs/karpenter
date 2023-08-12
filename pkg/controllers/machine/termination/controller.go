@@ -39,6 +39,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
+	"github.com/samber/lo"
 )
 
 var _ corecontroller.FinalizingTypedController[*v1alpha5.Machine] = (*Controller)(nil)
@@ -77,8 +78,8 @@ func (c *Controller) Finalize(ctx context.Context, machine *v1alpha5.Machine) (r
 		return reconcile.Result{}, err
 	}
 	for _, node := range nodes {
-		// We delete nodes to trigger the node finalization and deletion flow
-		if err = c.kubeClient.Delete(ctx, node); client.IgnoreNotFound(err) != nil {
+		// Trigger finalization to gracefully terminate the node, propagating the deletion grace period
+		if err = c.kubeClient.Delete(ctx, node, client.GracePeriodSeconds(lo.FromPtr(machine.DeletionGracePeriodSeconds))); client.IgnoreNotFound(err) != nil {
 			return reconcile.Result{}, err
 		}
 	}

@@ -17,6 +17,7 @@ package deprovisioning
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -188,8 +189,8 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 
 	for _, candidate := range command.candidates {
 		c.recorder.Publish(deprovisioningevents.Terminating(candidate.Node, candidate.Machine, reason)...)
-
-		if err := c.kubeClient.Delete(ctx, candidate.Machine); err != nil {
+		// Gracefully shut down the machine, with indefinite timeout
+		if err := c.kubeClient.Delete(ctx, candidate.Machine, client.GracePeriodSeconds(math.MaxInt64)); err != nil {
 			if errors.IsNotFound(err) {
 				continue
 			}

@@ -38,6 +38,11 @@ const (
 	CapacityTypeLabelKey    = Group + "/capacity-type"
 )
 
+// Karpenter specific taints
+const (
+	TaintKeyTerminating = Group + "/terminating"
+)
+
 // Karpenter specific annotations
 const (
 	DoNotDisruptAnnotationKey          = Group + "/do-not-disrupt"
