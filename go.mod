@@ -17,8 +17,8 @@ require (
 	github.com/prometheus/client_model v0.4.0
 	github.com/samber/lo v1.38.1
 	go.uber.org/multierr v1.11.0
-	go.uber.org/zap v1.24.0
-	golang.org/x/text v0.11.0
+	go.uber.org/zap v1.25.0
+	golang.org/x/text v0.12.0
 	golang.org/x/time v0.3.0
 	k8s.io/api v0.26.6
 	k8s.io/apiextensions-apiserver v0.26.6
@@ -35,7 +35,7 @@ require (
 require (
 	contrib.go.opencensus.io/exporter/ocagent v0.7.1-0.20200907061046-05415f1de66d // indirect
 	contrib.go.opencensus.io/exporter/prometheus v0.4.0 // indirect
-	github.com/benbjohnson/clock v1.1.0 // indirect
+	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/blendle/zapdriver v1.3.1 // indirect
