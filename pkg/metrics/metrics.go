@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	nodeSubsystem      = "nodes"
+	NodeSubsystem      = "nodes"
 	machineSubsystem   = "machines"
 	nodeClaimSubsystem = "nodeclaims"
 )
@@ -110,7 +110,7 @@ var (
 	NodesCreatedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
-			Subsystem: nodeSubsystem,
+			Subsystem: NodeSubsystem,
 			Name:      "created",
 			Help:      "Number of nodes created in total by Karpenter. Labeled by owning provisioner.",
 		},
@@ -122,7 +122,7 @@ var (
 	NodesTerminatedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
-			Subsystem: nodeSubsystem,
+			Subsystem: NodeSubsystem,
 			Name:      "terminated",
 			Help:      "Number of nodes terminated in total by Karpenter. Labeled by owning provisioner.",
 		},
