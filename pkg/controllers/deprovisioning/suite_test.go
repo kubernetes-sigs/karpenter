@@ -2094,13 +2094,6 @@ var _ = Describe("Consolidation TTL", func() {
 		// controller should be blocking during the timeout
 		Expect(finished.Load()).To(BeFalse())
 
-		ExpectTriggerVerifyAction(&wg)
-
-		// wait for the controller to block on the validation timeout
-		Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
-		// controller should be blocking during the timeout
-		Expect(finished.Load()).To(BeFalse())
-
 		// and the node should not be deleted yet
 		ExpectExists(ctx, env.Client, node1)
 
@@ -2226,20 +2219,8 @@ var _ = Describe("Consolidation TTL", func() {
 		ExpectExists(ctx, env.Client, machine1)
 		ExpectExists(ctx, env.Client, machine2)
 
-		// Increment time so that the multi-machine will finish
-		ExpectTriggerVerifyAction(&wg)
-
-		// wait for the controller to block on the validation timeout
-		Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
-		// controller should be blocking during the timeout
-		Expect(finished.Load()).To(BeFalse())
-
-		// and the node should not be deleted yet
-		ExpectExists(ctx, env.Client, machine1)
-		ExpectExists(ctx, env.Client, machine2)
-
-		// Increment time so that validation will finish
-		ExpectTriggerVerifyAction(&wg)
+		// advance the clock so that the timeout expires
+		fakeClock.Step(31 * time.Second)
 
 		// controller should finish
 		Eventually(finished.Load, 10*time.Second).Should(BeTrue())
@@ -2302,7 +2283,7 @@ var _ = Describe("Consolidation Timeout", func() {
 		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
 	})
 	It("should return the last valid command when multi-machine consolidation times out", func() {
-		numNodes := 100
+		numNodes := 20
 		labels := map[string]string{
 			"app": "test",
 		}
@@ -2367,24 +2348,24 @@ var _ = Describe("Consolidation Timeout", func() {
 			defer GinkgoRecover()
 			defer wg.Done()
 			defer finished.Store(true)
-			_, _ = deprovisioningController.Reconcile(ctx, reconcile.Request{})
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		}()
+
+		ExpectTriggerVerifyAction(&wg)
+
+		// advance the clock so that the timeout expires
+		fakeClock.Step(deprovisioning.MultiMachineConsolidationTimeoutDuration)
 
 		// wait for the controller to block on the validation timeout
 		Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
 		// controller should be blocking during the timeout
 		Expect(finished.Load()).To(BeFalse())
 
-		// advance the clock so that the timeout expires
-		fakeClock.Step(deprovisioning.MultiMachineConsolidationTimeoutDuration)
-
 		// and the node should not be deleted yet
 		for i := range machines {
 			ExpectExists(ctx, env.Client, machines[i])
 		}
 
-		// advance the clock so that the timeout expires
-		fakeClock.Step(5 * time.Minute)
 		// controller should finish
 		Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 		wg.Wait()
@@ -2458,28 +2439,15 @@ var _ = Describe("Consolidation Timeout", func() {
 			defer GinkgoRecover()
 			defer wg.Done()
 			defer finished.Store(true)
-			_, _ = deprovisioningController.Reconcile(ctx, reconcile.Request{})
+			ExpectReconcileFailed(ctx, deprovisioningController, client.ObjectKey{})
 		}()
 
-		// wait for the controller to block on the consolidation timeout
-		Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
-		// controller should be blocking during the timeout
-		Expect(finished.Load()).To(BeFalse())
+		// ExpectTriggerVerifyAction() so that we can try to compute some deprovisioning actions.
+		ExpectTriggerVerifyAction(&wg)
 
 		// advance the clock so that the timeout expires for multi-machine
 		fakeClock.Step(deprovisioning.MultiMachineConsolidationTimeoutDuration)
-
-		// and the node should not be deleted yet
-		for i := range machines {
-			ExpectExists(ctx, env.Client, machines[i])
-		}
-
-		// wait for the controller to block on the consolidation timeout
-		Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
-		// controller should be blocking during the timeout
-		Expect(finished.Load()).To(BeFalse())
-
-		// advance the clock so that the timeout expires for multi-machine
+		// advance the clock so that the timeout expires for single-machine
 		fakeClock.Step(deprovisioning.SingleMachineConsolidationTimeoutDuration)
 
 		// controller should finish

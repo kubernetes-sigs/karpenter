@@ -16,7 +16,6 @@ package deprovisioning
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -57,37 +56,33 @@ func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 	v := NewValidation(consolidationTTL, c.clock, c.cluster, c.kubeClient, c.provisioner, c.cloudProvider, c.recorder)
 
 	// Set a timeout
-	timer := c.clock.After(SingleMachineConsolidationTimeoutDuration)
+	timeout := c.clock.Now().Add(MultiMachineConsolidationTimeoutDuration)
 	// binary search to find the maximum number of machines we can terminate
 	for i, candidate := range candidates {
-		select {
-		case <-ctx.Done():
-			return Command{}, errors.New("context canceled")
-		case <-timer:
+		if c.clock.Now().After(timeout) {
 			deprovisioningConsolidationTimeoutsCounter.WithLabelValues("single-machine").Inc()
 			logging.FromContext(ctx).Debugf("abandoning single-machine consolidation due to timeout after evaluating %d candidates", i)
 			return Command{}, nil
-		default:
-			// compute a possible consolidation option
-			cmd, err := c.computeConsolidation(ctx, candidate)
-			if err != nil {
-				logging.FromContext(ctx).Errorf("computing consolidation %s", err)
-				continue
-			}
-			if cmd.Action() == NoOpAction {
-				continue
-			}
-
-			isValid, err := v.IsValid(ctx, cmd)
-			if err != nil {
-				return Command{}, fmt.Errorf("validating consolidation, %w", err)
-			}
-			if !isValid {
-				logging.FromContext(ctx).Debugf("abandoning single machine consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
-				return Command{}, nil
-			}
-			return cmd, nil
 		}
+		// compute a possible consolidation option
+		cmd, err := c.computeConsolidation(ctx, candidate)
+		if err != nil {
+			logging.FromContext(ctx).Errorf("computing consolidation %s", err)
+			continue
+		}
+		if cmd.Action() == NoOpAction {
+			continue
+		}
+
+		isValid, err := v.IsValid(ctx, cmd)
+		if err != nil {
+			return Command{}, fmt.Errorf("validating consolidation, %w", err)
+		}
+		if !isValid {
+			logging.FromContext(ctx).Debugf("abandoning single machine consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+			return Command{}, nil
+		}
+		return cmd, nil
 	}
 	// couldn't remove any candidate
 	c.markConsolidated()
