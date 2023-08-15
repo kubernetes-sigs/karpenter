@@ -31,9 +31,10 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
+	"github.com/samber/lo"
 )
 
-const MultiMachineConsolidationTimeoutDuration = 2 * time.Minute
+const MultiMachineConsolidationTimeoutDuration = 1 * time.Minute
 
 type MultiMachineConsolidation struct {
 	consolidation
@@ -55,7 +56,8 @@ func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	deprovisioningEligibleMachinesGauge.WithLabelValues(m.String()).Set(float64(len(candidates)))
 
 	// For now, we will consider up to every machine in the cluster, might be configurable in the future.
-	maxParallel := len(candidates)
+	// Only consider a maximum batch of 100 machines to save on computation.
+	maxParallel := lo.Clamp(len(candidates), 0, 100)
 
 	cmd, err := m.firstNMachineConsolidationOption(ctx, candidates, maxParallel)
 	if err != nil {
