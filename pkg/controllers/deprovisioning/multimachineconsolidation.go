@@ -26,12 +26,13 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/samber/lo"
+
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
-	"github.com/samber/lo"
 )
 
 const MultiMachineConsolidationTimeoutDuration = 1 * time.Minute
@@ -55,8 +56,8 @@ func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	}
 	deprovisioningEligibleMachinesGauge.WithLabelValues(m.String()).Set(float64(len(candidates)))
 
-	// For now, we will consider up to every machine in the cluster, might be configurable in the future.
 	// Only consider a maximum batch of 100 machines to save on computation.
+	// This could be further configurable in the future.
 	maxParallel := lo.Clamp(len(candidates), 0, 100)
 
 	cmd, err := m.firstNMachineConsolidationOption(ctx, candidates, maxParallel)
@@ -106,9 +107,9 @@ func (m *MultiMachineConsolidation) firstNMachineConsolidationOption(ctx context
 		case <-timer:
 			deprovisioningConsolidationTimeoutsCounter.WithLabelValues("multi-machine").Inc()
 			if lastSavedCommand.candidates == nil {
-				logging.FromContext(ctx).Debugf("abandoning multi-machine consolidation due to timeout, last considered batch had %d machines", (min + max)/2)
+				logging.FromContext(ctx).Debugf("failed to find a multi-machine consolidation after timeout, last considered batch had %d machines", (min+max)/2)
 			} else {
-				logging.FromContext(ctx).Debugf("halting multi-machine consolidation due to timeout, returning last valid command %s", lastSavedCommand)
+				logging.FromContext(ctx).Debugf("stopping multi-machine consolidation after timeout, returning last valid command %s", lastSavedCommand)
 			}
 			return lastSavedCommand, nil
 		default:

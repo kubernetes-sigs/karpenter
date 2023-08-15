@@ -22,25 +22,15 @@ import (
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(SchedulingSimulationDuration)
-	crmetrics.Registry.MustRegister(SchedulingSimulationDurationSummary)
+	crmetrics.Registry.MustRegister(schedulingSimulationDuration)
 }
 
-var SchedulingSimulationDuration = prometheus.NewHistogram(
+var schedulingSimulationDuration = prometheus.NewHistogram(
 	prometheus.HistogramOpts{
 		Namespace: metrics.Namespace,
 		Subsystem: "provisioner",
 		Name:      "scheduling_simulation_duration_seconds",
 		Help:      "Duration of scheduling process in seconds.",
 		Buckets:   metrics.DurationBuckets(),
-	},
-)
-
-var SchedulingSimulationDurationSummary = prometheus.NewSummary(
-	prometheus.SummaryOpts{
-		Namespace: metrics.Namespace,
-		Subsystem: "provisioner",
-		Name:      "scheduling_simulation_summary_duration_seconds",
-		Help:      "Duration of scheduling process in seconds.",
 	},
 )

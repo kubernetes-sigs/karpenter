@@ -279,8 +279,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (*scheduler.Results, error) {
-	defer metrics.Measure(SchedulingDuration)()
-	defer metrics.Measure(SchedulingDurationSummary)()
+	defer metrics.Measure(schedulingDuration)()
 
 	// We collect the nodes with their used capacities before we get the list of pending pods. This ensures that
 	// the node capacities we schedule against are always >= what the actual capacity is at any given instance. This

@@ -142,7 +142,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 }
 
 func (c *Controller) deprovision(ctx context.Context, deprovisioner Deprovisioner) (bool, error) {
-	defer metrics.Measure(deprovisioningDurationSummary.WithLabelValues(deprovisioner.String()))()
+	defer metrics.Measure(deprovisioningDurationHistogram.WithLabelValues(deprovisioner.String()))()
 	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, deprovisioner.ShouldDeprovision)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
@@ -213,7 +213,7 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 // launchReplacementMachines launches replacement machines and blocks until it is ready
 // nolint:gocyclo
 func (c *Controller) launchReplacementMachines(ctx context.Context, action Command, reason string) error {
-	defer metrics.Measure(deprovisioningReplacementNodeInitializedSummary)()
+	defer metrics.Measure(deprovisioningReplacementNodeInitializedHistogram)()
 	candidateNodeNames := lo.Map(action.candidates, func(c *Candidate, _ int) string { return c.Node.Name })
 
 	// cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
