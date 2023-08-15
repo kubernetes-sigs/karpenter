@@ -130,6 +130,7 @@ var _ = Describe("Drift", func() {
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+		ExpectMakeOldMachinesDeleted(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
@@ -180,6 +181,7 @@ var _ = Describe("Drift", func() {
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeOldMachinesDeleted(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
@@ -222,6 +224,7 @@ var _ = Describe("Drift", func() {
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeOldMachinesDeleted(ctx, env.Client, &wg, cluster, cloudProvider, 100)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
@@ -268,6 +271,7 @@ var _ = Describe("Drift", func() {
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+		ExpectMakeOldMachinesDeleted(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
@@ -368,6 +372,7 @@ var _ = Describe("Drift", func() {
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 3)
+		ExpectMakeOldMachinesDeleted(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		wg.Wait()
 
@@ -440,6 +445,7 @@ var _ = Describe("Drift", func() {
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+		ExpectMakeOldMachinesDeleted(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 

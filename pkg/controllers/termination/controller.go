@@ -91,12 +91,6 @@ func (c *Controller) Reconcile(ctx context.Context, n *v1.Node) (reconcile.Resul
 			return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 		}
 		c.recorder.Publish(terminatorevents.NodeFailedToDrain(n, err))
-		if _, err := c.cloudProvider.Get(ctx, n.Spec.ProviderID); err != nil {
-			if cloudprovider.IsMachineNotFoundError(err) {
-				return reconcile.Result{}, c.kubeClient.Delete(ctx, n)
-			}
-			return reconcile.Result{}, fmt.Errorf("getting machine, %w", err)
-		}
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 	if err := c.kubeClient.Delete(ctx, n); err != nil {
@@ -108,6 +102,12 @@ func (c *Controller) Reconcile(ctx context.Context, n *v1.Node) (reconcile.Resul
 func (c *Controller) Finalize(ctx context.Context, n *v1.Node) (reconcile.Result, error) {
 	if !controllerutil.ContainsFinalizer(n, v1alpha5.TerminationFinalizer) {
 		return reconcile.Result{}, nil
+	}
+	if err := c.terminator.ForceDrain(ctx, n); err != nil {
+		if !terminator.IsNodeDrainError(err) {
+			return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
+		}
+		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 	if err := c.deleteAllMachines(ctx, n); err != nil {
 		return reconcile.Result{}, fmt.Errorf("deleting machines, %w", err)

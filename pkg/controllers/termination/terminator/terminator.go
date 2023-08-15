@@ -73,26 +73,29 @@ func (t *Terminator) Drain(ctx context.Context, node *v1.Node) error {
 	if err := t.kubeClient.List(ctx, podList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
 		return fmt.Errorf("listing pods on node, %w", err)
 	}
-
-	pods := lo.Map(podList.Items, func(pod v1.Pod, _ int) *v1.Pod { return lo.ToPtr(pod) })
-	pods = lo.Reject(pods, func(p *v1.Pod, _ int) bool { return podutil.IsNotDrainable(p) }) // Ignore pods that can't be drained
-	pods = lo.Reject(pods, func(p *v1.Pod, _ int) bool { return t.isStuckTerminating(p) })   // Ignore pods that are stuck terminating
-
-	// Successfully Drained
+	pods := lo.Reject(lo.ToSlicePtr(podList.Items), func(p *v1.Pod, _ int) bool { return podutil.IsNotEvictable(p) }) // Ignore pods that can't be drained
 	if len(pods) == 0 {
 		return nil
 	}
-	// Find any evictable pods, and evict them
-	if evictable := lo.Reject(pods, func(p *v1.Pod, _ int) bool { return podutil.IsNotEvictable(p) }); len(evictable) > 0 {
-		t.evict(evictable)
-		return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", len(evictable)))
-	}
+	// Evict, respecting PDBs
+	t.evict(pods)
+	return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", len(pods)))
+}
 
-	// Taint NoExecute to trigger graceful deletion for remaining pods
+func (t *Terminator) ForceDrain(ctx context.Context, node *v1.Node) error {
+	podList := &v1.PodList{}
+	if err := t.kubeClient.List(ctx, podList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
+		return fmt.Errorf("listing pods on node, %w", err)
+	}
+	pods := lo.Reject(lo.ToSlicePtr(podList.Items), func(p *v1.Pod, _ int) bool { return podutil.IsNotForceEvictable(p) }) // Ignore pods that can't be drained
+	if len(pods) == 0 {
+		return nil
+	}
+	// Taint NoExecute, ignoring PDBs, and triggering graceful deletion for remaining pods
 	if err := t.Taint(ctx, node, v1beta1.TaintShuttingDown); err != nil {
 		return fmt.Errorf("tainting node %s, %w", v1beta1.TaintShuttingDown.ToString(), err)
 	}
-	return NewNodeDrainError(fmt.Errorf("%d pods are gracefully shutting down", len(pods)))
+	return NewNodeDrainError(fmt.Errorf("%d pods are waiting to shutdown", len(pods)))
 }
 
 func (t *Terminator) Taint(ctx context.Context, node *v1.Node, taint v1.Taint) error {

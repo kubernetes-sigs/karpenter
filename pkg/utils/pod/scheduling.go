@@ -15,6 +15,8 @@ limitations under the License.
 package pod
 
 import (
+	"time"
+
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -56,6 +58,10 @@ func IsTerminating(pod *v1.Pod) bool {
 	return pod.DeletionTimestamp != nil
 }
 
+func IsStuckTerminating(pod *v1.Pod) bool {
+	return IsTerminating(pod) && time.Now().After(pod.DeletionTimestamp.Time.Add(1*time.Minute))
+}
+
 func IsOwnedByDaemonSet(pod *v1.Pod) bool {
 	return IsOwnedBy(pod, []schema.GroupVersionKind{
 		{Group: "apps", Version: "v1", Kind: "DaemonSet"},
@@ -88,12 +94,13 @@ func HasDoNotEvict(pod *v1.Pod) bool {
 }
 
 func IsNotEvictable(pod *v1.Pod) bool {
-	return (scheduling.Taints{{Key: v1.TaintNodeUnschedulable, Effect: v1.TaintEffectNoSchedule}}).Tolerates(pod) == nil ||
+	return (scheduling.Taints{{Key: v1beta1.TaintKeyTermination, Effect: v1.TaintEffectNoSchedule}}).Tolerates(pod) == nil ||
+		IsNotForceEvictable(pod) ||
 		IsOwnedByNode(pod) ||
 		IsTerminal(pod)
 }
 
-func IsNotDrainable(pod *v1.Pod) bool {
+func IsNotForceEvictable(pod *v1.Pod) bool {
 	return (scheduling.Taints{{Key: v1beta1.TaintKeyTermination, Effect: v1.TaintEffectNoExecute}}).Tolerates(pod) == nil
 }
 

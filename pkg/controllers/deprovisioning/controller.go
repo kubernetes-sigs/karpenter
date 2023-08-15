@@ -191,13 +191,14 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 		c.recorder.Publish(deprovisioningevents.Terminating(candidate.Node, candidate.Machine, reason)...)
 
 		node := candidate.Node.DeepCopy()
-		node.Spec.Taints = append(node.Spec.Taints, v1.Taint{Key: v1beta1.TaintKeyTermination, Value: v1beta1.TaintValueDraining, Effect: v1.TaintEffectNoSchedule})
+		node.Spec.Taints = append(node.Spec.Taints, v1beta1.TaintDraining)
 		if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(candidate.Node)); err != nil {
 			if errors.IsNotFound(err) {
 				continue
 			}
 			logging.FromContext(ctx).Errorf("terminating machine, %s", err)
 		} else {
+			logging.FromContext(ctx).Infow("tainted", "node", candidate.Node.Name, "taint", v1beta1.TaintDraining.ToString())
 			metrics.MachinesTerminatedCounter.With(prometheus.Labels{
 				metrics.ReasonLabel:      reason,
 				metrics.ProvisionerLabel: candidate.provisioner.Name,
