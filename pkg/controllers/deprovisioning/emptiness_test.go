@@ -114,7 +114,6 @@ var _ = Describe("Empty Nodes (TTLSecondsAfterEmpty)", func() {
 	})
 })
 
-
 var _ = Describe("Empty Nodes (Consolidation)", func() {
 	var prov *v1alpha5.Provisioner
 	var machine1, machine2 *v1alpha5.Machine
