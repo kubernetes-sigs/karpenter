@@ -59,7 +59,7 @@ func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	// This could be further configurable in the future.
 	maxParallel := lo.Clamp(len(candidates), 0, 100)
 
-	cmd, err := m.firstNMachineConsolidationOption(ctx, candidates, maxParallel)
+	cmd, err := m.firstNMachineConsolidationOption(ctx, candidates, maxParallel, m.clock.Now())
 	if err != nil {
 		return Command{}, err
 	}
@@ -85,7 +85,7 @@ func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 
 // firstNMachineConsolidationOption looks at the first N machines to determine if they can all be consolidated at once.  The
 // machines are sorted by increasing disruption order which correlates to likelihood if being able to consolidate the machine
-func (m *MultiMachineConsolidation) firstNMachineConsolidationOption(ctx context.Context, candidates []*Candidate, max int) (Command, error) {
+func (m *MultiMachineConsolidation) firstNMachineConsolidationOption(ctx context.Context, candidates []*Candidate, max int, start time.Time) (Command, error) {
 	// we always operate on at least two machines at once, for single machines standard consolidation will find all solutions
 	if len(candidates) < 2 {
 		return Command{}, nil

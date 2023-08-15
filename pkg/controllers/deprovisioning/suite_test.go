@@ -2706,19 +2706,6 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		ExpectExists(ctx, env.Client, machine1)
 		ExpectExists(ctx, env.Client, machine2)
 
-		// Increment time so that the multi-machine will finish
-		ExpectTriggerVerifyAction(&wg)
-
-		// wait for the controller to block on the validation timeout
-		Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
-		// controller should be blocking during the timeout
-		Expect(finished.Load()).To(BeFalse())
-
-		// and the node should not be deleted yet
-		ExpectExists(ctx, env.Client, machine1)
-		ExpectExists(ctx, env.Client, machine2)
-
-		// Wait on Validation
 		fakeClock.Step(31 * time.Second)
 
 		// controller should finish
@@ -2848,8 +2835,6 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		// controller should be blocking during the timeout
 		Expect(finished.Load()).To(BeFalse())
 
-		ExpectTriggerVerifyAction(&wg)
-
 		// and the node should not be deleted yet
 		ExpectExists(ctx, env.Client, machine1)
 		ExpectExists(ctx, env.Client, machine2)
@@ -2873,17 +2858,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
 
-		// wait for the controller to block on the validation timeout for multi machine consolidation
-		Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
-		// advance the clock so that the validation expires for multi-machine consolidation
 		fakeClock.Step(31 * time.Second)
-
-		// and the node should not be deleted yet
-		ExpectExists(ctx, env.Client, machine1)
-		ExpectExists(ctx, env.Client, machine2)
-		ExpectExists(ctx, env.Client, machine3)
-
-		ExpectTriggerVerifyAction(&wg)
 
 		// wait for the controller to block on the validation timeout for single machine consolidation
 		Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
