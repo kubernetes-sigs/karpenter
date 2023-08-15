@@ -2228,7 +2228,7 @@ var _ = Describe("Consolidation Timeout", func() {
 		Expect(len(ExpectMachines(ctx, env.Client))).To(BeNumerically("<=", numNodes-2))
 	})
 	It("should exit single-machine consolidation if it times out", func() {
-		numNodes := 100
+		numNodes := 25
 		labels := map[string]string{
 			"app": "test",
 		}
@@ -2293,16 +2293,19 @@ var _ = Describe("Consolidation Timeout", func() {
 			defer GinkgoRecover()
 			defer wg.Done()
 			defer finished.Store(true)
-			ExpectReconcileFailed(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		}()
 
-		// ExpectTriggerVerifyAction() so that we can try to compute some deprovisioning actions.
-		ExpectTriggerVerifyAction(&wg)
+		// ExpectTriggerVerifyAction so that we can try to compute some deprovisioning actions.
+		ExpectTimeoutCompleted(&wg)
 
 		// advance the clock so that the timeout expires for multi-machine
 		fakeClock.Step(deprovisioning.MultiMachineConsolidationTimeoutDuration)
 		// advance the clock so that the timeout expires for single-machine
 		fakeClock.Step(deprovisioning.SingleMachineConsolidationTimeoutDuration)
+
+		// advance the clock so that the timeout expires
+		fakeClock.Step(31 * time.Second)
 
 		// controller should finish
 		Eventually(finished.Load, 10*time.Second).Should(BeTrue())
@@ -2706,6 +2709,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		ExpectExists(ctx, env.Client, machine1)
 		ExpectExists(ctx, env.Client, machine2)
 
+		// advance the clock so that the timeout expires
 		fakeClock.Step(31 * time.Second)
 
 		// controller should finish
@@ -2858,6 +2862,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
 
+		// advance the clock so that the timeout expires for multi-machine consolidation
 		fakeClock.Step(31 * time.Second)
 
 		// wait for the controller to block on the validation timeout for single machine consolidation
@@ -2927,6 +2932,20 @@ func ExpectTriggerVerifyAction(wg *sync.WaitGroup) {
 			}
 		}
 		fakeClock.Step(45 * time.Second)
+	}()
+}
+
+func ExpectTimeoutCompleted(wg *sync.WaitGroup) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 10; i++ {
+			time.Sleep(250 * time.Millisecond)
+			if fakeClock.HasWaiters() {
+				break
+			}
+		}
+		fakeClock.Step(3 * time.Minute)
 	}()
 }
 
