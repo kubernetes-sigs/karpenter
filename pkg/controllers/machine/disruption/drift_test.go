@@ -74,7 +74,7 @@ var _ = Describe("Drift", func() {
 
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).IsTrue()).To(BeTrue())
-		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).Reason).To(Equal(string(disruption.ProvisionerStaticallyDrifted)))
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).Reason).To(Equal(string(disruption.ProvisionerDrifted)))
 	})
 	It("should detect node requirement drift before cloud provider drift", func() {
 		cp.Drifted = "drifted"
@@ -89,7 +89,7 @@ var _ = Describe("Drift", func() {
 
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).IsTrue()).To(BeTrue())
-		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).Reason).To(Equal(string(disruption.NodeRequirementDrifted)))
+		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).Reason).To(Equal(string(disruption.RequirementsDrifted)))
 	})
 	It("should not detect drift if the feature flag is disabled", func() {
 		cp.Drifted = "drifted"

@@ -37,8 +37,8 @@ import (
 )
 
 const (
-	ProvisionerStaticallyDrifted cloudprovider.DriftReason = "ProvisionerStaticallyDrifted"
-	NodeRequirementDrifted       cloudprovider.DriftReason = "NodeRequirementDrifted"
+	ProvisionerDrifted  cloudprovider.DriftReason = "ProvisionerDrifted"
+	RequirementsDrifted cloudprovider.DriftReason = "RequirementsDrifted"
 )
 
 // Drift is a machine sub-controller that adds or removes status conditions on drifted machines
@@ -98,7 +98,7 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 // the cloudprovider
 func (d *Drift) isDrifted(ctx context.Context, nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) (cloudprovider.DriftReason, error) {
 	// First check for static drift or node requirements have drifted to save on API calls.
-	if reason := lo.FindOrElse([]cloudprovider.DriftReason{areStaticFieldsDrifted(nodePool, nodeClaim), areNodeRequirementsDrifted(nodePool, nodeClaim)}, "", func(i cloudprovider.DriftReason) bool {
+	if reason := lo.FindOrElse([]cloudprovider.DriftReason{areStaticFieldsDrifted(nodePool, nodeClaim), areRequirementsDrifted(nodePool, nodeClaim)}, "", func(i cloudprovider.DriftReason) bool {
 		return i != ""
 	}); reason != "" {
 		return reason, nil
@@ -120,19 +120,19 @@ func areStaticFieldsDrifted(nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeC
 		return ""
 	}
 	if provisionerHash != machineHash {
-		return ProvisionerStaticallyDrifted
+		return ProvisionerDrifted
 	}
 
 	return ""
 }
 
-func areNodeRequirementsDrifted(nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) cloudprovider.DriftReason {
+func areRequirementsDrifted(nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) cloudprovider.DriftReason {
 	provisionerReq := scheduling.NewNodeSelectorRequirements(nodePool.Spec.Template.Spec.Requirements...)
 	machineReq := scheduling.NewLabelRequirements(nodeClaim.Labels)
 
 	// Every provisioner requirement is compatible with the Machine label set
 	if machineReq.StrictlyCompatible(provisionerReq) != nil {
-		return NodeRequirementDrifted
+		return RequirementsDrifted
 	}
 
 	return ""
