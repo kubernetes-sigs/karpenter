@@ -30,7 +30,7 @@ var schedulingSimulationDuration = prometheus.NewHistogram(
 		Namespace: metrics.Namespace,
 		Subsystem: "provisioner",
 		Name:      "scheduling_simulation_duration_seconds",
-		Help:      "Duration of scheduling process in seconds.",
+		Help:      "Duration of scheduling simulations used for deprovisioning and provisioning in seconds.",
 		Buckets:   metrics.DurationBuckets(),
 	},
 )

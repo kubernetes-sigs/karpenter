@@ -60,7 +60,7 @@ func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 	// binary search to find the maximum number of machines we can terminate
 	for i, candidate := range candidates {
 		if c.clock.Now().After(timeout) {
-			deprovisioningConsolidationTimeoutsCounter.WithLabelValues("single-machine").Inc()
+			deprovisioningConsolidationTimeoutsCounter.WithLabelValues(singleMachineConsolidationLabelValue).Inc()
 			logging.FromContext(ctx).Debugf("abandoning single-machine consolidation due to timeout after evaluating %d candidates", i)
 			return Command{}, nil
 		}

@@ -101,7 +101,7 @@ func (m *MultiMachineConsolidation) firstNMachineConsolidationOption(ctx context
 	// binary search to find the maximum number of machines we can terminate
 	for min <= max {
 		if m.clock.Now().After(timeout) {
-			deprovisioningConsolidationTimeoutsCounter.WithLabelValues("multi-machine").Inc()
+			deprovisioningConsolidationTimeoutsCounter.WithLabelValues(multiMachineConsolidationLabelValue).Inc()
 			if lastSavedCommand.candidates == nil {
 				logging.FromContext(ctx).Debugf("failed to find a multi-machine consolidation after timeout, last considered batch had %d machines", (min+max)/2)
 			} else {

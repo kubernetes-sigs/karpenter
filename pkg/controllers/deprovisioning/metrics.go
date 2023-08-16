@@ -33,6 +33,9 @@ const (
 	deprovisionerLabel      = "deprovisioner"
 	actionLabel             = "action"
 	consolidationType       = "consolidationType"
+
+	multiMachineConsolidationLabelValue  = "multi-machine"
+	singleMachineConsolidationLabelValue = "single-machine"
 )
 
 var (
