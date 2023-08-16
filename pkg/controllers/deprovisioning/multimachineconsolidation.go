@@ -18,11 +18,14 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"time"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/samber/lo"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
@@ -30,6 +33,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 )
+
+const MultiMachineConsolidationTimeoutDuration = 1 * time.Minute
 
 type MultiMachineConsolidation struct {
 	consolidation
@@ -50,8 +55,10 @@ func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	}
 	deprovisioningEligibleMachinesGauge.WithLabelValues(m.String()).Set(float64(len(candidates)))
 
-	// For now, we will consider up to every machine in the cluster, might be configurable in the future.
-	maxParallel := len(candidates)
+	// Only consider a maximum batch of 100 machines to save on computation.
+	// This could be further configurable in the future.
+	maxParallel := lo.Clamp(len(candidates), 0, 100)
+
 	cmd, err := m.firstNMachineConsolidationOption(ctx, candidates, maxParallel)
 	if err != nil {
 		return Command{}, err
@@ -89,10 +96,20 @@ func (m *MultiMachineConsolidation) firstNMachineConsolidationOption(ctx context
 	}
 
 	lastSavedCommand := Command{}
+	// Set a timeout
+	timeout := m.clock.Now().Add(MultiMachineConsolidationTimeoutDuration)
 	// binary search to find the maximum number of machines we can terminate
 	for min <= max {
+		if m.clock.Now().After(timeout) {
+			deprovisioningConsolidationTimeoutsCounter.WithLabelValues(multiMachineConsolidationLabelValue).Inc()
+			if lastSavedCommand.candidates == nil {
+				logging.FromContext(ctx).Debugf("failed to find a multi-machine consolidation after timeout, last considered batch had %d machines", (min+max)/2)
+			} else {
+				logging.FromContext(ctx).Debugf("stopping multi-machine consolidation after timeout, returning last valid command %s", lastSavedCommand)
+			}
+			return lastSavedCommand, nil
+		}
 		mid := (min + max) / 2
-
 		candidatesToConsolidate := candidates[0 : mid+1]
 
 		cmd, err := m.computeConsolidation(ctx, candidatesToConsolidate...)

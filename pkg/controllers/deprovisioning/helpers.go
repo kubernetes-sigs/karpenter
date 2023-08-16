@@ -68,7 +68,6 @@ func filterCandidates(ctx context.Context, kubeClient client.Client, recorder ev
 //nolint:gocyclo
 func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
 	candidates ...*Candidate) (*pscheduling.Results, error) {
-
 	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
 	nodes := cluster.Nodes()
 	deletingNodes := nodes.Deleting()

@@ -32,6 +32,10 @@ const (
 	deprovisioningSubsystem = "deprovisioning"
 	deprovisionerLabel      = "deprovisioner"
 	actionLabel             = "action"
+	consolidationType       = "consolidationType"
+
+	multiMachineConsolidationLabelValue  = "multi-machine"
+	singleMachineConsolidationLabelValue = "single-machine"
 )
 
 var (
@@ -69,5 +73,14 @@ var (
 			Help:      "Number of machines eligible for deprovisioning by Karpenter. Labeled by deprovisioner",
 		},
 		[]string{deprovisionerLabel},
+	)
+	deprovisioningConsolidationTimeoutsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: deprovisioningSubsystem,
+			Name:      "consolidation_timeouts",
+			Help:      "Number of times the Consolidation algorithm has reached a timeout. Labeled by consolidationType.",
+		},
+		[]string{consolidationType},
 	)
 )

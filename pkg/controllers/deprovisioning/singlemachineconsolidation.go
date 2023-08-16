@@ -17,6 +17,7 @@ package deprovisioning
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
@@ -27,6 +28,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 )
+
+const SingleMachineConsolidationTimeoutDuration = 3 * time.Minute
 
 // SingleMachineConsolidation is the consolidation controller that performs single machine consolidation.
 type SingleMachineConsolidation struct {
@@ -51,7 +54,16 @@ func (c *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 	deprovisioningEligibleMachinesGauge.WithLabelValues(c.String()).Set(float64(len(candidates)))
 
 	v := NewValidation(consolidationTTL, c.clock, c.cluster, c.kubeClient, c.provisioner, c.cloudProvider, c.recorder)
-	for _, candidate := range candidates {
+
+	// Set a timeout
+	timeout := c.clock.Now().Add(SingleMachineConsolidationTimeoutDuration)
+	// binary search to find the maximum number of machines we can terminate
+	for i, candidate := range candidates {
+		if c.clock.Now().After(timeout) {
+			deprovisioningConsolidationTimeoutsCounter.WithLabelValues(singleMachineConsolidationLabelValue).Inc()
+			logging.FromContext(ctx).Debugf("abandoning single-machine consolidation due to timeout after evaluating %d candidates", i)
+			return Command{}, nil
+		}
 		// compute a possible consolidation option
 		cmd, err := c.computeConsolidation(ctx, candidate)
 		if err != nil {
