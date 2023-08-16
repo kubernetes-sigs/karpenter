@@ -84,8 +84,8 @@ type Scheduler struct {
 	newNodeClaims      []*NodeClaim
 	existingNodes      []*ExistingNode
 	nodeClaimTemplates []*NodeClaimTemplate
-	remainingResources map[nodepoolutil.Key]v1.ResourceList               // (nodePool name, isProvisioner) -> remaining resources for that provisioner
-	instanceTypes      map[nodepoolutil.Key][]*cloudprovider.InstanceType // (nodePool name, isProvisioner) -> instance types for nodePool
+	remainingResources map[nodepoolutil.Key]v1.ResourceList               // (NodePool name, isProvisioner) -> remaining resources for that NodePool
+	instanceTypes      map[nodepoolutil.Key][]*cloudprovider.InstanceType // (NodePool name, isProvisioner) -> instance types for NodePool
 	daemonOverhead     map[*NodeClaimTemplate]v1.ResourceList
 	preferences        *Preferences
 	topology           *Topology

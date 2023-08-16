@@ -20,8 +20,8 @@ import (
 	"github.com/samber/lo"
 	"k8s.io/utils/clock"
 
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/metrics"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
 
 // Emptiness is a subreconciler that deletes empty machines.
@@ -39,7 +39,8 @@ func NewEmptiness(clk clock.Clock) *Emptiness {
 // ShouldDeprovision is a predicate used to filter deprovisionable machines
 func (e *Emptiness) ShouldDeprovision(_ context.Context, c *Candidate) bool {
 	return c.nodePool.Spec.Deprovisioning.EmptinessTTL != nil &&
-		nodeclaimutil.IsPastEmptinessTTL(c.NodeClaim, e.clock, c.nodePool)
+		c.NodeClaim.StatusConditions().GetCondition(v1beta1.NodeEmpty).IsTrue() &&
+		!e.clock.Now().Before(c.NodeClaim.StatusConditions().GetCondition(v1beta1.NodeEmpty).LastTransitionTime.Inner.Add(c.nodePool.Spec.Deprovisioning.EmptinessTTL.Duration))
 }
 
 // ComputeCommand generates a deprovisioning command given deprovisionable machines

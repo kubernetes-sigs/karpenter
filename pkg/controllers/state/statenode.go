@@ -111,11 +111,11 @@ func NewNode() *StateNode {
 }
 
 func (in *StateNode) OwnerKey() nodepoolutil.Key {
-	if in.Labels()[v1alpha5.ProvisionerNameLabelKey] != "" {
-		return nodepoolutil.Key{Name: in.Labels()[v1alpha5.ProvisionerNameLabelKey], IsProvisioner: true}
-	}
 	if in.Labels()[v1beta1.NodePoolLabelKey] != "" {
 		return nodepoolutil.Key{Name: in.Labels()[v1beta1.NodePoolLabelKey], IsProvisioner: false}
+	}
+	if in.Labels()[v1alpha5.ProvisionerNameLabelKey] != "" {
+		return nodepoolutil.Key{Name: in.Labels()[v1alpha5.ProvisionerNameLabelKey], IsProvisioner: true}
 	}
 	return nodepoolutil.Key{}
 }

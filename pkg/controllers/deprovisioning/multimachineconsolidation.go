@@ -20,14 +20,16 @@ import (
 	"math"
 	"time"
 
+	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/samber/lo"
-
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -45,8 +47,17 @@ func NewMultiMachineConsolidation(clk clock.Clock, cluster *state.Cluster, kubeC
 	return &MultiMachineConsolidation{makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
 }
 
-func (m *MultiMachineConsolidation) ShouldDeprovision(ctx context.Context, cn *Candidate) bool {
-	return m.shouldDeprovision(ctx, cn, false)
+func (m *MultiMachineConsolidation) ShouldDeprovision(_ context.Context, cn *Candidate) bool {
+	if cn.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey] == "true" {
+		m.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s annotation exists", v1alpha5.DoNotConsolidateNodeAnnotationKey))...)
+		return false
+	}
+	if cn.nodePool.Spec.Deprovisioning.ConsolidationPolicy == v1beta1.ConsolidationPolicyNever ||
+		cn.nodePool.Spec.Deprovisioning.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenEmpty {
+		m.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s %q has underutilized consolidation disabled by consolidation policy", lo.Ternary(cn.nodePool.IsProvisioner, "Provisioner", "NodePool"), cn.nodePool.Name))...)
+		return false
+	}
+	return true
 }
 
 func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {

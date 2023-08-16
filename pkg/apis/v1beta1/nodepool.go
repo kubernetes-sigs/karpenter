@@ -37,10 +37,10 @@ type NodePoolSpec struct {
 	// Deprovisioning contains the parameters that relate to Karpenter's deprovisioning logic
 	// +kubebuilder:default={"consolidationTTL": "15s","consolidationPolicy": "WhenUnderutilized", "expirationTTL": "90d"}
 	// +optional
-	Deprovisioning Deprovisioning `json:"deprovisioning" hash:"ignore"`
+	Deprovisioning Deprovisioning `json:"deprovisioning"`
 	// Limits define a set of bounds for provisioning capacity.
 	// +optional
-	Limits Limits `json:"limits,omitempty" hash:"ignore"`
+	Limits Limits `json:"limits,omitempty"`
 	// Weight is the priority given to the provisioner during scheduling. A higher
 	// numerical weight indicates that this provisioner will be ordered
 	// ahead of other provisioners with lower weights. A provisioner with no weight
@@ -48,7 +48,7 @@ type NodePoolSpec struct {
 	// +kubebuilder:validation:Minimum:=1
 	// +kubebuilder:validation:Maximum:=100
 	// +optional
-	Weight *int32 `json:"weight,omitempty" hash:"ignore"`
+	Weight *int32 `json:"weight,omitempty"`
 }
 
 type Deprovisioning struct {
@@ -122,11 +122,11 @@ type NodePool struct {
 	// IsProvisioner tells Karpenter whether the in-memory representation of this object
 	// is actually referring to a Provisioner object. This value is not actually part of the v1beta1 public-facing API
 	// TODO @joinnis: Remove this field when v1alpha5 is unsupported in a future version of Karpenter
-	IsProvisioner bool `json:"-" hash:"ignore"`
+	IsProvisioner bool `json:"-"`
 }
 
 func (in *NodePool) Hash() string {
-	return fmt.Sprint(lo.Must(hashstructure.Hash(in.Spec, hashstructure.FormatV2, &hashstructure.HashOptions{
+	return fmt.Sprint(lo.Must(hashstructure.Hash(in.Spec.Template, hashstructure.FormatV2, &hashstructure.HashOptions{
 		SlicesAsSets:    true,
 		IgnoreZeroValue: true,
 		ZeroNil:         true,

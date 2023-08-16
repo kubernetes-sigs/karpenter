@@ -63,7 +63,7 @@ func New(provisioner *v1alpha5.Provisioner) *v1beta1.NodePool {
 	} else {
 		np.Spec.Deprovisioning.ExpirationTTL = metav1.Duration{Duration: -1}
 	}
-	if provisioner.Spec.Consolidation != nil {
+	if provisioner.Spec.Consolidation != nil && lo.FromPtr(provisioner.Spec.Consolidation.Enabled) {
 		np.Spec.Deprovisioning.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
 		np.Spec.Deprovisioning.ConsolidationTTL = metav1.Duration{Duration: lo.Must(time.ParseDuration("15s"))}
 	} else {

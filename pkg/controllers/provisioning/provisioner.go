@@ -134,13 +134,13 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 	if len(results.NewNodeClaims) == 0 {
 		return reconcile.Result{}, nil
 	}
-	_, err = p.LaunchNodeClaims(ctx, results.NewNodeClaims, WithReason(metrics.ProvisioningReason), RecordPodNomination)
+	_, err = p.CreateNodeClaims(ctx, results.NewNodeClaims, WithReason(metrics.ProvisioningReason), RecordPodNomination)
 	return reconcile.Result{}, err
 }
 
-// LaunchNodeClaims launches nodes passed into the function in parallel. It returns a slice of the successfully created node
+// CreateNodeClaims launches nodes passed into the function in parallel. It returns a slice of the successfully created node
 // names as well as a multierr of any errors that occurred while launching nodes
-func (p *Provisioner) LaunchNodeClaims(ctx context.Context, nodeClaims []*scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) ([]nodeclaimutil.Key, error) {
+func (p *Provisioner) CreateNodeClaims(ctx context.Context, nodeClaims []*scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) ([]nodeclaimutil.Key, error) {
 	// Launch capacity and bind pods
 	errs := make([]error, len(nodeClaims))
 	nodeClaimKeys := make([]nodeclaimutil.Key, len(nodeClaims))
@@ -227,9 +227,6 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 
 	for i := range nodePoolList.Items {
 		nodePool := &nodePoolList.Items[i]
-		if !nodePool.DeletionTimestamp.IsZero() {
-			continue
-		}
 		// Create node template
 		nodeClaimTemplates = append(nodeClaimTemplates, scheduler.NewNodeClaimTemplate(nodePool))
 		// Get instance type options

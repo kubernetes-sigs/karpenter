@@ -68,19 +68,13 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		return nil, fmt.Errorf("state node is marked for deletion")
 	}
 	// skip nodes that aren't initialized
-	// This also means that the real Node doesn't exist for it
 	if !node.Initialized() {
 		return nil, fmt.Errorf("state node isn't initialized")
 	}
 	if _, ok := node.Annotations()[v1beta1.DoNotDisruptAnnotationKey]; ok {
 		recorder.Publish(deprovisioningevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Disruption is blocked with the %q annotation", v1beta1.DoNotDisruptAnnotationKey))...)
-		return nil, fmt.Errorf("disruption is blocked thorugh the %q annotation", v1beta1.DoNotDisruptAnnotationKey)
+		return nil, fmt.Errorf("disruption is blocked through the %q annotation", v1beta1.DoNotDisruptAnnotationKey)
 	}
-	ownerKey := nodeclaimutil.OwnerKey(node)
-	if ownerKey.Name == "" {
-		return nil, fmt.Errorf("state node doesn't have the Karpenter owner label")
-	}
-
 	// check whether the node has all the labels we need
 	for _, label := range []string{
 		v1beta1.CapacityTypeLabelKey,
@@ -91,7 +85,10 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 			return nil, fmt.Errorf("state node doesn't have required label %q", label)
 		}
 	}
-
+	ownerKey := nodeclaimutil.OwnerKey(node)
+	if ownerKey.Name == "" {
+		return nil, fmt.Errorf("state node doesn't have the Karpenter owner label")
+	}
 	nodePool := nodePoolMap[ownerKey]
 	instanceTypeMap := nodePoolToInstanceTypesMap[ownerKey]
 	// skip any nodes where we can't determine the nodePool
@@ -132,7 +129,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 // disruption cost is highest, and it approaches zero as the node ages towards its expiration time.
 func (c *Candidate) lifetimeRemaining(clock clock.Clock) float64 {
 	remaining := 1.0
-	if c.nodePool.Spec.Deprovisioning.ExpirationTTL.Duration > 0 {
+	if c.nodePool.Spec.Deprovisioning.ExpirationTTL.Duration >= 0 {
 		ageInSeconds := clock.Since(c.Node.CreationTimestamp.Time).Seconds()
 		totalLifetimeSeconds := c.nodePool.Spec.Deprovisioning.ExpirationTTL.Duration.Seconds()
 		lifetimeRemainingSeconds := totalLifetimeSeconds - ageInSeconds

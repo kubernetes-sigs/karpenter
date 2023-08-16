@@ -19,12 +19,10 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"time"
 
 	"k8s.io/utils/clock"
 
 	"knative.dev/pkg/logging"
-	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/samber/lo"
@@ -110,7 +108,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, nodes ...*Candidate) (C
 			continue
 		}
 
-		logging.FromContext(ctx).With("ttl", time.Duration(ptr.Int64Value(candidates[0].provisioner.Spec.TTLSecondsUntilExpired))*time.Second).Infof("triggering termination for expired node after TTL")
+		logging.FromContext(ctx).With("ttl", candidates[0].nodePool.Spec.Deprovisioning.ExpirationTTL.String()).Infof("triggering termination for expired node after TTL")
 		return Command{
 			candidates:   []*Candidate{candidate},
 			replacements: results.NewNodeClaims,

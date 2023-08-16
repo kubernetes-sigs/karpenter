@@ -24,7 +24,10 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
@@ -40,8 +43,16 @@ func NewEmptyMachineConsolidation(clk clock.Clock, cluster *state.Cluster, kubeC
 	return &EmptyMachineConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
 }
 
-func (c *EmptyMachineConsolidation) ShouldDeprovision(ctx context.Context, cn *Candidate) bool {
-	return c.shouldDeprovision(ctx, cn, true)
+func (c *EmptyMachineConsolidation) ShouldDeprovision(_ context.Context, cn *Candidate) bool {
+	if cn.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey] == "true" {
+		c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s annotation exists", v1alpha5.DoNotConsolidateNodeAnnotationKey))...)
+		return false
+	}
+	if cn.nodePool.Spec.Deprovisioning.ConsolidationPolicy == v1beta1.ConsolidationPolicyNever {
+		c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s %q has empty consolidation disabled by consolidation policy", lo.Ternary(cn.nodePool.IsProvisioner, "Provisioner", "NodePool"), cn.nodePool.Name))...)
+		return false
+	}
+	return true
 }
 
 // ComputeCommand generates a deprovisioning command given deprovisionable machines

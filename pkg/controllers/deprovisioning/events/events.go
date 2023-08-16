@@ -162,7 +162,7 @@ func Blocked(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) []event
 			InvolvedObject: node,
 			Type:           v1.EventTypeNormal,
 			Reason:         "DeprovisioningBlocked",
-			Message:        fmt.Sprintf("Cannot deprovision node due to: %s", reason),
+			Message:        fmt.Sprintf("Cannot deprovision Node: %s", reason),
 			DedupeValues:   []string{string(node.UID)},
 		},
 	}
@@ -172,7 +172,7 @@ func Blocked(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) []event
 			InvolvedObject: machine,
 			Type:           v1.EventTypeNormal,
 			Reason:         "DeprovisioningBlocked",
-			Message:        fmt.Sprintf("Cannot deprovision machine due to: %s", reason),
+			Message:        fmt.Sprintf("Cannot deprovision Machine: %s", reason),
 			DedupeValues:   []string{string(machine.UID)},
 		})
 	} else {
@@ -180,7 +180,7 @@ func Blocked(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) []event
 			InvolvedObject: nodeClaim,
 			Type:           v1.EventTypeNormal,
 			Reason:         "DeprovisioningBlocked",
-			Message:        fmt.Sprintf("Cannot deprovision NodeClaim due to: %s", reason),
+			Message:        fmt.Sprintf("Cannot deprovision NodeClaim: %s", reason),
 			DedupeValues:   []string{string(nodeClaim.UID)},
 		})
 	}
