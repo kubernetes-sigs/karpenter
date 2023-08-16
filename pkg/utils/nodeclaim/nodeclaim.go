@@ -18,14 +18,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/clock"
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -316,9 +316,7 @@ func List(ctx context.Context, c client.Client, opts ...client.ListOption) (*v1b
 		return *New(&m)
 	})
 	nodeClaimList := &v1beta1.NodeClaimList{}
-	if err := c.List(ctx, nodeClaimList, opts...); err != nil {
-		return nil, err
-	}
+	// TODO @joinnis: Add NodeClaims to this List() function when releasing v1beta1 APIs
 	nodeClaimList.Items = append(nodeClaimList.Items, convertedNodeClaims...)
 	return nodeClaimList, nil
 }
@@ -416,6 +414,32 @@ func TerminatedCounter(nodeClaim *v1beta1.NodeClaim, reason string) prometheus.C
 	})
 }
 
+func DisruptedCounter(nodeClaim *v1beta1.NodeClaim, disruptionType string) prometheus.Counter {
+	if nodeClaim.IsMachine {
+		return metrics.MachinesDisruptedCounter.With(prometheus.Labels{
+			metrics.TypeLabel:        disruptionType,
+			metrics.ProvisionerLabel: nodeClaim.Labels[v1alpha5.ProvisionerNameLabelKey],
+		})
+	}
+	return metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
+		metrics.TypeLabel:     disruptionType,
+		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+	})
+}
+
+func DriftedCounter(nodeClaim *v1beta1.NodeClaim, driftType string) prometheus.Counter {
+	if nodeClaim.IsMachine {
+		return metrics.MachinesDriftedCounter.With(prometheus.Labels{
+			metrics.TypeLabel:        driftType,
+			metrics.ProvisionerLabel: nodeClaim.Labels[v1alpha5.ProvisionerNameLabelKey],
+		})
+	}
+	return metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
+		metrics.TypeLabel:     driftType,
+		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+	})
+}
+
 func UpdateNodeOwnerReferences(nodeClaim *v1beta1.NodeClaim, node *v1.Node) *v1.Node {
 	// Remove any provisioner owner references since we own them
 	node.OwnerReferences = lo.Reject(node.OwnerReferences, func(o metav1.OwnerReference, _ int) bool {
@@ -456,7 +480,7 @@ func Owner(ctx context.Context, c client.Client, obj interface{ GetLabels() map[
 		}
 		return nodepoolutil.New(provisioner), nil
 	}
-	return nil, fmt.Errorf("object has no owner")
+	return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "NodePool"}, "")
 }
 
 func OwnerName(obj interface{ GetLabels() map[string]string }) string {
@@ -467,21 +491,4 @@ func OwnerName(obj interface{ GetLabels() map[string]string }) string {
 		return v
 	}
 	return ""
-}
-
-func IsExpired(obj client.Object, clock clock.Clock, nodePool *v1beta1.NodePool) bool {
-	return clock.Now().After(GetExpirationTime(obj, nodePool))
-}
-
-func GetExpirationTime(obj client.Object, nodePool *v1beta1.NodePool) time.Time {
-	if nodePool == nil || nodePool.Spec.Deprovisioning.ExpirationTTL.Duration >= 0 || obj == nil {
-		// If not defined, return some much larger time.
-		return time.Date(5000, 0, 0, 0, 0, 0, 0, time.UTC)
-	}
-	return obj.GetCreationTimestamp().Add(nodePool.Spec.Deprovisioning.ExpirationTTL.Duration)
-}
-
-func IsPastEmptinessTTL(nodeClaim *v1beta1.NodeClaim, clock clock.Clock, nodePool *v1beta1.NodePool) bool {
-	return nodeClaim.StatusConditions().GetCondition(v1beta1.NodeEmpty).IsTrue() &&
-		!clock.Now().Before(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeEmpty).LastTransitionTime.Inner.Add(nodePool.Spec.Deprovisioning.EmptinessTTL.Duration))
 }

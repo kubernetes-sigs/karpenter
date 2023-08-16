@@ -18,7 +18,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	"k8s.io/client-go/util/workqueue"
@@ -29,9 +28,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/metrics"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 	"github.com/aws/karpenter-core/pkg/utils/sets"
 )
 
@@ -54,8 +54,8 @@ func (c *Controller) Name() string {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
-	machineList := &v1alpha5.MachineList{}
-	if err := c.kubeClient.List(ctx, machineList); err != nil {
+	nodeClaimList, err := nodeclaimutil.List(ctx, c.kubeClient)
+	if err != nil {
 		return reconcile.Result{}, err
 	}
 	cloudProviderMachines, err := c.cloudProvider.List(ctx)
@@ -68,26 +68,27 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	cloudProviderProviderIDs := sets.New[string](lo.Map(cloudProviderMachines, func(m *v1alpha5.Machine, _ int) string {
 		return m.Status.ProviderID
 	})...)
-	machines := lo.Filter(lo.ToSlicePtr(machineList.Items), func(m *v1alpha5.Machine, _ int) bool {
-		return m.StatusConditions().GetCondition(v1alpha5.MachineLaunched).IsTrue() &&
-			m.DeletionTimestamp.IsZero() &&
-			c.clock.Since(m.StatusConditions().GetCondition(v1alpha5.MachineLaunched).LastTransitionTime.Inner.Time) > time.Second*10 &&
-			!cloudProviderProviderIDs.Has(m.Status.ProviderID)
+	nodeClaims := lo.Filter(lo.ToSlicePtr(nodeClaimList.Items), func(n *v1beta1.NodeClaim, _ int) bool {
+		return n.StatusConditions().GetCondition(v1beta1.NodeLaunched).IsTrue() &&
+			n.DeletionTimestamp.IsZero() &&
+			c.clock.Since(n.StatusConditions().GetCondition(v1beta1.NodeLaunched).LastTransitionTime.Inner.Time) > time.Second*10 &&
+			!cloudProviderProviderIDs.Has(n.Status.ProviderID)
 	})
 
-	errs := make([]error, len(machines))
-	workqueue.ParallelizeUntil(ctx, 20, len(machines), func(i int) {
-		if err := c.kubeClient.Delete(ctx, machines[i]); err != nil {
+	errs := make([]error, len(nodeClaims))
+	workqueue.ParallelizeUntil(ctx, 20, len(nodeClaims), func(i int) {
+		if err := nodeclaimutil.Delete(ctx, c.kubeClient, nodeClaims[i]); err != nil {
 			errs[i] = client.IgnoreNotFound(err)
 			return
 		}
 		logging.FromContext(ctx).
-			With("provisioner", machines[i].Labels[v1alpha5.ProvisionerNameLabelKey], "machine", machines[i].Name, "provider-id", machines[i].Status.ProviderID).
-			Debugf("garbage collecting machine with no cloudprovider representation")
-		metrics.MachinesTerminatedCounter.With(prometheus.Labels{
-			metrics.ReasonLabel:      "garbage_collected",
-			metrics.ProvisionerLabel: machines[i].Labels[v1alpha5.ProvisionerNameLabelKey],
-		}).Inc()
+			With(
+				lo.Ternary(nodeClaims[i].IsMachine, "machine", "nodeclaim"), nodeClaims[i].Name,
+				"provider-id", nodeClaims[i].Status.ProviderID,
+				lo.Ternary(nodeClaims[i].IsMachine, "provisioner", "nodepool"), nodeclaimutil.OwnerName(nodeClaims[i]),
+			).
+			Debugf("garbage collecting %s with no cloudprovider representation", lo.Ternary(nodeClaims[i].IsMachine, "machine", "nodeclaim"))
+		nodeclaimutil.TerminatedCounter(nodeClaims[i], "garbage_collected").Inc()
 	})
 	return reconcile.Result{RequeueAfter: time.Minute * 2}, multierr.Combine(errs...)
 }

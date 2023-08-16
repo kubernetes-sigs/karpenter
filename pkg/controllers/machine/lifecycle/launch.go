@@ -19,7 +19,6 @@ import (
 	"fmt"
 
 	"github.com/patrickmn/go-cache"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"knative.dev/pkg/logging"
@@ -27,10 +26,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/events"
-	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
+	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
+	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
 
 type Launch struct {
@@ -40,57 +41,53 @@ type Launch struct {
 	recorder      events.Recorder
 }
 
-func (l *Launch) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	if machine.StatusConditions().GetCondition(v1alpha5.MachineLaunched).IsTrue() {
+func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
+	if nodeClaim.StatusConditions().GetCondition(v1beta1.NodeLaunched).IsTrue() {
 		return reconcile.Result{}, nil
 	}
 
 	var err error
-	var created *v1alpha5.Machine
+	var created *v1beta1.NodeClaim
 
-	// One of the following scenarios can happen with a Machine that isn't marked as launched:
+	// One of the following scenarios can happen with a NodeClaim that isn't marked as launched:
 	//  1. It was already launched by the CloudProvider but the client-go cache wasn't updated quickly enough or
-	//     patching failed on the status. In this case, we use the in-memory cached value for the created machine.
-	//  2. It is a "linked" machine, which implies that the CloudProvider Machine already exists for the Machine CR, but we
-	//     need to grab info from the CloudProvider to get details on the machine.
-	//  3. It is a standard machine launch where we should call CloudProvider Create() and fill in details of the launched
-	//     machine into the Machine CR.
-	if ret, ok := l.cache.Get(string(machine.UID)); ok {
-		created = ret.(*v1alpha5.Machine)
-	} else if _, ok := machine.Annotations[v1alpha5.MachineLinkedAnnotationKey]; ok {
-		created, err = l.linkMachine(ctx, machine)
+	//     patching failed on the status. In this case, we use the in-memory cached value for the created NodeClaim.
+	//  2. It is a "linked" NodeClaim, which implies that the CloudProvider NodeClaim already exists for the NodeClaim CR, but we
+	//     need to grab info from the CloudProvider to get details on the NodeClaim.
+	//  3. It is a standard NodeClaim launch where we should call CloudProvider Create() and fill in details of the launched
+	//     NodeClaim into the NodeClaim CR.
+	if ret, ok := l.cache.Get(string(nodeClaim.UID)); ok {
+		created = ret.(*v1beta1.NodeClaim)
+	} else if _, ok := nodeClaim.Annotations[v1alpha5.MachineLinkedAnnotationKey]; ok {
+		created, err = l.linkNodeClaim(ctx, nodeClaim)
 	} else {
-		created, err = l.launchMachine(ctx, machine)
+		created, err = l.launchNodeClaim(ctx, nodeClaim)
 	}
-	// Either the machine launch/linking failed or the machine was deleted due to InsufficientCapacity/NotFound
+	// Either the Node launch failed or the Node was deleted due to InsufficientCapacity/NotFound
 	if err != nil || created == nil {
 		return reconcile.Result{}, err
 	}
-	l.cache.SetDefault(string(machine.UID), created)
-	PopulateMachineDetails(machine, created)
-	machine.StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
-	metrics.MachinesLaunchedCounter.With(prometheus.Labels{
-		metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
-	}).Inc()
+	l.cache.SetDefault(string(nodeClaim.UID), created)
+	nodeClaim = PopulateNodeClaimDetails(nodeClaim, created)
+	nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeLaunched)
+	nodeclaimutil.LaunchedCounter(nodeClaim).Inc()
+
 	return reconcile.Result{}, nil
 }
 
-func (l *Launch) linkMachine(ctx context.Context, machine *v1alpha5.Machine) (*v1alpha5.Machine, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", machine.Annotations[v1alpha5.MachineLinkedAnnotationKey]))
-	created, err := l.cloudProvider.Get(ctx, machine.Annotations[v1alpha5.MachineLinkedAnnotationKey])
+func (l *Launch) linkNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (*v1beta1.NodeClaim, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", nodeClaim.Annotations[v1alpha5.MachineLinkedAnnotationKey]))
+	created, err := l.cloudProvider.Get(ctx, nodeClaim.Annotations[v1alpha5.MachineLinkedAnnotationKey])
 	if err != nil {
 		if !cloudprovider.IsMachineNotFoundError(err) {
-			machine.StatusConditions().MarkFalse(v1alpha5.MachineLaunched, "LinkFailed", truncateMessage(err.Error()))
-			return nil, fmt.Errorf("linking machine, %w", err)
+			nodeClaim.StatusConditions().MarkFalse(v1beta1.NodeLaunched, "LinkFailed", truncateMessage(err.Error()))
+			return nil, fmt.Errorf("linking, %w", err)
 		}
-		if err = l.kubeClient.Delete(ctx, machine); err != nil {
+		if err = nodeclaimutil.Delete(ctx, l.kubeClient, nodeClaim); err != nil {
 			return nil, client.IgnoreNotFound(err)
 		}
-		logging.FromContext(ctx).Debugf("garbage collected machine with no cloudprovider representation")
-		metrics.MachinesTerminatedCounter.With(prometheus.Labels{
-			metrics.ReasonLabel:      "garbage_collected",
-			metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
-		}).Inc()
+		logging.FromContext(ctx).Debugf("garbage collected with no cloudprovider representation")
+		nodeclaimutil.TerminatedCounter(nodeClaim, "garbage_collected").Inc()
 		return nil, nil
 	}
 	logging.FromContext(ctx).With(
@@ -98,57 +95,49 @@ func (l *Launch) linkMachine(ctx context.Context, machine *v1alpha5.Machine) (*v
 		"instance-type", created.Labels[v1.LabelInstanceTypeStable],
 		"zone", created.Labels[v1.LabelTopologyZone],
 		"capacity-type", created.Labels[v1alpha5.LabelCapacityType],
-		"allocatable", created.Status.Allocatable).Infof("linked machine")
-	return created, nil
+		"allocatable", created.Status.Allocatable).Infof("linked %s", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"))
+	return nodeclaimutil.New(created), nil
 }
 
-func (l *Launch) launchMachine(ctx context.Context, machine *v1alpha5.Machine) (*v1alpha5.Machine, error) {
-	created, err := l.cloudProvider.Create(ctx, machine)
+func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (*v1beta1.NodeClaim, error) {
+	created, err := l.cloudProvider.Create(ctx, machineutil.NewFromNodeClaim(nodeClaim))
 	if err != nil {
 		switch {
 		case cloudprovider.IsInsufficientCapacityError(err):
-			l.recorder.Publish(events.Event{
-				InvolvedObject: machine,
-				Type:           v1.EventTypeWarning,
-				Reason:         "InsufficientCapacityError",
-				Message:        fmt.Sprintf("Machine %s event: %s", machine.Name, err),
-				DedupeValues:   []string{machine.Name},
-			})
+			l.recorder.Publish(InsufficientCapacityErrorEvent(nodeClaim, err))
 			logging.FromContext(ctx).Error(err)
-			if err = l.kubeClient.Delete(ctx, machine); err != nil {
+			if err = nodeclaimutil.Delete(ctx, l.kubeClient, nodeClaim); err != nil {
 				return nil, client.IgnoreNotFound(err)
 			}
-			metrics.MachinesTerminatedCounter.With(prometheus.Labels{
-				metrics.ReasonLabel:      "insufficient_capacity",
-				metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
-			}).Inc()
+			nodeclaimutil.TerminatedCounter(nodeClaim, "insufficient_capacity").Inc()
 			return nil, nil
 		default:
-			machine.StatusConditions().MarkFalse(v1alpha5.MachineLaunched, "LaunchFailed", truncateMessage(err.Error()))
-			return nil, fmt.Errorf("creating machine, %w", err)
+			nodeClaim.StatusConditions().MarkFalse(v1beta1.NodeLaunched, "LaunchFailed", truncateMessage(err.Error()))
+			return nil, fmt.Errorf("creating %s, %w", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"), err)
 		}
 	}
 	logging.FromContext(ctx).With(
 		"provider-id", created.Status.ProviderID,
 		"instance-type", created.Labels[v1.LabelInstanceTypeStable],
 		"zone", created.Labels[v1.LabelTopologyZone],
-		"capacity-type", created.Labels[v1alpha5.LabelCapacityType],
-		"allocatable", created.Status.Allocatable).Infof("launched machine")
-	return created, nil
+		"capacity-type", created.Labels[v1beta1.CapacityTypeLabelKey],
+		"allocatable", created.Status.Allocatable).Infof("launched %s", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"))
+	return nodeclaimutil.New(created), nil
 }
 
-func PopulateMachineDetails(machine, retrieved *v1alpha5.Machine) {
-	// These are ordered in priority order so that user-defined machine labels and requirements trump retrieved labels
-	// or the static machine labels
-	machine.Labels = lo.Assign(
+func PopulateNodeClaimDetails(nodeClaim, retrieved *v1beta1.NodeClaim) *v1beta1.NodeClaim {
+	// These are ordered in priority order so that user-defined nodeClaim labels and requirements trump retrieved labels
+	// or the static nodeClaim labels
+	nodeClaim.Labels = lo.Assign(
 		retrieved.Labels, // CloudProvider-resolved labels
-		scheduling.NewNodeSelectorRequirements(machine.Spec.Requirements...).Labels(), // Single-value requirement resolved labels
-		machine.Labels, // User-defined labels
+		scheduling.NewNodeSelectorRequirements(nodeClaim.Spec.Requirements...).Labels(), // Single-value requirement resolved labels
+		nodeClaim.Labels, // User-defined labels
 	)
-	machine.Annotations = lo.Assign(machine.Annotations, retrieved.Annotations)
-	machine.Status.ProviderID = retrieved.Status.ProviderID
-	machine.Status.Allocatable = retrieved.Status.Allocatable
-	machine.Status.Capacity = retrieved.Status.Capacity
+	nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, retrieved.Annotations)
+	nodeClaim.Status.ProviderID = retrieved.Status.ProviderID
+	nodeClaim.Status.Allocatable = retrieved.Status.Allocatable
+	nodeClaim.Status.Capacity = retrieved.Status.Capacity
+	return nodeClaim
 }
 
 func truncateMessage(msg string) string {

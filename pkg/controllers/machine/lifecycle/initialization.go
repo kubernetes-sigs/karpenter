@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -26,11 +25,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/metrics"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/scheduling"
-	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 	nodeutil "github.com/aws/karpenter-core/pkg/utils/node"
+	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
@@ -43,49 +41,47 @@ type Initialization struct {
 // b) all the startup taints have been removed from the node
 // c) all extended resources have been registered
 // This method handles both nil provisioners and nodes without extended resources gracefully.
-func (i *Initialization) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	if machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).IsTrue() {
+func (i *Initialization) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
+	if nodeClaim.StatusConditions().GetCondition(v1beta1.NodeInitialized).IsTrue() {
 		return reconcile.Result{}, nil
 	}
-	if !machine.StatusConditions().GetCondition(v1alpha5.MachineLaunched).IsTrue() {
-		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "MachineNotLaunched", "Machine is not launched")
+	if !nodeClaim.StatusConditions().GetCondition(v1beta1.NodeLaunched).IsTrue() {
+		nodeClaim.StatusConditions().MarkFalse(v1beta1.NodeInitialized, "NotLaunched", "Node not launched")
 		return reconcile.Result{}, nil
 	}
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", machine.Status.ProviderID))
-	node, err := machineutil.NodeForMachine(ctx, i.kubeClient, machine)
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", nodeClaim.Status.ProviderID))
+	node, err := nodeclaimutil.NodeForNodeClaim(ctx, i.kubeClient, nodeClaim)
 	if err != nil {
-		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "NodeNotFound", "Node not registered with cluster")
+		nodeClaim.StatusConditions().MarkFalse(v1beta1.NodeInitialized, "NodeNotFound", "Node not registered with cluster")
 		return reconcile.Result{}, nil //nolint:nilerr
 	}
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
 	if nodeutil.GetCondition(node, v1.NodeReady).Status != v1.ConditionTrue {
-		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "NodeNotReady", "Node status is NotReady")
+		nodeClaim.StatusConditions().MarkFalse(v1beta1.NodeInitialized, "NodeNotReady", "Node status is NotReady")
 		return reconcile.Result{}, nil
 	}
-	if taint, ok := StartupTaintsRemoved(node, machine); !ok {
-		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "StartupTaintsExist", "StartupTaint %q still exists", formatTaint(taint))
+	if taint, ok := StartupTaintsRemoved(node, nodeClaim); !ok {
+		nodeClaim.StatusConditions().MarkFalse(v1beta1.NodeInitialized, "StartupTaintsExist", "StartupTaint %q still exists", formatTaint(taint))
 		return reconcile.Result{}, nil
 	}
 	if taint, ok := KnownEphemeralTaintsRemoved(node); !ok {
-		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "KnownEphemeralTaintsExist", "KnownEphemeralTaint %q still exists", formatTaint(taint))
+		nodeClaim.StatusConditions().MarkFalse(v1beta1.NodeInitialized, "KnownEphemeralTaintsExist", "KnownEphemeralTaint %q still exists", formatTaint(taint))
 		return reconcile.Result{}, nil
 	}
-	if name, ok := RequestedResourcesRegistered(node, machine); !ok {
-		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "ResourceNotRegistered", "Resource %q was requested but not registered", name)
+	if name, ok := RequestedResourcesRegistered(node, nodeClaim); !ok {
+		nodeClaim.StatusConditions().MarkFalse(v1beta1.NodeInitialized, "ResourceNotRegistered", "Resource %q was requested but not registered", name)
 		return reconcile.Result{}, nil
 	}
 	stored := node.DeepCopy()
-	node.Labels = lo.Assign(node.Labels, map[string]string{v1alpha5.LabelNodeInitialized: "true"})
+	node.Labels = lo.Assign(node.Labels, map[string]string{v1beta1.NodeInitializedLabelKey: "true"})
 	if !equality.Semantic.DeepEqual(stored, node) {
 		if err = i.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, err
 		}
 	}
-	logging.FromContext(ctx).Debugf("initialized machine")
-	machine.StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
-	metrics.MachinesInitializedCounter.With(prometheus.Labels{
-		metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
-	}).Inc()
+	logging.FromContext(ctx).Debugf("initialized %s", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"))
+	nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeInitialized)
+	nodeclaimutil.InitializedCounter(nodeClaim).Inc()
 	return reconcile.Result{}, nil
 }
 
@@ -104,9 +100,9 @@ func KnownEphemeralTaintsRemoved(node *v1.Node) (*v1.Taint, bool) {
 
 // StartupTaintsRemoved returns true if there are no startup taints registered for the provisioner, or if all startup
 // taints have been removed from the node
-func StartupTaintsRemoved(node *v1.Node, machine *v1alpha5.Machine) (*v1.Taint, bool) {
-	if machine != nil {
-		for _, startupTaint := range machine.Spec.StartupTaints {
+func StartupTaintsRemoved(node *v1.Node, nodeClaim *v1beta1.NodeClaim) (*v1.Taint, bool) {
+	if nodeClaim != nil {
+		for _, startupTaint := range nodeClaim.Spec.StartupTaints {
 			for i := range node.Spec.Taints {
 				// if the node still has a startup taint applied, it's not ready
 				if startupTaint.MatchTaint(&node.Spec.Taints[i]) {
@@ -120,8 +116,8 @@ func StartupTaintsRemoved(node *v1.Node, machine *v1alpha5.Machine) (*v1.Taint, 
 
 // RequestedResourcesRegistered returns true if there are no extended resources on the node, or they have all been
 // registered by device plugins
-func RequestedResourcesRegistered(node *v1.Node, machine *v1alpha5.Machine) (v1.ResourceName, bool) {
-	for resourceName, quantity := range machine.Spec.Resources.Requests {
+func RequestedResourcesRegistered(node *v1.Node, nodeClaim *v1beta1.NodeClaim) (v1.ResourceName, bool) {
+	for resourceName, quantity := range nodeClaim.Spec.Resources.Requests {
 		if quantity.IsZero() {
 			continue
 		}

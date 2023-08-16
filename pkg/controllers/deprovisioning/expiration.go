@@ -35,7 +35,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
-	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 )
 
 // Expiration is a subreconciler that deletes empty nodes.
@@ -111,8 +110,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, nodes ...*Candidate) (C
 			continue
 		}
 
-		logging.FromContext(ctx).With("ttl", time.Duration(ptr.Int64Value(candidates[0].provisioner.Spec.TTLSecondsUntilExpired))*time.Second).
-			With("delay", time.Since(machineutil.GetExpirationTime(candidates[0].Machine, candidates[0].provisioner))).Infof("triggering termination for expired node after TTL")
+		logging.FromContext(ctx).With("ttl", time.Duration(ptr.Int64Value(candidates[0].provisioner.Spec.TTLSecondsUntilExpired))*time.Second).Infof("triggering termination for expired node after TTL")
 		return Command{
 			candidates:   []*Candidate{candidate},
 			replacements: results.NewMachines,

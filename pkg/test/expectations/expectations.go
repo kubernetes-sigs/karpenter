@@ -57,6 +57,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	pscheduling "github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/test"
+	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
+	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
 
 const (
@@ -321,7 +323,7 @@ func ExpectMachineDeployedNoNodeWithOffset(offset int, ctx context.Context, c cl
 	ExpectWithOffset(offset+1, err).To(Succeed())
 
 	// Make the machine ready in the status conditions
-	lifecycle.PopulateMachineDetails(m, resolved)
+	m = machineutil.NewFromNodeClaim(lifecycle.PopulateNodeClaimDetails(nodeclaimutil.New(m), nodeclaimutil.New(resolved)))
 	m.StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
 	ExpectAppliedWithOffset(offset+1, ctx, c, m)
 	cluster.UpdateMachine(m)

@@ -89,7 +89,7 @@ var _ = Describe("Liveness", func() {
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 		machine = ExpectExists(ctx, env.Client, machine)
 
-		// If the node hasn't registered in the registration timeframe, then we deprovision the Machine
+		// If the node hasn't registered in the registration timeframe, then we deprovision the NodeClaim
 		fakeClock.Step(time.Minute * 20)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 		ExpectFinalizersRemoved(ctx, env.Client, machine)

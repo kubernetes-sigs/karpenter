@@ -326,6 +326,8 @@ var _ = Describe("NodeClaimUtils", func() {
 		Expect(retrieved.Name).To(Equal(machine.Name))
 	})
 	It("should retrieve both NodeClaims and Machines on a list call", func() {
+		Skip("Re-enable this test when NodeClaims are enabled and v1beta1 is released")
+
 		numNodeClaims := 3
 		numMachines := 5
 

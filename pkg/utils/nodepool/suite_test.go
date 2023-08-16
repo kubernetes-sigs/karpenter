@@ -241,6 +241,8 @@ var _ = Describe("NodePoolUtils", func() {
 		Expect(nodePool.Spec.Template.Spec.Provider).To(Equal(provisioner.Spec.Provider))
 	})
 	It("should retrieve both NodePools and Provisioners on a list call", func() {
+		Skip("Re-enable this test when NodePools are enabled and v1beta1 is released")
+
 		numNodePools := 3
 		numProvisioners := 5
 

@@ -36,8 +36,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
-	machinelifecycle "github.com/aws/karpenter-core/pkg/controllers/machine/lifecycle"
-	machinetermination "github.com/aws/karpenter-core/pkg/controllers/machine/termination"
+	nodeclaimlifecycle "github.com/aws/karpenter-core/pkg/controllers/machine/lifecycle"
+	nodeclaimtermination "github.com/aws/karpenter-core/pkg/controllers/machine/termination"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
@@ -68,8 +68,8 @@ var _ = BeforeSuite(func() {
 	}))
 	ctx = settings.ToContext(ctx, test.Settings())
 	cloudProvider = fake.NewCloudProvider()
-	machineController = machinelifecycle.NewController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
-	terminationController = machinetermination.NewController(env.Client, cloudProvider)
+	machineController = nodeclaimlifecycle.NewMachineController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
+	terminationController = nodeclaimtermination.NewMachineController(env.Client, cloudProvider)
 })
 
 var _ = AfterSuite(func() {
