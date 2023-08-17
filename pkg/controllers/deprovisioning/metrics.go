@@ -26,6 +26,7 @@ func init() {
 	crmetrics.Registry.MustRegister(deprovisioningReplacementNodeInitializedHistogram)
 	crmetrics.Registry.MustRegister(deprovisioningActionsPerformedCounter)
 	crmetrics.Registry.MustRegister(deprovisioningEligibleMachinesGauge)
+	crmetrics.Registry.MustRegister(deprovisioningReplacementNodeLaunchFailedCounter)
 }
 
 const (
@@ -82,5 +83,14 @@ var (
 			Help:      "Number of times the Consolidation algorithm has reached a timeout. Labeled by consolidationType.",
 		},
 		[]string{consolidationType},
+	)
+	deprovisioningReplacementNodeLaunchFailedCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: deprovisioningSubsystem,
+			Name:      "replacement_machine_launch_failure_counter",
+			Help:      "The number of times that Karpenter failed to launch a replacement node for deprovisioning. Labeled by deprovisioner.",
+		},
+		[]string{deprovisionerLabel},
 	)
 )
