@@ -239,7 +239,11 @@ func (c *Controller) launchReplacementMachines(ctx context.Context, action Comma
 	workqueue.ParallelizeUntil(ctx, len(machineNames), len(machineNames), func(i int) {
 		// machine never became ready or the machines that we tried to launch got Insufficient Capacity or some
 		// other transient error
-		errs[i] = c.waitForReadiness(ctx, machineNames[i], reason)
+		err := c.waitForReadiness(ctx, machineNames[i], reason)
+		if err != nil {
+			deprovisioningReplacementNodeLaunchFailedCounter.WithLabelValues(reason).Inc()
+		}
+		errs[i] = err
 	})
 	if err = multierr.Combine(errs...); err != nil {
 		c.cluster.UnmarkForDeletion(candidateNodeNames...)
