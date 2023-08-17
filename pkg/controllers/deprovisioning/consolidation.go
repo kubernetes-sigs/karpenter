@@ -21,11 +21,13 @@ import (
 	"sort"
 	"time"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
@@ -34,6 +36,9 @@ import (
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 )
+
+// consolidationTTL is the TTL between creating a consolidation command and validating that it still works.
+const consolidationTTL = 15 * time.Second
 
 // consolidation is the base consolidation controller that provides common functionality used across the different
 // consolidation methods.
@@ -86,6 +91,19 @@ func (c *consolidation) isConsolidated() bool {
 // markConsolidated records the current state of the cluster.
 func (c *consolidation) markConsolidated() {
 	c.lastConsolidationState = c.cluster.ConsolidationState()
+}
+
+// ShouldDeprovision is a predicate used to filter deprovisionable nodes
+func (c *consolidation) ShouldDeprovision(_ context.Context, cn *Candidate) bool {
+	if cn.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey] == "true" {
+		c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s annotation exists", v1alpha5.DoNotConsolidateNodeAnnotationKey))...)
+		return false
+	}
+	if cn.nodePool.Spec.Deprovisioning.ConsolidationPolicy != v1beta1.ConsolidationPolicyWhenUnderutilized {
+		c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s %q has empty consolidation disabled by consolidation policy", lo.Ternary(cn.nodePool.IsProvisioner, "Provisioner", "NodePool"), cn.nodePool.Name))...)
+		return false
+	}
+	return true
 }
 
 // computeConsolidation computes a consolidation action to take

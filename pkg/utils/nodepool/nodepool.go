@@ -55,9 +55,6 @@ func New(provisioner *v1alpha5.Provisioner) *v1beta1.NodePool {
 		},
 		IsProvisioner: true,
 	}
-	if provisioner.Spec.TTLSecondsAfterEmpty != nil {
-		np.Spec.Deprovisioning.EmptinessTTL = &metav1.Duration{Duration: lo.Must(time.ParseDuration(fmt.Sprintf("%ds", lo.FromPtr[int64](provisioner.Spec.TTLSecondsAfterEmpty))))}
-	}
 	if provisioner.Spec.TTLSecondsUntilExpired != nil {
 		np.Spec.Deprovisioning.ExpirationTTL = metav1.Duration{Duration: lo.Must(time.ParseDuration(fmt.Sprintf("%ds", lo.FromPtr[int64](provisioner.Spec.TTLSecondsUntilExpired))))}
 	} else {
@@ -65,10 +62,11 @@ func New(provisioner *v1alpha5.Provisioner) *v1beta1.NodePool {
 	}
 	if provisioner.Spec.Consolidation != nil && lo.FromPtr(provisioner.Spec.Consolidation.Enabled) {
 		np.Spec.Deprovisioning.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
-		np.Spec.Deprovisioning.ConsolidationTTL = metav1.Duration{Duration: lo.Must(time.ParseDuration("15s"))}
+	} else if provisioner.Spec.TTLSecondsAfterEmpty != nil {
+		np.Spec.Deprovisioning.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
+		np.Spec.Deprovisioning.ConsolidationTTL = metav1.Duration{Duration: lo.Must(time.ParseDuration(fmt.Sprintf("%ds", lo.FromPtr[int64](provisioner.Spec.TTLSecondsAfterEmpty))))}
 	} else {
 		np.Spec.Deprovisioning.ConsolidationPolicy = v1beta1.ConsolidationPolicyNever
-		np.Spec.Deprovisioning.ConsolidationTTL = metav1.Duration{Duration: -1}
 	}
 	if provisioner.Spec.Limits != nil {
 		np.Spec.Limits = v1beta1.Limits(provisioner.Spec.Limits.Resources)

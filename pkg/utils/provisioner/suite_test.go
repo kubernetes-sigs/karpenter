@@ -169,10 +169,8 @@ var _ = Describe("ProvisionerUtils", func() {
 					},
 				},
 				Deprovisioning: v1beta1.Deprovisioning{
-					ConsolidationTTL:    metav1.Duration{Duration: lo.Must(time.ParseDuration("60s"))},
 					ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenUnderutilized,
 					ExpirationTTL:       metav1.Duration{Duration: lo.Must(time.ParseDuration("2160h"))},
-					EmptinessTTL:        &metav1.Duration{Duration: lo.Must(time.ParseDuration("30s"))},
 				},
 				Limits: v1beta1.Limits(v1.ResourceList{
 					v1.ResourceCPU:              resource.MustParse("10"),
@@ -225,7 +223,7 @@ var _ = Describe("ProvisionerUtils", func() {
 		Expect(lo.FromPtr(provisioner.Spec.Consolidation.Enabled)).To(BeTrue())
 
 		Expect(lo.FromPtr(provisioner.Spec.TTLSecondsUntilExpired)).To(BeNumerically("==", nodePool.Spec.Deprovisioning.ExpirationTTL.Duration.Seconds()))
-		Expect(lo.FromPtr(provisioner.Spec.TTLSecondsAfterEmpty)).To(BeNumerically("==", nodePool.Spec.Deprovisioning.EmptinessTTL.Duration.Seconds()))
+		Expect(provisioner.Spec.TTLSecondsAfterEmpty).To(BeNil())
 
 		ExpectResources(provisioner.Spec.Limits.Resources, v1.ResourceList(nodePool.Spec.Limits))
 		Expect(lo.FromPtr(provisioner.Spec.Weight)).To(BeNumerically("==", lo.FromPtr(nodePool.Spec.Weight)))

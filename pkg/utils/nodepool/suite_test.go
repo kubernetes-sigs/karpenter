@@ -223,9 +223,8 @@ var _ = Describe("NodePoolUtils", func() {
 		Expect(nodePool.Spec.Template.Spec.NodeClass.Name).To(Equal(provisioner.Spec.ProviderRef.Name))
 
 		Expect(nodePool.Spec.Deprovisioning.ConsolidationPolicy).To(Equal(v1beta1.ConsolidationPolicyWhenUnderutilized))
-		Expect(nodePool.Spec.Deprovisioning.ConsolidationTTL.Duration.Seconds()).To(BeNumerically("==", 15))
 		Expect(nodePool.Spec.Deprovisioning.ExpirationTTL.Duration.Seconds()).To(BeNumerically("==", lo.FromPtr(provisioner.Spec.TTLSecondsUntilExpired)))
-		Expect(nodePool.Spec.Deprovisioning.EmptinessTTL.Duration.Seconds()).To(BeNumerically("==", lo.FromPtr(provisioner.Spec.TTLSecondsAfterEmpty)))
+		Expect(nodePool.Spec.Deprovisioning.ConsolidationTTL.Duration.Seconds()).To(BeNumerically("==", 0))
 
 		ExpectResources(v1.ResourceList(nodePool.Spec.Limits), provisioner.Spec.Limits.Resources)
 		Expect(lo.FromPtr(nodePool.Spec.Weight)).To(BeNumerically("==", lo.FromPtr(provisioner.Spec.Weight)))
