@@ -25,6 +25,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/consistency"
 	"github.com/aws/karpenter-core/pkg/controllers/counter"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
+	"github.com/aws/karpenter-core/pkg/controllers/leasegarbagecollection"
 	nodeclaimdisruption "github.com/aws/karpenter-core/pkg/controllers/machine/disruption"
 	nodeclaimgarbagecollection "github.com/aws/karpenter-core/pkg/controllers/machine/garbagecollection"
 	nodeclaimlifecycle "github.com/aws/karpenter-core/pkg/controllers/machine/lifecycle"
@@ -75,5 +76,6 @@ func NewControllers(
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimtermination.NewMachineController(kubeClient, cloudProvider),
 		nodeclaimdisruption.NewMachineController(clock, kubeClient, cluster, cloudProvider),
+		leasegarbagecollection.NewController(kubeClient),
 	}
 }
