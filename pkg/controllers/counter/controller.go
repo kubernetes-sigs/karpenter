@@ -21,6 +21,9 @@ import (
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
@@ -30,14 +33,11 @@ import (
 	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
@@ -104,10 +104,6 @@ func NewNodePoolController(kubeClient client.Client, cluster *state.Cluster) cor
 	})
 }
 
-func (c *NodePoolController) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) (reconcile.Result, error) {
-	return c.Controller.Reconcile(ctx, nodePool)
-}
-
 func (c *NodePoolController) Name() string {
 	return "counter"
 }
@@ -116,6 +112,15 @@ func (c *NodePoolController) Builder(_ context.Context, m manager.Manager) corec
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1beta1.NodePool{}).
+		Watches(
+			&source.Kind{Type: &v1beta1.NodeClaim{}},
+			handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
+				if name, ok := o.GetLabels()[v1beta1.NodePoolLabelKey]; ok {
+					return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: name}}}
+				}
+				return nil
+			}),
+		).
 		Watches(
 			&source.Kind{Type: &v1.Node{}},
 			handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
@@ -150,6 +155,15 @@ func (c *ProvisionerController) Builder(_ context.Context, m manager.Manager) co
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1alpha5.Provisioner{}).
+		Watches(
+			&source.Kind{Type: &v1alpha5.Machine{}},
+			handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
+				if name, ok := o.GetLabels()[v1alpha5.ProvisionerNameLabelKey]; ok {
+					return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: name}}}
+				}
+				return nil
+			}),
+		).
 		Watches(
 			&source.Kind{Type: &v1.Node{}},
 			handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
