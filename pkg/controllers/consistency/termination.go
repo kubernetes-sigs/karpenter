@@ -21,7 +21,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
 	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
 )
@@ -37,9 +37,9 @@ func NewTermination(kubeClient client.Client) Check {
 	}
 }
 
-func (t *Termination) Check(ctx context.Context, node *v1.Node, machine *v1alpha5.Machine) ([]Issue, error) {
+func (t *Termination) Check(ctx context.Context, node *v1.Node, nodeClaim *v1beta1.NodeClaim) ([]Issue, error) {
 	// we are only looking at nodes that are hung deleting
-	if machine.DeletionTimestamp.IsZero() {
+	if nodeClaim.DeletionTimestamp.IsZero() {
 		return nil, nil
 	}
 	pdbs, err := deprovisioning.NewPDBLimits(ctx, t.kubeClient)

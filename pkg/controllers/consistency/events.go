@@ -17,16 +17,27 @@ package consistency
 import (
 	v1 "k8s.io/api/core/v1"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/events"
+	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 )
 
-func CheckEvent(machine *v1alpha5.Machine, message string) events.Event {
+func FailedConsistencyCheckEvent(nodeClaim *v1beta1.NodeClaim, message string) events.Event {
+	if nodeClaim.IsMachine {
+		machine := machineutil.NewFromNodeClaim(nodeClaim)
+		return events.Event{
+			InvolvedObject: machine,
+			Type:           v1.EventTypeWarning,
+			Reason:         "FailedConsistencyCheck",
+			Message:        message,
+			DedupeValues:   []string{string(machine.UID), message},
+		}
+	}
 	return events.Event{
-		InvolvedObject: machine,
+		InvolvedObject: nodeClaim,
 		Type:           v1.EventTypeWarning,
 		Reason:         "FailedConsistencyCheck",
 		Message:        message,
-		DedupeValues:   []string{machine.Name, message},
+		DedupeValues:   []string{string(nodeClaim.UID), message},
 	}
 }

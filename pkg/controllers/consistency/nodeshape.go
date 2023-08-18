@@ -20,7 +20,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 )
 
@@ -35,17 +35,17 @@ func NewNodeShape(provider cloudprovider.CloudProvider) Check {
 	}
 }
 
-func (n *NodeShape) Check(_ context.Context, node *v1.Node, machine *v1alpha5.Machine) ([]Issue, error) {
+func (n *NodeShape) Check(_ context.Context, node *v1.Node, nodeClaim *v1beta1.NodeClaim) ([]Issue, error) {
 	// ignore machines that are deleting
-	if !machine.DeletionTimestamp.IsZero() {
+	if !nodeClaim.DeletionTimestamp.IsZero() {
 		return nil, nil
 	}
 	// and machines that haven't initialized yet
-	if !machine.StatusConditions().GetCondition(v1alpha5.MachineInitialized).IsTrue() {
+	if !nodeClaim.StatusConditions().GetCondition(v1beta1.NodeInitialized).IsTrue() {
 		return nil, nil
 	}
 	var issues []Issue
-	for resourceName, expectedQuantity := range machine.Status.Capacity {
+	for resourceName, expectedQuantity := range nodeClaim.Status.Capacity {
 		nodeQuantity, ok := node.Status.Capacity[resourceName]
 		if !ok && !expectedQuantity.IsZero() {
 			issues = append(issues, Issue(fmt.Sprintf("expected resource %q not found", resourceName)))
