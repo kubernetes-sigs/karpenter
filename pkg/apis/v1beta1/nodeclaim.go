@@ -33,10 +33,10 @@ type NodeClaimSpec struct {
 	StartupTaints []v1.Taint `json:"startupTaints,omitempty"`
 	// Requirements are layered with GetLabels and applied to every node.
 	// +optional
-	Requirements []v1.NodeSelectorRequirement `json:"requirements,omitempty"`
+	Requirements []v1.NodeSelectorRequirement `json:"requirements,omitempty" hash:"ignore"`
 	// Resources models the resource requirements for the NodeClaim to launch
 	// +optional
-	Resources ResourceRequirements `json:"resources,omitempty"`
+	Resources ResourceRequirements `json:"resources,omitempty" hash:"ignore"`
 	// KubeletConfiguration are options passed to the kubelet when provisioning nodes
 	// +optional
 	KubeletConfiguration *KubeletConfiguration `json:"kubeletConfiguration,omitempty"`

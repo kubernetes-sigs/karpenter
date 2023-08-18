@@ -27,47 +27,83 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 )
 
-// Controller is provisioner hash controller that constructs a hash based on the felids that are considered for
-// static drift from the provisioner. The hash is placed in the provisioner.objectmeta.Annotation for increased observability.
-// The provisioner hash should be found on each machine that is owned that by the provisioner.
+// Controller is hash controller that constructs a hash based on the fields that are considered for static drift.
+// The hash is placed in the metadata for increased observability and should be found on each object.
 type Controller struct {
 	kubeClient client.Client
 }
 
-func NewController(kubeClient client.Client) corecontroller.Controller {
-	return corecontroller.Typed[*v1alpha5.Provisioner](kubeClient, &Controller{
+func NewController(kubeClient client.Client) *Controller {
+	return &Controller{
 		kubeClient: kubeClient,
-	})
-}
-
-func (c *Controller) Name() string {
-	return "provisioner.hash"
+	}
 }
 
 // Reconcile the resource
-func (c *Controller) Reconcile(ctx context.Context, p *v1alpha5.Provisioner) (reconcile.Result, error) {
-	stored := p.DeepCopy()
+func (c *Controller) Reconcile(ctx context.Context, np *v1beta1.NodePool) (reconcile.Result, error) {
+	stored := np.DeepCopy()
+	np.Annotations = lo.Assign(np.Annotations, nodepoolutil.HashAnnotation(np))
 
-	provisionerHash := p.Hash()
-	p.ObjectMeta.Annotations = lo.Assign(p.ObjectMeta.Annotations, map[string]string{v1alpha5.ProvisionerHashAnnotationKey: provisionerHash})
-
-	if !equality.Semantic.DeepEqual(stored, p) {
-		if err := c.kubeClient.Patch(ctx, p, client.MergeFrom(stored)); err != nil {
+	if !equality.Semantic.DeepEqual(stored, np) {
+		if err := nodepoolutil.Patch(ctx, c.kubeClient, stored, np); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 	}
-
 	return reconcile.Result{}, nil
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
+//nolint:revive
+type ProvisionerController struct {
+	*Controller
+}
+
+func NewProvisionerController(kubeClient client.Client) corecontroller.Controller {
+	return corecontroller.Typed[*v1alpha5.Provisioner](kubeClient, &ProvisionerController{
+		Controller: NewController(kubeClient),
+	})
+}
+
+func (c *ProvisionerController) Reconcile(ctx context.Context, p *v1alpha5.Provisioner) (reconcile.Result, error) {
+	return c.Controller.Reconcile(ctx, nodepoolutil.New(p))
+}
+
+func (c *ProvisionerController) Name() string {
+	return "provisioner.hash"
+}
+
+func (c *ProvisionerController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		For(&v1alpha5.Provisioner{}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
+	)
+}
+
+type NodePoolController struct {
+	*Controller
+}
+
+func NewNodePoolController(kubeClient client.Client) corecontroller.Controller {
+	return corecontroller.Typed[*v1beta1.NodePool](kubeClient, &NodePoolController{
+		Controller: NewController(kubeClient),
+	})
+}
+
+func (c *NodePoolController) Name() string {
+	return "nodepool.hash"
+}
+
+func (c *NodePoolController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
+	return corecontroller.Adapt(controllerruntime.
+		NewControllerManagedBy(m).
+		WithEventFilter(predicate.GenerationChangedPredicate{}).
+		For(&v1beta1.NodePool{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
 	)
 }

@@ -122,6 +122,15 @@ func List(ctx context.Context, c client.Client, opts ...client.ListOption) (*v1b
 	return nodePoolList, nil
 }
 
+func Patch(ctx context.Context, c client.Client, stored, nodePool *v1beta1.NodePool) error {
+	if nodePool.IsProvisioner {
+		storedProvisioner := provisionerutil.New(stored)
+		provisioner := provisionerutil.New(nodePool)
+		return c.Patch(ctx, provisioner, client.MergeFrom(storedProvisioner))
+	}
+	return c.Patch(ctx, nodePool, client.MergeFrom(stored))
+}
+
 func PatchStatus(ctx context.Context, c client.Client, stored, nodePool *v1beta1.NodePool) error {
 	if nodePool.IsProvisioner {
 		storedProvisioner := provisionerutil.New(stored)
@@ -129,4 +138,12 @@ func PatchStatus(ctx context.Context, c client.Client, stored, nodePool *v1beta1
 		return c.Status().Patch(ctx, provisioner, client.MergeFrom(storedProvisioner))
 	}
 	return c.Status().Patch(ctx, nodePool, client.MergeFrom(stored))
+}
+
+func HashAnnotation(nodePool *v1beta1.NodePool) map[string]string {
+	if nodePool.IsProvisioner {
+		provisioner := provisionerutil.New(nodePool)
+		return map[string]string{v1alpha5.ProvisionerHashAnnotationKey: provisioner.Hash()}
+	}
+	return map[string]string{v1beta1.NodePoolHashAnnotationKey: nodePool.Hash()}
 }
