@@ -69,7 +69,7 @@ func NewControllers(
 		termination.NewController(kubeClient, cloudProvider, terminator, recorder),
 		metricspod.NewController(kubeClient),
 		metricsprovisioner.NewController(kubeClient),
-		counter.NewController(kubeClient, cluster),
+		counter.NewProvisionerController(kubeClient, cluster),
 		consistency.NewController(clock, kubeClient, recorder, cloudProvider),
 		nodeclaimlifecycle.NewMachineController(clock, kubeClient, cloudProvider, recorder),
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
