@@ -45,6 +45,9 @@ func (in *NodePoolSpec) validate() (errs *apis.FieldError) {
 }
 
 func (in *NodeClaimTemplate) validate() (errs *apis.FieldError) {
+	if len(in.Spec.Resources.Requests) > 0 {
+		errs = errs.Also(apis.ErrDisallowedFields("resources.requests"))
+	}
 	return errs.Also(
 		in.validateLabels().ViaField("metadata"),
 		in.Spec.validate().ViaField("spec"),

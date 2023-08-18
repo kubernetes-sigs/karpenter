@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/mitchellh/hashstructure/v2"
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/ptr"
@@ -121,6 +123,14 @@ type NodePool struct {
 	// is actually referring to a Provisioner object. This value is not actually part of the v1beta1 public-facing API
 	// TODO @joinnis: Remove this field when v1alpha5 is unsupported in a future version of Karpenter
 	IsProvisioner bool `json:"-"`
+}
+
+func (in *NodePool) Hash() string {
+	return fmt.Sprint(lo.Must(hashstructure.Hash(in.Spec.Template, hashstructure.FormatV2, &hashstructure.HashOptions{
+		SlicesAsSets:    true,
+		IgnoreZeroValue: true,
+		ZeroNil:         true,
+	})))
 }
 
 // NodePoolList contains a list of NodePool

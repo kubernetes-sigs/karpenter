@@ -365,7 +365,7 @@ var _ = Describe("Drift", func() {
 		var provisionerController controller.Controller
 		BeforeEach(func() {
 			cp.Drifted = ""
-			provisionerController = controllerprov.NewController(env.Client)
+			provisionerController = controllerprov.NewProvisionerController(env.Client)
 			testProvisionerOptions = test.ProvisionerOptions{
 				ObjectMeta: provisioner.ObjectMeta,
 				Taints: []v1.Taint{

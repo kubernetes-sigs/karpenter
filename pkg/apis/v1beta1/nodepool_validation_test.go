@@ -87,6 +87,12 @@ var _ = Describe("Validation", func() {
 		})
 	})
 	Context("Template", func() {
+		It("should fail if resource requests are set", func() {
+			nodePool.Spec.Template.Spec.Resources.Requests = v1.ResourceList{
+				v1.ResourceCPU: resource.MustParse("5"),
+			}
+			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
+		})
 		Context("Labels", func() {
 			It("should allow unrecognized labels", func() {
 				nodePool.Spec.Template.Labels = map[string]string{"foo": randomdata.SillyName()}

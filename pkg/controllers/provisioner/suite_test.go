@@ -34,6 +34,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
+	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 )
 
 var provisionerController controller.Controller
@@ -44,12 +45,12 @@ var env *test.Environment
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Controllers/Provisioner")
+	RunSpecs(t, "ProvisionerController")
 }
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
-	provisionerController = provcontroller.NewController(env.Client)
+	provisionerController = provcontroller.NewProvisionerController(env.Client)
 	provisioner = test.Provisioner(test.ProvisionerOptions{
 		Taints: []v1.Taint{
 			{
@@ -81,6 +82,12 @@ var _ = AfterSuite(func() {
 })
 
 var _ = Describe("Provisioner Static Drift Hash", func() {
+	It("should maintain the same hash, before and after the NodePool conversion", func() {
+		hash := provisioner.Hash()
+		nodePool := nodepoolutil.New(provisioner)
+		convertedHash := nodepoolutil.HashAnnotation(nodePool)
+		Expect(convertedHash).To(HaveKeyWithValue(v1alpha5.ProvisionerHashAnnotationKey, hash))
+	})
 	It("should update the static drift hash when provisioner static field is updated", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
 		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
