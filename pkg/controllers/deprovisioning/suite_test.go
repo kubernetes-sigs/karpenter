@@ -2205,13 +2205,14 @@ var _ = Describe("Consolidation Timeout", func() {
 			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		}()
 
-		ExpectTriggerVerifyAction(&wg)
-
 		// advance the clock so that the timeout expires
 		fakeClock.Step(deprovisioning.MultiMachineConsolidationTimeoutDuration)
 
 		// wait for the controller to block on the validation timeout
 		Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
+
+		ExpectTriggerVerifyAction(&wg)
+
 		// controller should be blocking during the timeout
 		Expect(finished.Load()).To(BeFalse())
 
@@ -2296,22 +2297,18 @@ var _ = Describe("Consolidation Timeout", func() {
 			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		}()
 
-		// ExpectTriggerVerifyAction so that we can try to compute some deprovisioning actions.
-		ExpectTimeoutCompleted(&wg)
-
 		// advance the clock so that the timeout expires for multi-machine
 		fakeClock.Step(deprovisioning.MultiMachineConsolidationTimeoutDuration)
 		// advance the clock so that the timeout expires for single-machine
 		fakeClock.Step(deprovisioning.SingleMachineConsolidationTimeoutDuration)
 
-		// advance the clock so that the timeout expires
-		fakeClock.Step(31 * time.Second)
+		ExpectTriggerVerifyAction(&wg)
 
 		// controller should finish
 		Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 		wg.Wait()
 
-		// should have no machines deleted from multi machine consolidation
+		// should have no machines deleted from single machine consolidation
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(numNodes))
 	})
 })
@@ -2932,20 +2929,6 @@ func ExpectTriggerVerifyAction(wg *sync.WaitGroup) {
 			}
 		}
 		fakeClock.Step(45 * time.Second)
-	}()
-}
-
-func ExpectTimeoutCompleted(wg *sync.WaitGroup) {
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 10; i++ {
-			time.Sleep(250 * time.Millisecond)
-			if fakeClock.HasWaiters() {
-				break
-			}
-		}
-		fakeClock.Step(3 * time.Minute)
 	}()
 }
 
