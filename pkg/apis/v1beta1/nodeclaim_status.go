@@ -60,6 +60,7 @@ var (
 	NodeDrifted       apis.ConditionType = "NodeDrifted"
 	NodeExpired       apis.ConditionType = "NodeExpired"
 	NodeUnderutilized apis.ConditionType = "NodeUnderutilized"
+	NodeDeprovisioningBlocked apis.ConditionType = "NodeDeprovisioningBlocked"
 )
 
 func (in *NodeClaim) GetConditions() apis.Conditions {

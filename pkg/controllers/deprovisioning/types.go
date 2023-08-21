@@ -133,7 +133,7 @@ func (c *Candidate) lifetimeRemaining(clock clock.Clock) float64 {
 		ageInSeconds := clock.Since(c.Node.CreationTimestamp.Time).Seconds()
 		totalLifetimeSeconds := c.nodePool.Spec.Deprovisioning.ExpirationTTL.Duration.Seconds()
 		lifetimeRemainingSeconds := totalLifetimeSeconds - ageInSeconds
-		remaining = clamp(0.0, lifetimeRemainingSeconds/totalLifetimeSeconds, 1.0)
+		remaining = lo.Clamp(lifetimeRemainingSeconds/totalLifetimeSeconds, 0.0, 1.0)
 	}
 	return remaining
 }

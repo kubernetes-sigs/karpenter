@@ -151,6 +151,16 @@ func (c *Cluster) ForEachNode(f func(n *StateNode) bool) {
 	}
 }
 
+func (c *Cluster) GetNode(nodeName string) (*StateNode, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	node, ok := c.nodes[nodeName]
+	if !ok {
+		return nil, fmt.Errorf("state has no node with name %s", nodeName)
+	}
+	return node, nil
+}
+
 // Nodes creates a DeepCopy of all state nodes.
 // NOTE: This is very inefficient so this should only be used when DeepCopying is absolutely necessary
 func (c *Cluster) Nodes() StateNodes {

@@ -58,7 +58,7 @@ func filterCandidates(ctx context.Context, kubeClient client.Client, recorder ev
 			recorder.Publish(deprovisioningevents.Blocked(cn.Node, cn.NodeClaim, fmt.Sprintf("PDB %q prevents pod evictions", pdb))...)
 			return false
 		}
-		if p, ok := hasDoNotEvictPod(cn); ok {
+		if p, ok := HasDoNotEvictPod(cn); ok {
 			recorder.Publish(deprovisioningevents.Blocked(cn.Node, cn.NodeClaim, fmt.Sprintf("Pod %q has do not evict annotation", client.ObjectKeyFromObject(p)))...)
 			return false
 		}
@@ -156,7 +156,7 @@ func GetPodEvictionCost(ctx context.Context, p *v1.Pod) float64 {
 	}
 
 	// overall we clamp the pod cost to the range [-10.0, 10.0] with the default being 1.0
-	return clamp(-10.0, cost, 10.0)
+	return lo.Clamp(cost, -10.0, 10.0)
 }
 
 func filterByPrice(options []*cloudprovider.InstanceType, reqs scheduling.Requirements, price float64) []*cloudprovider.InstanceType {
@@ -180,7 +180,7 @@ func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
 
 // GetCandidates returns nodes that appear to be currently deprovisionable based off of their nodePool
 func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter) ([]*Candidate, error) {
-	nodePoolMap, nodePoolToInstanceTypesMap, err := buildNodePoolMap(ctx, kubeClient, cloudProvider)
+	nodePoolMap, nodePoolToInstanceTypesMap, err := BuildNodePoolMap(ctx, kubeClient, cloudProvider)
 	if err != nil {
 		return nil, err
 	}
@@ -192,8 +192,8 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 	return lo.Filter(candidates, func(c *Candidate, _ int) bool { return shouldDeprovision(ctx, c) }), nil
 }
 
-// buildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map
-func buildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[nodepoolutil.Key]*v1beta1.NodePool, map[nodepoolutil.Key]map[string]*cloudprovider.InstanceType, error) {
+// BuildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map
+func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[nodepoolutil.Key]*v1beta1.NodePool, map[nodepoolutil.Key]map[string]*cloudprovider.InstanceType, error) {
 	nodePoolMap := map[nodepoolutil.Key]*v1beta1.NodePool{}
 	nodePoolList, err := nodepoolutil.List(ctx, kubeClient)
 	if err != nil {
@@ -253,18 +253,8 @@ func worstLaunchPrice(ofs []cloudprovider.Offering, reqs scheduling.Requirements
 	return math.MaxFloat64
 }
 
-func clamp(min, val, max float64) float64 {
-	if val < min {
-		return min
-	}
-	if val > max {
-		return max
-	}
-	return val
-}
-
-func hasDoNotEvictPod(c *Candidate) (*v1.Pod, bool) {
-	return lo.Find(c.pods, func(p *v1.Pod) bool {
+func hasDoNotEvictPod(pods []*v1.Pod) (*v1.Pod, bool) {
+	return lo.Find(pods, func(p *v1.Pod) bool {
 		if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
 			return false
 		}
