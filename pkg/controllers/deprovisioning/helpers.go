@@ -58,7 +58,7 @@ func filterCandidates(ctx context.Context, kubeClient client.Client, recorder ev
 			recorder.Publish(deprovisioningevents.Blocked(cn.Node, cn.NodeClaim, fmt.Sprintf("PDB %q prevents pod evictions", pdb))...)
 			return false
 		}
-		if p, ok := HasDoNotEvictPod(cn); ok {
+		if p, ok := HasDoNotEvictPod(cn.pods); ok {
 			recorder.Publish(deprovisioningevents.Blocked(cn.Node, cn.NodeClaim, fmt.Sprintf("Pod %q has do not evict annotation", client.ObjectKeyFromObject(p)))...)
 			return false
 		}
@@ -253,7 +253,7 @@ func worstLaunchPrice(ofs []cloudprovider.Offering, reqs scheduling.Requirements
 	return math.MaxFloat64
 }
 
-func hasDoNotEvictPod(pods []*v1.Pod) (*v1.Pod, bool) {
+func HasDoNotEvictPod(pods []*v1.Pod) (*v1.Pod, bool) {
 	return lo.Find(pods, func(p *v1.Pod) bool {
 		if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
 			return false

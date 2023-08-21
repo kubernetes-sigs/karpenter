@@ -151,6 +151,8 @@ func (c *Cluster) ForEachNode(f func(n *StateNode) bool) {
 	}
 }
 
+// More efficient way to get a node from cluster state without grabbing the whole list of nodes.
+// If you need to grab all nodes, use Nodes() instead.
 func (c *Cluster) GetNode(nodeName string) (*StateNode, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
