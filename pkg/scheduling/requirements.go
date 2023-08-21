@@ -16,6 +16,7 @@ package scheduling
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -260,6 +261,6 @@ func (r Requirements) Labels() map[string]string {
 func (r Requirements) String() string {
 	requirements := lo.Reject(r.Values(), func(requirement *Requirement, _ int) bool { return v1alpha5.RestrictedLabels.Has(requirement.Key) })
 	stringRequirements := lo.Map(requirements, func(requirement *Requirement, _ int) string { return requirement.String() })
-	sort.Strings(stringRequirements)
+	slices.Sort(stringRequirements)
 	return strings.Join(stringRequirements, ", ")
 }

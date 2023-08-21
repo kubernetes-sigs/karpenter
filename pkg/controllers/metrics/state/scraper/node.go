@@ -17,7 +17,7 @@ package scraper
 import (
 	"bytes"
 	"context"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -257,7 +257,7 @@ func labelsToString(labels prometheus.Labels) string {
 		// len(key + len(value) + len(="",)
 		sz += len(k) + len(v) + 4
 	}
-	sort.Strings(keyValues)
+	slices.Sort(keyValues)
 
 	var buf bytes.Buffer
 	// grow the buffer to the size needed to avoid allocations
