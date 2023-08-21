@@ -24,7 +24,9 @@ import (
 
 	"github.com/go-logr/zapr"
 	"github.com/samber/lo"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/util/flowcontrol"
@@ -37,6 +39,7 @@ import (
 	"knative.dev/pkg/system"
 	"knative.dev/pkg/webhook"
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -122,6 +125,13 @@ func NewOperator() (context.Context, *Operator) {
 			ctx = injection.WithOptions(ctx, *opts)
 			return ctx
 		},
+		NewCache: cache.BuilderWithOptions(cache.Options{
+			SelectorsByObject: cache.SelectorsByObject{
+				&coordinationv1.Lease{}: {
+					Field: fields.SelectorFromSet(fields.Set{"metadata.namespace": "kube-node-lease"}),
+				},
+			},
+		}),
 	})
 	mgr = lo.Must(mgr, err, "failed to setup manager")
 	if opts.EnableProfiling {
