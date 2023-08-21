@@ -53,13 +53,13 @@ var LivingConditions = []apis.ConditionType{
 }
 
 var (
-	NodeLaunched      apis.ConditionType = "NodeLaunched"
-	NodeRegistered    apis.ConditionType = "NodeRegistered"
-	NodeInitialized   apis.ConditionType = "NodeInitialized"
-	NodeEmpty         apis.ConditionType = "NodeEmpty"
-	NodeDrifted       apis.ConditionType = "NodeDrifted"
-	NodeExpired       apis.ConditionType = "NodeExpired"
-	NodeUnderutilized apis.ConditionType = "NodeUnderutilized"
+	NodeLaunched              apis.ConditionType = "NodeLaunched"
+	NodeRegistered            apis.ConditionType = "NodeRegistered"
+	NodeInitialized           apis.ConditionType = "NodeInitialized"
+	NodeEmpty                 apis.ConditionType = "NodeEmpty"
+	NodeDrifted               apis.ConditionType = "NodeDrifted"
+	NodeExpired               apis.ConditionType = "NodeExpired"
+	NodeUnderutilized         apis.ConditionType = "NodeUnderutilized"
 	NodeDeprovisioningBlocked apis.ConditionType = "NodeDeprovisioningBlocked"
 )
 
