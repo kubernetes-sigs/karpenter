@@ -33,9 +33,11 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	nodeclaimdisruption "github.com/aws/karpenter-core/pkg/controllers/machine/disruption"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
@@ -49,6 +51,9 @@ var env *test.Environment
 var fakeClock *clock.FakeClock
 var cluster *state.Cluster
 var cp *fake.CloudProvider
+var nodeStateController controller.Controller
+var machineStateController controller.Controller
+var recorder *test.EventRecorder
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -57,15 +62,19 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
+	cp = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
+	cluster = state.NewCluster(fakeClock, env.Client, cp)
+	nodeStateController = informer.NewNodeController(env.Client, cluster)
+	machineStateController = informer.NewMachineController(env.Client, cluster)
+	recorder = test.NewEventRecorder()
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...), test.WithFieldIndexers(func(c cache.Cache) error {
 		return c.IndexField(ctx, &v1.Node{}, "spec.providerID", func(obj client.Object) []string {
 			return []string{obj.(*v1.Node).Spec.ProviderID}
 		})
 	}))
 	ctx = settings.ToContext(ctx, test.Settings())
-	cp = fake.NewCloudProvider()
-	cluster = state.NewCluster(fakeClock, env.Client, cp)
 	disruptionController = nodeclaimdisruption.NewMachineController(fakeClock, env.Client, cluster, cp)
 })
 
@@ -80,8 +89,8 @@ var _ = BeforeEach(func() {
 var _ = AfterEach(func() {
 	fakeClock.SetTime(time.Now())
 	cp.Reset()
-	cluster.Reset()
 	ExpectCleanedUp(ctx, env.Client)
+	cluster.Reset()
 })
 
 var _ = Describe("Disruption", func() {
@@ -93,7 +102,14 @@ var _ = Describe("Disruption", func() {
 		provisioner = test.Provisioner()
 		machine, node = test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name},
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1.LabelInstanceTypeStable:       test.RandomName(),
+					v1alpha5.LabelCapacityType:       "on-demand",
+				},
+			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.RandomProviderID(),
 			},
 		})
 	})
@@ -104,8 +120,9 @@ var _ = Describe("Disruption", func() {
 		node.Annotations = lo.Assign(node.Annotations, map[string]string{
 			v1alpha5.EmptinessTimestampAnnotationKey: fakeClock.Now().Format(time.RFC3339),
 		})
+
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
-		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		// step forward to make the node expired and empty
 		fakeClock.Step(60 * time.Second)
@@ -115,14 +132,16 @@ var _ = Describe("Disruption", func() {
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).IsTrue()).To(BeTrue())
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty).IsTrue()).To(BeTrue())
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineExpired).IsTrue()).To(BeTrue())
+		Expect(machine.StatusConditions().GetCondition(v1beta1.NodeDeprovisioningBlocked).IsTrue()).To(BeTrue())
 	})
 	It("should remove multiple disruption conditions simultaneously", func() {
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineExpired)
+		machine.StatusConditions().MarkTrue(v1beta1.NodeDeprovisioningBlocked)
 
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
-		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		// Drift, Expiration, and Emptiness are disabled through configuration
 		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))

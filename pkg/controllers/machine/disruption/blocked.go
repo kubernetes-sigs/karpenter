@@ -48,9 +48,6 @@ type Blocked struct {
 //
 //nolint:gocyclo
 func (b *Blocked) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	if nodeClaim == nil {
-		return reconcile.Result{}, nil
-	}
 	if !b.cluster.Synced(ctx) {
 		return reconcile.Result{}, fmt.Errorf("waiting for cluster state to sync")
 	}
@@ -63,17 +60,17 @@ func (b *Blocked) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nod
 
 	// Get the node from cluster state before we can check anything else.
 	// If we fail to get a node, this means cluster state is no longer synced after we thought it was.
-	node, err := b.cluster.GetNode(nodeClaim.Name)
+	node, err := b.cluster.GetNode(ctx, nodeClaim.Status.ProviderID)
 	if err != nil {
 		condition.Reason = fmt.Sprintf("state doesn't have nodeclaim, %s", err)
 		nodeClaim.StatusConditions().SetCondition(condition)
-		return reconcile.Result{}, nil
+		return reconcile.Result{}, fmt.Errorf("state doesn't have nodeclaim, %w", err)
 	}
 	// If there's no node or no machine, we may have incomplete information, so add that it's blocked.
 	if node.Node == nil || node.Machine == nil {
 		condition.Reason = "state node doesn't contain both a node and a machine"
 		nodeClaim.StatusConditions().SetCondition(condition)
-		return reconcile.Result{}, nil
+		return reconcile.Result{}, fmt.Errorf(condition.Reason)
 	}
 	// Cluster state is synced, so append all blocked reasons together and set the condition for any failed reasons.
 	var reasons []string
@@ -115,7 +112,6 @@ func (b *Blocked) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nod
 	} {
 		if _, ok := node.Labels()[label]; !ok {
 			missingLabelKeys = append(missingLabelKeys, label)
-			// return nil, fmt.Errorf("state node doesn't have required label '%s'", label)
 		}
 		missingLabelKeys = append(missingLabelKeys, label)
 	}

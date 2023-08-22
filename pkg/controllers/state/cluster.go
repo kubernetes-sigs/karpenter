@@ -153,12 +153,14 @@ func (c *Cluster) ForEachNode(f func(n *StateNode) bool) {
 
 // More efficient way to get a node from cluster state without grabbing the whole list of nodes.
 // If you need to grab all nodes, use Nodes() instead.
-func (c *Cluster) GetNode(nodeName string) (*StateNode, error) {
+func (c *Cluster) GetNode(ctx context.Context, providerID string) (*StateNode, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	node, ok := c.nodes[nodeName]
+	logging.FromContext(ctx).Infof("DEBUGGING: this is the get node map %s", c.nameToProviderID)
+	node, ok := c.nodes[providerID]
 	if !ok {
-		return nil, fmt.Errorf("state has no node with name %s", nodeName)
+		logging.FromContext(ctx).Infof("DEBUGGING: providerID failed %s", providerID)
+		return nil, fmt.Errorf("state has no node with providerID %s", providerID)
 	}
 	return node, nil
 }

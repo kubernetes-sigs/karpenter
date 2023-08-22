@@ -48,13 +48,15 @@ var _ = Describe("Emptiness", func() {
 					v1.LabelInstanceTypeStable:       "default-instance-type", // need the instance type for the cluster state update
 				},
 			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.RandomProviderID(),
+			},
 		})
 	})
 
 	It("should mark machines as empty", func() {
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
-		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
-
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
@@ -64,7 +66,7 @@ var _ = Describe("Emptiness", func() {
 		provisioner.Spec.TTLSecondsAfterEmpty = nil
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
-		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
@@ -74,7 +76,7 @@ var _ = Describe("Emptiness", func() {
 	It("should remove the status condition from the machine when the machine initialization condition is false", func() {
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
-		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "", "")
 		ExpectApplied(ctx, env.Client, machine)
 
@@ -86,7 +88,7 @@ var _ = Describe("Emptiness", func() {
 	It("should remove the status condition from the machine when the machine initialization condition doesn't exist", func() {
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
-		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 		machine.Status.Conditions = lo.Reject(machine.Status.Conditions, func(s apis.Condition, _ int) bool {
 			return s.Type == v1alpha5.MachineInitialized
 		})
@@ -101,7 +103,7 @@ var _ = Describe("Emptiness", func() {
 		provisioner.Spec.TTLSecondsAfterEmpty = ptr.Int64(30)
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
 		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
@@ -111,7 +113,7 @@ var _ = Describe("Emptiness", func() {
 	It("should remove the status condition from non-empty machines", func() {
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
-		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{
 			NodeName:   node.Name,
@@ -126,7 +128,7 @@ var _ = Describe("Emptiness", func() {
 	It("should remove the status condition when the cluster state node is nominated", func() {
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
-		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		// Add the node to the cluster state and nominate it in the internal cluster state
 		Expect(cluster.UpdateNode(ctx, node)).To(Succeed())

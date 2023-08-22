@@ -52,6 +52,9 @@ var _ = Describe("Drift", func() {
 					v1alpha5.ProvisionerHashAnnotationKey: provisioner.Hash(),
 				},
 			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.RandomProviderID(),
+			},
 		})
 		// Machines are required to be launched before they can be evaluated for drift
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
@@ -59,6 +62,9 @@ var _ = Describe("Drift", func() {
 	It("should detect drift", func() {
 		cp.Drifted = "drifted"
 		ExpectApplied(ctx, env.Client, provisioner, machine)
+		// Make state aware of the node and machine.
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
@@ -70,6 +76,8 @@ var _ = Describe("Drift", func() {
 			v1alpha5.ProvisionerHashAnnotationKey: "123456789",
 		})
 		ExpectApplied(ctx, env.Client, provisioner, machine)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
@@ -79,12 +87,14 @@ var _ = Describe("Drift", func() {
 	It("should detect node requirement drift before cloud provider drift", func() {
 		cp.Drifted = "drifted"
 		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
-			v1.NodeSelectorRequirement{
+			{
 				Key:      v1.LabelInstanceTypeStable,
 				Operator: v1.NodeSelectorOpDoesNotExist,
 			},
 		}
 		ExpectApplied(ctx, env.Client, provisioner, machine)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
@@ -95,6 +105,8 @@ var _ = Describe("Drift", func() {
 		cp.Drifted = "drifted"
 		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
 		ExpectApplied(ctx, env.Client, provisioner, machine)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
@@ -105,6 +117,7 @@ var _ = Describe("Drift", func() {
 		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
 		ExpectApplied(ctx, env.Client, provisioner, machine)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
@@ -117,6 +130,7 @@ var _ = Describe("Drift", func() {
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
 		machine.StatusConditions().MarkFalse(v1alpha5.MachineLaunched, "", "")
 		ExpectApplied(ctx, env.Client, machine)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
@@ -131,6 +145,7 @@ var _ = Describe("Drift", func() {
 			return s.Type == v1alpha5.MachineLaunched
 		})
 		ExpectApplied(ctx, env.Client, machine)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
@@ -140,6 +155,8 @@ var _ = Describe("Drift", func() {
 	It("should not detect drift if the provisioner does not exist", func() {
 		cp.Drifted = "drifted"
 		ExpectApplied(ctx, env.Client, machine)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
@@ -149,6 +166,7 @@ var _ = Describe("Drift", func() {
 		cp.Drifted = ""
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
 		ExpectApplied(ctx, env.Client, provisioner, machine)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
@@ -163,6 +181,7 @@ var _ = Describe("Drift", func() {
 				machine.Labels = lo.Assign(machine.Labels, machineLabels)
 
 				ExpectApplied(ctx, env.Client, provisioner, machine)
+				ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 				machine = ExpectExists(ctx, env.Client, machine)
 				Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted)).To(BeNil())
@@ -317,7 +336,7 @@ var _ = Describe("Drift", func() {
 				v1alpha5.LabelCapacityType: v1alpha5.CapacityTypeOnDemand,
 				v1.LabelOSStable:           string(v1.Linux),
 			})
-			machineTwo, _ := test.MachineAndNode(v1alpha5.Machine{
+			machineTwo, nodeTwo := test.MachineAndNode(v1alpha5.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
@@ -335,6 +354,7 @@ var _ = Describe("Drift", func() {
 			})
 			machineTwo.StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
 			ExpectApplied(ctx, env.Client, provisioner, machine, machineTwo)
+			ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node, nodeTwo}, []*v1alpha5.Machine{machine, machineTwo})
 
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machineTwo))
@@ -397,6 +417,7 @@ var _ = Describe("Drift", func() {
 		})
 		It("should detect drift on changes for all static fields", func() {
 			ExpectApplied(ctx, env.Client, provisioner, machine)
+			ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 			ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 			machine = ExpectExists(ctx, env.Client, machine)
@@ -422,6 +443,7 @@ var _ = Describe("Drift", func() {
 		It("should not return drifted if karpenter.sh/provisioner-hash annotation is not present on the provisioner", func() {
 			provisioner.ObjectMeta.Annotations = map[string]string{}
 			ExpectApplied(ctx, env.Client, provisioner, machine)
+			ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 			machine = ExpectExists(ctx, env.Client, machine)
 			Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted)).To(BeNil())
@@ -429,6 +451,7 @@ var _ = Describe("Drift", func() {
 		It("should not return drifted if karpenter.sh/provisioner-hash annotation is not present on the machine", func() {
 			machine.ObjectMeta.Annotations = map[string]string{}
 			ExpectApplied(ctx, env.Client, provisioner, machine)
+			ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 			machine = ExpectExists(ctx, env.Client, machine)
 			Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted)).To(BeNil())

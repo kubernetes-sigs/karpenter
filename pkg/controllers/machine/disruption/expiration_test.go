@@ -41,12 +41,16 @@ var _ = Describe("Expiration", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name},
 			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.RandomProviderID(),
+			},
 		})
 	})
 
 	It("should remove the status condition from the machines when expiration is disabled", func() {
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineExpired)
 		ExpectApplied(ctx, env.Client, provisioner, machine)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
@@ -56,6 +60,7 @@ var _ = Describe("Expiration", func() {
 	It("should mark machines as expired", func() {
 		provisioner.Spec.TTLSecondsUntilExpired = ptr.Int64(30)
 		ExpectApplied(ctx, env.Client, provisioner, machine)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		// step forward to make the node expired
 		fakeClock.Step(60 * time.Second)
@@ -68,6 +73,7 @@ var _ = Describe("Expiration", func() {
 		provisioner.Spec.TTLSecondsUntilExpired = ptr.Int64(200)
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineExpired)
 		ExpectApplied(ctx, env.Client, provisioner, machine)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 
@@ -77,6 +83,7 @@ var _ = Describe("Expiration", func() {
 	It("should mark machines as expired if the node is expired but the machine isn't", func() {
 		provisioner.Spec.TTLSecondsUntilExpired = ptr.Int64(30)
 		ExpectApplied(ctx, env.Client, provisioner, node)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		// step forward to make the node expired
 		fakeClock.Step(60 * time.Second)
@@ -89,6 +96,7 @@ var _ = Describe("Expiration", func() {
 	It("should mark machines as expired if the machine is expired but the node isn't", func() {
 		provisioner.Spec.TTLSecondsUntilExpired = ptr.Int64(30)
 		ExpectApplied(ctx, env.Client, provisioner, machine)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		// step forward to make the node expired
 		fakeClock.Step(60 * time.Second)
@@ -101,6 +109,7 @@ var _ = Describe("Expiration", func() {
 	It("should return the requeue interval for the time between now and when the machine expires", func() {
 		provisioner.Spec.TTLSecondsUntilExpired = ptr.Int64(200)
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
+		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		fakeClock.Step(time.Second * 100)
 
