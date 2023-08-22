@@ -20,12 +20,11 @@ import (
 	"math"
 	"time"
 
+	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/samber/lo"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
@@ -153,7 +152,7 @@ func (m *MultiMachineConsolidation) firstNMachineConsolidationOption(ctx context
 // This code sees that t3a.small is the cheapest type in both lists and filters it and anything more expensive out
 // leaving the valid consolidation:
 // machines=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.nano
-func filterOutSameType(newMachine *scheduling.Machine, consolidate []*Candidate) []*cloudprovider.InstanceType {
+func filterOutSameType(newMachine *scheduling.NodeClaim, consolidate []*Candidate) []*cloudprovider.InstanceType {
 	existingInstanceTypes := sets.NewString()
 	pricesByInstanceType := map[string]float64{}
 

@@ -71,10 +71,6 @@ type Deprovisioning struct {
 	// +kubebuilder:default:="90d"
 	// +optional
 	ExpirationTTL metav1.Duration `json:"expirationTTL,omitempty"`
-	// EmptinessTTL exists for compatibility to allow us to model the v1alpha5 APIs in
-	// terms of the v1beta1 APIs. This value is not actually part of the v1beta1 public-facing API
-	// TODO @joinnis: Remove this field when v1alpha5 is unsupported in a future version of Karpenter
-	EmptinessTTL *metav1.Duration `json:"-"`
 }
 
 type ConsolidationPolicy string

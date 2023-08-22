@@ -12,27 +12,28 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package events
+package scheduling
 
 import (
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/flowcontrol"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
 // PodNominationRateLimiter is a pointer so it rate-limits across events
 var PodNominationRateLimiter = flowcontrol.NewTokenBucketRateLimiter(5, 10)
 
-func NominatePod(pod *v1.Pod, node *v1.Node, machine *v1alpha5.Machine) events.Event {
+func NominatePodEvent(pod *v1.Pod, node *v1.Node, nodeClaim *v1beta1.NodeClaim) events.Event {
 	var info []string
-	if machine != nil {
-		info = append(info, fmt.Sprintf("machine/%s", machine.Name))
+	if nodeClaim != nil {
+		info = append(info, fmt.Sprintf("%s/%s", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"), nodeClaim.GetName()))
 	}
 	if node != nil {
 		info = append(info, fmt.Sprintf("node/%s", node.Name))
@@ -47,7 +48,7 @@ func NominatePod(pod *v1.Pod, node *v1.Node, machine *v1alpha5.Machine) events.E
 	}
 }
 
-func PodFailedToSchedule(pod *v1.Pod, err error) events.Event {
+func PodFailedToScheduleEvent(pod *v1.Pod, err error) events.Event {
 	return events.Event{
 		InvolvedObject: pod,
 		Type:           v1.EventTypeWarning,

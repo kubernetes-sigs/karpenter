@@ -18,13 +18,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/clock"
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -300,10 +298,4 @@ func NewMachineTemplateRef(ncr *v1beta1.NodeClassReference) *v1alpha5.MachineTem
 		Name:       ncr.Name,
 		APIVersion: ncr.APIVersion,
 	}
-}
-
-func IsPastEmptinessTTL(nodeClaim *v1alpha5.Machine, clock clock.Clock, provisioner *v1alpha5.Provisioner) bool {
-	return nodeClaim.StatusConditions().GetCondition(v1alpha5.MachineEmpty) != nil &&
-		nodeClaim.StatusConditions().GetCondition(v1alpha5.MachineEmpty).IsTrue() &&
-		!clock.Now().Before(nodeClaim.StatusConditions().GetCondition(v1alpha5.MachineEmpty).LastTransitionTime.Inner.Add(time.Duration(lo.FromPtr(provisioner.Spec.TTLSecondsAfterEmpty))*time.Second))
 }

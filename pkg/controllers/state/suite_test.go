@@ -2069,7 +2069,7 @@ func ExpectStateNodeExists(node *v1.Node) *state.StateNode {
 func ExpectStateNodeExistsForMachine(machine *v1alpha5.Machine) *state.StateNode {
 	var ret *state.StateNode
 	cluster.ForEachNode(func(n *state.StateNode) bool {
-		if n.Machine.Name != machine.Name {
+		if n.NodeClaim.Name != machine.Name {
 			return true
 		}
 		ret = n.DeepCopy()
@@ -2082,7 +2082,7 @@ func ExpectStateNodeExistsForMachine(machine *v1alpha5.Machine) *state.StateNode
 func ExpectStateNodeNotFoundForMachine(machine *v1alpha5.Machine) *state.StateNode {
 	var ret *state.StateNode
 	cluster.ForEachNode(func(n *state.StateNode) bool {
-		if n.Machine.Name != machine.Name {
+		if n.NodeClaim.Name != machine.Name {
 			return true
 		}
 		ret = n.DeepCopy()

@@ -45,8 +45,8 @@ func (e *Emptiness) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, n
 	hasEmptyCondition := nodeClaim.StatusConditions().GetCondition(v1beta1.NodeEmpty) != nil
 
 	// From here there are a few scenarios to handle:
-	// 1. If TTLSecondsAfterEmpty is not configured, remove the emptiness status condition
-	if nodePool.Spec.Deprovisioning.EmptinessTTL == nil {
+	// 1. If ConsolidationPolicyWhenEmpty is not configured, remove the emptiness status condition
+	if nodePool.Spec.Deprovisioning.ConsolidationPolicy != v1beta1.ConsolidationPolicyWhenEmpty {
 		if hasEmptyCondition {
 			_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.NodeEmpty)
 			logging.FromContext(ctx).Debugf("removing emptiness status condition, emptiness is disabled")

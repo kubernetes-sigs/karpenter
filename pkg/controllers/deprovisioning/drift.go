@@ -26,7 +26,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/aws/karpenter-core/pkg/apis/settings"
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -54,8 +54,7 @@ func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *pro
 // ShouldDeprovision is a predicate used to filter deprovisionable machines
 func (d *Drift) ShouldDeprovision(ctx context.Context, c *Candidate) bool {
 	return settings.FromContext(ctx).DriftEnabled &&
-		c.Machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted) != nil &&
-		c.Machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).IsTrue()
+		c.NodeClaim.StatusConditions().GetCondition(v1beta1.NodeDrifted).IsTrue()
 }
 
 // SortCandidates orders drifted nodes by when they've drifted
@@ -65,8 +64,8 @@ func (d *Drift) filterAndSortCandidates(ctx context.Context, nodes []*Candidate)
 		return nil, fmt.Errorf("filtering candidates, %w", err)
 	}
 	sort.Slice(candidates, func(i int, j int) bool {
-		return candidates[i].Machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).LastTransitionTime.Inner.Time.Before(
-			candidates[j].Machine.StatusConditions().GetCondition(v1alpha5.MachineDrifted).LastTransitionTime.Inner.Time)
+		return candidates[i].NodeClaim.StatusConditions().GetCondition(v1beta1.NodeDrifted).LastTransitionTime.Inner.Time.Before(
+			candidates[j].NodeClaim.StatusConditions().GetCondition(v1beta1.NodeDrifted).LastTransitionTime.Inner.Time)
 	})
 	return candidates, nil
 }
@@ -100,18 +99,18 @@ func (d *Drift) ComputeCommand(ctx context.Context, nodes ...*Candidate) (Comman
 		}
 		// Log when all pods can't schedule, as the command will get executed immediately.
 		if !results.AllNonPendingPodsScheduled() {
-			logging.FromContext(ctx).With("machine", candidate.Machine.Name, "node", candidate.Node.Name).Debugf("cannot terminate drifted machine since scheduling simulation failed to schedule all pods %s", results.PodSchedulingErrors())
-			d.recorder.Publish(deprovisioningevents.Blocked(candidate.Node, candidate.Machine, "Scheduling simulation failed to schedule all pods")...)
+			logging.FromContext(ctx).With("machine", candidate.NodeClaim.Name, "node", candidate.Node.Name).Debugf("cannot terminate drifted machine since scheduling simulation failed to schedule all pods %s", results.PodSchedulingErrors())
+			d.recorder.Publish(deprovisioningevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
 			continue
 		}
-		if len(results.NewMachines) == 0 {
+		if len(results.NewNodeClaims) == 0 {
 			return Command{
 				candidates: []*Candidate{candidate},
 			}, nil
 		}
 		return Command{
 			candidates:   []*Candidate{candidate},
-			replacements: results.NewMachines,
+			replacements: results.NewNodeClaims,
 		}, nil
 	}
 	return Command{}, nil

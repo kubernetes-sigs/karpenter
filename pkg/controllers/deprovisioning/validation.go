@@ -22,10 +22,10 @@ import (
 	"time"
 
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -108,10 +108,10 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes
 func (v *Validation) ShouldDeprovision(_ context.Context, c *Candidate) bool {
-	if val, ok := c.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey]; ok {
-		return val != "true"
+	if c.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey] == "true" {
+		return false
 	}
-	return c.provisioner != nil && c.provisioner.Spec.Consolidation != nil && ptr.BoolValue(c.provisioner.Spec.Consolidation.Enabled)
+	return c.nodePool.Spec.Deprovisioning.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenUnderutilized
 }
 
 // ValidateCommand validates a command for a deprovisioner
@@ -138,7 +138,7 @@ func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidate
 	// len(newMachines) > 1, something in the cluster changed so that the candidates we were going to delete can no longer
 	//                    be deleted without producing more than one machine
 	// len(newMachines) == 1, as long as the machine looks like what we were expecting, this is valid
-	if len(results.NewMachines) == 0 {
+	if len(results.NewNodeClaims) == 0 {
 		if len(cmd.replacements) == 0 {
 			// scheduling produced zero new machines and we weren't expecting any, so this is valid.
 			return true, nil
@@ -149,7 +149,7 @@ func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidate
 	}
 
 	// we need more than one replacement machine which is never valid currently (all of our node replacement is m->1, never m->n)
-	if len(results.NewMachines) > 1 {
+	if len(results.NewNodeClaims) > 1 {
 		return false, nil
 	}
 
@@ -170,7 +170,7 @@ func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidate
 	// a 4xlarge and replace it with a 2xlarge. If things have changed and the scheduling simulation we just performed
 	// now says that we need to launch a 4xlarge. It's still launching the correct number of machines, but it's just
 	// as expensive or possibly more so we shouldn't validate.
-	if !instanceTypesAreSubset(cmd.replacements[0].InstanceTypeOptions, results.NewMachines[0].InstanceTypeOptions) {
+	if !instanceTypesAreSubset(cmd.replacements[0].InstanceTypeOptions, results.NewNodeClaims[0].InstanceTypeOptions) {
 		return false, nil
 	}
 

@@ -315,8 +315,8 @@ func List(ctx context.Context, c client.Client, opts ...client.ListOption) (*v1b
 	convertedNodeClaims := lo.Map(machineList.Items, func(m v1alpha5.Machine, _ int) v1beta1.NodeClaim {
 		return *New(&m)
 	})
-	nodeClaimList := &v1beta1.NodeClaimList{}
 	// TODO @joinnis: Add NodeClaims to this List() function when releasing v1beta1 APIs
+	nodeClaimList := &v1beta1.NodeClaimList{}
 	nodeClaimList.Items = append(nodeClaimList.Items, convertedNodeClaims...)
 	return nodeClaimList, nil
 }
@@ -483,12 +483,12 @@ func Owner(ctx context.Context, c client.Client, obj interface{ GetLabels() map[
 	return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "NodePool"}, "")
 }
 
-func OwnerName(obj interface{ GetLabels() map[string]string }) string {
+func OwnerKey(obj interface{ GetLabels() map[string]string }) nodepoolutil.Key {
 	if v, ok := obj.GetLabels()[v1beta1.NodePoolLabelKey]; ok {
-		return v
+		return nodepoolutil.Key{Name: v, IsProvisioner: false}
 	}
 	if v, ok := obj.GetLabels()[v1alpha5.ProvisionerNameLabelKey]; ok {
-		return v
+		return nodepoolutil.Key{Name: v, IsProvisioner: true}
 	}
-	return ""
+	return nodepoolutil.Key{}
 }

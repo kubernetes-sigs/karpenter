@@ -99,7 +99,6 @@ func (p *Provisioner) Hash() string {
 		IgnoreZeroValue: true,
 		ZeroNil:         true,
 	})
-
 	return fmt.Sprint(hash)
 }
 

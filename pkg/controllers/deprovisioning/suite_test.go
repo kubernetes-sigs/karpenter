@@ -785,7 +785,7 @@ var _ = Describe("Replace Nodes", func() {
 					},
 				}}})
 
-		// provisioner should require on-demand instance for this test case
+		// nodePool should require on-demand instance for this test case
 		prov := test.Provisioner(test.ProvisionerOptions{
 			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
 			Requirements: []v1.NodeSelectorRequirement{
@@ -1939,8 +1939,7 @@ var _ = Describe("Consolidation TTL", func() {
 			defer GinkgoRecover()
 			defer wg.Done()
 			defer finished.Store(true)
-			_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
-			Expect(err).ToNot(HaveOccurred())
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		}()
 
 		// wait for the deprovisioningController to block on the validation timeout
@@ -2089,7 +2088,11 @@ var _ = Describe("Consolidation TTL", func() {
 		ExpectNotFound(ctx, env.Client, machine2, node2)
 	})
 	It("should not consolidate if the action becomes invalid during the node TTL wait", func() {
-		pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"}}})
+		pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				v1alpha5.DoNotEvictPodAnnotationKey: "true",
+			},
+		}})
 		ExpectApplied(ctx, env.Client, machine1, node1, prov, pod)
 
 		// inform cluster state about nodes and machines
@@ -2102,8 +2105,7 @@ var _ = Describe("Consolidation TTL", func() {
 			defer GinkgoRecover()
 			defer wg.Done()
 			defer finished.Store(true)
-			_, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
-			Expect(err).ToNot(HaveOccurred())
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		}()
 
 		// wait for the deprovisioningController to block on the validation timeout

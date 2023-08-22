@@ -35,8 +35,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
+	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
+	provisionerutil "github.com/aws/karpenter-core/pkg/utils/provisioner"
+
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	schedulingevents "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/utils/functional"
@@ -127,28 +131,28 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	if len(results.NewMachines) == 0 {
+	if len(results.NewNodeClaims) == 0 {
 		return reconcile.Result{}, nil
 	}
-	_, err = p.LaunchMachines(ctx, results.NewMachines, WithReason(metrics.ProvisioningReason), RecordPodNomination)
+	_, err = p.CreateNodeClaims(ctx, results.NewNodeClaims, WithReason(metrics.ProvisioningReason), RecordPodNomination)
 	return reconcile.Result{}, err
 }
 
-// LaunchMachines launches nodes passed into the function in parallel. It returns a slice of the successfully created node
+// CreateNodeClaims launches nodes passed into the function in parallel. It returns a slice of the successfully created node
 // names as well as a multierr of any errors that occurred while launching nodes
-func (p *Provisioner) LaunchMachines(ctx context.Context, machines []*scheduler.Machine, opts ...functional.Option[LaunchOptions]) ([]string, error) {
+func (p *Provisioner) CreateNodeClaims(ctx context.Context, nodeClaims []*scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) ([]nodeclaimutil.Key, error) {
 	// Launch capacity and bind pods
-	errs := make([]error, len(machines))
-	machineNames := make([]string, len(machines))
-	workqueue.ParallelizeUntil(ctx, len(machines), len(machines), func(i int) {
+	errs := make([]error, len(nodeClaims))
+	nodeClaimKeys := make([]nodeclaimutil.Key, len(nodeClaims))
+	workqueue.ParallelizeUntil(ctx, len(nodeClaims), len(nodeClaims), func(i int) {
 		// create a new context to avoid a data race on the ctx variable
-		if machineName, err := p.Launch(ctx, machines[i], opts...); err != nil {
-			errs[i] = fmt.Errorf("launching machine, %w", err)
+		if key, err := p.Launch(ctx, nodeClaims[i], opts...); err != nil {
+			errs[i] = fmt.Errorf("creating node claim, %w", err)
 		} else {
-			machineNames[i] = machineName
+			nodeClaimKeys[i] = key
 		}
 	})
-	return machineNames, multierr.Combine(errs...)
+	return nodeClaimKeys, multierr.Combine(errs...)
 }
 
 func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*v1.Pod, error) {
@@ -159,7 +163,7 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*v1.Pod, error) {
 	var pods []*v1.Pod
 	for i := range podList.Items {
 		po := podList.Items[i]
-		// filter for provisionable pods first so we don't check for validity/PVCs on pods we won't provision anyway
+		// filter for provisionable pods first, so we don't check for validity/PVCs on pods we won't provision anyway
 		// (e.g. those owned by daemonsets)
 		if !pod.IsProvisionable(&po) {
 			continue
@@ -201,41 +205,42 @@ var ErrProvisionersNotFound = errors.New("no provisioners found")
 //nolint:gocyclo
 func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNodes []*state.StateNode, opts scheduler.SchedulerOptions) (*scheduler.Scheduler, error) {
 	// Build node templates
-	var machineTemplates []*scheduler.MachineTemplate
-	instanceTypes := map[string][]*cloudprovider.InstanceType{}
+	var nodeClaimTemplates []*scheduler.NodeClaimTemplate
+	instanceTypes := map[nodepoolutil.Key][]*cloudprovider.InstanceType{}
 	domains := map[string]sets.Set[string]{}
 
-	provisionerList := &v1alpha5.ProvisionerList{}
-	if err := p.kubeClient.List(ctx, provisionerList); err != nil {
-		return nil, fmt.Errorf("listing provisioners, %w", err)
+	nodePoolList, err := nodepoolutil.List(ctx, p.kubeClient)
+	if err != nil {
+		return nil, err
 	}
-	provisionerList.Items = lo.Filter(provisionerList.Items, func(p v1alpha5.Provisioner, _ int) bool {
-		return p.DeletionTimestamp.IsZero()
+	nodePoolList.Items = lo.Filter(nodePoolList.Items, func(n v1beta1.NodePool, _ int) bool {
+		return n.DeletionTimestamp.IsZero()
 	})
-	if len(provisionerList.Items) == 0 {
+	if len(nodePoolList.Items) == 0 {
 		return nil, ErrProvisionersNotFound
 	}
 
-	// nodeTemplates generated from provisioners are ordered by weight
+	// nodeTemplates generated from NodePools are ordered by weight
 	// since they are stored within a slice and scheduling
 	// will always attempt to schedule on the first nodeTemplate
-	provisionerList.OrderByWeight()
-	for i := range provisionerList.Items {
-		provisioner := &provisionerList.Items[i]
+	nodePoolList.OrderByWeight()
+
+	for i := range nodePoolList.Items {
+		nodePool := &nodePoolList.Items[i]
 		// Create node template
-		machineTemplates = append(machineTemplates, scheduler.NewMachineTemplate(provisioner))
+		nodeClaimTemplates = append(nodeClaimTemplates, scheduler.NewNodeClaimTemplate(nodePool))
 		// Get instance type options
-		instanceTypeOptions, err := p.cloudProvider.GetInstanceTypes(ctx, provisioner)
+		instanceTypeOptions, err := p.cloudProvider.GetInstanceTypes(ctx, provisionerutil.New(nodePool))
 		if err != nil {
 			return nil, fmt.Errorf("getting instance types, %w", err)
 		}
-		instanceTypes[provisioner.Name] = append(instanceTypes[provisioner.Name], instanceTypeOptions...)
+		instanceTypes[nodepoolutil.Key{Name: nodePool.Name, IsProvisioner: nodePool.IsProvisioner}] = append(instanceTypes[nodepoolutil.Key{Name: nodePool.Name, IsProvisioner: nodePool.IsProvisioner}], instanceTypeOptions...)
 
 		// Construct Topology Domains
 		for _, instanceType := range instanceTypeOptions {
-			// We need to intersect the instance type requirements with the current provisioner requirements.  This
+			// We need to intersect the instance type requirements with the current nodePool requirements.  This
 			// ensures that something like zones from an instance type don't expand the universe of valid domains.
-			requirements := scheduling.NewNodeSelectorRequirements(provisioner.Spec.Requirements...)
+			requirements := scheduling.NewNodeSelectorRequirements(nodePool.Spec.Template.Spec.Requirements...)
 			requirements.Add(instanceType.Requirements.Values()...)
 
 			for key, requirement := range requirements {
@@ -251,7 +256,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 			}
 		}
 
-		for key, requirement := range scheduling.NewNodeSelectorRequirements(provisioner.Spec.Requirements...) {
+		for key, requirement := range scheduling.NewNodeSelectorRequirements(nodePool.Spec.Template.Spec.Requirements...) {
 			if requirement.Operator() == v1.NodeSelectorOpIn {
 				//The following is a performance optimisation, for the explanation see the comment above
 				if domains[key] == nil {
@@ -275,7 +280,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	if err != nil {
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
-	return scheduler.NewScheduler(ctx, p.kubeClient, machineTemplates, provisionerList.Items, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, opts), nil
+	return scheduler.NewScheduler(ctx, p.kubeClient, nodeClaimTemplates, nodePoolList.Items, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, opts), nil
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (*scheduler.Results, error) {
@@ -321,22 +326,26 @@ func (p *Provisioner) Schedule(ctx context.Context) (*scheduler.Results, error) 
 	return s.Solve(ctx, pods)
 }
 
-func (p *Provisioner) Launch(ctx context.Context, m *scheduler.Machine, opts ...functional.Option[LaunchOptions]) (string, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", m.Labels[v1alpha5.ProvisionerNameLabelKey]))
+func (p *Provisioner) Launch(ctx context.Context, n *scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) (nodeclaimutil.Key, error) {
+	if n.OwnerKey.IsProvisioner {
+		return p.launchMachine(ctx, n, opts...)
+	}
+	return p.launchNodeClaim(ctx, n, opts...)
+}
 
-	// Check limits
+func (p *Provisioner) launchMachine(ctx context.Context, n *scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) (nodeclaimutil.Key, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", n.OwnerKey.Name))
+	options := functional.ResolveOptions(opts...)
 	latest := &v1alpha5.Provisioner{}
-	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: m.ProvisionerName}, latest); err != nil {
-		return "", fmt.Errorf("getting current resource usage, %w", err)
+	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: n.OwnerKey.Name}, latest); err != nil {
+		return nodeclaimutil.Key{}, fmt.Errorf("getting current resource usage, %w", err)
 	}
 	if err := latest.Spec.Limits.ExceededBy(latest.Status.Resources); err != nil {
-		return "", err
+		return nodeclaimutil.Key{}, err
 	}
-	options := functional.ResolveOptions(opts...)
-
-	machine := m.ToMachine(latest)
+	machine := n.ToMachine(latest)
 	if err := p.kubeClient.Create(ctx, machine); err != nil {
-		return "", err
+		return nodeclaimutil.Key{}, err
 	}
 	instanceTypeRequirement, _ := lo.Find(machine.Spec.Requirements, func(req v1.NodeSelectorRequirement) bool { return req.Key == v1.LabelInstanceTypeStable })
 	logging.FromContext(ctx).With("machine", machine.Name, "requests", machine.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).Infof("created machine")
@@ -346,11 +355,40 @@ func (p *Provisioner) Launch(ctx context.Context, m *scheduler.Machine, opts ...
 		metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
 	}).Inc()
 	if functional.ResolveOptions(opts...).RecordPodNomination {
-		for _, pod := range m.Pods {
-			p.recorder.Publish(schedulingevents.NominatePod(pod, nil, machine))
+		for _, pod := range n.Pods {
+			p.recorder.Publish(scheduler.NominatePodEvent(pod, nil, nodeclaimutil.New(machine)))
 		}
 	}
-	return machine.Name, nil
+	return nodeclaimutil.Key{Name: machine.Name, IsMachine: true}, nil
+}
+
+func (p *Provisioner) launchNodeClaim(ctx context.Context, n *scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) (nodeclaimutil.Key, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("nodepool", n.OwnerKey.Name))
+	options := functional.ResolveOptions(opts...)
+	latest := &v1beta1.NodePool{}
+	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: n.OwnerKey.Name}, latest); err != nil {
+		return nodeclaimutil.Key{}, fmt.Errorf("getting current resource usage, %w", err)
+	}
+	if err := latest.Spec.Limits.ExceededBy(latest.Status.Resources); err != nil {
+		return nodeclaimutil.Key{}, err
+	}
+	nodeClaim := n.ToNodeClaim(latest)
+	if err := p.kubeClient.Create(ctx, nodeClaim); err != nil {
+		return nodeclaimutil.Key{}, err
+	}
+	instanceTypeRequirement, _ := lo.Find(nodeClaim.Spec.Requirements, func(req v1.NodeSelectorRequirement) bool { return req.Key == v1.LabelInstanceTypeStable })
+	logging.FromContext(ctx).With("nodeclaim", nodeClaim.Name, "requests", nodeClaim.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).Infof("created nodeclaim")
+	p.cluster.NominateNodeForPod(ctx, nodeClaim.Name)
+	metrics.NodeClaimsCreatedCounter.With(prometheus.Labels{
+		metrics.ReasonLabel:   options.Reason,
+		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+	}).Inc()
+	if functional.ResolveOptions(opts...).RecordPodNomination {
+		for _, pod := range n.Pods {
+			p.recorder.Publish(scheduler.NominatePodEvent(pod, nil, nodeClaim))
+		}
+	}
+	return nodeclaimutil.Key{Name: nodeClaim.Name}, nil
 }
 
 func instanceTypeList(names []string) string {

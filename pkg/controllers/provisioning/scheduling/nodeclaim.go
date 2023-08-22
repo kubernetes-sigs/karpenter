@@ -28,10 +28,10 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
-// Machine is a set of constraints, compatible pods, and possible instance types that could fulfill these constraints. This
+// NodeClaim is a set of constraints, compatible pods, and possible instance types that could fulfill these constraints. This
 // will be turned into one or more actual node instances within the cluster after bin packing.
-type Machine struct {
-	MachineTemplate
+type NodeClaim struct {
+	NodeClaimTemplate
 
 	Pods            []*v1.Pod
 	topology        *Topology
@@ -41,45 +41,45 @@ type Machine struct {
 
 var nodeID int64
 
-func NewMachine(machineTemplate *MachineTemplate, topology *Topology, daemonResources v1.ResourceList, instanceTypes []*cloudprovider.InstanceType) *Machine {
+func NewNodeClaim(nodeClaimTemplate *NodeClaimTemplate, topology *Topology, daemonResources v1.ResourceList, instanceTypes []*cloudprovider.InstanceType) *NodeClaim {
 	// Copy the template, and add hostname
 	hostname := fmt.Sprintf("hostname-placeholder-%04d", atomic.AddInt64(&nodeID, 1))
 	topology.Register(v1.LabelHostname, hostname)
-	template := *machineTemplate
+	template := *nodeClaimTemplate
 	template.Requirements = scheduling.NewRequirements()
-	template.Requirements.Add(machineTemplate.Requirements.Values()...)
+	template.Requirements.Add(nodeClaimTemplate.Requirements.Values()...)
 	template.Requirements.Add(scheduling.NewRequirement(v1.LabelHostname, v1.NodeSelectorOpIn, hostname))
 	template.InstanceTypeOptions = instanceTypes
-	template.Requests = daemonResources
+	template.Spec.Resources.Requests = daemonResources
 
-	return &Machine{
-		MachineTemplate: template,
-		hostPortUsage:   scheduling.NewHostPortUsage(),
-		topology:        topology,
-		daemonResources: daemonResources,
+	return &NodeClaim{
+		NodeClaimTemplate: template,
+		hostPortUsage:     scheduling.NewHostPortUsage(),
+		topology:          topology,
+		daemonResources:   daemonResources,
 	}
 }
 
-func (m *Machine) Add(pod *v1.Pod) error {
+func (n *NodeClaim) Add(pod *v1.Pod) error {
 	// Check Taints
-	if err := m.Taints.Tolerates(pod); err != nil {
+	if err := scheduling.Taints(n.Spec.Taints).Tolerates(pod); err != nil {
 		return err
 	}
 
 	// exposed host ports on the node
 	hostPorts := scheduling.GetHostPorts(pod)
-	if err := m.hostPortUsage.Conflicts(pod, hostPorts); err != nil {
+	if err := n.hostPortUsage.Conflicts(pod, hostPorts); err != nil {
 		return fmt.Errorf("checking host port usage, %w", err)
 	}
 
-	machineRequirements := scheduling.NewRequirements(m.Requirements.Values()...)
+	nodeClaimRequirements := scheduling.NewRequirements(n.Requirements.Values()...)
 	podRequirements := scheduling.NewPodRequirements(pod)
 
-	// Check Machine Affinity Requirements
-	if err := machineRequirements.Compatible(podRequirements); err != nil {
+	// Check NodeClaim Affinity Requirements
+	if err := nodeClaimRequirements.Compatible(podRequirements); err != nil {
 		return fmt.Errorf("incompatible requirements, %w", err)
 	}
-	machineRequirements.Add(podRequirements.Values()...)
+	nodeClaimRequirements.Add(podRequirements.Values()...)
 
 	strictPodRequirements := podRequirements
 	if scheduling.HasPreferredNodeAffinity(pod) {
@@ -88,40 +88,40 @@ func (m *Machine) Add(pod *v1.Pod) error {
 		strictPodRequirements = scheduling.NewStrictPodRequirements(pod)
 	}
 	// Check Topology Requirements
-	topologyRequirements, err := m.topology.AddRequirements(strictPodRequirements, machineRequirements, pod)
+	topologyRequirements, err := n.topology.AddRequirements(strictPodRequirements, nodeClaimRequirements, pod)
 	if err != nil {
 		return err
 	}
-	if err = machineRequirements.Compatible(topologyRequirements); err != nil {
+	if err = nodeClaimRequirements.Compatible(topologyRequirements); err != nil {
 		return err
 	}
-	machineRequirements.Add(topologyRequirements.Values()...)
+	nodeClaimRequirements.Add(topologyRequirements.Values()...)
 
 	// Check instance type combinations
-	requests := resources.Merge(m.Requests, resources.RequestsForPods(pod))
-	filtered := filterInstanceTypesByRequirements(m.InstanceTypeOptions, machineRequirements, requests)
+	requests := resources.Merge(n.Spec.Resources.Requests, resources.RequestsForPods(pod))
+	filtered := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, requests)
 	if len(filtered.remaining) == 0 {
 		// log the total resources being requested (daemonset + the pod)
-		cumulativeResources := resources.Merge(m.daemonResources, resources.RequestsForPods(pod))
-		return fmt.Errorf("no instance type satisfied resources %s and requirements %s (%s)", resources.String(cumulativeResources), machineRequirements, filtered.FailureReason())
+		cumulativeResources := resources.Merge(n.daemonResources, resources.RequestsForPods(pod))
+		return fmt.Errorf("no instance type satisfied resources %s and requirements %s (%s)", resources.String(cumulativeResources), nodeClaimRequirements, filtered.FailureReason())
 	}
 
 	// Update node
-	m.Pods = append(m.Pods, pod)
-	m.InstanceTypeOptions = filtered.remaining
-	m.Requests = requests
-	m.Requirements = machineRequirements
-	m.topology.Record(pod, machineRequirements)
-	m.hostPortUsage.Add(pod, hostPorts)
+	n.Pods = append(n.Pods, pod)
+	n.InstanceTypeOptions = filtered.remaining
+	n.Spec.Resources.Requests = requests
+	n.Requirements = nodeClaimRequirements
+	n.topology.Record(pod, nodeClaimRequirements)
+	n.hostPortUsage.Add(pod, hostPorts)
 	return nil
 }
 
 // FinalizeScheduling is called once all scheduling has completed and allows the node to perform any cleanup
 // necessary before its requirements are used for instance launching
-func (m *Machine) FinalizeScheduling() {
+func (n *NodeClaim) FinalizeScheduling() {
 	// We need nodes to have hostnames for topology purposes, but we don't want to pass that node name on to consumers
 	// of the node as it will be displayed in error messages
-	delete(m.Requirements, v1.LabelHostname)
+	delete(n.Requirements, v1.LabelHostname)
 }
 
 func InstanceTypeList(instanceTypeOptions []*cloudprovider.InstanceType) string {

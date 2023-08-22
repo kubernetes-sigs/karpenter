@@ -19,17 +19,15 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"time"
 
 	"k8s.io/utils/clock"
 
 	"knative.dev/pkg/logging"
-	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/samber/lo"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -59,8 +57,8 @@ func NewExpiration(clk clock.Clock, kubeClient client.Client, cluster *state.Clu
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes
 func (e *Expiration) ShouldDeprovision(_ context.Context, c *Candidate) bool {
-	return c.provisioner.Spec.TTLSecondsUntilExpired != nil &&
-		c.Machine.StatusConditions().GetCondition(v1alpha5.MachineExpired).IsTrue()
+	return c.nodePool.Spec.Deprovisioning.ExpirationTTL.Duration >= 0 &&
+		c.NodeClaim.StatusConditions().GetCondition(v1beta1.NodeExpired).IsTrue()
 }
 
 // SortCandidates orders expired nodes by when they've expired
@@ -70,8 +68,8 @@ func (e *Expiration) filterAndSortCandidates(ctx context.Context, nodes []*Candi
 		return nil, fmt.Errorf("filtering candidates, %w", err)
 	}
 	sort.Slice(candidates, func(i int, j int) bool {
-		return candidates[i].Machine.StatusConditions().GetCondition(v1alpha5.MachineExpired).LastTransitionTime.Inner.Time.Before(
-			candidates[j].Machine.StatusConditions().GetCondition(v1alpha5.MachineExpired).LastTransitionTime.Inner.Time)
+		return candidates[i].NodeClaim.StatusConditions().GetCondition(v1beta1.NodeExpired).LastTransitionTime.Inner.Time.Before(
+			candidates[j].NodeClaim.StatusConditions().GetCondition(v1beta1.NodeExpired).LastTransitionTime.Inner.Time)
 	})
 	return candidates, nil
 }
@@ -105,15 +103,15 @@ func (e *Expiration) ComputeCommand(ctx context.Context, nodes ...*Candidate) (C
 		}
 		// Log when all pods can't schedule, as the command will get executed immediately.
 		if !results.AllNonPendingPodsScheduled() {
-			logging.FromContext(ctx).With("machine", candidate.Machine.Name, "node", candidate.Node.Name).Debugf("cannot terminate expired machine since scheduling simulation failed to schedule all pods, %s", results.PodSchedulingErrors())
-			e.recorder.Publish(deprovisioningevents.Blocked(candidate.Node, candidate.Machine, "Scheduling simulation failed to schedule all pods")...)
+			logging.FromContext(ctx).With("machine", candidate.NodeClaim.Name, "node", candidate.Node.Name).Debugf("cannot terminate expired machine since scheduling simulation failed to schedule all pods, %s", results.PodSchedulingErrors())
+			e.recorder.Publish(deprovisioningevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
 			continue
 		}
 
-		logging.FromContext(ctx).With("ttl", time.Duration(ptr.Int64Value(candidates[0].provisioner.Spec.TTLSecondsUntilExpired))*time.Second).Infof("triggering termination for expired node after TTL")
+		logging.FromContext(ctx).With("ttl", candidates[0].nodePool.Spec.Deprovisioning.ExpirationTTL.String()).Infof("triggering termination for expired node after TTL")
 		return Command{
 			candidates:   []*Candidate{candidate},
-			replacements: results.NewMachines,
+			replacements: results.NewNodeClaims,
 		}, nil
 	}
 	return Command{}, nil
