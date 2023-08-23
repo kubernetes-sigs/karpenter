@@ -144,6 +144,7 @@ var _ = Describe("Disruption", func() {
 		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		// Drift, Expiration, and Emptiness are disabled through configuration
+		// Blocked doesn't apply for the given node.
 		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
 

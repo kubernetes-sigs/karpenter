@@ -31,6 +31,7 @@ import (
 	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
+	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 )
 
 // Blocked is a machine sub-controller that adds or removes status conditions on machines if they're blocked for Deprovisioning
@@ -57,17 +58,16 @@ func (b *Blocked) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nod
 		Status:   v1.ConditionTrue,
 		Severity: apis.ConditionSeverityWarning,
 	}
-
 	// Get the node from cluster state before we can check anything else.
 	// If we fail to get a node, this means cluster state is no longer synced after we thought it was.
-	node, err := b.cluster.GetNode(ctx, nodeClaim.Status.ProviderID)
+	node, err := b.cluster.GetNode(nodeClaim.Status.ProviderID)
 	if err != nil {
 		condition.Reason = fmt.Sprintf("state doesn't have nodeclaim, %s", err)
 		nodeClaim.StatusConditions().SetCondition(condition)
 		return reconcile.Result{}, fmt.Errorf("state doesn't have nodeclaim, %w", err)
 	}
 	// If there's no node or no machine, we may have incomplete information, so add that it's blocked.
-	if node.Node == nil || node.Machine == nil {
+	if node.Node == nil || node.NodeClaim == nil {
 		condition.Reason = "state node doesn't contain both a node and a machine"
 		nodeClaim.StatusConditions().SetCondition(condition)
 		return reconcile.Result{}, fmt.Errorf(condition.Reason)
@@ -100,7 +100,7 @@ func (b *Blocked) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nod
 	// skip the node if it is nominated by a recent provisioning pass to be the target of a pending pod.
 	if node.Nominated() {
 		reasons = append(reasons, "state node is nominated for a pending pod")
-		b.recorder.Publish(deprovisioningevents.Blocked(node.Node, node.Machine, "Nominated for a pending pod")...)
+		b.recorder.Publish(deprovisioningevents.Blocked(node.Node, node.NodeClaim, "Nominated for a pending pod")...)
 	}
 
 	// 2. Ensure the node has all the labels we need
@@ -117,26 +117,25 @@ func (b *Blocked) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nod
 	}
 	if missingLabelKeys != nil {
 		reasons = append(reasons, fmt.Sprintf("node claim doesn't have required label(s) '%s'", strings.Join(missingLabelKeys, ",")))
-		b.recorder.Publish(deprovisioningevents.Blocked(node.Node, node.Machine, fmt.Sprintf("Required label(s) %q do not exist", strings.Join(missingLabelKeys, ",")))...)
+		b.recorder.Publish(deprovisioningevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Required label(s) %q do not exist", strings.Join(missingLabelKeys, ",")))...)
 	}
 
-	provisionerMap, provisionerToInstanceTypes, err := deprovisioning.BuildProvisionerMap(ctx, b.kubeClient, b.cloudProvider)
+	_, nodePoolToInstanceTypesMap, err := deprovisioning.BuildNodePoolMap(ctx, b.kubeClient, b.cloudProvider)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("building provisioner mapping")
 	}
 
-	provisioner := provisionerMap[node.Labels()[v1alpha5.ProvisionerNameLabelKey]]
-	instanceTypeMap := provisionerToInstanceTypes[node.Labels()[v1alpha5.ProvisionerNameLabelKey]]
+	instanceTypeMap := nodePoolToInstanceTypesMap[nodepoolutil.Key{Name: node.Labels()[v1beta1.NodePoolLabelKey], IsProvisioner: false}]
 	// skip any nodes where we can't determine the provisioner
-	if nodePool == nil || provisioner == nil || instanceTypeMap == nil {
+	if nodePool == nil || instanceTypeMap == nil {
 		reasons = append(reasons, fmt.Sprintf("provisioner '%s' can't be resolved for state node", node.Labels()[v1alpha5.ProvisionerNameLabelKey]))
-		b.recorder.Publish(deprovisioningevents.Blocked(node.Node, node.Machine, fmt.Sprintf("Owning provisioner %q not found", node.Labels()[v1alpha5.ProvisionerNameLabelKey]))...)
+		b.recorder.Publish(deprovisioningevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Owning provisioner %q not found", node.Labels()[v1alpha5.ProvisionerNameLabelKey]))...)
 	}
 	instanceType := instanceTypeMap[node.Labels()[v1.LabelInstanceTypeStable]]
 	// skip any nodes that we can't determine the instance of
 	if instanceType == nil {
 		reasons = append(reasons, fmt.Sprintf("instance type '%s' can't be resolved", node.Labels()[v1.LabelInstanceTypeStable]))
-		b.recorder.Publish(deprovisioningevents.Blocked(node.Node, node.Machine, fmt.Sprintf("Instance type %q not found", node.Labels()[v1.LabelInstanceTypeStable]))...)
+		b.recorder.Publish(deprovisioningevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Instance type %q not found", node.Labels()[v1.LabelInstanceTypeStable]))...)
 	}
 
 	// 3. Check that there are no pods blocking eviction.
@@ -152,11 +151,11 @@ func (b *Blocked) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nod
 
 	if pdb, ok := pdbs.CanEvictPods(pods); !ok {
 		reasons = append(reasons, fmt.Sprintf("has blocking PDB %q preventing pod evictions", pdb.Name))
-		b.recorder.Publish(deprovisioningevents.Blocked(node.Node, node.Machine, fmt.Sprintf("PDB %q prevents pod evictions", pdb))...)
+		b.recorder.Publish(deprovisioningevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("PDB %q prevents pod evictions", pdb))...)
 	}
 	if p, ok := deprovisioning.HasDoNotEvictPod(pods); ok {
 		reasons = append(reasons, fmt.Sprintf("has do-not-evict pod %s", p))
-		b.recorder.Publish(deprovisioningevents.Blocked(node.Node, node.Machine, fmt.Sprintf("Pod %q has do not evict annotation", client.ObjectKeyFromObject(p)))...)
+		b.recorder.Publish(deprovisioningevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Pod %q has do not evict annotation", client.ObjectKeyFromObject(p)))...)
 	}
 	return reconcile.Result{}, nil
 }

@@ -19,7 +19,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
@@ -61,11 +60,11 @@ type Candidate struct {
 func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode,
 	nodePoolMap map[nodepoolutil.Key]*v1beta1.NodePool, nodePoolToInstanceTypesMap map[nodepoolutil.Key]map[string]*cloudprovider.InstanceType) (*Candidate, error) {
 
-	provisioner := provisionerMap[node.Labels()[v1alpha5.ProvisionerNameLabelKey]]
-	instanceTypeMap := provisionerToInstanceTypes[node.Labels()[v1alpha5.ProvisionerNameLabelKey]]
+	nodePool := nodePoolMap[nodepoolutil.Key{Name: node.Labels()[v1beta1.NodePoolLabelKey], IsProvisioner: false}]
+	instanceTypeMap := nodePoolToInstanceTypesMap[nodepoolutil.Key{Name: node.Labels()[v1beta1.NodePoolLabelKey], IsProvisioner: false}]
 	// skip any nodes where we can't determine the provisioner
-	if provisioner == nil || instanceTypeMap == nil {
-		recorder.Publish(deprovisioningevents.Blocked(node.Node, node.Machine, fmt.Sprintf("Owning provisioner %q not found", node.Labels()[v1alpha5.ProvisionerNameLabelKey]))...)
+	if nodePool == nil || instanceTypeMap == nil {
+		recorder.Publish(deprovisioningevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Owning provisioner %q not found", node.Labels()[v1alpha5.ProvisionerNameLabelKey]))...)
 		return nil, fmt.Errorf("provisioner '%s' can't be resolved for state node", node.Labels()[v1alpha5.ProvisionerNameLabelKey])
 	}
 	instanceType := instanceTypeMap[node.Labels()[v1.LabelInstanceTypeStable]]
