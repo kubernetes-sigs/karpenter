@@ -15,6 +15,7 @@ limitations under the License.
 package v1beta1
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -127,6 +128,14 @@ var _ = Describe("Validation", func() {
 				for label := range LabelDomainExceptions {
 					nodePool.Spec.Template.Labels = map[string]string{
 						label: "test-value",
+					}
+					Expect(nodePool.Validate(ctx)).To(Succeed())
+				}
+			})
+			It("should allow labels prefixed with the restricted domain exceptions", func() {
+				for label := range LabelDomainExceptions {
+					nodePool.Spec.Template.Labels = map[string]string{
+						fmt.Sprintf("%s/key", label): "test-value",
 					}
 					Expect(nodePool.Validate(ctx)).To(Succeed())
 				}

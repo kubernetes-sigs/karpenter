@@ -68,6 +68,7 @@ var (
 	LabelDomainExceptions = sets.NewString(
 		"kops.k8s.io",
 		v1.LabelNamespaceSuffixNode,
+		v1.LabelNamespaceNodeRestriction,
 		TestingGroup,
 	)
 
