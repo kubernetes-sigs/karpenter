@@ -21,6 +21,7 @@ import (
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
 
+	controllerprov "github.com/aws/karpenter-core/pkg/controllers/provisioner/hash"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 
@@ -29,7 +30,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/controllers/machine/disruption"
-	controllerprov "github.com/aws/karpenter-core/pkg/controllers/provisioner"
 	"github.com/aws/karpenter-core/pkg/test"
 
 	. "github.com/onsi/ginkgo/v2"

@@ -12,21 +12,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package scraper
+package node
 
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/metrics"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
@@ -122,25 +126,34 @@ func init() {
 	)
 }
 
-type NodeScraper struct {
+type Controller struct {
 	cluster     *state.Cluster
 	metricStore *metrics.Store
 }
 
-func NewNodeScraper(cluster *state.Cluster) *NodeScraper {
-	return &NodeScraper{
+func NewController(cluster *state.Cluster) *Controller {
+	return &Controller{
 		cluster:     cluster,
 		metricStore: metrics.NewStore(),
 	}
 }
 
-func (ns *NodeScraper) Scrape(_ context.Context) {
-	nodes := lo.Reject(ns.cluster.Nodes(), func(n *state.StateNode, _ int) bool {
+func (c *Controller) Name() string {
+	return "metric_scraper"
+}
+
+func (c *Controller) Reconcile(_ context.Context, _ reconcile.Request) (reconcile.Result, error) {
+	nodes := lo.Reject(c.cluster.Nodes(), func(n *state.StateNode, _ int) bool {
 		return n.Node == nil
 	})
-	ns.metricStore.ReplaceAll(lo.SliceToMap(nodes, func(n *state.StateNode) (string, []*metrics.StoreMetric) {
+	c.metricStore.ReplaceAll(lo.SliceToMap(nodes, func(n *state.StateNode) (string, []*metrics.StoreMetric) {
 		return client.ObjectKeyFromObject(n.Node).String(), buildMetrics(n)
 	}))
+	return reconcile.Result{RequeueAfter: time.Second * 5}, nil
+}
+
+func (c *Controller) Builder(_ context.Context, mgr manager.Manager) controller.Builder {
+	return controller.NewSingletonManagedBy(mgr)
 }
 
 func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
