@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package metrics_test
+package node_test
 
 import (
 	"context"
@@ -30,7 +30,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	metricsstate "github.com/aws/karpenter-core/pkg/controllers/metrics/state"
+	"github.com/aws/karpenter-core/pkg/controllers/metrics/node"
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
@@ -71,7 +71,7 @@ var _ = BeforeSuite(func() {
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	provisioner = test.Provisioner(test.ProvisionerOptions{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
 	nodeController = informer.NewNodeController(env.Client, cluster)
-	metricsStateController = metricsstate.NewController(cluster)
+	metricsStateController = node.NewController(cluster)
 	ExpectApplied(ctx, env.Client, provisioner)
 })
 

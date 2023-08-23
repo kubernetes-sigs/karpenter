@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package provisioner_test
+package hash_test
 
 import (
 	"context"
@@ -29,7 +29,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	provcontroller "github.com/aws/karpenter-core/pkg/controllers/provisioner"
+	provcontroller "github.com/aws/karpenter-core/pkg/controllers/provisioner/hash"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
