@@ -378,7 +378,7 @@ func (in *StateNode) cleanupForPod(podKey types.NamespacedName) {
 }
 
 func nominationWindow(ctx context.Context) time.Duration {
-	nominationPeriod := 2 * settings.FromContext(ctx).BatchMaxDuration.Duration
+	nominationPeriod := 2 * settings.FromContext(ctx).BatchMaxDuration
 	if nominationPeriod < 10*time.Second {
 		nominationPeriod = 10 * time.Second
 	}

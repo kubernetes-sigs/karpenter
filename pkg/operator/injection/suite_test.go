@@ -81,16 +81,16 @@ var _ = Describe("Settings", func() {
 			Eventually(func(g Gomega) {
 				testCtx := injection.WithSettingsOrDie(ctx, env.KubernetesInterface, &settings.Settings{})
 				s := settings.FromContext(testCtx)
-				g.Expect(s.BatchIdleDuration.Duration).To(Equal(1 * time.Second))
-				g.Expect(s.BatchMaxDuration.Duration).To(Equal(10 * time.Second))
+				g.Expect(s.BatchIdleDuration).To(Equal(1 * time.Second))
+				g.Expect(s.BatchMaxDuration).To(Equal(10 * time.Second))
 			}).Should(Succeed())
 		})
 		It("should update if values are changed", func() {
 			Eventually(func(g Gomega) {
 				testCtx := injection.WithSettingsOrDie(ctx, env.KubernetesInterface, &settings.Settings{})
 				s := settings.FromContext(testCtx)
-				g.Expect(s.BatchIdleDuration.Duration).To(Equal(1 * time.Second))
-				g.Expect(s.BatchMaxDuration.Duration).To(Equal(10 * time.Second))
+				g.Expect(s.BatchIdleDuration).To(Equal(1 * time.Second))
+				g.Expect(s.BatchMaxDuration).To(Equal(10 * time.Second))
 			})
 			cm := defaultConfigMap.DeepCopy()
 			cm.Data = map[string]string{
@@ -102,8 +102,8 @@ var _ = Describe("Settings", func() {
 			Eventually(func(g Gomega) {
 				testCtx := injection.WithSettingsOrDie(ctx, env.KubernetesInterface, &settings.Settings{})
 				s := settings.FromContext(testCtx)
-				g.Expect(s.BatchIdleDuration.Duration).To(Equal(2 * time.Second))
-				g.Expect(s.BatchMaxDuration.Duration).To(Equal(15 * time.Second))
+				g.Expect(s.BatchIdleDuration).To(Equal(2 * time.Second))
+				g.Expect(s.BatchMaxDuration).To(Equal(15 * time.Second))
 			}).Should(Succeed())
 		})
 	})
@@ -128,8 +128,8 @@ var _ = Describe("Settings", func() {
 				testCtx := injection.WithSettingsOrDie(ctx, env.KubernetesInterface, &settings.Settings{}, &fake.Settings{})
 				s := settings.FromContext(testCtx)
 				fs := fake.FromContext(testCtx)
-				g.Expect(s.BatchIdleDuration.Duration).To(Equal(2 * time.Second))
-				g.Expect(s.BatchMaxDuration.Duration).To(Equal(15 * time.Second))
+				g.Expect(s.BatchIdleDuration).To(Equal(2 * time.Second))
+				g.Expect(s.BatchMaxDuration).To(Equal(15 * time.Second))
 				g.Expect(fs.TestArg).To(Equal("my-value"))
 			}).Should(Succeed())
 		})

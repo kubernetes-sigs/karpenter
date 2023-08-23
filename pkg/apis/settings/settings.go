@@ -21,7 +21,6 @@ import (
 
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/configmap"
 )
 
@@ -30,15 +29,15 @@ type settingsKeyType struct{}
 var ContextKey = settingsKeyType{}
 
 var defaultSettings = &Settings{
-	BatchMaxDuration:  &metav1.Duration{Duration: time.Second * 10},
-	BatchIdleDuration: &metav1.Duration{Duration: time.Second * 1},
+	BatchMaxDuration:  time.Second * 10,
+	BatchIdleDuration: time.Second * 1,
 	DriftEnabled:      false,
 }
 
 // +k8s:deepcopy-gen=true
 type Settings struct {
-	BatchMaxDuration  *metav1.Duration
-	BatchIdleDuration *metav1.Duration
+	BatchMaxDuration  time.Duration
+	BatchIdleDuration time.Duration
 	// This feature flag is temporary and will be removed in the near future.
 	DriftEnabled bool
 }
@@ -52,8 +51,8 @@ func (*Settings) Inject(ctx context.Context, cm *v1.ConfigMap) (context.Context,
 	s := defaultSettings.DeepCopy()
 
 	if err := configmap.Parse(cm.Data,
-		AsMetaDuration("batchMaxDuration", &s.BatchMaxDuration),
-		AsMetaDuration("batchIdleDuration", &s.BatchIdleDuration),
+		configmap.AsDuration("batchMaxDuration", &s.BatchMaxDuration),
+		configmap.AsDuration("batchIdleDuration", &s.BatchIdleDuration),
 		configmap.AsBool("featureGates.driftEnabled", &s.DriftEnabled),
 	); err != nil {
 		return ctx, fmt.Errorf("parsing settings, %w", err)
@@ -65,35 +64,13 @@ func (*Settings) Inject(ctx context.Context, cm *v1.ConfigMap) (context.Context,
 }
 
 func (in *Settings) Validate() (err error) {
-	if in.BatchMaxDuration == nil {
-		err = multierr.Append(err, fmt.Errorf("batchMaxDuration is required"))
-	} else if in.BatchMaxDuration.Duration <= 0 {
-		err = multierr.Append(err, fmt.Errorf("batchMaxDuration cannot be negative"))
+	if in.BatchMaxDuration < time.Second {
+		err = multierr.Append(err, fmt.Errorf("batchMaxDuration cannot be less then 1s"))
 	}
-	if in.BatchIdleDuration == nil {
-		err = multierr.Append(err, fmt.Errorf("batchIdleDuration is required"))
-	} else if in.BatchIdleDuration.Duration <= 0 {
-		err = multierr.Append(err, fmt.Errorf("batchIdleDuration cannot be negative"))
+	if in.BatchIdleDuration < time.Second {
+		err = multierr.Append(err, fmt.Errorf("batchIdleDuration cannot be less then 1s"))
 	}
 	return err
-}
-
-// AsMetaDuration parses the value at key as a time.Duration into the target, if it exists.
-func AsMetaDuration(key string, target **metav1.Duration) configmap.ParseFunc {
-	return func(data map[string]string) error {
-		if raw, ok := data[key]; ok {
-			if raw == "" {
-				*target = nil
-				return nil
-			}
-			val, err := time.ParseDuration(raw)
-			if err != nil {
-				return fmt.Errorf("failed to parse %q: %w", key, err)
-			}
-			*target = &metav1.Duration{Duration: val}
-		}
-		return nil
-	}
 }
 
 func ToContext(ctx context.Context, s *Settings) context.Context {
