@@ -15,19 +15,18 @@ limitations under the License.
 package scraper
 
 import (
-	"bytes"
 	"context"
-	"slices"
 	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
-	"sigs.k8s.io/controller-runtime/pkg/metrics"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
+	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
@@ -112,125 +111,69 @@ func nodeLabelNames() []string {
 	)
 }
 
-func forEachGaugeVec(f func(*prometheus.GaugeVec)) {
-	for _, gauge := range []*prometheus.GaugeVec{
+func init() {
+	crmetrics.Registry.MustRegister(
 		allocatableGaugeVec,
 		podRequestsGaugeVec,
 		podLimitsGaugeVec,
 		daemonRequestsGaugeVec,
 		daemonLimitsGaugeVec,
 		overheadGaugeVec,
-	} {
-		f(gauge)
-	}
-}
-
-func init() {
-	forEachGaugeVec(func(g *prometheus.GaugeVec) {
-		metrics.Registry.MustRegister(g)
-	})
+	)
 }
 
 type NodeScraper struct {
 	cluster     *state.Cluster
-	gaugeLabels map[*prometheus.GaugeVec]map[string]prometheus.Labels
+	metricStore *metrics.Store
 }
 
 func NewNodeScraper(cluster *state.Cluster) *NodeScraper {
 	return &NodeScraper{
-		cluster: cluster,
-		gaugeLabels: func() map[*prometheus.GaugeVec]map[string]prometheus.Labels {
-			m := make(map[*prometheus.GaugeVec]map[string]prometheus.Labels)
-			forEachGaugeVec(func(g *prometheus.GaugeVec) {
-				m[g] = make(map[string]prometheus.Labels)
-			})
-			return m
-		}(),
+		cluster:     cluster,
+		metricStore: metrics.NewStore(),
 	}
 }
 
 func (ns *NodeScraper) Scrape(_ context.Context) {
-	currentGaugeLabels := make(map[*prometheus.GaugeVec]sets.Set[string])
-	forEachGaugeVec(func(g *prometheus.GaugeVec) {
-		currentGaugeLabels[g] = sets.New[string]()
+	nodes := lo.Reject(ns.cluster.Nodes(), func(n *state.StateNode, _ int) bool {
+		return n.Node == nil
 	})
-
-	// Populate metrics
-	ns.cluster.ForEachNode(func(n *state.StateNode) bool {
-		if n.Node == nil {
-			return true
-		}
-		for gaugeVec, resourceList := range map[*prometheus.GaugeVec]v1.ResourceList{
-			overheadGaugeVec:       ns.getSystemOverhead(n.Node),
-			podRequestsGaugeVec:    resources.Subtract(n.PodRequests(), n.DaemonSetRequests()),
-			podLimitsGaugeVec:      resources.Subtract(n.PodLimits(), n.DaemonSetLimits()),
-			daemonRequestsGaugeVec: n.DaemonSetRequests(),
-			daemonLimitsGaugeVec:   n.DaemonSetLimits(),
-			allocatableGaugeVec:    n.Node.Status.Allocatable,
-		} {
-			for _, labels := range ns.set(gaugeVec, n.Node, resourceList) {
-				key := labelsToString(labels)
-				ns.gaugeLabels[gaugeVec][key] = labels
-				currentGaugeLabels[gaugeVec].Insert(key)
-			}
-		}
-		return true
-	})
-
-	// Remove stale gauges
-	forEachGaugeVec(func(g *prometheus.GaugeVec) {
-		for labelsKey := range sets.New(lo.Keys(ns.gaugeLabels[g])...).Difference(currentGaugeLabels[g]) {
-			g.Delete(ns.gaugeLabels[g][labelsKey])
-			delete(ns.gaugeLabels[g], labelsKey)
-		}
-	})
+	ns.metricStore.ReplaceAll(lo.SliceToMap(nodes, func(n *state.StateNode) (string, []*metrics.StoreMetric) {
+		return client.ObjectKeyFromObject(n.Node).String(), buildMetrics(n)
+	}))
 }
 
-// set the value for the node gauge and returns a slice of the labels for the gauges set
-func (ns *NodeScraper) set(gaugeVec *prometheus.GaugeVec, node *v1.Node, resourceList v1.ResourceList) []prometheus.Labels {
-	var gaugeLabels []prometheus.Labels
-	for resourceName, quantity := range resourceList {
-		// Reformat resource type to be consistent with Prometheus naming conventions (snake_case)
-		resourceLabels := ns.getNodeLabels(node, strings.ReplaceAll(strings.ToLower(string(resourceName)), "-", "_"))
-		gaugeLabels = append(gaugeLabels, resourceLabels)
-		if resourceName == v1.ResourceCPU {
-			gaugeVec.With(resourceLabels).Set(float64(quantity.MilliValue()) / float64(1000))
-		} else {
-			gaugeVec.With(resourceLabels).Set(float64(quantity.Value()))
+func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
+	for gaugeVec, resourceList := range map[*prometheus.GaugeVec]v1.ResourceList{
+		overheadGaugeVec:       resources.Subtract(n.Node.Status.Capacity, n.Node.Status.Allocatable),
+		podRequestsGaugeVec:    resources.Subtract(n.PodRequests(), n.DaemonSetRequests()),
+		podLimitsGaugeVec:      resources.Subtract(n.PodLimits(), n.DaemonSetLimits()),
+		daemonRequestsGaugeVec: n.DaemonSetRequests(),
+		daemonLimitsGaugeVec:   n.DaemonSetLimits(),
+		allocatableGaugeVec:    n.Node.Status.Allocatable,
+	} {
+		for resourceName, quantity := range resourceList {
+			res = append(res, &metrics.StoreMetric{
+				GaugeVec: gaugeVec,
+				Value:    lo.Ternary(resourceName == v1.ResourceCPU, float64(quantity.MilliValue())/float64(1000), float64(quantity.Value())),
+				Labels:   getNodeLabels(n.Node, strings.ReplaceAll(strings.ToLower(string(resourceName)), "-", "_")),
+			})
 		}
 	}
-	return gaugeLabels
+	return res
 }
 
-func (ns *NodeScraper) getSystemOverhead(node *v1.Node) v1.ResourceList {
-	systemOverhead := v1.ResourceList{}
-	if len(node.Status.Allocatable) > 0 {
-		// calculating system daemons overhead
-		for resourceName, quantity := range node.Status.Allocatable {
-			overhead := node.Status.Capacity[resourceName]
-			overhead.Sub(quantity)
-			systemOverhead[resourceName] = overhead
-		}
-	}
-	return systemOverhead
-}
-
-func (ns *NodeScraper) getNodeLabels(node *v1.Node, resourceTypeName string) prometheus.Labels {
+func getNodeLabels(node *v1.Node, resourceTypeName string) prometheus.Labels {
 	metricLabels := prometheus.Labels{}
 	metricLabels[resourceType] = resourceTypeName
-	metricLabels[nodeName] = node.GetName()
+	metricLabels[nodeName] = node.Name
 	metricLabels[nodeProvisioner] = node.Labels[v1alpha5.ProvisionerNameLabelKey]
 	metricLabels[nodePhase] = string(node.Status.Phase)
 
 	// Populate well known labels
 	for wellKnownLabel, label := range wellKnownLabels {
-		if value, ok := node.Labels[wellKnownLabel]; !ok {
-			metricLabels[label] = "N/A"
-		} else {
-			metricLabels[label] = value
-		}
+		metricLabels[label] = node.Labels[wellKnownLabel]
 	}
-
 	return metricLabels
 }
 
@@ -245,32 +188,4 @@ func getWellKnownLabels() map[string]string {
 		}
 	}
 	return labels
-}
-
-func labelsToString(labels prometheus.Labels) string {
-	// this function is called often and shows up in profiling, so its optimized
-	// a bit to run ~2x faster than a more standard approach
-	keyValues := make([]string, 0, len(labels))
-	sz := 0
-	for k, v := range labels {
-		keyValues = append(keyValues, k)
-		// len(key + len(value) + len(="",)
-		sz += len(k) + len(v) + 4
-	}
-	slices.Sort(keyValues)
-
-	var buf bytes.Buffer
-	// grow the buffer to the size needed to avoid allocations
-	buf.Grow(sz)
-	for i, k := range keyValues {
-		if i > 0 {
-			buf.WriteByte(',')
-		}
-		// much faster to  append a string than to format a string
-		buf.WriteString(k)
-		buf.WriteString("=\"")
-		buf.WriteString(labels[k])
-		buf.WriteString("\"")
-	}
-	return buf.String()
 }
