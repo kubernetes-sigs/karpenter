@@ -193,7 +193,7 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 
 	for _, existing := range s.existingNodes {
 		if len(existing.Pods) > 0 {
-			s.cluster.NominateNodeForPod(ctx, existing.Name())
+			s.cluster.NominateNodeForPod(ctx, existing.ProviderID())
 		}
 		for _, pod := range existing.Pods {
 			s.recorder.Publish(NominatePodEvent(pod, existing.Node, existing.NodeClaim))

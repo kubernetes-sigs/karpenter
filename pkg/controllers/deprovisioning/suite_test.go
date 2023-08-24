@@ -2446,7 +2446,7 @@ var _ = Describe("Parallelization", func() {
 
 		// Mark the node for deletion and re-trigger reconciliation
 		oldNodeName := nodes[0].Name
-		cluster.MarkForDeletion(nodes[0].Name)
+		cluster.MarkForDeletion(nodes[0].Spec.ProviderID)
 		ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, provisioner, lo.Map(pods, func(p *v1.Pod, _ int) *v1.Pod { return p.DeepCopy() })...)
 
 		// Make sure that the cluster state is aware of the current node state

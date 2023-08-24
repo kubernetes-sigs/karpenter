@@ -135,6 +135,16 @@ func (in *StateNode) Name() string {
 	return in.Node.Name
 }
 
+// ProviderID is the key that is used to map this StateNode
+// If the Node and NodeClaim have a providerID, this should map to a real providerID
+// If the Node does not have a providerID, this will map to the node name
+func (in *StateNode) ProviderID() string {
+	if in.Node == nil {
+		return in.NodeClaim.Status.ProviderID
+	}
+	return in.Node.Spec.ProviderID
+}
+
 // Pods gets the pods assigned to the Node based on the kubernetes api-server bindings
 func (in *StateNode) Pods(ctx context.Context, c client.Client) ([]*v1.Pod, error) {
 	if in.Node == nil {

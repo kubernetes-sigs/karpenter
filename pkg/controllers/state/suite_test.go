@@ -925,7 +925,7 @@ var _ = Describe("Inflight Nodes", func() {
 		ExpectApplied(ctx, env.Client, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 		ExpectStateNodeCount("==", 1)
-		cluster.NominateNodeForPod(ctx, machine.Name)
+		cluster.NominateNodeForPod(ctx, machine.Status.ProviderID)
 		Expect(ExpectStateNodeExistsForMachine(machine).Nominated()).To(BeTrue())
 
 		node := test.Node(test.NodeOptions{
@@ -946,7 +946,7 @@ var _ = Describe("Inflight Nodes", func() {
 		ExpectApplied(ctx, env.Client, machine)
 		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 		ExpectStateNodeCount("==", 1)
-		cluster.MarkForDeletion(machine.Name)
+		cluster.MarkForDeletion(machine.Status.ProviderID)
 		Expect(ExpectStateNodeExistsForMachine(machine).MarkedForDeletion()).To(BeTrue())
 
 		node := test.Node(test.NodeOptions{
@@ -957,6 +957,27 @@ var _ = Describe("Inflight Nodes", func() {
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectStateNodeCount("==", 1)
 		Expect(ExpectStateNodeExists(node).MarkedForDeletion()).To(BeTrue())
+	})
+})
+
+var _ = Describe("Node Deletion", func() {
+	It("should not leak a state node when the Machine and Node names match", func() {
+		machine, node := test.MachineAndNode()
+		node.Name = machine.Name
+
+		ExpectApplied(ctx, env.Client, machine, node)
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		ExpectStateNodeCount("==", 1)
+
+		// Expect that the node isn't leaked due to names matching
+		ExpectDeleted(ctx, env.Client, machine)
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectStateNodeCount("==", 1)
+		ExpectDeleted(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectStateNodeCount("==", 0)
 	})
 })
 
@@ -1513,7 +1534,7 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
-		cluster.NominateNodeForPod(ctx, node.Name)
+		cluster.NominateNodeForPod(ctx, node.Spec.ProviderID)
 
 		// Expect that the node is now nominated
 		Expect(ExpectStateNodeExists(node).Nominated()).To(BeTrue())
@@ -2045,7 +2066,7 @@ func ExpectStateNodeCount(comparator string, count int) int {
 		c++
 		return true
 	})
-	ExpectWithOffset(1, count).To(BeNumerically(comparator, count))
+	ExpectWithOffset(1, c).To(BeNumerically(comparator, count))
 	return c
 }
 

@@ -78,7 +78,7 @@ func (e *Emptiness) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, n
 	// We perform a short requeue if the node is nominated, so we can check the node for emptiness when the node
 	// nomination time ends since we don't watch node nomination events
 	// 4. If the Node is nominated for pods to schedule to it, remove the emptiness status condition
-	if e.cluster.IsNodeNominated(n.Name) {
+	if e.cluster.IsNodeNominated(n.Spec.ProviderID) {
 		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.NodeEmpty)
 		if hasEmptyCondition {
 			logging.FromContext(ctx).Debugf("removing emptiness status condition, is nominated for pods")
