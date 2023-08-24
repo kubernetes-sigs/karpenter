@@ -51,11 +51,12 @@ type Cluster struct {
 	cloudProvider cloudprovider.CloudProvider
 	clock         clock.Clock
 
-	mu               sync.RWMutex
-	nodes            map[string]*StateNode           // provider id -> cached node
-	bindings         map[types.NamespacedName]string // pod namespaced named -> node name
-	nameToProviderID map[string]string               // node name -> provider id
-	daemonSetPods    sync.Map                        // daemonSet -> existing pod
+	mu                       sync.RWMutex
+	nodes                    map[string]*StateNode           // provider id -> cached node
+	bindings                 map[types.NamespacedName]string // pod namespaced named -> node name
+	nodeNameToProviderID     map[string]string               // node name -> provider id
+	nodeClaimKeyToProviderID map[nodeclaimutil.Key]string    // node claim key -> provider id
+	daemonSetPods            sync.Map                        // daemonSet -> existing pod
 
 	clusterStateMu sync.RWMutex // Separate mutex as this is called in some places that mu is held
 	// A monotonically increasing timestamp representing the time state of the
@@ -69,13 +70,14 @@ type Cluster struct {
 
 func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudProvider) *Cluster {
 	return &Cluster{
-		clock:            clk,
-		kubeClient:       client,
-		cloudProvider:    cp,
-		nodes:            map[string]*StateNode{},
-		bindings:         map[types.NamespacedName]string{},
-		daemonSetPods:    sync.Map{},
-		nameToProviderID: map[string]string{},
+		clock:                    clk,
+		kubeClient:               client,
+		cloudProvider:            cp,
+		nodes:                    map[string]*StateNode{},
+		bindings:                 map[types.NamespacedName]string{},
+		daemonSetPods:            sync.Map{},
+		nodeNameToProviderID:     map[string]string{},
+		nodeClaimKeyToProviderID: map[nodeclaimutil.Key]string{},
 	}
 }
 
@@ -96,25 +98,35 @@ func (c *Cluster) Synced(ctx context.Context) bool {
 		return false
 	}
 	c.mu.RLock()
-	stateNames := sets.New(lo.Keys(c.nameToProviderID)...)
+	stateMachineNames := sets.New[string]()
+	stateNodeClaimNames := sets.New[string]()
+	for k := range c.nodeClaimKeyToProviderID {
+		if k.IsMachine {
+			stateMachineNames.Insert(k.Name)
+		} else {
+			stateNodeClaimNames.Insert(k.Name)
+		}
+	}
+	stateNodeNames := sets.New(lo.Keys(c.nodeNameToProviderID)...)
 	c.mu.RUnlock()
 
-	names := sets.New[string]()
+	machineNames := sets.New[string]()
 	for _, machine := range machineList.Items {
 		// If the machine hasn't resolved its provider id, then it hasn't resolved its status
 		if machine.Status.ProviderID == "" {
 			return false
 		}
-		names.Insert(machine.Name)
+		machineNames.Insert(machine.Name)
 	}
+	nodeNames := sets.New[string]()
 	for _, node := range nodeList.Items {
-		names.Insert(node.Name)
+		nodeNames.Insert(node.Name)
 	}
 	// The names tracked in-memory should at least have all the data that is in the api-server
 	// This doesn't ensure that the two states are exactly aligned (we could still not be tracking a node
 	// that exists in the cluster state but not in the apiserver) but it ensures that we have a state
 	// representation for every node/machine that exists on the apiserver
-	return stateNames.IsSuperset(names)
+	return stateMachineNames.IsSuperset(machineNames) && stateNodeNames.IsSuperset(nodeNames)
 }
 
 // ForPodsWithAntiAffinity calls the supplied function once for each pod with required anti affinity terms that is
@@ -129,7 +141,7 @@ func (c *Cluster) ForPodsWithAntiAffinity(fn func(p *v1.Pod, n *v1.Node) bool) {
 		if !ok {
 			return true
 		}
-		node, ok := c.nodes[c.nameToProviderID[nodeName]]
+		node, ok := c.nodes[c.nodeNameToProviderID[nodeName]]
 		if !ok || node.Node == nil {
 			// if we receive the node deletion event before the pod deletion event, this can happen
 			return true
@@ -164,46 +176,46 @@ func (c *Cluster) Nodes() StateNodes {
 
 // IsNodeNominated returns true if the given node was expected to have a pod bound to it during a recent scheduling
 // batch
-func (c *Cluster) IsNodeNominated(name string) bool {
+func (c *Cluster) IsNodeNominated(providerID string) bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if id, ok := c.nameToProviderID[name]; ok {
-		return c.nodes[id].Nominated()
+	if n, ok := c.nodes[providerID]; ok {
+		return n.Nominated()
 	}
 	return false
 }
 
 // NominateNodeForPod records that a node was the target of a pending pod during a scheduling batch
-func (c *Cluster) NominateNodeForPod(ctx context.Context, name string) {
+func (c *Cluster) NominateNodeForPod(ctx context.Context, providerID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if id, ok := c.nameToProviderID[name]; ok {
-		c.nodes[id].Nominate(ctx) // extends nomination window if already nominated
+	if n, ok := c.nodes[providerID]; ok {
+		n.Nominate(ctx) // extends nomination window if already nominated
 	}
 }
 
 // UnmarkForDeletion removes the marking on the node as a node the controller intends to delete
-func (c *Cluster) UnmarkForDeletion(names ...string) {
+func (c *Cluster) UnmarkForDeletion(providerIDs ...string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	for _, name := range names {
-		if id, ok := c.nameToProviderID[name]; ok {
-			c.nodes[id].markedForDeletion = false
+	for _, id := range providerIDs {
+		if n, ok := c.nodes[id]; ok {
+			n.markedForDeletion = false
 		}
 	}
 }
 
 // MarkForDeletion marks the node as pending deletion in the internal cluster state
-func (c *Cluster) MarkForDeletion(names ...string) {
+func (c *Cluster) MarkForDeletion(providerIDs ...string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	for _, name := range names {
-		if id, ok := c.nameToProviderID[name]; ok {
-			c.nodes[id].markedForDeletion = true
+	for _, id := range providerIDs {
+		if n, ok := c.nodes[id]; ok {
+			n.markedForDeletion = true
 		}
 	}
 }
@@ -217,14 +229,14 @@ func (c *Cluster) UpdateNodeClaim(nodeClaim *v1beta1.NodeClaim) {
 	}
 	n := c.newStateFromNodeClaim(nodeClaim, c.nodes[nodeClaim.Status.ProviderID])
 	c.nodes[nodeClaim.Status.ProviderID] = n
-	c.nameToProviderID[nodeClaim.Name] = nodeClaim.Status.ProviderID
+	c.nodeClaimKeyToProviderID[nodeclaimutil.Key{Name: nodeClaim.Name, IsMachine: nodeClaim.IsMachine}] = nodeClaim.Status.ProviderID
 }
 
-func (c *Cluster) DeleteNodeClaim(name string) {
+func (c *Cluster) DeleteNodeClaim(key nodeclaimutil.Key) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.cleanupNodeClaim(name)
+	c.cleanupNodeClaim(key)
 }
 
 func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
@@ -243,7 +255,7 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 		return err
 	}
 	c.nodes[node.Spec.ProviderID] = n
-	c.nameToProviderID[node.Name] = node.Spec.ProviderID
+	c.nodeNameToProviderID[node.Name] = node.Spec.ProviderID
 	return nil
 }
 
@@ -313,7 +325,8 @@ func (c *Cluster) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.nodes = map[string]*StateNode{}
-	c.nameToProviderID = map[string]string{}
+	c.nodeNameToProviderID = map[string]string{}
+	c.nodeClaimKeyToProviderID = map[nodeclaimutil.Key]string{}
 	c.bindings = map[types.NamespacedName]string{}
 	c.antiAffinityPods = sync.Map{}
 	c.daemonSetPods = sync.Map{}
@@ -379,21 +392,21 @@ func (c *Cluster) newStateFromNodeClaim(nodeClaim *v1beta1.NodeClaim, oldNode *S
 	// Cleanup the old nodeClaim with its old providerID if its providerID changes
 	// This can happen since nodes don't get created with providerIDs. Rather, CCM picks up the
 	// created node and injects the providerID into the spec.providerID
-	if id, ok := c.nameToProviderID[nodeClaim.Name]; ok && id != nodeClaim.Status.ProviderID {
-		c.cleanupNodeClaim(nodeClaim.Name)
+	if id, ok := c.nodeClaimKeyToProviderID[nodeclaimutil.Key{Name: nodeClaim.Name, IsMachine: nodeClaim.IsMachine}]; ok && id != nodeClaim.Status.ProviderID {
+		c.cleanupNodeClaim(nodeclaimutil.Key{Name: nodeClaim.Name, IsMachine: nodeClaim.IsMachine})
 	}
 	c.triggerConsolidationOnChange(oldNode, n)
 	return n
 }
 
-func (c *Cluster) cleanupNodeClaim(name string) {
-	if id := c.nameToProviderID[name]; id != "" {
+func (c *Cluster) cleanupNodeClaim(key nodeclaimutil.Key) {
+	if id := c.nodeClaimKeyToProviderID[key]; id != "" {
 		if c.nodes[id].Node == nil {
 			delete(c.nodes, id)
 		} else {
 			c.nodes[id].NodeClaim = nil
 		}
-		delete(c.nameToProviderID, name)
+		delete(c.nodeClaimKeyToProviderID, key)
 		c.MarkUnconsolidated()
 	}
 }
@@ -428,7 +441,7 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *
 	// Cleanup the old node with its old providerID if its providerID changes
 	// This can happen since nodes don't get created with providerIDs. Rather, CCM picks up the
 	// created node and injects the providerID into the spec.providerID
-	if id, ok := c.nameToProviderID[node.Name]; ok && id != node.Spec.ProviderID {
+	if id, ok := c.nodeNameToProviderID[node.Name]; ok && id != node.Spec.ProviderID {
 		c.cleanupNode(node.Name)
 	}
 	c.triggerConsolidationOnChange(oldNode, n)
@@ -436,13 +449,13 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *
 }
 
 func (c *Cluster) cleanupNode(name string) {
-	if id := c.nameToProviderID[name]; id != "" {
+	if id := c.nodeNameToProviderID[name]; id != "" {
 		if c.nodes[id].NodeClaim == nil {
 			delete(c.nodes, id)
 		} else {
 			c.nodes[id].Node = nil
 		}
-		delete(c.nameToProviderID, name)
+		delete(c.nodeNameToProviderID, name)
 		c.MarkUnconsolidated()
 	}
 }
@@ -523,7 +536,7 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 		return nil
 	}
 
-	n, ok := c.nodes[c.nameToProviderID[pod.Spec.NodeName]]
+	n, ok := c.nodes[c.nodeNameToProviderID[pod.Spec.NodeName]]
 	if !ok {
 		// the node must exist for us to update the resource requests on the node
 		return errors.NewNotFound(schema.GroupResource{Resource: "Node"}, pod.Spec.NodeName)
@@ -544,7 +557,7 @@ func (c *Cluster) updateNodeUsageFromPodCompletion(podKey types.NamespacedName) 
 	}
 
 	delete(c.bindings, podKey)
-	n, ok := c.nodes[c.nameToProviderID[nodeName]]
+	n, ok := c.nodes[c.nodeNameToProviderID[nodeName]]
 	if !ok {
 		// we weren't tracking the node yet, so nothing to do
 		return
@@ -560,7 +573,7 @@ func (c *Cluster) cleanupOldBindings(pod *v1.Pod) {
 		}
 		// the pod has switched nodes, this can occur if a pod name was re-used, and it was deleted/re-created rapidly,
 		// binding to a different node the second time
-		if oldNode, ok := c.nodes[c.nameToProviderID[oldNodeName]]; ok {
+		if oldNode, ok := c.nodes[c.nodeNameToProviderID[oldNodeName]]; ok {
 			// we were tracking the old node, so we need to reduce its capacity by the amount of the pod that left
 			oldNode.cleanupForPod(client.ObjectKeyFromObject(pod))
 			delete(c.bindings, client.ObjectKeyFromObject(pod))

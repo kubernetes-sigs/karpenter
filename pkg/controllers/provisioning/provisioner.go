@@ -349,7 +349,6 @@ func (p *Provisioner) launchMachine(ctx context.Context, n *scheduler.NodeClaim,
 	}
 	instanceTypeRequirement, _ := lo.Find(machine.Spec.Requirements, func(req v1.NodeSelectorRequirement) bool { return req.Key == v1.LabelInstanceTypeStable })
 	logging.FromContext(ctx).With("machine", machine.Name, "requests", machine.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).Infof("created machine")
-	p.cluster.NominateNodeForPod(ctx, machine.Name)
 	metrics.MachinesCreatedCounter.With(prometheus.Labels{
 		metrics.ReasonLabel:      options.Reason,
 		metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
@@ -378,7 +377,6 @@ func (p *Provisioner) launchNodeClaim(ctx context.Context, n *scheduler.NodeClai
 	}
 	instanceTypeRequirement, _ := lo.Find(nodeClaim.Spec.Requirements, func(req v1.NodeSelectorRequirement) bool { return req.Key == v1.LabelInstanceTypeStable })
 	logging.FromContext(ctx).With("nodeclaim", nodeClaim.Name, "requests", nodeClaim.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).Infof("created nodeclaim")
-	p.cluster.NominateNodeForPod(ctx, nodeClaim.Name)
 	metrics.NodeClaimsCreatedCounter.With(prometheus.Labels{
 		metrics.ReasonLabel:   options.Reason,
 		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
