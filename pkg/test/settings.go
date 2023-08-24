@@ -16,8 +16,7 @@ package test
 
 import (
 	"fmt"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"time"
 
 	"github.com/imdario/mergo"
 
@@ -31,11 +30,11 @@ func Settings(overrides ...settings.Settings) *settings.Settings {
 			panic(fmt.Sprintf("Failed to merge pod options: %s", err))
 		}
 	}
-	if options.BatchMaxDuration == nil {
-		options.BatchMaxDuration = &metav1.Duration{}
+	if options.BatchMaxDuration == 0 {
+		options.BatchMaxDuration = 10 * time.Second
 	}
-	if options.BatchIdleDuration == nil {
-		options.BatchIdleDuration = &metav1.Duration{}
+	if options.BatchIdleDuration == 0 {
+		options.BatchIdleDuration = time.Second
 	}
 	return &settings.Settings{
 		BatchMaxDuration:  options.BatchMaxDuration,

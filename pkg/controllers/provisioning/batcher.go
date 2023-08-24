@@ -55,8 +55,8 @@ func (b *Batcher) Wait(ctx context.Context) bool {
 		// If no pods, bail to the outer controller framework to refresh the context
 		return false
 	}
-	timeout := time.NewTimer(settings.FromContext(ctx).BatchMaxDuration.Duration)
-	idle := time.NewTimer(settings.FromContext(ctx).BatchIdleDuration.Duration)
+	timeout := time.NewTimer(settings.FromContext(ctx).BatchMaxDuration)
+	idle := time.NewTimer(settings.FromContext(ctx).BatchIdleDuration)
 	for {
 		select {
 		case <-b.trigger:
@@ -64,7 +64,7 @@ func (b *Batcher) Wait(ctx context.Context) bool {
 			if !idle.Stop() {
 				<-idle.C
 			}
-			idle.Reset(settings.FromContext(ctx).BatchIdleDuration.Duration)
+			idle.Reset(settings.FromContext(ctx).BatchIdleDuration)
 		case <-timeout.C:
 			return true
 		case <-idle.C:

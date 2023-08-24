@@ -43,8 +43,8 @@ var _ = Describe("Validation", func() {
 		ctx, err := (&settings.Settings{}).Inject(ctx, cm)
 		Expect(err).ToNot(HaveOccurred())
 		s := settings.FromContext(ctx)
-		Expect(s.BatchMaxDuration.Duration).To(Equal(time.Second * 10))
-		Expect(s.BatchIdleDuration.Duration).To(Equal(time.Second))
+		Expect(s.BatchMaxDuration).To(Equal(time.Second * 10))
+		Expect(s.BatchIdleDuration).To(Equal(time.Second))
 		Expect(s.DriftEnabled).To(BeFalse())
 	})
 	It("should succeed to set custom values", func() {
@@ -58,14 +58,23 @@ var _ = Describe("Validation", func() {
 		ctx, err := (&settings.Settings{}).Inject(ctx, cm)
 		Expect(err).ToNot(HaveOccurred())
 		s := settings.FromContext(ctx)
-		Expect(s.BatchMaxDuration.Duration).To(Equal(time.Second * 30))
-		Expect(s.BatchIdleDuration.Duration).To(Equal(time.Second * 5))
+		Expect(s.BatchMaxDuration).To(Equal(time.Second * 30))
+		Expect(s.BatchIdleDuration).To(Equal(time.Second * 5))
 		Expect(s.DriftEnabled).To(BeTrue())
 	})
 	It("should fail validation when batchMaxDuration is negative", func() {
 		cm := &v1.ConfigMap{
 			Data: map[string]string{
 				"batchMaxDuration": "-10s",
+			},
+		}
+		_, err := (&settings.Settings{}).Inject(ctx, cm)
+		Expect(err).To(HaveOccurred())
+	})
+	It("should fail validation when batchMaxDuration is less then 1s", func() {
+		cm := &v1.ConfigMap{
+			Data: map[string]string{
+				"batchMaxDuration": "800ms",
 			},
 		}
 		_, err := (&settings.Settings{}).Inject(ctx, cm)
@@ -84,6 +93,15 @@ var _ = Describe("Validation", func() {
 		cm := &v1.ConfigMap{
 			Data: map[string]string{
 				"batchIdleDuration": "-1s",
+			},
+		}
+		_, err := (&settings.Settings{}).Inject(ctx, cm)
+		Expect(err).To(HaveOccurred())
+	})
+	It("should fail validation when batchIdleDuration is less then 1s", func() {
+		cm := &v1.ConfigMap{
+			Data: map[string]string{
+				"batchIdleDuration": "800ms",
 			},
 		}
 		_, err := (&settings.Settings{}).Inject(ctx, cm)

@@ -1538,9 +1538,9 @@ var _ = Describe("Node Resource Level", func() {
 
 		// Expect that the node is now nominated
 		Expect(ExpectStateNodeExists(node).Nominated()).To(BeTrue())
-		time.Sleep(time.Second * 5) // nomination window is 10s so it should still be nominated
+		time.Sleep(time.Second * 10) // nomination window is 20s so it should still be nominated
 		Expect(ExpectStateNodeExists(node).Nominated()).To(BeTrue())
-		time.Sleep(time.Second * 6) // past 10s, node should no longer be nominated
+		time.Sleep(time.Second * 11) // past 20s, node should no longer be nominated
 		Expect(ExpectStateNodeExists(node).Nominated()).To(BeFalse())
 	})
 	It("should handle a node changing from no providerID to registering a providerID", func() {
