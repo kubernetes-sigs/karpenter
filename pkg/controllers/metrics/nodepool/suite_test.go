@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package provisioner_test
+package nodepool_test
 
 import (
 	"context"
@@ -27,27 +27,27 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/controllers/metrics/provisioner"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	"github.com/aws/karpenter-core/pkg/controllers/metrics/nodepool"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
-var provisionerController controller.Controller
+var nodePoolController controller.Controller
 var ctx context.Context
 var env *test.Environment
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "ProvisionerMetrics")
+	RunSpecs(t, "NodePoolMetrics")
 }
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
-	provisionerController = provisioner.NewController(env.Client)
+	nodePoolController = nodepool.NewController(env.Client)
 })
 
 var _ = AfterSuite(func() {
@@ -55,45 +55,53 @@ var _ = AfterSuite(func() {
 })
 
 var _ = Describe("Metrics", func() {
-	It("should update the provisioner limit metrics", func() {
-		limits := v1.ResourceList{
+	var nodePool *v1beta1.NodePool
+	BeforeEach(func() {
+		nodePool = test.NodePool(v1beta1.NodePool{
+			Spec: v1beta1.NodePoolSpec{
+				Template: v1beta1.NodeClaimTemplate{
+					Spec: v1beta1.NodeClaimSpec{
+						NodeClass: &v1beta1.NodeClassReference{
+							Name: "default",
+						},
+					},
+				},
+			},
+		})
+	})
+	It("should update the nodepool limit metrics", func() {
+		limits := v1beta1.Limits{
 			v1.ResourceCPU:              resource.MustParse("10"),
 			v1.ResourceMemory:           resource.MustParse("10Mi"),
 			v1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
 		}
-		provisioner := test.Provisioner(test.ProvisionerOptions{
-			Limits: limits,
-		})
-		ExpectApplied(ctx, env.Client, provisioner)
-		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
+		nodePool.Spec.Limits = limits
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 
 		for k, v := range limits {
-			m, found := FindMetricWithLabelValues("karpenter_provisioner_limit", map[string]string{
-				"provisioner":   provisioner.GetName(),
+			m, found := FindMetricWithLabelValues("karpenter_nodepool_limit", map[string]string{
+				"nodepool":      nodePool.GetName(),
 				"resource_type": strings.ReplaceAll(k.String(), "-", "_"),
 			})
 			Expect(found).To(BeTrue())
 			Expect(m.GetGauge().GetValue()).To(BeNumerically("~", v.AsApproximateFloat64()))
 		}
 	})
-	It("should update the provisioner usage metrics", func() {
+	It("should update the nodepool usage metrics", func() {
 		resources := v1.ResourceList{
 			v1.ResourceCPU:              resource.MustParse("10"),
 			v1.ResourceMemory:           resource.MustParse("10Mi"),
 			v1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
 		}
+		nodePool.Status.Resources = resources
 
-		provisioner := test.Provisioner(test.ProvisionerOptions{
-			Status: v1alpha5.ProvisionerStatus{
-				Resources: resources,
-			},
-		})
-		ExpectApplied(ctx, env.Client, provisioner)
-		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 
 		for k, v := range resources {
-			m, found := FindMetricWithLabelValues("karpenter_provisioner_usage", map[string]string{
-				"provisioner":   provisioner.GetName(),
+			m, found := FindMetricWithLabelValues("karpenter_nodepool_usage", map[string]string{
+				"nodepool":      nodePool.GetName(),
 				"resource_type": strings.ReplaceAll(k.String(), "-", "_"),
 			})
 			Expect(found).To(BeTrue())
@@ -106,62 +114,54 @@ var _ = Describe("Metrics", func() {
 			v1.ResourceMemory:           resource.MustParse("10Mi"),
 			v1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
 		}
-		limits := v1.ResourceList{
+		limits := v1beta1.Limits{
 			v1.ResourceCPU:              resource.MustParse("100"),
 			v1.ResourceMemory:           resource.MustParse("100Mi"),
 			v1.ResourceEphemeralStorage: resource.MustParse("1000Gi"),
 		}
+		nodePool.Spec.Limits = limits
+		nodePool.Status.Resources = resources
 
-		provisioner := test.Provisioner(test.ProvisionerOptions{
-			Limits: limits,
-			Status: v1alpha5.ProvisionerStatus{
-				Resources: resources,
-			},
-		})
-		ExpectApplied(ctx, env.Client, provisioner)
-		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 
 		for k := range resources {
-			m, found := FindMetricWithLabelValues("karpenter_provisioner_usage_pct", map[string]string{
-				"provisioner":   provisioner.GetName(),
+			m, found := FindMetricWithLabelValues("karpenter_nodepool_usage_pct", map[string]string{
+				"nodepool":      nodePool.GetName(),
 				"resource_type": strings.ReplaceAll(k.String(), "-", "_"),
 			})
 			Expect(found).To(BeTrue())
 			Expect(m.GetGauge().GetValue()).To(BeNumerically("~", 10))
 		}
 	})
-	It("should delete the provisioner state metrics on provisioner delete", func() {
-		expectedMetrics := []string{"karpenter_provisioner_limit", "karpenter_provisioner_usage", "karpenter_provisioner_usage_pct"}
-		provisioner := test.Provisioner(test.ProvisionerOptions{
-			Limits: v1.ResourceList{
-				v1.ResourceCPU:              resource.MustParse("100"),
-				v1.ResourceMemory:           resource.MustParse("100Mi"),
-				v1.ResourceEphemeralStorage: resource.MustParse("1000Gi"),
-			},
-			Status: v1alpha5.ProvisionerStatus{
-				Resources: v1.ResourceList{
-					v1.ResourceCPU:              resource.MustParse("10"),
-					v1.ResourceMemory:           resource.MustParse("10Mi"),
-					v1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, provisioner)
-		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
+	It("should delete the nodepool state metrics on nodepool delete", func() {
+		expectedMetrics := []string{"karpenter_nodepool_limit", "karpenter_nodepool_usage", "karpenter_nodepool_usage_pct"}
+		nodePool.Spec.Limits = v1beta1.Limits{
+			v1.ResourceCPU:              resource.MustParse("100"),
+			v1.ResourceMemory:           resource.MustParse("100Mi"),
+			v1.ResourceEphemeralStorage: resource.MustParse("1000Gi"),
+		}
+		nodePool.Status.Resources = v1.ResourceList{
+			v1.ResourceCPU:              resource.MustParse("10"),
+			v1.ResourceMemory:           resource.MustParse("10Mi"),
+			v1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
+		}
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 
 		for _, name := range expectedMetrics {
 			_, found := FindMetricWithLabelValues(name, map[string]string{
-				"provisioner": provisioner.GetName(),
+				"nodepool": nodePool.GetName(),
 			})
 			Expect(found).To(BeTrue())
 		}
 
-		ExpectDeleted(ctx, env.Client, provisioner)
-		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
+		ExpectDeleted(ctx, env.Client, nodePool)
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 
 		for _, name := range expectedMetrics {
 			_, found := FindMetricWithLabelValues(name, map[string]string{
-				"provisioner": provisioner.GetName(),
+				"nodepool": nodePool.GetName(),
 			})
 			Expect(found).To(BeFalse())
 		}

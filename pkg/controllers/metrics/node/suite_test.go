@@ -58,7 +58,7 @@ var provisioner *v1alpha5.Provisioner
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Controllers/Metrics/State")
+	RunSpecs(t, "NodeMetrics")
 }
 
 var _ = BeforeSuite(func() {

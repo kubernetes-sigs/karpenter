@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package provisioner
+package nodepool
 
 import (
 	"context"
@@ -32,55 +32,58 @@ import (
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
 const (
-	provisionerResourceType = "resource_type"
-	provisionerName         = "provisioner"
+	resourceTypeLabel = "resource_type"
+	nodePoolNameLabel = "nodepool"
+	nodePoolSubsystem = "nodepool"
 )
 
 var (
 	limitGaugeVec = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
-			Subsystem: "provisioner",
+			Subsystem: nodePoolSubsystem,
 			Name:      "limit",
-			Help:      "The Provisioner Limits are the limits specified on the provisioner that restrict the quantity of resources provisioned. Labeled by provisioner name and resource type.",
+			Help:      "The nodepool limits are the limits specified on the provisioner that restrict the quantity of resources provisioned. Labeled by nodepool name and resource type.",
 		},
-		labelNames(),
+		[]string{
+			resourceTypeLabel,
+			nodePoolNameLabel,
+		},
 	)
 	usageGaugeVec = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
-			Subsystem: "provisioner",
+			Subsystem: nodePoolSubsystem,
 			Name:      "usage",
-			Help:      "The Provisioner Usage is the amount of resources that have been provisioned by a particular provisioner. Labeled by provisioner name and resource type.",
+			Help:      "The nodepool usage is the amount of resources that have been provisioned by a particular nodepool. Labeled by nodepool name and resource type.",
 		},
-		labelNames(),
+		[]string{
+			resourceTypeLabel,
+			nodePoolNameLabel,
+		},
 	)
 	usagePctGaugeVec = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
-			Subsystem: "provisioner",
+			Subsystem: nodePoolSubsystem,
 			Name:      "usage_pct",
-			Help:      "The Provisioner Usage Percentage is the percentage of each resource used based on the resources provisioned and the limits that have been configured in the range [0,100].  Labeled by provisioner name and resource type.",
+			Help:      "The nodepool usage percentage is the percentage of each resource used based on the resources provisioned and the limits that have been configured.  Labeled by nodepool name and resource type.",
 		},
-		labelNames(),
+		[]string{
+			resourceTypeLabel,
+			nodePoolNameLabel,
+		},
 	)
 )
 
 func init() {
 	crmetrics.Registry.MustRegister(limitGaugeVec, usageGaugeVec, usagePctGaugeVec)
-}
-
-func labelNames() []string {
-	return []string{
-		provisionerResourceType,
-		provisionerName,
-	}
 }
 
 type Controller struct {
@@ -97,34 +100,34 @@ func NewController(kubeClient client.Client) corecontroller.Controller {
 }
 
 func (c *Controller) Name() string {
-	return "provisioner_metrics"
+	return "metrics.nodepool"
 }
 
 // Reconcile executes a termination control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("provisioner", req.Name))
-	provisioner := &v1alpha5.Provisioner{}
-	if err := c.kubeClient.Get(ctx, req.NamespacedName, provisioner); err != nil {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("nodepool", req.Name))
+	nodePool := &v1beta1.NodePool{}
+	if err := c.kubeClient.Get(ctx, req.NamespacedName, nodePool); err != nil {
 		if errors.IsNotFound(err) {
 			c.metricStore.Delete(req.NamespacedName.String())
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	c.metricStore.Update(req.NamespacedName.String(), buildMetrics(provisioner))
-	// periodically update our metrics per provisioner even if nothing has changed
+	c.metricStore.Update(req.NamespacedName.String(), buildMetrics(nodePool))
+	// periodically update our metrics per nodepool even if nothing has changed
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
-func buildMetrics(provisioner *v1alpha5.Provisioner) (res []*metrics.StoreMetric) {
+func buildMetrics(nodePool *v1beta1.NodePool) (res []*metrics.StoreMetric) {
 	for gaugeVec, resourceList := range map[*prometheus.GaugeVec]v1.ResourceList{
-		usageGaugeVec:    provisioner.Status.Resources,
-		limitGaugeVec:    getLimits(provisioner),
-		usagePctGaugeVec: getUsagePercentage(provisioner),
+		usageGaugeVec:    nodePool.Status.Resources,
+		limitGaugeVec:    getLimits(nodePool),
+		usagePctGaugeVec: getUsagePercentage(nodePool),
 	} {
 		for k, v := range resourceList {
 			res = append(res, &metrics.StoreMetric{
 				GaugeVec: gaugeVec,
-				Labels:   makeLabels(provisioner, strings.ReplaceAll(strings.ToLower(string(k)), "-", "_")),
+				Labels:   makeLabels(nodePool, strings.ReplaceAll(strings.ToLower(string(k)), "-", "_")),
 				Value:    lo.Ternary(k == v1.ResourceCPU, float64(v.MilliValue())/float64(1000), float64(v.Value())),
 			})
 		}
@@ -132,18 +135,18 @@ func buildMetrics(provisioner *v1alpha5.Provisioner) (res []*metrics.StoreMetric
 	return res
 }
 
-func getLimits(provisioner *v1alpha5.Provisioner) v1.ResourceList {
-	if provisioner.Spec.Limits != nil {
-		return provisioner.Spec.Limits.Resources
+func getLimits(nodePool *v1beta1.NodePool) v1.ResourceList {
+	if nodePool.Spec.Limits != nil {
+		return v1.ResourceList(nodePool.Spec.Limits)
 	}
 	return v1.ResourceList{}
 }
 
-func getUsagePercentage(provisioner *v1alpha5.Provisioner) v1.ResourceList {
+func getUsagePercentage(nodePool *v1beta1.NodePool) v1.ResourceList {
 	usage := v1.ResourceList{}
-	for k, v := range getLimits(provisioner) {
+	for k, v := range getLimits(nodePool) {
 		limitValue := v.AsApproximateFloat64()
-		usedValue := provisioner.Status.Resources[k]
+		usedValue := nodePool.Status.Resources[k]
 		if limitValue == 0 {
 			usage[k] = *resource.NewQuantity(100, resource.DecimalSI)
 		} else {
@@ -153,10 +156,10 @@ func getUsagePercentage(provisioner *v1alpha5.Provisioner) v1.ResourceList {
 	return usage
 }
 
-func makeLabels(provisioner *v1alpha5.Provisioner, resourceTypeName string) prometheus.Labels {
+func makeLabels(nodePool *v1beta1.NodePool, resourceTypeName string) prometheus.Labels {
 	return prometheus.Labels{
-		provisionerResourceType: resourceTypeName,
-		provisionerName:         provisioner.Name,
+		resourceTypeLabel: resourceTypeName,
+		nodePoolNameLabel: nodePool.Name,
 	}
 }
 
@@ -164,6 +167,6 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontrolle
 	return corecontroller.Adapt(
 		controllerruntime.
 			NewControllerManagedBy(m).
-			For(&v1alpha5.Provisioner{}),
+			For(&v1beta1.NodePool{}),
 	)
 }
