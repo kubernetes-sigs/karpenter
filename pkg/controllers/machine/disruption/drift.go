@@ -94,8 +94,7 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
-// isDrifted will check if a machine is drifted from the fields in the provisioner.Spec and
-// the cloudprovider
+// isDrifted will check if a NodeClaim is drifted from the fields in the NodePool Spec and the CloudProvider
 func (d *Drift) isDrifted(ctx context.Context, nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) (cloudprovider.DriftReason, error) {
 	// First check for static drift or node requirements have drifted to save on API calls.
 	if reason := lo.FindOrElse([]cloudprovider.DriftReason{areStaticFieldsDrifted(nodePool, nodeClaim), areRequirementsDrifted(nodePool, nodeClaim)}, "", func(i cloudprovider.DriftReason) bool {
@@ -103,7 +102,6 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 	}); reason != "" {
 		return reason, nil
 	}
-
 	driftedReason, err := d.cloudProvider.IsMachineDrifted(ctx, machineutil.NewFromNodeClaim(nodeClaim))
 	if err != nil {
 		return "", err
@@ -114,24 +112,29 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 // Eligible fields for static drift are described in the docs
 // https://karpenter.sh/docs/concepts/deprovisioning/#drift
 func areStaticFieldsDrifted(nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) cloudprovider.DriftReason {
-	provisionerHash, foundHashProvisioner := nodePool.Annotations[v1alpha5.ProvisionerHashAnnotationKey]
-	machineHash, foundHashMachine := nodeClaim.Annotations[v1alpha5.ProvisionerHashAnnotationKey]
-	if !foundHashProvisioner || !foundHashMachine {
+	var ownerHashKey string
+	if nodeClaim.IsMachine {
+		ownerHashKey = v1alpha5.ProvisionerHashAnnotationKey
+	} else {
+		ownerHashKey = v1beta1.NodePoolHashAnnotationKey
+	}
+	nodePoolHash, foundHashNodePool := nodePool.Annotations[ownerHashKey]
+	nodeClaimHash, foundHashNodeClaim := nodeClaim.Annotations[ownerHashKey]
+	if !foundHashNodePool || !foundHashNodeClaim {
 		return ""
 	}
-	if provisionerHash != machineHash {
+	if nodePoolHash != nodeClaimHash {
 		return ProvisionerDrifted
 	}
-
 	return ""
 }
 
 func areRequirementsDrifted(nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) cloudprovider.DriftReason {
 	provisionerReq := scheduling.NewNodeSelectorRequirements(nodePool.Spec.Template.Spec.Requirements...)
-	machineReq := scheduling.NewLabelRequirements(nodeClaim.Labels)
+	nodeClaimReq := scheduling.NewLabelRequirements(nodeClaim.Labels)
 
-	// Every provisioner requirement is compatible with the Machine label set
-	if machineReq.StrictlyCompatible(provisionerReq) != nil {
+	// Every provisioner requirement is compatible with the NodeClaim label set
+	if nodeClaimReq.StrictlyCompatible(provisionerReq) != nil {
 		return RequirementsDrifted
 	}
 
