@@ -109,7 +109,7 @@ var _ = Describe("Provisioning", func() {
 		Expect(len(nodes.Items)).To(Equal(1))
 		ExpectScheduled(ctx, env.Client, pod)
 	})
-	It("should continue with provisioning when at least one node pool has instance types", func() {
+	It("should continue with provisioning when at least a provisioner doesn't have resolved instance types", func() {
 		provNotDefined := test.Provisioner()
 		provNotDefined.Spec.ProviderRef = nil
 		ExpectApplied(ctx, env.Client, test.Provisioner(), provNotDefined)
