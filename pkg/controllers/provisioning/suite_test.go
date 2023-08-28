@@ -212,11 +212,13 @@ var _ = Describe("Provisioning", func() {
 	})
 	It("should schedule all pods on one node when node is in deleting state", func() {
 		provisioner := test.Provisioner()
+		its, err := cloudProvider.GetInstanceTypes(ctx, provisioner)
+		Expect(err).To(BeNil())
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-					v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
+					v1.LabelInstanceTypeStable:       its[0].Name,
 				},
 				Finalizers: []string{v1alpha5.TerminationFinalizer},
 			}},
