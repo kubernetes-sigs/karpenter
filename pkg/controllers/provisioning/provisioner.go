@@ -26,7 +26,6 @@ import (
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -233,12 +232,11 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 		// Get instance type options
 		instanceTypeOptions, err := p.cloudProvider.GetInstanceTypes(ctx, provisionerutil.New(nodePool))
 		if err != nil {
-			// If the node pool does not have a providerRef that resolves to an object in the cluster, don't consider it for provisioning.
-			if apierrors.IsNotFound(err) {
-				logging.FromContext(ctx).Infof("excluding nodePool %s from scheduling, provider not found", nodePool.Name)
-				continue
-			}
 			return nil, fmt.Errorf("getting instance types, %w", err)
+		}
+		if len(instanceTypeOptions) == 0 {
+			logging.FromContext(ctx).With("provisioner", nodePool.Name).Info("excluding from scheduling, no instance types exist")
+			continue
 		}
 		instanceTypes[nodepoolutil.Key{Name: nodePool.Name, IsProvisioner: nodePool.IsProvisioner}] = append(instanceTypes[nodepoolutil.Key{Name: nodePool.Name, IsProvisioner: nodePool.IsProvisioner}], instanceTypeOptions...)
 
