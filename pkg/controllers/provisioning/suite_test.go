@@ -78,7 +78,7 @@ var _ = BeforeSuite(func() {
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	prov = provisioning.NewProvisioner(env.Client, corev1.NewForConfigOrDie(env.Config), events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
-	instanceTypes, _ := cloudProvider.GetInstanceTypes(context.Background(), nil)
+	instanceTypes, _ := cloudProvider.GetInstanceTypes(ctx, nil)
 	instanceTypeMap = map[string]*cloudprovider.InstanceType{}
 	for _, it := range instanceTypes {
 		instanceTypeMap[it.Name] = it
@@ -102,6 +102,17 @@ var _ = AfterEach(func() {
 var _ = Describe("Provisioning", func() {
 	It("should provision nodes", func() {
 		ExpectApplied(ctx, env.Client, test.Provisioner())
+		pod := test.UnschedulablePod()
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		nodes := &v1.NodeList{}
+		Expect(env.Client.List(ctx, nodes)).To(Succeed())
+		Expect(len(nodes.Items)).To(Equal(1))
+		ExpectScheduled(ctx, env.Client, pod)
+	})
+	It("should continue with provisioning when not all nodePools have defined providers", func() {
+		provNotDefined := test.Provisioner()
+		provNotDefined.Spec.ProviderRef = nil
+		ExpectApplied(ctx, env.Client, test.Provisioner(), provNotDefined)
 		pod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		nodes := &v1.NodeList{}
@@ -201,13 +212,11 @@ var _ = Describe("Provisioning", func() {
 	})
 	It("should schedule all pods on one node when node is in deleting state", func() {
 		provisioner := test.Provisioner()
-		its, err := cloudProvider.GetInstanceTypes(ctx, provisioner)
-		Expect(err).To(BeNil())
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-					v1.LabelInstanceTypeStable:       its[0].Name,
+					v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
 				},
 				Finalizers: []string{v1alpha5.TerminationFinalizer},
 			}},
