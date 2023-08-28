@@ -151,7 +151,7 @@ func (c *CloudProvider) List(_ context.Context) ([]*v1alpha5.Machine, error) {
 	}), nil
 }
 
-func (c *CloudProvider) GetInstanceTypes(_ context.Context, p *v1alpha5.Provisioner) ([]*cloudprovider.InstanceType, error) {
+func (c *CloudProvider) GetInstanceTypes(_ context.Context, _ *v1alpha5.Provisioner) ([]*cloudprovider.InstanceType, error) {
 	if c.InstanceTypes != nil {
 		return c.InstanceTypes, nil
 	}
