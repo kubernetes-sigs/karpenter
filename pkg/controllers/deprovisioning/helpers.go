@@ -22,8 +22,6 @@ import (
 
 	"github.com/samber/lo"
 
-	"k8s.io/apimachinery/pkg/api/errors"
-
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
@@ -209,10 +207,11 @@ func buildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 
 		nodePoolInstanceTypes, err := cloudProvider.GetInstanceTypes(ctx, provisionerutil.New(np))
 		if err != nil {
-			if errors.IsNotFound(err) {
-				continue
-			}
 			return nil, nil, fmt.Errorf("listing instance types for %s, %w", np.Name, err)
+		}
+		if len(nodePoolInstanceTypes) == 0 {
+			logging.FromContext(ctx).With("provisioner", np.Name).Debug("failed to get instance types for provisioner")
+			continue
 		}
 		nodePoolToInstanceTypesMap[key] = map[string]*cloudprovider.InstanceType{}
 		for _, it := range nodePoolInstanceTypes {

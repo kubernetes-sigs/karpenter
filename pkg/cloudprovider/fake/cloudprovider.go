@@ -23,10 +23,8 @@ import (
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
@@ -154,12 +152,6 @@ func (c *CloudProvider) List(_ context.Context) ([]*v1alpha5.Machine, error) {
 }
 
 func (c *CloudProvider) GetInstanceTypes(_ context.Context, p *v1alpha5.Provisioner) ([]*cloudprovider.InstanceType, error) {
-	// Return a NotFound error for the provisioning controller so we can opt it out of scheduling.
-	if p != nil {
-		if p.Spec.ProviderRef == nil && p.Spec.Provider == nil {
-			return nil, errors.NewNotFound(schema.GroupResource{}, fmt.Sprintf("provisioner.providerRef/%s", p.Name))
-		}
-	}
 	if c.InstanceTypes != nil {
 		return c.InstanceTypes, nil
 	}
