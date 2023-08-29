@@ -99,7 +99,7 @@ func (c *consolidation) ShouldDeprovision(_ context.Context, cn *Candidate) bool
 		c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s annotation exists", v1alpha5.DoNotConsolidateNodeAnnotationKey))...)
 		return false
 	}
-	if cn.nodePool.Spec.Deprovisioning.ConsolidationPolicy != v1beta1.ConsolidationPolicyWhenUnderutilized {
+	if cn.nodePool.Spec.Disruption.ConsolidationPolicy != v1beta1.ConsolidationPolicyWhenUnderutilized {
 		c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s %q has empty consolidation disabled by consolidation policy", lo.Ternary(cn.nodePool.IsProvisioner, "Provisioner", "NodePool"), cn.nodePool.Name))...)
 		return false
 	}

@@ -57,7 +57,7 @@ func NewExpiration(clk clock.Clock, kubeClient client.Client, cluster *state.Clu
 
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes
 func (e *Expiration) ShouldDeprovision(_ context.Context, c *Candidate) bool {
-	return c.nodePool.Spec.Deprovisioning.ExpirationTTL.Duration >= 0 &&
+	return c.nodePool.Spec.Disruption.ExpireAfter.Duration != nil &&
 		c.NodeClaim.StatusConditions().GetCondition(v1beta1.NodeExpired).IsTrue()
 }
 
@@ -108,7 +108,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, nodes ...*Candidate) (C
 			continue
 		}
 
-		logging.FromContext(ctx).With("ttl", candidates[0].nodePool.Spec.Deprovisioning.ExpirationTTL.String()).Infof("triggering termination for expired node after TTL")
+		logging.FromContext(ctx).With("ttl", candidates[0].nodePool.Spec.Disruption.ExpireAfter.String()).Infof("triggering termination for expired node after TTL")
 		return Command{
 			candidates:   []*Candidate{candidate},
 			replacements: results.NewNodeClaims,

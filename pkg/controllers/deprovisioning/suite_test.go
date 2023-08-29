@@ -79,7 +79,7 @@ var leastExpensiveOffering cloudprovider.Offering
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Deprovisioning")
+	RunSpecs(t, "Disruption")
 }
 
 var _ = BeforeSuite(func() {

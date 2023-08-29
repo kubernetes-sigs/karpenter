@@ -41,8 +41,8 @@ func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, 
 	hasExpiredCondition := nodeClaim.StatusConditions().GetCondition(v1beta1.NodeExpired) != nil
 
 	// From here there are three scenarios to handle:
-	// 1. If ExpirationTTL is not configured, remove the expired status condition
-	if nodePool.Spec.Deprovisioning.ExpirationTTL.Duration < 0 {
+	// 1. If ExpireAfter is not configured, remove the expired status condition
+	if nodePool.Spec.Disruption.ExpireAfter.Duration == nil {
 		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.NodeExpired)
 		if hasExpiredCondition {
 			logging.FromContext(ctx).Debugf("removing expiration status condition, expiration has been disabled")
@@ -59,9 +59,9 @@ func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, 
 	// once machine migration is ripped out, which should happen when apis and Karpenter are promoted to v1
 	var expirationTime time.Time
 	if node == nil || nodeClaim.CreationTimestamp.Before(&node.CreationTimestamp) {
-		expirationTime = nodeClaim.CreationTimestamp.Add(nodePool.Spec.Deprovisioning.ExpirationTTL.Duration)
+		expirationTime = nodeClaim.CreationTimestamp.Add(*nodePool.Spec.Disruption.ExpireAfter.Duration)
 	} else {
-		expirationTime = node.CreationTimestamp.Add(nodePool.Spec.Deprovisioning.ExpirationTTL.Duration)
+		expirationTime = node.CreationTimestamp.Add(*nodePool.Spec.Disruption.ExpireAfter.Duration)
 	}
 	// 2. If the NodeClaim isn't expired, remove the status condition.
 	if e.clock.Now().Before(expirationTime) {
