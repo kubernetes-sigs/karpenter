@@ -22,12 +22,8 @@ import (
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(deprovisioningDurationHistogram)
-	crmetrics.Registry.MustRegister(deprovisioningReplacementNodeInitializedHistogram)
-	crmetrics.Registry.MustRegister(deprovisioningActionsPerformedCounter)
-	crmetrics.Registry.MustRegister(deprovisioningEligibleMachinesGauge)
-	crmetrics.Registry.MustRegister(deprovisioningReplacementNodeLaunchFailedCounter)
-	crmetrics.Registry.MustRegister(deprovisioningConsolidationTimeoutsCounter)
+	crmetrics.Registry.MustRegister(deprovisioningDurationHistogram, deprovisioningReplacementNodeInitializedHistogram, deprovisioningActionsPerformedCounter,
+		deprovisioningEligibleMachinesGauge, deprovisioningReplacementNodeLaunchFailedCounter, deprovisioningConsolidationTimeoutsCounter)
 }
 
 const (
