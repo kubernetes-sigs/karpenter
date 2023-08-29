@@ -210,7 +210,6 @@ func buildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 			return nil, nil, fmt.Errorf("listing instance types for %s, %w", np.Name, err)
 		}
 		if len(nodePoolInstanceTypes) == 0 {
-			logging.FromContext(ctx).With("provisioner", np.Name).Debug("skipping provisioner, no resolved instance types found")
 			continue
 		}
 		nodePoolToInstanceTypesMap[key] = map[string]*cloudprovider.InstanceType{}
