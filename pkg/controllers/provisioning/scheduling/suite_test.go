@@ -108,7 +108,7 @@ var _ = BeforeEach(func() {
 	}}})
 	// reset instance types
 	newCP := fake.CloudProvider{}
-	cloudProvider.InstanceTypes, _ = newCP.GetInstanceTypes(context.Background(), nil)
+	cloudProvider.InstanceTypes, _ = newCP.GetInstanceTypes(ctx, nil)
 	cloudProvider.CreateCalls = nil
 	pscheduling.ResetDefaultStorageClass()
 })

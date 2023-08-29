@@ -78,7 +78,7 @@ var _ = BeforeSuite(func() {
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	prov = provisioning.NewProvisioner(env.Client, corev1.NewForConfigOrDie(env.Config), events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
-	instanceTypes, _ := cloudProvider.GetInstanceTypes(context.Background(), nil)
+	instanceTypes, _ := cloudProvider.GetInstanceTypes(ctx, nil)
 	instanceTypeMap = map[string]*cloudprovider.InstanceType{}
 	for _, it := range instanceTypes {
 		instanceTypeMap[it.Name] = it
@@ -102,6 +102,17 @@ var _ = AfterEach(func() {
 var _ = Describe("Provisioning", func() {
 	It("should provision nodes", func() {
 		ExpectApplied(ctx, env.Client, test.Provisioner())
+		pod := test.UnschedulablePod()
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		nodes := &v1.NodeList{}
+		Expect(env.Client.List(ctx, nodes)).To(Succeed())
+		Expect(len(nodes.Items)).To(Equal(1))
+		ExpectScheduled(ctx, env.Client, pod)
+	})
+	It("should continue with provisioning when at least a provisioner doesn't have resolved instance types", func() {
+		provNotDefined := test.Provisioner()
+		provNotDefined.Spec.ProviderRef = nil
+		ExpectApplied(ctx, env.Client, test.Provisioner(), provNotDefined)
 		pod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		nodes := &v1.NodeList{}

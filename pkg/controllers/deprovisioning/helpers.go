@@ -209,6 +209,9 @@ func buildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 		if err != nil {
 			return nil, nil, fmt.Errorf("listing instance types for %s, %w", np.Name, err)
 		}
+		if len(nodePoolInstanceTypes) == 0 {
+			continue
+		}
 		nodePoolToInstanceTypesMap[key] = map[string]*cloudprovider.InstanceType{}
 		for _, it := range nodePoolInstanceTypes {
 			nodePoolToInstanceTypesMap[key][it.Name] = it
