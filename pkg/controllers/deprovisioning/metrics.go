@@ -27,6 +27,7 @@ func init() {
 	crmetrics.Registry.MustRegister(deprovisioningActionsPerformedCounter)
 	crmetrics.Registry.MustRegister(deprovisioningEligibleMachinesGauge)
 	crmetrics.Registry.MustRegister(deprovisioningReplacementNodeLaunchFailedCounter)
+	crmetrics.Registry.MustRegister(deprovisioningConsolidationTimeoutsCounter)
 }
 
 const (
