@@ -235,7 +235,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 			return nil, fmt.Errorf("getting instance types, %w", err)
 		}
 		if len(instanceTypeOptions) == 0 {
-			logging.FromContext(ctx).With(lo.Ternary(nodePool.IsProvisioner, "provisioner", "nodePool"), nodePool.Name).Info("skipping, no resolved instance types found")
+			logging.FromContext(ctx).With(lo.Ternary(nodePool.IsProvisioner, "provisioner", "nodepool"), nodePool.Name).Info("skipping, no resolved instance types found")
 			continue
 		}
 		instanceTypes[nodepoolutil.Key{Name: nodePool.Name, IsProvisioner: nodePool.IsProvisioner}] = append(instanceTypes[nodepoolutil.Key{Name: nodePool.Name, IsProvisioner: nodePool.IsProvisioner}], instanceTypeOptions...)
