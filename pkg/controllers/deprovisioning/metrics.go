@@ -22,18 +22,15 @@ import (
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(deprovisioningDurationHistogram)
-	crmetrics.Registry.MustRegister(deprovisioningReplacementNodeInitializedHistogram)
-	crmetrics.Registry.MustRegister(deprovisioningActionsPerformedCounter)
-	crmetrics.Registry.MustRegister(deprovisioningEligibleMachinesGauge)
-	crmetrics.Registry.MustRegister(deprovisioningReplacementNodeLaunchFailedCounter)
+	crmetrics.Registry.MustRegister(deprovisioningDurationHistogram, deprovisioningReplacementNodeInitializedHistogram, deprovisioningActionsPerformedCounter,
+		deprovisioningEligibleMachinesGauge, deprovisioningReplacementNodeLaunchFailedCounter, deprovisioningConsolidationTimeoutsCounter)
 }
 
 const (
 	deprovisioningSubsystem = "deprovisioning"
 	deprovisionerLabel      = "deprovisioner"
 	actionLabel             = "action"
-	consolidationType       = "consolidationType"
+	consolidationType       = "consolidation_type"
 
 	multiMachineConsolidationLabelValue  = "multi-machine"
 	singleMachineConsolidationLabelValue = "single-machine"
@@ -80,7 +77,7 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: deprovisioningSubsystem,
 			Name:      "consolidation_timeouts",
-			Help:      "Number of times the Consolidation algorithm has reached a timeout. Labeled by consolidationType.",
+			Help:      "Number of times the Consolidation algorithm has reached a timeout. Labeled by consolidation type.",
 		},
 		[]string{consolidationType},
 	)
