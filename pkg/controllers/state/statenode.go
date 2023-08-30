@@ -77,7 +77,7 @@ type StateNode struct {
 	Node      *v1.Node
 	NodeClaim *v1beta1.NodeClaim
 
-	inflightInitialized bool
+	inflightInitialized bool            // TODO @joinnis: This can be removed when machine is added
 	inflightAllocatable v1.ResourceList // TODO @joinnis: This can be removed when machine is added
 	inflightCapacity    v1.ResourceList // TODO @joinnis: This can be removed when machine is added
 
