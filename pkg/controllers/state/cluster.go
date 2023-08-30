@@ -375,19 +375,21 @@ func (c *Cluster) newStateFromNodeClaim(nodeClaim *v1beta1.NodeClaim, oldNode *S
 		oldNode = NewNode()
 	}
 	n := &StateNode{
-		Node:                oldNode.Node,
-		NodeClaim:           nodeClaim,
-		inflightAllocatable: oldNode.inflightAllocatable,
-		inflightCapacity:    oldNode.inflightCapacity,
-		startupTaints:       oldNode.startupTaints,
-		daemonSetRequests:   oldNode.daemonSetRequests,
-		daemonSetLimits:     oldNode.daemonSetLimits,
-		podRequests:         oldNode.podRequests,
-		podLimits:           oldNode.podLimits,
-		hostPortUsage:       oldNode.hostPortUsage,
-		volumeUsage:         oldNode.volumeUsage,
-		markedForDeletion:   oldNode.markedForDeletion,
-		nominatedUntil:      oldNode.nominatedUntil,
+		Node:                     oldNode.Node,
+		NodeClaim:                nodeClaim,
+		inflightInitialized:      oldNode.inflightInitialized,
+		inflightAllocatable:      oldNode.inflightAllocatable,
+		inflightCapacity:         oldNode.inflightCapacity,
+		startupTaintsInitialized: oldNode.startupTaintsInitialized,
+		startupTaints:            oldNode.startupTaints,
+		daemonSetRequests:        oldNode.daemonSetRequests,
+		daemonSetLimits:          oldNode.daemonSetLimits,
+		podRequests:              oldNode.podRequests,
+		podLimits:                oldNode.podLimits,
+		hostPortUsage:            oldNode.hostPortUsage,
+		volumeUsage:              oldNode.volumeUsage,
+		markedForDeletion:        oldNode.markedForDeletion,
+		nominatedUntil:           oldNode.nominatedUntil,
 	}
 	// Cleanup the old nodeClaim with its old providerID if its providerID changes
 	// This can happen since nodes don't get created with providerIDs. Rather, CCM picks up the
@@ -416,19 +418,21 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *
 		oldNode = NewNode()
 	}
 	n := &StateNode{
-		Node:                node,
-		NodeClaim:           oldNode.NodeClaim,
-		inflightAllocatable: oldNode.inflightAllocatable,
-		inflightCapacity:    oldNode.inflightCapacity,
-		startupTaints:       oldNode.startupTaints,
-		daemonSetRequests:   map[types.NamespacedName]v1.ResourceList{},
-		daemonSetLimits:     map[types.NamespacedName]v1.ResourceList{},
-		podRequests:         map[types.NamespacedName]v1.ResourceList{},
-		podLimits:           map[types.NamespacedName]v1.ResourceList{},
-		hostPortUsage:       scheduling.NewHostPortUsage(),
-		volumeUsage:         scheduling.NewVolumeUsage(),
-		markedForDeletion:   oldNode.markedForDeletion,
-		nominatedUntil:      oldNode.nominatedUntil,
+		Node:                     node,
+		NodeClaim:                oldNode.NodeClaim,
+		inflightInitialized:      oldNode.inflightInitialized,
+		inflightAllocatable:      oldNode.inflightAllocatable,
+		inflightCapacity:         oldNode.inflightCapacity,
+		startupTaintsInitialized: oldNode.startupTaintsInitialized,
+		startupTaints:            oldNode.startupTaints,
+		daemonSetRequests:        map[types.NamespacedName]v1.ResourceList{},
+		daemonSetLimits:          map[types.NamespacedName]v1.ResourceList{},
+		podRequests:              map[types.NamespacedName]v1.ResourceList{},
+		podLimits:                map[types.NamespacedName]v1.ResourceList{},
+		hostPortUsage:            scheduling.NewHostPortUsage(),
+		volumeUsage:              scheduling.NewVolumeUsage(),
+		markedForDeletion:        oldNode.markedForDeletion,
+		nominatedUntil:           oldNode.nominatedUntil,
 	}
 	if err := multierr.Combine(
 		c.populateStartupTaints(ctx, n),
@@ -461,6 +465,11 @@ func (c *Cluster) cleanupNode(name string) {
 }
 
 func (c *Cluster) populateStartupTaints(ctx context.Context, n *StateNode) error {
+	// We only need to populate the startup taints once
+	if n.startupTaintsInitialized {
+		return nil
+	}
+
 	if nodeclaimutil.OwnerKey(n).Name == "" {
 		return nil
 	}
@@ -468,11 +477,18 @@ func (c *Cluster) populateStartupTaints(ctx context.Context, n *StateNode) error
 	if err != nil {
 		return client.IgnoreNotFound(err)
 	}
+	n.startupTaintsInitialized = true
 	n.startupTaints = owner.Spec.Template.Spec.StartupTaints
 	return nil
 }
 
 func (c *Cluster) populateInflight(ctx context.Context, n *StateNode) error {
+	// We only need to set inflight details once. This prevents us from logging spurious errors when the cloud provider
+	// instance types change.
+	if n.inflightInitialized {
+		return nil
+	}
+
 	if nodeclaimutil.OwnerKey(n).Name == "" {
 		return nil
 	}
@@ -490,6 +506,7 @@ func (c *Cluster) populateInflight(ctx context.Context, n *StateNode) error {
 	if !ok {
 		return fmt.Errorf("instance type '%s' not found", n.Labels()[v1.LabelInstanceTypeStable])
 	}
+	n.inflightInitialized = true
 	n.inflightCapacity = instanceType.Capacity
 	n.inflightAllocatable = instanceType.Allocatable()
 	return nil

@@ -333,6 +333,26 @@ var _ = Describe("Inflight Nodes", func() {
 		ExpectResources(instanceType.Allocatable(), ExpectStateNodeExists(node).Allocatable())
 		ExpectResources(instanceType.Capacity, ExpectStateNodeExists(node).Capacity())
 	})
+	It("should populate inflight details once", func() {
+		instanceType := cloudProvider.InstanceTypes[0]
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+				v1.LabelInstanceTypeStable:       instanceType.Name,
+			}},
+			ProviderID: test.RandomProviderID(),
+		})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		ExpectStateNodeCount("==", 1)
+		ExpectResources(instanceType.Allocatable(), ExpectStateNodeExists(node).Allocatable())
+		ExpectResources(instanceType.Capacity, ExpectStateNodeExists(node).Capacity())
+
+		cloudProvider.InstanceTypes = cloudProvider.InstanceTypes[1:]
+		// Still expect to succeed w/o instance type since inflight details are set once
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+	})
 	It("should consider the node capacity/allocatable as a combination of instance type and current node", func() {
 		instanceType := cloudProvider.InstanceTypes[0]
 		node := test.Node(test.NodeOptions{
@@ -778,6 +798,45 @@ var _ = Describe("Inflight Nodes", func() {
 				Effect: v1.TaintEffectNoExecute,
 			},
 		}))
+	})
+	It("should only set startup taints once", func() {
+		taints := []v1.Taint{
+			{
+				Key:    "custom-taint1",
+				Value:  "custom-value1",
+				Effect: v1.TaintEffectNoSchedule,
+			},
+		}
+
+		customProvisioner := test.Provisioner(test.ProvisionerOptions{
+			ObjectMeta:    metav1.ObjectMeta{Name: "custom-provisioner"},
+			StartupTaints: taints,
+		})
+		ExpectApplied(ctx, env.Client, customProvisioner)
+
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "abcd",
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: customProvisioner.Name,
+					v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
+				},
+			},
+			Taints:     taints,
+			ProviderID: test.RandomProviderID(),
+		})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		// Update the provisioner to the default suite provisioner w/ no StartupTaints. StartupTaints should still be
+		// populated by custom provisioner.
+		node.Labels[v1alpha5.ProvisionerNameLabelKey] = provisioner.Name
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		ExpectStateNodeCount("==", 1)
+		stateNode := ExpectStateNodeExists(node)
+		Expect(stateNode.Taints()).To(HaveLen(0))
 	})
 	It("should not return known ephemeral taints", func() {
 		machine := test.Machine(v1alpha5.Machine{
