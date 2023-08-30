@@ -22,7 +22,7 @@ import (
 
 	set "github.com/deckarep/golang-set"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/api/policy/v1beta1"
+	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -110,22 +110,21 @@ func (e *EvictionQueue) Start(ctx context.Context) {
 // evict returns true if successful eviction call, and false if not an eviction-related error
 func (e *EvictionQueue) evict(ctx context.Context, nn types.NamespacedName) bool {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("pod", nn))
-	err := e.coreV1Client.Pods(nn.Namespace).Evict(ctx, &v1beta1.Eviction{
+	if err := e.coreV1Client.Pods(nn.Namespace).EvictV1(ctx, &policyv1.Eviction{
 		ObjectMeta: metav1.ObjectMeta{Name: nn.Name, Namespace: nn.Namespace},
-	})
-	// status codes for the eviction API are defined here:
-	// https://kubernetes.io/docs/concepts/scheduling-eviction/api-eviction/#how-api-initiated-eviction-works
-	if apierrors.IsNotFound(err) { // 404
-		return true
-	}
-	if apierrors.IsTooManyRequests(err) { // 429 - PDB violation
-		e.recorder.Publish(terminatorevents.NodeFailedToDrain(&v1.Node{ObjectMeta: metav1.ObjectMeta{
-			Name:      nn.Name,
-			Namespace: nn.Namespace,
-		}}, fmt.Errorf("evicting pod %s/%s violates a PDB", nn.Namespace, nn.Name)))
-		return false
-	}
-	if err != nil {
+	}); err != nil {
+		// status codes for the eviction API are defined here:
+		// https://kubernetes.io/docs/concepts/scheduling-eviction/api-eviction/#how-api-initiated-eviction-works
+		if apierrors.IsNotFound(err) { // 404
+			return true
+		}
+		if apierrors.IsTooManyRequests(err) { // 429 - PDB violation
+			e.recorder.Publish(terminatorevents.NodeFailedToDrain(&v1.Node{ObjectMeta: metav1.ObjectMeta{
+				Name:      nn.Name,
+				Namespace: nn.Namespace,
+			}}, fmt.Errorf("evicting pod %s/%s violates a PDB", nn.Namespace, nn.Name)))
+			return false
+		}
 		logging.FromContext(ctx).Errorf("evicting pod, %s", err)
 		return false
 	}
