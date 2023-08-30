@@ -31,6 +31,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
@@ -332,6 +333,27 @@ var _ = Describe("Inflight Nodes", func() {
 		ExpectStateNodeCount("==", 1)
 		ExpectResources(instanceType.Allocatable(), ExpectStateNodeExists(node).Allocatable())
 		ExpectResources(instanceType.Capacity, ExpectStateNodeExists(node).Capacity())
+	})
+	It("should populate inflight details once", func() {
+		instanceType := cloudProvider.InstanceTypes[0]
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+				v1.LabelInstanceTypeStable:       instanceType.Name,
+			}},
+			ProviderID: test.RandomProviderID(),
+		})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		ExpectStateNodeCount("==", 1)
+		ExpectResources(instanceType.Allocatable(), ExpectStateNodeExists(node).Allocatable())
+		ExpectResources(instanceType.Capacity, ExpectStateNodeExists(node).Capacity())
+
+		cloudProvider.InstanceTypes = cloudProvider.InstanceTypes[1:]
+		// Still expect to succeed w/o instance type since inflight details are set once
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		cloudProvider.InstanceTypes = append([]*cloudprovider.InstanceType{instanceType}, cloudProvider.InstanceTypes...)
 	})
 	It("should consider the node capacity/allocatable as a combination of instance type and current node", func() {
 		instanceType := cloudProvider.InstanceTypes[0]
@@ -778,6 +800,109 @@ var _ = Describe("Inflight Nodes", func() {
 				Effect: v1.TaintEffectNoExecute,
 			},
 		}))
+	})
+	It("should only set startup taints once", func() {
+		machine := test.Machine(v1alpha5.Machine{
+			Spec: v1alpha5.MachineSpec{
+				Requirements: []v1.NodeSelectorRequirement{
+					{
+						Key:      v1.LabelInstanceTypeStable,
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{cloudProvider.InstanceTypes[0].Name},
+					},
+					{
+						Key:      v1.LabelTopologyZone,
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{"test-zone-1"},
+					},
+				},
+				StartupTaints: []v1.Taint{
+					{
+						Key:    "custom-taint",
+						Value:  "custom-value",
+						Effect: v1.TaintEffectNoSchedule,
+					},
+					{
+						Key:    "custom-taint2",
+						Value:  "custom-value2",
+						Effect: v1.TaintEffectNoExecute,
+					},
+				},
+				MachineTemplateRef: &v1alpha5.MachineTemplateRef{
+					Name: "default",
+				},
+			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.RandomProviderID(),
+				Capacity: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("2"),
+					v1.ResourceMemory:           resource.MustParse("32Gi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+				},
+				Allocatable: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("1"),
+					v1.ResourceMemory:           resource.MustParse("30Gi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, machine)
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+
+		node := test.Node(test.NodeOptions{
+			ProviderID: machine.Status.ProviderID,
+			Capacity: v1.ResourceList{
+				v1.ResourceCPU:              resource.MustParse("1800m"),
+				v1.ResourceMemory:           resource.MustParse("30500Mi"),
+				v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
+			},
+			Allocatable: v1.ResourceList{
+				v1.ResourceCPU:              resource.MustParse("900m"),
+				v1.ResourceMemory:           resource.MustParse("29250Mi"),
+				v1.ResourceEphemeralStorage: resource.MustParse("17800Mi"),
+			},
+			Taints: []v1.Taint{
+				{
+					Key:    "custom-taint",
+					Value:  "custom-value",
+					Effect: v1.TaintEffectNoSchedule,
+				},
+				{
+					Key:    "custom-taint2",
+					Value:  "custom-value2",
+					Effect: v1.TaintEffectNoExecute,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
+		ExpectMakeNodesInitialized(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		ExpectStateNodeCount("==", 1)
+		stateNode := ExpectStateNodeExists(node)
+		Expect(stateNode.Taints()).To(HaveLen(2))
+		Expect(stateNode.Taints()).To(Equal([]v1.Taint{
+			{
+				Key:    "custom-taint",
+				Value:  "custom-value",
+				Effect: v1.TaintEffectNoSchedule,
+			},
+			{
+				Key:    "custom-taint2",
+				Value:  "custom-value2",
+				Effect: v1.TaintEffectNoExecute,
+			},
+		}))
+
+		node.Labels[v1alpha5.ProvisionerNameLabelKey] = "overwritten-provisioner"
+		ExpectApplied(ctx, env.Client, node)
+
+		// If there was an attempt to update startup taints, we would expect it to fail since this provisioner does not exist
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 	})
 	It("should not return known ephemeral taints", func() {
 		machine := test.Machine(v1alpha5.Machine{
