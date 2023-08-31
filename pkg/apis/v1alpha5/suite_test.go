@@ -578,48 +578,48 @@ var _ = Describe("Provisioner Annotation", func() {
 			Expect(p.Hash()).To(Equal(expectedHash))
 		},
 		// Base provisioner
-		Entry("should match static hash values", baseProvisionerExpectedHash),
+		Entry("should match with the base provisioner", baseProvisionerExpectedHash),
 
 		// Modified static fields - expect change from base provisioner
 		Entry(
-			"should match static hash values with modified annotations",
+			"should match with modified annotations",
 			"7374986726887162519",
 			test.ProvisionerOptions{Annotations: map[string]string{"keyAnnotationTest": "valueAnnotationTest"}},
 		),
 		Entry(
-			"should match static hash values with modified labels",
+			"should match with modified labels",
 			"9065364558915106368",
 			test.ProvisionerOptions{Labels: map[string]string{"keyLabelTest": "valueLabelTest"}},
 		),
 		Entry(
-			"should match static hash values with modified taints",
+			"should match with modified taints",
 			"9081458816929490897",
 			test.ProvisionerOptions{Taints: []v1.Taint{{Key: "keytest2Taint", Effect: v1.TaintEffectNoExecute}}},
 		),
 		Entry(
-			"should match static hash values with modified startup taints",
+			"should match with modified startup taints",
 			"2352640223763896447",
 			test.ProvisionerOptions{StartupTaints: []v1.Taint{{Key: "keytest2StartupTaint", Effect: v1.TaintEffectNoExecute}}},
 		),
 		Entry(
-			"should match static hash values with modified kubelet config",
+			"should match with modified kubelet config",
 			"3622457352880294488",
 			test.ProvisionerOptions{Kubelet: &KubeletConfiguration{MaxPods: ptr.Int32(30)}},
 		),
 
 		// Modified behavior fields - shouldn't change from base provisioner
 		Entry(
-			"should match static hash values with modified limits",
+			"should match with modified limits",
 			baseProvisionerExpectedHash,
 			test.ProvisionerOptions{Limits: v1.ResourceList{"cpu": resource.MustParse("4")}},
 		),
 		Entry(
-			"should match static hash values with modified provider ref",
+			"should match with modified provider ref",
 			baseProvisionerExpectedHash,
 			test.ProvisionerOptions{ProviderRef: &MachineTemplateRef{Name: "foobar"}},
 		),
 		Entry(
-			"should match static hash values with modified requirements",
+			"should match with modified requirements",
 			baseProvisionerExpectedHash,
 			test.ProvisionerOptions{Requirements: []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
@@ -628,22 +628,22 @@ var _ = Describe("Provisioner Annotation", func() {
 			}},
 		),
 		Entry(
-			"should match static hash values with modified TTLSecondsUntilExpired",
+			"should match with modified TTLSecondsUntilExpired",
 			baseProvisionerExpectedHash,
 			test.ProvisionerOptions{TTLSecondsUntilExpired: lo.ToPtr(int64(30))},
 		),
 		Entry(
-			"should match static hash values with modified TTLSecondsAfterEmpty",
+			"should match with modified TTLSecondsAfterEmpty",
 			baseProvisionerExpectedHash,
 			test.ProvisionerOptions{TTLSecondsAfterEmpty: lo.ToPtr(int64(50))},
 		),
 		Entry(
-			"should match static hash values with modified weight",
+			"should match with modified weight",
 			baseProvisionerExpectedHash,
 			test.ProvisionerOptions{Weight: lo.ToPtr(int32(80))},
 		),
 		Entry(
-			"should match static hash values with modified consolidation flag",
+			"should match with modified consolidation flag",
 			baseProvisionerExpectedHash,
 			test.ProvisionerOptions{Consolidation: &Consolidation{lo.ToPtr(true)}},
 		),
