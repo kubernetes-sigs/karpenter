@@ -567,38 +567,40 @@ var _ = Describe("Provisioner Annotation", func() {
 		}
 		provisioner = test.Provisioner(testProvisionerOptions)
 	})
-	It("should match previous static hashes", func() {
-		provisioners := []struct {
-			provisioner *Provisioner
-			hash        string
-		}{
-			{
-				provisioner: provisioner,
-				hash:        "14114424411830460479",
-			},
-			{
-				provisioner: test.Provisioner(testProvisionerOptions, test.ProvisionerOptions{Annotations: map[string]string{"keyAnnotationTest": "valueAnnotationTest"}}),
-				hash:        "7374986726887162519",
-			},
-			{
-				provisioner: test.Provisioner(testProvisionerOptions, test.ProvisionerOptions{Labels: map[string]string{"keyLabelTest": "valueLabelTest"}}),
-				hash:        "9065364558915106368",
-			},
-			{
-				provisioner: test.Provisioner(testProvisionerOptions, test.ProvisionerOptions{Taints: []v1.Taint{{Key: "keytest2Taint", Effect: v1.TaintEffectNoExecute}}}),
-				hash:        "9081458816929490897",
-			},
-			{
-				provisioner: test.Provisioner(testProvisionerOptions, test.ProvisionerOptions{StartupTaints: []v1.Taint{{Key: "keytest2StartupTaint", Effect: v1.TaintEffectNoExecute}}}),
-				hash:        "2352640223763896447",
-			},
-		}
-
-		for _, p := range provisioners {
-			hash := p.provisioner.Hash()
-			Expect(hash).To(Equal(p.hash))
-		}
-	})
+	DescribeTable(
+		"Static Hash Values",
+		func(expectedHash string, opts ...test.ProvisionerOptions) {
+			overrides := append([]test.ProvisionerOptions{testProvisionerOptions}, opts...)
+			p := test.Provisioner(overrides...)
+			Expect(p.Hash()).To(Equal(expectedHash))
+		},
+		Entry("should match static hash values", "14114424411830460479"),
+		Entry(
+			"should match static hash values with modified annotations",
+			"7374986726887162519",
+			test.ProvisionerOptions{Annotations: map[string]string{"keyAnnotationTest": "valueAnnotationTest"}},
+		),
+		Entry(
+			"should match static hash values with modified labels",
+			"9065364558915106368",
+			test.ProvisionerOptions{Labels: map[string]string{"keyLabelTest": "valueLabelTest"}},
+		),
+		Entry(
+			"should match static hash values with modified taints",
+			"9081458816929490897",
+			test.ProvisionerOptions{Taints: []v1.Taint{{Key: "keytest2Taint", Effect: v1.TaintEffectNoExecute}}},
+		),
+		Entry(
+			"should match static hash values with modified startup taints",
+			"2352640223763896447",
+			test.ProvisionerOptions{StartupTaints: []v1.Taint{{Key: "keytest2StartupTaint", Effect: v1.TaintEffectNoExecute}}},
+		),
+		Entry(
+			"should match static hash values with modified kubelet config",
+			"3622457352880294488",
+			test.ProvisionerOptions{Kubelet: &KubeletConfiguration{MaxPods: ptr.Int32(30)}},
+		),
+	)
 	It("should change hash when static fields are updated", func() {
 		expectedHash := provisioner.Hash()
 
