@@ -31,7 +31,7 @@ import (
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
-var _ = Describe("Expiration", func() {
+var _ = Describe("Machine/Expiration", func() {
 	var provisioner *v1alpha5.Provisioner
 	var machine *v1alpha5.Machine
 	var node *v1.Node
@@ -48,7 +48,7 @@ var _ = Describe("Expiration", func() {
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineExpired)
 		ExpectApplied(ctx, env.Client, provisioner, machine)
 
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, machineDisruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineExpired)).To(BeNil())
@@ -59,7 +59,7 @@ var _ = Describe("Expiration", func() {
 
 		// step forward to make the node expired
 		fakeClock.Step(60 * time.Second)
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, machineDisruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineExpired).IsTrue()).To(BeTrue())
@@ -69,7 +69,7 @@ var _ = Describe("Expiration", func() {
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineExpired)
 		ExpectApplied(ctx, env.Client, provisioner, machine)
 
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, machineDisruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineExpired)).To(BeNil())
@@ -81,7 +81,7 @@ var _ = Describe("Expiration", func() {
 		// step forward to make the node expired
 		fakeClock.Step(60 * time.Second)
 		ExpectApplied(ctx, env.Client, machine) // machine shouldn't be expired, but node will be
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, machineDisruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineExpired).IsTrue()).To(BeTrue())
@@ -93,7 +93,7 @@ var _ = Describe("Expiration", func() {
 		// step forward to make the node expired
 		fakeClock.Step(60 * time.Second)
 		ExpectApplied(ctx, env.Client, node) // node shouldn't be expired, but machine will be
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, machineDisruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineExpired).IsTrue()).To(BeTrue())
@@ -104,7 +104,7 @@ var _ = Describe("Expiration", func() {
 
 		fakeClock.Step(time.Second * 100)
 
-		result := ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
+		result := ExpectReconcileSucceeded(ctx, machineDisruptionController, client.ObjectKeyFromObject(machine))
 		Expect(result.RequeueAfter).To(BeNumerically("~", time.Second*100, time.Second))
 	})
 })

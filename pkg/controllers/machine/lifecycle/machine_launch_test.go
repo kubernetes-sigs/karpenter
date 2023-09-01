@@ -32,7 +32,7 @@ import (
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
-var _ = Describe("Launch", func() {
+var _ = Describe("Machine/Launch", func() {
 	var provisioner *v1alpha5.Provisioner
 	BeforeEach(func() {
 		provisioner = test.Provisioner()

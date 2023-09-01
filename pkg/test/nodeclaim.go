@@ -38,6 +38,11 @@ func NodeClaim(overrides ...v1beta1.NodeClaim) *v1beta1.NodeClaim {
 	if override.Status.ProviderID == "" {
 		override.Status.ProviderID = RandomProviderID()
 	}
+	if override.Spec.NodeClass == nil {
+		override.Spec.NodeClass = &v1beta1.NodeClassReference{
+			Name: "default",
+		}
+	}
 	return &v1beta1.NodeClaim{
 		ObjectMeta: ObjectMeta(override.ObjectMeta),
 		Spec:       override.Spec,
