@@ -28,6 +28,11 @@ import (
 	provisionerutil "github.com/aws/karpenter-core/pkg/utils/provisioner"
 )
 
+// EnableNodePools is an internal feature flag to allow functions that could List NodePools to work
+// This flag is currently here to enable testing
+// TODO @joinnis: Remove this internal flag when the v1beta1 APIs are released
+var EnableNodePools = false
+
 type Key struct {
 	Name          string
 	IsProvisioner bool
@@ -110,8 +115,12 @@ func List(ctx context.Context, c client.Client, opts ...client.ListOption) (*v1b
 	convertedNodePools := lo.Map(provisionerList.Items, func(p v1alpha5.Provisioner, _ int) v1beta1.NodePool {
 		return *New(&p)
 	})
-	// TODO @joinnis: Add NodePools to this List() function when releasing v1beta1 APIs
 	nodePoolList := &v1beta1.NodePoolList{}
+	if EnableNodePools {
+		if err := c.List(ctx, nodePoolList, opts...); err != nil {
+			return nil, err
+		}
+	}
 	nodePoolList.Items = append(nodePoolList.Items, convertedNodePools...)
 	return nodePoolList, nil
 }

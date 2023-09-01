@@ -19,6 +19,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -45,9 +46,9 @@ var _ = Describe("NodeClaim/Disruption", func() {
 	})
 	It("should set multiple disruption conditions simultaneously", func() {
 		cp.Drifted = "drifted"
-		nodePool.Spec.Deprovisioning.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
-		nodePool.Spec.Deprovisioning.ConsolidationTTL.Duration = time.Second * 30
-		nodePool.Spec.Deprovisioning.ExpirationTTL.Duration = time.Second * 30
+		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
+		nodePool.Spec.Disruption.ConsolidateAfter.Duration = lo.ToPtr(time.Second * 30)
+		nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 30)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 
@@ -61,9 +62,8 @@ var _ = Describe("NodeClaim/Disruption", func() {
 		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeExpired).IsTrue()).To(BeTrue())
 	})
 	It("should remove multiple disruption conditions simultaneously", func() {
-		nodePool.Spec.Deprovisioning.ConsolidationPolicy = v1beta1.ConsolidationPolicyNever
-		nodePool.Spec.Deprovisioning.ExpirationTTL.Duration = -1
-		nodePool.Spec.Deprovisioning.ConsolidationTTL.Duration = -1
+		nodePool.Spec.Disruption.ExpireAfter.Duration = nil
+		nodePool.Spec.Disruption.ConsolidateAfter.Duration = nil
 
 		nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeDrifted)
 		nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeEmpty)

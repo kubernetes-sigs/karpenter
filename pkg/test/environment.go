@@ -33,6 +33,8 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/utils/env"
 	"github.com/aws/karpenter-core/pkg/utils/functional"
+	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
+	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 )
 
 type Environment struct {
@@ -113,6 +115,9 @@ func NewEnvironment(scheme *runtime.Scheme, options ...functional.Option[Environ
 			log.Fatalf("cache failed to sync")
 		}
 	}
+	// TODO @joinnis: Remove this internal flag when the v1beta1 APIs are released
+	nodepoolutil.EnableNodePools = true
+	nodeclaimutil.EnableNodeClaims = true
 	return &Environment{
 		Environment:         environment,
 		Client:              c,

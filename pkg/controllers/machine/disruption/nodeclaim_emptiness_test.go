@@ -38,8 +38,8 @@ var _ = Describe("NodeClaim/Emptiness", func() {
 	var node *v1.Node
 	BeforeEach(func() {
 		nodePool = test.NodePool()
-		nodePool.Spec.Deprovisioning.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
-		nodePool.Spec.Deprovisioning.ConsolidationTTL.Duration = time.Second * 30
+		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
+		nodePool.Spec.Disruption.ConsolidateAfter.Duration = lo.ToPtr(time.Second * 30)
 		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -60,8 +60,7 @@ var _ = Describe("NodeClaim/Emptiness", func() {
 		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeEmpty).IsTrue()).To(BeTrue())
 	})
 	It("should remove the status condition from the nodeClaim when emptiness is disabled", func() {
-		nodePool.Spec.Deprovisioning.ConsolidationPolicy = v1beta1.ConsolidationPolicyNever
-		nodePool.Spec.Deprovisioning.ConsolidationTTL.Duration = -1
+		nodePool.Spec.Disruption.ConsolidateAfter.Duration = nil
 		nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeEmpty)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
