@@ -20,7 +20,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -35,7 +35,7 @@ const (
 	// MetricLabelErrorDefaultVal is the default string value that represents "error type unknown"
 	MetricLabelErrorDefaultVal = ""
 	// Well-known metricLabelError values
-	MachineNotFoundError      = "MachineNotFoundError"
+	NodeClaimNotFoundError    = "NodeClaimNotFoundError"
 	InsufficientCapacityError = "InsufficientCapacityError"
 )
 
@@ -92,60 +92,60 @@ func Decorate(cloudProvider cloudprovider.CloudProvider) cloudprovider.CloudProv
 	return &decorator{cloudProvider}
 }
 
-func (d *decorator) Create(ctx context.Context, machine *v1alpha5.Machine) (*v1alpha5.Machine, error) {
+func (d *decorator) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (*v1beta1.NodeClaim, error) {
 	method := "Create"
 	defer metrics.Measure(methodDurationHistogramVec.With(getLabelsMapForDuration(ctx, d, method)))()
-	machine, err := d.CloudProvider.Create(ctx, machine)
+	nodeClaim, err := d.CloudProvider.Create(ctx, nodeClaim)
 	if err != nil {
 		errorsTotalCounter.With(getLabelsMapForError(ctx, d, method, err)).Inc()
 	}
-	return machine, err
+	return nodeClaim, err
 }
 
-func (d *decorator) Delete(ctx context.Context, machine *v1alpha5.Machine) error {
+func (d *decorator) Delete(ctx context.Context, nodeClaim *v1beta1.NodeClaim) error {
 	method := "Delete"
 	defer metrics.Measure(methodDurationHistogramVec.With(getLabelsMapForDuration(ctx, d, method)))()
-	err := d.CloudProvider.Delete(ctx, machine)
+	err := d.CloudProvider.Delete(ctx, nodeClaim)
 	if err != nil {
 		errorsTotalCounter.With(getLabelsMapForError(ctx, d, method, err)).Inc()
 	}
 	return err
 }
 
-func (d *decorator) Get(ctx context.Context, id string) (*v1alpha5.Machine, error) {
+func (d *decorator) Get(ctx context.Context, id string) (*v1beta1.NodeClaim, error) {
 	method := "Get"
 	defer metrics.Measure(methodDurationHistogramVec.With(getLabelsMapForDuration(ctx, d, method)))()
-	machine, err := d.CloudProvider.Get(ctx, id)
+	nodeClaim, err := d.CloudProvider.Get(ctx, id)
 	if err != nil {
 		errorsTotalCounter.With(getLabelsMapForError(ctx, d, method, err)).Inc()
 	}
-	return machine, err
+	return nodeClaim, err
 }
 
-func (d *decorator) List(ctx context.Context) ([]*v1alpha5.Machine, error) {
+func (d *decorator) List(ctx context.Context) ([]*v1beta1.NodeClaim, error) {
 	method := "List"
 	defer metrics.Measure(methodDurationHistogramVec.With(getLabelsMapForDuration(ctx, d, method)))()
-	machines, err := d.CloudProvider.List(ctx)
+	nodeClaims, err := d.CloudProvider.List(ctx)
 	if err != nil {
 		errorsTotalCounter.With(getLabelsMapForError(ctx, d, method, err)).Inc()
 	}
-	return machines, err
+	return nodeClaims, err
 }
 
-func (d *decorator) GetInstanceTypes(ctx context.Context, provisioner *v1alpha5.Provisioner) ([]*cloudprovider.InstanceType, error) {
+func (d *decorator) GetInstanceTypes(ctx context.Context, nodePool *v1beta1.NodePool) ([]*cloudprovider.InstanceType, error) {
 	method := "GetInstanceTypes"
 	defer metrics.Measure(methodDurationHistogramVec.With(getLabelsMapForDuration(ctx, d, method)))()
-	instanceType, err := d.CloudProvider.GetInstanceTypes(ctx, provisioner)
+	instanceType, err := d.CloudProvider.GetInstanceTypes(ctx, nodePool)
 	if err != nil {
 		errorsTotalCounter.With(getLabelsMapForError(ctx, d, method, err)).Inc()
 	}
 	return instanceType, err
 }
 
-func (d *decorator) IsMachineDrifted(ctx context.Context, machine *v1alpha5.Machine) (cloudprovider.DriftReason, error) {
-	method := "IsMachineDrifted"
+func (d *decorator) IsDrifted(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (cloudprovider.DriftReason, error) {
+	method := "IsDrifted"
 	defer metrics.Measure(methodDurationHistogramVec.With(getLabelsMapForDuration(ctx, d, method)))()
-	isDrifted, err := d.CloudProvider.IsMachineDrifted(ctx, machine)
+	isDrifted, err := d.CloudProvider.IsDrifted(ctx, nodeClaim)
 	if err != nil {
 		errorsTotalCounter.With(getLabelsMapForError(ctx, d, method, err)).Inc()
 	}
@@ -178,8 +178,8 @@ func getLabelsMapForError(ctx context.Context, d *decorator, method string, err 
 func GetErrorTypeLabelValue(err error) string {
 	if cloudprovider.IsInsufficientCapacityError(err) {
 		return InsufficientCapacityError
-	} else if cloudprovider.IsMachineNotFoundError(err) {
-		return MachineNotFoundError
+	} else if cloudprovider.IsNodeClaimNotFoundError(err) {
+		return NodeClaimNotFoundError
 	}
 	return MetricLabelErrorDefaultVal
 }

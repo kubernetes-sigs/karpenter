@@ -27,7 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/test"
@@ -42,19 +42,19 @@ type CloudProvider struct {
 
 	mu sync.RWMutex
 	// CreateCalls contains the arguments for every create call that was made since it was cleared
-	CreateCalls        []*v1alpha5.Machine
+	CreateCalls        []*v1beta1.NodeClaim
 	AllowedCreateCalls int
 	NextCreateErr      error
-	DeleteCalls        []*v1alpha5.Machine
+	DeleteCalls        []*v1beta1.NodeClaim
 
-	CreatedMachines map[string]*v1alpha5.Machine
-	Drifted         cloudprovider.DriftReason
+	CreatedNodeClaims map[string]*v1beta1.NodeClaim
+	Drifted           cloudprovider.DriftReason
 }
 
 func NewCloudProvider() *CloudProvider {
 	return &CloudProvider{
 		AllowedCreateCalls: math.MaxInt,
-		CreatedMachines:    map[string]*v1alpha5.Machine{},
+		CreatedNodeClaims:  map[string]*v1beta1.NodeClaim{},
 	}
 }
 
@@ -62,15 +62,15 @@ func NewCloudProvider() *CloudProvider {
 func (c *CloudProvider) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.CreateCalls = []*v1alpha5.Machine{}
-	c.CreatedMachines = map[string]*v1alpha5.Machine{}
+	c.CreateCalls = []*v1beta1.NodeClaim{}
+	c.CreatedNodeClaims = map[string]*v1beta1.NodeClaim{}
 	c.AllowedCreateCalls = math.MaxInt
 	c.NextCreateErr = nil
-	c.DeleteCalls = []*v1alpha5.Machine{}
+	c.DeleteCalls = []*v1beta1.NodeClaim{}
 	c.Drifted = "drifted"
 }
 
-func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (*v1alpha5.Machine, error) {
+func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (*v1beta1.NodeClaim, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -80,15 +80,15 @@ func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (
 		return nil, temp
 	}
 
-	c.CreateCalls = append(c.CreateCalls, machine)
+	c.CreateCalls = append(c.CreateCalls, nodeClaim)
 	if len(c.CreateCalls) > c.AllowedCreateCalls {
-		return &v1alpha5.Machine{}, fmt.Errorf("erroring as number of AllowedCreateCalls has been exceeded")
+		return &v1beta1.NodeClaim{}, fmt.Errorf("erroring as number of AllowedCreateCalls has been exceeded")
 	}
-	reqs := scheduling.NewNodeSelectorRequirements(machine.Spec.Requirements...)
+	reqs := scheduling.NewNodeSelectorRequirements(nodeClaim.Spec.Requirements...)
 	instanceTypes := lo.Filter(lo.Must(c.GetInstanceTypes(ctx, nil)), func(i *cloudprovider.InstanceType, _ int) bool {
 		return reqs.Compatible(i.Requirements, scheduling.AllowUndefinedWellKnownLabelsV1Alpha5) == nil &&
 			len(i.Offerings.Requirements(reqs).Available()) > 0 &&
-			resources.Fits(machine.Spec.Resources.Requests, i.Allocatable())
+			resources.Fits(nodeClaim.Spec.Resources.Requests, i.Allocatable())
 	})
 	// Order instance types so that we get the cheapest instance types of the available offerings
 	sort.Slice(instanceTypes, func(i, j int) bool {
@@ -108,50 +108,51 @@ func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (
 	for _, o := range instanceType.Offerings.Available() {
 		if reqs.Compatible(scheduling.NewRequirements(
 			scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, o.Zone),
-			scheduling.NewRequirement(v1alpha5.LabelCapacityType, v1.NodeSelectorOpIn, o.CapacityType),
+			scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, o.CapacityType),
 		), scheduling.AllowUndefinedWellKnownLabelsV1Alpha5) == nil {
 			labels[v1.LabelTopologyZone] = o.Zone
-			labels[v1alpha5.LabelCapacityType] = o.CapacityType
+			labels[v1beta1.CapacityTypeLabelKey] = o.CapacityType
 			break
 		}
 	}
-	created := &v1alpha5.Machine{
+	created := &v1beta1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        machine.Name,
-			Labels:      lo.Assign(labels, machine.Labels),
-			Annotations: machine.Annotations,
+			Name:        nodeClaim.Name,
+			Labels:      lo.Assign(labels, nodeClaim.Labels),
+			Annotations: nodeClaim.Annotations,
 		},
-		Spec: *machine.Spec.DeepCopy(),
-		Status: v1alpha5.MachineStatus{
+		Spec: *nodeClaim.Spec.DeepCopy(),
+		Status: v1beta1.NodeClaimStatus{
 			ProviderID:  test.RandomProviderID(),
 			Capacity:    functional.FilterMap(instanceType.Capacity, func(_ v1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
 			Allocatable: functional.FilterMap(instanceType.Allocatable(), func(_ v1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
 		},
+		IsMachine: nodeClaim.IsMachine,
 	}
-	c.CreatedMachines[created.Status.ProviderID] = created
+	c.CreatedNodeClaims[created.Status.ProviderID] = created
 	return created, nil
 }
 
-func (c *CloudProvider) Get(_ context.Context, id string) (*v1alpha5.Machine, error) {
+func (c *CloudProvider) Get(_ context.Context, id string) (*v1beta1.NodeClaim, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if machine, ok := c.CreatedMachines[id]; ok {
-		return machine.DeepCopy(), nil
+	if nodeClaim, ok := c.CreatedNodeClaims[id]; ok {
+		return nodeClaim.DeepCopy(), nil
 	}
-	return nil, cloudprovider.NewMachineNotFoundError(fmt.Errorf("no machine exists with id '%s'", id))
+	return nil, cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("no nodeclaim exists with id '%s'", id))
 }
 
-func (c *CloudProvider) List(_ context.Context) ([]*v1alpha5.Machine, error) {
+func (c *CloudProvider) List(_ context.Context) ([]*v1beta1.NodeClaim, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return lo.Map(lo.Values(c.CreatedMachines), func(m *v1alpha5.Machine, _ int) *v1alpha5.Machine {
-		return m.DeepCopy()
+	return lo.Map(lo.Values(c.CreatedNodeClaims), func(nc *v1beta1.NodeClaim, _ int) *v1beta1.NodeClaim {
+		return nc.DeepCopy()
 	}), nil
 }
 
-func (c *CloudProvider) GetInstanceTypes(_ context.Context, _ *v1alpha5.Provisioner) ([]*cloudprovider.InstanceType, error) {
+func (c *CloudProvider) GetInstanceTypes(_ context.Context, _ *v1beta1.NodePool) ([]*cloudprovider.InstanceType, error) {
 	if c.InstanceTypes != nil {
 		return c.InstanceTypes, nil
 	}
@@ -195,19 +196,19 @@ func (c *CloudProvider) GetInstanceTypes(_ context.Context, _ *v1alpha5.Provisio
 	}, nil
 }
 
-func (c *CloudProvider) Delete(_ context.Context, m *v1alpha5.Machine) error {
+func (c *CloudProvider) Delete(_ context.Context, nc *v1beta1.NodeClaim) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.DeleteCalls = append(c.DeleteCalls, m)
-	if _, ok := c.CreatedMachines[m.Status.ProviderID]; ok {
-		delete(c.CreatedMachines, m.Status.ProviderID)
+	c.DeleteCalls = append(c.DeleteCalls, nc)
+	if _, ok := c.CreatedNodeClaims[nc.Status.ProviderID]; ok {
+		delete(c.CreatedNodeClaims, nc.Status.ProviderID)
 		return nil
 	}
-	return cloudprovider.NewMachineNotFoundError(fmt.Errorf("no machine exists with provider id '%s'", m.Status.ProviderID))
+	return cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("no nodeclaim exists with provider id '%s'", nc.Status.ProviderID))
 }
 
-func (c *CloudProvider) IsMachineDrifted(context.Context, *v1alpha5.Machine) (cloudprovider.DriftReason, error) {
+func (c *CloudProvider) IsDrifted(context.Context, *v1beta1.NodeClaim) (cloudprovider.DriftReason, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 

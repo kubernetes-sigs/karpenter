@@ -80,7 +80,7 @@ var _ = Describe("Machine", func() {
 
 		// Expect the machine to be gone from the cloudprovider
 		_, err = cloudProvider.Get(ctx, machine.Status.ProviderID)
-		Expect(cloudprovider.IsMachineNotFoundError(err)).To(BeTrue())
+		Expect(cloudprovider.IsNodeClaimNotFoundError(err)).To(BeTrue())
 	})
 	It("should delete multiple Nodes if multiple Nodes map to the Machine", func() {
 		ExpectApplied(ctx, env.Client, provisioner, machine)
@@ -106,7 +106,7 @@ var _ = Describe("Machine", func() {
 
 		// Expect the machine to be gone from the cloudprovider
 		_, err = cloudProvider.Get(ctx, machine.Status.ProviderID)
-		Expect(cloudprovider.IsMachineNotFoundError(err)).To(BeTrue())
+		Expect(cloudprovider.IsNodeClaimNotFoundError(err)).To(BeTrue())
 	})
 	It("should delete the Instance if the Machine is linked but doesn't have its providerID resolved yet", func() {
 		node := test.MachineLinkedNode(machine)
@@ -122,7 +122,7 @@ var _ = Describe("Machine", func() {
 
 		// Expect the machine to be gone from the cloudprovider
 		_, err := cloudProvider.Get(ctx, machine.Annotations[v1alpha5.MachineLinkedAnnotationKey])
-		Expect(cloudprovider.IsMachineNotFoundError(err)).To(BeTrue())
+		Expect(cloudprovider.IsNodeClaimNotFoundError(err)).To(BeTrue())
 	})
 	It("should not delete the Machine until all the Nodes are removed", func() {
 		ExpectApplied(ctx, env.Client, provisioner, machine)

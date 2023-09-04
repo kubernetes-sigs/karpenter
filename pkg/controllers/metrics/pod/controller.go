@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 )
@@ -43,6 +44,7 @@ const (
 	ownerSelfLink       = "owner"
 	podHostName         = "node"
 	podProvisioner      = "provisioner"
+	podNodePool         = "nodepool"
 	podHostZone         = "zone"
 	podHostArchitecture = "arch"
 	podHostCapacityType = "capacity_type"
@@ -93,6 +95,7 @@ func labelNames() []string {
 		ownerSelfLink,
 		podHostName,
 		podProvisioner,
+		podNodePool,
 		podHostZone,
 		podHostArchitecture,
 		podHostCapacityType,
@@ -179,9 +182,10 @@ func (c *Controller) makeLabels(ctx context.Context, pod *v1.Pod) (prometheus.La
 	}
 	metricLabels[podHostZone] = node.Labels[v1.LabelTopologyZone]
 	metricLabels[podHostArchitecture] = node.Labels[v1.LabelArchStable]
-	metricLabels[podHostCapacityType] = node.Labels[v1alpha5.LabelCapacityType]
+	metricLabels[podHostCapacityType] = node.Labels[v1beta1.CapacityTypeLabelKey]
 	metricLabels[podHostInstanceType] = node.Labels[v1.LabelInstanceTypeStable]
 	metricLabels[podProvisioner] = node.Labels[v1alpha5.ProvisionerNameLabelKey]
+	metricLabels[podNodePool] = node.Labels[v1beta1.NodePoolLabelKey]
 	return metricLabels, nil
 }
 

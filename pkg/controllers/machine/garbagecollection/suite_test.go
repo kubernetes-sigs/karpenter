@@ -41,7 +41,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
-	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
+	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
@@ -117,9 +117,9 @@ var _ = Describe("Combined/GarbageCollection", func() {
 		// Step forward to move past the cache eventual consistency timeout
 		fakeClock.SetTime(time.Now().Add(time.Second * 20))
 
-		// Delete the nodeClaim from the cloudprovider
-		Expect(cloudProvider.Delete(ctx, machine)).To(Succeed())
-		Expect(cloudProvider.Delete(ctx, machineutil.NewFromNodeClaim(nodeClaim))).To(Succeed())
+		// Delete the NodeClaim and Machine from the cloudprovider
+		Expect(cloudProvider.Delete(ctx, nodeclaimutil.New(machine))).To(Succeed())
+		Expect(cloudProvider.Delete(ctx, nodeClaim)).To(Succeed())
 
 		// Expect the NodeClaim to be removed now that the Instance is gone
 		ExpectReconcileSucceeded(ctx, garbageCollectionController, client.ObjectKey{})

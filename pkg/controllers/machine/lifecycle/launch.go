@@ -30,7 +30,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/scheduling"
-	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
 
@@ -79,7 +78,7 @@ func (l *Launch) linkNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", nodeClaim.Annotations[v1alpha5.MachineLinkedAnnotationKey]))
 	created, err := l.cloudProvider.Get(ctx, nodeClaim.Annotations[v1alpha5.MachineLinkedAnnotationKey])
 	if err != nil {
-		if !cloudprovider.IsMachineNotFoundError(err) {
+		if !cloudprovider.IsNodeClaimNotFoundError(err) {
 			nodeClaim.StatusConditions().MarkFalse(v1beta1.NodeLaunched, "LinkFailed", truncateMessage(err.Error()))
 			return nil, fmt.Errorf("linking, %w", err)
 		}
@@ -96,11 +95,11 @@ func (l *Launch) linkNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 		"zone", created.Labels[v1.LabelTopologyZone],
 		"capacity-type", created.Labels[v1alpha5.LabelCapacityType],
 		"allocatable", created.Status.Allocatable).Infof("linked %s", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"))
-	return nodeclaimutil.New(created), nil
+	return created, nil
 }
 
 func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (*v1beta1.NodeClaim, error) {
-	created, err := l.cloudProvider.Create(ctx, machineutil.NewFromNodeClaim(nodeClaim))
+	created, err := l.cloudProvider.Create(ctx, nodeClaim)
 	if err != nil {
 		switch {
 		case cloudprovider.IsInsufficientCapacityError(err):
@@ -122,7 +121,7 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeCla
 		"zone", created.Labels[v1.LabelTopologyZone],
 		"capacity-type", created.Labels[v1beta1.CapacityTypeLabelKey],
 		"allocatable", created.Status.Allocatable).Infof("launched %s", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"))
-	return nodeclaimutil.New(created), nil
+	return created, nil
 }
 
 func PopulateNodeClaimDetails(nodeClaim, retrieved *v1beta1.NodeClaim) *v1beta1.NodeClaim {

@@ -22,12 +22,11 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/test"
-	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	"github.com/aws/karpenter-core/pkg/test"
 
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
@@ -54,7 +53,7 @@ var _ = Describe("NodeClaim/GarbageCollection", func() {
 		fakeClock.SetTime(time.Now().Add(time.Second * 20))
 
 		// Delete the nodeClaim from the cloudprovider
-		Expect(cloudProvider.Delete(ctx, machineutil.NewFromNodeClaim(nodeClaim))).To(Succeed())
+		Expect(cloudProvider.Delete(ctx, nodeClaim)).To(Succeed())
 
 		// Expect the NodeClaim to be removed now that the Instance is gone
 		ExpectReconcileSucceeded(ctx, garbageCollectionController, client.ObjectKey{})
@@ -86,7 +85,7 @@ var _ = Describe("NodeClaim/GarbageCollection", func() {
 		workqueue.ParallelizeUntil(ctx, len(nodeClaims), len(nodeClaims), func(i int) {
 			defer GinkgoRecover()
 			// Delete the NodeClaim from the cloudprovider
-			Expect(cloudProvider.Delete(ctx, machineutil.NewFromNodeClaim(nodeClaims[i]))).To(Succeed())
+			Expect(cloudProvider.Delete(ctx, nodeClaims[i])).To(Succeed())
 		})
 
 		// Expect the NodeClaims to be removed now that the Instance is gone

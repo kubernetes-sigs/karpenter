@@ -30,6 +30,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/termination"
 	"github.com/aws/karpenter-core/pkg/controllers/termination/terminator"
@@ -38,6 +39,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
+	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -86,7 +88,7 @@ var _ = Describe("Termination", func() {
 
 	BeforeEach(func() {
 		machine, node = test.MachineAndNode(v1alpha5.Machine{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1alpha5.TerminationFinalizer}}})
-		cloudProvider.CreatedMachines[node.Spec.ProviderID] = machine
+		cloudProvider.CreatedNodeClaims[node.Spec.ProviderID] = nodeclaimutil.New(machine)
 	})
 
 	AfterEach(func() {
@@ -409,7 +411,7 @@ var _ = Describe("Termination", func() {
 			ExpectDeleted(ctx, env.Client, pods[1])
 
 			// Remove the node from created machines so that the cloud provider returns DNE
-			cloudProvider.CreatedMachines = map[string]*v1alpha5.Machine{}
+			cloudProvider.CreatedNodeClaims = map[string]*v1beta1.NodeClaim{}
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)

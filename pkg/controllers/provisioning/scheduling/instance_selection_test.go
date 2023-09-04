@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -595,8 +596,8 @@ var _ = Describe("Instance Type Selection", func() {
 	})
 })
 
-func supportedInstanceTypes(machine *v1alpha5.Machine) (res []*cloudprovider.InstanceType) {
-	reqs := scheduling.NewNodeSelectorRequirements(machine.Spec.Requirements...)
+func supportedInstanceTypes(nodeClaim *v1beta1.NodeClaim) (res []*cloudprovider.InstanceType) {
+	reqs := scheduling.NewNodeSelectorRequirements(nodeClaim.Spec.Requirements...)
 	return lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
 		return reqs.Get(v1.LabelInstanceTypeStable).Has(i.Name)
 	})

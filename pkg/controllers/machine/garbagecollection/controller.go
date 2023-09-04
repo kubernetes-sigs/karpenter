@@ -27,7 +27,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
@@ -58,15 +57,15 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	cloudProviderMachines, err := c.cloudProvider.List(ctx)
+	cloudProviderNodeClaims, err := c.cloudProvider.List(ctx)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	cloudProviderMachines = lo.Filter(cloudProviderMachines, func(m *v1alpha5.Machine, _ int) bool {
-		return m.DeletionTimestamp.IsZero()
+	cloudProviderNodeClaims = lo.Filter(cloudProviderNodeClaims, func(nc *v1beta1.NodeClaim, _ int) bool {
+		return nc.DeletionTimestamp.IsZero()
 	})
-	cloudProviderProviderIDs := sets.New[string](lo.Map(cloudProviderMachines, func(m *v1alpha5.Machine, _ int) string {
-		return m.Status.ProviderID
+	cloudProviderProviderIDs := sets.New[string](lo.Map(cloudProviderNodeClaims, func(nc *v1beta1.NodeClaim, _ int) string {
+		return nc.Status.ProviderID
 	})...)
 	nodeClaims := lo.Filter(lo.ToSlicePtr(nodeClaimList.Items), func(n *v1beta1.NodeClaim, _ int) bool {
 		return n.StatusConditions().GetCondition(v1beta1.NodeLaunched).IsTrue() &&

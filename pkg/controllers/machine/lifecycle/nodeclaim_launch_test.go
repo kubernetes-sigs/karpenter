@@ -51,7 +51,7 @@ var _ = Describe("NodeClaim/Launch", func() {
 		machine = ExpectExists(ctx, env.Client, machine)
 
 		Expect(cloudProvider.CreateCalls).To(HaveLen(1))
-		Expect(cloudProvider.CreatedMachines).To(HaveLen(1))
+		Expect(cloudProvider.CreatedNodeClaims).To(HaveLen(1))
 		_, err := cloudProvider.Get(ctx, machine.Status.ProviderID)
 		Expect(err).ToNot(HaveOccurred())
 	})

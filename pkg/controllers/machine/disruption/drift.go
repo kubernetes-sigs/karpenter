@@ -32,7 +32,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
-	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
 
@@ -68,7 +67,7 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 	}
 	driftedReason, err := d.isDrifted(ctx, nodePool, nodeClaim)
 	if err != nil {
-		return reconcile.Result{}, cloudprovider.IgnoreMachineNotFoundError(fmt.Errorf("getting drift, %w", err))
+		return reconcile.Result{}, cloudprovider.IgnoreNodeClaimNotFoundError(fmt.Errorf("getting drift, %w", err))
 	}
 	// 3. Otherwise, if the NodeClaim isn't drifted, but has the status condition, remove it.
 	if driftedReason == "" {
@@ -102,7 +101,7 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 	}); reason != "" {
 		return reason, nil
 	}
-	driftedReason, err := d.cloudProvider.IsMachineDrifted(ctx, machineutil.NewFromNodeClaim(nodeClaim))
+	driftedReason, err := d.cloudProvider.IsDrifted(ctx, nodeClaim)
 	if err != nil {
 		return "", err
 	}

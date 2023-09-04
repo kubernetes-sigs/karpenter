@@ -23,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/test"
 
@@ -51,7 +52,7 @@ var _ = Describe("Machine/Launch", func() {
 		machine = ExpectExists(ctx, env.Client, machine)
 
 		Expect(cloudProvider.CreateCalls).To(HaveLen(1))
-		Expect(cloudProvider.CreatedMachines).To(HaveLen(1))
+		Expect(cloudProvider.CreatedNodeClaims).To(HaveLen(1))
 		_, err := cloudProvider.Get(ctx, machine.Status.ProviderID)
 		Expect(err).ToNot(HaveOccurred())
 	})
@@ -70,7 +71,7 @@ var _ = Describe("Machine/Launch", func() {
 		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineLaunched).Status).To(Equal(v1.ConditionTrue))
 	})
 	It("should link an instance with the karpenter.sh/linked annotation", func() {
-		cloudProviderMachine := &v1alpha5.Machine{
+		cloudProviderNodeClaim := &v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1.LabelInstanceTypeStable: "small-instance-type",
@@ -79,7 +80,7 @@ var _ = Describe("Machine/Launch", func() {
 					v1alpha5.LabelCapacityType: v1alpha5.CapacityTypeSpot,
 				},
 			},
-			Status: v1alpha5.MachineStatus{
+			Status: v1beta1.NodeClaimStatus{
 				ProviderID: test.RandomProviderID(),
 				Capacity: v1.ResourceList{
 					v1.ResourceCPU:              resource.MustParse("10"),
@@ -93,11 +94,11 @@ var _ = Describe("Machine/Launch", func() {
 				},
 			},
 		}
-		cloudProvider.CreatedMachines[cloudProviderMachine.Status.ProviderID] = cloudProviderMachine
+		cloudProvider.CreatedNodeClaims[cloudProviderNodeClaim.Status.ProviderID] = cloudProviderNodeClaim
 		machine := test.Machine(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Annotations: map[string]string{
-					v1alpha5.MachineLinkedAnnotationKey: cloudProviderMachine.Status.ProviderID,
+					v1alpha5.MachineLinkedAnnotationKey: cloudProviderNodeClaim.Status.ProviderID,
 				},
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
@@ -109,9 +110,9 @@ var _ = Describe("Machine/Launch", func() {
 
 		machine = ExpectExists(ctx, env.Client, machine)
 
-		Expect(machine.Status.ProviderID).To(Equal(cloudProviderMachine.Status.ProviderID))
-		ExpectResources(machine.Status.Capacity, cloudProviderMachine.Status.Capacity)
-		ExpectResources(machine.Status.Allocatable, cloudProviderMachine.Status.Allocatable)
+		Expect(machine.Status.ProviderID).To(Equal(cloudProviderNodeClaim.Status.ProviderID))
+		ExpectResources(machine.Status.Capacity, cloudProviderNodeClaim.Status.Capacity)
+		ExpectResources(machine.Status.Allocatable, cloudProviderNodeClaim.Status.Allocatable)
 
 		Expect(machine.Labels).To(HaveKeyWithValue(v1.LabelInstanceTypeStable, "small-instance-type"))
 		Expect(machine.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-1a"))

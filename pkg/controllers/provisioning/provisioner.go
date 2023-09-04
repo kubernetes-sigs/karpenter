@@ -35,15 +35,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
-	provisionerutil "github.com/aws/karpenter-core/pkg/utils/provisioner"
-
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/utils/functional"
+	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
+	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 	"github.com/aws/karpenter-core/pkg/utils/pretty"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -230,7 +228,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 		// Create node template
 		nodeClaimTemplates = append(nodeClaimTemplates, scheduler.NewNodeClaimTemplate(nodePool))
 		// Get instance type options
-		instanceTypeOptions, err := p.cloudProvider.GetInstanceTypes(ctx, provisionerutil.New(nodePool))
+		instanceTypeOptions, err := p.cloudProvider.GetInstanceTypes(ctx, nodePool)
 		if err != nil {
 			return nil, fmt.Errorf("getting instance types, %w", err)
 		}

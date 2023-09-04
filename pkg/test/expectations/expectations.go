@@ -180,7 +180,7 @@ func ExpectDeletionTimestampSet(ctx context.Context, c client.Client, objects ..
 func ExpectDeletionTimestampSetWithOffset(offset int, ctx context.Context, c client.Client, objects ...client.Object) {
 	for _, object := range objects {
 		ExpectWithOffset(offset+1, c.Get(ctx, client.ObjectKeyFromObject(object), object)).To(Succeed())
-		controllerutil.AddFinalizer(object, v1alpha5.TestingGroup+"/finalizer")
+		controllerutil.AddFinalizer(object, "testing/finalizer")
 		ExpectWithOffset(offset+1, c.Update(ctx, object)).To(Succeed())
 		ExpectWithOffset(offset+1, c.Delete(ctx, object)).To(Succeed())
 		DeferCleanup(func(obj client.Object) {
@@ -310,7 +310,7 @@ func ExpectMachineDeployedNoNode(ctx context.Context, c client.Client, cluster *
 }
 
 func ExpectMachineDeployedNoNodeWithOffset(offset int, ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, m *v1alpha5.Machine) (*v1alpha5.Machine, error) {
-	resolved, err := cloudProvider.Create(ctx, m)
+	resolved, err := cloudProvider.Create(ctx, nodeclaimutil.New(m))
 	// TODO @joinnis: Check this error rather than swallowing it. This is swallowed right now due to how we are doing some testing in the cloudprovider
 	if err != nil {
 		return m, err
@@ -318,7 +318,7 @@ func ExpectMachineDeployedNoNodeWithOffset(offset int, ctx context.Context, c cl
 	ExpectWithOffset(offset+1, err).To(Succeed())
 
 	// Make the machine ready in the status conditions
-	m = machineutil.NewFromNodeClaim(lifecycle.PopulateNodeClaimDetails(nodeclaimutil.New(m), nodeclaimutil.New(resolved)))
+	m = machineutil.NewFromNodeClaim(lifecycle.PopulateNodeClaimDetails(nodeclaimutil.New(m), resolved))
 	m.StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
 	ExpectAppliedWithOffset(offset+1, ctx, c, m)
 	cluster.UpdateNodeClaim(nodeclaimutil.New(m))
