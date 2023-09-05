@@ -40,7 +40,7 @@ func (in *NodePool) Validate(_ context.Context) (errs *apis.FieldError) {
 func (in *NodePoolSpec) validate() (errs *apis.FieldError) {
 	return errs.Also(
 		in.Template.validate().ViaField("template"),
-		in.Deprovisioning.validate().ViaField("deprovisioning"),
+		in.Disruption.validate().ViaField("deprovisioning"),
 	)
 }
 
@@ -72,12 +72,15 @@ func (in *NodeClaimTemplate) validateLabels() (errs *apis.FieldError) {
 	return errs
 }
 
-func (in *Deprovisioning) validate() (errs *apis.FieldError) {
-	if in.ExpirationTTL.Duration < 0 {
+func (in *Disruption) validate() (errs *apis.FieldError) {
+	if in.ExpireAfter.Duration != nil && *in.ExpireAfter.Duration < 0 {
 		return errs.Also(apis.ErrInvalidValue("cannot be negative", "expirationTTL"))
 	}
-	if in.ConsolidationTTL.Duration < 0 {
+	if in.ConsolidateAfter.Duration != nil && *in.ConsolidateAfter.Duration < 0 {
 		return errs.Also(apis.ErrInvalidValue("cannot be negative", "consolidationTTL"))
+	}
+	if in.ConsolidateAfter.Duration != nil && in.ConsolidationPolicy == ConsolidationPolicyWhenUnderutilized {
+		return errs.Also(apis.ErrGeneric("consolidateAfter cannot be combined with consolidationPolicy"))
 	}
 	return errs
 }

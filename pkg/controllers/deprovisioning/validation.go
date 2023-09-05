@@ -111,7 +111,7 @@ func (v *Validation) ShouldDeprovision(_ context.Context, c *Candidate) bool {
 	if c.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey] == "true" {
 		return false
 	}
-	return c.nodePool.Spec.Deprovisioning.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenUnderutilized
+	return c.nodePool.Spec.Disruption.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenUnderutilized
 }
 
 // ValidateCommand validates a command for a deprovisioner

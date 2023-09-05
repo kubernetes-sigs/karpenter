@@ -34,10 +34,10 @@ type NodePoolSpec struct {
 	// NodeClaims launched from this NodePool will often be further constrained than the template specifies.
 	// +optional
 	Template NodeClaimTemplate `json:"template,omitempty"`
-	// Deprovisioning contains the parameters that relate to Karpenter's deprovisioning logic
-	// +kubebuilder:default={"consolidationTTL": "15s","consolidationPolicy": "WhenUnderutilized", "expirationTTL": "90d"}
+	// Disruption contains the parameters that relate to Karpenter's disruption logic
+	// +kubebuilder:default={"consolidateAfter": "15s","consolidationPolicy": "WhenUnderutilized", "expireAfter": "720h"}
 	// +optional
-	Deprovisioning Deprovisioning `json:"deprovisioning"`
+	Disruption Disruption `json:"disruption"`
 	// Limits define a set of bounds for provisioning capacity.
 	// +optional
 	Limits Limits `json:"limits,omitempty"`
@@ -51,32 +51,37 @@ type NodePoolSpec struct {
 	Weight *int32 `json:"weight,omitempty"`
 }
 
-type Deprovisioning struct {
-	// ConsolidationTTL is the duration the controller will wait
+type Disruption struct {
+	// ConsolidateAfter is the duration the controller will wait
 	// before attempting to terminate nodes that are underutilized.
 	// Refer to ConsolidationPolicy for how underutilization is considered.
 	// +kubebuilder:default:="15s"
+	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+)|(Never)$`
+	// +kubebuilder:validation:Type="string"
+	// +kubebuilder:validation:Schemaless
 	// +optional
-	ConsolidationTTL metav1.Duration `json:"consolidationTTL,omitempty"`
-	// ConsolidationPolicy describes which nodes Karpenter can deprovision through its consolidation
+	ConsolidateAfter NillableDuration `json:"consolidateAfter,omitempty"`
+	// ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation
 	// algorithm. This policy defaults to "WhenUnderutilized" if not specified
 	// +kubebuilder:default:="WhenUnderutilized"
-	// +kubebuilder:validation:Enum:={Never,WhenEmpty,WhenUnderutilized}
+	// +kubebuilder:validation:Enum:={WhenEmpty,WhenUnderutilized}
 	// +optional
 	ConsolidationPolicy ConsolidationPolicy `json:"consolidationPolicy,omitempty"`
-	// ExpirationTTL is the duration the controller will wait
+	// ExpireAfter is the duration the controller will wait
 	// before terminating a node, measured from when the node is created. This
 	// is useful to implement features like eventually consistent node upgrade,
 	// memory leak protection, and disruption testing.
-	// +kubebuilder:default:="90d"
+	// +kubebuilder:default:="720h"
+	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+)|(Never)$`
+	// +kubebuilder:validation:Type="string"
+	// +kubebuilder:validation:Schemaless
 	// +optional
-	ExpirationTTL metav1.Duration `json:"expirationTTL,omitempty"`
+	ExpireAfter NillableDuration `json:"expireAfter,omitempty"`
 }
 
 type ConsolidationPolicy string
 
 const (
-	ConsolidationPolicyNever             ConsolidationPolicy = "Never"
 	ConsolidationPolicyWhenEmpty         ConsolidationPolicy = "WhenEmpty"
 	ConsolidationPolicyWhenUnderutilized ConsolidationPolicy = "WhenUnderutilized"
 )

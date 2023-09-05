@@ -168,9 +168,9 @@ var _ = Describe("ProvisionerUtils", func() {
 						},
 					},
 				},
-				Deprovisioning: v1beta1.Deprovisioning{
+				Disruption: v1beta1.Disruption{
 					ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenUnderutilized,
-					ExpirationTTL:       metav1.Duration{Duration: lo.Must(time.ParseDuration("2160h"))},
+					ExpireAfter:         v1beta1.NillableDuration{Duration: lo.ToPtr(lo.Must(time.ParseDuration("2160h")))},
 				},
 				Limits: v1beta1.Limits(v1.ResourceList{
 					v1.ResourceCPU:              resource.MustParse("10"),
@@ -222,7 +222,7 @@ var _ = Describe("ProvisionerUtils", func() {
 		Expect(provisioner.Spec.Consolidation.Enabled).ToNot(BeNil())
 		Expect(lo.FromPtr(provisioner.Spec.Consolidation.Enabled)).To(BeTrue())
 
-		Expect(lo.FromPtr(provisioner.Spec.TTLSecondsUntilExpired)).To(BeNumerically("==", nodePool.Spec.Deprovisioning.ExpirationTTL.Duration.Seconds()))
+		Expect(lo.FromPtr(provisioner.Spec.TTLSecondsUntilExpired)).To(BeNumerically("==", nodePool.Spec.Disruption.ExpireAfter.Duration.Seconds()))
 		Expect(provisioner.Spec.TTLSecondsAfterEmpty).To(BeNil())
 
 		ExpectResources(provisioner.Spec.Limits.Resources, v1.ResourceList(nodePool.Spec.Limits))

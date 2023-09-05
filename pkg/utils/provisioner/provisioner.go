@@ -42,13 +42,13 @@ func New(nodePool *v1beta1.NodePool) *v1alpha5.Provisioner {
 			Resources: nodePool.Status.Resources,
 		},
 	}
-	if nodePool.Spec.Deprovisioning.ExpirationTTL.Duration >= 0 {
-		p.Spec.TTLSecondsUntilExpired = lo.ToPtr(int64(nodePool.Spec.Deprovisioning.ExpirationTTL.Seconds()))
+	if nodePool.Spec.Disruption.ExpireAfter.Duration != nil {
+		p.Spec.TTLSecondsUntilExpired = lo.ToPtr(int64(nodePool.Spec.Disruption.ExpireAfter.Seconds()))
 	}
-	if nodePool.Spec.Deprovisioning.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenEmpty {
-		p.Spec.TTLSecondsAfterEmpty = lo.ToPtr(int64(nodePool.Spec.Deprovisioning.ConsolidationTTL.Seconds()))
+	if nodePool.Spec.Disruption.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenEmpty {
+		p.Spec.TTLSecondsAfterEmpty = lo.ToPtr(int64(nodePool.Spec.Disruption.ConsolidateAfter.Seconds()))
 	}
-	if nodePool.Spec.Deprovisioning.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenUnderutilized {
+	if nodePool.Spec.Disruption.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenUnderutilized {
 		p.Spec.Consolidation = &v1alpha5.Consolidation{
 			Enabled: lo.ToPtr(true),
 		}
