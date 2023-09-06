@@ -102,7 +102,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, nodes ...*Candidate) (C
 			return Command{}, err
 		}
 		// Log when all pods can't schedule, as the command will get executed immediately.
-		if !results.AllNonPendingPodsScheduled() {
+		if !results.AllPodsScheduled() {
 			logging.FromContext(ctx).With("machine", candidate.NodeClaim.Name, "node", candidate.Node.Name).Debugf("cannot terminate expired machine since scheduling simulation failed to schedule all pods, %s", results.PodSchedulingErrors())
 			e.recorder.Publish(deprovisioningevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
 			continue

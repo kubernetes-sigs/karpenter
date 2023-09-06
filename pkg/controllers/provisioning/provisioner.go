@@ -327,7 +327,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (*scheduler.Results, error) 
 		}
 		return nil, fmt.Errorf("creating scheduler, %w", err)
 	}
-	return s.Solve(ctx, pods)
+	return s.Solve(ctx, pods), nil
 }
 
 func (p *Provisioner) Launch(ctx context.Context, n *scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) (nodeclaimutil.Key, error) {

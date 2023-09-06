@@ -102,16 +102,11 @@ type Results struct {
 	PodErrors     map[*v1.Pod]error
 }
 
-// AllNonPendingPodsScheduled returns true if all of the non-pending pods scheduled.  This is useful in consolidation as
-// we don't care if a pod was pending before consolidation and will still be pending after. It may be a pod that we
-// can't schedule at all and don't want it to block consolidation.
-func (r Results) AllNonPendingPodsScheduled() bool {
-	for p := range r.PodErrors {
-		if !pod.IsProvisionable(p) {
-			return false
-		}
-	}
-	return true
+// AllPodsScheduled returns true if all pods scheduled. SchedulingResults will not have errors of pods that aren't provisionable
+// since we don't care if a pod was pending before consolidation and will still be pending after. It may be a pod that we can't
+// schedule at all and don't want it to block consolidation.
+func (r Results) AllPodsScheduled() bool {
+	return len(r.PodErrors) == 0
 }
 
 // PodSchedulingErrors creates a string that describes why pods wouldn't schedule that is suitable for presentation
@@ -134,7 +129,7 @@ func (r Results) PodSchedulingErrors() string {
 	return msg.String()
 }
 
-func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) (*Results, error) {
+func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) *Results {
 	defer metrics.Measure(schedulingSimulationDuration)()
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
 	// issues including pods with affinity to another pod in the batch. We could topo-sort to solve this, but it wouldn't
@@ -172,8 +167,11 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) (*Results, error)
 		s.recordSchedulingResults(ctx, pods, q.List(), errors)
 	}
 	// clear any nil errors so we can know that len(PodErrors) == 0 => all pods scheduled
+	// we can also clear any pod errors for pods that aren't provisionable since
+	// 1. Provisioning only cares about the new nodes we need to provisionable
+	// 2. Deprovisioning only cares about the pods on the candidates we're trying to delete.
 	for k, v := range errors {
-		if v == nil {
+		if v == nil || !pod.IsProvisionable(k) {
 			delete(errors, k)
 		}
 	}
@@ -181,7 +179,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) (*Results, error)
 		NewNodeClaims: s.newNodeClaims,
 		ExistingNodes: s.existingNodes,
 		PodErrors:     errors,
-	}, nil
+	}
 }
 
 func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod, failedToSchedule []*v1.Pod, errors map[*v1.Pod]error) {

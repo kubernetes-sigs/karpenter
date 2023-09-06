@@ -136,10 +136,7 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	podsScheduledInRound1 := 0
 	nodesInRound1 := 0
 	for i := 0; i < b.N; i++ {
-		results, err := scheduler.Solve(ctx, pods)
-		if err != nil {
-			b.FailNow()
-		}
+		results := scheduler.Solve(ctx, pods)
 		if i == 0 {
 
 			minPods := math.MaxInt64
