@@ -171,7 +171,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) *Results {
 	// 1. Provisioning only cares about the new nodes we need to provisionable
 	// 2. Deprovisioning only cares about the pods on the candidates we're trying to delete.
 	for k, v := range errors {
-		if v == nil || !pod.IsProvisionable(k) {
+		if v == nil || pod.IsProvisionable(k) {
 			delete(errors, k)
 		}
 	}
