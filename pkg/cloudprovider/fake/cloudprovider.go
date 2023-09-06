@@ -86,7 +86,7 @@ func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (
 	}
 	reqs := scheduling.NewNodeSelectorRequirements(machine.Spec.Requirements...)
 	instanceTypes := lo.Filter(lo.Must(c.GetInstanceTypes(ctx, nil)), func(i *cloudprovider.InstanceType, _ int) bool {
-		return reqs.Compatible(i.Requirements) == nil &&
+		return reqs.Compatible(i.Requirements, scheduling.AllowUndefinedWellKnownLabelsV1Alpha5) == nil &&
 			len(i.Offerings.Requirements(reqs).Available()) > 0 &&
 			resources.Fits(machine.Spec.Resources.Requests, i.Allocatable())
 	})
@@ -109,7 +109,7 @@ func (c *CloudProvider) Create(ctx context.Context, machine *v1alpha5.Machine) (
 		if reqs.Compatible(scheduling.NewRequirements(
 			scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, o.Zone),
 			scheduling.NewRequirement(v1alpha5.LabelCapacityType, v1.NodeSelectorOpIn, o.CapacityType),
-		)) == nil {
+		), scheduling.AllowUndefinedWellKnownLabelsV1Alpha5) == nil {
 			labels[v1.LabelTopologyZone] = o.Zone
 			labels[v1alpha5.LabelCapacityType] = o.CapacityType
 			break

@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/aws/karpenter-core/pkg/scheduling"
+	"github.com/aws/karpenter-core/pkg/utils/functional"
 )
 
 type TopologyType byte
@@ -108,8 +109,8 @@ func (t *TopologyGroup) Record(domains ...string) {
 
 // Counts returns true if the pod would count for the topology, given that it schedule to a node with the provided
 // requirements
-func (t *TopologyGroup) Counts(pod *v1.Pod, requirements scheduling.Requirements) bool {
-	return t.selects(pod) && t.nodeFilter.MatchesRequirements(requirements)
+func (t *TopologyGroup) Counts(pod *v1.Pod, requirements scheduling.Requirements, compatabilityOptions ...functional.Option[scheduling.CompatabilityOptions]) bool {
+	return t.selects(pod) && t.nodeFilter.MatchesRequirements(requirements, compatabilityOptions...)
 }
 
 // Register ensures that the topology is aware of the given domain names.

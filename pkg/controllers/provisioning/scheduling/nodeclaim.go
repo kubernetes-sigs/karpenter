@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -76,7 +77,7 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 	podRequirements := scheduling.NewPodRequirements(pod)
 
 	// Check NodeClaim Affinity Requirements
-	if err := nodeClaimRequirements.Compatible(podRequirements); err != nil {
+	if err := nodeClaimRequirements.Compatible(podRequirements, lo.Ternary(n.OwnerKey.IsProvisioner, scheduling.AllowUndefinedWellKnownLabelsV1Alpha5, scheduling.AllowUndefinedWellKnownLabelsV1Beta1)); err != nil {
 		return fmt.Errorf("incompatible requirements, %w", err)
 	}
 	nodeClaimRequirements.Add(podRequirements.Values()...)
@@ -88,11 +89,11 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 		strictPodRequirements = scheduling.NewStrictPodRequirements(pod)
 	}
 	// Check Topology Requirements
-	topologyRequirements, err := n.topology.AddRequirements(strictPodRequirements, nodeClaimRequirements, pod)
+	topologyRequirements, err := n.topology.AddRequirements(strictPodRequirements, nodeClaimRequirements, pod, lo.Ternary(n.OwnerKey.IsProvisioner, scheduling.AllowUndefinedWellKnownLabelsV1Alpha5, scheduling.AllowUndefinedWellKnownLabelsV1Beta1))
 	if err != nil {
 		return err
 	}
-	if err = nodeClaimRequirements.Compatible(topologyRequirements); err != nil {
+	if err = nodeClaimRequirements.Compatible(topologyRequirements, lo.Ternary(n.OwnerKey.IsProvisioner, scheduling.AllowUndefinedWellKnownLabelsV1Alpha5, scheduling.AllowUndefinedWellKnownLabelsV1Beta1)); err != nil {
 		return err
 	}
 	nodeClaimRequirements.Add(topologyRequirements.Values()...)
@@ -111,7 +112,7 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 	n.InstanceTypeOptions = filtered.remaining
 	n.Spec.Resources.Requests = requests
 	n.Requirements = nodeClaimRequirements
-	n.topology.Record(pod, nodeClaimRequirements)
+	n.topology.Record(pod, nodeClaimRequirements, lo.Ternary(n.OwnerKey.IsProvisioner, scheduling.AllowUndefinedWellKnownLabelsV1Alpha5, scheduling.AllowUndefinedWellKnownLabelsV1Beta1))
 	n.hostPortUsage.Add(pod, hostPorts)
 	return nil
 }

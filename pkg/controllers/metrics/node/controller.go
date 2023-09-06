@@ -22,12 +22,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
@@ -51,7 +53,6 @@ var (
 		},
 		nodeLabelNames(),
 	)
-
 	podRequestsGaugeVec = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "karpenter",
@@ -61,7 +62,6 @@ var (
 		},
 		nodeLabelNames(),
 	)
-
 	podLimitsGaugeVec = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "karpenter",
@@ -71,7 +71,6 @@ var (
 		},
 		nodeLabelNames(),
 	)
-
 	daemonRequestsGaugeVec = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "karpenter",
@@ -81,7 +80,6 @@ var (
 		},
 		nodeLabelNames(),
 	)
-
 	daemonLimitsGaugeVec = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "karpenter",
@@ -91,7 +89,6 @@ var (
 		},
 		nodeLabelNames(),
 	)
-
 	overheadGaugeVec = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "karpenter",
@@ -101,13 +98,12 @@ var (
 		},
 		nodeLabelNames(),
 	)
-
 	wellKnownLabels = getWellKnownLabels()
 )
 
 func nodeLabelNames() []string {
 	return append(
-		lo.Values(wellKnownLabels),
+		sets.New(lo.Values(wellKnownLabels)...).UnsortedList(),
 		resourceType,
 		nodeName,
 		nodeProvisioner,
@@ -192,7 +188,8 @@ func getNodeLabels(node *v1.Node, resourceTypeName string) prometheus.Labels {
 
 func getWellKnownLabels() map[string]string {
 	labels := make(map[string]string)
-	for wellKnownLabel := range v1alpha5.WellKnownLabels {
+	// TODO @joinnis: Remove v1alpha5 well-known labels in favor of only v1beta1 well-known labels after v1alpha5 is dropped
+	for wellKnownLabel := range v1alpha5.WellKnownLabels.Union(v1beta1.WellKnownLabels) {
 		if parts := strings.Split(wellKnownLabel, "/"); len(parts) == 2 {
 			label := parts[1]
 			// Reformat label names to be consistent with Prometheus naming conventions (snake_case)

@@ -134,7 +134,7 @@ func areRequirementsDrifted(nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeC
 	nodeClaimReq := scheduling.NewLabelRequirements(nodeClaim.Labels)
 
 	// Every provisioner requirement is compatible with the NodeClaim label set
-	if nodeClaimReq.StrictlyCompatible(provisionerReq) != nil {
+	if nodeClaimReq.Compatible(provisionerReq) != nil {
 		return RequirementsDrifted
 	}
 
