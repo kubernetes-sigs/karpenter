@@ -109,11 +109,7 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return nil, fmt.Errorf("creating scheduler, %w", err)
 	}
 
-	results, err := scheduler.Solve(ctx, pods)
-	if err != nil {
-		return nil, fmt.Errorf("simulating scheduling, %w", err)
-	}
-
+	results := scheduler.Solve(ctx, pods)
 	// check if the scheduling relied on an existing node that isn't ready yet, if so we fail
 	// to schedule since we want to assume that we can delete a node and its pods will immediately
 	// move to an existing node which won't occur if that node isn't ready.

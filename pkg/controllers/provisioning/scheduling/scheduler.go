@@ -102,39 +102,39 @@ type Results struct {
 	PodErrors     map[*v1.Pod]error
 }
 
-// AllNonPendingPodsScheduled returns true if all of the non-pending pods scheduled.  This is useful in consolidation as
-// we don't care if a pod was pending before consolidation and will still be pending after. It may be a pod that we
-// can't schedule at all and don't want it to block consolidation.
+// AllNonPendingPodsScheduled returns true if all pods scheduled.
+// We don't care if a pod was pending before consolidation and will still be pending after. It may be a pod that we can't
+// schedule at all and don't want it to block consolidation.
 func (r Results) AllNonPendingPodsScheduled() bool {
-	for p := range r.PodErrors {
-		if !pod.IsProvisionable(p) {
-			return false
-		}
-	}
-	return true
+	return len(lo.OmitBy(r.PodErrors, func(p *v1.Pod, err error) bool {
+		return pod.IsProvisionable(p)
+	})) == 0
 }
 
-// PodSchedulingErrors creates a string that describes why pods wouldn't schedule that is suitable for presentation
-func (r Results) PodSchedulingErrors() string {
-	if len(r.PodErrors) == 0 {
+// NonPendingPodSchedulingErrors creates a string that describes why pods wouldn't schedule that is suitable for presentation
+func (r Results) NonPendingPodSchedulingErrors() string {
+	errs := lo.OmitBy(r.PodErrors, func(p *v1.Pod, err error) bool {
+		return pod.IsProvisionable(p)
+	})
+	if len(errs) == 0 {
 		return "No Pod Scheduling Errors"
 	}
 	var msg bytes.Buffer
 	fmt.Fprintf(&msg, "not all pods would schedule, ")
 	const MaxErrors = 5
 	numErrors := 0
-	for k, err := range r.PodErrors {
+	for k, err := range errs {
 		fmt.Fprintf(&msg, "%s/%s => %s ", k.Namespace, k.Name, err)
 		numErrors++
 		if numErrors >= MaxErrors {
-			fmt.Fprintf(&msg, " and %d other(s)", len(r.PodErrors)-MaxErrors)
+			fmt.Fprintf(&msg, " and %d other(s)", len(errs)-MaxErrors)
 			break
 		}
 	}
 	return msg.String()
 }
 
-func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) (*Results, error) {
+func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) *Results {
 	defer metrics.Measure(schedulingSimulationDuration)()
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
 	// issues including pods with affinity to another pod in the batch. We could topo-sort to solve this, but it wouldn't
@@ -181,7 +181,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) (*Results, error)
 		NewNodeClaims: s.newNodeClaims,
 		ExistingNodes: s.existingNodes,
 		PodErrors:     errors,
-	}, nil
+	}
 }
 
 func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod, failedToSchedule []*v1.Pod, errors map[*v1.Pod]error) {
