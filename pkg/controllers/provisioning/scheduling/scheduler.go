@@ -172,9 +172,6 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) *Results {
 		s.recordSchedulingResults(ctx, pods, q.List(), errors)
 	}
 	// clear any nil errors so we can know that len(PodErrors) == 0 => all pods scheduled
-	// we can also clear any pod errors for pods that aren't provisionable since
-	// 1. Provisioning only cares about the new nodes we need to provisionable
-	// 2. Deprovisioning only cares about the pods on the candidates we're trying to delete.
 	for k, v := range errors {
 		if v == nil {
 			delete(errors, k)
