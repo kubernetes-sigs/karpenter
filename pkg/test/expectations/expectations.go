@@ -195,7 +195,7 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 	wg := sync.WaitGroup{}
 	namespaces := &v1.NamespaceList{}
 	ExpectWithOffset(1, c.List(ctx, namespaces)).To(Succeed())
-	ExpectFinalizersRemovedFromList(ctx, c, &v1.NodeList{}, &v1alpha5.MachineList{}, &v1.PersistentVolumeClaimList{})
+	ExpectFinalizersRemovedFromList(ctx, c, &v1.NodeList{}, &v1alpha5.MachineList{}, &v1beta1.NodeClaimList{}, &v1.PersistentVolumeClaimList{})
 	for _, object := range []client.Object{
 		&v1.Pod{},
 		&v1.Node{},

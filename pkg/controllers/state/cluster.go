@@ -84,12 +84,20 @@ func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudPro
 // have the same representation in the cluster state. This is to ensure that our view
 // of the cluster is as close to correct as it can be when we begin to perform operations
 // utilizing the cluster state as our source of truth
-// TODO @joinnis: Add NodeClaims to this Synced() function when releasing v1beta1 APIs
+//
+//nolint:gocyclo
 func (c *Cluster) Synced(ctx context.Context) bool {
 	machineList := &v1alpha5.MachineList{}
 	if err := c.kubeClient.List(ctx, machineList); err != nil {
 		logging.FromContext(ctx).Errorf("checking cluster state sync, %v", err)
 		return false
+	}
+	nodeClaimList := &v1beta1.NodeClaimList{}
+	if nodeclaimutil.EnableNodeClaims {
+		if err := c.kubeClient.List(ctx, nodeClaimList); err != nil {
+			logging.FromContext(ctx).Errorf("checking cluster state sync, %v", err)
+			return false
+		}
 	}
 	nodeList := &v1.NodeList{}
 	if err := c.kubeClient.List(ctx, nodeList); err != nil {
@@ -117,6 +125,14 @@ func (c *Cluster) Synced(ctx context.Context) bool {
 		}
 		machineNames.Insert(machine.Name)
 	}
+	nodeClaimNames := sets.New[string]()
+	for _, nodeClaim := range nodeClaimList.Items {
+		// If the machine hasn't resolved its provider id, then it hasn't resolved its status
+		if nodeClaim.Status.ProviderID == "" {
+			return false
+		}
+		nodeClaimNames.Insert(nodeClaim.Name)
+	}
 	nodeNames := sets.New[string]()
 	for _, node := range nodeList.Items {
 		nodeNames.Insert(node.Name)
@@ -125,7 +141,9 @@ func (c *Cluster) Synced(ctx context.Context) bool {
 	// This doesn't ensure that the two states are exactly aligned (we could still not be tracking a node
 	// that exists in the cluster state but not in the apiserver) but it ensures that we have a state
 	// representation for every node/machine that exists on the apiserver
-	return stateMachineNames.IsSuperset(machineNames) && stateNodeNames.IsSuperset(nodeNames)
+	return stateMachineNames.IsSuperset(machineNames) &&
+		stateNodeClaimNames.IsSuperset(nodeClaimNames) &&
+		stateNodeNames.IsSuperset(nodeNames)
 }
 
 // ForPodsWithAntiAffinity calls the supplied function once for each pod with required anti affinity terms that is
