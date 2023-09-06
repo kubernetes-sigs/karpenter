@@ -121,10 +121,10 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	}
 
 	// if not all of the pods were scheduled, we can't do anything
-	if !results.AllPodsScheduled() {
+	if !results.AllNonPendingPodsScheduled() {
 		// This method is used by multi-node consolidation as well, so we'll only report in the single node case
 		if len(candidates) == 1 {
-			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, results.PodSchedulingErrors())...)
+			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, results.NonPendingPodSchedulingErrors())...)
 		}
 		return Command{}, nil
 	}
