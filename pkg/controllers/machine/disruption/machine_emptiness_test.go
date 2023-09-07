@@ -33,7 +33,7 @@ import (
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
-var _ = Describe("Emptiness", func() {
+var _ = Describe("Machine/Emptiness", func() {
 	var provisioner *v1alpha5.Provisioner
 	var machine *v1alpha5.Machine
 	var node *v1.Node
@@ -55,7 +55,7 @@ var _ = Describe("Emptiness", func() {
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
 		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
 
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, machineDisruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty).IsTrue()).To(BeTrue())
@@ -66,7 +66,7 @@ var _ = Describe("Emptiness", func() {
 		ExpectApplied(ctx, env.Client, provisioner, machine, node)
 		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
 
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, machineDisruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty)).To(BeNil())
@@ -78,7 +78,7 @@ var _ = Describe("Emptiness", func() {
 		machine.StatusConditions().MarkFalse(v1alpha5.MachineInitialized, "", "")
 		ExpectApplied(ctx, env.Client, machine)
 
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, machineDisruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty)).To(BeNil())
@@ -92,7 +92,7 @@ var _ = Describe("Emptiness", func() {
 		})
 		ExpectApplied(ctx, env.Client, machine)
 
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, machineDisruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty)).To(BeNil())
@@ -103,7 +103,7 @@ var _ = Describe("Emptiness", func() {
 		ExpectApplied(ctx, env.Client, provisioner, machine)
 		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
 
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, machineDisruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty)).To(BeNil())
@@ -118,7 +118,7 @@ var _ = Describe("Emptiness", func() {
 			Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}},
 		}))
 
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, machineDisruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
 		Expect(machine.StatusConditions().GetCondition(v1alpha5.MachineEmpty)).To(BeNil())
@@ -132,7 +132,7 @@ var _ = Describe("Emptiness", func() {
 		Expect(cluster.UpdateNode(ctx, node)).To(Succeed())
 		cluster.NominateNodeForPod(ctx, node.Spec.ProviderID)
 
-		result := ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKeyFromObject(machine))
+		result := ExpectReconcileSucceeded(ctx, machineDisruptionController, client.ObjectKeyFromObject(machine))
 		Expect(result.RequeueAfter).To(Equal(time.Second * 30))
 
 		machine = ExpectExists(ctx, env.Client, machine)

@@ -31,7 +31,7 @@ import (
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
-var _ = Describe("Liveness", func() {
+var _ = Describe("Machine/Liveness", func() {
 	var provisioner *v1alpha5.Provisioner
 
 	BeforeEach(func() {

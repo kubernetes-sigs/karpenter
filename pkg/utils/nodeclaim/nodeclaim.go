@@ -40,6 +40,11 @@ import (
 	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 )
 
+// EnableNodeClaims is an internal feature flag to allow functions that could List NodeClaims to work
+// This flag is currently here to enable testing
+// TODO @joinnis: Remove this internal flag when the v1beta1 APIs are released
+var EnableNodeClaims = false
+
 type Key struct {
 	Name      string
 	IsMachine bool
@@ -315,8 +320,12 @@ func List(ctx context.Context, c client.Client, opts ...client.ListOption) (*v1b
 	convertedNodeClaims := lo.Map(machineList.Items, func(m v1alpha5.Machine, _ int) v1beta1.NodeClaim {
 		return *New(&m)
 	})
-	// TODO @joinnis: Add NodeClaims to this List() function when releasing v1beta1 APIs
 	nodeClaimList := &v1beta1.NodeClaimList{}
+	if EnableNodeClaims {
+		if err := c.List(ctx, nodeClaimList, opts...); err != nil {
+			return nil, err
+		}
+	}
 	nodeClaimList.Items = append(nodeClaimList.Items, convertedNodeClaims...)
 	return nodeClaimList, nil
 }
