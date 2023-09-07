@@ -21,6 +21,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/scheduling"
+	"github.com/aws/karpenter-core/pkg/utils/functional"
 
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
@@ -117,10 +118,10 @@ func (t *Topology) Update(ctx context.Context, p *v1.Pod) error {
 }
 
 // Record records the topology changes given that pod p schedule on a node with the given requirements
-func (t *Topology) Record(p *v1.Pod, requirements scheduling.Requirements) {
+func (t *Topology) Record(p *v1.Pod, requirements scheduling.Requirements, compatabilityOptions ...functional.Option[scheduling.CompatabilityOptions]) {
 	// once we've committed to a domain, we record the usage in every topology that cares about it
 	for _, tc := range t.topologies {
-		if tc.Counts(p, requirements) {
+		if tc.Counts(p, requirements, compatabilityOptions...) {
 			domains := requirements.Get(tc.Key)
 			if tc.Type == TopologyTypePodAntiAffinity {
 				// for anti-affinity topologies we need to block out all possible domains that the pod could land in
@@ -146,9 +147,9 @@ func (t *Topology) Record(p *v1.Pod, requirements scheduling.Requirements) {
 // affinities, anti-affinities or inverse anti-affinities.  The nodeHostname is the hostname that we are currently considering
 // placing the pod on.  It returns these newly tightened requirements, or an error in the case of a set of requirements that
 // cannot be satisfied.
-func (t *Topology) AddRequirements(podRequirements, nodeRequirements scheduling.Requirements, p *v1.Pod) (scheduling.Requirements, error) {
+func (t *Topology) AddRequirements(podRequirements, nodeRequirements scheduling.Requirements, p *v1.Pod, compatabilityOptions ...functional.Option[scheduling.CompatabilityOptions]) (scheduling.Requirements, error) {
 	requirements := scheduling.NewRequirements(nodeRequirements.Values()...)
-	for _, topology := range t.getMatchingTopologies(p, nodeRequirements) {
+	for _, topology := range t.getMatchingTopologies(p, nodeRequirements, compatabilityOptions...) {
 		podDomains := scheduling.NewRequirement(topology.Key, v1.NodeSelectorOpExists)
 		if podRequirements.Has(topology.Key) {
 			podDomains = podRequirements.Get(topology.Key)
@@ -348,7 +349,7 @@ func (t *Topology) buildNamespaceList(ctx context.Context, namespace string, nam
 
 // getMatchingTopologies returns a sorted list of topologies that either control the scheduling of pod p, or for which
 // the topology selects pod p and the scheduling of p affects the count per topology domain
-func (t *Topology) getMatchingTopologies(p *v1.Pod, requirements scheduling.Requirements) []*TopologyGroup {
+func (t *Topology) getMatchingTopologies(p *v1.Pod, requirements scheduling.Requirements, compatabilityOptions ...functional.Option[scheduling.CompatabilityOptions]) []*TopologyGroup {
 	var matchingTopologies []*TopologyGroup
 	for _, tc := range t.topologies {
 		if tc.IsOwnedBy(p.UID) {
@@ -356,7 +357,7 @@ func (t *Topology) getMatchingTopologies(p *v1.Pod, requirements scheduling.Requ
 		}
 	}
 	for _, tc := range t.inverseTopologies {
-		if tc.Counts(p, requirements) {
+		if tc.Counts(p, requirements, compatabilityOptions...) {
 			matchingTopologies = append(matchingTopologies, tc)
 		}
 	}

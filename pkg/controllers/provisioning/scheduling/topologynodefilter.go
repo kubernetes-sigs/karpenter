@@ -18,6 +18,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 
 	"github.com/aws/karpenter-core/pkg/scheduling"
+	"github.com/aws/karpenter-core/pkg/utils/functional"
 )
 
 // TopologyNodeFilter is used to determine if a given actual node or scheduling node matches the pod's node selectors
@@ -55,14 +56,14 @@ func (t TopologyNodeFilter) Matches(node *v1.Node) bool {
 // MatchesRequirements returns true if the TopologyNodeFilter doesn't prohibit a node with the requirements from
 // participating in the topology. This method allows checking the requirements from a scheduling.NodeClaim to see if the
 // node we will soon create participates in this topology.
-func (t TopologyNodeFilter) MatchesRequirements(requirements scheduling.Requirements) bool {
+func (t TopologyNodeFilter) MatchesRequirements(requirements scheduling.Requirements, compatabilityOptions ...functional.Option[scheduling.CompatabilityOptions]) bool {
 	// no requirements, so it always matches
 	if len(t) == 0 {
 		return true
 	}
 	// these are an OR, so if any passes the filter passes
 	for _, req := range t {
-		if err := requirements.Compatible(req); err == nil {
+		if err := requirements.Compatible(req, compatabilityOptions...); err == nil {
 			return true
 		}
 	}

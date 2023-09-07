@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 )
@@ -39,6 +40,11 @@ const (
 
 func init() {
 	v1alpha5.WellKnownLabels.Insert(
+		LabelInstanceSize,
+		ExoticInstanceLabelKey,
+		IntegerInstanceLabelKey,
+	)
+	v1beta1.WellKnownLabels.Insert(
 		LabelInstanceSize,
 		ExoticInstanceLabelKey,
 		IntegerInstanceLabelKey,

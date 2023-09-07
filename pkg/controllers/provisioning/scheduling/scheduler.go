@@ -282,7 +282,7 @@ func (s *Scheduler) calculateExistingNodeClaims(stateNodes []*state.StateNode, d
 			if err := scheduling.Taints(node.Taints()).Tolerates(p); err != nil {
 				continue
 			}
-			if err := scheduling.NewLabelRequirements(node.Labels()).StrictlyCompatible(scheduling.NewPodRequirements(p)); err != nil {
+			if err := scheduling.NewLabelRequirements(node.Labels()).Compatible(scheduling.NewPodRequirements(p)); err != nil {
 				continue
 			}
 			daemons = append(daemons, p)
@@ -319,7 +319,7 @@ func getDaemonOverhead(nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []
 			if err := scheduling.Taints(nodeClaimTemplate.Spec.Taints).Tolerates(p); err != nil {
 				continue
 			}
-			if err := nodeClaimTemplate.Requirements.Compatible(scheduling.NewPodRequirements(p)); err != nil {
+			if err := nodeClaimTemplate.Requirements.Compatible(scheduling.NewPodRequirements(p), lo.Ternary(nodeClaimTemplate.OwnerKey.IsProvisioner, scheduling.AllowUndefinedWellKnownLabelsV1Alpha5, scheduling.AllowUndefinedWellKnownLabelsV1Beta1)); err != nil {
 				continue
 			}
 			daemons = append(daemons, p)
