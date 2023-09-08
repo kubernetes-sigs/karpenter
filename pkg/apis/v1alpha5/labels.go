@@ -69,7 +69,6 @@ var (
 		"kops.k8s.io",
 		v1.LabelNamespaceSuffixNode,
 		v1.LabelNamespaceNodeRestriction,
-		TestingGroup,
 	)
 
 	// WellKnownLabels are labels that belong to the RestrictedLabelDomains but allowed.

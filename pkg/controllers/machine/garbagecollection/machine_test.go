@@ -24,6 +24,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/test"
+	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -53,7 +54,7 @@ var _ = Describe("Machine/GarbageCollection", func() {
 		fakeClock.SetTime(time.Now().Add(time.Second * 20))
 
 		// Delete the machine from the cloudprovider
-		Expect(cloudProvider.Delete(ctx, machine)).To(Succeed())
+		Expect(cloudProvider.Delete(ctx, nodeclaimutil.New(machine))).To(Succeed())
 
 		// Expect the Machine to be removed now that the Instance is gone
 		ExpectReconcileSucceeded(ctx, garbageCollectionController, client.ObjectKey{})
@@ -85,7 +86,7 @@ var _ = Describe("Machine/GarbageCollection", func() {
 		workqueue.ParallelizeUntil(ctx, len(machines), len(machines), func(i int) {
 			defer GinkgoRecover()
 			// Delete the machine from the cloudprovider
-			Expect(cloudProvider.Delete(ctx, machines[i])).To(Succeed())
+			Expect(cloudProvider.Delete(ctx, nodeclaimutil.New(machines[i]))).To(Succeed())
 		})
 
 		// Expect the Machines to be removed now that the Instance is gone

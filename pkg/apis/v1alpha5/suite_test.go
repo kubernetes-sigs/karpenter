@@ -540,7 +540,7 @@ var _ = Describe("Provisioner Annotation", func() {
 	var testProvisionerOptions test.ProvisionerOptions
 	var provisioner *Provisioner
 
-	const baseProvisionerExpectedHash = "14114424411830460479"
+	const baseProvisionerExpectedHash = "775825888864018614"
 
 	BeforeEach(func() {
 		taints := []v1.Taint{
@@ -583,27 +583,27 @@ var _ = Describe("Provisioner Annotation", func() {
 		// Modified static fields - expect change from base provisioner
 		Entry(
 			"should match with modified annotations",
-			"7374986726887162519",
+			"8291486979066679783",
 			test.ProvisionerOptions{Annotations: map[string]string{"keyAnnotationTest": "valueAnnotationTest"}},
 		),
 		Entry(
 			"should match with modified labels",
-			"9065364558915106368",
+			"13084558173553732887",
 			test.ProvisionerOptions{Labels: map[string]string{"keyLabelTest": "valueLabelTest"}},
 		),
 		Entry(
 			"should match with modified taints",
-			"9081458816929490897",
+			"2448241124432930761",
 			test.ProvisionerOptions{Taints: []v1.Taint{{Key: "keytest2Taint", Effect: v1.TaintEffectNoExecute}}},
 		),
 		Entry(
 			"should match with modified startup taints",
-			"2352640223763896447",
+			"6798849987795493190",
 			test.ProvisionerOptions{StartupTaints: []v1.Taint{{Key: "keytest2StartupTaint", Effect: v1.TaintEffectNoExecute}}},
 		),
 		Entry(
 			"should match with modified kubelet config",
-			"3622457352880294488",
+			"12466819533084384505",
 			test.ProvisionerOptions{Kubelet: &KubeletConfiguration{MaxPods: ptr.Int32(30)}},
 		),
 

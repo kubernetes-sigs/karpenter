@@ -88,7 +88,7 @@ func (c *Controller) Finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 		return reconcile.Result{}, nil
 	}
 	if nodeClaim.Status.ProviderID != "" || nodeClaim.Annotations[v1alpha5.MachineLinkedAnnotationKey] != "" {
-		if err = c.cloudProvider.Delete(ctx, machineutil.NewFromNodeClaim(nodeClaim)); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
+		if err = c.cloudProvider.Delete(ctx, nodeClaim); cloudprovider.IgnoreNodeClaimNotFoundError(err) != nil {
 			return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
 		}
 	}

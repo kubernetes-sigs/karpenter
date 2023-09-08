@@ -22,6 +22,12 @@ import (
 
 	"github.com/samber/lo"
 
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/utils/clock"
+	"knative.dev/pkg/logging"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
@@ -33,13 +39,6 @@ import (
 	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
 	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
-	provisionerutil "github.com/aws/karpenter-core/pkg/utils/provisioner"
-
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func filterCandidates(ctx context.Context, kubeClient client.Client, recorder events.Recorder, nodes []*Candidate) ([]*Candidate, error) {
@@ -58,7 +57,7 @@ func filterCandidates(ctx context.Context, kubeClient client.Client, recorder ev
 			recorder.Publish(deprovisioningevents.Blocked(cn.Node, cn.NodeClaim, fmt.Sprintf("PDB %q prevents pod evictions", pdb))...)
 			return false
 		}
-		if p, ok := hasDoNotEvictPod(cn); ok {
+		if p, ok := hasDoNotDisruptPod(cn); ok {
 			recorder.Publish(deprovisioningevents.Blocked(cn.Node, cn.NodeClaim, fmt.Sprintf("Pod %q has do not evict annotation", client.ObjectKeyFromObject(p)))...)
 			return false
 		}
@@ -201,7 +200,7 @@ func buildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 		key := nodepoolutil.Key{Name: np.Name, IsProvisioner: np.IsProvisioner}
 		nodePoolMap[key] = np
 
-		nodePoolInstanceTypes, err := cloudProvider.GetInstanceTypes(ctx, provisionerutil.New(np))
+		nodePoolInstanceTypes, err := cloudProvider.GetInstanceTypes(ctx, np)
 		if err != nil {
 			return nil, nil, fmt.Errorf("listing instance types for %s, %w", np.Name, err)
 		}
@@ -262,11 +261,11 @@ func clamp(min, val, max float64) float64 {
 	return val
 }
 
-func hasDoNotEvictPod(c *Candidate) (*v1.Pod, bool) {
+func hasDoNotDisruptPod(c *Candidate) (*v1.Pod, bool) {
 	return lo.Find(c.pods, func(p *v1.Pod) bool {
 		if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
 			return false
 		}
-		return pod.HasDoNotEvict(p)
+		return pod.HasDoNotDisrupt(p)
 	})
 }

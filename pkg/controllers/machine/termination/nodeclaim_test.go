@@ -81,7 +81,7 @@ var _ = Describe("NodeClaim", func() {
 
 		// Expect the nodeClaim to be gone from the cloudprovider
 		_, err = cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
-		Expect(cloudprovider.IsMachineNotFoundError(err)).To(BeTrue())
+		Expect(cloudprovider.IsNodeClaimNotFoundError(err)).To(BeTrue())
 	})
 	It("should delete multiple Nodes if multiple Nodes map to the NodeClaim", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
@@ -107,7 +107,7 @@ var _ = Describe("NodeClaim", func() {
 
 		// Expect the nodeClaim to be gone from the cloudprovider
 		_, err = cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
-		Expect(cloudprovider.IsMachineNotFoundError(err)).To(BeTrue())
+		Expect(cloudprovider.IsNodeClaimNotFoundError(err)).To(BeTrue())
 	})
 	It("should delete the Instance if the NodeClaim is linked but doesn't have its providerID resolved yet", func() {
 		node := test.NodeClaimLinkedNode(nodeClaim)
@@ -123,7 +123,7 @@ var _ = Describe("NodeClaim", func() {
 
 		// Expect the nodeClaim to be gone from the cloudprovider
 		_, err := cloudProvider.Get(ctx, nodeClaim.Annotations[v1alpha5.MachineLinkedAnnotationKey])
-		Expect(cloudprovider.IsMachineNotFoundError(err)).To(BeTrue())
+		Expect(cloudprovider.IsNodeClaimNotFoundError(err)).To(BeTrue())
 	})
 	It("should not delete the NodeClaim until all the Nodes are removed", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)

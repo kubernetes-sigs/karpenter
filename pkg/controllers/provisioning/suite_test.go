@@ -35,6 +35,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
@@ -44,6 +45,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
+	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 	"github.com/aws/karpenter-core/pkg/utils/sets"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -212,7 +214,7 @@ var _ = Describe("Provisioning", func() {
 	})
 	It("should schedule all pods on one node when node is in deleting state", func() {
 		provisioner := test.Provisioner()
-		its, err := cloudProvider.GetInstanceTypes(ctx, provisioner)
+		its, err := cloudProvider.GetInstanceTypes(ctx, nodepoolutil.New(provisioner))
 		Expect(err).To(BeNil())
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -703,7 +705,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 
 			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
-			ExpectMachineRequirements(cloudProvider.CreateCalls[0],
+			ExpectNodeClaimRequirements(cloudProvider.CreateCalls[0],
 				v1.NodeSelectorRequirement{
 					Key:      v1.LabelInstanceTypeStable,
 					Operator: v1.NodeSelectorOpIn,
@@ -737,7 +739,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 
 			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
-			ExpectMachineRequirements(cloudProvider.CreateCalls[0],
+			ExpectNodeClaimRequirements(cloudProvider.CreateCalls[0],
 				v1.NodeSelectorRequirement{
 					Key:      v1.LabelInstanceTypeStable,
 					Operator: v1.NodeSelectorOpIn,
@@ -778,7 +780,7 @@ var _ = Describe("Provisioning", func() {
 			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
 
 			// Expect a more restricted set of instance types
-			ExpectMachineRequirements(cloudProvider.CreateCalls[0],
+			ExpectNodeClaimRequirements(cloudProvider.CreateCalls[0],
 				v1.NodeSelectorRequirement{
 					Key:      v1.LabelArchStable,
 					Operator: v1.NodeSelectorOpIn,
@@ -809,7 +811,7 @@ var _ = Describe("Provisioning", func() {
 			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
 
 			// Expect a more restricted set of instance types
-			ExpectMachineRequirements(cloudProvider.CreateCalls[0],
+			ExpectNodeClaimRequirements(cloudProvider.CreateCalls[0],
 				v1.NodeSelectorRequirement{
 					Key:      v1.LabelOSStable,
 					Operator: v1.NodeSelectorOpIn,
@@ -841,7 +843,7 @@ var _ = Describe("Provisioning", func() {
 			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
 
 			// Expect a more restricted set of instance types
-			ExpectMachineRequirements(cloudProvider.CreateCalls[0],
+			ExpectNodeClaimRequirements(cloudProvider.CreateCalls[0],
 				v1.NodeSelectorRequirement{
 					Key:      v1.LabelInstanceTypeStable,
 					Operator: v1.NodeSelectorOpIn,
@@ -880,11 +882,12 @@ var _ = Describe("Provisioning", func() {
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 
 			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
-			Expect(cloudProvider.CreateCalls[0].Spec.MachineTemplateRef).To(Equal(
-				&v1alpha5.MachineTemplateRef{
-					APIVersion: "cloudprovider.karpenter.sh/v1alpha1",
-					Kind:       "CloudProvider",
-					Name:       "default",
+			Expect(cloudProvider.CreateCalls[0].Spec.NodeClass).To(Equal(
+				&v1beta1.NodeClassReference{
+					APIVersion:     "cloudprovider.karpenter.sh/v1alpha1",
+					Kind:           "CloudProvider",
+					Name:           "default",
+					IsNodeTemplate: true,
 				},
 			))
 			ExpectScheduled(ctx, env.Client, pod)
@@ -932,7 +935,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
 			Expect(cloudProvider.CreateCalls[0].Spec.Resources.Requests).To(HaveLen(4))
-			ExpectMachineRequests(cloudProvider.CreateCalls[0], v1.ResourceList{
+			ExpectNodeClaimRequests(cloudProvider.CreateCalls[0], v1.ResourceList{
 				v1.ResourceCPU:          resource.MustParse("1"),
 				v1.ResourceMemory:       resource.MustParse("1Mi"),
 				fake.ResourceGPUVendorA: resource.MustParse("1"),
@@ -953,7 +956,7 @@ var _ = Describe("Provisioning", func() {
 			)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
-			ExpectMachineRequests(cloudProvider.CreateCalls[0], v1.ResourceList{
+			ExpectNodeClaimRequests(cloudProvider.CreateCalls[0], v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("2"),
 				v1.ResourceMemory: resource.MustParse("2Mi"),
 				v1.ResourcePods:   resource.MustParse("2"),
@@ -1357,9 +1360,9 @@ var _ = Describe("Multiple Provisioners", func() {
 	})
 })
 
-func ExpectMachineRequirements(machine *v1alpha5.Machine, requirements ...v1.NodeSelectorRequirement) {
+func ExpectNodeClaimRequirements(nodeClaim *v1beta1.NodeClaim, requirements ...v1.NodeSelectorRequirement) {
 	for _, requirement := range requirements {
-		req, ok := lo.Find(machine.Spec.Requirements, func(r v1.NodeSelectorRequirement) bool {
+		req, ok := lo.Find(nodeClaim.Spec.Requirements, func(r v1.NodeSelectorRequirement) bool {
 			return r.Key == requirement.Key && r.Operator == requirement.Operator
 		})
 		ExpectWithOffset(1, ok).To(BeTrue())
@@ -1371,9 +1374,9 @@ func ExpectMachineRequirements(machine *v1alpha5.Machine, requirements ...v1.Nod
 	}
 }
 
-func ExpectMachineRequests(machine *v1alpha5.Machine, resources v1.ResourceList) {
+func ExpectNodeClaimRequests(nodeClaim *v1beta1.NodeClaim, resources v1.ResourceList) {
 	for name, value := range resources {
-		v := machine.Spec.Resources.Requests[name]
+		v := nodeClaim.Spec.Resources.Requests[name]
 		ExpectWithOffset(1, v.AsApproximateFloat64()).To(BeNumerically("~", value.AsApproximateFloat64(), 10))
 	}
 }

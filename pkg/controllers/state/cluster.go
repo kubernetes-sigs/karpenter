@@ -41,7 +41,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
-	provisionerutil "github.com/aws/karpenter-core/pkg/utils/provisioner"
 	"github.com/aws/karpenter-core/pkg/utils/sets"
 )
 
@@ -496,7 +495,7 @@ func (c *Cluster) populateInflight(ctx context.Context, n *StateNode) error {
 	if err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, provisionerutil.New(owner))
+	instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, owner)
 	if err != nil {
 		return err
 	}

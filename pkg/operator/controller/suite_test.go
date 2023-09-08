@@ -99,7 +99,7 @@ var _ = Describe("Typed", func() {
 					v1alpha5.ProvisionerNameLabelKey: "default",
 				},
 				Finalizers: []string{
-					v1alpha5.TestingGroup + "/finalizer",
+					"testing/finalizer",
 				},
 			},
 		})

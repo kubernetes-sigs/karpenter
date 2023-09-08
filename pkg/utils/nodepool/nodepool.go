@@ -21,6 +21,7 @@ import (
 
 	"github.com/samber/lo"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
@@ -105,6 +106,21 @@ func NewNodeClassReference(pr *v1alpha5.MachineTemplateRef) *v1beta1.NodeClassRe
 		Name:       pr.Name,
 		APIVersion: pr.APIVersion,
 	}
+}
+
+func Get(ctx context.Context, c client.Client, key Key) (*v1beta1.NodePool, error) {
+	if key.IsProvisioner {
+		provisioner := &v1alpha5.Provisioner{}
+		if err := c.Get(ctx, types.NamespacedName{Name: key.Name}, provisioner); err != nil {
+			return nil, err
+		}
+		return New(provisioner), nil
+	}
+	nodePool := &v1beta1.NodePool{}
+	if err := c.Get(ctx, types.NamespacedName{Name: key.Name}, nodePool); err != nil {
+		return nil, err
+	}
+	return nodePool, nil
 }
 
 func List(ctx context.Context, c client.Client, opts ...client.ListOption) (*v1beta1.NodePoolList, error) {

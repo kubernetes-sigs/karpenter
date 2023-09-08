@@ -25,7 +25,7 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
@@ -34,23 +34,23 @@ type DriftReason string
 
 // CloudProvider interface is implemented by cloud providers to support provisioning.
 type CloudProvider interface {
-	// Create launches a machine with the given resource requests and requirements and returns a hydrated
-	// machine back with resolved machine labels for the launched machine
-	Create(context.Context, *v1alpha5.Machine) (*v1alpha5.Machine, error)
-	// Delete removes a machine from the cloudprovider by its provider id
-	Delete(context.Context, *v1alpha5.Machine) error
-	// Get retrieves a machine from the cloudprovider by its provider id
-	Get(context.Context, string) (*v1alpha5.Machine, error)
-	// List retrieves all machines from the cloudprovider
-	List(context.Context) ([]*v1alpha5.Machine, error)
+	// Create launches a NodeClaim with the given resource requests and requirements and returns a hydrated
+	// NodeClaim back with resolved NodeClaim labels for the launched NodeClaim
+	Create(context.Context, *v1beta1.NodeClaim) (*v1beta1.NodeClaim, error)
+	// Delete removes a NodeClaim from the cloudprovider by its provider id
+	Delete(context.Context, *v1beta1.NodeClaim) error
+	// Get retrieves a NodeClaim from the cloudprovider by its provider id
+	Get(context.Context, string) (*v1beta1.NodeClaim, error)
+	// List retrieves all NodeClaims from the cloudprovider
+	List(context.Context) ([]*v1beta1.NodeClaim, error)
 	// GetInstanceTypes returns instance types supported by the cloudprovider.
 	// Availability of types or zone may vary by provisioner or over time.  Regardless of
 	// availability, the GetInstanceTypes method should always return all instance types,
 	// even those with no offerings available.
-	GetInstanceTypes(context.Context, *v1alpha5.Provisioner) ([]*InstanceType, error)
-	// IsMachineDrifted returns whether a machine has drifted from the provisioning requirements
+	GetInstanceTypes(context.Context, *v1beta1.NodePool) ([]*InstanceType, error)
+	// IsDrifted returns whether a NodeClaim has drifted from the provisioning requirements
 	// it is tied to.
-	IsMachineDrifted(context.Context, *v1alpha5.Machine) (DriftReason, error)
+	IsDrifted(context.Context, *v1beta1.NodeClaim) (DriftReason, error)
 	// Name returns the CloudProvider implementation name.
 	Name() string
 }
@@ -152,7 +152,7 @@ func (ofs Offerings) Available() Offerings {
 func (ofs Offerings) Requirements(reqs scheduling.Requirements) Offerings {
 	return lo.Filter(ofs, func(offering Offering, _ int) bool {
 		return (!reqs.Has(v1.LabelTopologyZone) || reqs.Get(v1.LabelTopologyZone).Has(offering.Zone)) &&
-			(!reqs.Has(v1alpha5.LabelCapacityType) || reqs.Get(v1alpha5.LabelCapacityType).Has(offering.CapacityType))
+			(!reqs.Has(v1beta1.CapacityTypeLabelKey) || reqs.Get(v1beta1.CapacityTypeLabelKey).Has(offering.CapacityType))
 	})
 }
 
@@ -163,37 +163,37 @@ func (ofs Offerings) Cheapest() Offering {
 	})
 }
 
-// MachineNotFoundError is an error type returned by CloudProviders when the reason for failure is NotFound
-type MachineNotFoundError struct {
+// NodeClaimNotFoundError is an error type returned by CloudProviders when the reason for failure is NotFound
+type NodeClaimNotFoundError struct {
 	error
 }
 
-func NewMachineNotFoundError(err error) *MachineNotFoundError {
-	return &MachineNotFoundError{
+func NewNodeClaimNotFoundError(err error) *NodeClaimNotFoundError {
+	return &NodeClaimNotFoundError{
 		error: err,
 	}
 }
 
-func (e *MachineNotFoundError) Error() string {
-	return fmt.Sprintf("machine not found, %s", e.error)
+func (e *NodeClaimNotFoundError) Error() string {
+	return fmt.Sprintf("nodeclaim not found, %s", e.error)
 }
 
-func IsMachineNotFoundError(err error) bool {
+func IsNodeClaimNotFoundError(err error) bool {
 	if err == nil {
 		return false
 	}
-	var mnfErr *MachineNotFoundError
+	var mnfErr *NodeClaimNotFoundError
 	return errors.As(err, &mnfErr)
 }
 
-func IgnoreMachineNotFoundError(err error) error {
-	if IsMachineNotFoundError(err) {
+func IgnoreNodeClaimNotFoundError(err error) error {
+	if IsNodeClaimNotFoundError(err) {
 		return nil
 	}
 	return err
 }
 
-// InsufficientCapacityError is an error type returned by CloudProviders when a launch fails due to a lack of capacity from machine requirements
+// InsufficientCapacityError is an error type returned by CloudProviders when a launch fails due to a lack of capacity from NodeClaim requirements
 type InsufficientCapacityError struct {
 	error
 }

@@ -40,7 +40,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
+	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
 
 var _ corecontroller.FinalizingTypedController[*v1.Node] = (*Controller)(nil)
@@ -89,7 +89,7 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 		c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
 		// If the underlying machine no longer exists.
 		if _, err := c.cloudProvider.Get(ctx, node.Spec.ProviderID); err != nil {
-			if cloudprovider.IsMachineNotFoundError(err) {
+			if cloudprovider.IsNodeClaimNotFoundError(err) {
 				return reconcile.Result{}, c.removeFinalizer(ctx, node)
 			}
 			return reconcile.Result{}, fmt.Errorf("getting machine, %w", err)
@@ -97,7 +97,7 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 
-	if err := c.cloudProvider.Delete(ctx, machineutil.NewFromNode(node)); cloudprovider.IgnoreMachineNotFoundError(err) != nil {
+	if err := c.cloudProvider.Delete(ctx, nodeclaimutil.NewFromNode(node)); cloudprovider.IgnoreNodeClaimNotFoundError(err) != nil {
 		return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
 	}
 	return reconcile.Result{}, c.removeFinalizer(ctx, node)

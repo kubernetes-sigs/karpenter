@@ -256,7 +256,7 @@ func (r Requirements) Intersects(requirements Requirements) (errs error) {
 func (r Requirements) Labels() map[string]string {
 	labels := map[string]string{}
 	for key, requirement := range r {
-		if !v1alpha5.IsRestrictedNodeLabel(key) {
+		if !v1alpha5.IsRestrictedNodeLabel(key) && !v1beta1.IsRestrictedNodeLabel(key) {
 			if value := requirement.Any(); value != "" {
 				labels[key] = value
 			}
@@ -266,7 +266,9 @@ func (r Requirements) Labels() map[string]string {
 }
 
 func (r Requirements) String() string {
-	requirements := lo.Reject(r.Values(), func(requirement *Requirement, _ int) bool { return v1alpha5.RestrictedLabels.Has(requirement.Key) })
+	requirements := lo.Reject(r.Values(), func(requirement *Requirement, _ int) bool {
+		return v1alpha5.RestrictedLabels.Has(requirement.Key) || v1beta1.RestrictedLabels.Has(requirement.Key)
+	})
 	stringRequirements := lo.Map(requirements, func(requirement *Requirement, _ int) string { return requirement.String() })
 	slices.Sort(stringRequirements)
 	return strings.Join(stringRequirements, ", ")
