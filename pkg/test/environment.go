@@ -31,6 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/utils/env"
 	"github.com/aws/karpenter-core/pkg/utils/functional"
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
@@ -65,6 +67,22 @@ func WithFieldIndexers(fieldIndexers ...func(cache.Cache) error) functional.Opti
 	return func(o EnvironmentOptions) EnvironmentOptions {
 		o.fieldIndexers = append(o.fieldIndexers, fieldIndexers...)
 		return o
+	}
+}
+
+func MachineFieldIndexer(ctx context.Context) func(cache.Cache) error {
+	return func(c cache.Cache) error {
+		return c.IndexField(ctx, &v1alpha5.Machine{}, "status.providerID", func(obj client.Object) []string {
+			return []string{obj.(*v1alpha5.Machine).Status.ProviderID}
+		})
+	}
+}
+
+func NodeClaimFieldIndexer(ctx context.Context) func(cache.Cache) error {
+	return func(c cache.Cache) error {
+		return c.IndexField(ctx, &v1beta1.NodeClaim{}, "status.providerID", func(obj client.Object) []string {
+			return []string{obj.(*v1beta1.NodeClaim).Status.ProviderID}
+		})
 	}
 }
 
