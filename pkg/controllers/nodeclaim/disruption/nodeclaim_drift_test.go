@@ -22,14 +22,14 @@ import (
 	"knative.dev/pkg/ptr"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	controllerprov "github.com/aws/karpenter-core/pkg/controllers/provisioner/hash"
+	"github.com/aws/karpenter-core/pkg/controllers/nodeclaim/disruption"
+	controllerprov "github.com/aws/karpenter-core/pkg/controllers/nodepool/hash"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/settings"
-	"github.com/aws/karpenter-core/pkg/controllers/machine/disruption"
 	"github.com/aws/karpenter-core/pkg/test"
 
 	. "github.com/onsi/ginkgo/v2"

@@ -24,16 +24,16 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/leasegarbagecollection"
-	"github.com/aws/karpenter-core/pkg/controllers/machine/consistency"
-	nodeclaimdisruption "github.com/aws/karpenter-core/pkg/controllers/machine/disruption"
-	nodeclaimgarbagecollection "github.com/aws/karpenter-core/pkg/controllers/machine/garbagecollection"
-	nodeclaimlifecycle "github.com/aws/karpenter-core/pkg/controllers/machine/lifecycle"
-	nodeclaimtermination "github.com/aws/karpenter-core/pkg/controllers/machine/termination"
 	metricsnode "github.com/aws/karpenter-core/pkg/controllers/metrics/node"
 	metricspod "github.com/aws/karpenter-core/pkg/controllers/metrics/pod"
 	metricsprovisioner "github.com/aws/karpenter-core/pkg/controllers/metrics/provisioner"
-	"github.com/aws/karpenter-core/pkg/controllers/provisioner/counter"
-	"github.com/aws/karpenter-core/pkg/controllers/provisioner/hash"
+	nodeclaimconsistency "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/consistency"
+	nodeclaimdisruption "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/disruption"
+	nodeclaimgarbagecollection "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/garbagecollection"
+	nodeclaimlifecycle "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/lifecycle"
+	nodeclaimtermination "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/termination"
+	nodepoolcounter "github.com/aws/karpenter-core/pkg/controllers/nodepool/counter"
+	nodepoolhash "github.com/aws/karpenter-core/pkg/controllers/nodepool/hash"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
@@ -60,7 +60,7 @@ func NewControllers(
 		p,
 		deprovisioning.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster),
 		provisioning.NewController(kubeClient, p, recorder),
-		hash.NewProvisionerController(kubeClient),
+		nodepoolhash.NewProvisionerController(kubeClient),
 		informer.NewDaemonSetController(kubeClient, cluster),
 		informer.NewNodeController(kubeClient, cluster),
 		informer.NewPodController(kubeClient, cluster),
@@ -70,8 +70,8 @@ func NewControllers(
 		metricspod.NewController(kubeClient),
 		metricsprovisioner.NewController(kubeClient),
 		metricsnode.NewController(cluster),
-		counter.NewProvisionerController(kubeClient, cluster),
-		consistency.NewMachineController(clock, kubeClient, recorder, cloudProvider),
+		nodepoolcounter.NewProvisionerController(kubeClient, cluster),
+		nodeclaimconsistency.NewMachineController(clock, kubeClient, recorder, cloudProvider),
 		nodeclaimlifecycle.NewMachineController(clock, kubeClient, cloudProvider, recorder),
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimtermination.NewMachineController(kubeClient, cloudProvider),

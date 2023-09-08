@@ -29,7 +29,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	provcontroller "github.com/aws/karpenter-core/pkg/controllers/provisioner/hash"
+	provcontroller "github.com/aws/karpenter-core/pkg/controllers/nodepool/hash"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"

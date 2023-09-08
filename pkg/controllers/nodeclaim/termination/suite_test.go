@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package consistency_test
+package termination_test
 
 import (
 	"context"
@@ -22,34 +22,38 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
 	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	. "github.com/aws/karpenter-core/pkg/test/expectations"
-
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
-	"github.com/aws/karpenter-core/pkg/controllers/machine/consistency"
+	nodeclaimlifecycle "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/lifecycle"
+	nodeclaimtermination "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/termination"
+	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
+	. "github.com/aws/karpenter-core/pkg/test/expectations"
+
 	"github.com/aws/karpenter-core/pkg/test"
 )
 
 var ctx context.Context
-var machineConsistencyController controller.Controller
-var nodeClaimConsistencyController controller.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
-var cp *fake.CloudProvider
-var recorder *test.EventRecorder
+var cloudProvider *fake.CloudProvider
+var machineController controller.Controller
+var machineTerminationController controller.Controller
+var nodeClaimController controller.Controller
+var nodeClaimTerminationController controller.Controller
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Node")
+	RunSpecs(t, "Machine")
 }
 
 var _ = BeforeSuite(func() {
@@ -60,22 +64,19 @@ var _ = BeforeSuite(func() {
 		})
 	}))
 	ctx = settings.ToContext(ctx, test.Settings())
-	cp = &fake.CloudProvider{}
-	recorder = test.NewEventRecorder()
-	machineConsistencyController = consistency.NewMachineController(fakeClock, env.Client, recorder, cp)
-	nodeClaimConsistencyController = consistency.NewNodeClaimController(fakeClock, env.Client, recorder, cp)
+	cloudProvider = fake.NewCloudProvider()
+	machineController = nodeclaimlifecycle.NewMachineController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
+	machineTerminationController = nodeclaimtermination.NewMachineController(env.Client, cloudProvider)
+	nodeClaimController = nodeclaimlifecycle.NewNodeClaimController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
+	nodeClaimTerminationController = nodeclaimtermination.NewNodeClaimController(env.Client, cloudProvider)
 })
 
 var _ = AfterSuite(func() {
 	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
 })
 
-var _ = BeforeEach(func() {
-
-	recorder.Reset()
-})
-
 var _ = AfterEach(func() {
 	fakeClock.SetTime(time.Now())
 	ExpectCleanedUp(ctx, env.Client)
+	cloudProvider.Reset()
 })
