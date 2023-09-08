@@ -21,11 +21,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/samber/lo"
 	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
-
-	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis"
@@ -66,12 +64,9 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	nodeclaimutil.EnableNodeClaims = true
 	fakeClock = clock.NewFakeClock(time.Now())
-	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...), test.WithFieldIndexers(func(c cache.Cache) error {
-		return c.IndexField(ctx, &v1alpha5.Machine{}, "status.providerID", func(obj client.Object) []string {
-			return []string{obj.(*v1alpha5.Machine).Status.ProviderID}
-		})
-	}))
+	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...), test.WithFieldIndexers(test.MachineFieldIndexer(ctx), test.NodeClaimFieldIndexer(ctx)))
 
 	cloudProvider = fake.NewCloudProvider()
 	evictionQueue = terminator.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}))
@@ -84,10 +79,12 @@ var _ = AfterSuite(func() {
 
 var _ = Describe("Termination", func() {
 	var node *v1.Node
+	var nodeClaim *v1beta1.NodeClaim
 	var machine *v1alpha5.Machine
 
 	BeforeEach(func() {
-		machine, node = test.MachineAndNode(v1alpha5.Machine{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1alpha5.TerminationFinalizer}}})
+		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1beta1.TerminationFinalizer}}})
+		machine = test.Machine(v1alpha5.Machine{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1beta1.TerminationFinalizer}}, Status: v1alpha5.MachineStatus{ProviderID: node.Spec.ProviderID}})
 		cloudProvider.CreatedNodeClaims[node.Spec.ProviderID] = nodeclaimutil.New(machine)
 	})
 
@@ -117,6 +114,15 @@ var _ = Describe("Termination", func() {
 			ExpectExists(ctx, env.Client, machine)
 			ExpectFinalizersRemoved(ctx, env.Client, machine)
 			ExpectNotFound(ctx, env.Client, node, machine)
+		})
+		It("should delete nodeclaims associated with nodes", func() {
+			ExpectApplied(ctx, env.Client, node, nodeClaim)
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectExists(ctx, env.Client, nodeClaim)
+			ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+			ExpectNotFound(ctx, env.Client, node, nodeClaim)
 		})
 		It("should not race if deleting nodes in parallel", func() {
 			var nodes []*v1.Node
@@ -387,7 +393,7 @@ var _ = Describe("Termination", func() {
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 			ExpectNotFound(ctx, env.Client, node)
 		})
-		It("should delete nodes with no underlying machine even if not fully drained", func() {
+		It("should delete nodes with no underlying instance even if not fully drained", func() {
 			pods := []*v1.Pod{
 				test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}}),
 				test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}}),

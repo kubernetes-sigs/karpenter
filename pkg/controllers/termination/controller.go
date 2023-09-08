@@ -79,6 +79,9 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 	if err := c.deleteAllMachines(ctx, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("deleting machines, %w", err)
 	}
+	if err := c.deleteAllNodeClaims(ctx, node); err != nil {
+		return reconcile.Result{}, fmt.Errorf("deleting nodeclaims, %w", err)
+	}
 	if err := c.terminator.Cordon(ctx, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("cordoning node, %w", err)
 	}
@@ -110,6 +113,21 @@ func (c *Controller) deleteAllMachines(ctx context.Context, node *v1.Node) error
 	}
 	for i := range machineList.Items {
 		if err := c.kubeClient.Delete(ctx, &machineList.Items[i]); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+	}
+	return nil
+}
+
+func (c *Controller) deleteAllNodeClaims(ctx context.Context, node *v1.Node) error {
+	nodeClaimList := &v1beta1.NodeClaimList{}
+	if nodeclaimutil.EnableNodeClaims {
+		if err := c.kubeClient.List(ctx, nodeClaimList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
+			return err
+		}
+	}
+	for i := range nodeClaimList.Items {
+		if err := c.kubeClient.Delete(ctx, &nodeClaimList.Items[i]); err != nil {
 			return client.IgnoreNotFound(err)
 		}
 	}
