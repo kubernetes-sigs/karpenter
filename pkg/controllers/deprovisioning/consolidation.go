@@ -165,13 +165,13 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	// a spot node with one that is less available and more likely to be reclaimed).
 	allExistingAreSpot := true
 	for _, cn := range candidates {
-		if cn.capacityType != v1alpha5.CapacityTypeSpot {
+		if cn.capacityType != v1beta1.CapacityTypeSpot {
 			allExistingAreSpot = false
 		}
 	}
 
 	if allExistingAreSpot &&
-		results.NewNodeClaims[0].Requirements.Get(v1alpha5.LabelCapacityType).Has(v1alpha5.CapacityTypeSpot) {
+		results.NewNodeClaims[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeSpot) {
 		if len(candidates) == 1 {
 			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace a spot node with a spot node")...)
 		}

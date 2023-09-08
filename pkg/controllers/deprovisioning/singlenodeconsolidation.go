@@ -29,21 +29,21 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
-const SingleMachineConsolidationTimeoutDuration = 3 * time.Minute
+const SingleNodeConsolidationTimeoutDuration = 3 * time.Minute
 
-// SingleMachineConsolidation is the consolidation controller that performs single machine consolidation.
-type SingleMachineConsolidation struct {
+// SingleNodeConsolidation is the consolidation controller that performs single node consolidation.
+type SingleNodeConsolidation struct {
 	consolidation
 }
 
-func NewSingleMachineConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cp cloudprovider.CloudProvider, recorder events.Recorder) *SingleMachineConsolidation {
-	return &SingleMachineConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
+func NewSingleNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
+	cp cloudprovider.CloudProvider, recorder events.Recorder) *SingleNodeConsolidation {
+	return &SingleNodeConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
 }
 
-// ComputeCommand generates a deprovisioning command given deprovisionable machines
+// ComputeCommand generates a deprovisioning command given deprovisionable nodes
 // nolint:gocyclo
-func (s *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
+func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	if s.isConsolidated() {
 		return Command{}, nil
 	}
@@ -51,17 +51,17 @@ func (s *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 	if err != nil {
 		return Command{}, fmt.Errorf("sorting candidates, %w", err)
 	}
-	deprovisioningEligibleMachinesGauge.WithLabelValues(s.String()).Set(float64(len(candidates)))
+	deprovisioningEligibleNodesGauge.WithLabelValues(s.String()).Set(float64(len(candidates)))
 
 	v := NewValidation(consolidationTTL, s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder)
 
 	// Set a timeout
-	timeout := s.clock.Now().Add(SingleMachineConsolidationTimeoutDuration)
-	// binary search to find the maximum number of machines we can terminate
+	timeout := s.clock.Now().Add(SingleNodeConsolidationTimeoutDuration)
+	// binary search to find the maximum number of nodes we can terminate
 	for i, candidate := range candidates {
 		if s.clock.Now().After(timeout) {
-			deprovisioningConsolidationTimeoutsCounter.WithLabelValues(singleMachineConsolidationLabelValue).Inc()
-			logging.FromContext(ctx).Debugf("abandoning single-machine consolidation due to timeout after evaluating %d candidates", i)
+			deprovisioningConsolidationTimeoutsCounter.WithLabelValues(singleNodeConsolidationLabelValue).Inc()
+			logging.FromContext(ctx).Debugf("abandoning single-node consolidation due to timeout after evaluating %d candidates", i)
 			return Command{}, nil
 		}
 		// compute a possible consolidation option
@@ -78,7 +78,7 @@ func (s *SingleMachineConsolidation) ComputeCommand(ctx context.Context, candida
 			return Command{}, fmt.Errorf("validating consolidation, %w", err)
 		}
 		if !isValid {
-			logging.FromContext(ctx).Debugf("abandoning single machine consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+			logging.FromContext(ctx).Debugf("abandoning single-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
 			return Command{}, nil
 		}
 		return cmd, nil

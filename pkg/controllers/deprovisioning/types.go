@@ -25,7 +25,6 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
@@ -61,7 +60,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	nodePoolMap map[nodepoolutil.Key]*v1beta1.NodePool, nodePoolToInstanceTypesMap map[nodepoolutil.Key]map[string]*cloudprovider.InstanceType) (*Candidate, error) {
 
 	if node.Node == nil || node.NodeClaim == nil {
-		return nil, fmt.Errorf("state node doesn't contain both a node and a machine")
+		return nil, fmt.Errorf("state node doesn't contain both a node and a nodeclaim")
 	}
 	// skip any nodes that are already marked for deletion and being handled
 	if node.MarkedForDeletion() {
@@ -164,7 +163,7 @@ func (o Command) Action() Action {
 
 func (o Command) String() string {
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "%s, terminating %d machines ", o.Action(), len(o.candidates))
+	fmt.Fprintf(&buf, "%s, terminating %d nodes ", o.Action(), len(o.candidates))
 	for i, old := range o.candidates {
 		if i != 0 {
 			fmt.Fprint(&buf, ", ")
@@ -176,31 +175,31 @@ func (o Command) String() string {
 	if len(o.replacements) == 0 {
 		return buf.String()
 	}
-	odMachines := 0
-	spotMachines := 0
-	for _, machine := range o.replacements {
-		ct := machine.Requirements.Get(v1alpha5.LabelCapacityType)
-		if ct.Has(v1alpha5.CapacityTypeOnDemand) {
-			odMachines++
+	odNodes := 0
+	spotNodes := 0
+	for _, nodeClaim := range o.replacements {
+		ct := nodeClaim.Requirements.Get(v1beta1.CapacityTypeLabelKey)
+		if ct.Has(v1beta1.CapacityTypeOnDemand) {
+			odNodes++
 		}
-		if ct.Has(v1alpha5.CapacityTypeSpot) {
-			spotMachines++
+		if ct.Has(v1beta1.CapacityTypeSpot) {
+			spotNodes++
 		}
 	}
 	// Print list of instance types for the first replacements.
 	if len(o.replacements) > 1 {
-		fmt.Fprintf(&buf, " and replacing with %d spot and %d on-demand machines from types %s",
-			spotMachines, odMachines,
+		fmt.Fprintf(&buf, " and replacing with %d spot and %d on-demand nodes from types %s",
+			spotNodes, odNodes,
 			scheduling.InstanceTypeList(o.replacements[0].InstanceTypeOptions))
 		return buf.String()
 	}
-	ct := o.replacements[0].Requirements.Get(v1alpha5.LabelCapacityType)
-	machineDesc := "machine"
+	ct := o.replacements[0].Requirements.Get(v1beta1.CapacityTypeLabelKey)
+	nodeDesc := "node"
 	if ct.Len() == 1 {
-		machineDesc = fmt.Sprintf("%s machine", ct.Any())
+		nodeDesc = fmt.Sprintf("%s node", ct.Any())
 	}
 	fmt.Fprintf(&buf, " and replacing with %s from types %s",
-		machineDesc,
+		nodeDesc,
 		scheduling.InstanceTypeList(o.replacements[0].InstanceTypeOptions))
 	return buf.String()
 }

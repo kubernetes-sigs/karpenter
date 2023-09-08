@@ -62,7 +62,7 @@ const immediately = time.Millisecond
 
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 
-// waitRetryOptions are the retry options used when waiting on a machine to become ready or to be deleted
+// waitRetryOptions are the retry options used when waiting on a node to become ready or to be deleted
 // readiness can take some time as the node needs to come up, have any daemonset extended resoruce plugins register, etc.
 // deletion can take some time in the case of restrictive PDBs that throttle the rate at which the node is drained
 func waitRetryOptions(ctx context.Context) []retry.Option {
@@ -87,18 +87,18 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 		cloudProvider: cp,
 		lastRun:       map[string]time.Time{},
 		deprovisioners: []Deprovisioner{
-			// Expire any machines that must be deleted, allowing their pods to potentially land on currently
+			// Expire any nodes that must be deleted, allowing their pods to potentially land on currently
 			NewExpiration(clk, kubeClient, cluster, provisioner, recorder),
-			// Terminate any machines that have drifted from provisioning specifications, allowing the pods to reschedule.
+			// Terminate any nodes that have drifted from provisioning specifications, allowing the pods to reschedule.
 			NewDrift(kubeClient, cluster, provisioner, recorder),
-			// Delete any remaining empty machines as there is zero cost in terms of disruption.  Emptiness and
+			// Delete any remaining empty nodes as there is zero cost in terms of disruption.  Emptiness and
 			// emptyNodeConsolidation are mutually exclusive, only one of these will operate
 			NewEmptiness(clk),
-			NewEmptyMachineConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
-			// Attempt to identify multiple machines that we can consolidate simultaneously to reduce pod churn
-			NewMultiMachineConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
-			// And finally fall back our single machines consolidation to further reduce cluster cost.
-			NewSingleMachineConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
+			NewEmptyNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
+			// Attempt to identify multiple nodes that we can consolidate simultaneously to reduce pod churn
+			NewMultiNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
+			// And finally fall back our single nodes consolidation to further reduce cluster cost.
+			NewSingleNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
 		},
 	}
 }
@@ -178,10 +178,10 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 
 	reason := fmt.Sprintf("%s/%s", d, command.Action())
 	if command.Action() == ReplaceAction {
-		if err := c.launchReplacementMachines(ctx, command, reason); err != nil {
+		if err := c.launchReplacementNodes(ctx, command, reason); err != nil {
 			// If we failed to launch the replacement, don't deprovision.  If this is some permanent failure,
 			// we don't want to disrupt workloads with no way to provision new nodes for them.
-			return fmt.Errorf("launching replacement machine, %w", err)
+			return fmt.Errorf("launching replacement, %w", err)
 		}
 	}
 
@@ -190,7 +190,7 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 
 		if err := nodeclaimutil.Delete(ctx, c.kubeClient, candidate.NodeClaim); err != nil {
 			if !errors.IsNotFound(err) {
-				logging.FromContext(ctx).Errorf("terminating machine, %s", err)
+				logging.FromContext(ctx).Errorf("terminating, %s", err)
 			}
 			continue
 		}
@@ -205,9 +205,9 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 	return nil
 }
 
-// launchReplacementMachines launches replacement machines and blocks until it is ready
+// launchReplacementNodes launches replacement nodes and blocks until it is ready
 // nolint:gocyclo
-func (c *Controller) launchReplacementMachines(ctx context.Context, action Command, reason string) error {
+func (c *Controller) launchReplacementNodes(ctx context.Context, action Command, reason string) error {
 	defer metrics.Measure(deprovisioningReplacementNodeInitializedHistogram)()
 
 	// cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
@@ -228,12 +228,12 @@ func (c *Controller) launchReplacementMachines(ctx context.Context, action Comma
 
 	candidateProviderIDs := lo.Map(action.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
 
-	// We have the new machines created at the API server so mark the old machines for deletion
+	// We have the new nodes created at the API server so mark the old nodes for deletion
 	c.cluster.MarkForDeletion(candidateProviderIDs...)
 
 	errs := make([]error, len(nodeClaimKeys))
 	workqueue.ParallelizeUntil(ctx, len(nodeClaimKeys), len(nodeClaimKeys), func(i int) {
-		// machine never became ready or the machines that we tried to launch got Insufficient Capacity or some
+		// node never became ready or the nodes that we tried to launch got Insufficient Capacity or some
 		// other transient error
 		if err := c.waitForReadiness(ctx, nodeClaimKeys[i], reason); err != nil {
 			deprovisioningReplacementNodeLaunchFailedCounter.WithLabelValues(reason).Inc()
@@ -243,14 +243,14 @@ func (c *Controller) launchReplacementMachines(ctx context.Context, action Comma
 	if err = multierr.Combine(errs...); err != nil {
 		c.cluster.UnmarkForDeletion(candidateProviderIDs...)
 		return multierr.Combine(c.setNodesUnschedulable(ctx, false, action.candidates...),
-			fmt.Errorf("timed out checking machine readiness, %w", err))
+			fmt.Errorf("timed out checking node readiness, %w", err))
 	}
 	return nil
 }
 
 // TODO @njtran: Allow to bypass this check for certain deprovisioners
 func (c *Controller) waitForReadiness(ctx context.Context, key nodeclaimutil.Key, reason string) error {
-	// Wait for the machine to be initialized
+	// Wait for the node to be initialized
 	var once sync.Once
 	pollStart := time.Now()
 	return retry.Do(func() error {
@@ -259,9 +259,9 @@ func (c *Controller) waitForReadiness(ctx context.Context, key nodeclaimutil.Key
 			// The NodeClaim got deleted after an initial eventual consistency delay
 			// This means that there was an ICE error or the Node initializationTTL expired
 			if errors.IsNotFound(err) && c.clock.Since(pollStart) > time.Second*5 {
-				return retry.Unrecoverable(fmt.Errorf("getting machine, %w", err))
+				return retry.Unrecoverable(fmt.Errorf("getting %s, %w", lo.Ternary(key.IsMachine, "machine", "nodeclaim"), err))
 			}
-			return fmt.Errorf("getting machine, %w", err)
+			return fmt.Errorf("getting %s, %w", lo.Ternary(key.IsMachine, "machine", "nodeclaim"), err)
 		}
 		once.Do(func() {
 			c.recorder.Publish(deprovisioningevents.Launching(nodeClaim, reason))
@@ -275,22 +275,22 @@ func (c *Controller) waitForReadiness(ctx context.Context, key nodeclaimutil.Key
 	}, waitRetryOptions(ctx)...)
 }
 
-// waitForDeletion waits for the specified machine to be removed from the API server. This deletion can take some period
-// of time if there are PDBs that govern pods on the machine as we need to wait until the node drains before
+// waitForDeletion waits for the specified node to be removed from the API server. This deletion can take some period
+// of time if there are PDBs that govern pods on the node as we need to wait until the node drains before
 // it's actually deleted.
 func (c *Controller) waitForDeletion(ctx context.Context, nodeClaim *v1beta1.NodeClaim) {
 	if err := retry.Do(func() error {
 		nc, nerr := nodeclaimutil.Get(ctx, c.kubeClient, nodeclaimutil.Key{Name: nodeClaim.Name, IsMachine: nodeClaim.IsMachine})
-		// We expect the not machine found error, at which point we know the machine is deleted.
+		// We expect the not found error, at which point we know the node is deleted.
 		if errors.IsNotFound(nerr) {
 			return nil
 		}
 		// make the user aware of why deprovisioning is paused
 		c.recorder.Publish(deprovisioningevents.WaitingOnDeletion(nc))
 		if nerr != nil {
-			return fmt.Errorf("expected machine to be not found, %w", nerr)
+			return fmt.Errorf("expected to be not found, %w", nerr)
 		}
-		// the machine still exists
+		// the node still exists
 		return fmt.Errorf("expected node to be not found")
 	}, waitRetryOptions(ctx)...,
 	); err != nil {

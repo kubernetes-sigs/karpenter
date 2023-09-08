@@ -2484,7 +2484,7 @@ var _ = Describe("Machine/Consolidation", func() {
 			}()
 
 			// advance the clock so that the timeout expires
-			fakeClock.Step(deprovisioning.MultiMachineConsolidationTimeoutDuration)
+			fakeClock.Step(deprovisioning.MultiNodeConsolidationTimeoutDuration)
 
 			// wait for the controller to block on the validation timeout
 			Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
@@ -2576,9 +2576,9 @@ var _ = Describe("Machine/Consolidation", func() {
 			}()
 
 			// advance the clock so that the timeout expires for multi-machine
-			fakeClock.Step(deprovisioning.MultiMachineConsolidationTimeoutDuration)
+			fakeClock.Step(deprovisioning.MultiNodeConsolidationTimeoutDuration)
 			// advance the clock so that the timeout expires for single-machine
-			fakeClock.Step(deprovisioning.SingleMachineConsolidationTimeoutDuration)
+			fakeClock.Step(deprovisioning.SingleNodeConsolidationTimeoutDuration)
 
 			ExpectTriggerVerifyAction(&wg)
 
