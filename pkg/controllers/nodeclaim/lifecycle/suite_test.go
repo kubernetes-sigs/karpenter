@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package disruption_test
+package lifecycle_test
 
 import (
 	"context"
@@ -22,6 +22,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
 	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -30,8 +31,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
-	nodeclaimdisruption "github.com/aws/karpenter-core/pkg/controllers/machine/disruption"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
+	nodeclaimlifecycle "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/lifecycle"
+	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
@@ -40,17 +41,16 @@ import (
 )
 
 var ctx context.Context
-var machineDisruptionController controller.Controller
-var nodeClaimDisruptionController controller.Controller
+var machineController controller.Controller
+var nodeClaimController controller.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
-var cluster *state.Cluster
-var cp *fake.CloudProvider
+var cloudProvider *fake.CloudProvider
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Disruption")
+	RunSpecs(t, "Machine")
 }
 
 var _ = BeforeSuite(func() {
@@ -61,23 +61,18 @@ var _ = BeforeSuite(func() {
 		})
 	}))
 	ctx = settings.ToContext(ctx, test.Settings())
-	cp = fake.NewCloudProvider()
-	cluster = state.NewCluster(fakeClock, env.Client, cp)
-	machineDisruptionController = nodeclaimdisruption.NewMachineController(fakeClock, env.Client, cluster, cp)
-	nodeClaimDisruptionController = nodeclaimdisruption.NewNodeClaimController(fakeClock, env.Client, cluster, cp)
+
+	cloudProvider = fake.NewCloudProvider()
+	machineController = nodeclaimlifecycle.NewMachineController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
+	nodeClaimController = nodeclaimlifecycle.NewNodeClaimController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
 })
 
 var _ = AfterSuite(func() {
 	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
 })
 
-var _ = BeforeEach(func() {
-	ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: true}))
-})
-
 var _ = AfterEach(func() {
 	fakeClock.SetTime(time.Now())
-	cp.Reset()
-	cluster.Reset()
 	ExpectCleanedUp(ctx, env.Client)
+	cloudProvider.Reset()
 })
