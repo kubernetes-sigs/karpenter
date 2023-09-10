@@ -124,9 +124,6 @@ func (in *NodeClaimSpec) validateTaintsField(taints []v1.Taint, existing map[tai
 // NodeClaim requirements only support well known labels.
 func (in *NodeClaimSpec) validateRequirements() (errs *apis.FieldError) {
 	for i, requirement := range in.Requirements {
-		if requirement.Key == NodePoolLabelKey {
-			errs = errs.Also(apis.ErrInvalidArrayValue(fmt.Sprintf("%s is restricted", requirement.Key), "requirements", i))
-		}
 		if err := in.validateRequirement(requirement); err != nil {
 			errs = errs.Also(apis.ErrInvalidArrayValue(err, "requirements", i))
 		}

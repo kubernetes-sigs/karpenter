@@ -54,8 +54,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/logging"
 	"github.com/aws/karpenter-core/pkg/operator/options"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 	"github.com/aws/karpenter-core/pkg/webhooks"
 )
 
@@ -76,9 +74,6 @@ type Operator struct {
 
 // NewOperator instantiates a controller manager or panics
 func NewOperator() (context.Context, *Operator) {
-	nodepoolutil.EnableNodePools = true
-	nodeclaimutil.EnableNodeClaims = true
-
 	// Root Context
 	ctx := signals.NewContext()
 	ctx = knativeinjection.WithNamespaceScope(ctx, system.Namespace())

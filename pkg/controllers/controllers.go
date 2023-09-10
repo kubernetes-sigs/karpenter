@@ -23,6 +23,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/disruption"
 	"github.com/aws/karpenter-core/pkg/controllers/leasegarbagecollection"
 	metricsnode "github.com/aws/karpenter-core/pkg/controllers/metrics/node"
+	metricsnodepool "github.com/aws/karpenter-core/pkg/controllers/metrics/nodepool"
 	metricspod "github.com/aws/karpenter-core/pkg/controllers/metrics/pod"
 	metricsprovisioner "github.com/aws/karpenter-core/pkg/controllers/metrics/provisioner"
 	"github.com/aws/karpenter-core/pkg/controllers/node/termination"
@@ -63,11 +64,13 @@ func NewControllers(
 		informer.NewNodeController(kubeClient, cluster),
 		informer.NewPodController(kubeClient, cluster),
 		informer.NewProvisionerController(kubeClient, cluster),
+		informer.NewNodePoolController(kubeClient, cluster),
 		informer.NewMachineController(kubeClient, cluster),
 		informer.NewNodeClaimController(kubeClient, cluster),
 		termination.NewController(kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue), recorder),
 		metricspod.NewController(kubeClient),
 		metricsprovisioner.NewController(kubeClient),
+		metricsnodepool.NewController(kubeClient),
 		metricsnode.NewController(cluster),
 		nodepoolcounter.NewProvisionerController(kubeClient, cluster),
 		nodepoolcounter.NewNodePoolController(kubeClient, cluster),

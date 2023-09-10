@@ -90,12 +90,6 @@ var _ = Describe("Validation", func() {
 		})
 	})
 	Context("Requirements", func() {
-		It("should fail for the karpenter.sh/nodepool label", func() {
-			nodeClaim.Spec.Requirements = []v1.NodeSelectorRequirement{
-				{Key: NodePoolLabelKey, Operator: v1.NodeSelectorOpIn, Values: []string{randomdata.SillyName()}},
-			}
-			Expect(nodeClaim.Validate(ctx)).ToNot(Succeed())
-		})
 		It("should allow supported ops", func() {
 			nodeClaim.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},

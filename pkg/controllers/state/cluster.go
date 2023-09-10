@@ -41,7 +41,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
@@ -94,11 +93,9 @@ func (c *Cluster) Synced(ctx context.Context) bool {
 		return false
 	}
 	nodeClaimList := &v1beta1.NodeClaimList{}
-	if nodeclaimutil.EnableNodeClaims {
-		if err := c.kubeClient.List(ctx, nodeClaimList); err != nil {
-			logging.FromContext(ctx).Errorf("checking cluster state sync, %v", err)
-			return false
-		}
+	if err := c.kubeClient.List(ctx, nodeClaimList); err != nil {
+		logging.FromContext(ctx).Errorf("checking cluster state sync, %v", err)
+		return false
 	}
 	nodeList := &v1.NodeList{}
 	if err := c.kubeClient.List(ctx, nodeList); err != nil {
@@ -267,7 +264,7 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 
 	if node.Spec.ProviderID == "" {
 		// If we know that we own this node, we shouldn't allow the providerID to be empty
-		if node.Labels[v1alpha5.ProvisionerNameLabelKey] != "" || (node.Labels[v1beta1.NodePoolLabelKey] != "" && nodepoolutil.EnableNodePools) {
+		if node.Labels[v1alpha5.ProvisionerNameLabelKey] != "" || (node.Labels[v1beta1.NodePoolLabelKey] != "") {
 			return nil
 		}
 		node.Spec.ProviderID = node.Name
