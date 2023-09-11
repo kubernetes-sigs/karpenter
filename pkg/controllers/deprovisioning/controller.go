@@ -17,7 +17,6 @@ package deprovisioning
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -127,7 +126,8 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 
 	// Karpenter taints nodes as part of the deprovisioning process while it progresses in memory.
 	// If Karpenter restarts during a deprovisioning action, the nodes will remain tainted.
-	if err := c.enforceTaints(ctx); err != nil {
+	// Idempotently remove this taint from candidates before continuing.
+	if err := c.taintCandidates(ctx, false, c.cluster.Nodes()...); err != nil {
 		return reconcile.Result{}, fmt.Errorf("removing disruption taint from nodes, %w", err)
 	}
 
@@ -335,28 +335,6 @@ func (c *Controller) taintCandidates(ctx context.Context, addTaint bool, nodes .
 		}
 	}
 	return multiErr
-}
-
-func (c *Controller) enforceTaints(ctx context.Context) error {
-	nodes := []*state.StateNode{}
-	c.cluster.ForEachNode(func(stateNode *state.StateNode) bool {
-		_, ok := lo.Find(stateNode.Taints(), func(taint v1.Taint) bool {
-			return v1beta1.DisruptingNoScheduleTaint.MatchTaint(&taint)
-		})
-		if ok {
-			nodes = append(nodes, stateNode)
-		}
-		return false
-	})
-	if len(nodes) == 0 {
-		return nil
-	}
-	logging.FromContext(ctx).Debugf("removing karpenter.sh/disrupting taint from node(s), %s", strings.Join(
-		lo.Map(nodes, func(node *state.StateNode, _ int) string {
-			return node.Name()
-		}), ",",
-	))
-	return c.taintCandidates(ctx, false, nodes...)
 }
 
 func (c *Controller) recordRun(s string) {
