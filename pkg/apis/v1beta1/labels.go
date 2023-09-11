@@ -46,12 +46,23 @@ const (
 	NodePoolHashAnnotationKey          = Group + "/nodepool-hash"
 )
 
+// Karpenter specific taints
+const (
+	DisruptingTaintKey = Group + "/disrupting"
+)
+
 // Karpenter specific finalizers
 const (
 	TerminationFinalizer = Group + "/termination"
 )
 
 var (
+	// DisruptingNoScheduleTaint is used by the deprovisioning controller to ensure no pods
+	// are scheduled to a node that Karpenter is actively disrupting.
+	DisruptingNoScheduleTaint = v1.Taint{
+		Key:    DisruptingTaintKey,
+		Effect: v1.TaintEffectNoSchedule,
+	}
 	// RestrictedLabelDomains are either prohibited by the kubelet or reserved by karpenter
 	RestrictedLabelDomains = sets.New(
 		"kubernetes.io",

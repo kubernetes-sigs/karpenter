@@ -222,7 +222,7 @@ func (in *StateNode) Taints() []v1.Taint {
 	// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
 	if (!in.Registered() && !in.Initialized() && in.NodeClaim != nil) || in.Node == nil {
 		taints = in.NodeClaim.Spec.Taints
-	} else {
+	} else if in.Node != nil {
 		taints = in.Node.Spec.Taints
 	}
 	return lo.Reject(taints, func(taint v1.Taint, _ int) bool {
