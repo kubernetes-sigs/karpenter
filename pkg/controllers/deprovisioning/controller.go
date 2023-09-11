@@ -221,14 +221,14 @@ func (c *Controller) launchReplacementNodeClaims(ctx context.Context, action Com
 	stateNodes := lo.Map(action.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode })
 
 	// cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
-	if err := c.taintCandidates(ctx, stateNodes...); err != nil {
+	if err := c.taintCandidates(ctx, true, stateNodes...); err != nil {
 		return fmt.Errorf("cordoning nodes, %w", err)
 	}
 
 	nodeClaimKeys, err := c.provisioner.CreateNodeClaims(ctx, action.replacements, provisioning.WithReason(reason))
 	if err != nil {
 		// uncordon the nodes as the launch may fail (e.g. ICE)
-		err = multierr.Append(err, c.unTaintCandidates(ctx, stateNodes...))
+		err = multierr.Append(err, c.taintCandidates(ctx, false, stateNodes...))
 		return err
 	}
 	if len(nodeClaimKeys) != len(action.replacements) {
@@ -246,7 +246,7 @@ func (c *Controller) launchReplacementNodeClaims(ctx context.Context, action Com
 		}
 	})
 	if err = multierr.Combine(errs...); err != nil {
-		return multierr.Combine(c.unTaintCandidates(ctx, stateNodes...),
+		return multierr.Combine(c.taintCandidates(ctx, false, stateNodes...),
 			fmt.Errorf("timed out checking machine readiness, %w", err))
 	}
 	return nil
@@ -302,8 +302,7 @@ func (c *Controller) waitForDeletion(ctx context.Context, nodeClaim *v1beta1.Nod
 	}
 }
 
-// taintCandidates will add the Karpenter disrupting taint to nodes.
-func (c *Controller) taintCandidates(ctx context.Context, nodes ...*state.StateNode) error {
+func (c *Controller) taintCandidates(ctx context.Context, addTaint bool, nodes ...*state.StateNode) error {
 	var multiErr error
 	for _, n := range nodes {
 		node := &v1.Node{}
@@ -311,49 +310,28 @@ func (c *Controller) taintCandidates(ctx context.Context, nodes ...*state.StateN
 			multiErr = multierr.Append(multiErr, fmt.Errorf("getting node, %w", err))
 		}
 
-		// node is being deleted already, so no need to do anything
+		// node is being deleted already, so no need to do anything as node will be gone soon
 		if !node.DeletionTimestamp.IsZero() {
 			continue
 		}
 		// If the node already has the taint, continue to the next
-		if _, ok := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
-			return v1beta1.DisruptingNoScheduleTaint.MatchTaint(&taint)
-		}); ok {
-			continue
-		}
-		stored := node.DeepCopy()
-		node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptingNoScheduleTaint)
-		if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
-			multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
-		}
-	}
-	return multiErr
-}
-
-// unTaintCandidates will remove the Karpenter disrupting taint from nodes.
-func (c *Controller) unTaintCandidates(ctx context.Context, nodes ...*state.StateNode) error {
-	var multiErr error
-	for _, n := range nodes {
-		node := &v1.Node{}
-		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Name()}, node); err != nil {
-			multiErr = multierr.Append(multiErr, fmt.Errorf("getting node, %w", err))
-		}
-
-		// node is being deleted already, so no need to do anything
-		if !node.DeletionTimestamp.IsZero() {
-			continue
-		}
-		// If the node already has the taint, continue to the next
-		if _, ok := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
-			return v1beta1.DisruptingNoScheduleTaint.MatchTaint(&taint)
-		}); !ok {
-			continue
-		}
-
-		stored := node.DeepCopy()
-		node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint v1.Taint, _ int) bool {
+		_, ok := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
 			return v1beta1.DisruptingNoScheduleTaint.MatchTaint(&taint)
 		})
+		// If it exists and we want to add it,
+		// or if taint doesn't exist and we want to remove, do nothing.
+		if ok == addTaint {
+			continue
+		}
+		stored := node.DeepCopy()
+		// If the taint exists and we want to remove, remove it.
+		if ok == !addTaint {
+			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint v1.Taint, _ int) bool {
+				return v1beta1.DisruptingNoScheduleTaint.MatchTaint(&taint)
+			})
+		} else {
+			node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptingNoScheduleTaint)
+		}
 		if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 			multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
 		}
@@ -380,7 +358,7 @@ func (c *Controller) enforceTaints(ctx context.Context) error {
 			return node.Name()
 		}), ",",
 	))
-	return c.unTaintCandidates(ctx, nodes...)
+	return c.taintCandidates(ctx, false, nodes...)
 }
 
 func (c *Controller) recordRun(s string) {
