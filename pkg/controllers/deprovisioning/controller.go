@@ -301,6 +301,9 @@ func (c *Controller) waitForDeletion(ctx context.Context, nodeClaim *v1beta1.Nod
 	}
 }
 
+// taintCandidates will either add/remove the karpenter.sh/disrupting taint.
+// This is used to enforce no taints at the beginning of deprovisioning, and
+// to add/remove taints while executing a deprovisioning action.
 func (c *Controller) taintCandidates(ctx context.Context, addTaint bool, nodes ...*state.StateNode) error {
 	var multiErr error
 	for _, n := range nodes {
