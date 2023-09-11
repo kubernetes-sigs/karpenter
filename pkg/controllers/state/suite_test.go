@@ -1379,7 +1379,6 @@ var _ = Describe("Inflight Nodes", func() {
 			})
 			ExpectApplied(ctx, env.Client, nodeClaim)
 			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-
 			ExpectStateNodeCount("==", 1)
 			ExpectResources(v1.ResourceList{
 				v1.ResourceCPU:              resource.MustParse("2"),
@@ -1391,6 +1390,21 @@ var _ = Describe("Inflight Nodes", func() {
 				v1.ResourceMemory:           resource.MustParse("30Gi"),
 				v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
 			}, ExpectStateNodeExistsForNodeClaim(nodeClaim).Allocatable())
+		})
+		It("should continue to be MarkedForDeletion when an inflight node becomes a real node", func() {
+			machine := test.Machine(v1alpha5.Machine{
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			ExpectApplied(ctx, env.Client, machine)
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+			ExpectStateNodeCount("==", 1)
+			// Add the disrupting taint so that it's understood to be marked for deletion.
+			machine.Spec.Taints = append(machine.Spec.Taints, v1beta1.DisruptingNoScheduleTaint)
+			ExpectApplied(ctx, env.Client, machine)
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+			Expect(ExpectStateNodeExistsForMachine(machine).MarkedForDeletion()).To(BeTrue())
 		})
 		It("should model the inflight capacity of the nodeclaim until the node registers and is initialized", func() {
 			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{

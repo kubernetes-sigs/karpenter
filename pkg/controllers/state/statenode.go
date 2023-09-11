@@ -95,8 +95,7 @@ type StateNode struct {
 	hostPortUsage *scheduling.HostPortUsage
 	volumeUsage   *scheduling.VolumeUsage
 
-	markedForDeletion bool
-	nominatedUntil    metav1.Time
+	nominatedUntil metav1.Time
 }
 
 func NewNode() *StateNode {
@@ -220,7 +219,7 @@ func (in *StateNode) Taints() []v1.Taint {
 	// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
 	if !in.Registered() && !in.Initialized() && in.NodeClaim != nil {
 		taints = in.NodeClaim.Spec.Taints
-	} else {
+	} else if in.Node != nil {
 		taints = in.Node.Spec.Taints
 	}
 	return lo.Reject(taints, func(taint v1.Taint, _ int) bool {
@@ -340,10 +339,13 @@ func (in *StateNode) PodLimits() v1.ResourceList {
 
 func (in *StateNode) MarkedForDeletion() bool {
 	// The Node is marked for the Deletion if:
-	//  1. The Node has explicitly MarkedForDeletion
+	//  1. The Node has the Disrupting Taint
 	//  2. The Node has a NodeClaim counterpart and is actively deleting
 	//  3. The Node has no NodeClaim counterpart and is actively deleting
-	return in.markedForDeletion ||
+	_, ok := lo.Find(in.Taints(), func(taint v1.Taint) bool {
+		return v1beta1.DisruptingNoScheduleTaint.MatchTaint(&taint)
+	})
+	return ok ||
 		(in.NodeClaim != nil && !in.NodeClaim.DeletionTimestamp.IsZero()) ||
 		(in.Node != nil && in.NodeClaim == nil && !in.Node.DeletionTimestamp.IsZero())
 }

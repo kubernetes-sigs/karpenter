@@ -17,6 +17,7 @@ package deprovisioning
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -123,6 +124,14 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		logging.FromContext(ctx).Debugf("waiting on cluster sync")
 		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}
+
+	// Karpenter taints nodes as part of the deprovisioning process while it progresses in memory.
+	// If Karpenter restarts during a deprovisioning action, the nodes will remain tainted.
+	// Remove these taints as Karpenter so that Karpenter can properly consider nodes.
+	if err := c.enforceTaints(ctx); err != nil {
+		return reconcile.Result{}, fmt.Errorf("removing disruption taint from nodes, %w", err)
+	}
+
 	// Attempt different deprovisioning methods. We'll only let one method perform an action
 	for _, d := range c.deprovisioners {
 		c.recordRun(fmt.Sprintf("%T", d))
@@ -209,26 +218,23 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 func (c *Controller) launchReplacementNodeClaims(ctx context.Context, action Command, reason string) error {
 	defer metrics.Measure(deprovisioningReplacementNodeInitializedHistogram)()
 
+	stateNodes := lo.Map(action.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode })
+
 	// cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
-	if err := c.setNodesUnschedulable(ctx, true, action.candidates...); err != nil {
+	if err := c.taintCandidates(ctx, stateNodes...); err != nil {
 		return fmt.Errorf("cordoning nodes, %w", err)
 	}
 
 	nodeClaimKeys, err := c.provisioner.CreateNodeClaims(ctx, action.replacements, provisioning.WithReason(reason))
 	if err != nil {
 		// uncordon the nodes as the launch may fail (e.g. ICE)
-		err = multierr.Append(err, c.setNodesUnschedulable(ctx, false, action.candidates...))
+		err = multierr.Append(err, c.unTaintCandidates(ctx, stateNodes...))
 		return err
 	}
 	if len(nodeClaimKeys) != len(action.replacements) {
 		// shouldn't ever occur since a partially failed CreateNodeClaims should return an error
 		return fmt.Errorf("expected %d replacements, got %d", len(action.replacements), len(nodeClaimKeys))
 	}
-
-	candidateProviderIDs := lo.Map(action.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
-
-	// We have the new NodeClaims created at the API server so mark the old NodeClaims for deletion
-	c.cluster.MarkForDeletion(candidateProviderIDs...)
 
 	errs := make([]error, len(nodeClaimKeys))
 	workqueue.ParallelizeUntil(ctx, len(nodeClaimKeys), len(nodeClaimKeys), func(i int) {
@@ -240,9 +246,8 @@ func (c *Controller) launchReplacementNodeClaims(ctx context.Context, action Com
 		}
 	})
 	if err = multierr.Combine(errs...); err != nil {
-		c.cluster.UnmarkForDeletion(candidateProviderIDs...)
-		return multierr.Combine(c.setNodesUnschedulable(ctx, false, action.candidates...),
-			fmt.Errorf("timed out checking readiness, %w", err))
+		return multierr.Combine(c.unTaintCandidates(ctx, stateNodes...),
+			fmt.Errorf("timed out checking machine readiness, %w", err))
 	}
 	return nil
 }
@@ -297,31 +302,85 @@ func (c *Controller) waitForDeletion(ctx context.Context, nodeClaim *v1beta1.Nod
 	}
 }
 
-func (c *Controller) setNodesUnschedulable(ctx context.Context, isUnschedulable bool, candidates ...*Candidate) error {
+// taintCandidates will add the Karpenter disrupting taint to nodes.
+func (c *Controller) taintCandidates(ctx context.Context, nodes ...*state.StateNode) error {
 	var multiErr error
-	for _, cn := range candidates {
+	for _, n := range nodes {
 		node := &v1.Node{}
-		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: cn.Node.Name}, node); err != nil {
+		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Name()}, node); err != nil {
 			multiErr = multierr.Append(multiErr, fmt.Errorf("getting node, %w", err))
 		}
 
-		// node is being deleted already, so no need to un-cordon
-		if !isUnschedulable && !node.DeletionTimestamp.IsZero() {
+		// node is being deleted already, so no need to do anything
+		if !node.DeletionTimestamp.IsZero() {
 			continue
 		}
-
-		// already matches the state we want to be in
-		if node.Spec.Unschedulable == isUnschedulable {
+		// If the node already has the taint, continue to the next
+		if _, ok := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
+			return v1beta1.DisruptingNoScheduleTaint.MatchTaint(&taint)
+		}); ok {
 			continue
 		}
-
 		stored := node.DeepCopy()
-		node.Spec.Unschedulable = isUnschedulable
+		node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptingNoScheduleTaint)
 		if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 			multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
 		}
 	}
 	return multiErr
+}
+
+// unTaintCandidates will remove the Karpenter disrupting taint from nodes.
+func (c *Controller) unTaintCandidates(ctx context.Context, nodes ...*state.StateNode) error {
+	var multiErr error
+	for _, n := range nodes {
+		node := &v1.Node{}
+		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Name()}, node); err != nil {
+			multiErr = multierr.Append(multiErr, fmt.Errorf("getting node, %w", err))
+		}
+
+		// node is being deleted already, so no need to do anything
+		if !node.DeletionTimestamp.IsZero() {
+			continue
+		}
+		// If the node already has the taint, continue to the next
+		if _, ok := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
+			return v1beta1.DisruptingNoScheduleTaint.MatchTaint(&taint)
+		}); !ok {
+			continue
+		}
+
+		stored := node.DeepCopy()
+		node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint v1.Taint, _ int) bool {
+			return v1beta1.DisruptingNoScheduleTaint.MatchTaint(&taint)
+		})
+		if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+			multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
+		}
+	}
+	return multiErr
+}
+
+func (c *Controller) enforceTaints(ctx context.Context) error {
+	nodes := []*state.StateNode{}
+	c.cluster.ForEachNode(func(stateNode *state.StateNode) bool {
+		_, ok := lo.Find(stateNode.Taints(), func(taint v1.Taint) bool {
+			return v1beta1.DisruptingNoScheduleTaint.MatchTaint(&taint)
+		})
+		if ok {
+			nodes = append(nodes, stateNode)
+		}
+		return false
+	})
+	if len(nodes) == 0 {
+		return nil
+	}
+	logging.FromContext(ctx).Debugf("removing karpenter.sh/disrupting taint from node(s), %s", strings.Join(
+		lo.Map(nodes, func(node *state.StateNode, _ int) string {
+			return node.Name()
+		}), ",",
+	))
+	return c.unTaintCandidates(ctx, nodes...)
 }
 
 func (c *Controller) recordRun(s string) {
