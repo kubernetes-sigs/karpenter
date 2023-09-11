@@ -308,7 +308,7 @@ func (c *Controller) taintCandidates(ctx context.Context, addTaint bool, nodes .
 	var multiErr error
 	for _, n := range nodes {
 		node := &v1.Node{}
-		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Name()}, node); err != nil {
+		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Name()}, node); client.IgnoreNotFound(err) != nil {
 			multiErr = multierr.Append(multiErr, fmt.Errorf("getting node, %w", err))
 		}
 
