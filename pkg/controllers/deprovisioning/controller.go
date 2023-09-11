@@ -127,7 +127,6 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 
 	// Karpenter taints nodes as part of the deprovisioning process while it progresses in memory.
 	// If Karpenter restarts during a deprovisioning action, the nodes will remain tainted.
-	// Remove these taints as Karpenter so that Karpenter can properly consider nodes.
 	if err := c.enforceTaints(ctx); err != nil {
 		return reconcile.Result{}, fmt.Errorf("removing disruption taint from nodes, %w", err)
 	}
@@ -310,21 +309,20 @@ func (c *Controller) taintCandidates(ctx context.Context, addTaint bool, nodes .
 			multiErr = multierr.Append(multiErr, fmt.Errorf("getting node, %w", err))
 		}
 
-		// node is being deleted already, so no need to do anything as node will be gone soon
-		if !node.DeletionTimestamp.IsZero() {
-			continue
-		}
 		// If the node already has the taint, continue to the next
 		_, ok := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
 			return v1beta1.DisruptingNoScheduleTaint.MatchTaint(&taint)
 		})
-		// If it exists and we want to add it,
-		// or if taint doesn't exist and we want to remove, do nothing.
+
+		// node is being deleted, so no need to remove taint as the node will be gone soon
+		if ok && !node.DeletionTimestamp.IsZero() {
+			continue
+		}
+		// If the taint is how we want it, do nothing.
 		if ok == addTaint {
 			continue
 		}
 		stored := node.DeepCopy()
-		// If the taint exists and we want to remove, remove it.
 		if ok == !addTaint {
 			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint v1.Taint, _ int) bool {
 				return v1beta1.DisruptingNoScheduleTaint.MatchTaint(&taint)
