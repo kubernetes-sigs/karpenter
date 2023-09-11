@@ -31,10 +31,12 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/scheduling"
+	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 
@@ -57,6 +59,7 @@ var ctx context.Context
 var env *test.Environment
 var fakeClock *clock.FakeClock
 var cluster *state.Cluster
+var nodeClaimController controller.Controller
 var machineController controller.Controller
 var nodeController controller.Controller
 var podController controller.Controller
@@ -64,6 +67,7 @@ var provisionerController controller.Controller
 var daemonsetController controller.Controller
 var cloudProvider *fake.CloudProvider
 var provisioner *v1alpha5.Provisioner
+var nodePool *v1beta1.NodePool
 
 const csiProvider = "fake.csi.provider"
 
@@ -83,30 +87,34 @@ var _ = AfterSuite(func() {
 
 var _ = BeforeEach(func() {
 	ctx = settings.ToContext(ctx, test.Settings())
+	nodeclaimutil.EnableNodeClaims = true
 	cloudProvider = fake.NewCloudProvider()
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	nodeClaimController = informer.NewNodeClaimController(env.Client, cluster)
 	machineController = informer.NewMachineController(env.Client, cluster)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	podController = informer.NewPodController(env.Client, cluster)
 	provisionerController = informer.NewProvisionerController(env.Client, cluster)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
 	provisioner = test.Provisioner(test.ProvisionerOptions{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
-	ExpectApplied(ctx, env.Client, provisioner)
+	nodePool = test.NodePool(v1beta1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
+	ExpectApplied(ctx, env.Client, provisioner, nodePool)
 })
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 })
 
 var _ = Describe("Volume Usage/Limits", func() {
+	var nodeClaim *v1beta1.NodeClaim
 	var machine *v1alpha5.Machine
-	var node *v1.Node
-	var csiNode *storagev1.CSINode
+	var node1, node2 *v1.Node
+	var csiNode1, csiNode2 *storagev1.CSINode
 	var sc *storagev1.StorageClass
 	BeforeEach(func() {
 		instanceType := cloudProvider.InstanceTypes[0]
-		machine, node = test.MachineAndNode(v1alpha5.Machine{
+		machine, node1 = test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
 				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
 				v1.LabelInstanceTypeStable:       instanceType.Name,
@@ -115,14 +123,39 @@ var _ = Describe("Volume Usage/Limits", func() {
 				ProviderID: test.RandomProviderID(),
 			},
 		})
+		nodeClaim, node2 = test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1beta1.NodePoolLabelKey:   nodePool.Name,
+				v1.LabelInstanceTypeStable: instanceType.Name,
+			}},
+			Status: v1beta1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+			},
+		})
 		sc = test.StorageClass(test.StorageClassOptions{
 			ObjectMeta:  metav1.ObjectMeta{Name: "my-storage-class"},
 			Provisioner: ptr.String(csiProvider),
 			Zones:       []string{"test-zone-1"},
 		})
-		csiNode = &storagev1.CSINode{
+		csiNode1 = &storagev1.CSINode{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: node.Name,
+				Name: node1.Name,
+			},
+			Spec: storagev1.CSINodeSpec{
+				Drivers: []storagev1.CSINodeDriver{
+					{
+						Name:   csiProvider,
+						NodeID: "fake-node-id",
+						Allocatable: &storagev1.VolumeNodeResources{
+							Count: ptr.Int32(10),
+						},
+					},
+				},
+			},
+		}
+		csiNode2 = &storagev1.CSINode{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: node2.Name,
 			},
 			Spec: storagev1.CSINodeSpec{
 				Drivers: []storagev1.CSINodeDriver{
@@ -138,7 +171,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 		}
 	})
 	It("should hydrate the volume usage on a Node update", func() {
-		ExpectApplied(ctx, env.Client, sc, node, csiNode)
+		ExpectApplied(ctx, env.Client, sc, node1, csiNode1)
 		for i := 0; i < 10; i++ {
 			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
 				StorageClassName: ptr.String(sc.Name),
@@ -147,79 +180,139 @@ var _ = Describe("Volume Usage/Limits", func() {
 				PersistentVolumeClaims: []string{pvc.Name},
 			})
 			ExpectApplied(ctx, env.Client, pvc, pod)
-			ExpectManualBinding(ctx, env.Client, pod, node)
+			ExpectManualBinding(ctx, env.Client, pod, node1)
 		}
-		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node1))
 		ExpectStateNodeCount("==", 1)
-		stateNode := ExpectStateNodeExists(node)
+		stateNode := ExpectStateNodeExists(node1)
 
 		// Adding more volumes should cause an error since we are at the volume limits
 		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.Volumes{
 			csiProvider: sets.New("test"),
 		})).ToNot(BeNil())
 	})
-	It("should maintain the volume usage state when receiving Machine updates", func() {
-		ExpectApplied(ctx, env.Client, sc, machine, node, csiNode)
-		for i := 0; i < 10; i++ {
-			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-				StorageClassName: ptr.String(sc.Name),
-			})
-			pod := test.Pod(test.PodOptions{
-				PersistentVolumeClaims: []string{pvc.Name},
-			})
-			ExpectApplied(ctx, env.Client, pvc, pod)
-			ExpectManualBinding(ctx, env.Client, pod, node)
-		}
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectStateNodeCount("==", 1)
-		stateNode := ExpectStateNodeExists(node)
+	Context("Machine", func() {
+		It("should maintain the volume usage state when receiving Machine updates", func() {
+			ExpectApplied(ctx, env.Client, sc, machine, node1, csiNode1)
+			for i := 0; i < 10; i++ {
+				pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+					StorageClassName: ptr.String(sc.Name),
+				})
+				pod := test.Pod(test.PodOptions{
+					PersistentVolumeClaims: []string{pvc.Name},
+				})
+				ExpectApplied(ctx, env.Client, pvc, pod)
+				ExpectManualBinding(ctx, env.Client, pod, node1)
+			}
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node1))
+			ExpectStateNodeCount("==", 1)
+			stateNode := ExpectStateNodeExists(node1)
 
-		// Adding more volumes should cause an error since we are at the volume limits
-		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.Volumes{
-			csiProvider: sets.New("test"),
-		})).ToNot(BeNil())
+			// Adding more volumes should cause an error since we are at the volume limits
+			Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.Volumes{
+				csiProvider: sets.New("test"),
+			})).ToNot(BeNil())
 
-		// Reconcile the machine one more time to ensure that we maintain our volume usage state
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+			// Reconcile the machine one more time to ensure that we maintain our volume usage state
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 
-		// Ensure that we still consider adding another volume to the node breaching our volume limits
-		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.Volumes{
-			csiProvider: sets.New("test"),
-		})).ToNot(BeNil())
+			// Ensure that we still consider adding another volume to the node breaching our volume limits
+			Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.Volumes{
+				csiProvider: sets.New("test"),
+			})).ToNot(BeNil())
+		})
+		It("should ignore the volume usage limits breach if the pod update is for an already tracked pod", func() {
+			ExpectApplied(ctx, env.Client, sc, machine, node1, csiNode1)
+			var pvcs []*v1.PersistentVolumeClaim
+			for i := 0; i < 10; i++ {
+				pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+					StorageClassName: ptr.String(sc.Name),
+				})
+				pod := test.Pod(test.PodOptions{
+					PersistentVolumeClaims: []string{pvc.Name},
+				})
+				pvcs = append(pvcs, pvc)
+				ExpectApplied(ctx, env.Client, pvc, pod)
+				ExpectManualBinding(ctx, env.Client, pod, node1)
+			}
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node1))
+			ExpectStateNodeCount("==", 1)
+			stateNode := ExpectStateNodeExists(node1)
+
+			// Adding more volumes should not cause an error since this PVC volume is already tracked
+			Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.Volumes{
+				csiProvider: sets.New(client.ObjectKeyFromObject(pvcs[5]).String()),
+			})).To(BeNil())
+		})
+
 	})
-	It("should ignore the volume usage limits breach if the pod update is for an already tracked pod", func() {
-		ExpectApplied(ctx, env.Client, sc, machine, node, csiNode)
-		var pvcs []*v1.PersistentVolumeClaim
-		for i := 0; i < 10; i++ {
-			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-				StorageClassName: ptr.String(sc.Name),
-			})
-			pod := test.Pod(test.PodOptions{
-				PersistentVolumeClaims: []string{pvc.Name},
-			})
-			pvcs = append(pvcs, pvc)
-			ExpectApplied(ctx, env.Client, pvc, pod)
-			ExpectManualBinding(ctx, env.Client, pod, node)
-		}
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectStateNodeCount("==", 1)
-		stateNode := ExpectStateNodeExists(node)
+	Context("NodeClaim", func() {
+		It("should maintain the volume usage state when receiving NodeClaim updates", func() {
+			ExpectApplied(ctx, env.Client, sc, nodeClaim, node2, csiNode2)
+			for i := 0; i < 10; i++ {
+				pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+					StorageClassName: ptr.String(sc.Name),
+				})
+				pod := test.Pod(test.PodOptions{
+					PersistentVolumeClaims: []string{pvc.Name},
+				})
+				ExpectApplied(ctx, env.Client, pvc, pod)
+				ExpectManualBinding(ctx, env.Client, pod, node2)
+			}
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node2))
+			ExpectStateNodeCount("==", 1)
+			stateNode := ExpectStateNodeExists(node2)
 
-		// Adding more volumes should not cause an error since this PVC volume is already tracked
-		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.Volumes{
-			csiProvider: sets.New(client.ObjectKeyFromObject(pvcs[5]).String()),
-		})).To(BeNil())
+			// Adding more volumes should cause an error since we are at the volume limits
+			Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.Volumes{
+				csiProvider: sets.New("test"),
+			})).ToNot(BeNil())
+
+			// Reconcile the machine one more time to ensure that we maintain our volume usage state
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+			// Ensure that we still consider adding another volume to the node breaching our volume limits
+			Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.Volumes{
+				csiProvider: sets.New("test"),
+			})).ToNot(BeNil())
+		})
+		It("should ignore the volume usage limits breach if the pod update is for an already tracked pod", func() {
+			ExpectApplied(ctx, env.Client, sc, nodeClaim, node2, csiNode2)
+			var pvcs []*v1.PersistentVolumeClaim
+			for i := 0; i < 10; i++ {
+				pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+					StorageClassName: ptr.String(sc.Name),
+				})
+				pod := test.Pod(test.PodOptions{
+					PersistentVolumeClaims: []string{pvc.Name},
+				})
+				pvcs = append(pvcs, pvc)
+				ExpectApplied(ctx, env.Client, pvc, pod)
+				ExpectManualBinding(ctx, env.Client, pod, node2)
+			}
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node2))
+			ExpectStateNodeCount("==", 1)
+			stateNode := ExpectStateNodeExists(node2)
+
+			// Adding more volumes should not cause an error since this PVC volume is already tracked
+			Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.Volumes{
+				csiProvider: sets.New(client.ObjectKeyFromObject(pvcs[5]).String()),
+			})).To(BeNil())
+		})
 	})
 })
 
 var _ = Describe("HostPort Usage", func() {
+	var nodeClaim *v1beta1.NodeClaim
 	var machine *v1alpha5.Machine
-	var node *v1.Node
+	var node1, node2 *v1.Node
 	BeforeEach(func() {
 		instanceType := cloudProvider.InstanceTypes[0]
-		machine, node = test.MachineAndNode(v1alpha5.Machine{
+		machine, node1 = test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
 				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
 				v1.LabelInstanceTypeStable:       instanceType.Name,
@@ -228,20 +321,29 @@ var _ = Describe("HostPort Usage", func() {
 				ProviderID: test.RandomProviderID(),
 			},
 		})
+		nodeClaim, node2 = test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1beta1.NodePoolLabelKey:   nodePool.Name,
+				v1.LabelInstanceTypeStable: instanceType.Name,
+			}},
+			Status: v1beta1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+			},
+		})
 	})
 	It("should hydrate the HostPort usage on a Node update", func() {
-		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectApplied(ctx, env.Client, node1)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node1))
 		for i := 0; i < 10; i++ {
 			pod := test.Pod(test.PodOptions{
 				HostPorts: []int32{int32(i)},
 			})
 			ExpectApplied(ctx, env.Client, pod)
-			ExpectManualBinding(ctx, env.Client, pod, node)
+			ExpectManualBinding(ctx, env.Client, pod, node1)
 		}
-		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node1))
 		ExpectStateNodeCount("==", 1)
-		stateNode := ExpectStateNodeExists(node)
+		stateNode := ExpectStateNodeExists(node1)
 
 		// Adding a conflicting host port should cause an error
 		Expect(stateNode.HostPortUsage().Conflicts(test.Pod(), []scheduling.HostPort{
@@ -252,67 +354,133 @@ var _ = Describe("HostPort Usage", func() {
 			},
 		})).ToNot(BeNil())
 	})
-	It("should maintain the host port usage state when receiving Machine updates", func() {
-		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		for i := 0; i < 10; i++ {
-			pod := test.Pod(test.PodOptions{
-				HostPorts: []int32{int32(i)},
-			})
-			ExpectApplied(ctx, env.Client, pod)
-			ExpectManualBinding(ctx, env.Client, pod, node)
-		}
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectStateNodeCount("==", 1)
-		stateNode := ExpectStateNodeExists(node)
+	Context("Machine", func() {
+		It("should maintain the host port usage state when receiving Machine updates", func() {
+			ExpectApplied(ctx, env.Client, node1)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node1))
+			for i := 0; i < 10; i++ {
+				pod := test.Pod(test.PodOptions{
+					HostPorts: []int32{int32(i)},
+				})
+				ExpectApplied(ctx, env.Client, pod)
+				ExpectManualBinding(ctx, env.Client, pod, node1)
+			}
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node1))
+			ExpectStateNodeCount("==", 1)
+			stateNode := ExpectStateNodeExists(node1)
 
-		// Adding a conflicting host port should cause an error
-		Expect(stateNode.HostPortUsage().Conflicts(test.Pod(), []scheduling.HostPort{
-			{
-				IP:       net.IP("0.0.0.0"),
-				Port:     int32(5),
-				Protocol: v1.ProtocolTCP,
-			},
-		})).ToNot(BeNil())
+			// Adding a conflicting host port should cause an error
+			Expect(stateNode.HostPortUsage().Conflicts(test.Pod(), []scheduling.HostPort{
+				{
+					IP:       net.IP("0.0.0.0"),
+					Port:     int32(5),
+					Protocol: v1.ProtocolTCP,
+				},
+			})).ToNot(BeNil())
 
-		// Reconcile the machine one more time to ensure that we maintain our volume usage state
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+			// Reconcile the machine one more time to ensure that we maintain our volume usage state
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 
-		// Ensure that we still consider the host port usage addition an error
-		Expect(stateNode.HostPortUsage().Conflicts(test.Pod(), []scheduling.HostPort{
-			{
-				IP:       net.IP("0.0.0.0"),
-				Port:     int32(5),
-				Protocol: v1.ProtocolTCP,
-			},
-		})).ToNot(BeNil())
+			// Ensure that we still consider the host port usage addition an error
+			Expect(stateNode.HostPortUsage().Conflicts(test.Pod(), []scheduling.HostPort{
+				{
+					IP:       net.IP("0.0.0.0"),
+					Port:     int32(5),
+					Protocol: v1.ProtocolTCP,
+				},
+			})).ToNot(BeNil())
+		})
+		It("should ignore the host port usage conflict if the pod update is for an already tracked pod", func() {
+			ExpectApplied(ctx, env.Client, node1)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node1))
+			var pods []*v1.Pod
+			for i := 0; i < 10; i++ {
+				pod := test.Pod(test.PodOptions{
+					HostPorts: []int32{int32(i)},
+				})
+				pods = append(pods, pod)
+				ExpectApplied(ctx, env.Client, pod)
+				ExpectManualBinding(ctx, env.Client, pod, node1)
+			}
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node1))
+			ExpectStateNodeCount("==", 1)
+			stateNode := ExpectStateNodeExists(node1)
+
+			// Adding a conflicting host port should not cause an error since this port is already tracked for the pod
+			Expect(stateNode.HostPortUsage().Conflicts(pods[5], []scheduling.HostPort{
+				{
+					IP:       net.IP("0.0.0.0"),
+					Port:     int32(5),
+					Protocol: v1.ProtocolTCP,
+				},
+			})).To(BeNil())
+		})
 	})
-	It("should ignore the host port usage conflict if the pod update is for an already tracked pod", func() {
-		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		var pods []*v1.Pod
-		for i := 0; i < 10; i++ {
-			pod := test.Pod(test.PodOptions{
-				HostPorts: []int32{int32(i)},
-			})
-			pods = append(pods, pod)
-			ExpectApplied(ctx, env.Client, pod)
-			ExpectManualBinding(ctx, env.Client, pod, node)
-		}
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectStateNodeCount("==", 1)
-		stateNode := ExpectStateNodeExists(node)
+	Context("NodeClaim", func() {
+		It("should maintain the host port usage state when receiving NodeClaim updates", func() {
+			ExpectApplied(ctx, env.Client, node2)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node2))
+			for i := 0; i < 10; i++ {
+				pod := test.Pod(test.PodOptions{
+					HostPorts: []int32{int32(i)},
+				})
+				ExpectApplied(ctx, env.Client, pod)
+				ExpectManualBinding(ctx, env.Client, pod, node2)
+			}
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node2))
+			ExpectStateNodeCount("==", 1)
+			stateNode := ExpectStateNodeExists(node2)
 
-		// Adding a conflicting host port should not cause an error since this port is already tracked for the pod
-		Expect(stateNode.HostPortUsage().Conflicts(pods[5], []scheduling.HostPort{
-			{
-				IP:       net.IP("0.0.0.0"),
-				Port:     int32(5),
-				Protocol: v1.ProtocolTCP,
-			},
-		})).To(BeNil())
+			// Adding a conflicting host port should cause an error
+			Expect(stateNode.HostPortUsage().Conflicts(test.Pod(), []scheduling.HostPort{
+				{
+					IP:       net.IP("0.0.0.0"),
+					Port:     int32(5),
+					Protocol: v1.ProtocolTCP,
+				},
+			})).ToNot(BeNil())
+
+			// Reconcile the nodeclaim one more time to ensure that we maintain our volume usage state
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+			// Ensure that we still consider the host port usage addition an error
+			Expect(stateNode.HostPortUsage().Conflicts(test.Pod(), []scheduling.HostPort{
+				{
+					IP:       net.IP("0.0.0.0"),
+					Port:     int32(5),
+					Protocol: v1.ProtocolTCP,
+				},
+			})).ToNot(BeNil())
+		})
+		It("should ignore the host port usage conflict if the pod update is for an already tracked pod", func() {
+			ExpectApplied(ctx, env.Client, node2)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node2))
+			var pods []*v1.Pod
+			for i := 0; i < 10; i++ {
+				pod := test.Pod(test.PodOptions{
+					HostPorts: []int32{int32(i)},
+				})
+				pods = append(pods, pod)
+				ExpectApplied(ctx, env.Client, pod)
+				ExpectManualBinding(ctx, env.Client, pod, node2)
+			}
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node2))
+			ExpectStateNodeCount("==", 1)
+			stateNode := ExpectStateNodeExists(node2)
+
+			// Adding a conflicting host port should not cause an error since this port is already tracked for the pod
+			Expect(stateNode.HostPortUsage().Conflicts(pods[5], []scheduling.HostPort{
+				{
+					IP:       net.IP("0.0.0.0"),
+					Port:     int32(5),
+					Protocol: v1.ProtocolTCP,
+				},
+			})).To(BeNil())
+		})
 	})
 })
 
@@ -383,422 +551,6 @@ var _ = Describe("Inflight Nodes", func() {
 			v1.ResourceEphemeralStorage: resource.MustParse("100Gi"), // pulled from the node's real capacity
 		}, ExpectStateNodeExists(node).Capacity())
 	})
-	It("should ignore machines that don't yet have provider id", func() {
-		machine := test.Machine(v1alpha5.Machine{
-			Spec: v1alpha5.MachineSpec{
-				Taints: []v1.Taint{
-					{
-						Key:    "custom-taint",
-						Value:  "custom-value",
-						Effect: v1.TaintEffectNoSchedule,
-					},
-				},
-				Requirements: []v1.NodeSelectorRequirement{
-					{
-						Key:      v1.LabelInstanceTypeStable,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{cloudProvider.InstanceTypes[0].Name},
-					},
-					{
-						Key:      v1.LabelTopologyZone,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{"test-zone-1"},
-					},
-				},
-				Resources: v1alpha5.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:              resource.MustParse("2"),
-						v1.ResourceMemory:           resource.MustParse("2Gi"),
-						v1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
-					},
-				},
-				MachineTemplateRef: &v1alpha5.MachineTemplateRef{
-					Name: "default",
-				},
-			},
-		})
-		machine.Status.ProviderID = ""
-		ExpectApplied(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		ExpectStateNodeNotFoundForMachine(machine)
-	})
-	It("should model the inflight data as machine with no node", func() {
-		machine := test.Machine(v1alpha5.Machine{
-			ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{
-					v1alpha5.DoNotConsolidateNodeAnnotationKey: "true",
-				},
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: "default",
-					v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
-					v1.LabelTopologyZone:             "test-zone-1",
-					v1.LabelTopologyRegion:           "test-region",
-					v1.LabelHostname:                 "custom-host-name",
-				},
-			},
-			Spec: v1alpha5.MachineSpec{
-				Taints: []v1.Taint{
-					{
-						Key:    "custom-taint",
-						Value:  "custom-value",
-						Effect: v1.TaintEffectNoSchedule,
-					},
-				},
-				Requirements: []v1.NodeSelectorRequirement{
-					{
-						Key:      v1.LabelInstanceTypeStable,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{cloudProvider.InstanceTypes[0].Name},
-					},
-					{
-						Key:      v1.LabelTopologyZone,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{"test-zone-1"},
-					},
-				},
-				Resources: v1alpha5.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:              resource.MustParse("2"),
-						v1.ResourceMemory:           resource.MustParse("2Gi"),
-						v1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
-					},
-				},
-				MachineTemplateRef: &v1alpha5.MachineTemplateRef{
-					Name: "default",
-				},
-			},
-			Status: v1alpha5.MachineStatus{
-				ProviderID: test.RandomProviderID(),
-			},
-		})
-		ExpectApplied(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-
-		ExpectStateNodeCount("==", 1)
-		stateNode := ExpectStateNodeExistsForMachine(machine)
-		Expect(stateNode.Labels()).To(HaveKeyWithValue(v1alpha5.ProvisionerNameLabelKey, "default"))
-		Expect(stateNode.Labels()).To(HaveKeyWithValue(v1.LabelInstanceTypeStable, cloudProvider.InstanceTypes[0].Name))
-		Expect(stateNode.Labels()).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-1"))
-		Expect(stateNode.Labels()).To(HaveKeyWithValue(v1.LabelTopologyRegion, "test-region"))
-		Expect(stateNode.Labels()).To(HaveKeyWithValue(v1.LabelHostname, "custom-host-name"))
-		Expect(stateNode.HostName()).To(Equal("custom-host-name"))
-		Expect(stateNode.Annotations()).To(HaveKeyWithValue(v1alpha5.DoNotConsolidateNodeAnnotationKey, "true"))
-		Expect(stateNode.Initialized()).To(BeFalse())
-		Expect(stateNode.Managed()).To(BeTrue())
-	})
-	It("should model the inflight capacity/allocatable as the machine capacity/allocatable", func() {
-		machine := test.Machine(v1alpha5.Machine{
-			Spec: v1alpha5.MachineSpec{
-				Requirements: []v1.NodeSelectorRequirement{
-					{
-						Key:      v1.LabelInstanceTypeStable,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{cloudProvider.InstanceTypes[0].Name},
-					},
-					{
-						Key:      v1.LabelTopologyZone,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{"test-zone-1"},
-					},
-				},
-				MachineTemplateRef: &v1alpha5.MachineTemplateRef{
-					Name: "default",
-				},
-			},
-			Status: v1alpha5.MachineStatus{
-				ProviderID: test.RandomProviderID(),
-				Capacity: v1.ResourceList{
-					v1.ResourceCPU:              resource.MustParse("2"),
-					v1.ResourceMemory:           resource.MustParse("32Gi"),
-					v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
-				},
-				Allocatable: v1.ResourceList{
-					v1.ResourceCPU:              resource.MustParse("1"),
-					v1.ResourceMemory:           resource.MustParse("30Gi"),
-					v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-
-		ExpectStateNodeCount("==", 1)
-		ExpectResources(v1.ResourceList{
-			v1.ResourceCPU:              resource.MustParse("2"),
-			v1.ResourceMemory:           resource.MustParse("32Gi"),
-			v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
-		}, ExpectStateNodeExistsForMachine(machine).Capacity())
-		ExpectResources(v1.ResourceList{
-			v1.ResourceCPU:              resource.MustParse("1"),
-			v1.ResourceMemory:           resource.MustParse("30Gi"),
-			v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
-		}, ExpectStateNodeExistsForMachine(machine).Allocatable())
-	})
-	It("should model the inflight capacity of the machine until the node registers and is initialized", func() {
-		machine := test.Machine(v1alpha5.Machine{
-			Spec: v1alpha5.MachineSpec{
-				Requirements: []v1.NodeSelectorRequirement{
-					{
-						Key:      v1.LabelInstanceTypeStable,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{cloudProvider.InstanceTypes[0].Name},
-					},
-					{
-						Key:      v1.LabelTopologyZone,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{"test-zone-1"},
-					},
-				},
-				MachineTemplateRef: &v1alpha5.MachineTemplateRef{
-					Name: "default",
-				},
-			},
-			Status: v1alpha5.MachineStatus{
-				ProviderID: test.RandomProviderID(),
-				Capacity: v1.ResourceList{
-					v1.ResourceCPU:              resource.MustParse("2"),
-					v1.ResourceMemory:           resource.MustParse("32Gi"),
-					v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
-				},
-				Allocatable: v1.ResourceList{
-					v1.ResourceCPU:              resource.MustParse("1"),
-					v1.ResourceMemory:           resource.MustParse("30Gi"),
-					v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-
-		ExpectStateNodeCount("==", 1)
-		ExpectResources(v1.ResourceList{
-			v1.ResourceCPU:              resource.MustParse("2"),
-			v1.ResourceMemory:           resource.MustParse("32Gi"),
-			v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
-		}, ExpectStateNodeExistsForMachine(machine).Capacity())
-		ExpectResources(v1.ResourceList{
-			v1.ResourceCPU:              resource.MustParse("1"),
-			v1.ResourceMemory:           resource.MustParse("30Gi"),
-			v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
-		}, ExpectStateNodeExistsForMachine(machine).Allocatable())
-
-		node := test.Node(test.NodeOptions{
-			ProviderID: machine.Status.ProviderID,
-			Capacity: v1.ResourceList{
-				v1.ResourceCPU:              resource.MustParse("1800m"),
-				v1.ResourceMemory:           resource.MustParse("30500Mi"),
-				v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
-			},
-			Allocatable: v1.ResourceList{
-				v1.ResourceCPU:              resource.MustParse("900m"),
-				v1.ResourceMemory:           resource.MustParse("29250Mi"),
-				v1.ResourceEphemeralStorage: resource.MustParse("17800Mi"),
-			},
-		})
-		ExpectApplied(ctx, env.Client, node)
-
-		ExpectStateNodeCount("==", 1)
-		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-
-		// Update machine to be initialized
-		machine.StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
-		ExpectApplied(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-
-		ExpectStateNodeCount("==", 1)
-		ExpectStateNodeExistsForMachine(machine)
-		ExpectResources(v1.ResourceList{
-			v1.ResourceCPU:              resource.MustParse("1800m"),
-			v1.ResourceMemory:           resource.MustParse("30500Mi"),
-			v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
-		}, ExpectStateNodeExists(node).Capacity())
-		ExpectResources(v1.ResourceList{
-			v1.ResourceCPU:              resource.MustParse("900m"),
-			v1.ResourceMemory:           resource.MustParse("29250Mi"),
-			v1.ResourceEphemeralStorage: resource.MustParse("17800Mi"),
-		}, ExpectStateNodeExists(node).Allocatable())
-	})
-	It("should not return startup taints when the node isn't initialized", func() {
-		machine := test.Machine(v1alpha5.Machine{
-			Spec: v1alpha5.MachineSpec{
-				Requirements: []v1.NodeSelectorRequirement{
-					{
-						Key:      v1.LabelInstanceTypeStable,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{cloudProvider.InstanceTypes[0].Name},
-					},
-					{
-						Key:      v1.LabelTopologyZone,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{"test-zone-1"},
-					},
-				},
-				StartupTaints: []v1.Taint{
-					{
-						Key:    "custom-taint",
-						Value:  "custom-value",
-						Effect: v1.TaintEffectNoSchedule,
-					},
-					{
-						Key:    "custom-taint2",
-						Value:  "custom-value2",
-						Effect: v1.TaintEffectNoExecute,
-					},
-				},
-				MachineTemplateRef: &v1alpha5.MachineTemplateRef{
-					Name: "default",
-				},
-			},
-			Status: v1alpha5.MachineStatus{
-				ProviderID: test.RandomProviderID(),
-				Capacity: v1.ResourceList{
-					v1.ResourceCPU:              resource.MustParse("2"),
-					v1.ResourceMemory:           resource.MustParse("32Gi"),
-					v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
-				},
-				Allocatable: v1.ResourceList{
-					v1.ResourceCPU:              resource.MustParse("1"),
-					v1.ResourceMemory:           resource.MustParse("30Gi"),
-					v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-
-		ExpectStateNodeCount("==", 1)
-		stateNode := ExpectStateNodeExistsForMachine(machine)
-		Expect(stateNode.Taints()).To(HaveLen(0))
-
-		node := test.Node(test.NodeOptions{
-			ProviderID: machine.Status.ProviderID,
-			Capacity: v1.ResourceList{
-				v1.ResourceCPU:              resource.MustParse("1800m"),
-				v1.ResourceMemory:           resource.MustParse("30500Mi"),
-				v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
-			},
-			Allocatable: v1.ResourceList{
-				v1.ResourceCPU:              resource.MustParse("900m"),
-				v1.ResourceMemory:           resource.MustParse("29250Mi"),
-				v1.ResourceEphemeralStorage: resource.MustParse("17800Mi"),
-			},
-			Taints: []v1.Taint{
-				{
-					Key:    "custom-taint",
-					Value:  "custom-value",
-					Effect: v1.TaintEffectNoSchedule,
-				},
-				{
-					Key:    "custom-taint2",
-					Value:  "custom-value2",
-					Effect: v1.TaintEffectNoExecute,
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-
-		ExpectStateNodeCount("==", 1)
-		stateNode = ExpectStateNodeExists(node)
-		Expect(stateNode.Taints()).To(HaveLen(0))
-	})
-	It("should return startup taints when the node is initialized", func() {
-		machine := test.Machine(v1alpha5.Machine{
-			Spec: v1alpha5.MachineSpec{
-				Requirements: []v1.NodeSelectorRequirement{
-					{
-						Key:      v1.LabelInstanceTypeStable,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{cloudProvider.InstanceTypes[0].Name},
-					},
-					{
-						Key:      v1.LabelTopologyZone,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{"test-zone-1"},
-					},
-				},
-				StartupTaints: []v1.Taint{
-					{
-						Key:    "custom-taint",
-						Value:  "custom-value",
-						Effect: v1.TaintEffectNoSchedule,
-					},
-					{
-						Key:    "custom-taint2",
-						Value:  "custom-value2",
-						Effect: v1.TaintEffectNoExecute,
-					},
-				},
-				MachineTemplateRef: &v1alpha5.MachineTemplateRef{
-					Name: "default",
-				},
-			},
-			Status: v1alpha5.MachineStatus{
-				ProviderID: test.RandomProviderID(),
-				Capacity: v1.ResourceList{
-					v1.ResourceCPU:              resource.MustParse("2"),
-					v1.ResourceMemory:           resource.MustParse("32Gi"),
-					v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
-				},
-				Allocatable: v1.ResourceList{
-					v1.ResourceCPU:              resource.MustParse("1"),
-					v1.ResourceMemory:           resource.MustParse("30Gi"),
-					v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-
-		node := test.Node(test.NodeOptions{
-			ProviderID: machine.Status.ProviderID,
-			Capacity: v1.ResourceList{
-				v1.ResourceCPU:              resource.MustParse("1800m"),
-				v1.ResourceMemory:           resource.MustParse("30500Mi"),
-				v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
-			},
-			Allocatable: v1.ResourceList{
-				v1.ResourceCPU:              resource.MustParse("900m"),
-				v1.ResourceMemory:           resource.MustParse("29250Mi"),
-				v1.ResourceEphemeralStorage: resource.MustParse("17800Mi"),
-			},
-			Taints: []v1.Taint{
-				{
-					Key:    "custom-taint",
-					Value:  "custom-value",
-					Effect: v1.TaintEffectNoSchedule,
-				},
-				{
-					Key:    "custom-taint2",
-					Value:  "custom-value2",
-					Effect: v1.TaintEffectNoExecute,
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-
-		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
-		ExpectMakeNodesInitialized(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-
-		ExpectStateNodeCount("==", 1)
-		stateNode := ExpectStateNodeExists(node)
-		Expect(stateNode.Taints()).To(HaveLen(2))
-		Expect(stateNode.Taints()).To(Equal([]v1.Taint{
-			{
-				Key:    "custom-taint",
-				Value:  "custom-value",
-				Effect: v1.TaintEffectNoSchedule,
-			},
-			{
-				Key:    "custom-taint2",
-				Value:  "custom-value2",
-				Effect: v1.TaintEffectNoExecute,
-			},
-		}))
-	})
 	It("should only set startup taints once", func() {
 		taints := []v1.Taint{
 			{
@@ -838,184 +590,1200 @@ var _ = Describe("Inflight Nodes", func() {
 		stateNode := ExpectStateNodeExists(node)
 		Expect(stateNode.Taints()).To(HaveLen(0))
 	})
-	It("should not return known ephemeral taints", func() {
-		machine := test.Machine(v1alpha5.Machine{
-			Spec: v1alpha5.MachineSpec{
-				Requirements: []v1.NodeSelectorRequirement{
-					{
-						Key:      v1.LabelInstanceTypeStable,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{cloudProvider.InstanceTypes[0].Name},
+
+	Context("Machine", func() {
+		It("should ignore machines that don't yet have provider id", func() {
+			machine := test.Machine(v1alpha5.Machine{
+				Spec: v1alpha5.MachineSpec{
+					Taints: []v1.Taint{
+						{
+							Key:    "custom-taint",
+							Value:  "custom-value",
+							Effect: v1.TaintEffectNoSchedule,
+						},
 					},
-					{
-						Key:      v1.LabelTopologyZone,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{"test-zone-1"},
+					Requirements: []v1.NodeSelectorRequirement{
+						{
+							Key:      v1.LabelInstanceTypeStable,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{cloudProvider.InstanceTypes[0].Name},
+						},
+						{
+							Key:      v1.LabelTopologyZone,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+						},
+					},
+					Resources: v1alpha5.ResourceRequirements{
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:              resource.MustParse("2"),
+							v1.ResourceMemory:           resource.MustParse("2Gi"),
+							v1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
+						},
+					},
+					MachineTemplateRef: &v1alpha5.MachineTemplateRef{
+						Name: "default",
 					},
 				},
-				MachineTemplateRef: &v1alpha5.MachineTemplateRef{
-					Name: "default",
+			})
+			machine.Status.ProviderID = ""
+			ExpectApplied(ctx, env.Client, machine)
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+			ExpectStateNodeNotFoundForMachine(machine)
+		})
+		It("should model the inflight data as machine with no node", func() {
+			machine := test.Machine(v1alpha5.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1alpha5.DoNotConsolidateNodeAnnotationKey: "true",
+					},
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: "default",
+						v1.LabelInstanceTypeStable:       cloudProvider.InstanceTypes[0].Name,
+						v1.LabelTopologyZone:             "test-zone-1",
+						v1.LabelTopologyRegion:           "test-region",
+						v1.LabelHostname:                 "custom-host-name",
+					},
 				},
-			},
-			Status: v1alpha5.MachineStatus{
-				ProviderID: test.RandomProviderID(),
+				Spec: v1alpha5.MachineSpec{
+					Taints: []v1.Taint{
+						{
+							Key:    "custom-taint",
+							Value:  "custom-value",
+							Effect: v1.TaintEffectNoSchedule,
+						},
+					},
+					Requirements: []v1.NodeSelectorRequirement{
+						{
+							Key:      v1.LabelInstanceTypeStable,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{cloudProvider.InstanceTypes[0].Name},
+						},
+						{
+							Key:      v1.LabelTopologyZone,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+						},
+					},
+					Resources: v1alpha5.ResourceRequirements{
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:              resource.MustParse("2"),
+							v1.ResourceMemory:           resource.MustParse("2Gi"),
+							v1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
+						},
+					},
+					MachineTemplateRef: &v1alpha5.MachineTemplateRef{
+						Name: "default",
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			ExpectApplied(ctx, env.Client, machine)
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+
+			ExpectStateNodeCount("==", 1)
+			stateNode := ExpectStateNodeExistsForMachine(machine)
+			Expect(stateNode.Labels()).To(HaveKeyWithValue(v1alpha5.ProvisionerNameLabelKey, "default"))
+			Expect(stateNode.Labels()).To(HaveKeyWithValue(v1.LabelInstanceTypeStable, cloudProvider.InstanceTypes[0].Name))
+			Expect(stateNode.Labels()).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-1"))
+			Expect(stateNode.Labels()).To(HaveKeyWithValue(v1.LabelTopologyRegion, "test-region"))
+			Expect(stateNode.Labels()).To(HaveKeyWithValue(v1.LabelHostname, "custom-host-name"))
+			Expect(stateNode.HostName()).To(Equal("custom-host-name"))
+			Expect(stateNode.Annotations()).To(HaveKeyWithValue(v1alpha5.DoNotConsolidateNodeAnnotationKey, "true"))
+			Expect(stateNode.Initialized()).To(BeFalse())
+			Expect(stateNode.Managed()).To(BeTrue())
+		})
+		It("should model the inflight capacity/allocatable as the machine capacity/allocatable", func() {
+			machine := test.Machine(v1alpha5.Machine{
+				Spec: v1alpha5.MachineSpec{
+					Requirements: []v1.NodeSelectorRequirement{
+						{
+							Key:      v1.LabelInstanceTypeStable,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{cloudProvider.InstanceTypes[0].Name},
+						},
+						{
+							Key:      v1.LabelTopologyZone,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+						},
+					},
+					MachineTemplateRef: &v1alpha5.MachineTemplateRef{
+						Name: "default",
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Capacity: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("2"),
+						v1.ResourceMemory:           resource.MustParse("32Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+					},
+					Allocatable: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("1"),
+						v1.ResourceMemory:           resource.MustParse("30Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, machine)
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+
+			ExpectStateNodeCount("==", 1)
+			ExpectResources(v1.ResourceList{
+				v1.ResourceCPU:              resource.MustParse("2"),
+				v1.ResourceMemory:           resource.MustParse("32Gi"),
+				v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+			}, ExpectStateNodeExistsForMachine(machine).Capacity())
+			ExpectResources(v1.ResourceList{
+				v1.ResourceCPU:              resource.MustParse("1"),
+				v1.ResourceMemory:           resource.MustParse("30Gi"),
+				v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+			}, ExpectStateNodeExistsForMachine(machine).Allocatable())
+		})
+		It("should model the inflight capacity of the machine until the node registers and is initialized", func() {
+			machine := test.Machine(v1alpha5.Machine{
+				Spec: v1alpha5.MachineSpec{
+					Requirements: []v1.NodeSelectorRequirement{
+						{
+							Key:      v1.LabelInstanceTypeStable,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{cloudProvider.InstanceTypes[0].Name},
+						},
+						{
+							Key:      v1.LabelTopologyZone,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+						},
+					},
+					MachineTemplateRef: &v1alpha5.MachineTemplateRef{
+						Name: "default",
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Capacity: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("2"),
+						v1.ResourceMemory:           resource.MustParse("32Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+					},
+					Allocatable: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("1"),
+						v1.ResourceMemory:           resource.MustParse("30Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, machine)
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+
+			ExpectStateNodeCount("==", 1)
+			ExpectResources(v1.ResourceList{
+				v1.ResourceCPU:              resource.MustParse("2"),
+				v1.ResourceMemory:           resource.MustParse("32Gi"),
+				v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+			}, ExpectStateNodeExistsForMachine(machine).Capacity())
+			ExpectResources(v1.ResourceList{
+				v1.ResourceCPU:              resource.MustParse("1"),
+				v1.ResourceMemory:           resource.MustParse("30Gi"),
+				v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+			}, ExpectStateNodeExistsForMachine(machine).Allocatable())
+
+			node := test.Node(test.NodeOptions{
+				ProviderID: machine.Status.ProviderID,
 				Capacity: v1.ResourceList{
-					v1.ResourceCPU:              resource.MustParse("2"),
-					v1.ResourceMemory:           resource.MustParse("32Gi"),
-					v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+					v1.ResourceCPU:              resource.MustParse("1800m"),
+					v1.ResourceMemory:           resource.MustParse("30500Mi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
 				},
 				Allocatable: v1.ResourceList{
-					v1.ResourceCPU:              resource.MustParse("1"),
-					v1.ResourceMemory:           resource.MustParse("30Gi"),
-					v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+					v1.ResourceCPU:              resource.MustParse("900m"),
+					v1.ResourceMemory:           resource.MustParse("29250Mi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("17800Mi"),
 				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+			})
+			ExpectApplied(ctx, env.Client, node)
 
-		node := test.Node(test.NodeOptions{
-			ProviderID: machine.Status.ProviderID,
-			Capacity: v1.ResourceList{
+			ExpectStateNodeCount("==", 1)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			// Update machine to be initialized
+			machine.StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
+			ExpectApplied(ctx, env.Client, machine)
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+
+			ExpectStateNodeCount("==", 1)
+			ExpectStateNodeExistsForMachine(machine)
+			ExpectResources(v1.ResourceList{
 				v1.ResourceCPU:              resource.MustParse("1800m"),
 				v1.ResourceMemory:           resource.MustParse("30500Mi"),
 				v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
-			},
-			Allocatable: v1.ResourceList{
+			}, ExpectStateNodeExists(node).Capacity())
+			ExpectResources(v1.ResourceList{
 				v1.ResourceCPU:              resource.MustParse("900m"),
 				v1.ResourceMemory:           resource.MustParse("29250Mi"),
 				v1.ResourceEphemeralStorage: resource.MustParse("17800Mi"),
-			},
-			Taints: []v1.Taint{
-				{
-					Key:    v1.TaintNodeNotReady,
-					Effect: v1.TaintEffectNoSchedule,
-				},
-				{
-					Key:    v1.TaintNodeUnreachable,
-					Effect: v1.TaintEffectNoSchedule,
-				},
-				{
-					Key:    cloudproviderapi.TaintExternalCloudProvider,
-					Effect: v1.TaintEffectNoSchedule,
-					Value:  "true",
-				},
-			},
+			}, ExpectStateNodeExists(node).Allocatable())
 		})
-		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		It("should not return startup taints when the node isn't initialized", func() {
+			machine := test.Machine(v1alpha5.Machine{
+				Spec: v1alpha5.MachineSpec{
+					Requirements: []v1.NodeSelectorRequirement{
+						{
+							Key:      v1.LabelInstanceTypeStable,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{cloudProvider.InstanceTypes[0].Name},
+						},
+						{
+							Key:      v1.LabelTopologyZone,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+						},
+					},
+					StartupTaints: []v1.Taint{
+						{
+							Key:    "custom-taint",
+							Value:  "custom-value",
+							Effect: v1.TaintEffectNoSchedule,
+						},
+						{
+							Key:    "custom-taint2",
+							Value:  "custom-value2",
+							Effect: v1.TaintEffectNoExecute,
+						},
+					},
+					MachineTemplateRef: &v1alpha5.MachineTemplateRef{
+						Name: "default",
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Capacity: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("2"),
+						v1.ResourceMemory:           resource.MustParse("32Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+					},
+					Allocatable: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("1"),
+						v1.ResourceMemory:           resource.MustParse("30Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, machine)
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 
-		ExpectStateNodeCount("==", 1)
-		stateNode := ExpectStateNodeExists(node)
-		Expect(stateNode.Taints()).To(HaveLen(0))
-	})
-	It("should combine the inflight capacity with node while node isn't initialized", func() {
-		machine := test.Machine(v1alpha5.Machine{
-			Spec: v1alpha5.MachineSpec{
-				Requirements: []v1.NodeSelectorRequirement{
-					{
-						Key:      v1.LabelInstanceTypeStable,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{cloudProvider.InstanceTypes[0].Name},
-					},
-					{
-						Key:      v1.LabelTopologyZone,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{"test-zone-1"},
-					},
-				},
-				MachineTemplateRef: &v1alpha5.MachineTemplateRef{
-					Name: "default",
-				},
-			},
-			Status: v1alpha5.MachineStatus{
-				ProviderID: test.RandomProviderID(),
+			ExpectStateNodeCount("==", 1)
+			stateNode := ExpectStateNodeExistsForMachine(machine)
+			Expect(stateNode.Taints()).To(HaveLen(0))
+
+			node := test.Node(test.NodeOptions{
+				ProviderID: machine.Status.ProviderID,
 				Capacity: v1.ResourceList{
-					v1.ResourceCPU:              resource.MustParse("2"),
-					v1.ResourceMemory:           resource.MustParse("32Gi"),
-					v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+					v1.ResourceCPU:              resource.MustParse("1800m"),
+					v1.ResourceMemory:           resource.MustParse("30500Mi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
 				},
 				Allocatable: v1.ResourceList{
-					v1.ResourceCPU:              resource.MustParse("1"),
-					v1.ResourceMemory:           resource.MustParse("30Gi"),
-					v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+					v1.ResourceCPU:              resource.MustParse("900m"),
+					v1.ResourceMemory:           resource.MustParse("29250Mi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("17800Mi"),
 				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		ExpectStateNodeCount("==", 1)
+				Taints: []v1.Taint{
+					{
+						Key:    "custom-taint",
+						Value:  "custom-value",
+						Effect: v1.TaintEffectNoSchedule,
+					},
+					{
+						Key:    "custom-taint2",
+						Value:  "custom-value2",
+						Effect: v1.TaintEffectNoExecute,
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
-		node := test.Node(test.NodeOptions{
-			ProviderID: machine.Status.ProviderID,
-			Capacity: v1.ResourceList{
+			ExpectStateNodeCount("==", 1)
+			stateNode = ExpectStateNodeExists(node)
+			Expect(stateNode.Taints()).To(HaveLen(0))
+		})
+		It("should return startup taints when the node is initialized", func() {
+			machine := test.Machine(v1alpha5.Machine{
+				Spec: v1alpha5.MachineSpec{
+					Requirements: []v1.NodeSelectorRequirement{
+						{
+							Key:      v1.LabelInstanceTypeStable,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{cloudProvider.InstanceTypes[0].Name},
+						},
+						{
+							Key:      v1.LabelTopologyZone,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+						},
+					},
+					StartupTaints: []v1.Taint{
+						{
+							Key:    "custom-taint",
+							Value:  "custom-value",
+							Effect: v1.TaintEffectNoSchedule,
+						},
+						{
+							Key:    "custom-taint2",
+							Value:  "custom-value2",
+							Effect: v1.TaintEffectNoExecute,
+						},
+					},
+					MachineTemplateRef: &v1alpha5.MachineTemplateRef{
+						Name: "default",
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Capacity: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("2"),
+						v1.ResourceMemory:           resource.MustParse("32Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+					},
+					Allocatable: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("1"),
+						v1.ResourceMemory:           resource.MustParse("30Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, machine)
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+
+			node := test.Node(test.NodeOptions{
+				ProviderID: machine.Status.ProviderID,
+				Capacity: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("1800m"),
+					v1.ResourceMemory:           resource.MustParse("30500Mi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
+				},
+				Allocatable: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("900m"),
+					v1.ResourceMemory:           resource.MustParse("29250Mi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("17800Mi"),
+				},
+				Taints: []v1.Taint{
+					{
+						Key:    "custom-taint",
+						Value:  "custom-value",
+						Effect: v1.TaintEffectNoSchedule,
+					},
+					{
+						Key:    "custom-taint2",
+						Value:  "custom-value2",
+						Effect: v1.TaintEffectNoExecute,
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			ExpectMakeMachinesInitialized(ctx, env.Client, machine)
+			ExpectMakeNodesInitialized(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			ExpectStateNodeCount("==", 1)
+			stateNode := ExpectStateNodeExists(node)
+			Expect(stateNode.Taints()).To(HaveLen(2))
+			Expect(stateNode.Taints()).To(Equal([]v1.Taint{
+				{
+					Key:    "custom-taint",
+					Value:  "custom-value",
+					Effect: v1.TaintEffectNoSchedule,
+				},
+				{
+					Key:    "custom-taint2",
+					Value:  "custom-value2",
+					Effect: v1.TaintEffectNoExecute,
+				},
+			}))
+		})
+		It("should not return known ephemeral taints", func() {
+			machine := test.Machine(v1alpha5.Machine{
+				Spec: v1alpha5.MachineSpec{
+					Requirements: []v1.NodeSelectorRequirement{
+						{
+							Key:      v1.LabelInstanceTypeStable,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{cloudProvider.InstanceTypes[0].Name},
+						},
+						{
+							Key:      v1.LabelTopologyZone,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+						},
+					},
+					MachineTemplateRef: &v1alpha5.MachineTemplateRef{
+						Name: "default",
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Capacity: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("2"),
+						v1.ResourceMemory:           resource.MustParse("32Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+					},
+					Allocatable: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("1"),
+						v1.ResourceMemory:           resource.MustParse("30Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, machine)
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+
+			node := test.Node(test.NodeOptions{
+				ProviderID: machine.Status.ProviderID,
+				Capacity: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("1800m"),
+					v1.ResourceMemory:           resource.MustParse("30500Mi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
+				},
+				Allocatable: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("900m"),
+					v1.ResourceMemory:           resource.MustParse("29250Mi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("17800Mi"),
+				},
+				Taints: []v1.Taint{
+					{
+						Key:    v1.TaintNodeNotReady,
+						Effect: v1.TaintEffectNoSchedule,
+					},
+					{
+						Key:    v1.TaintNodeUnreachable,
+						Effect: v1.TaintEffectNoSchedule,
+					},
+					{
+						Key:    cloudproviderapi.TaintExternalCloudProvider,
+						Effect: v1.TaintEffectNoSchedule,
+						Value:  "true",
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			ExpectStateNodeCount("==", 1)
+			stateNode := ExpectStateNodeExists(node)
+			Expect(stateNode.Taints()).To(HaveLen(0))
+		})
+		It("should combine the inflight capacity with node while node isn't initialized", func() {
+			machine := test.Machine(v1alpha5.Machine{
+				Spec: v1alpha5.MachineSpec{
+					Requirements: []v1.NodeSelectorRequirement{
+						{
+							Key:      v1.LabelInstanceTypeStable,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{cloudProvider.InstanceTypes[0].Name},
+						},
+						{
+							Key:      v1.LabelTopologyZone,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+						},
+					},
+					MachineTemplateRef: &v1alpha5.MachineTemplateRef{
+						Name: "default",
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Capacity: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("2"),
+						v1.ResourceMemory:           resource.MustParse("32Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+					},
+					Allocatable: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("1"),
+						v1.ResourceMemory:           resource.MustParse("30Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, machine)
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+			ExpectStateNodeCount("==", 1)
+
+			node := test.Node(test.NodeOptions{
+				ProviderID: machine.Status.ProviderID,
+				Capacity: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("1800m"),
+					v1.ResourceMemory:           resource.MustParse("0"), // Should use the inflight capacity for this value
+					v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
+				},
+				Allocatable: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("0"), // Should use the inflight allocatable for this value
+					v1.ResourceMemory:           resource.MustParse("29250Mi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("0"), // Should use the inflight allocatable for this value
+				},
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			ExpectStateNodeCount("==", 1)
+
+			// Machine isn't initialized yet so the resources should remain as the in-flight resources
+			ExpectResources(v1.ResourceList{
 				v1.ResourceCPU:              resource.MustParse("1800m"),
-				v1.ResourceMemory:           resource.MustParse("0"), // Should use the inflight capacity for this value
+				v1.ResourceMemory:           resource.MustParse("32Gi"),
 				v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
-			},
-			Allocatable: v1.ResourceList{
-				v1.ResourceCPU:              resource.MustParse("0"), // Should use the inflight allocatable for this value
+			}, ExpectStateNodeExistsForMachine(machine).Capacity())
+			ExpectResources(v1.ResourceList{
+				v1.ResourceCPU:              resource.MustParse("1"),
 				v1.ResourceMemory:           resource.MustParse("29250Mi"),
-				v1.ResourceEphemeralStorage: resource.MustParse("0"), // Should use the inflight allocatable for this value
-			},
+				v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+			}, ExpectStateNodeExistsForMachine(machine).Allocatable())
 		})
-		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectStateNodeCount("==", 1)
+		It("should continue node nomination when an inflight node becomes a real node", func() {
+			machine := test.Machine(v1alpha5.Machine{
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			ExpectApplied(ctx, env.Client, machine)
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+			ExpectStateNodeCount("==", 1)
+			cluster.NominateNodeForPod(ctx, machine.Status.ProviderID)
+			Expect(ExpectStateNodeExistsForMachine(machine).Nominated()).To(BeTrue())
 
-		// Machine isn't initialized yet so the resources should remain as the in-flight resources
-		ExpectResources(v1.ResourceList{
-			v1.ResourceCPU:              resource.MustParse("1800m"),
-			v1.ResourceMemory:           resource.MustParse("32Gi"),
-			v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
-		}, ExpectStateNodeExistsForMachine(machine).Capacity())
-		ExpectResources(v1.ResourceList{
-			v1.ResourceCPU:              resource.MustParse("1"),
-			v1.ResourceMemory:           resource.MustParse("29250Mi"),
-			v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
-		}, ExpectStateNodeExistsForMachine(machine).Allocatable())
+			node := test.Node(test.NodeOptions{
+				ProviderID: machine.Status.ProviderID,
+			})
+			node.Spec.ProviderID = machine.Status.ProviderID
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			ExpectStateNodeCount("==", 1)
+			Expect(ExpectStateNodeExists(node).Nominated()).To(BeTrue())
+		})
+		It("should continue MarkedForDeletion when an inflight node becomes a real node", func() {
+			machine := test.Machine(v1alpha5.Machine{
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			ExpectApplied(ctx, env.Client, machine)
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+			ExpectStateNodeCount("==", 1)
+			cluster.MarkForDeletion(machine.Status.ProviderID)
+			Expect(ExpectStateNodeExistsForMachine(machine).MarkedForDeletion()).To(BeTrue())
+
+			node := test.Node(test.NodeOptions{
+				ProviderID: machine.Status.ProviderID,
+			})
+			node.Spec.ProviderID = machine.Status.ProviderID
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			ExpectStateNodeCount("==", 1)
+			Expect(ExpectStateNodeExists(node).MarkedForDeletion()).To(BeTrue())
+		})
 	})
-	It("should continue node nomination when an inflight node becomes a real node", func() {
-		machine := test.Machine(v1alpha5.Machine{
-			Status: v1alpha5.MachineStatus{
-				ProviderID: test.RandomProviderID(),
-			},
+	Context("NodeClaim", func() {
+		It("should ignore nodeclaims that don't yet have provider id", func() {
+			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+				Spec: v1beta1.NodeClaimSpec{
+					Taints: []v1.Taint{
+						{
+							Key:    "custom-taint",
+							Value:  "custom-value",
+							Effect: v1.TaintEffectNoSchedule,
+						},
+					},
+					Requirements: []v1.NodeSelectorRequirement{
+						{
+							Key:      v1.LabelInstanceTypeStable,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{cloudProvider.InstanceTypes[0].Name},
+						},
+						{
+							Key:      v1.LabelTopologyZone,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+						},
+					},
+					Resources: v1beta1.ResourceRequirements{
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:              resource.MustParse("2"),
+							v1.ResourceMemory:           resource.MustParse("2Gi"),
+							v1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
+						},
+					},
+					NodeClass: &v1beta1.NodeClassReference{
+						Name: "default",
+					},
+				},
+			})
+			nodeClaim.Status.ProviderID = ""
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectStateNodeNotFoundForNodeClaim(nodeClaim)
 		})
-		ExpectApplied(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		ExpectStateNodeCount("==", 1)
-		cluster.NominateNodeForPod(ctx, machine.Status.ProviderID)
-		Expect(ExpectStateNodeExistsForMachine(machine).Nominated()).To(BeTrue())
+		It("should model the inflight data as nodeclaim with no node", func() {
+			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1beta1.DoNotDisruptAnnotationKey: "true",
+					},
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey:   "default",
+						v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+						v1.LabelTopologyZone:       "test-zone-1",
+						v1.LabelTopologyRegion:     "test-region",
+						v1.LabelHostname:           "custom-host-name",
+					},
+				},
+				Spec: v1beta1.NodeClaimSpec{
+					Taints: []v1.Taint{
+						{
+							Key:    "custom-taint",
+							Value:  "custom-value",
+							Effect: v1.TaintEffectNoSchedule,
+						},
+					},
+					Requirements: []v1.NodeSelectorRequirement{
+						{
+							Key:      v1.LabelInstanceTypeStable,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{cloudProvider.InstanceTypes[0].Name},
+						},
+						{
+							Key:      v1.LabelTopologyZone,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+						},
+					},
+					Resources: v1beta1.ResourceRequirements{
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:              resource.MustParse("2"),
+							v1.ResourceMemory:           resource.MustParse("2Gi"),
+							v1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
+						},
+					},
+					NodeClass: &v1beta1.NodeClassReference{
+						Name: "default",
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
-		node := test.Node(test.NodeOptions{
-			ProviderID: machine.Status.ProviderID,
+			ExpectStateNodeCount("==", 1)
+			stateNode := ExpectStateNodeExistsForNodeClaim(nodeClaim)
+			Expect(stateNode.Labels()).To(HaveKeyWithValue(v1beta1.NodePoolLabelKey, "default"))
+			Expect(stateNode.Labels()).To(HaveKeyWithValue(v1.LabelInstanceTypeStable, cloudProvider.InstanceTypes[0].Name))
+			Expect(stateNode.Labels()).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-1"))
+			Expect(stateNode.Labels()).To(HaveKeyWithValue(v1.LabelTopologyRegion, "test-region"))
+			Expect(stateNode.Labels()).To(HaveKeyWithValue(v1.LabelHostname, "custom-host-name"))
+			Expect(stateNode.HostName()).To(Equal("custom-host-name"))
+			Expect(stateNode.Annotations()).To(HaveKeyWithValue(v1beta1.DoNotDisruptAnnotationKey, "true"))
+			Expect(stateNode.Initialized()).To(BeFalse())
+			Expect(stateNode.Managed()).To(BeTrue())
 		})
-		node.Spec.ProviderID = machine.Status.ProviderID
-		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectStateNodeCount("==", 1)
-		Expect(ExpectStateNodeExists(node).Nominated()).To(BeTrue())
-	})
-	It("should continue MarkedForDeletion when an inflight node becomes a real node", func() {
-		machine := test.Machine(v1alpha5.Machine{
-			Status: v1alpha5.MachineStatus{
-				ProviderID: test.RandomProviderID(),
-			},
-		})
-		ExpectApplied(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		ExpectStateNodeCount("==", 1)
-		cluster.MarkForDeletion(machine.Status.ProviderID)
-		Expect(ExpectStateNodeExistsForMachine(machine).MarkedForDeletion()).To(BeTrue())
+		It("should model the inflight capacity/allocatable as the nodeclaim capacity/allocatable", func() {
+			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+				Spec: v1beta1.NodeClaimSpec{
+					Requirements: []v1.NodeSelectorRequirement{
+						{
+							Key:      v1.LabelInstanceTypeStable,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{cloudProvider.InstanceTypes[0].Name},
+						},
+						{
+							Key:      v1.LabelTopologyZone,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+						},
+					},
+					NodeClass: &v1beta1.NodeClassReference{
+						Name: "default",
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Capacity: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("2"),
+						v1.ResourceMemory:           resource.MustParse("32Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+					},
+					Allocatable: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("1"),
+						v1.ResourceMemory:           resource.MustParse("30Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
-		node := test.Node(test.NodeOptions{
-			ProviderID: machine.Status.ProviderID,
+			ExpectStateNodeCount("==", 1)
+			ExpectResources(v1.ResourceList{
+				v1.ResourceCPU:              resource.MustParse("2"),
+				v1.ResourceMemory:           resource.MustParse("32Gi"),
+				v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+			}, ExpectStateNodeExistsForNodeClaim(nodeClaim).Capacity())
+			ExpectResources(v1.ResourceList{
+				v1.ResourceCPU:              resource.MustParse("1"),
+				v1.ResourceMemory:           resource.MustParse("30Gi"),
+				v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+			}, ExpectStateNodeExistsForNodeClaim(nodeClaim).Allocatable())
 		})
-		node.Spec.ProviderID = machine.Status.ProviderID
-		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectStateNodeCount("==", 1)
-		Expect(ExpectStateNodeExists(node).MarkedForDeletion()).To(BeTrue())
+		It("should model the inflight capacity of the nodeclaim until the node registers and is initialized", func() {
+			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+				Spec: v1beta1.NodeClaimSpec{
+					Requirements: []v1.NodeSelectorRequirement{
+						{
+							Key:      v1.LabelInstanceTypeStable,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{cloudProvider.InstanceTypes[0].Name},
+						},
+						{
+							Key:      v1.LabelTopologyZone,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+						},
+					},
+					NodeClass: &v1beta1.NodeClassReference{
+						Name: "default",
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Capacity: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("2"),
+						v1.ResourceMemory:           resource.MustParse("32Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+					},
+					Allocatable: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("1"),
+						v1.ResourceMemory:           resource.MustParse("30Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+			ExpectStateNodeCount("==", 1)
+			ExpectResources(v1.ResourceList{
+				v1.ResourceCPU:              resource.MustParse("2"),
+				v1.ResourceMemory:           resource.MustParse("32Gi"),
+				v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+			}, ExpectStateNodeExistsForNodeClaim(nodeClaim).Capacity())
+			ExpectResources(v1.ResourceList{
+				v1.ResourceCPU:              resource.MustParse("1"),
+				v1.ResourceMemory:           resource.MustParse("30Gi"),
+				v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+			}, ExpectStateNodeExistsForNodeClaim(nodeClaim).Allocatable())
+
+			node := test.Node(test.NodeOptions{
+				ProviderID: nodeClaim.Status.ProviderID,
+				Capacity: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("1800m"),
+					v1.ResourceMemory:           resource.MustParse("30500Mi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
+				},
+				Allocatable: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("900m"),
+					v1.ResourceMemory:           resource.MustParse("29250Mi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("17800Mi"),
+				},
+			})
+			ExpectApplied(ctx, env.Client, node)
+
+			ExpectStateNodeCount("==", 1)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			// Update nodeClaim to be initialized
+			nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeInitialized)
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+			ExpectStateNodeCount("==", 1)
+			ExpectStateNodeExistsForNodeClaim(nodeClaim)
+			ExpectResources(v1.ResourceList{
+				v1.ResourceCPU:              resource.MustParse("1800m"),
+				v1.ResourceMemory:           resource.MustParse("30500Mi"),
+				v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
+			}, ExpectStateNodeExists(node).Capacity())
+			ExpectResources(v1.ResourceList{
+				v1.ResourceCPU:              resource.MustParse("900m"),
+				v1.ResourceMemory:           resource.MustParse("29250Mi"),
+				v1.ResourceEphemeralStorage: resource.MustParse("17800Mi"),
+			}, ExpectStateNodeExists(node).Allocatable())
+		})
+		It("should not return startup taints when the node isn't initialized", func() {
+			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+				Spec: v1beta1.NodeClaimSpec{
+					Requirements: []v1.NodeSelectorRequirement{
+						{
+							Key:      v1.LabelInstanceTypeStable,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{cloudProvider.InstanceTypes[0].Name},
+						},
+						{
+							Key:      v1.LabelTopologyZone,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+						},
+					},
+					StartupTaints: []v1.Taint{
+						{
+							Key:    "custom-taint",
+							Value:  "custom-value",
+							Effect: v1.TaintEffectNoSchedule,
+						},
+						{
+							Key:    "custom-taint2",
+							Value:  "custom-value2",
+							Effect: v1.TaintEffectNoExecute,
+						},
+					},
+					NodeClass: &v1beta1.NodeClassReference{
+						Name: "default",
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Capacity: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("2"),
+						v1.ResourceMemory:           resource.MustParse("32Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+					},
+					Allocatable: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("1"),
+						v1.ResourceMemory:           resource.MustParse("30Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+			ExpectStateNodeCount("==", 1)
+			stateNode := ExpectStateNodeExistsForNodeClaim(nodeClaim)
+			Expect(stateNode.Taints()).To(HaveLen(0))
+
+			node := test.Node(test.NodeOptions{
+				ProviderID: nodeClaim.Status.ProviderID,
+				Capacity: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("1800m"),
+					v1.ResourceMemory:           resource.MustParse("30500Mi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
+				},
+				Allocatable: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("900m"),
+					v1.ResourceMemory:           resource.MustParse("29250Mi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("17800Mi"),
+				},
+				Taints: []v1.Taint{
+					{
+						Key:    "custom-taint",
+						Value:  "custom-value",
+						Effect: v1.TaintEffectNoSchedule,
+					},
+					{
+						Key:    "custom-taint2",
+						Value:  "custom-value2",
+						Effect: v1.TaintEffectNoExecute,
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			ExpectStateNodeCount("==", 1)
+			stateNode = ExpectStateNodeExists(node)
+			Expect(stateNode.Taints()).To(HaveLen(0))
+		})
+		It("should return startup taints when the node is initialized", func() {
+			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+				Spec: v1beta1.NodeClaimSpec{
+					Requirements: []v1.NodeSelectorRequirement{
+						{
+							Key:      v1.LabelInstanceTypeStable,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{cloudProvider.InstanceTypes[0].Name},
+						},
+						{
+							Key:      v1.LabelTopologyZone,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+						},
+					},
+					StartupTaints: []v1.Taint{
+						{
+							Key:    "custom-taint",
+							Value:  "custom-value",
+							Effect: v1.TaintEffectNoSchedule,
+						},
+						{
+							Key:    "custom-taint2",
+							Value:  "custom-value2",
+							Effect: v1.TaintEffectNoExecute,
+						},
+					},
+					NodeClass: &v1beta1.NodeClassReference{
+						Name: "default",
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Capacity: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("2"),
+						v1.ResourceMemory:           resource.MustParse("32Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+					},
+					Allocatable: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("1"),
+						v1.ResourceMemory:           resource.MustParse("30Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+			node := test.Node(test.NodeOptions{
+				ProviderID: nodeClaim.Status.ProviderID,
+				Capacity: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("1800m"),
+					v1.ResourceMemory:           resource.MustParse("30500Mi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
+				},
+				Allocatable: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("900m"),
+					v1.ResourceMemory:           resource.MustParse("29250Mi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("17800Mi"),
+				},
+				Taints: []v1.Taint{
+					{
+						Key:    "custom-taint",
+						Value:  "custom-value",
+						Effect: v1.TaintEffectNoSchedule,
+					},
+					{
+						Key:    "custom-taint2",
+						Value:  "custom-value2",
+						Effect: v1.TaintEffectNoExecute,
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+			ExpectMakeNodesInitialized(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			ExpectStateNodeCount("==", 1)
+			stateNode := ExpectStateNodeExists(node)
+			Expect(stateNode.Taints()).To(HaveLen(2))
+			Expect(stateNode.Taints()).To(Equal([]v1.Taint{
+				{
+					Key:    "custom-taint",
+					Value:  "custom-value",
+					Effect: v1.TaintEffectNoSchedule,
+				},
+				{
+					Key:    "custom-taint2",
+					Value:  "custom-value2",
+					Effect: v1.TaintEffectNoExecute,
+				},
+			}))
+		})
+		It("should not return known ephemeral taints", func() {
+			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+				Spec: v1beta1.NodeClaimSpec{
+					Requirements: []v1.NodeSelectorRequirement{
+						{
+							Key:      v1.LabelInstanceTypeStable,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{cloudProvider.InstanceTypes[0].Name},
+						},
+						{
+							Key:      v1.LabelTopologyZone,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+						},
+					},
+					NodeClass: &v1beta1.NodeClassReference{
+						Name: "default",
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Capacity: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("2"),
+						v1.ResourceMemory:           resource.MustParse("32Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+					},
+					Allocatable: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("1"),
+						v1.ResourceMemory:           resource.MustParse("30Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+			node := test.Node(test.NodeOptions{
+				ProviderID: nodeClaim.Status.ProviderID,
+				Capacity: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("1800m"),
+					v1.ResourceMemory:           resource.MustParse("30500Mi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
+				},
+				Allocatable: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("900m"),
+					v1.ResourceMemory:           resource.MustParse("29250Mi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("17800Mi"),
+				},
+				Taints: []v1.Taint{
+					{
+						Key:    v1.TaintNodeNotReady,
+						Effect: v1.TaintEffectNoSchedule,
+					},
+					{
+						Key:    v1.TaintNodeUnreachable,
+						Effect: v1.TaintEffectNoSchedule,
+					},
+					{
+						Key:    cloudproviderapi.TaintExternalCloudProvider,
+						Effect: v1.TaintEffectNoSchedule,
+						Value:  "true",
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			ExpectStateNodeCount("==", 1)
+			stateNode := ExpectStateNodeExists(node)
+			Expect(stateNode.Taints()).To(HaveLen(0))
+		})
+		It("should combine the inflight capacity with node while node isn't initialized", func() {
+			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+				Spec: v1beta1.NodeClaimSpec{
+					Requirements: []v1.NodeSelectorRequirement{
+						{
+							Key:      v1.LabelInstanceTypeStable,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{cloudProvider.InstanceTypes[0].Name},
+						},
+						{
+							Key:      v1.LabelTopologyZone,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+						},
+					},
+					NodeClass: &v1beta1.NodeClassReference{
+						Name: "default",
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Capacity: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("2"),
+						v1.ResourceMemory:           resource.MustParse("32Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+					},
+					Allocatable: v1.ResourceList{
+						v1.ResourceCPU:              resource.MustParse("1"),
+						v1.ResourceMemory:           resource.MustParse("30Gi"),
+						v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectStateNodeCount("==", 1)
+
+			node := test.Node(test.NodeOptions{
+				ProviderID: nodeClaim.Status.ProviderID,
+				Capacity: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("1800m"),
+					v1.ResourceMemory:           resource.MustParse("0"), // Should use the inflight capacity for this value
+					v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
+				},
+				Allocatable: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("0"), // Should use the inflight allocatable for this value
+					v1.ResourceMemory:           resource.MustParse("29250Mi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("0"), // Should use the inflight allocatable for this value
+				},
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			ExpectStateNodeCount("==", 1)
+
+			// Machine isn't initialized yet so the resources should remain as the in-flight resources
+			ExpectResources(v1.ResourceList{
+				v1.ResourceCPU:              resource.MustParse("1800m"),
+				v1.ResourceMemory:           resource.MustParse("32Gi"),
+				v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
+			}, ExpectStateNodeExistsForNodeClaim(nodeClaim).Capacity())
+			ExpectResources(v1.ResourceList{
+				v1.ResourceCPU:              resource.MustParse("1"),
+				v1.ResourceMemory:           resource.MustParse("29250Mi"),
+				v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+			}, ExpectStateNodeExistsForNodeClaim(nodeClaim).Allocatable())
+		})
+		It("should continue node nomination when an inflight node becomes a real node", func() {
+			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectStateNodeCount("==", 1)
+			cluster.NominateNodeForPod(ctx, nodeClaim.Status.ProviderID)
+			Expect(ExpectStateNodeExistsForNodeClaim(nodeClaim).Nominated()).To(BeTrue())
+
+			node := test.Node(test.NodeOptions{
+				ProviderID: nodeClaim.Status.ProviderID,
+			})
+			node.Spec.ProviderID = nodeClaim.Status.ProviderID
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			ExpectStateNodeCount("==", 1)
+			Expect(ExpectStateNodeExists(node).Nominated()).To(BeTrue())
+		})
+		It("should continue MarkedForDeletion when an inflight node becomes a real node", func() {
+			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectStateNodeCount("==", 1)
+			cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
+			Expect(ExpectStateNodeExistsForNodeClaim(nodeClaim).MarkedForDeletion()).To(BeTrue())
+
+			node := test.Node(test.NodeOptions{
+				ProviderID: nodeClaim.Status.ProviderID,
+			})
+			node.Spec.ProviderID = nodeClaim.Status.ProviderID
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			ExpectStateNodeCount("==", 1)
+			Expect(ExpectStateNodeExists(node).MarkedForDeletion()).To(BeTrue())
+		})
 	})
 })
 
@@ -1037,6 +1805,45 @@ var _ = Describe("Node Deletion", func() {
 		ExpectDeleted(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectStateNodeCount("==", 0)
+	})
+	It("should not leak a state node when the NodeClaim and Node names match", func() {
+		nodeClaim, node := test.NodeClaimAndNode()
+		node.Name = nodeClaim.Name
+
+		ExpectApplied(ctx, env.Client, nodeClaim, node)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		ExpectStateNodeCount("==", 1)
+
+		// Expect that the node isn't leaked due to names matching
+		ExpectDeleted(ctx, env.Client, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectStateNodeCount("==", 1)
+		ExpectDeleted(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectStateNodeCount("==", 0)
+	})
+	It("should not leak a state node when the Machine and NodeClaim names match", func() {
+		machine, node1 := test.MachineAndNode()
+		nodeClaim, node2 := test.NodeClaimAndNode()
+		nodeClaim.Name = machine.Name
+
+		ExpectApplied(ctx, env.Client, machine, nodeClaim, node1, node2)
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node1))
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node2))
+
+		ExpectStateNodeCount("==", 2)
+
+		// Expect that the node isn't leaked due to names matching
+		ExpectDeleted(ctx, env.Client, machine)
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectStateNodeCount("==", 2)
+		ExpectDeleted(ctx, env.Client, node1)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node1))
+		ExpectStateNodeCount("==", 1)
 	})
 })
 
@@ -1576,6 +2383,64 @@ var _ = Describe("Node Resource Level", func() {
 		Expect(ExpectStateNodeExistsForMachine(machine).MarkedForDeletion()).To(BeTrue())
 		Expect(ExpectStateNodeExists(node).MarkedForDeletion()).To(BeTrue())
 	})
+	It("should mark node for deletion when nodeclaim is deleted", func() {
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Finalizers: []string{v1alpha5.TerminationFinalizer},
+			},
+			Spec: v1beta1.NodeClaimSpec{
+				Requirements: []v1.NodeSelectorRequirement{
+					{
+						Key:      v1.LabelInstanceTypeStable,
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{cloudProvider.InstanceTypes[0].Name},
+					},
+					{
+						Key:      v1.LabelTopologyZone,
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{"test-zone-1"},
+					},
+				},
+				NodeClass: &v1beta1.NodeClassReference{
+					Name: "default",
+				},
+			},
+			Status: v1beta1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+				Capacity: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("2"),
+					v1.ResourceMemory:           resource.MustParse("32Gi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+				},
+				Allocatable: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("1"),
+					v1.ResourceMemory:           resource.MustParse("30Gi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+				},
+			},
+		})
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:   nodePool.Name,
+					v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+				},
+				Finalizers: []string{v1alpha5.TerminationFinalizer},
+			},
+			ProviderID: nodeClaim.Status.ProviderID,
+		})
+		ExpectApplied(ctx, env.Client, nodeClaim, node)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectStateNodeCount("==", 1)
+
+		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectExists(ctx, env.Client, nodeClaim)
+
+		Expect(ExpectStateNodeExistsForNodeClaim(nodeClaim).MarkedForDeletion()).To(BeTrue())
+		Expect(ExpectStateNodeExists(node).MarkedForDeletion()).To(BeTrue())
+	})
 	It("should nominate the node until the nomination time passes", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1866,6 +2731,19 @@ var _ = Describe("Cluster State Sync", func() {
 		}
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 	})
+	It("should consider the cluster state synced when all nodeclaims are tracked", func() {
+		// Deploy 1000 machines and sync them all with the cluster
+		for i := 0; i < 1000; i++ {
+			machine := test.NodeClaim(v1beta1.NodeClaim{
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			ExpectApplied(ctx, env.Client, machine)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(machine))
+		}
+		Expect(cluster.Synced(ctx)).To(BeTrue())
+	})
 	It("should consider the cluster state synced when a combination of machines and nodes are tracked", func() {
 		// Deploy 250 nodes to the cluster that also have machines
 		for i := 0; i < 250; i++ {
@@ -1901,6 +2779,100 @@ var _ = Describe("Cluster State Sync", func() {
 		}
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 	})
+	It("should consider the cluster state synced when a combination of nodeclaims and node are tracked", func() {
+		// Deploy 250 nodes to the cluster that also have nodeclaims
+		for i := 0; i < 250; i++ {
+			node := test.Node(test.NodeOptions{
+				ProviderID: test.RandomProviderID(),
+			})
+			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: node.Spec.ProviderID,
+				},
+			})
+			ExpectApplied(ctx, env.Client, node, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		}
+		// Deploy 250 nodes to the cluster
+		for i := 0; i < 250; i++ {
+			node := test.Node(test.NodeOptions{
+				ProviderID: test.RandomProviderID(),
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		}
+		// Deploy 500 nodeclaims and sync them all with the cluster
+		for i := 0; i < 500; i++ {
+			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		}
+		Expect(cluster.Synced(ctx)).To(BeTrue())
+	})
+	It("should consider the cluster state synced when a combination of machines, nodeclaims, and nodes are tracked", func() {
+		// Deploy 250 nodes to the cluster that also have machines
+		for i := 0; i < 250; i++ {
+			node := test.Node(test.NodeOptions{
+				ProviderID: test.RandomProviderID(),
+			})
+			machine := test.Machine(v1alpha5.Machine{
+				Status: v1alpha5.MachineStatus{
+					ProviderID: node.Spec.ProviderID,
+				},
+			})
+			ExpectApplied(ctx, env.Client, node, machine)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		}
+		// Deploy 250 nodes to the cluster that also have nodeclaims
+		for i := 0; i < 250; i++ {
+			node := test.Node(test.NodeOptions{
+				ProviderID: test.RandomProviderID(),
+			})
+			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: node.Spec.ProviderID,
+				},
+			})
+			ExpectApplied(ctx, env.Client, node, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		}
+		// Deploy 250 nodes to the cluster
+		for i := 0; i < 250; i++ {
+			node := test.Node(test.NodeOptions{
+				ProviderID: test.RandomProviderID(),
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		}
+		// Deploy 500 machines and sync them all with the cluster
+		for i := 0; i < 500; i++ {
+			machine := test.Machine(v1alpha5.Machine{
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			ExpectApplied(ctx, env.Client, machine)
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		}
+		// Deploy 500 nodeclaims and sync them all with the cluster
+		for i := 0; i < 500; i++ {
+			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		}
+		Expect(cluster.Synced(ctx)).To(BeTrue())
+	})
 	It("should consider the cluster state synced when the representation of nodes is the same", func() {
 		// Deploy 500 machines to the cluster, apply the linked nodes, but don't sync them
 		for i := 0; i < 500; i++ {
@@ -1915,6 +2887,24 @@ var _ = Describe("Cluster State Sync", func() {
 			ExpectApplied(ctx, env.Client, machine)
 			ExpectApplied(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		}
+		Expect(cluster.Synced(ctx)).To(BeTrue())
+	})
+	It("should consider the cluster state synced when the representation of nodes is the same for nodeclaims", func() {
+		// Deploy 500 machines to the cluster, apply the linked nodes, but don't sync them
+		for i := 0; i < 500; i++ {
+			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			node := test.Node(test.NodeOptions{
+				ProviderID: nodeClaim.Status.ProviderID,
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		}
 		Expect(cluster.Synced(ctx)).To(BeTrue())
@@ -1936,6 +2926,23 @@ var _ = Describe("Cluster State Sync", func() {
 		}
 		Expect(cluster.Synced(ctx)).To(BeFalse())
 	})
+	It("shouldn't consider the cluster state synced if a nodeclaim hasn't resolved its provider id", func() {
+		// Deploy 1000 machines and sync them all with the cluster
+		for i := 0; i < 1000; i++ {
+			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			// One of them doesn't have its providerID
+			if i == 900 {
+				nodeClaim.Status.ProviderID = ""
+			}
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		}
+		Expect(cluster.Synced(ctx)).To(BeFalse())
+	})
 	It("shouldn't consider the cluster state synced if a machine isn't tracked", func() {
 		// Deploy 1000 machines and sync them all with the cluster
 		for i := 0; i < 1000; i++ {
@@ -1949,6 +2956,23 @@ var _ = Describe("Cluster State Sync", func() {
 			// One of them doesn't get synced with the reconciliation
 			if i != 900 {
 				ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+			}
+		}
+		Expect(cluster.Synced(ctx)).To(BeFalse())
+	})
+	It("shouldn't consider the cluster state synced if a nodeclaim isn't tracked", func() {
+		// Deploy 1000 machines and sync them all with the cluster
+		for i := 0; i < 1000; i++ {
+			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim)
+
+			// One of them doesn't get synced with the reconciliation
+			if i != 900 {
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 			}
 		}
 		Expect(cluster.Synced(ctx)).To(BeFalse())
@@ -2120,16 +3144,18 @@ var _ = Describe("Consolidated State", func() {
 })
 
 func ExpectStateNodeCount(comparator string, count int) int {
+	GinkgoHelper()
 	c := 0
 	cluster.ForEachNode(func(n *state.StateNode) bool {
 		c++
 		return true
 	})
-	ExpectWithOffset(1, c).To(BeNumerically(comparator, count))
+	Expect(c).To(BeNumerically(comparator, count))
 	return c
 }
 
-func ExpectStateNodeExistsWithOffset(offset int, node *v1.Node) *state.StateNode {
+func ExpectStateNodeExists(node *v1.Node) *state.StateNode {
+	GinkgoHelper()
 	var ret *state.StateNode
 	cluster.ForEachNode(func(n *state.StateNode) bool {
 		if n.Node.Name != node.Name {
@@ -2138,36 +3164,62 @@ func ExpectStateNodeExistsWithOffset(offset int, node *v1.Node) *state.StateNode
 		ret = n.DeepCopy()
 		return false
 	})
-	ExpectWithOffset(offset+1, ret).ToNot(BeNil())
+	Expect(ret).ToNot(BeNil())
 	return ret
 }
 
-func ExpectStateNodeExists(node *v1.Node) *state.StateNode {
-	return ExpectStateNodeExistsWithOffset(1, node)
-}
-
 func ExpectStateNodeExistsForMachine(machine *v1alpha5.Machine) *state.StateNode {
+	GinkgoHelper()
 	var ret *state.StateNode
 	cluster.ForEachNode(func(n *state.StateNode) bool {
-		if n.NodeClaim.Name != machine.Name {
+		if n.NodeClaim.Status.ProviderID != machine.Status.ProviderID {
 			return true
 		}
 		ret = n.DeepCopy()
 		return false
 	})
-	ExpectWithOffset(1, ret).ToNot(BeNil())
+	Expect(ret).ToNot(BeNil())
+	return ret
+}
+
+func ExpectStateNodeExistsForNodeClaim(nodeClaim *v1beta1.NodeClaim) *state.StateNode {
+	GinkgoHelper()
+	var ret *state.StateNode
+	cluster.ForEachNode(func(n *state.StateNode) bool {
+		if n.NodeClaim.Status.ProviderID != nodeClaim.Status.ProviderID {
+			return true
+		}
+		ret = n.DeepCopy()
+		return false
+	})
+	Expect(ret).ToNot(BeNil())
 	return ret
 }
 
 func ExpectStateNodeNotFoundForMachine(machine *v1alpha5.Machine) *state.StateNode {
+	GinkgoHelper()
 	var ret *state.StateNode
 	cluster.ForEachNode(func(n *state.StateNode) bool {
-		if n.NodeClaim.Name != machine.Name {
+		if n.NodeClaim.Status.ProviderID != machine.Status.ProviderID {
 			return true
 		}
 		ret = n.DeepCopy()
 		return false
 	})
-	ExpectWithOffset(1, ret).To(BeNil())
+	Expect(ret).To(BeNil())
+	return ret
+}
+
+func ExpectStateNodeNotFoundForNodeClaim(nodeClaim *v1beta1.NodeClaim) *state.StateNode {
+	GinkgoHelper()
+	var ret *state.StateNode
+	cluster.ForEachNode(func(n *state.StateNode) bool {
+		if n.NodeClaim.Status.ProviderID != nodeClaim.Status.ProviderID {
+			return true
+		}
+		ret = n.DeepCopy()
+		return false
+	})
+	Expect(ret).To(BeNil())
 	return ret
 }
