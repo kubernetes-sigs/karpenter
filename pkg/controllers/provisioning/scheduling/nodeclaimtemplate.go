@@ -72,6 +72,7 @@ func (i *NodeClaimTemplate) ToNodeClaim(nodePool *v1beta1.NodePool) *v1beta1.Nod
 			GenerateName: fmt.Sprintf("%s-", i.OwnerKey.Name),
 			Annotations:  lo.Assign(i.Annotations, map[string]string{v1beta1.NodePoolHashAnnotationKey: nodePool.Hash()}),
 			Labels:       i.Labels,
+			Finalizers:   i.Finalizers,
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion:         v1beta1.SchemeGroupVersion.String(),
