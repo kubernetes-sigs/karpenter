@@ -30,6 +30,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/ptr"
@@ -41,7 +42,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
-	"github.com/aws/karpenter-core/pkg/utils/sets"
 )
 
 // Cluster maintains cluster state that is often needed but expensive to compute.
