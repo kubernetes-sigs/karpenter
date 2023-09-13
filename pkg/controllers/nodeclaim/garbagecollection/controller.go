@@ -20,6 +20,7 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
@@ -31,7 +32,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
-	"github.com/aws/karpenter-core/pkg/utils/sets"
 )
 
 type Controller struct {
