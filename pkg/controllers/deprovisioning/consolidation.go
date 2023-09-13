@@ -69,10 +69,10 @@ func (c *consolidation) String() string {
 	return metrics.ConsolidationReason
 }
 
-// sortAndFilterCandidates orders deprovisionable nodes by the disruptionCost, removing any that we already know won't
+// sortAndFilterCandidates orders deprovisionable candidates by the disruptionCost, removing any that we already know won't
 // be viable consolidation options.
-func (c *consolidation) sortAndFilterCandidates(ctx context.Context, nodes []*Candidate) ([]*Candidate, error) {
-	candidates, err := filterCandidates(ctx, c.kubeClient, c.recorder, nodes)
+func (c *consolidation) sortAndFilterCandidates(ctx context.Context, candidates []*Candidate) ([]*Candidate, error) {
+	candidates, err := filterCandidates(ctx, c.kubeClient, c.recorder, candidates)
 	if err != nil {
 		return nil, fmt.Errorf("filtering candidates, %w", err)
 	}
@@ -93,7 +93,7 @@ func (c *consolidation) markConsolidated() {
 	c.lastConsolidationState = c.cluster.ConsolidationState()
 }
 
-// ShouldDeprovision is a predicate used to filter deprovisionable nodes
+// ShouldDeprovision is a predicate used to filter deprovisionable candidates
 func (c *consolidation) ShouldDeprovision(_ context.Context, cn *Candidate) bool {
 	if cn.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey] == "true" {
 		c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s annotation exists", v1alpha5.DoNotConsolidateNodeAnnotationKey))...)
@@ -147,11 +147,11 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 
 	// get the current node price based on the offering
 	// fallback if we can't find the specific zonal pricing data
-	nodesPrice, err := getCandidatePrices(candidates)
+	candidatePrice, err := getCandidatePrices(candidates)
 	if err != nil {
 		return Command{}, fmt.Errorf("getting offering price from candidate node, %w", err)
 	}
-	results.NewNodeClaims[0].InstanceTypeOptions = filterByPrice(results.NewNodeClaims[0].InstanceTypeOptions, results.NewNodeClaims[0].Requirements, nodesPrice)
+	results.NewNodeClaims[0].InstanceTypeOptions = filterByPrice(results.NewNodeClaims[0].InstanceTypeOptions, results.NewNodeClaims[0].Requirements, candidatePrice)
 	if len(results.NewNodeClaims[0].InstanceTypeOptions) == 0 {
 		if len(candidates) == 1 {
 			c.recorder.Publish(deprovisioningevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace with a cheaper node")...)
@@ -193,7 +193,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	}, nil
 }
 
-// getCandidatePrices returns the sum of the prices of the given candidate nodes
+// getCandidatePrices returns the sum of the prices of the given candidates
 func getCandidatePrices(candidates []*Candidate) (float64, error) {
 	var price float64
 	for _, c := range candidates {

@@ -52,9 +52,9 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 	if err != nil {
 		return Command{}, fmt.Errorf("sorting candidates, %w", err)
 	}
-	deprovisioningEligibleNodesGauge.WithLabelValues(m.String()).Set(float64(len(candidates)))
+	deprovisioningEligibleMachinesGauge.WithLabelValues(m.String()).Set(float64(len(candidates)))
 
-	// Only consider a maximum batch of 100 nodes to save on computation.
+	// Only consider a maximum batch of 100 NodeClaims to save on computation.
 	// This could be further configurable in the future.
 	maxParallel := lo.Clamp(len(candidates), 0, 100)
 
@@ -76,16 +76,16 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 	}
 
 	if !isValid {
-		logging.FromContext(ctx).Debugf("abandoning multi node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+		logging.FromContext(ctx).Debugf("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
 		return Command{}, nil
 	}
 	return cmd, nil
 }
 
-// firstNConsolidationOption looks at the first N nodes to determine if they can all be consolidated at once.  The
-// nodes are sorted by increasing disruption order which correlates to likelihood if being able to consolidate the node
+// firstNConsolidationOption looks at the first N NodeClaims to determine if they can all be consolidated at once.  The
+// NodeClaims are sorted by increasing disruption order which correlates to likelihood if being able to consolidate the node
 func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, candidates []*Candidate, max int) (Command, error) {
-	// we always operate on at least two nodes at once, for single nodes standard consolidation will find all solutions
+	// we always operate on at least two NodeClaims at once, for single NodeClaims standard consolidation will find all solutions
 	if len(candidates) < 2 {
 		return Command{}, nil
 	}
@@ -97,12 +97,13 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	lastSavedCommand := Command{}
 	// Set a timeout
 	timeout := m.clock.Now().Add(MultiNodeConsolidationTimeoutDuration)
-	// binary search to find the maximum number of nodes we can terminate
+	// binary search to find the maximum number of NodeClaims we can terminate
 	for min <= max {
 		if m.clock.Now().After(timeout) {
-			deprovisioningConsolidationTimeoutsCounter.WithLabelValues(multiNodeConsolidationLabelValue).Inc()
+			// TODO @joinnis: Change this to multiNodeConsolidationLabelValue when migrating
+			deprovisioningConsolidationTimeoutsCounter.WithLabelValues(multiMachineConsolidationLabelValue).Inc()
 			if lastSavedCommand.candidates == nil {
-				logging.FromContext(ctx).Debugf("failed to find a multi-node consolidation after timeout, last considered batch had %d nodes", (min+max)/2)
+				logging.FromContext(ctx).Debugf("failed to find a multi-node consolidation after timeout, last considered batch had %d", (min+max)/2)
 			} else {
 				logging.FromContext(ctx).Debugf("stopping multi-node consolidation after timeout, returning last valid command %s", lastSavedCommand)
 			}
@@ -126,7 +127,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 
 		// replacementHasValidInstanceTypes will be false if the replacement action has valid instance types remaining after filtering.
 		if replacementHasValidInstanceTypes || cmd.Action() == DeleteAction {
-			// we can consolidate nodes [0,mid]
+			// We can consolidate NodeClaims [0,mid]
 			lastSavedCommand = cmd
 			min = mid + 1
 		} else {
@@ -140,19 +141,19 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 // consolidated if the list of replacement instance types include one of the instance types that is being removed
 //
 // This handles the following potential consolidation result:
-// nodes=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.small, t3a.xlarge, t3a.2xlarge
+// NodeClaims=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.small, t3a.xlarge, t3a.2xlarge
 //
 // In this case, we shouldn't perform this consolidation at all.  This is equivalent to just
-// deleting the 2x t3a.xlarge nodes.  This code will identify that t3a.small is in both lists and filter
+// deleting the 2x t3a.xlarge NodeClaims.  This code will identify that t3a.small is in both lists and filter
 // out any instance type that is the same or more expensive than the t3a.small
 //
 // For another scenario:
-// nodes=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.nano, t3a.small, t3a.xlarge, t3a.2xlarge
+// NodeClaims=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.nano, t3a.small, t3a.xlarge, t3a.2xlarge
 //
 // This code sees that t3a.small is the cheapest type in both lists and filters it and anything more expensive out
 // leaving the valid consolidation:
-// nodes=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.nano
-func filterOutSameType(newNode *scheduling.NodeClaim, consolidate []*Candidate) []*cloudprovider.InstanceType {
+// NodeClaims=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.nano
+func filterOutSameType(newNodeClaim *scheduling.NodeClaim, consolidate []*Candidate) []*cloudprovider.InstanceType {
 	existingInstanceTypes := sets.New[string]()
 	pricesByInstanceType := map[string]float64{}
 
@@ -173,8 +174,8 @@ func filterOutSameType(newNode *scheduling.NodeClaim, consolidate []*Candidate) 
 	}
 
 	maxPrice := math.MaxFloat64
-	for _, it := range newNode.InstanceTypeOptions {
-		// we are considering replacing multiple nodes with a single node of one of the same types, so the replacement
+	for _, it := range newNodeClaim.InstanceTypeOptions {
+		// we are considering replacing multiple NodeClaims with a single NodeClaim of one of the same types, so the replacement
 		// node must be cheaper than the price of the existing node, or we should just keep that one and do a
 		// deletion only to reduce cluster disruption (fewer pods will re-schedule).
 		if existingInstanceTypes.Has(it.Name) {
@@ -184,5 +185,5 @@ func filterOutSameType(newNode *scheduling.NodeClaim, consolidate []*Candidate) 
 		}
 	}
 
-	return filterByPrice(newNode.InstanceTypeOptions, newNode.Requirements, maxPrice)
+	return filterByPrice(newNodeClaim.InstanceTypeOptions, newNodeClaim.Requirements, maxPrice)
 }

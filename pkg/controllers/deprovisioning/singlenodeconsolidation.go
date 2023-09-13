@@ -31,7 +31,7 @@ import (
 
 const SingleNodeConsolidationTimeoutDuration = 3 * time.Minute
 
-// SingleNodeConsolidation is the consolidation controller that performs single node consolidation.
+// SingleNodeConsolidation is the consolidation controller that performs single-node consolidation.
 type SingleNodeConsolidation struct {
 	consolidation
 }
@@ -41,7 +41,7 @@ func NewSingleNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeCli
 	return &SingleNodeConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
 }
 
-// ComputeCommand generates a deprovisioning command given deprovisionable nodes
+// ComputeCommand generates a deprovisioning command given deprovisionable NodeClaims
 // nolint:gocyclo
 func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	if s.isConsolidated() {
@@ -51,16 +51,17 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, candidates
 	if err != nil {
 		return Command{}, fmt.Errorf("sorting candidates, %w", err)
 	}
-	deprovisioningEligibleNodesGauge.WithLabelValues(s.String()).Set(float64(len(candidates)))
+	deprovisioningEligibleMachinesGauge.WithLabelValues(s.String()).Set(float64(len(candidates)))
 
 	v := NewValidation(consolidationTTL, s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder)
 
 	// Set a timeout
 	timeout := s.clock.Now().Add(SingleNodeConsolidationTimeoutDuration)
-	// binary search to find the maximum number of nodes we can terminate
+	// binary search to find the maximum number of NodeClaims we can terminate
 	for i, candidate := range candidates {
 		if s.clock.Now().After(timeout) {
-			deprovisioningConsolidationTimeoutsCounter.WithLabelValues(singleNodeConsolidationLabelValue).Inc()
+			// TODO @joinnis: Change this to singleNodeClaimConsolidationLabelValue when migrating
+			deprovisioningConsolidationTimeoutsCounter.WithLabelValues(singleMachineConsolidationLabelValue).Inc()
 			logging.FromContext(ctx).Debugf("abandoning single-node consolidation due to timeout after evaluating %d candidates", i)
 			return Command{}, nil
 		}

@@ -34,7 +34,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
-// Drift is a subreconciler that deletes drifted nodes.
+// Drift is a subreconciler that deletes drifted candidates.
 type Drift struct {
 	kubeClient  client.Client
 	cluster     *state.Cluster
@@ -51,15 +51,15 @@ func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *pro
 	}
 }
 
-// ShouldDeprovision is a predicate used to filter deprovisionable nodes
+// ShouldDeprovision is a predicate used to filter deprovisionable candidates
 func (d *Drift) ShouldDeprovision(ctx context.Context, c *Candidate) bool {
 	return settings.FromContext(ctx).DriftEnabled &&
 		c.NodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).IsTrue()
 }
 
-// SortCandidates orders drifted nodes by when they've drifted
-func (d *Drift) filterAndSortCandidates(ctx context.Context, nodes []*Candidate) ([]*Candidate, error) {
-	candidates, err := filterCandidates(ctx, d.kubeClient, d.recorder, nodes)
+// SortCandidates orders drifted candidates by when they've drifted
+func (d *Drift) filterAndSortCandidates(ctx context.Context, candidates []*Candidate) ([]*Candidate, error) {
+	candidates, err := filterCandidates(ctx, d.kubeClient, d.recorder, candidates)
 	if err != nil {
 		return nil, fmt.Errorf("filtering candidates, %w", err)
 	}
@@ -70,15 +70,15 @@ func (d *Drift) filterAndSortCandidates(ctx context.Context, nodes []*Candidate)
 	return candidates, nil
 }
 
-// ComputeCommand generates a deprovisioning command given deprovisionable nodes
-func (d *Drift) ComputeCommand(ctx context.Context, nodes ...*Candidate) (Command, error) {
-	candidates, err := d.filterAndSortCandidates(ctx, nodes)
+// ComputeCommand generates a deprovisioning command given deprovisionable candidates
+func (d *Drift) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
+	candidates, err := d.filterAndSortCandidates(ctx, candidates)
 	if err != nil {
 		return Command{}, err
 	}
-	deprovisioningEligibleNodesGauge.WithLabelValues(d.String()).Set(float64(len(candidates)))
+	deprovisioningEligibleMachinesGauge.WithLabelValues(d.String()).Set(float64(len(candidates)))
 
-	// Deprovision all empty drifted nodes, as they require no scheduling simulations.
+	// Deprovision all empty drifted candidates, as they require no scheduling simulations.
 	if empty := lo.Filter(candidates, func(c *Candidate, _ int) bool {
 		return len(c.pods) == 0
 	}); len(empty) > 0 {
@@ -88,7 +88,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, nodes ...*Candidate) (Comman
 	}
 
 	for _, candidate := range candidates {
-		// Check if we need to create any nodes.
+		// Check if we need to create any NodeClaims.
 		results, err := simulateScheduling(ctx, d.kubeClient, d.cluster, d.provisioner, candidate)
 		if err != nil {
 			// if a candidate is now deleting, just retry

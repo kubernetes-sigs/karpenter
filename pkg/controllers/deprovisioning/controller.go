@@ -62,7 +62,7 @@ const immediately = time.Millisecond
 
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 
-// waitRetryOptions are the retry options used when waiting on a node to become ready or to be deleted
+// waitRetryOptions are the retry options used when waiting on a NodeClaim to become ready or to be deleted
 // readiness can take some time as the node needs to come up, have any daemonset extended resoruce plugins register, etc.
 // deletion can take some time in the case of restrictive PDBs that throttle the rate at which the node is drained
 func waitRetryOptions(ctx context.Context) []retry.Option {
@@ -87,17 +87,17 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 		cloudProvider: cp,
 		lastRun:       map[string]time.Time{},
 		deprovisioners: []Deprovisioner{
-			// Expire any nodes that must be deleted, allowing their pods to potentially land on currently
+			// Expire any NodeClaims that must be deleted, allowing their pods to potentially land on currently
 			NewExpiration(clk, kubeClient, cluster, provisioner, recorder),
-			// Terminate any nodes that have drifted from provisioning specifications, allowing the pods to reschedule.
+			// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
 			NewDrift(kubeClient, cluster, provisioner, recorder),
-			// Delete any remaining empty nodes as there is zero cost in terms of disruption.  Emptiness and
+			// Delete any remaining empty NodeClaims as there is zero cost in terms of disruption.  Emptiness and
 			// emptyNodeConsolidation are mutually exclusive, only one of these will operate
 			NewEmptiness(clk),
-			NewEmptyNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
-			// Attempt to identify multiple nodes that we can consolidate simultaneously to reduce pod churn
+			NewEmptyNodeClaimConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
+			// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
 			NewMultiNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
-			// And finally fall back our single nodes consolidation to further reduce cluster cost.
+			// And finally fall back our single NodeClaim consolidation to further reduce cluster cost.
 			NewSingleNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
 		},
 	}
@@ -146,7 +146,7 @@ func (c *Controller) deprovision(ctx context.Context, deprovisioner Deprovisione
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}
-	// If there are no candidate nodes, move to the next deprovisioner
+	// If there are no candidates, move to the next deprovisioner
 	if len(candidates) == 0 {
 		return false, nil
 	}
@@ -178,9 +178,9 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 
 	reason := fmt.Sprintf("%s/%s", d, command.Action())
 	if command.Action() == ReplaceAction {
-		if err := c.launchReplacementNodes(ctx, command, reason); err != nil {
+		if err := c.launchReplacementNodeClaims(ctx, command, reason); err != nil {
 			// If we failed to launch the replacement, don't deprovision.  If this is some permanent failure,
-			// we don't want to disrupt workloads with no way to provision new nodes for them.
+			// we don't want to disrupt workloads with no way to provision new NodeClaims for them.
 			return fmt.Errorf("launching replacement, %w", err)
 		}
 	}
@@ -197,7 +197,7 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 		nodeclaimutil.TerminatedCounter(candidate.NodeClaim, reason).Inc()
 	}
 
-	// We wait for nodes to delete to ensure we don't start another round of deprovisioning until this node is fully
+	// We wait for NodeClaims to delete to ensure we don't start another round of deprovisioning until this node is fully
 	// deleted.
 	for _, oldCandidate := range command.candidates {
 		c.waitForDeletion(ctx, oldCandidate.NodeClaim)
@@ -205,9 +205,9 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 	return nil
 }
 
-// launchReplacementNodes launches replacement nodes and blocks until it is ready
+// launchReplacementNodeClaims launches replacement NodeClaims and blocks until it is ready
 // nolint:gocyclo
-func (c *Controller) launchReplacementNodes(ctx context.Context, action Command, reason string) error {
+func (c *Controller) launchReplacementNodeClaims(ctx context.Context, action Command, reason string) error {
 	defer metrics.Measure(deprovisioningReplacementNodeInitializedHistogram)()
 
 	// cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
@@ -223,17 +223,17 @@ func (c *Controller) launchReplacementNodes(ctx context.Context, action Command,
 	}
 	if len(nodeClaimKeys) != len(action.replacements) {
 		// shouldn't ever occur since a partially failed CreateNodeClaims should return an error
-		return fmt.Errorf("expected %d nodes, got %d", len(action.replacements), len(nodeClaimKeys))
+		return fmt.Errorf("expected %d replacements, got %d", len(action.replacements), len(nodeClaimKeys))
 	}
 
 	candidateProviderIDs := lo.Map(action.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
 
-	// We have the new nodes created at the API server so mark the old nodes for deletion
+	// We have the new NodeClaims created at the API server so mark the old NodeClaims for deletion
 	c.cluster.MarkForDeletion(candidateProviderIDs...)
 
 	errs := make([]error, len(nodeClaimKeys))
 	workqueue.ParallelizeUntil(ctx, len(nodeClaimKeys), len(nodeClaimKeys), func(i int) {
-		// node never became ready or the nodes that we tried to launch got Insufficient Capacity or some
+		// NodeClaim never became ready or the NodeClaims that we tried to launch got Insufficient Capacity or some
 		// other transient error
 		if err := c.waitForReadiness(ctx, nodeClaimKeys[i], reason); err != nil {
 			deprovisioningReplacementNodeLaunchFailedCounter.WithLabelValues(reason).Inc()
@@ -243,14 +243,14 @@ func (c *Controller) launchReplacementNodes(ctx context.Context, action Command,
 	if err = multierr.Combine(errs...); err != nil {
 		c.cluster.UnmarkForDeletion(candidateProviderIDs...)
 		return multierr.Combine(c.setNodesUnschedulable(ctx, false, action.candidates...),
-			fmt.Errorf("timed out checking node readiness, %w", err))
+			fmt.Errorf("timed out checking readiness, %w", err))
 	}
 	return nil
 }
 
 // TODO @njtran: Allow to bypass this check for certain deprovisioners
 func (c *Controller) waitForReadiness(ctx context.Context, key nodeclaimutil.Key, reason string) error {
-	// Wait for the node to be initialized
+	// Wait for the NodeClaim to be initialized
 	var once sync.Once
 	pollStart := time.Now()
 	return retry.Do(func() error {
@@ -275,13 +275,13 @@ func (c *Controller) waitForReadiness(ctx context.Context, key nodeclaimutil.Key
 	}, waitRetryOptions(ctx)...)
 }
 
-// waitForDeletion waits for the specified node to be removed from the API server. This deletion can take some period
-// of time if there are PDBs that govern pods on the node as we need to wait until the node drains before
+// waitForDeletion waits for the specified NodeClaim to be removed from the API server. This deletion can take some period
+// of time if there are PDBs that govern pods on the node as we need to wait until the NodeClaim drains before
 // it's actually deleted.
 func (c *Controller) waitForDeletion(ctx context.Context, nodeClaim *v1beta1.NodeClaim) {
 	if err := retry.Do(func() error {
 		nc, nerr := nodeclaimutil.Get(ctx, c.kubeClient, nodeclaimutil.Key{Name: nodeClaim.Name, IsMachine: nodeClaim.IsMachine})
-		// We expect the not found error, at which point we know the node is deleted.
+		// We expect the not found error, at which point we know the NodeClaim is deleted.
 		if errors.IsNotFound(nerr) {
 			return nil
 		}
@@ -290,7 +290,7 @@ func (c *Controller) waitForDeletion(ctx context.Context, nodeClaim *v1beta1.Nod
 		if nerr != nil {
 			return fmt.Errorf("expected to be not found, %w", nerr)
 		}
-		// the node still exists
+		// the NodeClaim still exists
 		return fmt.Errorf("expected node to be not found")
 	}, waitRetryOptions(ctx)...,
 	); err != nil {

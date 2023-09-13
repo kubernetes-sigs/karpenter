@@ -23,7 +23,7 @@ import (
 
 func init() {
 	crmetrics.Registry.MustRegister(deprovisioningDurationHistogram, deprovisioningReplacementNodeInitializedHistogram, deprovisioningActionsPerformedCounter,
-		deprovisioningEligibleNodesGauge, deprovisioningReplacementNodeLaunchFailedCounter, deprovisioningConsolidationTimeoutsCounter)
+		deprovisioningEligibleMachinesGauge, deprovisioningReplacementNodeLaunchFailedCounter, deprovisioningConsolidationTimeoutsCounter)
 }
 
 const (
@@ -32,8 +32,8 @@ const (
 	actionLabel             = "action"
 	consolidationType       = "consolidation_type"
 
-	multiNodeConsolidationLabelValue  = "multi-node"
-	singleNodeConsolidationLabelValue = "single-node"
+	multiMachineConsolidationLabelValue  = "multi-machine"
+	singleMachineConsolidationLabelValue = "single-machine"
 )
 
 var (
@@ -50,8 +50,8 @@ var (
 		prometheus.HistogramOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: deprovisioningSubsystem,
-			Name:      "replacement_node_initialized_seconds",
-			Help:      "Amount of time required for a replacement node to become initialized.",
+			Name:      "replacement_machine_initialized_seconds",
+			Help:      "Amount of time required for a replacement machine to become initialized.",
 			Buckets:   metrics.DurationBuckets(),
 		})
 	deprovisioningActionsPerformedCounter = prometheus.NewCounterVec(
@@ -63,12 +63,12 @@ var (
 		},
 		[]string{actionLabel, deprovisionerLabel},
 	)
-	deprovisioningEligibleNodesGauge = prometheus.NewGaugeVec(
+	deprovisioningEligibleMachinesGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: deprovisioningSubsystem,
-			Name:      "eligible_nodes",
-			Help:      "Number of nodes eligible for deprovisioning by Karpenter. Labeled by deprovisioner",
+			Name:      "eligible_machines",
+			Help:      "Number of machines eligible for deprovisioning by Karpenter. Labeled by deprovisioner",
 		},
 		[]string{deprovisionerLabel},
 	)
@@ -85,7 +85,7 @@ var (
 		prometheus.CounterOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: deprovisioningSubsystem,
-			Name:      "replacement_node_launch_failure_counter",
+			Name:      "replacement_machine_launch_failure_counter",
 			Help:      "The number of times that Karpenter failed to launch a replacement node for deprovisioning. Labeled by deprovisioner.",
 		},
 		[]string{deprovisionerLabel},

@@ -82,12 +82,12 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 			return false, fmt.Errorf("constructing validation candidates, %w", err)
 		}
 	}
-	nodes, err := filterCandidates(ctx, v.kubeClient, v.recorder, cmd.candidates)
+	candidates, err := filterCandidates(ctx, v.kubeClient, v.recorder, cmd.candidates)
 	if err != nil {
 		return false, fmt.Errorf("filtering candidates, %w", err)
 	}
-	// If we filtered out any candidates, return false as some nodes in the consolidation decision have changed.
-	if len(nodes) != len(cmd.candidates) {
+	// If we filtered out any candidates, return false as some NodeClaims in the consolidation decision have changed.
+	if len(candidates) != len(cmd.candidates) {
 		return false, nil
 	}
 	// a candidate we are about to delete is a target of a currently pending pod, wait for that to settle
@@ -106,7 +106,7 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 	return isValid, nil
 }
 
-// ShouldDeprovision is a predicate used to filter deprovisionable nodes
+// ShouldDeprovision is a predicate used to filter deprovisionable candidates
 func (v *Validation) ShouldDeprovision(_ context.Context, c *Candidate) bool {
 	if c.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey] == "true" {
 		return false
@@ -140,10 +140,10 @@ func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidate
 	// len(NewNodeClaims) == 1, as long as the noe looks like what we were expecting, this is valid
 	if len(results.NewNodeClaims) == 0 {
 		if len(cmd.replacements) == 0 {
-			// scheduling produced zero new nodes and we weren't expecting any, so this is valid.
+			// scheduling produced zero new NodeClaims and we weren't expecting any, so this is valid.
 			return true, nil
 		}
-		// if it produced no new nodes, but we were expecting one we should re-simulate as there is likely a better
+		// if it produced no new NodeClaims, but we were expecting one we should re-simulate as there is likely a better
 		// consolidation option now
 		return false, nil
 	}
@@ -155,7 +155,7 @@ func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidate
 
 	// we now know that scheduling simulation wants to create one new node
 	if len(cmd.replacements) == 0 {
-		// but we weren't expecting any new nodes, so this is invalid
+		// but we weren't expecting any new NodeClaims, so this is invalid
 		return false, nil
 	}
 
@@ -166,9 +166,9 @@ func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidate
 	// creating are a subset of what scheduling says we should create.  We check for a subset since the scheduling
 	// simulation here does no price filtering, so it will include more expensive types.
 	//
-	// This is necessary since consolidation only wants cheaper nodes.  Suppose consolidation determined we should delete
+	// This is necessary since consolidation only wants cheaper NodeClaims.  Suppose consolidation determined we should delete
 	// a 4xlarge and replace it with a 2xlarge. If things have changed and the scheduling simulation we just performed
-	// now says that we need to launch a 4xlarge. It's still launching the correct number of nodes, but it's just
+	// now says that we need to launch a 4xlarge. It's still launching the correct number of NodeClaims, but it's just
 	// as expensive or possibly more so we shouldn't validate.
 	if !instanceTypesAreSubset(cmd.replacements[0].InstanceTypeOptions, results.NewNodeClaims[0].InstanceTypeOptions) {
 		return false, nil

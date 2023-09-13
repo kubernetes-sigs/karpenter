@@ -62,11 +62,11 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	if node.Node == nil || node.NodeClaim == nil {
 		return nil, fmt.Errorf("state node doesn't contain both a node and a nodeclaim")
 	}
-	// skip any nodes that are already marked for deletion and being handled
+	// skip any candidates that are already marked for deletion and being handled
 	if node.MarkedForDeletion() {
 		return nil, fmt.Errorf("state node is marked for deletion")
 	}
-	// skip nodes that aren't initialized
+	// skip candidates that aren't initialized
 	if !node.Initialized() {
 		return nil, fmt.Errorf("state node isn't initialized")
 	}
@@ -90,13 +90,13 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	}
 	nodePool := nodePoolMap[ownerKey]
 	instanceTypeMap := nodePoolToInstanceTypesMap[ownerKey]
-	// skip any nodes where we can't determine the nodePool
+	// skip any candidates where we can't determine the nodePool
 	if nodePool == nil || instanceTypeMap == nil {
 		recorder.Publish(deprovisioningevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Owning %s %q not found", lo.Ternary(ownerKey.IsProvisioner, "provisioner", "nodepool"), ownerKey.Name))...)
 		return nil, fmt.Errorf("%s %q can't be resolved for state node", lo.Ternary(ownerKey.IsProvisioner, "provisioner", "nodepool"), ownerKey.Name)
 	}
 	instanceType := instanceTypeMap[node.Labels()[v1.LabelInstanceTypeStable]]
-	// skip any nodes that we can't determine the instance of
+	// skip any candidates that we can't determine the instance of
 	if instanceType == nil {
 		recorder.Publish(deprovisioningevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Instance type %q not found", node.Labels()[v1.LabelInstanceTypeStable]))...)
 		return nil, fmt.Errorf("instance type '%s' can't be resolved", node.Labels()[v1.LabelInstanceTypeStable])
@@ -124,7 +124,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 }
 
 // lifetimeRemaining calculates the fraction of node lifetime remaining in the range [0.0, 1.0].  If the TTLSecondsUntilExpired
-// is non-zero, we use it to scale down the disruption costs of nodes that are going to expire.  Just after creation, the
+// is non-zero, we use it to scale down the disruption costs of candidates that are going to expire.  Just after creation, the
 // disruption cost is highest, and it approaches zero as the node ages towards its expiration time.
 func (c *Candidate) lifetimeRemaining(clock clock.Clock) float64 {
 	remaining := 1.0
@@ -163,7 +163,7 @@ func (o Command) Action() Action {
 
 func (o Command) String() string {
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "%s, terminating %d nodes ", o.Action(), len(o.candidates))
+	fmt.Fprintf(&buf, "%s, terminating %d candidates ", o.Action(), len(o.candidates))
 	for i, old := range o.candidates {
 		if i != 0 {
 			fmt.Fprint(&buf, ", ")
@@ -175,21 +175,21 @@ func (o Command) String() string {
 	if len(o.replacements) == 0 {
 		return buf.String()
 	}
-	odNodes := 0
-	spotNodes := 0
+	odNodeClaims := 0
+	spotNodeClaims := 0
 	for _, nodeClaim := range o.replacements {
 		ct := nodeClaim.Requirements.Get(v1beta1.CapacityTypeLabelKey)
 		if ct.Has(v1beta1.CapacityTypeOnDemand) {
-			odNodes++
+			odNodeClaims++
 		}
 		if ct.Has(v1beta1.CapacityTypeSpot) {
-			spotNodes++
+			spotNodeClaims++
 		}
 	}
 	// Print list of instance types for the first replacements.
 	if len(o.replacements) > 1 {
-		fmt.Fprintf(&buf, " and replacing with %d spot and %d on-demand nodes from types %s",
-			spotNodes, odNodes,
+		fmt.Fprintf(&buf, " and replacing with %d spot and %d on-demand, from types %s",
+			spotNodeClaims, odNodeClaims,
 			scheduling.InstanceTypeList(o.replacements[0].InstanceTypeOptions))
 		return buf.String()
 	}

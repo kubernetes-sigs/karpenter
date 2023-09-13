@@ -35,7 +35,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
-// Expiration is a subreconciler that deletes empty nodes.
+// Expiration is a subreconciler that deletes empty candidates.
 // Expiration will respect TTLSecondsAfterEmpty
 type Expiration struct {
 	clock       clock.Clock
@@ -55,15 +55,15 @@ func NewExpiration(clk clock.Clock, kubeClient client.Client, cluster *state.Clu
 	}
 }
 
-// ShouldDeprovision is a predicate used to filter deprovisionable nodes
+// ShouldDeprovision is a predicate used to filter deprovisionable candidates
 func (e *Expiration) ShouldDeprovision(_ context.Context, c *Candidate) bool {
 	return c.nodePool.Spec.Disruption.ExpireAfter.Duration != nil &&
 		c.NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).IsTrue()
 }
 
-// SortCandidates orders expired nodes by when they've expired
-func (e *Expiration) filterAndSortCandidates(ctx context.Context, nodes []*Candidate) ([]*Candidate, error) {
-	candidates, err := filterCandidates(ctx, e.kubeClient, e.recorder, nodes)
+// SortCandidates orders expired candidates by when they've expired
+func (e *Expiration) filterAndSortCandidates(ctx context.Context, candidates []*Candidate) ([]*Candidate, error) {
+	candidates, err := filterCandidates(ctx, e.kubeClient, e.recorder, candidates)
 	if err != nil {
 		return nil, fmt.Errorf("filtering candidates, %w", err)
 	}
@@ -74,15 +74,15 @@ func (e *Expiration) filterAndSortCandidates(ctx context.Context, nodes []*Candi
 	return candidates, nil
 }
 
-// ComputeCommand generates a deprovisioning command given deprovisionable nodes
-func (e *Expiration) ComputeCommand(ctx context.Context, nodes ...*Candidate) (Command, error) {
-	candidates, err := e.filterAndSortCandidates(ctx, nodes)
+// ComputeCommand generates a deprovisioning command given deprovisionable candidates
+func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
+	candidates, err := e.filterAndSortCandidates(ctx, candidates)
 	if err != nil {
 		return Command{}, fmt.Errorf("filtering candidates, %w", err)
 	}
-	deprovisioningEligibleNodesGauge.WithLabelValues(e.String()).Set(float64(len(candidates)))
+	deprovisioningEligibleMachinesGauge.WithLabelValues(e.String()).Set(float64(len(candidates)))
 
-	// Deprovision all empty expired nodes, as they require no scheduling simulations.
+	// Deprovision all empty expired candidates, as they require no scheduling simulations.
 	if empty := lo.Filter(candidates, func(c *Candidate, _ int) bool {
 		return len(c.pods) == 0
 	}); len(empty) > 0 {
@@ -92,7 +92,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, nodes ...*Candidate) (C
 	}
 
 	for _, candidate := range candidates {
-		// Check if we need to create any nodes.
+		// Check if we need to create any NodeClaims.
 		results, err := simulateScheduling(ctx, e.kubeClient, e.cluster, e.provisioner, candidate)
 		if err != nil {
 			// if a candidate node is now deleting, just retry
