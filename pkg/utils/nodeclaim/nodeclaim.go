@@ -258,10 +258,9 @@ func NewNodeClassReference(mtr *v1alpha5.MachineTemplateRef) *v1beta1.NodeClassR
 		return nil
 	}
 	return &v1beta1.NodeClassReference{
-		Kind:           mtr.Kind,
-		Name:           mtr.Name,
-		APIVersion:     mtr.APIVersion,
-		IsNodeTemplate: true,
+		Kind:       mtr.Kind,
+		Name:       mtr.Name,
+		APIVersion: mtr.APIVersion,
 	}
 }
 
