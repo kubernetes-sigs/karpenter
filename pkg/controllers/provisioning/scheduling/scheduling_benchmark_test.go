@@ -115,9 +115,9 @@ func TestSchedulingProfile(t *testing.T) {
 
 func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	// disable logging
-	ctx := logging.WithLogger(context.Background(), zap.NewNop().Sugar())
+	ctx = logging.WithLogger(context.Background(), zap.NewNop().Sugar())
 	ctx = settings.ToContext(ctx, test.Settings())
-	provisioner = test.Provisioner(test.ProvisionerOptions{Limits: map[v1.ResourceName]resource.Quantity{}})
+	provisioner := test.Provisioner(test.ProvisionerOptions{Limits: map[v1.ResourceName]resource.Quantity{}})
 
 	instanceTypes := fake.InstanceTypes(instanceCount)
 	cloudProvider = fake.NewCloudProvider()

@@ -38,6 +38,7 @@ import (
 )
 
 var _ = Describe("Instance Type Selection", func() {
+	var provisioner *v1alpha5.Provisioner
 	var minPrice float64
 	var instanceTypeMap map[string]*cloudprovider.InstanceType
 	nodePrice := func(n *v1.Node) float64 {
@@ -46,17 +47,19 @@ var _ = Describe("Instance Type Selection", func() {
 	}
 
 	BeforeEach(func() {
-		// open up the provisioner to any instance types
-		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
+		provisioner = test.Provisioner(test.ProvisionerOptions{Requirements: []v1.NodeSelectorRequirement{
+			{
+				Key:      v1alpha5.LabelCapacityType,
+				Operator: v1.NodeSelectorOpIn,
+				Values:   []string{v1alpha5.CapacityTypeSpot, v1alpha5.CapacityTypeOnDemand},
+			},
 			{
 				Key:      v1.LabelArchStable,
 				Operator: v1.NodeSelectorOpIn,
 				Values:   []string{v1alpha5.ArchitectureArm64, v1alpha5.ArchitectureAmd64},
 			},
-		}
-		cloudProvider.CreateCalls = nil
+		}})
 		cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
-
 		instanceTypeMap = getInstanceTypeMap(cloudProvider.InstanceTypes)
 		minPrice = getMinPrice(cloudProvider.InstanceTypes)
 

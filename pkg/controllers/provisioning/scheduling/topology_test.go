@@ -34,7 +34,15 @@ import (
 )
 
 var _ = Describe("Topology", func() {
+	var provisioner *v1alpha5.Provisioner
 	labels := map[string]string{"test": "test"}
+	BeforeEach(func() {
+		provisioner = test.Provisioner(test.ProvisionerOptions{Requirements: []v1.NodeSelectorRequirement{{
+			Key:      v1alpha5.LabelCapacityType,
+			Operator: v1.NodeSelectorOpIn,
+			Values:   []string{v1alpha5.CapacityTypeSpot, v1alpha5.CapacityTypeOnDemand},
+		}}})
+	})
 
 	It("should ignore unknown topology keys", func() {
 		ExpectApplied(ctx, env.Client, provisioner)
@@ -2302,6 +2310,14 @@ func ExpectDeleteAllUnscheduledPods(ctx2 context.Context, c client.Client) {
 }
 
 var _ = Describe("Taints", func() {
+	var provisioner *v1alpha5.Provisioner
+	BeforeEach(func() {
+		provisioner = test.Provisioner(test.ProvisionerOptions{Requirements: []v1.NodeSelectorRequirement{{
+			Key:      v1alpha5.LabelCapacityType,
+			Operator: v1.NodeSelectorOpIn,
+			Values:   []string{v1alpha5.CapacityTypeSpot, v1alpha5.CapacityTypeOnDemand},
+		}}})
+	})
 	It("should taint nodes with provisioner taints", func() {
 		provisioner.Spec.Taints = []v1.Taint{{Key: "test", Value: "bar", Effect: v1.TaintEffectNoSchedule}}
 		ExpectApplied(ctx, env.Client, provisioner)
