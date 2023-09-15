@@ -68,7 +68,7 @@ func New(provisioner *v1alpha5.Provisioner) *v1beta1.NodePool {
 		np.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
 	} else if provisioner.Spec.TTLSecondsAfterEmpty != nil {
 		np.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
-		np.Spec.Disruption.ConsolidateAfter.Duration = lo.ToPtr(lo.Must(time.ParseDuration(fmt.Sprintf("%ds", lo.FromPtr[int64](provisioner.Spec.TTLSecondsAfterEmpty)))))
+		np.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: lo.ToPtr(lo.Must(time.ParseDuration(fmt.Sprintf("%ds", lo.FromPtr[int64](provisioner.Spec.TTLSecondsAfterEmpty)))))}
 	}
 	if provisioner.Spec.Limits != nil {
 		np.Spec.Limits = v1beta1.Limits(provisioner.Spec.Limits.Resources)
@@ -76,11 +76,11 @@ func New(provisioner *v1alpha5.Provisioner) *v1beta1.NodePool {
 	return np
 }
 
-func NewKubeletConfiguration(kc *v1alpha5.KubeletConfiguration) *v1beta1.KubeletConfiguration {
+func NewKubeletConfiguration(kc *v1alpha5.KubeletConfiguration) *v1beta1.Kubelet {
 	if kc == nil {
 		return nil
 	}
-	return &v1beta1.KubeletConfiguration{
+	return &v1beta1.Kubelet{
 		ClusterDNS:                  kc.ClusterDNS,
 		ContainerRuntime:            kc.ContainerRuntime,
 		MaxPods:                     kc.MaxPods,

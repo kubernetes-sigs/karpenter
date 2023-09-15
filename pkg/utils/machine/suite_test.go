@@ -263,7 +263,7 @@ var _ = Describe("MachineUtils", func() {
 						v1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
 					},
 				},
-				KubeletConfiguration: &v1beta1.KubeletConfiguration{
+				KubeletConfiguration: &v1beta1.Kubelet{
 					ContainerRuntime: ptr.String("containerd"),
 					MaxPods:          ptr.Int32(110),
 					PodsPerCore:      ptr.Int32(10),
@@ -319,9 +319,9 @@ var _ = Describe("MachineUtils", func() {
 				Allocatable: node.Status.Allocatable,
 			},
 		})
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeLaunched)
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeRegistered)
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeInitialized)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Launched)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Registered)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Initialized)
 	})
 	It("should convert a Node and a Provisioner to a Machine", func() {
 		machine := machineutil.New(node, provisioner)

@@ -41,7 +41,7 @@ type Launch struct {
 }
 
 func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	if nodeClaim.StatusConditions().GetCondition(v1beta1.NodeLaunched).IsTrue() {
+	if nodeClaim.StatusConditions().GetCondition(v1beta1.Launched).IsTrue() {
 		return reconcile.Result{}, nil
 	}
 
@@ -68,7 +68,7 @@ func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (r
 	}
 	l.cache.SetDefault(string(nodeClaim.UID), created)
 	nodeClaim = PopulateNodeClaimDetails(nodeClaim, created)
-	nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeLaunched)
+	nodeClaim.StatusConditions().MarkTrue(v1beta1.Launched)
 	nodeclaimutil.LaunchedCounter(nodeClaim).Inc()
 
 	return reconcile.Result{}, nil
@@ -79,7 +79,7 @@ func (l *Launch) linkNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	created, err := l.cloudProvider.Get(ctx, nodeClaim.Annotations[v1alpha5.MachineLinkedAnnotationKey])
 	if err != nil {
 		if !cloudprovider.IsNodeClaimNotFoundError(err) {
-			nodeClaim.StatusConditions().MarkFalse(v1beta1.NodeLaunched, "LinkFailed", truncateMessage(err.Error()))
+			nodeClaim.StatusConditions().MarkFalse(v1beta1.Launched, "LinkFailed", truncateMessage(err.Error()))
 			return nil, fmt.Errorf("linking, %w", err)
 		}
 		if err = nodeclaimutil.Delete(ctx, l.kubeClient, nodeClaim); err != nil {
@@ -111,7 +111,7 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeCla
 			nodeclaimutil.TerminatedCounter(nodeClaim, "insufficient_capacity").Inc()
 			return nil, nil
 		default:
-			nodeClaim.StatusConditions().MarkFalse(v1beta1.NodeLaunched, "LaunchFailed", truncateMessage(err.Error()))
+			nodeClaim.StatusConditions().MarkFalse(v1beta1.Launched, "LaunchFailed", truncateMessage(err.Error()))
 			return nil, fmt.Errorf("creating %s, %w", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"), err)
 		}
 	}

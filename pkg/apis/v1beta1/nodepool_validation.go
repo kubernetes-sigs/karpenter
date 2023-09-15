@@ -76,11 +76,14 @@ func (in *Disruption) validate() (errs *apis.FieldError) {
 	if in.ExpireAfter.Duration != nil && *in.ExpireAfter.Duration < 0 {
 		return errs.Also(apis.ErrInvalidValue("cannot be negative", "expirationTTL"))
 	}
-	if in.ConsolidateAfter.Duration != nil && *in.ConsolidateAfter.Duration < 0 {
+	if in.ConsolidateAfter != nil && in.ConsolidateAfter.Duration != nil && *in.ConsolidateAfter.Duration < 0 {
 		return errs.Also(apis.ErrInvalidValue("cannot be negative", "consolidationTTL"))
 	}
-	if in.ConsolidateAfter.Duration != nil && in.ConsolidationPolicy == ConsolidationPolicyWhenUnderutilized {
-		return errs.Also(apis.ErrGeneric("consolidateAfter cannot be combined with consolidationPolicy"))
+	if in.ConsolidateAfter != nil && in.ConsolidateAfter.Duration != nil && in.ConsolidationPolicy == ConsolidationPolicyWhenUnderutilized {
+		return errs.Also(apis.ErrGeneric("consolidateAfter cannot be combined with consolidationPolicy=WhenUnderutilized"))
+	}
+	if in.ConsolidateAfter == nil && in.ConsolidationPolicy == ConsolidationPolicyWhenEmpty {
+		return errs.Also(apis.ErrGeneric("consolidateAfter must be specified with consolidationPolicy=WhenEmpty"))
 	}
 	return errs
 }

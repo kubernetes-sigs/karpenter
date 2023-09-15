@@ -266,7 +266,7 @@ func (c *Controller) waitForReadiness(ctx context.Context, key nodeclaimutil.Key
 		once.Do(func() {
 			c.recorder.Publish(deprovisioningevents.Launching(nodeClaim, reason))
 		})
-		if !nodeClaim.StatusConditions().GetCondition(v1beta1.NodeInitialized).IsTrue() {
+		if !nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized).IsTrue() {
 			// make the user aware of why deprovisioning is paused
 			c.recorder.Publish(deprovisioningevents.WaitingOnReadiness(nodeClaim))
 			return fmt.Errorf("node is not initialized")

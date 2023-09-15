@@ -67,7 +67,7 @@ var _ = Describe("NodeClaim/Launch", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(ExpectStatusConditionExists(machine, v1beta1.NodeLaunched).Status).To(Equal(v1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(machine, v1beta1.Launched).Status).To(Equal(v1.ConditionTrue))
 	})
 	It("should delete the machine if InsufficientCapacity is returned from the cloudprovider", func() {
 		cloudProvider.NextCreateErr = cloudprovider.NewInsufficientCapacityError(fmt.Errorf("all instance types were unavailable"))

@@ -1407,7 +1407,7 @@ var _ = Describe("Inflight Nodes", func() {
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 			// Update nodeClaim to be initialized
-			nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeInitialized)
+			nodeClaim.StatusConditions().MarkTrue(v1beta1.Initialized)
 			ExpectApplied(ctx, env.Client, nodeClaim)
 			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 

@@ -56,7 +56,7 @@ func New(nodePool *v1beta1.NodePool) *v1alpha5.Provisioner {
 	return p
 }
 
-func NewKubeletConfiguration(kc *v1beta1.KubeletConfiguration) *v1alpha5.KubeletConfiguration {
+func NewKubeletConfiguration(kc *v1beta1.Kubelet) *v1alpha5.KubeletConfiguration {
 	if kc == nil {
 		return nil
 	}

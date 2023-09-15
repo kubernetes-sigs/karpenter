@@ -38,10 +38,11 @@ func NewEmptiness(clk clock.Clock) *Emptiness {
 
 // ShouldDeprovision is a predicate used to filter deprovisionable machines
 func (e *Emptiness) ShouldDeprovision(_ context.Context, c *Candidate) bool {
-	return c.nodePool.Spec.Disruption.ConsolidateAfter.Duration != nil &&
+	return c.nodePool.Spec.Disruption.ConsolidateAfter != nil &&
+		c.nodePool.Spec.Disruption.ConsolidateAfter.Duration != nil &&
 		c.nodePool.Spec.Disruption.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenEmpty &&
-		c.NodeClaim.StatusConditions().GetCondition(v1beta1.NodeEmpty).IsTrue() &&
-		!e.clock.Now().Before(c.NodeClaim.StatusConditions().GetCondition(v1beta1.NodeEmpty).LastTransitionTime.Inner.Add(*c.nodePool.Spec.Disruption.ConsolidateAfter.Duration))
+		c.NodeClaim.StatusConditions().GetCondition(v1beta1.Empty).IsTrue() &&
+		!e.clock.Now().Before(c.NodeClaim.StatusConditions().GetCondition(v1beta1.Empty).LastTransitionTime.Inner.Add(*c.nodePool.Spec.Disruption.ConsolidateAfter.Duration))
 }
 
 // ComputeCommand generates a deprovisioning command given deprovisionable machines

@@ -126,7 +126,7 @@ var _ = Describe("Provisioning", func() {
 		}
 	})
 	It("should provision multiple nodes when maxPods is set", func() {
-		// KubeletConfiguration is actually not observed here, the scheduler is relying on the
+		// Kubelet is actually not observed here, the scheduler is relying on the
 		// pods resource value which is statically set in the fake cloudprovider
 		ExpectApplied(ctx, env.Client, test.Provisioner(test.ProvisionerOptions{
 			Kubelet: &v1alpha5.KubeletConfiguration{MaxPods: ptr.Int32(1)},

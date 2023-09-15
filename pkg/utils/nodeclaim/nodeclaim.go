@@ -216,27 +216,27 @@ func NewConditions(conds apis.Conditions) apis.Conditions {
 	for i := range out {
 		switch out[i].Type {
 		case v1alpha5.MachineLaunched:
-			out[i].Type = v1beta1.NodeLaunched
+			out[i].Type = v1beta1.Launched
 		case v1alpha5.MachineRegistered:
-			out[i].Type = v1beta1.NodeRegistered
+			out[i].Type = v1beta1.Registered
 		case v1alpha5.MachineInitialized:
-			out[i].Type = v1beta1.NodeInitialized
+			out[i].Type = v1beta1.Initialized
 		case v1alpha5.MachineEmpty:
-			out[i].Type = v1beta1.NodeEmpty
+			out[i].Type = v1beta1.Empty
 		case v1alpha5.MachineExpired:
-			out[i].Type = v1beta1.NodeExpired
+			out[i].Type = v1beta1.Expired
 		case v1alpha5.MachineDrifted:
-			out[i].Type = v1beta1.NodeDrifted
+			out[i].Type = v1beta1.Drifted
 		}
 	}
 	return out
 }
 
-func NewKubeletConfiguration(kc *v1alpha5.KubeletConfiguration) *v1beta1.KubeletConfiguration {
+func NewKubeletConfiguration(kc *v1alpha5.KubeletConfiguration) *v1beta1.Kubelet {
 	if kc == nil {
 		return nil
 	}
-	return &v1beta1.KubeletConfiguration{
+	return &v1beta1.Kubelet{
 		ClusterDNS:                  kc.ClusterDNS,
 		ContainerRuntime:            kc.ContainerRuntime,
 		MaxPods:                     kc.MaxPods,
@@ -289,10 +289,10 @@ func NewFromNode(node *v1.Node) *v1beta1.NodeClaim {
 		},
 	}
 	if _, ok := node.Labels[v1beta1.NodeInitializedLabelKey]; ok {
-		nc.StatusConditions().MarkTrue(v1beta1.NodeInitialized)
+		nc.StatusConditions().MarkTrue(v1beta1.Initialized)
 	}
-	nc.StatusConditions().MarkTrue(v1beta1.NodeLaunched)
-	nc.StatusConditions().MarkTrue(v1beta1.NodeRegistered)
+	nc.StatusConditions().MarkTrue(v1beta1.Launched)
+	nc.StatusConditions().MarkTrue(v1beta1.Registered)
 	return nc
 }
 

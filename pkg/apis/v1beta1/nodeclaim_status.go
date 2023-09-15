@@ -40,26 +40,25 @@ type NodeClaimStatus struct {
 
 func (in *NodeClaim) StatusConditions() apis.ConditionManager {
 	return apis.NewLivingConditionSet(
-		NodeLaunched,
-		NodeRegistered,
-		NodeInitialized,
+		Launched,
+		Registered,
+		Initialized,
 	).Manage(in)
 }
 
 var LivingConditions = []apis.ConditionType{
-	NodeLaunched,
-	NodeRegistered,
-	NodeInitialized,
+	Launched,
+	Registered,
+	Initialized,
 }
 
 var (
-	NodeLaunched      apis.ConditionType = "NodeLaunched"
-	NodeRegistered    apis.ConditionType = "NodeRegistered"
-	NodeInitialized   apis.ConditionType = "NodeInitialized"
-	NodeEmpty         apis.ConditionType = "NodeEmpty"
-	NodeDrifted       apis.ConditionType = "NodeDrifted"
-	NodeExpired       apis.ConditionType = "NodeExpired"
-	NodeUnderutilized apis.ConditionType = "NodeUnderutilized"
+	Launched    apis.ConditionType = "Launched"
+	Registered  apis.ConditionType = "Registered"
+	Initialized apis.ConditionType = "Initialized"
+	Empty       apis.ConditionType = "Empty"
+	Drifted     apis.ConditionType = "Drifted"
+	Expired     apis.ConditionType = "Expired"
 )
 
 func (in *NodeClaim) GetConditions() apis.Conditions {

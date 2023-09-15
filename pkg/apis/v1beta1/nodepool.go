@@ -35,7 +35,7 @@ type NodePoolSpec struct {
 	// +optional
 	Template NodeClaimTemplate `json:"template,omitempty"`
 	// Disruption contains the parameters that relate to Karpenter's disruption logic
-	// +kubebuilder:default={"consolidateAfter": "15s","consolidationPolicy": "WhenUnderutilized", "expireAfter": "720h"}
+	// +kubebuilder:default={"consolidationPolicy": "WhenUnderutilized", "expireAfter": "720h"}
 	// +optional
 	Disruption Disruption `json:"disruption"`
 	// Limits define a set of bounds for provisioning capacity.
@@ -55,12 +55,11 @@ type Disruption struct {
 	// ConsolidateAfter is the duration the controller will wait
 	// before attempting to terminate nodes that are underutilized.
 	// Refer to ConsolidationPolicy for how underutilization is considered.
-	// +kubebuilder:default:="15s"
 	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+)|(Never)$`
 	// +kubebuilder:validation:Type="string"
 	// +kubebuilder:validation:Schemaless
 	// +optional
-	ConsolidateAfter NillableDuration `json:"consolidateAfter,omitempty"`
+	ConsolidateAfter *NillableDuration `json:"consolidateAfter,omitempty"`
 	// ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation
 	// algorithm. This policy defaults to "WhenUnderutilized" if not specified
 	// +kubebuilder:default:="WhenUnderutilized"
@@ -76,7 +75,7 @@ type Disruption struct {
 	// +kubebuilder:validation:Type="string"
 	// +kubebuilder:validation:Schemaless
 	// +optional
-	ExpireAfter NillableDuration `json:"expireAfter,omitempty"`
+	ExpireAfter NillableDuration `json:"expireAfter"`
 }
 
 type ConsolidationPolicy string
