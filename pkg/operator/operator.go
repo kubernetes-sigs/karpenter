@@ -26,7 +26,6 @@ import (
 	"github.com/samber/lo"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/api/core/v1"
-	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
@@ -130,9 +129,6 @@ func NewOperator() (context.Context, *Operator) {
 			SelectorsByObject: cache.SelectorsByObject{
 				&coordinationv1.Lease{}: {
 					Field: fields.SelectorFromSet(fields.Set{"metadata.namespace": "kube-node-lease"}),
-				},
-				&discoveryv1.EndpointSlice{}: {
-					Field: fields.SelectorFromSet(fields.Set{"metadata.namespace": "default"}),
 				},
 			},
 		}),
