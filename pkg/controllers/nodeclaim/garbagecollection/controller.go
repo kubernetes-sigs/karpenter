@@ -68,9 +68,9 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		return nc.Status.ProviderID
 	})...)
 	nodeClaims := lo.Filter(lo.ToSlicePtr(nodeClaimList.Items), func(n *v1beta1.NodeClaim, _ int) bool {
-		return n.StatusConditions().GetCondition(v1beta1.NodeLaunched).IsTrue() &&
+		return n.StatusConditions().GetCondition(v1beta1.Launched).IsTrue() &&
 			n.DeletionTimestamp.IsZero() &&
-			c.clock.Since(n.StatusConditions().GetCondition(v1beta1.NodeLaunched).LastTransitionTime.Inner.Time) > time.Second*10 &&
+			c.clock.Since(n.StatusConditions().GetCondition(v1beta1.Launched).LastTransitionTime.Inner.Time) > time.Second*10 &&
 			!cloudProviderProviderIDs.Has(n.Status.ProviderID)
 	})
 

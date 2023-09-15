@@ -277,9 +277,9 @@ var _ = Describe("NodeClaimUtils", func() {
 		Expect(nodeClaim.Status.Capacity).To(Equal(machine.Status.Capacity))
 		Expect(nodeClaim.Status.Allocatable).To(Equal(machine.Status.Allocatable))
 
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeLaunched).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeRegistered).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeInitialized).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Launched).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Registered).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized).IsTrue()).To(BeTrue())
 	})
 	It("should convert a Node to a NodeClaim", func() {
 		nodeClaim := nodeclaimutil.NewFromNode(node)
@@ -297,9 +297,9 @@ var _ = Describe("NodeClaimUtils", func() {
 		Expect(nodeClaim.Status.ProviderID).To(Equal(node.Spec.ProviderID))
 		Expect(nodeClaim.Status.Capacity).To(Equal(node.Status.Capacity))
 		Expect(nodeClaim.Status.Allocatable).To(Equal(node.Status.Allocatable))
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeLaunched).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeRegistered).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeInitialized).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Launched).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Registered).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized).IsTrue()).To(BeTrue())
 	})
 	It("should retrieve a NodeClaim with a get call", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{

@@ -46,13 +46,13 @@ var _ = Describe("NodeClaim/Expiration", func() {
 
 	It("should remove the status condition from the NodeClaims when expiration is disabled", func() {
 		nodePool.Spec.Disruption.ExpireAfter.Duration = nil
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeExpired)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Expired)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeExpired)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Expired)).To(BeNil())
 	})
 	It("should mark NodeClaims as expired", func() {
 		nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 30)
@@ -63,17 +63,17 @@ var _ = Describe("NodeClaim/Expiration", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeExpired).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Expired).IsTrue()).To(BeTrue())
 	})
 	It("should remove the status condition from non-expired NodeClaims", func() {
 		nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 200)
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeExpired)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Expired)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeExpired)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Expired)).To(BeNil())
 	})
 	It("should mark NodeClaims as expired if the node is expired but the nodeClaim isn't", func() {
 		nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 30)
@@ -85,7 +85,7 @@ var _ = Describe("NodeClaim/Expiration", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeExpired).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Expired).IsTrue()).To(BeTrue())
 	})
 	It("should mark NodeClaims as expired if the nodeClaim is expired but the node isn't", func() {
 		nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 30)
@@ -97,7 +97,7 @@ var _ = Describe("NodeClaim/Expiration", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeExpired).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Expired).IsTrue()).To(BeTrue())
 	})
 	It("should return the requeue interval for the time between now and when the nodeClaim expires", func() {
 		nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 200)

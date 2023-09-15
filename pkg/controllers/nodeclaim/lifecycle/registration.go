@@ -39,13 +39,13 @@ type Registration struct {
 }
 
 func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	if nodeClaim.StatusConditions().GetCondition(v1beta1.NodeRegistered).IsTrue() {
+	if nodeClaim.StatusConditions().GetCondition(v1beta1.Registered).IsTrue() {
 		// TODO @joinnis: Remove the back-propagation of this label onto the Node once all Nodes are guaranteed to have this label
 		// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
 		return reconcile.Result{}, r.backPropagateRegistrationLabel(ctx, nodeClaim)
 	}
-	if !nodeClaim.StatusConditions().GetCondition(v1beta1.NodeLaunched).IsTrue() {
-		nodeClaim.StatusConditions().MarkFalse(v1beta1.NodeRegistered, "NotLaunched", "Node not launched")
+	if !nodeClaim.StatusConditions().GetCondition(v1beta1.Launched).IsTrue() {
+		nodeClaim.StatusConditions().MarkFalse(v1beta1.Registered, "NotLaunched", "Node not launched")
 		return reconcile.Result{}, nil
 	}
 
@@ -53,11 +53,11 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeCla
 	node, err := nodeclaimutil.NodeForNodeClaim(ctx, r.kubeClient, nodeClaim)
 	if err != nil {
 		if nodeclaimutil.IsNodeNotFoundError(err) {
-			nodeClaim.StatusConditions().MarkFalse(v1beta1.NodeRegistered, "NodeNotFound", "Node not registered with cluster")
+			nodeClaim.StatusConditions().MarkFalse(v1beta1.Registered, "NodeNotFound", "Node not registered with cluster")
 			return reconcile.Result{}, nil
 		}
 		if nodeclaimutil.IsDuplicateNodeError(err) {
-			nodeClaim.StatusConditions().MarkFalse(v1beta1.NodeRegistered, "MultipleNodesFound", "Invariant violated, matched multiple nodes")
+			nodeClaim.StatusConditions().MarkFalse(v1beta1.Registered, "MultipleNodesFound", "Invariant violated, matched multiple nodes")
 			return reconcile.Result{}, nil
 		}
 		return reconcile.Result{}, fmt.Errorf("getting node for nodeclaim, %w", err)
@@ -67,7 +67,7 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeCla
 		return reconcile.Result{}, fmt.Errorf("syncing node, %w", err)
 	}
 	logging.FromContext(ctx).Debugf("registered %s", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"))
-	nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeRegistered)
+	nodeClaim.StatusConditions().MarkTrue(v1beta1.Registered)
 	nodeClaim.Status.NodeName = node.Name
 
 	nodeclaimutil.RegisteredCounter(nodeClaim).Inc()

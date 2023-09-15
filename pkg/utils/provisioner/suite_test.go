@@ -118,7 +118,7 @@ var _ = Describe("ProvisionerUtils", func() {
 								v1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
 							},
 						},
-						KubeletConfiguration: &v1beta1.KubeletConfiguration{
+						KubeletConfiguration: &v1beta1.Kubelet{
 							ContainerRuntime: ptr.String("containerd"),
 							MaxPods:          ptr.Int32(110),
 							PodsPerCore:      ptr.Int32(10),

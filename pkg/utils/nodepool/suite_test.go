@@ -224,7 +224,7 @@ var _ = Describe("NodePoolUtils", func() {
 
 		Expect(nodePool.Spec.Disruption.ConsolidationPolicy).To(Equal(v1beta1.ConsolidationPolicyWhenUnderutilized))
 		Expect(nodePool.Spec.Disruption.ExpireAfter.Duration.Seconds()).To(BeNumerically("==", lo.FromPtr(provisioner.Spec.TTLSecondsUntilExpired)))
-		Expect(nodePool.Spec.Disruption.ConsolidateAfter.Duration).To(BeNil())
+		Expect(nodePool.Spec.Disruption.ConsolidateAfter).To(BeNil())
 
 		ExpectResources(v1.ResourceList(nodePool.Spec.Limits), provisioner.Spec.Limits.Resources)
 		Expect(lo.FromPtr(nodePool.Spec.Weight)).To(BeNumerically("==", lo.FromPtr(provisioner.Spec.Weight)))

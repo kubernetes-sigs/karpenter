@@ -54,7 +54,7 @@ func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *pro
 // ShouldDeprovision is a predicate used to filter deprovisionable machines
 func (d *Drift) ShouldDeprovision(ctx context.Context, c *Candidate) bool {
 	return settings.FromContext(ctx).DriftEnabled &&
-		c.NodeClaim.StatusConditions().GetCondition(v1beta1.NodeDrifted).IsTrue()
+		c.NodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).IsTrue()
 }
 
 // SortCandidates orders drifted nodes by when they've drifted
@@ -64,8 +64,8 @@ func (d *Drift) filterAndSortCandidates(ctx context.Context, nodes []*Candidate)
 		return nil, fmt.Errorf("filtering candidates, %w", err)
 	}
 	sort.Slice(candidates, func(i int, j int) bool {
-		return candidates[i].NodeClaim.StatusConditions().GetCondition(v1beta1.NodeDrifted).LastTransitionTime.Inner.Time.Before(
-			candidates[j].NodeClaim.StatusConditions().GetCondition(v1beta1.NodeDrifted).LastTransitionTime.Inner.Time)
+		return candidates[i].NodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).LastTransitionTime.Inner.Time.Before(
+			candidates[j].NodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).LastTransitionTime.Inner.Time)
 	})
 	return candidates, nil
 }

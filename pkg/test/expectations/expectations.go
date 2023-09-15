@@ -362,7 +362,7 @@ func ExpectNodeClaimDeployedNoNode(ctx context.Context, c client.Client, cluster
 
 	// Make the machine ready in the status conditions
 	nc = lifecycle.PopulateNodeClaimDetails(nc, resolved)
-	nc.StatusConditions().MarkTrue(v1beta1.NodeLaunched)
+	nc.StatusConditions().MarkTrue(v1beta1.Launched)
 	ExpectApplied(ctx, c, nc)
 	cluster.UpdateNodeClaim(nc)
 	return nc, nil
@@ -374,7 +374,7 @@ func ExpectNodeClaimDeployed(ctx context.Context, c client.Client, cluster *stat
 	if err != nil {
 		return nc, nil
 	}
-	nc.StatusConditions().MarkTrue(v1beta1.NodeRegistered)
+	nc.StatusConditions().MarkTrue(v1beta1.Registered)
 
 	// Mock the machine launch and node joining at the apiserver
 	node := test.NodeClaimLinkedNode(nc)
@@ -406,9 +406,9 @@ func ExpectMakeNodeClaimsInitialized(ctx context.Context, c client.Client, nodeC
 	GinkgoHelper()
 	for i := range nodeClaims {
 		nodeClaims[i] = ExpectExists(ctx, c, nodeClaims[i])
-		nodeClaims[i].StatusConditions().MarkTrue(v1beta1.NodeLaunched)
-		nodeClaims[i].StatusConditions().MarkTrue(v1beta1.NodeRegistered)
-		nodeClaims[i].StatusConditions().MarkTrue(v1beta1.NodeInitialized)
+		nodeClaims[i].StatusConditions().MarkTrue(v1beta1.Launched)
+		nodeClaims[i].StatusConditions().MarkTrue(v1beta1.Registered)
+		nodeClaims[i].StatusConditions().MarkTrue(v1beta1.Initialized)
 		ExpectApplied(ctx, c, nodeClaims[i])
 	}
 }

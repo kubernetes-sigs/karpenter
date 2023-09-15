@@ -58,7 +58,7 @@ func NewExpiration(clk clock.Clock, kubeClient client.Client, cluster *state.Clu
 // ShouldDeprovision is a predicate used to filter deprovisionable nodes
 func (e *Expiration) ShouldDeprovision(_ context.Context, c *Candidate) bool {
 	return c.nodePool.Spec.Disruption.ExpireAfter.Duration != nil &&
-		c.NodeClaim.StatusConditions().GetCondition(v1beta1.NodeExpired).IsTrue()
+		c.NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).IsTrue()
 }
 
 // SortCandidates orders expired nodes by when they've expired
@@ -68,8 +68,8 @@ func (e *Expiration) filterAndSortCandidates(ctx context.Context, nodes []*Candi
 		return nil, fmt.Errorf("filtering candidates, %w", err)
 	}
 	sort.Slice(candidates, func(i int, j int) bool {
-		return candidates[i].NodeClaim.StatusConditions().GetCondition(v1beta1.NodeExpired).LastTransitionTime.Inner.Time.Before(
-			candidates[j].NodeClaim.StatusConditions().GetCondition(v1beta1.NodeExpired).LastTransitionTime.Inner.Time)
+		return candidates[i].NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).LastTransitionTime.Inner.Time.Before(
+			candidates[j].NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).LastTransitionTime.Inner.Time)
 	})
 	return candidates, nil
 }

@@ -59,7 +59,7 @@ var _ = Describe("NodePool Static Drift Hash", func() {
 								Effect: v1.TaintEffectNoExecute,
 							},
 						},
-						KubeletConfiguration: &v1beta1.KubeletConfiguration{
+						KubeletConfiguration: &v1beta1.Kubelet{
 							MaxPods: ptr.Int32(10),
 						},
 					},
@@ -93,7 +93,7 @@ var _ = Describe("NodePool Static Drift Hash", func() {
 
 		nodePool.Spec.Limits = v1beta1.Limits(v1.ResourceList{"cpu": resource.MustParse("16")})
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
-		nodePool.Spec.Disruption.ConsolidateAfter.Duration = lo.ToPtr(30 * time.Second)
+		nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: lo.ToPtr(30 * time.Second)}
 		nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(30 * time.Second)
 		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
 			{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},

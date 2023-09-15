@@ -46,20 +46,20 @@ type Drift struct {
 }
 
 func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	hasDriftedCondition := nodeClaim.StatusConditions().GetCondition(v1beta1.NodeDrifted) != nil
+	hasDriftedCondition := nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted) != nil
 
 	// From here there are three scenarios to handle:
 	// 1. If drift is not enabled but the NodeClaim is drifted, remove the status condition
 	if !settings.FromContext(ctx).DriftEnabled {
-		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.NodeDrifted)
+		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.Drifted)
 		if hasDriftedCondition {
 			logging.FromContext(ctx).Debugf("removing drift status condition, drift has been disabled")
 		}
 		return reconcile.Result{}, nil
 	}
 	// 2. If NodeClaim is not launched, remove the drift status condition
-	if launchCond := nodeClaim.StatusConditions().GetCondition(v1beta1.NodeLaunched); launchCond == nil || launchCond.IsFalse() {
-		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.NodeDrifted)
+	if launchCond := nodeClaim.StatusConditions().GetCondition(v1beta1.Launched); launchCond == nil || launchCond.IsFalse() {
+		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.Drifted)
 		if hasDriftedCondition {
 			logging.FromContext(ctx).Debugf("removing drift status condition, isn't launched")
 		}
@@ -71,7 +71,7 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 	}
 	// 3. Otherwise, if the NodeClaim isn't drifted, but has the status condition, remove it.
 	if driftedReason == "" {
-		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.NodeDrifted)
+		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.Drifted)
 		if hasDriftedCondition {
 			logging.FromContext(ctx).Debugf("removing drifted status condition, not drifted")
 		}
@@ -79,7 +79,7 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 	}
 	// 4. Finally, if the NodeClaim is drifted, but doesn't have status condition, add it.
 	nodeClaim.StatusConditions().SetCondition(apis.Condition{
-		Type:     v1beta1.NodeDrifted,
+		Type:     v1beta1.Drifted,
 		Status:   v1.ConditionTrue,
 		Severity: apis.ConditionSeverityWarning,
 		Reason:   string(driftedReason),
