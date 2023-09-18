@@ -150,8 +150,8 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) *Results {
 			break
 		}
 
-		// Schedule to existing nodes or create a new node
-		if errors[pod] = s.add(ctx, pod); errors[pod] == nil {
+		// Schedule to existing nodes
+		if s.add(ctx, pod) {
 			continue
 		}
 
@@ -162,6 +162,11 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) *Results {
 			if err := s.topology.Update(ctx, pod); err != nil {
 				logging.FromContext(ctx).Errorf("updating topology, %s", err)
 			}
+		}
+		
+		// Schedule onto new node
+		if errors[pod] = s.newNode(ctx, pod); errors[pod] == nil {
+			continue
 		}
 	}
 
@@ -223,11 +228,11 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 	logging.FromContext(ctx).Infof("computed %d unready node(s) will fit %d pod(s)", inflightCount, existingCount)
 }
 
-func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
+func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) bool {
 	// first try to schedule against an in-flight real node
 	for _, node := range s.existingNodes {
 		if err := node.Add(ctx, s.kubeClient, pod); err == nil {
-			return nil
+			return true
 		}
 	}
 
@@ -237,10 +242,14 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 	// Pick existing node that we are about to create
 	for _, nodeClaim := range s.newNodeClaims {
 		if err := nodeClaim.Add(pod); err == nil {
-			return nil
+			return true
 		}
 	}
+	return false
+}
 
+
+func (s *Scheduler) newNode(ctx context.Context, pod *v1.Pod) error {
 	// Create new node
 	var errs error
 	for _, nodeClaimTemplate := range s.nodeClaimTemplates {
