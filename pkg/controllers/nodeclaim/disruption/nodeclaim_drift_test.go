@@ -393,7 +393,7 @@ var _ = Describe("NodeClaim/Drift", func() {
 									Effect: v1.TaintEffectNoExecute,
 								},
 							},
-							KubeletConfiguration: &v1beta1.Kubelet{
+							Kubelet: &v1beta1.KubeletConfiguration{
 								MaxPods: ptr.Int32(10),
 							},
 						},
@@ -415,7 +415,7 @@ var _ = Describe("NodeClaim/Drift", func() {
 				test.NodePool(nodePoolOptions, v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"keyLabelTest": "valueLabelTest"}}}}}),
 				test.NodePool(nodePoolOptions, v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Taints: []v1.Taint{{Key: "keytest2Taint", Effect: v1.TaintEffectNoExecute}}}}}}),
 				test.NodePool(nodePoolOptions, v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{StartupTaints: []v1.Taint{{Key: "keytest2StartupTaint", Effect: v1.TaintEffectNoExecute}}}}}}),
-				test.NodePool(nodePoolOptions, v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{KubeletConfiguration: &v1beta1.Kubelet{MaxPods: ptr.Int32(30)}}}}}),
+				test.NodePool(nodePoolOptions, v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{MaxPods: ptr.Int32(30)}}}}}),
 			}
 
 			for _, updatedNodePool := range nodePoolFieldToChange {

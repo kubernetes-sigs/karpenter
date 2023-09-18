@@ -32,7 +32,7 @@ func New(nodePool *v1beta1.NodePool) *v1alpha5.Provisioner {
 			Taints:               nodePool.Spec.Template.Spec.Taints,
 			StartupTaints:        nodePool.Spec.Template.Spec.StartupTaints,
 			Requirements:         nodePool.Spec.Template.Spec.Requirements,
-			KubeletConfiguration: NewKubeletConfiguration(nodePool.Spec.Template.Spec.KubeletConfiguration),
+			KubeletConfiguration: NewKubeletConfiguration(nodePool.Spec.Template.Spec.Kubelet),
 			Provider:             nodePool.Spec.Template.Spec.Provider,
 			ProviderRef:          NewProviderRef(nodePool.Spec.Template.Spec.NodeClass),
 			Limits:               NewLimits(v1.ResourceList(nodePool.Spec.Limits)),
@@ -56,7 +56,7 @@ func New(nodePool *v1beta1.NodePool) *v1alpha5.Provisioner {
 	return p
 }
 
-func NewKubeletConfiguration(kc *v1beta1.Kubelet) *v1alpha5.KubeletConfiguration {
+func NewKubeletConfiguration(kc *v1beta1.KubeletConfiguration) *v1alpha5.KubeletConfiguration {
 	if kc == nil {
 		return nil
 	}

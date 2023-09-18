@@ -59,7 +59,7 @@ var _ = Describe("NodePool Static Drift Hash", func() {
 								Effect: v1.TaintEffectNoExecute,
 							},
 						},
-						KubeletConfiguration: &v1beta1.Kubelet{
+						Kubelet: &v1beta1.KubeletConfiguration{
 							MaxPods: ptr.Int32(10),
 						},
 					},

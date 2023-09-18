@@ -44,9 +44,14 @@ func NodePool(overrides ...v1beta1.NodePool) *v1beta1.NodePool {
 			Name: "default",
 		}
 	}
-	return &v1beta1.NodePool{
+	if override.Spec.Template.Spec.Requirements == nil {
+		override.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{}
+	}
+	np := &v1beta1.NodePool{
 		ObjectMeta: ObjectMeta(override.ObjectMeta),
 		Spec:       override.Spec,
 		Status:     override.Status,
 	}
+	np.Spec.Template.ObjectMeta = ObjectMeta(np.Spec.Template.ObjectMeta)
+	return np
 }

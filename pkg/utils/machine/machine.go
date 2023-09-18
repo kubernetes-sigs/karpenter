@@ -234,7 +234,7 @@ func NewFromNodeClaim(nodeClaim *v1beta1.NodeClaim) *v1alpha5.Machine {
 			Resources: v1alpha5.ResourceRequirements{
 				Requests: nodeClaim.Spec.Resources.Requests,
 			},
-			Kubelet:            NewKubeletConfiguration(nodeClaim.Spec.KubeletConfiguration),
+			Kubelet:            NewKubeletConfiguration(nodeClaim.Spec.Kubelet),
 			MachineTemplateRef: NewMachineTemplateRef(nodeClaim.Spec.NodeClass),
 		},
 		Status: v1alpha5.MachineStatus{
@@ -268,7 +268,7 @@ func NewConditions(conds apis.Conditions) apis.Conditions {
 	return out
 }
 
-func NewKubeletConfiguration(kc *v1beta1.Kubelet) *v1alpha5.KubeletConfiguration {
+func NewKubeletConfiguration(kc *v1beta1.KubeletConfiguration) *v1alpha5.KubeletConfiguration {
 	if kc == nil {
 		return nil
 	}

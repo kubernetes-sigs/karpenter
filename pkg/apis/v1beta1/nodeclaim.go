@@ -32,14 +32,15 @@ type NodeClaimSpec struct {
 	// +optional
 	StartupTaints []v1.Taint `json:"startupTaints,omitempty"`
 	// Requirements are layered with GetLabels and applied to every node.
-	// +optional
-	Requirements []v1.NodeSelectorRequirement `json:"requirements,omitempty" hash:"ignore"`
+	// +required
+	Requirements []v1.NodeSelectorRequirement `json:"requirements" hash:"ignore"`
 	// Resources models the resource requirements for the NodeClaim to launch
 	// +optional
 	Resources ResourceRequirements `json:"resources,omitempty" hash:"ignore"`
-	// KubeletConfiguration are options passed to the kubelet when provisioning nodes
-	// +optional
-	KubeletConfiguration *Kubelet `json:"kubelet,omitempty"`
+	// Kubelet defines args to be used when configuring kubelet on provisioned nodes.
+	// They are a subset of the upstream types, recognizing not all options may be supported.
+	// Wherever possible, the types and names should reflect the upstream kubelet types.
+	Kubelet *KubeletConfiguration `json:"kubelet,omitempty"`
 	// NodeClass is a reference to an object that defines provider specific configuration
 	// +required
 	NodeClass *NodeClassReference `json:"nodeClass"`
@@ -56,12 +57,12 @@ type ResourceRequirements struct {
 	Requests v1.ResourceList `json:"requests,omitempty"`
 }
 
-// Kubelet defines args to be used when configuring kubelet on provisioned nodes.
+// KubeletConfiguration defines args to be used when configuring kubelet on provisioned nodes.
 // They are a subset of the upstream types, recognizing not all options may be supported.
 // Wherever possible, the types and names should reflect the upstream kubelet types.
 // https://pkg.go.dev/k8s.io/kubelet/config/v1beta1#KubeletConfiguration
 // https://github.com/kubernetes/kubernetes/blob/9f82d81e55cafdedab619ea25cabf5d42736dacf/cmd/kubelet/app/options/options.go#L53
-type Kubelet struct {
+type KubeletConfiguration struct {
 	// clusterDNS is a list of IP addresses for the cluster DNS server.
 	// Note that not all providers may use all addresses.
 	//+optional
