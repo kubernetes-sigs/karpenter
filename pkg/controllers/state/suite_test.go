@@ -32,13 +32,11 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/scheduling"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
-
-	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -64,6 +62,7 @@ var machineController controller.Controller
 var nodeController controller.Controller
 var podController controller.Controller
 var provisionerController controller.Controller
+var nodePoolController controller.Controller
 var daemonsetController controller.Controller
 var cloudProvider *fake.CloudProvider
 var provisioner *v1alpha5.Provisioner
@@ -79,17 +78,8 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
-})
-
-var _ = AfterSuite(func() {
-	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
-})
-
-var _ = BeforeEach(func() {
 	ctx = settings.ToContext(ctx, test.Settings())
-	nodeclaimutil.EnableNodeClaims = true
 	cloudProvider = fake.NewCloudProvider()
-	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeClaimController = informer.NewNodeClaimController(env.Client, cluster)
@@ -97,13 +87,25 @@ var _ = BeforeEach(func() {
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	podController = informer.NewPodController(env.Client, cluster)
 	provisionerController = informer.NewProvisionerController(env.Client, cluster)
+	nodePoolController = informer.NewNodePoolController(env.Client, cluster)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
+})
+
+var _ = AfterSuite(func() {
+	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
+})
+
+var _ = BeforeEach(func() {
+	fakeClock.SetTime(time.Now())
+	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 	provisioner = test.Provisioner(test.ProvisionerOptions{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
 	nodePool = test.NodePool(v1beta1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
 	ExpectApplied(ctx, env.Client, provisioner, nodePool)
 })
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
+	cluster.Reset()
+	cloudProvider.Reset()
 })
 
 var _ = Describe("Volume Usage/Limits", func() {
@@ -2669,18 +2671,6 @@ var _ = Describe("Pod Anti-Affinity", func() {
 	})
 })
 
-var _ = Describe("Provisioner Spec Updates", func() {
-	It("should cause consolidation state to change when a provisioner is updated", func() {
-		cluster.MarkUnconsolidated()
-		fakeClock.Step(time.Minute)
-		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: ptr.Bool(true)}
-		ExpectApplied(ctx, env.Client, provisioner)
-		state := cluster.ConsolidationState()
-		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
-		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
-	})
-})
-
 var _ = Describe("Cluster State Sync", func() {
 	It("should consider the cluster state synced when all nodes are tracked", func() {
 		// Deploy 1000 nodes and sync them all with the cluster
@@ -3139,6 +3129,22 @@ var _ = Describe("Consolidated State", func() {
 		Expect(cluster.ConsolidationState()).To(Equal(state))
 
 		fakeClock.Step(time.Minute * 2)
+		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
+	})
+	It("should cause consolidation state to change when a Provisioner is updated", func() {
+		cluster.MarkUnconsolidated()
+		fakeClock.Step(time.Minute)
+		ExpectApplied(ctx, env.Client, provisioner)
+		state := cluster.ConsolidationState()
+		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
+		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
+	})
+	It("should cause consolidation state to change when a NodePool is updated", func() {
+		cluster.MarkUnconsolidated()
+		fakeClock.Step(time.Minute)
+		ExpectApplied(ctx, env.Client, nodePool)
+		state := cluster.ConsolidationState()
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
 	})
 })

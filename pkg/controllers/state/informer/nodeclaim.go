@@ -46,7 +46,7 @@ func NewNodeClaimController(kubeClient client.Client, cluster *state.Cluster) co
 }
 
 func (c *NodeClaimController) Name() string {
-	return "nodeclaim-state"
+	return "state.nodeclaim"
 }
 
 func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
