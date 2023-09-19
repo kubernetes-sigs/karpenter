@@ -38,8 +38,8 @@ var _ = Describe("NodePool Counter", func() {
 		instanceType := cloudProvider.InstanceTypes[0]
 		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1beta1.NodePoolLabelKey: nodePool.Name,
-				v1.LabelInstanceTypeStable:       instanceType.Name,
+				v1beta1.NodePoolLabelKey:   nodePool.Name,
+				v1.LabelInstanceTypeStable: instanceType.Name,
 			}},
 			Status: v1beta1.NodeClaimStatus{
 				ProviderID: test.RandomProviderID(),
@@ -52,8 +52,8 @@ var _ = Describe("NodePool Counter", func() {
 		})
 		nodeClaim2, node2 = test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1beta1.NodePoolLabelKey: nodePool.Name,
-				v1.LabelInstanceTypeStable:       instanceType.Name,
+				v1beta1.NodePoolLabelKey:   nodePool.Name,
+				v1.LabelInstanceTypeStable: instanceType.Name,
 			}},
 			Status: v1beta1.NodeClaimStatus{
 				ProviderID: test.RandomProviderID(),
@@ -135,7 +135,7 @@ var _ = Describe("NodePool Counter", func() {
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		// Should equal both the nodeClaim and node capacity
-		Expect(nodePool.Status.Resources).To(BeEquivalentTo(nodeClaim.Status.Capacity))
+		Expect(nodePool.Status.Resources).To(BeEquivalentTo(nodeClaim2.Status.Capacity))
 		Expect(nodePool.Status.Resources).To(BeEquivalentTo(node2.Status.Capacity))
 	})
 })
