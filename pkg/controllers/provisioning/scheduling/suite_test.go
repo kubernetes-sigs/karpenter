@@ -17,10 +17,12 @@ package scheduling_test
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"testing"
 	"time"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
@@ -29,6 +31,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
@@ -147,4 +151,86 @@ func ExpectMaxSkew(ctx context.Context, c client.Client, namespace string, const
 		}
 	}
 	return Expect(maxCount - minCount)
+}
+
+// Functions below this line are used for the instance type selection testing
+// -----------
+func supportedInstanceTypes(nodeClaim *v1beta1.NodeClaim) (res []*cloudprovider.InstanceType) {
+	reqs := pscheduling.NewNodeSelectorRequirements(nodeClaim.Spec.Requirements...)
+	return lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
+		return reqs.Get(v1.LabelInstanceTypeStable).Has(i.Name)
+	})
+}
+
+func getInstanceTypeMap(its []*cloudprovider.InstanceType) map[string]*cloudprovider.InstanceType {
+	return lo.SliceToMap(its, func(it *cloudprovider.InstanceType) (string, *cloudprovider.InstanceType) {
+		return it.Name, it
+	})
+}
+
+func getMinPrice(its []*cloudprovider.InstanceType) float64 {
+	minPrice := math.MaxFloat64
+	for _, it := range its {
+		for _, of := range it.Offerings {
+			minPrice = math.Min(minPrice, of.Price)
+		}
+	}
+	return minPrice
+}
+
+func filterInstanceTypes(types []*cloudprovider.InstanceType, pred func(i *cloudprovider.InstanceType) bool) []*cloudprovider.InstanceType {
+	var ret []*cloudprovider.InstanceType
+	for _, it := range types {
+		if pred(it) {
+			ret = append(ret, it)
+		}
+	}
+	return ret
+}
+
+func ExpectInstancesWithOffering(instanceTypes []*cloudprovider.InstanceType, capacityType string, zone string) {
+	for _, it := range instanceTypes {
+		matched := false
+		for _, offering := range it.Offerings {
+			if offering.CapacityType == capacityType && offering.Zone == zone {
+				matched = true
+			}
+		}
+		Expect(matched).To(BeTrue(), fmt.Sprintf("expected to find zone %s / capacity type %s in an offering", zone, capacityType))
+	}
+}
+
+func ExpectInstancesWithLabel(instanceTypes []*cloudprovider.InstanceType, label string, value string) {
+	for _, it := range instanceTypes {
+		switch label {
+		case v1.LabelArchStable:
+			Expect(it.Requirements.Get(v1.LabelArchStable).Has(value)).To(BeTrue(), fmt.Sprintf("expected to find an arch of %s", value))
+		case v1.LabelOSStable:
+			Expect(it.Requirements.Get(v1.LabelOSStable).Has(value)).To(BeTrue(), fmt.Sprintf("expected to find an OS of %s", value))
+		case v1.LabelTopologyZone:
+			{
+				matched := false
+				for _, offering := range it.Offerings {
+					if offering.Zone == value {
+						matched = true
+						break
+					}
+				}
+				Expect(matched).To(BeTrue(), fmt.Sprintf("expected to find zone %s in an offering", value))
+			}
+		case v1beta1.CapacityTypeLabelKey:
+			{
+				matched := false
+				for _, offering := range it.Offerings {
+					if offering.CapacityType == value {
+						matched = true
+						break
+					}
+				}
+				Expect(matched).To(BeTrue(), fmt.Sprintf("expected to find caapacity type %s in an offering", value))
+			}
+		default:
+			Fail(fmt.Sprintf("unsupported label %s in test", label))
+		}
+	}
 }
