@@ -28,6 +28,9 @@ import (
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
+var provisioner *v1alpha5.Provisioner
+var machine, machine2 *v1alpha5.Machine
+
 var _ = Describe("Provisioner Counter", func() {
 	BeforeEach(func() {
 		cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
@@ -67,7 +70,40 @@ var _ = Describe("Provisioner Counter", func() {
 		provisioner = ExpectExists(ctx, env.Client, provisioner)
 	})
 
-	It("should increase the counter when a new nodes are created", func() {
+	It("should set the counter from the machine and then to the node when it initializes", func() {
+		ExpectApplied(ctx, env.Client, node, machine)
+		// Don't initialize the node yet
+		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
+		// Inform cluster state about node and machine readiness
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+
+		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
+		provisioner = ExpectExists(ctx, env.Client, provisioner)
+
+		// Should equal both the machine and node capacity
+		Expect(provisioner.Status.Resources).To(BeEquivalentTo(machine.Status.Capacity))
+
+		// Change the node capacity to be different than the machine capacity
+		node.Status.Capacity = v1.ResourceList{
+			v1.ResourceCPU:    resource.MustParse("1"),
+			v1.ResourcePods:   resource.MustParse("512"),
+			v1.ResourceMemory: resource.MustParse("2Gi"),
+		}
+		ExpectApplied(ctx, env.Client, node, machine)
+		// Don't initialize the node yet
+		ExpectMakeNodesInitialized(ctx, env.Client, node)
+		// Inform cluster state about node and machine readiness
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+
+		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
+		provisioner = ExpectExists(ctx, env.Client, provisioner)
+
+		Expect(provisioner.Status.Resources).To(BeEquivalentTo(node.Status.Capacity))
+	})
+
+	It("should increase the counter when new nodes are created", func() {
 		ExpectApplied(ctx, env.Client, node, machine)
 		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeController, machineController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 

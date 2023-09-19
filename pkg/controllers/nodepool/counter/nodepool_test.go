@@ -22,12 +22,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/test"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
+
+var nodePool *v1beta1.NodePool
+var nodeClaim, nodeClaim2 *v1beta1.NodeClaim
 
 var _ = Describe("NodePool Counter", func() {
 	BeforeEach(func() {
@@ -36,7 +38,7 @@ var _ = Describe("NodePool Counter", func() {
 		instanceType := cloudProvider.InstanceTypes[0]
 		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1alpha5.ProvisionerNameLabelKey: nodePool.Name,
+				v1beta1.NodePoolLabelKey: nodePool.Name,
 				v1.LabelInstanceTypeStable:       instanceType.Name,
 			}},
 			Status: v1beta1.NodeClaimStatus{
@@ -50,7 +52,7 @@ var _ = Describe("NodePool Counter", func() {
 		})
 		nodeClaim2, node2 = test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1alpha5.ProvisionerNameLabelKey: nodePool.Name,
+				v1beta1.NodePoolLabelKey: nodePool.Name,
 				v1.LabelInstanceTypeStable:       instanceType.Name,
 			}},
 			Status: v1beta1.NodeClaimStatus{
@@ -67,15 +69,46 @@ var _ = Describe("NodePool Counter", func() {
 		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 	})
+	It("should set the counter from the nodeClaim and then to the node when it initializes", func() {
+		ExpectApplied(ctx, env.Client, node, nodeClaim)
+		// Don't initialize the node yet
+		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+		// Inform cluster state about node and nodeClaim readiness
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
+
+		// Should equal both the nodeClaim and node capacity
+		Expect(nodePool.Status.Resources).To(BeEquivalentTo(nodeClaim.Status.Capacity))
+
+		// Change the node capacity to be different than the nodeClaim capacity
+		node.Status.Capacity = v1.ResourceList{
+			v1.ResourceCPU:    resource.MustParse("1"),
+			v1.ResourcePods:   resource.MustParse("512"),
+			v1.ResourceMemory: resource.MustParse("2Gi"),
+		}
+		ExpectApplied(ctx, env.Client, node, nodeClaim)
+		// Don't initialize the node yet
+		ExpectMakeNodesInitialized(ctx, env.Client, node)
+		// Inform cluster state about node and nodeClaim readiness
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
+
+		Expect(nodePool.Status.Resources).To(BeEquivalentTo(node.Status.Capacity))
+	})
 	It("should increase the counter when new nodes are created", func() {
 		ExpectApplied(ctx, env.Client, node, nodeClaim)
 		ExpectMakeNodesNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
-		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(nodePool))
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
-		// Should equal both the machine and node capacity
+		// Should equal both the nodeClaim and node capacity
 		Expect(nodePool.Status.Resources).To(BeEquivalentTo(nodeClaim.Status.Capacity))
 		Expect(nodePool.Status.Resources).To(BeEquivalentTo(node.Status.Capacity))
 	})
@@ -86,7 +119,7 @@ var _ = Describe("NodePool Counter", func() {
 		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
-		// Should equal the sums of the machines and nodes
+		// Should equal the sums of the nodeClaims and nodes
 		resources := v1.ResourceList{
 			v1.ResourceCPU:    resource.MustParse("600m"),
 			v1.ResourcePods:   resource.MustParse("1256"),
@@ -101,7 +134,7 @@ var _ = Describe("NodePool Counter", func() {
 		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
-		// Should equal both the machine and node capacity
+		// Should equal both the nodeClaim and node capacity
 		Expect(nodePool.Status.Resources).To(BeEquivalentTo(nodeClaim.Status.Capacity))
 		Expect(nodePool.Status.Resources).To(BeEquivalentTo(node2.Status.Capacity))
 	})

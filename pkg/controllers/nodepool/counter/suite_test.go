@@ -26,8 +26,6 @@ import (
 	. "knative.dev/pkg/logging/testing"
 
 	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/nodepool/counter"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -52,12 +50,7 @@ var env *test.Environment
 var cluster *state.Cluster
 var fakeClock *clock.FakeClock
 var cloudProvider *fake.CloudProvider
-
-var provisioner *v1alpha5.Provisioner
 var node, node2 *v1.Node
-var machine, machine2 *v1alpha5.Machine
-var nodePool *v1beta1.NodePool
-var nodeClaim, nodeClaim2 *v1beta1.NodeClaim
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
