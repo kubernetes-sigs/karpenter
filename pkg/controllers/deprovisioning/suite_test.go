@@ -240,7 +240,7 @@ var _ = Describe("Replace Nodes", func() {
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -316,7 +316,7 @@ var _ = Describe("Replace Nodes", func() {
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -408,7 +408,7 @@ var _ = Describe("Replace Nodes", func() {
 		ExpectManualBinding(ctx, env.Client, pods[2], node)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -501,7 +501,7 @@ var _ = Describe("Replace Nodes", func() {
 		}
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -586,7 +586,7 @@ var _ = Describe("Replace Nodes", func() {
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -678,7 +678,7 @@ var _ = Describe("Replace Nodes", func() {
 		ExpectManualBinding(ctx, env.Client, pods[2], annotatedNode)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{regularNode, annotatedNode}, []*v1alpha5.Machine{regularMachine, annotatedMachine})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{regularNode, annotatedNode}, []*v1alpha5.Machine{regularMachine, annotatedMachine})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -780,7 +780,7 @@ var _ = Describe("Replace Nodes", func() {
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		fakeClock.Step(10 * time.Minute)
 		var wg sync.WaitGroup
@@ -893,7 +893,7 @@ var _ = Describe("Replace Nodes", func() {
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		fakeClock.Step(10 * time.Minute)
 		var wg sync.WaitGroup
@@ -953,7 +953,7 @@ var _ = Describe("Replace Nodes", func() {
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -1070,7 +1070,7 @@ var _ = Describe("Delete Node", func() {
 		ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -1117,7 +1117,7 @@ var _ = Describe("Delete Node", func() {
 		ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -1171,7 +1171,7 @@ var _ = Describe("Delete Node", func() {
 		ExpectManualBinding(ctx, env.Client, pods[2], node1)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, unmanagedNode}, []*v1alpha5.Machine{machine1})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, unmanagedNode}, []*v1alpha5.Machine{machine1})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -1236,7 +1236,7 @@ var _ = Describe("Delete Node", func() {
 		ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -1287,7 +1287,7 @@ var _ = Describe("Delete Node", func() {
 		ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -1335,7 +1335,7 @@ var _ = Describe("Delete Node", func() {
 		ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -1383,7 +1383,7 @@ var _ = Describe("Delete Node", func() {
 		// inform cluster state about nodes and machines, intentionally leaving node1 as not ready
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(machine1))
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node2}, []*v1alpha5.Machine{machine2})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node2}, []*v1alpha5.Machine{machine2})
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
@@ -1480,7 +1480,7 @@ var _ = Describe("Delete Node", func() {
 			ExpectManualBinding(ctx, env.Client, pods[i], n)
 
 			if i == elem {
-				ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{n}, []*v1alpha5.Machine{m})
+				ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{n}, []*v1alpha5.Machine{m})
 			} else {
 				ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(m))
 				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
@@ -1532,7 +1532,7 @@ var _ = Describe("Delete Node", func() {
 		})
 		ExpectApplied(ctx, env.Client, consolidatableMachine, consolidatableNode, consolidatablePod)
 		ExpectManualBinding(ctx, env.Client, consolidatablePod, consolidatableNode)
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{consolidatableNode}, []*v1alpha5.Machine{consolidatableMachine})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{consolidatableNode}, []*v1alpha5.Machine{consolidatableMachine})
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
@@ -1587,7 +1587,7 @@ var _ = Describe("Delete Node", func() {
 		ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -1645,7 +1645,7 @@ var _ = Describe("Delete Node", func() {
 		ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -1737,7 +1737,7 @@ var _ = Describe("Node Lifetime Consideration", func() {
 		ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
 
 		fakeClock.SetTime(time.Now())
 
@@ -1853,7 +1853,7 @@ var _ = Describe("Topology Consideration", func() {
 		ExpectManualBinding(ctx, env.Client, pods[2], zone3Node)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{zone1Node, zone2Node, zone3Node}, []*v1alpha5.Machine{zone1Machine, zone2Machine, zone3Machine})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{zone1Node, zone2Node, zone3Node}, []*v1alpha5.Machine{zone1Machine, zone2Machine, zone3Machine})
 
 		ExpectSkew(ctx, env.Client, "default", &tsc).To(ConsistOf(1, 1, 1))
 
@@ -1942,7 +1942,7 @@ var _ = Describe("Topology Consideration", func() {
 		ExpectManualBinding(ctx, env.Client, pods[2], zone3Node)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{zone1Node, zone2Node, zone3Node}, []*v1alpha5.Machine{zone1Machine, zone2Machine, zone3Machine})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{zone1Node, zone2Node, zone3Node}, []*v1alpha5.Machine{zone1Machine, zone2Machine, zone3Machine})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -2053,7 +2053,7 @@ var _ = Describe("Consolidation TTL", func() {
 		ExpectManualBinding(ctx, env.Client, pod, node1)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
 
 		var wg sync.WaitGroup
 		wg.Add(1)
@@ -2091,7 +2091,7 @@ var _ = Describe("Consolidation TTL", func() {
 		ExpectApplied(ctx, env.Client, machine1, node1, prov)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
 
 		var wg sync.WaitGroup
 		wg.Add(1)
@@ -2176,7 +2176,7 @@ var _ = Describe("Consolidation TTL", func() {
 		ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
 
 		var wg sync.WaitGroup
 		wg.Add(1)
@@ -2219,7 +2219,7 @@ var _ = Describe("Consolidation TTL", func() {
 		ExpectApplied(ctx, env.Client, machine1, node1, prov, pod)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
 
 		var wg sync.WaitGroup
 		wg.Add(1)
@@ -2318,7 +2318,7 @@ var _ = Describe("Consolidation Timeout", func() {
 		}
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, nodes, machines)
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, nodes, machines)
 
 		var wg sync.WaitGroup
 		wg.Add(1)
@@ -2410,7 +2410,7 @@ var _ = Describe("Consolidation Timeout", func() {
 		}
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, nodes, machines)
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, nodes, machines)
 
 		var wg sync.WaitGroup
 		wg.Add(1)
@@ -2496,7 +2496,7 @@ var _ = Describe("Parallelization", func() {
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -2577,7 +2577,7 @@ var _ = Describe("Parallelization", func() {
 		Expect(nodes).To(HaveLen(2))
 		newNode, _ := lo.Find(nodes, func(n *v1.Node) bool { return n.Name != oldNodeName })
 
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, nodes, nil)
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, nodes, nil)
 
 		// Wait for the nomination cache to expire
 		time.Sleep(time.Second * 11)
@@ -2688,7 +2688,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		ExpectManualBinding(ctx, env.Client, pods[2], node3)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2, node3}, []*v1alpha5.Machine{machine1, machine2, machine3})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2, node3}, []*v1alpha5.Machine{machine1, machine2, machine3})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -2756,7 +2756,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -2809,7 +2809,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
 
 		var wg sync.WaitGroup
 		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
@@ -2868,7 +2868,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 				}}})
 
 		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], machine1, node1, machine2, node2, machine3, node3, prov)
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2, node3}, []*v1alpha5.Machine{machine1, machine2, machine3})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2, node3}, []*v1alpha5.Machine{machine1, machine2, machine3})
 
 		var wg sync.WaitGroup
 		wg.Add(1)
@@ -2944,7 +2944,7 @@ var _ = Describe("Multi-Node Consolidation", func() {
 		ExpectManualBinding(ctx, env.Client, pods[2], node3)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2, node3}, []*v1alpha5.Machine{machine1, machine2, machine3})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2, node3}, []*v1alpha5.Machine{machine1, machine2, machine3})
 
 		var wg sync.WaitGroup
 		wg.Add(1)

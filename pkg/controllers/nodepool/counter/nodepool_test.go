@@ -80,7 +80,6 @@ var _ = Describe("NodePool Counter", func() {
 		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
-		// Should equal both the nodeClaim and node capacity
 		Expect(nodePool.Status.Resources).To(BeEquivalentTo(nodeClaim.Status.Capacity))
 
 		// Change the node capacity to be different than the nodeClaim capacity
@@ -103,7 +102,7 @@ var _ = Describe("NodePool Counter", func() {
 	})
 	It("should increase the counter when new nodes are created", func() {
 		ExpectApplied(ctx, env.Client, node, nodeClaim)
-		ExpectMakeNodesNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
@@ -114,7 +113,7 @@ var _ = Describe("NodePool Counter", func() {
 	})
 	It("should decrease the counter when an existing node is deleted", func() {
 		ExpectApplied(ctx, env.Client, node, nodeClaim, node2, nodeClaim2)
-		ExpectMakeNodesNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
 
 		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 		nodePool = ExpectExists(ctx, env.Client, nodePool)

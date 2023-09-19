@@ -601,7 +601,7 @@ func ExpectMachinesWithOffset(offset int, ctx context.Context, c client.Client) 
 	})
 }
 
-func ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx context.Context, c client.Client, nodeStateController, machineStateController controller.Controller, nodes []*v1.Node, machines []*v1alpha5.Machine) {
+func ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx context.Context, c client.Client, nodeStateController, machineStateController controller.Controller, nodes []*v1.Node, machines []*v1alpha5.Machine) {
 	GinkgoHelper()
 
 	ExpectMakeNodesInitialized(ctx, c, nodes...)
@@ -616,7 +616,7 @@ func ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx context.Context, c cl
 	}
 }
 
-func ExpectMakeNodesNodeClaimsInitializedAndStateUpdated(ctx context.Context, c client.Client, nodeStateController, nodeClaimStateController controller.Controller, nodes []*v1.Node, nodeClaims []*v1beta1.NodeClaim) {
+func ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx context.Context, c client.Client, nodeStateController, nodeClaimStateController controller.Controller, nodes []*v1.Node, nodeClaims []*v1beta1.NodeClaim) {
 	GinkgoHelper()
 
 	ExpectMakeNodesInitialized(ctx, c, nodes...)

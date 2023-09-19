@@ -81,7 +81,6 @@ var _ = Describe("Provisioner Counter", func() {
 		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
 		provisioner = ExpectExists(ctx, env.Client, provisioner)
 
-		// Should equal both the machine and node capacity
 		Expect(provisioner.Status.Resources).To(BeEquivalentTo(machine.Status.Capacity))
 
 		// Change the node capacity to be different than the machine capacity
@@ -105,7 +104,7 @@ var _ = Describe("Provisioner Counter", func() {
 
 	It("should increase the counter when new nodes are created", func() {
 		ExpectApplied(ctx, env.Client, node, machine)
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeController, machineController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeController, machineController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
 		provisioner = ExpectExists(ctx, env.Client, provisioner)
@@ -116,7 +115,7 @@ var _ = Describe("Provisioner Counter", func() {
 	})
 	It("should decrease the counter when an existing node is deleted", func() {
 		ExpectApplied(ctx, env.Client, node, machine, node2, machine2)
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeController, machineController, []*v1.Node{node, node2}, []*v1alpha5.Machine{machine, machine2})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeController, machineController, []*v1.Node{node, node2}, []*v1alpha5.Machine{machine, machine2})
 
 		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
 		provisioner = ExpectExists(ctx, env.Client, provisioner)
