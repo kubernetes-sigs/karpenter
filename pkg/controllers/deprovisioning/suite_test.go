@@ -3143,21 +3143,6 @@ func ExpectMakeNewMachinesReady(ctx context.Context, c client.Client, wg *sync.W
 	}()
 }
 
-func ExpectMakeInitializedAndStateUpdated(ctx context.Context, c client.Client, nodeStateController, machineStateController controller.Controller, nodes []*v1.Node, machines []*v1alpha5.Machine) {
-	GinkgoHelper()
-
-	ExpectMakeNodesInitialized(ctx, c, nodes...)
-	ExpectMakeMachinesInitialized(ctx, c, machines...)
-
-	// Inform cluster state about node and machine readiness
-	for _, n := range nodes {
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
-	}
-	for _, m := range machines {
-		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(m))
-	}
-}
-
 // cheapestOffering grabs the cheapest offering from the passed offerings
 func cheapestOffering(ofs []cloudprovider.Offering) cloudprovider.Offering {
 	offering := cloudprovider.Offering{Price: math.MaxFloat64}

@@ -54,6 +54,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/metrics"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	pscheduling "github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/test"
@@ -598,4 +599,19 @@ func ExpectMachinesWithOffset(offset int, ctx context.Context, c client.Client) 
 	return lo.Map(machineList.Items, func(m v1alpha5.Machine, _ int) *v1alpha5.Machine {
 		return &m
 	})
+}
+
+func ExpectMakeInitializedAndStateUpdated(ctx context.Context, c client.Client, nodeStateController, machineStateController controller.Controller, nodes []*v1.Node, machines []*v1alpha5.Machine) {
+	GinkgoHelper()
+
+	ExpectMakeNodesInitialized(ctx, c, nodes...)
+	ExpectMakeMachinesInitialized(ctx, c, machines...)
+
+	// Inform cluster state about node and machine readiness
+	for _, n := range nodes {
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
+	}
+	for _, m := range machines {
+		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(m))
+	}
 }
