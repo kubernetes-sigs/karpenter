@@ -27,6 +27,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/nodepool/counter"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -40,6 +41,8 @@ import (
 
 var provisionerController controller.Controller
 var provisionerInformerController controller.Controller
+var nodePoolController controller.Controller
+var nodePoolInformerController controller.Controller
 var nodeClaimController controller.Controller
 var machineController controller.Controller
 var nodeController controller.Controller
@@ -53,6 +56,8 @@ var cloudProvider *fake.CloudProvider
 var provisioner *v1alpha5.Provisioner
 var node, node2 *v1.Node
 var machine, machine2 *v1alpha5.Machine
+var nodePool *v1beta1.NodePool
+var nodeClaim, nodeClaim2 *v1beta1.NodeClaim
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -72,7 +77,9 @@ var _ = BeforeSuite(func() {
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	podController = informer.NewPodController(env.Client, cluster)
 	provisionerInformerController = informer.NewProvisionerController(env.Client, cluster)
+	nodePoolInformerController = informer.NewNodePoolController(env.Client, cluster)
 	provisionerController = counter.NewProvisionerController(env.Client, cluster)
+	nodePoolController = counter.NewNodePoolController(env.Client, cluster)
 })
 
 var _ = AfterSuite(func() {

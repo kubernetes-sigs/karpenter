@@ -601,7 +601,7 @@ func ExpectMachinesWithOffset(offset int, ctx context.Context, c client.Client) 
 	})
 }
 
-func ExpectMakeInitializedAndStateUpdated(ctx context.Context, c client.Client, nodeStateController, machineStateController controller.Controller, nodes []*v1.Node, machines []*v1alpha5.Machine) {
+func ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx context.Context, c client.Client, nodeStateController, machineStateController controller.Controller, nodes []*v1.Node, machines []*v1alpha5.Machine) {
 	GinkgoHelper()
 
 	ExpectMakeNodesInitialized(ctx, c, nodes...)
@@ -613,5 +613,20 @@ func ExpectMakeInitializedAndStateUpdated(ctx context.Context, c client.Client, 
 	}
 	for _, m := range machines {
 		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(m))
+	}
+}
+
+func ExpectMakeNodesNodeClaimsInitializedAndStateUpdated(ctx context.Context, c client.Client, nodeStateController, nodeClaimStateController controller.Controller, nodes []*v1.Node, nodeClaims []*v1beta1.NodeClaim) {
+	GinkgoHelper()
+
+	ExpectMakeNodesInitialized(ctx, c, nodes...)
+	ExpectMakeNodeClaimsInitialized(ctx, c, nodeClaims...)
+
+	// Inform cluster state about node and machine readiness
+	for _, n := range nodes {
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
+	}
+	for _, m := range nodeClaims {
+		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(m))
 	}
 }

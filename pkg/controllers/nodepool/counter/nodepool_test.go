@@ -23,22 +23,23 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/test"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
-var _ = Describe("Provisioner Counter", func() {
+var _ = Describe("NodePool Counter", func() {
 	BeforeEach(func() {
 		cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
-		provisioner = test.Provisioner()
+		nodePool = test.NodePool()
 		instanceType := cloudProvider.InstanceTypes[0]
-		machine, node = test.MachineAndNode(v1alpha5.Machine{
+		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+				v1alpha5.ProvisionerNameLabelKey: nodePool.Name,
 				v1.LabelInstanceTypeStable:       instanceType.Name,
 			}},
-			Status: v1alpha5.MachineStatus{
+			Status: v1beta1.NodeClaimStatus{
 				ProviderID: test.RandomProviderID(),
 				Capacity: v1.ResourceList{
 					v1.ResourceCPU:    resource.MustParse("100m"),
@@ -47,12 +48,12 @@ var _ = Describe("Provisioner Counter", func() {
 				},
 			},
 		})
-		machine2, node2 = test.MachineAndNode(v1alpha5.Machine{
+		nodeClaim2, node2 = test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+				v1alpha5.ProvisionerNameLabelKey: nodePool.Name,
 				v1.LabelInstanceTypeStable:       instanceType.Name,
 			}},
-			Status: v1alpha5.MachineStatus{
+			Status: v1beta1.NodeClaimStatus{
 				ProviderID: test.RandomProviderID(),
 				Capacity: v1.ResourceList{
 					v1.ResourceCPU:    resource.MustParse("500m"),
@@ -61,29 +62,29 @@ var _ = Describe("Provisioner Counter", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, provisioner)
-		ExpectReconcileSucceeded(ctx, provisionerInformerController, client.ObjectKeyFromObject(provisioner))
-		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
-		provisioner = ExpectExists(ctx, env.Client, provisioner)
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectReconcileSucceeded(ctx, nodePoolInformerController, client.ObjectKeyFromObject(nodePool))
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
 	})
 
-	It("should increase the counter when a new nodes are created", func() {
-		ExpectApplied(ctx, env.Client, node, machine)
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeController, machineController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+	It("should increase the counter when new nodes are created", func() {
+		ExpectApplied(ctx, env.Client, node, nodeClaim)
+		ExpectMakeNodesNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
-		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
-		provisioner = ExpectExists(ctx, env.Client, provisioner)
+		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(nodePool))
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		// Should equal both the machine and node capacity
-		Expect(provisioner.Status.Resources).To(BeEquivalentTo(machine.Status.Capacity))
-		Expect(provisioner.Status.Resources).To(BeEquivalentTo(node.Status.Capacity))
+		Expect(nodePool.Status.Resources).To(BeEquivalentTo(nodeClaim.Status.Capacity))
+		Expect(nodePool.Status.Resources).To(BeEquivalentTo(node.Status.Capacity))
 	})
 	It("should decrease the counter when an existing node is deleted", func() {
-		ExpectApplied(ctx, env.Client, node, machine, node2, machine2)
-		ExpectMakeNodesMachinesInitializedAndStateUpdated(ctx, env.Client, nodeController, machineController, []*v1.Node{node, node2}, []*v1alpha5.Machine{machine, machine2})
+		ExpectApplied(ctx, env.Client, node, nodeClaim, node2, nodeClaim2)
+		ExpectMakeNodesNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
 
-		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
-		provisioner = ExpectExists(ctx, env.Client, provisioner)
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		// Should equal the sums of the machines and nodes
 		resources := v1.ResourceList{
@@ -91,17 +92,17 @@ var _ = Describe("Provisioner Counter", func() {
 			v1.ResourcePods:   resource.MustParse("1256"),
 			v1.ResourceMemory: resource.MustParse("6Gi"),
 		}
-		Expect(provisioner.Status.Resources).To(BeEquivalentTo(resources))
-		Expect(provisioner.Status.Resources).To(BeEquivalentTo(resources))
+		Expect(nodePool.Status.Resources).To(BeEquivalentTo(resources))
+		Expect(nodePool.Status.Resources).To(BeEquivalentTo(resources))
 
-		ExpectDeleted(ctx, env.Client, node, machine)
+		ExpectDeleted(ctx, env.Client, node, nodeClaim)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
-		provisioner = ExpectExists(ctx, env.Client, provisioner)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		// Should equal both the machine and node capacity
-		Expect(provisioner.Status.Resources).To(BeEquivalentTo(machine2.Status.Capacity))
-		Expect(provisioner.Status.Resources).To(BeEquivalentTo(node2.Status.Capacity))
+		Expect(nodePool.Status.Resources).To(BeEquivalentTo(nodeClaim.Status.Capacity))
+		Expect(nodePool.Status.Resources).To(BeEquivalentTo(node2.Status.Capacity))
 	})
 })
