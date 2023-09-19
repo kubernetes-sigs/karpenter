@@ -49,12 +49,12 @@ func New(provisioner *v1alpha5.Provisioner) *v1beta1.NodePool {
 					Labels:      provisioner.Spec.Labels,
 				},
 				Spec: v1beta1.NodeClaimSpec{
-					Taints:               provisioner.Spec.Taints,
-					StartupTaints:        provisioner.Spec.StartupTaints,
-					Requirements:         provisioner.Spec.Requirements,
-					KubeletConfiguration: NewKubeletConfiguration(provisioner.Spec.KubeletConfiguration),
-					NodeClass:            NewNodeClassReference(provisioner.Spec.ProviderRef),
-					Provider:             provisioner.Spec.Provider,
+					Taints:        provisioner.Spec.Taints,
+					StartupTaints: provisioner.Spec.StartupTaints,
+					Requirements:  provisioner.Spec.Requirements,
+					Kubelet:       NewKubeletConfiguration(provisioner.Spec.KubeletConfiguration),
+					NodeClass:     NewNodeClassReference(provisioner.Spec.ProviderRef),
+					Provider:      provisioner.Spec.Provider,
 				},
 			},
 			Weight: provisioner.Spec.Weight,
@@ -76,11 +76,11 @@ func New(provisioner *v1alpha5.Provisioner) *v1beta1.NodePool {
 	return np
 }
 
-func NewKubeletConfiguration(kc *v1alpha5.KubeletConfiguration) *v1beta1.Kubelet {
+func NewKubeletConfiguration(kc *v1alpha5.KubeletConfiguration) *v1beta1.KubeletConfiguration {
 	if kc == nil {
 		return nil
 	}
-	return &v1beta1.Kubelet{
+	return &v1beta1.KubeletConfiguration{
 		ClusterDNS:                  kc.ClusterDNS,
 		ContainerRuntime:            kc.ContainerRuntime,
 		MaxPods:                     kc.MaxPods,

@@ -43,6 +43,25 @@ func NodeClaim(overrides ...v1beta1.NodeClaim) *v1beta1.NodeClaim {
 			Name: "default",
 		}
 	}
+	if override.Spec.Requirements == nil {
+		override.Spec.Requirements = []v1.NodeSelectorRequirement{
+			{
+				Key:      v1beta1.CapacityTypeLabelKey,
+				Operator: v1.NodeSelectorOpIn,
+				Values:   []string{v1beta1.CapacityTypeOnDemand},
+			},
+			{
+				Key:      v1.LabelOSStable,
+				Operator: v1.NodeSelectorOpIn,
+				Values:   []string{string(v1.Linux)},
+			},
+			{
+				Key:      v1.LabelArchStable,
+				Operator: v1.NodeSelectorOpIn,
+				Values:   []string{v1beta1.ArchitectureAmd64},
+			},
+		}
+	}
 	return &v1beta1.NodeClaim{
 		ObjectMeta: ObjectMeta(override.ObjectMeta),
 		Spec:       override.Spec,

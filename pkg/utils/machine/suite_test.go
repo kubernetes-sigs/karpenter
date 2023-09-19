@@ -263,7 +263,7 @@ var _ = Describe("MachineUtils", func() {
 						v1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
 					},
 				},
-				KubeletConfiguration: &v1beta1.Kubelet{
+				Kubelet: &v1beta1.KubeletConfiguration{
 					ContainerRuntime: ptr.String("containerd"),
 					MaxPods:          ptr.Int32(110),
 					PodsPerCore:      ptr.Int32(10),
@@ -396,19 +396,19 @@ var _ = Describe("MachineUtils", func() {
 		Expect(machine.Spec.Requirements).To(ContainElements(nodeClaim.Spec.Requirements))
 		Expect(machine.Spec.Resources.Requests).To(Equal(nodeClaim.Spec.Resources.Requests))
 
-		Expect(machine.Spec.Kubelet.ClusterDNS).To(Equal(nodeClaim.Spec.KubeletConfiguration.ClusterDNS))
-		Expect(machine.Spec.Kubelet.ContainerRuntime).To(Equal(nodeClaim.Spec.KubeletConfiguration.ContainerRuntime))
-		Expect(machine.Spec.Kubelet.MaxPods).To(Equal(nodeClaim.Spec.KubeletConfiguration.MaxPods))
-		Expect(machine.Spec.Kubelet.PodsPerCore).To(Equal(nodeClaim.Spec.KubeletConfiguration.PodsPerCore))
-		Expect(machine.Spec.Kubelet.SystemReserved).To(Equal(nodeClaim.Spec.KubeletConfiguration.SystemReserved))
-		Expect(machine.Spec.Kubelet.KubeReserved).To(Equal(nodeClaim.Spec.KubeletConfiguration.KubeReserved))
-		Expect(machine.Spec.Kubelet.EvictionHard).To(Equal(nodeClaim.Spec.KubeletConfiguration.EvictionHard))
-		Expect(machine.Spec.Kubelet.EvictionSoft).To(Equal(nodeClaim.Spec.KubeletConfiguration.EvictionSoft))
-		Expect(machine.Spec.Kubelet.EvictionSoftGracePeriod).To(Equal(nodeClaim.Spec.KubeletConfiguration.EvictionSoftGracePeriod))
-		Expect(machine.Spec.Kubelet.EvictionMaxPodGracePeriod).To(Equal(nodeClaim.Spec.KubeletConfiguration.EvictionMaxPodGracePeriod))
-		Expect(machine.Spec.Kubelet.ImageGCHighThresholdPercent).To(Equal(nodeClaim.Spec.KubeletConfiguration.ImageGCHighThresholdPercent))
-		Expect(machine.Spec.Kubelet.ImageGCLowThresholdPercent).To(Equal(nodeClaim.Spec.KubeletConfiguration.ImageGCLowThresholdPercent))
-		Expect(machine.Spec.Kubelet.CPUCFSQuota).To(Equal(nodeClaim.Spec.KubeletConfiguration.CPUCFSQuota))
+		Expect(machine.Spec.Kubelet.ClusterDNS).To(Equal(nodeClaim.Spec.Kubelet.ClusterDNS))
+		Expect(machine.Spec.Kubelet.ContainerRuntime).To(Equal(nodeClaim.Spec.Kubelet.ContainerRuntime))
+		Expect(machine.Spec.Kubelet.MaxPods).To(Equal(nodeClaim.Spec.Kubelet.MaxPods))
+		Expect(machine.Spec.Kubelet.PodsPerCore).To(Equal(nodeClaim.Spec.Kubelet.PodsPerCore))
+		Expect(machine.Spec.Kubelet.SystemReserved).To(Equal(nodeClaim.Spec.Kubelet.SystemReserved))
+		Expect(machine.Spec.Kubelet.KubeReserved).To(Equal(nodeClaim.Spec.Kubelet.KubeReserved))
+		Expect(machine.Spec.Kubelet.EvictionHard).To(Equal(nodeClaim.Spec.Kubelet.EvictionHard))
+		Expect(machine.Spec.Kubelet.EvictionSoft).To(Equal(nodeClaim.Spec.Kubelet.EvictionSoft))
+		Expect(machine.Spec.Kubelet.EvictionSoftGracePeriod).To(Equal(nodeClaim.Spec.Kubelet.EvictionSoftGracePeriod))
+		Expect(machine.Spec.Kubelet.EvictionMaxPodGracePeriod).To(Equal(nodeClaim.Spec.Kubelet.EvictionMaxPodGracePeriod))
+		Expect(machine.Spec.Kubelet.ImageGCHighThresholdPercent).To(Equal(nodeClaim.Spec.Kubelet.ImageGCHighThresholdPercent))
+		Expect(machine.Spec.Kubelet.ImageGCLowThresholdPercent).To(Equal(nodeClaim.Spec.Kubelet.ImageGCLowThresholdPercent))
+		Expect(machine.Spec.Kubelet.CPUCFSQuota).To(Equal(nodeClaim.Spec.Kubelet.CPUCFSQuota))
 
 		Expect(machine.Spec.MachineTemplateRef.Kind).To(Equal(nodeClaim.Spec.NodeClass.Kind))
 		Expect(machine.Spec.MachineTemplateRef.APIVersion).To(Equal(nodeClaim.Spec.NodeClass.APIVersion))
