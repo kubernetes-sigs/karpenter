@@ -153,6 +153,16 @@ func ExpectMaxSkew(ctx context.Context, c client.Client, namespace string, const
 	return Expect(maxCount - minCount)
 }
 
+func ExpectDeleteAllUnscheduledPods(ctx2 context.Context, c client.Client) {
+	var pods v1.PodList
+	Expect(c.List(ctx2, &pods)).To(Succeed())
+	for i := range pods.Items {
+		if pods.Items[i].Spec.NodeName == "" {
+			ExpectDeleted(ctx2, c, &pods.Items[i])
+		}
+	}
+}
+
 // Functions below this line are used for the instance type selection testing
 // -----------
 func supportedInstanceTypes(nodeClaim *v1beta1.NodeClaim) (res []*cloudprovider.InstanceType) {
