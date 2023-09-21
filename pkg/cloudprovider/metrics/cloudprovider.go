@@ -36,6 +36,7 @@ const (
 	MetricLabelErrorDefaultVal = ""
 	// Well-known metricLabelError values
 	NodeClaimNotFoundError    = "NodeClaimNotFoundError"
+	NodeClassNotReadyError    = "NodeClassNotReadyError"
 	InsufficientCapacityError = "InsufficientCapacityError"
 )
 
@@ -176,10 +177,14 @@ func getLabelsMapForError(ctx context.Context, d *decorator, method string, err 
 // GetErrorTypeLabelValue is a convenience func that returns
 // a string representation of well-known CloudProvider error types
 func GetErrorTypeLabelValue(err error) string {
-	if cloudprovider.IsInsufficientCapacityError(err) {
+	switch {
+	case cloudprovider.IsInsufficientCapacityError(err):
 		return InsufficientCapacityError
-	} else if cloudprovider.IsNodeClaimNotFoundError(err) {
+	case cloudprovider.IsNodeClaimNotFoundError(err):
 		return NodeClaimNotFoundError
+	case cloudprovider.IsNodeClassNotReadyError(err):
+		return NodeClassNotReadyError
+	default:
+		return MetricLabelErrorDefaultVal
 	}
-	return MetricLabelErrorDefaultVal
 }

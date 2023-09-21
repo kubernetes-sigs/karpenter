@@ -43,3 +43,23 @@ func InsufficientCapacityErrorEvent(nodeClaim *v1beta1.NodeClaim, err error) eve
 		DedupeValues:   []string{string(nodeClaim.UID)},
 	}
 }
+
+func NodeClassNotReadyEvent(nodeClaim *v1beta1.NodeClaim, err error) events.Event {
+	if nodeClaim.IsMachine {
+		machine := machineutil.NewFromNodeClaim(nodeClaim)
+		return events.Event{
+			InvolvedObject: machine,
+			Type:           v1.EventTypeWarning,
+			Reason:         "ProviderNotReady",
+			Message:        fmt.Sprintf("Machine %s event: %s", machine.Name, truncateMessage(err.Error())),
+			DedupeValues:   []string{string(machine.UID)},
+		}
+	}
+	return events.Event{
+		InvolvedObject: nodeClaim,
+		Type:           v1.EventTypeWarning,
+		Reason:         "NodeClassNotReady",
+		Message:        fmt.Sprintf("NodeClaim %s event: %s", nodeClaim.Name, truncateMessage(err.Error())),
+		DedupeValues:   []string{string(nodeClaim.UID)},
+	}
+}
