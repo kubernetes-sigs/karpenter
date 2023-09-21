@@ -416,9 +416,32 @@ func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*v1.Pod, error) {
 		pod := p.cluster.GetDaemonSetPod(&d)
 		if pod == nil {
 			pod = &v1.Pod{Spec: d.Spec.Template.Spec}
+		} else {
+			mergedAffinity, _ := p.MergeAffinities(*d.Spec.Template.Spec.Affinity, *pod.Spec.Affinity)
+			pod.Spec.Affinity = &mergedAffinity
 		}
 		return pod
 	}), nil
+}
+
+func (p *Provisioner) MergeAffinities(a1 v1.Affinity, a2 v1.Affinity) (v1.Affinity, error) {
+	mergedAffinity := v1.Affinity{
+		NodeAffinity: &v1.NodeAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: &v1.NodeSelector{
+				NodeSelectorTerms: append(a1.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms, a2.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms...),
+			},
+			PreferredDuringSchedulingIgnoredDuringExecution: append(a1.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution, a2.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution...),
+		},
+		PodAffinity: &v1.PodAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution:  append(a1.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution, a2.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution...),
+			PreferredDuringSchedulingIgnoredDuringExecution: append(a1.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution, a2.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution...),
+		},
+		PodAntiAffinity: &v1.PodAntiAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution:  append(a1.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution, a2.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution...),
+			PreferredDuringSchedulingIgnoredDuringExecution: append(a1.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution, a2.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution...),
+		},
+	}
+	return mergedAffinity, nil
 }
 
 func (p *Provisioner) Validate(ctx context.Context, pod *v1.Pod) error {

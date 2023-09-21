@@ -17,6 +17,7 @@ package provisioning_test
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/aws/karpenter-core/pkg/cloudprovider"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -536,6 +537,86 @@ var _ = Describe("Provisioning", func() {
 			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
+		})
+		It("should account for daemonset spec affinity ", func() {
+			cloudProviderTest := fake.NewCloudProvider()
+			instanceTypes := []*cloudprovider.InstanceType{
+				fake.NewInstanceType(fake.InstanceTypeOptions{
+					Name: "small-instance",
+					Resources: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:    resource.MustParse("2"),
+						v1.ResourceMemory: resource.MustParse("2Gi"),
+					},
+				}),
+			}
+			cloudProviderTest.InstanceTypes = instanceTypes
+			provisioner := test.Provisioner(test.ProvisionerOptions{
+				Provider: cloudProviderTest,
+				Labels: map[string]string{
+					"foo": "voo",
+				},
+			})
+
+			cloudProviderDaemon := fake.NewCloudProvider()
+			instanceTypesDaemon := []*cloudprovider.InstanceType{
+				fake.NewInstanceType(fake.InstanceTypeOptions{
+					Name: "small-instance-daemon",
+					Resources: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:    resource.MustParse("4"),
+						v1.ResourceMemory: resource.MustParse("4Gi"),
+					},
+				}),
+			}
+			cloudProviderDaemon.InstanceTypes = instanceTypesDaemon
+			provisionerDaemonset := test.Provisioner(test.ProvisionerOptions{
+				Provider: cloudProviderDaemon,
+				Labels: map[string]string{
+					"foo": "bar",
+				},
+			})
+
+			// Create a daemonset with large resource requests
+			daemonset := test.DaemonSet(
+				test.DaemonSetOptions{PodOptions: test.PodOptions{
+					NodeRequirements: []v1.NodeSelectorRequirement{
+						{
+							Key:      "foo",
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"bar"},
+						},
+					},
+					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4"), v1.ResourceMemory: resource.MustParse("4Gi")}},
+				}},
+			)
+			ExpectApplied(ctx, env.Client, provisionerDaemonset, daemonset)
+			// Create the actual daemonSet pod with lower resource requests and expect to use the pod
+			daemonsetPod := test.UnschedulablePod(
+				test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								APIVersion:         "apps/v1",
+								Kind:               "DaemonSet",
+								Name:               daemonset.Name,
+								UID:                daemonset.UID,
+								Controller:         ptr.Bool(true),
+								BlockOwnerDeletion: ptr.Bool(true),
+							},
+						},
+					},
+					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4"), v1.ResourceMemory: resource.MustParse("4Gi")}},
+				})
+			ExpectApplied(ctx, env.Client, daemonsetPod)
+			ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
+
+			//Deploy pod
+			pod := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+				NodeSelector: map[string]string{
+					"foo": "voo",
+				},
+			})
+			ExpectApplied(ctx, env.Client, provisioner, pod)
 		})
 	})
 	Context("Annotations", func() {
