@@ -162,6 +162,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) *Results {
 			if err := s.topology.Update(ctx, pod); err != nil {
 				logging.FromContext(ctx).Errorf("updating topology, %s", err)
 			}
+			continue
 		}
 		
 		// Schedule onto new node
