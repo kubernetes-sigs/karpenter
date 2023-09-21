@@ -13,9 +13,6 @@ spec:
     kind: NodeClaim
     listKind: NodeClaimList
     plural: nodeclaims
-    shortNames:
-    - nc
-    - ncs
     singular: nodeclaim
   scope: Cluster
   versions:
