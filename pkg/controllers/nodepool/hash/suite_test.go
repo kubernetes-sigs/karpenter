@@ -27,8 +27,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 )
 
 var provisionerController controller.Controller
@@ -43,8 +41,6 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	nodeclaimutil.EnableNodeClaims = true
-	nodepoolutil.EnableNodePools = true
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
 	provisionerController = hash.NewProvisionerController(env.Client)
 	nodePoolController = hash.NewNodePoolController(env.Client)

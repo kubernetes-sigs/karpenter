@@ -272,9 +272,9 @@ var _ = Describe("Validation", func() {
 				}
 			})
 		})
-		Context("Kubelet", func() {
+		Context("KubeletConfiguration", func() {
 			It("should fail on kubeReserved with invalid keys", func() {
-				nodePool.Spec.Template.Spec.KubeletConfiguration = &Kubelet{
+				nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
 					KubeReserved: v1.ResourceList{
 						v1.ResourcePods: resource.MustParse("2"),
 					},
@@ -282,7 +282,7 @@ var _ = Describe("Validation", func() {
 				Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 			})
 			It("should fail on systemReserved with invalid keys", func() {
-				nodePool.Spec.Template.Spec.KubeletConfiguration = &Kubelet{
+				nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
 					SystemReserved: v1.ResourceList{
 						v1.ResourcePods: resource.MustParse("2"),
 					},
@@ -292,7 +292,7 @@ var _ = Describe("Validation", func() {
 			Context("Eviction Signals", func() {
 				Context("Eviction Hard", func() {
 					It("should succeed on evictionHard with valid keys", func() {
-						nodePool.Spec.Template.Spec.KubeletConfiguration = &Kubelet{
+						nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
 							EvictionHard: map[string]string{
 								"memory.available":   "5%",
 								"nodefs.available":   "10%",
@@ -305,7 +305,7 @@ var _ = Describe("Validation", func() {
 						Expect(nodePool.Validate(ctx)).To(Succeed())
 					})
 					It("should fail on evictionHard with invalid keys", func() {
-						nodePool.Spec.Template.Spec.KubeletConfiguration = &Kubelet{
+						nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
 							EvictionHard: map[string]string{
 								"memory": "5%",
 							},
@@ -313,7 +313,7 @@ var _ = Describe("Validation", func() {
 						Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 					})
 					It("should fail on invalid formatted percentage value in evictionHard", func() {
-						nodePool.Spec.Template.Spec.KubeletConfiguration = &Kubelet{
+						nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
 							EvictionHard: map[string]string{
 								"memory.available": "5%3",
 							},
@@ -321,7 +321,7 @@ var _ = Describe("Validation", func() {
 						Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 					})
 					It("should fail on invalid percentage value (too large) in evictionHard", func() {
-						nodePool.Spec.Template.Spec.KubeletConfiguration = &Kubelet{
+						nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
 							EvictionHard: map[string]string{
 								"memory.available": "110%",
 							},
@@ -329,7 +329,7 @@ var _ = Describe("Validation", func() {
 						Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 					})
 					It("should fail on invalid quantity value in evictionHard", func() {
-						nodePool.Spec.Template.Spec.KubeletConfiguration = &Kubelet{
+						nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
 							EvictionHard: map[string]string{
 								"memory.available": "110GB",
 							},
@@ -340,7 +340,7 @@ var _ = Describe("Validation", func() {
 			})
 			Context("Eviction Soft", func() {
 				It("should succeed on evictionSoft with valid keys", func() {
-					nodePool.Spec.Template.Spec.KubeletConfiguration = &Kubelet{
+					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
 						EvictionSoft: map[string]string{
 							"memory.available":   "5%",
 							"nodefs.available":   "10%",
@@ -361,7 +361,7 @@ var _ = Describe("Validation", func() {
 					Expect(nodePool.Validate(ctx)).To(Succeed())
 				})
 				It("should fail on evictionSoft with invalid keys", func() {
-					nodePool.Spec.Template.Spec.KubeletConfiguration = &Kubelet{
+					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
 						EvictionSoft: map[string]string{
 							"memory": "5%",
 						},
@@ -372,7 +372,7 @@ var _ = Describe("Validation", func() {
 					Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 				})
 				It("should fail on invalid formatted percentage value in evictionSoft", func() {
-					nodePool.Spec.Template.Spec.KubeletConfiguration = &Kubelet{
+					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
 						EvictionSoft: map[string]string{
 							"memory.available": "5%3",
 						},
@@ -383,7 +383,7 @@ var _ = Describe("Validation", func() {
 					Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 				})
 				It("should fail on invalid percentage value (too large) in evictionSoft", func() {
-					nodePool.Spec.Template.Spec.KubeletConfiguration = &Kubelet{
+					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
 						EvictionSoft: map[string]string{
 							"memory.available": "110%",
 						},
@@ -394,7 +394,7 @@ var _ = Describe("Validation", func() {
 					Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 				})
 				It("should fail on invalid quantity value in evictionSoft", func() {
-					nodePool.Spec.Template.Spec.KubeletConfiguration = &Kubelet{
+					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
 						EvictionSoft: map[string]string{
 							"memory.available": "110GB",
 						},
@@ -405,7 +405,7 @@ var _ = Describe("Validation", func() {
 					Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 				})
 				It("should fail when eviction soft doesn't have matching grace period", func() {
-					nodePool.Spec.Template.Spec.KubeletConfiguration = &Kubelet{
+					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
 						EvictionSoft: map[string]string{
 							"memory.available": "200Mi",
 						},
@@ -416,13 +416,13 @@ var _ = Describe("Validation", func() {
 			Context("GCThresholdPercent", func() {
 				Context("ImageGCHighThresholdPercent", func() {
 					It("should succeed on a imageGCHighThresholdPercent", func() {
-						nodePool.Spec.Template.Spec.KubeletConfiguration = &Kubelet{
+						nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
 							ImageGCHighThresholdPercent: ptr.Int32(10),
 						}
 						Expect(nodePool.Validate(ctx)).To(Succeed())
 					})
 					It("should fail when imageGCHighThresholdPercent is less than imageGCLowThresholdPercent", func() {
-						nodePool.Spec.Template.Spec.KubeletConfiguration = &Kubelet{
+						nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
 							ImageGCHighThresholdPercent: ptr.Int32(50),
 							ImageGCLowThresholdPercent:  ptr.Int32(60),
 						}
@@ -431,13 +431,13 @@ var _ = Describe("Validation", func() {
 				})
 				Context("ImageGCLowThresholdPercent", func() {
 					It("should succeed on a imageGCLowThresholdPercent", func() {
-						nodePool.Spec.Template.Spec.KubeletConfiguration = &Kubelet{
+						nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
 							ImageGCLowThresholdPercent: ptr.Int32(10),
 						}
 						Expect(nodePool.Validate(ctx)).To(Succeed())
 					})
 					It("should fail when imageGCLowThresholdPercent is greather than imageGCHighThresheldPercent", func() {
-						nodePool.Spec.Template.Spec.KubeletConfiguration = &Kubelet{
+						nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
 							ImageGCHighThresholdPercent: ptr.Int32(50),
 							ImageGCLowThresholdPercent:  ptr.Int32(60),
 						}
@@ -447,7 +447,7 @@ var _ = Describe("Validation", func() {
 			})
 			Context("Eviction Soft Grace Period", func() {
 				It("should succeed on evictionSoftGracePeriod with valid keys", func() {
-					nodePool.Spec.Template.Spec.KubeletConfiguration = &Kubelet{
+					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
 						EvictionSoft: map[string]string{
 							"memory.available":   "5%",
 							"nodefs.available":   "10%",
@@ -468,7 +468,7 @@ var _ = Describe("Validation", func() {
 					Expect(nodePool.Validate(ctx)).To(Succeed())
 				})
 				It("should fail on evictionSoftGracePeriod with invalid keys", func() {
-					nodePool.Spec.Template.Spec.KubeletConfiguration = &Kubelet{
+					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
 						EvictionSoftGracePeriod: map[string]metav1.Duration{
 							"memory": {Duration: time.Minute},
 						},
@@ -476,7 +476,7 @@ var _ = Describe("Validation", func() {
 					Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 				})
 				It("should fail when eviction soft grace period doesn't have matching threshold", func() {
-					nodePool.Spec.Template.Spec.KubeletConfiguration = &Kubelet{
+					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
 						EvictionSoftGracePeriod: map[string]metav1.Duration{
 							"memory.available": {Duration: time.Minute},
 						},

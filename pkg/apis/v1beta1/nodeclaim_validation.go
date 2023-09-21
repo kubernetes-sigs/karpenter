@@ -69,7 +69,7 @@ func (in *NodeClaimSpec) validate() (errs *apis.FieldError) {
 	return errs.Also(
 		in.validateTaints(),
 		in.validateRequirements(),
-		in.KubeletConfiguration.validate().ViaField("kubeletConfiguration"),
+		in.Kubelet.validate().ViaField("kubeletConfiguration"),
 	)
 }
 
@@ -169,7 +169,7 @@ func (in *NodeClaimSpec) validateRequirement(requirement v1.NodeSelectorRequirem
 	return errs
 }
 
-func (in *Kubelet) validate() (errs *apis.FieldError) {
+func (in *KubeletConfiguration) validate() (errs *apis.FieldError) {
 	if in == nil {
 		return
 	}
@@ -185,7 +185,7 @@ func (in *Kubelet) validate() (errs *apis.FieldError) {
 	)
 }
 
-func (in *Kubelet) validateEvictionSoftGracePeriod() (errs *apis.FieldError) {
+func (in *KubeletConfiguration) validateEvictionSoftGracePeriod() (errs *apis.FieldError) {
 	for k := range in.EvictionSoftGracePeriod {
 		if !SupportedEvictionSignals.Has(k) {
 			errs = errs.Also(apis.ErrInvalidKeyName(k, "evictionSoftGracePeriod"))
@@ -194,7 +194,7 @@ func (in *Kubelet) validateEvictionSoftGracePeriod() (errs *apis.FieldError) {
 	return errs
 }
 
-func (in *Kubelet) validateEvictionSoftPairs() (errs *apis.FieldError) {
+func (in *KubeletConfiguration) validateEvictionSoftPairs() (errs *apis.FieldError) {
 	evictionSoftKeys := sets.New(lo.Keys(in.EvictionSoft)...)
 	evictionSoftGracePeriodKeys := sets.New(lo.Keys(in.EvictionSoftGracePeriod)...)
 
@@ -251,7 +251,7 @@ func validateEvictionThresholds(m map[string]string, fieldName string) (errs *ap
 }
 
 // Validate validateImageGCHighThresholdPercent
-func (in *Kubelet) validateImageGCHighThresholdPercent() (errs *apis.FieldError) {
+func (in *KubeletConfiguration) validateImageGCHighThresholdPercent() (errs *apis.FieldError) {
 	if in.ImageGCHighThresholdPercent != nil && ptr.Int32Value(in.ImageGCHighThresholdPercent) < ptr.Int32Value(in.ImageGCLowThresholdPercent) {
 		return errs.Also(apis.ErrInvalidValue("must be greater than imageGCLowThresholdPercent", "imageGCHighThresholdPercent"))
 	}
@@ -260,7 +260,7 @@ func (in *Kubelet) validateImageGCHighThresholdPercent() (errs *apis.FieldError)
 }
 
 // Validate imageGCLowThresholdPercent
-func (in *Kubelet) validateImageGCLowThresholdPercent() (errs *apis.FieldError) {
+func (in *KubeletConfiguration) validateImageGCLowThresholdPercent() (errs *apis.FieldError) {
 	if in.ImageGCHighThresholdPercent != nil && ptr.Int32Value(in.ImageGCLowThresholdPercent) > ptr.Int32Value(in.ImageGCHighThresholdPercent) {
 		return errs.Also(apis.ErrInvalidValue("must be less than imageGCHighThresholdPercent", "imageGCLowThresholdPercent"))
 	}

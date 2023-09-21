@@ -106,9 +106,9 @@ type NodeClaimTemplate struct {
 	Spec              NodeClaimSpec `json:"spec,omitempty"`
 }
 
-// NodePool is the Schema for the Provisioners API
+// NodePool is the Schema for the NodePools API
 // +kubebuilder:object:root=true
-// +kubebuilder:resource:path=nodepools,scope=Cluster,categories=karpenter,shortName={np,nps}
+// +kubebuilder:resource:path=nodepools,scope=Cluster,categories=karpenter
 // +kubebuilder:printcolumn:name="NodeClass",type="string",JSONPath=".spec.template.spec.nodeClass.name",description=""
 // +kubebuilder:printcolumn:name="Weight",type="string",JSONPath=".spec.weight",priority=1,description=""
 // +kubebuilder:subresource:status

@@ -68,7 +68,7 @@ var _ = Describe("Empty Nodes (TTLSecondsAfterEmpty)", func() {
 		ExpectApplied(ctx, env.Client, prov, machine, node)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		fakeClock.Step(10 * time.Minute)
 		wg := sync.WaitGroup{}
@@ -88,7 +88,7 @@ var _ = Describe("Empty Nodes (TTLSecondsAfterEmpty)", func() {
 		ExpectApplied(ctx, env.Client, machine, node, prov)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 
@@ -102,7 +102,7 @@ var _ = Describe("Empty Nodes (TTLSecondsAfterEmpty)", func() {
 		ExpectApplied(ctx, env.Client, machine, node, prov)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -162,7 +162,7 @@ var _ = Describe("Empty Nodes (Consolidation)", func() {
 		ExpectApplied(ctx, env.Client, machine1, node1, prov)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -183,7 +183,7 @@ var _ = Describe("Empty Nodes (Consolidation)", func() {
 		ExpectApplied(ctx, env.Client, machine1, node1, machine2, node2, prov)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
 
 		fakeClock.Step(10 * time.Minute)
 		wg := sync.WaitGroup{}
@@ -248,7 +248,7 @@ var _ = Describe("Empty Nodes (Consolidation)", func() {
 		ExpectManualBinding(ctx, env.Client, pod, node1)
 
 		// inform cluster state about nodes and machines
-		ExpectMakeInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
 
 		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 

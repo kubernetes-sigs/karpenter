@@ -118,7 +118,7 @@ var _ = Describe("ProvisionerUtils", func() {
 								v1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
 							},
 						},
-						KubeletConfiguration: &v1beta1.Kubelet{
+						Kubelet: &v1beta1.KubeletConfiguration{
 							ContainerRuntime: ptr.String("containerd"),
 							MaxPods:          ptr.Int32(110),
 							PodsPerCore:      ptr.Int32(10),
@@ -200,19 +200,19 @@ var _ = Describe("ProvisionerUtils", func() {
 		Expect(provisioner.Spec.StartupTaints).To(Equal(nodePool.Spec.Template.Spec.StartupTaints))
 		Expect(provisioner.Spec.Requirements).To(Equal(nodePool.Spec.Template.Spec.Requirements))
 
-		Expect(provisioner.Spec.KubeletConfiguration.ClusterDNS).To(Equal(nodePool.Spec.Template.Spec.KubeletConfiguration.ClusterDNS))
-		Expect(provisioner.Spec.KubeletConfiguration.ContainerRuntime).To(Equal(nodePool.Spec.Template.Spec.KubeletConfiguration.ContainerRuntime))
-		Expect(provisioner.Spec.KubeletConfiguration.MaxPods).To(Equal(nodePool.Spec.Template.Spec.KubeletConfiguration.MaxPods))
-		Expect(provisioner.Spec.KubeletConfiguration.PodsPerCore).To(Equal(nodePool.Spec.Template.Spec.KubeletConfiguration.PodsPerCore))
-		Expect(provisioner.Spec.KubeletConfiguration.SystemReserved).To(Equal(nodePool.Spec.Template.Spec.KubeletConfiguration.SystemReserved))
-		Expect(provisioner.Spec.KubeletConfiguration.KubeReserved).To(Equal(nodePool.Spec.Template.Spec.KubeletConfiguration.KubeReserved))
-		Expect(provisioner.Spec.KubeletConfiguration.EvictionHard).To(Equal(nodePool.Spec.Template.Spec.KubeletConfiguration.EvictionHard))
-		Expect(provisioner.Spec.KubeletConfiguration.EvictionSoft).To(Equal(nodePool.Spec.Template.Spec.KubeletConfiguration.EvictionSoft))
-		Expect(provisioner.Spec.KubeletConfiguration.EvictionSoftGracePeriod).To(Equal(nodePool.Spec.Template.Spec.KubeletConfiguration.EvictionSoftGracePeriod))
-		Expect(provisioner.Spec.KubeletConfiguration.EvictionMaxPodGracePeriod).To(Equal(nodePool.Spec.Template.Spec.KubeletConfiguration.EvictionMaxPodGracePeriod))
-		Expect(provisioner.Spec.KubeletConfiguration.ImageGCHighThresholdPercent).To(Equal(nodePool.Spec.Template.Spec.KubeletConfiguration.ImageGCHighThresholdPercent))
-		Expect(provisioner.Spec.KubeletConfiguration.ImageGCLowThresholdPercent).To(Equal(nodePool.Spec.Template.Spec.KubeletConfiguration.ImageGCLowThresholdPercent))
-		Expect(provisioner.Spec.KubeletConfiguration.CPUCFSQuota).To(Equal(nodePool.Spec.Template.Spec.KubeletConfiguration.CPUCFSQuota))
+		Expect(provisioner.Spec.KubeletConfiguration.ClusterDNS).To(Equal(nodePool.Spec.Template.Spec.Kubelet.ClusterDNS))
+		Expect(provisioner.Spec.KubeletConfiguration.ContainerRuntime).To(Equal(nodePool.Spec.Template.Spec.Kubelet.ContainerRuntime))
+		Expect(provisioner.Spec.KubeletConfiguration.MaxPods).To(Equal(nodePool.Spec.Template.Spec.Kubelet.MaxPods))
+		Expect(provisioner.Spec.KubeletConfiguration.PodsPerCore).To(Equal(nodePool.Spec.Template.Spec.Kubelet.PodsPerCore))
+		Expect(provisioner.Spec.KubeletConfiguration.SystemReserved).To(Equal(nodePool.Spec.Template.Spec.Kubelet.SystemReserved))
+		Expect(provisioner.Spec.KubeletConfiguration.KubeReserved).To(Equal(nodePool.Spec.Template.Spec.Kubelet.KubeReserved))
+		Expect(provisioner.Spec.KubeletConfiguration.EvictionHard).To(Equal(nodePool.Spec.Template.Spec.Kubelet.EvictionHard))
+		Expect(provisioner.Spec.KubeletConfiguration.EvictionSoft).To(Equal(nodePool.Spec.Template.Spec.Kubelet.EvictionSoft))
+		Expect(provisioner.Spec.KubeletConfiguration.EvictionSoftGracePeriod).To(Equal(nodePool.Spec.Template.Spec.Kubelet.EvictionSoftGracePeriod))
+		Expect(provisioner.Spec.KubeletConfiguration.EvictionMaxPodGracePeriod).To(Equal(nodePool.Spec.Template.Spec.Kubelet.EvictionMaxPodGracePeriod))
+		Expect(provisioner.Spec.KubeletConfiguration.ImageGCHighThresholdPercent).To(Equal(nodePool.Spec.Template.Spec.Kubelet.ImageGCHighThresholdPercent))
+		Expect(provisioner.Spec.KubeletConfiguration.ImageGCLowThresholdPercent).To(Equal(nodePool.Spec.Template.Spec.Kubelet.ImageGCLowThresholdPercent))
+		Expect(provisioner.Spec.KubeletConfiguration.CPUCFSQuota).To(Equal(nodePool.Spec.Template.Spec.Kubelet.CPUCFSQuota))
 
 		Expect(provisioner.Spec.ProviderRef.Kind).To(Equal(nodePool.Spec.Template.Spec.NodeClass.Kind))
 		Expect(provisioner.Spec.ProviderRef.APIVersion).To(Equal(nodePool.Spec.Template.Spec.NodeClass.APIVersion))

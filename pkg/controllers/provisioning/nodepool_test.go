@@ -117,7 +117,7 @@ var _ = Describe("Provisioning", func() {
 			Spec: v1beta1.NodePoolSpec{
 				Template: v1beta1.NodeClaimTemplate{
 					Spec: v1beta1.NodeClaimSpec{
-						KubeletConfiguration: &v1beta1.Kubelet{MaxPods: ptr.Int32(1)},
+						Kubelet: &v1beta1.KubeletConfiguration{MaxPods: ptr.Int32(1)},
 						Requirements: []v1.NodeSelectorRequirement{
 							{
 								Key:      v1.LabelInstanceTypeStable,

@@ -15,7 +15,6 @@ limitations under the License.
 package scheduling_test
 
 import (
-	"context"
 	"time"
 
 	. "github.com/onsi/gomega"
@@ -2298,16 +2297,6 @@ var _ = Describe("Topology", func() {
 		})
 	})
 })
-
-func ExpectDeleteAllUnscheduledPods(ctx2 context.Context, c client.Client) {
-	var pods v1.PodList
-	Expect(c.List(ctx2, &pods)).To(Succeed())
-	for i := range pods.Items {
-		if pods.Items[i].Spec.NodeName == "" {
-			ExpectDeleted(ctx2, c, &pods.Items[i])
-		}
-	}
-}
 
 var _ = Describe("Taints", func() {
 	var provisioner *v1alpha5.Provisioner

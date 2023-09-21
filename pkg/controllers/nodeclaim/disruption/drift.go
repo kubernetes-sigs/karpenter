@@ -37,6 +37,7 @@ import (
 
 const (
 	ProvisionerDrifted  cloudprovider.DriftReason = "ProvisionerDrifted"
+	NodePoolDrifted     cloudprovider.DriftReason = "NodePoolDrifted"
 	RequirementsDrifted cloudprovider.DriftReason = "RequirementsDrifted"
 )
 
@@ -123,7 +124,10 @@ func areStaticFieldsDrifted(nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeC
 		return ""
 	}
 	if nodePoolHash != nodeClaimHash {
-		return ProvisionerDrifted
+		if nodeClaim.IsMachine {
+			return ProvisionerDrifted
+		}
+		return NodePoolDrifted
 	}
 	return ""
 }
