@@ -13,9 +13,6 @@ spec:
     kind: NodePool
     listKind: NodePoolList
     plural: nodepools
-    shortNames:
-    - np
-    - nps
     singular: nodepool
   scope: Cluster
   versions:
@@ -30,7 +27,7 @@ spec:
     name: v1beta1
     schema:
       openAPIV3Schema:
-        description: NodePool is the Schema for the Provisioners API
+        description: NodePool is the Schema for the NodePools API
         properties:
           apiVersion:
             description: 'APIVersion defines the versioned schema of this representation

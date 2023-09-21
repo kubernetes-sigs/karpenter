@@ -140,7 +140,7 @@ type Provider = runtime.RawExtension
 
 // NodeClaim is the Schema for the NodeClaims API
 // +kubebuilder:object:root=true
-// +kubebuilder:resource:path=nodeclaims,scope=Cluster,categories=karpenter,shortName={nc,ncs}
+// +kubebuilder:resource:path=nodeclaims,scope=Cluster,categories=karpenter
 // +kubebuilder:subresource:status
 // +kubebuilder:storageversion
 // +kubebuilder:printcolumn:name="Type",type="string",JSONPath=".metadata.labels.node\\.kubernetes\\.io/instance-type",description=""
