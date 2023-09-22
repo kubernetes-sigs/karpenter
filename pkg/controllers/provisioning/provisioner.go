@@ -417,31 +417,141 @@ func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*v1.Pod, error) {
 		if pod == nil {
 			pod = &v1.Pod{Spec: d.Spec.Template.Spec}
 		} else {
-			mergedAffinity, _ := p.MergeAffinities(*d.Spec.Template.Spec.Affinity, *pod.Spec.Affinity)
-			pod.Spec.Affinity = &mergedAffinity
+			mergedAffinity := p.MergeAffinities(d.Spec.Template.Spec.Affinity, pod.Spec.Affinity)
+			pod.Spec.Affinity = mergedAffinity
 		}
 		return pod
 	}), nil
 }
 
-func (p *Provisioner) MergeAffinities(a1 v1.Affinity, a2 v1.Affinity) (v1.Affinity, error) {
-	mergedAffinity := v1.Affinity{
-		NodeAffinity: &v1.NodeAffinity{
-			RequiredDuringSchedulingIgnoredDuringExecution: &v1.NodeSelector{
-				NodeSelectorTerms: append(a1.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms, a2.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms...),
-			},
-			PreferredDuringSchedulingIgnoredDuringExecution: append(a1.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution, a2.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution...),
-		},
-		PodAffinity: &v1.PodAffinity{
-			RequiredDuringSchedulingIgnoredDuringExecution:  append(a1.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution, a2.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution...),
-			PreferredDuringSchedulingIgnoredDuringExecution: append(a1.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution, a2.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution...),
-		},
-		PodAntiAffinity: &v1.PodAntiAffinity{
-			RequiredDuringSchedulingIgnoredDuringExecution:  append(a1.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution, a2.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution...),
-			PreferredDuringSchedulingIgnoredDuringExecution: append(a1.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution, a2.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution...),
-		},
+func (p *Provisioner) MergeAffinities(left *v1.Affinity, right *v1.Affinity) *v1.Affinity {
+	if left == nil && right == nil {
+		return nil
+	} else if right == nil {
+		return left
+	} else if left == nil {
+		return right
 	}
-	return mergedAffinity, nil
+	mergedAffinity := v1.Affinity{}
+
+	mergedNodeAffinity := p.MergeNodeAffinities(left.NodeAffinity, right.NodeAffinity)
+	if mergedNodeAffinity != nil {
+		mergedAffinity.NodeAffinity = mergedNodeAffinity
+	}
+	mergedPodAffinity := p.MergePodAffinities(left.PodAffinity, right.PodAffinity)
+	if mergedPodAffinity != nil {
+		mergedAffinity.PodAffinity = mergedPodAffinity
+	}
+	mergedPodAntiAffinitiy := p.MergePodAntiAffinities(left.PodAntiAffinity, right.PodAntiAffinity)
+	if mergedPodAntiAffinitiy != nil {
+		mergedAffinity.PodAntiAffinity = mergedPodAntiAffinitiy
+	}
+
+	return &mergedAffinity
+}
+
+func (p *Provisioner) MergeNodeAffinities(left *v1.NodeAffinity, right *v1.NodeAffinity) *v1.NodeAffinity {
+	if left == nil && right == nil {
+		return nil
+	} else if left == nil {
+		return right
+	} else if right == nil {
+		return left
+	}
+	var mergedNodeSelectorTerms []v1.NodeSelectorTerm
+	if left.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		mergedNodeSelectorTerms = append(mergedNodeSelectorTerms, left.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms...)
+	}
+	if right.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		mergedNodeSelectorTerms = append(mergedNodeSelectorTerms, right.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms...)
+	}
+	var mergedNodeAffinityPreferredSchedulingTerms []v1.PreferredSchedulingTerm
+	if left.PreferredDuringSchedulingIgnoredDuringExecution != nil {
+		mergedNodeAffinityPreferredSchedulingTerms = append(mergedNodeAffinityPreferredSchedulingTerms, left.PreferredDuringSchedulingIgnoredDuringExecution...)
+	}
+	if right.PreferredDuringSchedulingIgnoredDuringExecution != nil {
+		mergedNodeAffinityPreferredSchedulingTerms = append(mergedNodeAffinityPreferredSchedulingTerms, right.PreferredDuringSchedulingIgnoredDuringExecution...)
+	}
+
+	merged := v1.NodeAffinity{
+		RequiredDuringSchedulingIgnoredDuringExecution:  nil,
+		PreferredDuringSchedulingIgnoredDuringExecution: nil,
+	}
+	if len(mergedNodeAffinityPreferredSchedulingTerms) > 0 {
+		merged.PreferredDuringSchedulingIgnoredDuringExecution = mergedNodeAffinityPreferredSchedulingTerms
+	}
+	if len(mergedNodeSelectorTerms) > 0 {
+		merged.RequiredDuringSchedulingIgnoredDuringExecution = &v1.NodeSelector{
+			NodeSelectorTerms: mergedNodeSelectorTerms,
+		}
+	}
+	return &merged
+}
+
+func (p *Provisioner) MergePodAffinities(left *v1.PodAffinity, right *v1.PodAffinity) *v1.PodAffinity {
+	if left == nil && right == nil {
+		return nil
+	} else if left == nil {
+		return right
+	} else if right == nil {
+		return left
+	}
+	var mergedPodAffinityTerms []v1.PodAffinityTerm
+	if left.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		mergedPodAffinityTerms = append(mergedPodAffinityTerms, left.RequiredDuringSchedulingIgnoredDuringExecution...)
+	}
+	if right.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		mergedPodAffinityTerms = append(mergedPodAffinityTerms, right.RequiredDuringSchedulingIgnoredDuringExecution...)
+	}
+	var mergedWeightedPodAffinityTerms []v1.WeightedPodAffinityTerm
+	if left.PreferredDuringSchedulingIgnoredDuringExecution != nil {
+		mergedWeightedPodAffinityTerms = append(mergedWeightedPodAffinityTerms, left.PreferredDuringSchedulingIgnoredDuringExecution...)
+	}
+	if right.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		mergedWeightedPodAffinityTerms = append(mergedWeightedPodAffinityTerms, right.PreferredDuringSchedulingIgnoredDuringExecution...)
+	}
+
+	merged := v1.PodAffinity{}
+	if len(mergedPodAffinityTerms) > 0 {
+		merged.RequiredDuringSchedulingIgnoredDuringExecution = mergedPodAffinityTerms
+	}
+	if len(mergedWeightedPodAffinityTerms) > 0 {
+		merged.PreferredDuringSchedulingIgnoredDuringExecution = mergedWeightedPodAffinityTerms
+	}
+	return &merged
+}
+
+func (p *Provisioner) MergePodAntiAffinities(left *v1.PodAntiAffinity, right *v1.PodAntiAffinity) *v1.PodAntiAffinity {
+	if left == nil && right == nil {
+		return nil
+	} else if left == nil {
+		return right
+	} else if right == nil {
+		return left
+	}
+	var mergedPodAffinityTerms []v1.PodAffinityTerm
+	if left.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		mergedPodAffinityTerms = append(mergedPodAffinityTerms, left.RequiredDuringSchedulingIgnoredDuringExecution...)
+	}
+	if right.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		mergedPodAffinityTerms = append(mergedPodAffinityTerms, right.RequiredDuringSchedulingIgnoredDuringExecution...)
+	}
+	var mergedWeightedPodAffinityTerms []v1.WeightedPodAffinityTerm
+	if left.PreferredDuringSchedulingIgnoredDuringExecution != nil {
+		mergedWeightedPodAffinityTerms = append(mergedWeightedPodAffinityTerms, left.PreferredDuringSchedulingIgnoredDuringExecution...)
+	}
+	if right.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		mergedWeightedPodAffinityTerms = append(mergedWeightedPodAffinityTerms, right.PreferredDuringSchedulingIgnoredDuringExecution...)
+	}
+
+	merged := v1.PodAntiAffinity{}
+	if len(mergedPodAffinityTerms) > 0 {
+		merged.RequiredDuringSchedulingIgnoredDuringExecution = mergedPodAffinityTerms
+	}
+	if len(mergedWeightedPodAffinityTerms) > 0 {
+		merged.PreferredDuringSchedulingIgnoredDuringExecution = mergedWeightedPodAffinityTerms
+	}
+	return &merged
 }
 
 func (p *Provisioner) Validate(ctx context.Context, pod *v1.Pod) error {

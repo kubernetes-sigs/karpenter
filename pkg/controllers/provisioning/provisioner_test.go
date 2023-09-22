@@ -17,8 +17,6 @@ package provisioning_test
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -539,37 +537,19 @@ var _ = Describe("Provisioning", func() {
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
 		})
 		It("should account for daemonset spec affinity ", func() {
-			cloudProviderTest := fake.NewCloudProvider()
-			instanceTypes := []*cloudprovider.InstanceType{
-				fake.NewInstanceType(fake.InstanceTypeOptions{
-					Name: "small-instance",
-					Resources: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:    resource.MustParse("2"),
-						v1.ResourceMemory: resource.MustParse("2Gi"),
-					},
-				}),
-			}
-			cloudProviderTest.InstanceTypes = instanceTypes
+			ExpectCleanedUp(ctx, env.Client)
+			cluster.Reset()
+
 			provisioner := test.Provisioner(test.ProvisionerOptions{
-				Provider: cloudProviderTest,
 				Labels: map[string]string{
 					"foo": "voo",
 				},
+				Limits: v1.ResourceList{
+					v1.ResourceCPU: resource.MustParse("2"),
+				},
 			})
 
-			cloudProviderDaemon := fake.NewCloudProvider()
-			instanceTypesDaemon := []*cloudprovider.InstanceType{
-				fake.NewInstanceType(fake.InstanceTypeOptions{
-					Name: "small-instance-daemon",
-					Resources: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:    resource.MustParse("4"),
-						v1.ResourceMemory: resource.MustParse("4Gi"),
-					},
-				}),
-			}
-			cloudProviderDaemon.InstanceTypes = instanceTypesDaemon
 			provisionerDaemonset := test.Provisioner(test.ProvisionerOptions{
-				Provider: cloudProviderDaemon,
 				Labels: map[string]string{
 					"foo": "bar",
 				},
@@ -607,6 +587,7 @@ var _ = Describe("Provisioning", func() {
 					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4"), v1.ResourceMemory: resource.MustParse("4Gi")}},
 				})
 			ExpectApplied(ctx, env.Client, daemonsetPod)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, daemonsetPod)
 			ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
 
 			//Deploy pod
@@ -617,6 +598,8 @@ var _ = Describe("Provisioning", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, provisioner, pod)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectScheduled(ctx, env.Client, pod)
 		})
 	})
 	Context("Annotations", func() {
