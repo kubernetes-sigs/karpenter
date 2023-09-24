@@ -46,6 +46,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
@@ -68,6 +69,7 @@ var provisioner *provisioning.Provisioner
 var cloudProvider *fake.CloudProvider
 var nodeStateController controller.Controller
 var machineStateController controller.Controller
+var nodeClaimStateController controller.Controller
 var fakeClock *clock.FakeClock
 var recorder *test.EventRecorder
 var onDemandInstances []*cloudprovider.InstanceType
@@ -90,6 +92,7 @@ var _ = BeforeSuite(func() {
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	machineStateController = informer.NewMachineController(env.Client, cluster)
+	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
 	provisioner = provisioning.NewProvisioner(env.Client, env.KubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
 	deprovisioningController = deprovisioning.NewController(fakeClock, env.Client, provisioner, cloudProvider, recorder, cluster)
@@ -3138,6 +3141,92 @@ func ExpectMakeNewMachinesReady(ctx context.Context, c client.Client, wg *sync.W
 				}
 			case <-ctx.Done():
 				Fail(fmt.Sprintf("waiting for machines to be ready, %s", ctx.Err()))
+			}
+		}
+	}()
+}
+
+// ExpectNewMachinesDeleted simulates the machines being created and then removed, similar to what would happen
+// during an ICE error on the created machine
+func ExpectNewNodeClaimsDeleted(ctx context.Context, c client.Client, wg *sync.WaitGroup, numNewNodeClaims int) {
+	existingNodeClaims := ExpectNodeClaims(ctx, c)
+	existingNodeClaimNames := sets.NewString(lo.Map(existingNodeClaims, func(nc *v1beta1.NodeClaim, _ int) string {
+		return nc.Name
+	})...)
+
+	wg.Add(1)
+	go func() {
+		nodeClaimsDeleted := 0
+		ctx, cancel := context.WithTimeout(ctx, time.Second*30) // give up after 30s
+		defer GinkgoRecover()
+		defer wg.Done()
+		defer cancel()
+		for {
+			select {
+			case <-time.After(50 * time.Millisecond):
+				nodeClaimList := &v1beta1.NodeClaimList{}
+				if err := c.List(ctx, nodeClaimList); err != nil {
+					continue
+				}
+				for i := range nodeClaimList.Items {
+					m := &nodeClaimList.Items[i]
+					if existingNodeClaimNames.Has(m.Name) {
+						continue
+					}
+					ExpectWithOffset(1, client.IgnoreNotFound(c.Delete(ctx, m))).To(Succeed())
+					nodeClaimsDeleted++
+					if nodeClaimsDeleted == numNewNodeClaims {
+						return
+					}
+				}
+			case <-ctx.Done():
+				Fail(fmt.Sprintf("waiting for nodeclaims to be deleted, %s", ctx.Err()))
+			}
+		}
+	}()
+}
+
+func ExpectMakeNewNodeClaimsReady(ctx context.Context, c client.Client, wg *sync.WaitGroup, cluster *state.Cluster,
+	cloudProvider cloudprovider.CloudProvider, numNewNodeClaims int) {
+	GinkgoHelper()
+
+	existingNodeClaims := ExpectNodeClaims(ctx, c)
+	existingNodeClaimNames := sets.NewString(lo.Map(existingNodeClaims, func(nc *v1beta1.NodeClaim, _ int) string {
+		return nc.Name
+	})...)
+
+	wg.Add(1)
+	go func() {
+		nodeClaimsMadeReady := 0
+		ctx, cancel := context.WithTimeout(ctx, time.Second*10) // give up after 10s
+		defer GinkgoRecover()
+		defer wg.Done()
+		defer cancel()
+		for {
+			select {
+			case <-time.After(50 * time.Millisecond):
+				nodeClaimList := &v1beta1.NodeClaimList{}
+				if err := c.List(ctx, nodeClaimList); err != nil {
+					continue
+				}
+				for i := range nodeClaimList.Items {
+					nc := &nodeClaimList.Items[i]
+					if existingNodeClaimNames.Has(nc.Name) {
+						continue
+					}
+					nc, n := ExpectNodeClaimDeployed(ctx, c, cluster, cloudProvider, nc)
+					ExpectMakeNodeClaimsInitialized(ctx, c, nc)
+					ExpectMakeNodesInitialized(ctx, c, n)
+
+					nodeClaimsMadeReady++
+					existingNodeClaimNames.Insert(nc.Name)
+					// did we make all the nodes ready that we expected?
+					if nodeClaimsMadeReady == numNewNodeClaims {
+						return
+					}
+				}
+			case <-ctx.Done():
+				Fail(fmt.Sprintf("waiting for nodeclaims to be ready, %s", ctx.Err()))
 			}
 		}
 	}()
