@@ -37,7 +37,7 @@ import (
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
-var _ = Describe("Expiration", func() {
+var _ = Describe("Machine/Expiration", func() {
 	var prov *v1alpha5.Provisioner
 	var machine *v1alpha5.Machine
 	var node *v1.Node

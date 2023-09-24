@@ -100,8 +100,7 @@ func (c *consolidation) ShouldDeprovision(_ context.Context, cn *Candidate) bool
 		return false
 	}
 	if cn.nodePool.Spec.Disruption.ConsolidationPolicy != v1beta1.ConsolidationPolicyWhenUnderutilized ||
-		cn.nodePool.Spec.Disruption.ConsolidateAfter == nil ||
-		cn.nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
+		(cn.nodePool.Spec.Disruption.ConsolidateAfter != nil && cn.nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil) {
 		c.recorder.Publish(deprovisioningevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s %q has consolidation disabled", lo.Ternary(cn.nodePool.IsProvisioner, "Provisioner", "NodePool"), cn.nodePool.Name))...)
 		return false
 	}
