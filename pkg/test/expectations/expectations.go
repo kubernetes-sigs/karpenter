@@ -387,7 +387,8 @@ func ExpectNodeClaimDeployed(ctx context.Context, c client.Client, cluster *stat
 }
 
 func ExpectMachinesCascadeDeletion(ctx context.Context, c client.Client, machines ...*v1alpha5.Machine) {
-	nodes := ExpectNodesWithOffset(1, ctx, c)
+	GinkgoHelper()
+	nodes := ExpectNodes(ctx, c)
 	for _, machine := range machines {
 		err := c.Get(ctx, client.ObjectKeyFromObject(machine), &v1alpha5.Machine{})
 		if !errors.IsNotFound(err) {
@@ -395,6 +396,24 @@ func ExpectMachinesCascadeDeletion(ctx context.Context, c client.Client, machine
 		}
 		for _, node := range nodes {
 			if node.Spec.ProviderID == machine.Status.ProviderID {
+				Expect(c.Delete(ctx, node))
+				ExpectFinalizersRemoved(ctx, c, node)
+				ExpectNotFound(ctx, c, node)
+			}
+		}
+	}
+}
+
+func ExpectNodeClaimsCascadeDeletion(ctx context.Context, c client.Client, nodeClaims ...*v1beta1.NodeClaim) {
+	GinkgoHelper()
+	nodes := ExpectNodes(ctx, c)
+	for _, nodeClaim := range nodeClaims {
+		err := c.Get(ctx, client.ObjectKeyFromObject(nodeClaim), &v1beta1.NodeClaim{})
+		if !errors.IsNotFound(err) {
+			continue
+		}
+		for _, node := range nodes {
+			if node.Spec.ProviderID == nodeClaim.Status.ProviderID {
 				Expect(c.Delete(ctx, node))
 				ExpectFinalizersRemoved(ctx, c, node)
 				ExpectNotFound(ctx, c, node)
@@ -578,27 +597,24 @@ func ExpectResources(expected, real v1.ResourceList) {
 }
 
 func ExpectNodes(ctx context.Context, c client.Client) []*v1.Node {
-	return ExpectNodesWithOffset(1, ctx, c)
-}
-
-func ExpectNodesWithOffset(offset int, ctx context.Context, c client.Client) []*v1.Node {
+	GinkgoHelper()
 	nodeList := &v1.NodeList{}
-	ExpectWithOffset(offset+1, c.List(ctx, nodeList)).To(Succeed())
-	return lo.Map(nodeList.Items, func(n v1.Node, _ int) *v1.Node {
-		return &n
-	})
+	Expect(c.List(ctx, nodeList)).To(Succeed())
+	return lo.ToSlicePtr(nodeList.Items)
 }
 
 func ExpectMachines(ctx context.Context, c client.Client) []*v1alpha5.Machine {
-	return ExpectMachinesWithOffset(1, ctx, c)
+	GinkgoHelper()
+	machineList := &v1alpha5.MachineList{}
+	Expect(c.List(ctx, machineList)).To(Succeed())
+	return lo.ToSlicePtr(machineList.Items)
 }
 
-func ExpectMachinesWithOffset(offset int, ctx context.Context, c client.Client) []*v1alpha5.Machine {
-	machineList := &v1alpha5.MachineList{}
-	ExpectWithOffset(offset+1, c.List(ctx, machineList)).To(Succeed())
-	return lo.Map(machineList.Items, func(m v1alpha5.Machine, _ int) *v1alpha5.Machine {
-		return &m
-	})
+func ExpectNodeClaims(ctx context.Context, c client.Client) []*v1beta1.NodeClaim {
+	GinkgoHelper()
+	nodeClaims := &v1beta1.NodeClaimList{}
+	Expect(c.List(ctx, nodeClaims)).To(Succeed())
+	return lo.ToSlicePtr(nodeClaims.Items)
 }
 
 func ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx context.Context, c client.Client, nodeStateController, machineStateController controller.Controller, nodes []*v1.Node, machines []*v1alpha5.Machine) {
