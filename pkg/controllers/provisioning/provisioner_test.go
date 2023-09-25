@@ -584,6 +584,13 @@ var _ = Describe("Provisioning", func() {
 							},
 						},
 					},
+					NodeRequirements: []v1.NodeSelectorRequirement{
+						{
+							Key:      metav1.ObjectNameField,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"node-name"},
+						},
+					},
 					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4"), v1.ResourceMemory: resource.MustParse("4Gi")}},
 				})
 			ExpectApplied(ctx, env.Client, daemonsetPod)
