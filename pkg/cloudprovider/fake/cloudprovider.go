@@ -27,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -38,7 +39,8 @@ import (
 var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)
 
 type CloudProvider struct {
-	InstanceTypes []*cloudprovider.InstanceType
+	InstanceTypes            []*cloudprovider.InstanceType
+	InstanceTypesForNodePool map[string][]*cloudprovider.InstanceType
 
 	mu sync.RWMutex
 	// CreateCalls contains the arguments for every create call that was made since it was cleared
@@ -53,8 +55,9 @@ type CloudProvider struct {
 
 func NewCloudProvider() *CloudProvider {
 	return &CloudProvider{
-		AllowedCreateCalls: math.MaxInt,
-		CreatedNodeClaims:  map[string]*v1beta1.NodeClaim{},
+		AllowedCreateCalls:       math.MaxInt,
+		CreatedNodeClaims:        map[string]*v1beta1.NodeClaim{},
+		InstanceTypesForNodePool: map[string][]*cloudprovider.InstanceType{},
 	}
 }
 
@@ -64,6 +67,7 @@ func (c *CloudProvider) Reset() {
 	defer c.mu.Unlock()
 	c.CreateCalls = []*v1beta1.NodeClaim{}
 	c.CreatedNodeClaims = map[string]*v1beta1.NodeClaim{}
+	c.InstanceTypesForNodePool = map[string][]*cloudprovider.InstanceType{}
 	c.AllowedCreateCalls = math.MaxInt
 	c.NextCreateErr = nil
 	c.DeleteCalls = []*v1beta1.NodeClaim{}
@@ -85,7 +89,8 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 		return &v1beta1.NodeClaim{}, fmt.Errorf("erroring as number of AllowedCreateCalls has been exceeded")
 	}
 	reqs := scheduling.NewNodeSelectorRequirements(nodeClaim.Spec.Requirements...)
-	instanceTypes := lo.Filter(lo.Must(c.GetInstanceTypes(ctx, nil)), func(i *cloudprovider.InstanceType, _ int) bool {
+	np := &v1beta1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: nodeClaim.Labels[lo.Ternary(nodeClaim.IsMachine, v1alpha5.ProvisionerNameLabelKey, v1beta1.NodePoolLabelKey)]}}
+	instanceTypes := lo.Filter(lo.Must(c.GetInstanceTypes(ctx, np)), func(i *cloudprovider.InstanceType, _ int) bool {
 		return reqs.Compatible(i.Requirements, scheduling.AllowUndefinedWellKnownLabelsV1Alpha5) == nil &&
 			len(i.Offerings.Requirements(reqs).Available()) > 0 &&
 			resources.Fits(nodeClaim.Spec.Resources.Requests, i.Allocatable())
@@ -152,7 +157,12 @@ func (c *CloudProvider) List(_ context.Context) ([]*v1beta1.NodeClaim, error) {
 	}), nil
 }
 
-func (c *CloudProvider) GetInstanceTypes(_ context.Context, _ *v1beta1.NodePool) ([]*cloudprovider.InstanceType, error) {
+func (c *CloudProvider) GetInstanceTypes(_ context.Context, np *v1beta1.NodePool) ([]*cloudprovider.InstanceType, error) {
+	if np != nil {
+		if v, ok := c.InstanceTypesForNodePool[np.Name]; ok {
+			return v, nil
+		}
+	}
 	if c.InstanceTypes != nil {
 		return c.InstanceTypes, nil
 	}
