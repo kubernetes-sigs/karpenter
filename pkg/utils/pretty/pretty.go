@@ -16,6 +16,8 @@ package pretty
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 )
 
 func Concise(o interface{}) string {
@@ -24,4 +26,20 @@ func Concise(o interface{}) string {
 		return err.Error()
 	}
 	return string(bytes)
+}
+
+// Slice truncates a slice after a certain number of max items to ensure
+// that the Slice isn't too long
+func Slice[T any](s []T, maxItems int) string {
+	var sb strings.Builder
+	for i, elem := range s {
+		if i > maxItems-1 {
+			fmt.Fprintf(&sb, " and %d other(s)", len(s)-i)
+			break
+		} else if i > 0 {
+			fmt.Fprint(&sb, ", ")
+		}
+		fmt.Fprint(&sb, elem)
+	}
+	return sb.String()
 }
