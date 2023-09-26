@@ -536,10 +536,7 @@ var _ = Describe("Provisioning", func() {
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
 		})
-		It("should account for daemonset spec affinity ", func() {
-			ExpectCleanedUp(ctx, env.Client)
-			cluster.Reset()
-
+		It("should account for daemonset spec affinity", func() {
 			provisioner := test.Provisioner(test.ProvisionerOptions{
 				Labels: map[string]string{
 					"foo": "voo",
