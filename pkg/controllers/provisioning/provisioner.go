@@ -416,17 +416,15 @@ func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*v1.Pod, error) {
 		pod := p.cluster.GetDaemonSetPod(&d)
 		if pod == nil {
 			pod = &v1.Pod{Spec: d.Spec.Template.Spec}
-		} else if pod.Spec.Affinity != nil && pod.Spec.Affinity.NodeAffinity != nil &&
-			d.Spec.Template.Spec.Affinity != nil &&
-			d.Spec.Template.Spec.Affinity.NodeAffinity != nil &&
-			d.Spec.Template.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
-
-			nodeAffinity := pod.Spec.Affinity.NodeAffinity
-			if nodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
-				nodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = d.Spec.Template.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
-			} else {
-				nodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = d.Spec.Template.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+		}
+		if d.Spec.Template.Spec.Affinity != nil && d.Spec.Template.Spec.Affinity.NodeAffinity != nil && d.Spec.Template.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+			if pod.Spec.Affinity == nil {
+				pod.Spec.Affinity = &v1.Affinity{}
 			}
+			if pod.Spec.Affinity.NodeAffinity == nil {
+				pod.Spec.Affinity.NodeAffinity = &v1.NodeAffinity{}
+			}
+			pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = d.Spec.Template.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
 		}
 		return pod
 	}), nil
