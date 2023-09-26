@@ -34,6 +34,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
+	"github.com/aws/karpenter-core/pkg/utils/pretty"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
@@ -208,7 +209,14 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 	if newCount == 0 {
 		return
 	}
-	logging.FromContext(ctx).With("pods", len(pods)).Infof("found provisionable pod(s)")
+	var podNames []string
+	for _, p := range pods {
+		podNames = append(podNames, fmt.Sprintf("%s/%s", p.Namespace, p.Name))
+	}
+
+	logging.FromContext(ctx).With("pods", pretty.Slice(podNames, 5)).
+		Infof("found provisionable pod(s)")
+
 	logging.FromContext(ctx).With("machines", len(s.newNodeClaims), "pods", newCount).Infof("computed new machine(s) to fit pod(s)")
 	// Report in flight newNodes, or exit to avoid log spam
 	inflightCount := 0
