@@ -21,10 +21,11 @@ import (
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"knative.dev/pkg/system"
 
@@ -44,20 +45,6 @@ func GetOptions(ctx context.Context) options.Options {
 		return options.Options{}
 	}
 	return retval.(options.Options)
-}
-
-type configKey struct{}
-
-func WithConfig(ctx context.Context, config *rest.Config) context.Context {
-	return context.WithValue(ctx, configKey{}, config)
-}
-
-func GetConfig(ctx context.Context) *rest.Config {
-	retval := ctx.Value(configKey{})
-	if retval == nil {
-		return nil
-	}
-	return retval.(*rest.Config)
 }
 
 type controllerNameKeyType struct{}
@@ -89,22 +76,28 @@ func WithSettingsOrDie(ctx context.Context, kubernetesInterface kubernetes.Inter
 	factory.Start(cancelCtx.Done())
 
 	for _, setting := range settings {
-		cm := lo.Must(waitForConfigMap(ctx, setting.ConfigMap(), informer))
+		cm := lo.Must(WaitForConfigMap(ctx, setting.ConfigMap(), informer))
 		ctx = lo.Must(setting.Inject(ctx, cm))
 	}
 	return ctx
 }
 
-// waitForConfigMap waits until all registered configMaps in the settingsStore are created
-func waitForConfigMap(ctx context.Context, name string, informer cache.SharedIndexInformer) (*v1.ConfigMap, error) {
+// WaitForConfigMap waits until all registered configMaps are created or the passed-through context is canceled
+func WaitForConfigMap(ctx context.Context, name string, informer cache.SharedIndexInformer) (*v1.ConfigMap, error) {
 	for {
+		var existed bool
 		configMap, exists, err := informer.GetStore().GetByKey(types.NamespacedName{Namespace: system.Namespace(), Name: name}.String())
 		if configMap != nil && exists && err == nil {
 			return configMap.(*v1.ConfigMap), nil
 		}
+		existed = existed || exists
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("context canceled")
+			if existed {
+				// return the last seen error
+				return nil, fmt.Errorf("context canceled, %w", err)
+			}
+			return nil, fmt.Errorf("context canceled, %w", errors.NewNotFound(schema.GroupResource{Resource: "configmaps"}, types.NamespacedName{Namespace: system.Namespace(), Name: name}.String()))
 		case <-time.After(time.Millisecond * 500):
 		}
 	}
