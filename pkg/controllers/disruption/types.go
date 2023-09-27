@@ -28,6 +28,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	disruptionevents "github.com/aws/karpenter-core/pkg/controllers/disruption/events"
+	"github.com/aws/karpenter-core/pkg/controllers/disruption/orchestration"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
@@ -58,7 +59,7 @@ type Candidate struct {
 
 //nolint:gocyclo
 func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode,
-	nodePoolMap map[nodepoolutil.Key]*v1beta1.NodePool, nodePoolToInstanceTypesMap map[nodepoolutil.Key]map[string]*cloudprovider.InstanceType) (*Candidate, error) {
+	nodePoolMap map[nodepoolutil.Key]*v1beta1.NodePool, nodePoolToInstanceTypesMap map[nodepoolutil.Key]map[string]*cloudprovider.InstanceType, queue *orchestration.Queue) (*Candidate, error) {
 
 	if node.Node == nil || node.NodeClaim == nil {
 		return nil, fmt.Errorf("state node doesn't contain both a node and a nodeclaim")
@@ -70,6 +71,11 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	// skip candidates that aren't initialized
 	if !node.Initialized() {
 		return nil, fmt.Errorf("state node isn't initialized")
+	}
+	// If the orchestration queue is already considering a candidate we want to deprovision, don't consider it a candidate.
+	if err := queue.CanAdd(node.Name()); err != nil {
+		recorder.Publish(deprovisioningevents.Blocked(node.Node, node.NodeClaim, "Already being disrupted")...)
+		return nil, fmt.Errorf("candidate(s) are in an active deprovisioning command, %w", err)
 	}
 	if _, ok := node.Annotations()[v1beta1.DoNotDisruptAnnotationKey]; ok {
 		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Disruption is blocked with the %q annotation", v1beta1.DoNotDisruptAnnotationKey))...)
@@ -112,6 +118,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		logging.FromContext(ctx).Errorf("Determining node pods, %s", err)
 		return nil, fmt.Errorf("getting pods from state node, %w", err)
 	}
+
 	cn := &Candidate{
 		StateNode:    node.DeepCopy(),
 		instanceType: instanceType,
@@ -120,6 +127,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		zone:         node.Labels()[v1.LabelTopologyZone],
 		pods:         pods,
 	}
+
 	cn.disruptionCost = disruptionCost(ctx, pods) * cn.lifetimeRemaining(clk)
 	return cn, nil
 }
@@ -139,8 +147,8 @@ func (c *Candidate) lifetimeRemaining(clock clock.Clock) float64 {
 }
 
 type Command struct {
-	candidates   []*Candidate
-	replacements []*scheduling.NodeClaim
+	Candidates   []*Candidate
+	Replacements []*scheduling.NodeClaim
 }
 
 type Action string
@@ -153,9 +161,9 @@ var (
 
 func (o Command) Action() Action {
 	switch {
-	case len(o.candidates) > 0 && len(o.replacements) > 0:
+	case len(o.Candidates) > 0 && len(o.Replacements) > 0:
 		return ReplaceAction
-	case len(o.candidates) > 0 && len(o.replacements) == 0:
+	case len(o.Candidates) > 0 && len(o.Replacements) == 0:
 		return DeleteAction
 	default:
 		return NoOpAction
@@ -164,8 +172,8 @@ func (o Command) Action() Action {
 
 func (o Command) String() string {
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "%s, terminating %d candidates ", o.Action(), len(o.candidates))
-	for i, old := range o.candidates {
+	fmt.Fprintf(&buf, "%s, terminating %d candidates ", o.Action(), len(o.Candidates))
+	for i, old := range o.Candidates {
 		if i != 0 {
 			fmt.Fprint(&buf, ", ")
 		}
@@ -173,12 +181,12 @@ func (o Command) String() string {
 		fmt.Fprintf(&buf, "/%s", old.instanceType.Name)
 		fmt.Fprintf(&buf, "/%s", old.capacityType)
 	}
-	if len(o.replacements) == 0 {
+	if len(o.Replacements) == 0 {
 		return buf.String()
 	}
 	odNodeClaims := 0
 	spotNodeClaims := 0
-	for _, nodeClaim := range o.replacements {
+	for _, nodeClaim := range o.Replacements {
 		ct := nodeClaim.Requirements.Get(v1beta1.CapacityTypeLabelKey)
 		if ct.Has(v1beta1.CapacityTypeOnDemand) {
 			odNodeClaims++
@@ -188,19 +196,19 @@ func (o Command) String() string {
 		}
 	}
 	// Print list of instance types for the first replacements.
-	if len(o.replacements) > 1 {
+	if len(o.Replacements) > 1 {
 		fmt.Fprintf(&buf, " and replacing with %d spot and %d on-demand, from types %s",
 			spotNodeClaims, odNodeClaims,
-			scheduling.InstanceTypeList(o.replacements[0].InstanceTypeOptions))
+			scheduling.InstanceTypeList(o.Replacements[0].InstanceTypeOptions))
 		return buf.String()
 	}
-	ct := o.replacements[0].Requirements.Get(v1beta1.CapacityTypeLabelKey)
+	ct := o.Replacements[0].Requirements.Get(v1beta1.CapacityTypeLabelKey)
 	nodeDesc := "node"
 	if ct.Len() == 1 {
 		nodeDesc = fmt.Sprintf("%s node", ct.Any())
 	}
 	fmt.Fprintf(&buf, " and replacing with %s from types %s",
 		nodeDesc,
-		scheduling.InstanceTypeList(o.replacements[0].InstanceTypeOptions))
+		scheduling.InstanceTypeList(o.Replacements[0].InstanceTypeOptions))
 	return buf.String()
 }

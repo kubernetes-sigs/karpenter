@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package disruption
+package deprovisioning
 
 import (
 	"context"
@@ -73,7 +73,7 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 		case <-v.clock.After(waitDuration):
 		}
 	}
-	validationCandidates, err := GetCandidates(ctx, v.cluster, v.kubeClient, v.recorder, v.clock, v.cloudProvider, v.ShouldDisrupt)
+	validationCandidates, err := GetCandidates(ctx, v.cluster, v.kubeClient, v.recorder, v.clock, v.cloudProvider, v.ShouldDeprovision)
 	if err != nil {
 		return false, fmt.Errorf("constructing validation candidates, %w", err)
 	}
@@ -111,7 +111,7 @@ func (v *Validation) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 	return c.nodePool.Spec.Disruption.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenUnderutilized
 }
 
-// ValidateCommand validates a command for a Method
+// ValidateCommand validates a command for a deprovisioner
 func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidates []*Candidate) (bool, error) {
 	// None of the chosen candidate are valid for execution, so retry
 	if len(candidates) == 0 {

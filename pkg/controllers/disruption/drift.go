@@ -85,7 +85,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, candidates ...*Candidate) (C
 		return len(c.pods) == 0
 	}); len(empty) > 0 {
 		return Command{
-			candidates: empty,
+			Candidates: empty,
 		}, nil
 	}
 
@@ -106,12 +106,12 @@ func (d *Drift) ComputeCommand(ctx context.Context, candidates ...*Candidate) (C
 		}
 		if len(results.NewNodeClaims) == 0 {
 			return Command{
-				candidates: []*Candidate{candidate},
+				Candidates: []*Candidate{candidate},
 			}, nil
 		}
 		return Command{
-			candidates:   []*Candidate{candidate},
-			replacements: results.NewNodeClaims,
+			Candidates:   []*Candidate{candidate},
+			Replacements: results.NewNodeClaims,
 		}, nil
 	}
 	return Command{}, nil

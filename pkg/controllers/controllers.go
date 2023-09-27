@@ -21,6 +21,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/disruption"
+	"github.com/aws/karpenter-core/pkg/controllers/disruption/orchestration"
 	"github.com/aws/karpenter-core/pkg/controllers/leasegarbagecollection"
 	metricsnode "github.com/aws/karpenter-core/pkg/controllers/metrics/node"
 	metricsnodepool "github.com/aws/karpenter-core/pkg/controllers/metrics/nodepool"
@@ -55,7 +56,7 @@ func NewControllers(
 
 	return []controller.Controller{
 		p, evictionQueue,
-		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster),
+		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, orchestration.NewQueue(kubeClient, recorder, cluster)),
 		provisioning.NewController(kubeClient, p, recorder),
 		nodepoolhash.NewNodePoolController(kubeClient),
 		informer.NewDaemonSetController(kubeClient, cluster),

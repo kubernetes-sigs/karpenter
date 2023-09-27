@@ -29,6 +29,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning/orchestration"
 	disruptionevents "github.com/aws/karpenter-core/pkg/controllers/disruption/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -42,6 +43,8 @@ const consolidationTTL = 15 * time.Second
 // consolidation is the base consolidation controller that provides common functionality used across the different
 // consolidation methods.
 type consolidation struct {
+	// Consolidation needs to be aware of the queue for validation
+	queue                  *orchestration.Queue
 	clock                  clock.Clock
 	cluster                *state.Cluster
 	kubeClient             client.Client
@@ -52,8 +55,9 @@ type consolidation struct {
 }
 
 func makeConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) consolidation {
+	cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, queue *orchestration.Queue) consolidation {
 	return consolidation{
+		queue:         queue,
 		clock:         clock,
 		cluster:       cluster,
 		kubeClient:    kubeClient,
@@ -127,7 +131,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	// were we able to schedule all the pods on the inflight candidates?
 	if len(results.NewNodeClaims) == 0 {
 		return Command{
-			candidates: candidates,
+			Candidates: candidates,
 		}, nil
 	}
 
@@ -182,8 +186,8 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	}
 
 	return Command{
-		candidates:   candidates,
-		replacements: results.NewNodeClaims,
+		Candidates:   candidates,
+		Replacements: results.NewNodeClaims,
 	}, nil
 }
 

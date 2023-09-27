@@ -20,7 +20,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/avast/retry-go"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
@@ -41,19 +40,20 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
+	"github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
 
 type Controller struct {
-	kubeClient    client.Client
-	cluster       *state.Cluster
-	provisioner   *provisioning.Provisioner
-	recorder      events.Recorder
-	clock         clock.Clock
-	cloudProvider cloudprovider.CloudProvider
-	methods       []Method
-	mu            sync.Mutex
-	lastRun       map[string]time.Time
+	Queue          *orchestration.Queue
+	kubeClient     client.Client
+	cluster        *state.Cluster
+	provisioner    *provisioning.Provisioner
+	recorder       events.Recorder
+	clock          clock.Clock
+	cloudProvider  cloudprovider.CloudProvider
+	deprovisioners []Deprovisioner
+	mu             sync.Mutex
+	lastRun        map[string]time.Time
 }
 
 // pollingPeriod that we inspect cluster to look for opportunities to disrupt
@@ -61,23 +61,11 @@ const pollingPeriod = 10 * time.Second
 
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 
-// waitRetryOptions are the retry options used when waiting on a NodeClaim to become ready or to be deleted
-// readiness can take some time as the node needs to come up, have any daemonset extended resoruce plugins register, etc.
-// deletion can take some time in the case of restrictive PDBs that throttle the rate at which the node is drained
-func waitRetryOptions(ctx context.Context) []retry.Option {
-	return []retry.Option{
-		retry.Context(ctx),
-		retry.Delay(2 * time.Second),
-		retry.LastErrorOnly(true),
-		retry.Attempts(60),
-		retry.MaxDelay(10 * time.Second), // 22 + (60-5)*10 =~ 9.5 minutes in total
-	}
-}
-
 func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster) *Controller {
+	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *orchestration.Queue) *Controller {
 
 	return &Controller{
+		Queue:         queue,
 		clock:         clk,
 		kubeClient:    kubeClient,
 		cluster:       cluster,
@@ -198,19 +186,16 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 	for _, candidate := range cmd.candidates {
 		c.recorder.Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, reason)...)
 
-		if err := nodeclaimutil.Delete(ctx, c.kubeClient, candidate.NodeClaim); err != nil {
-			if !errors.IsNotFound(err) {
-				logging.FromContext(ctx).Errorf("terminating, %s", err)
-			}
-			continue
-		}
-		nodeclaimutil.TerminatedCounter(candidate.NodeClaim, reason).Inc()
-	}
+	// We have the new NodeClaims created at the API server so mark the old NodeClaims for deletion
+	c.cluster.MarkForDeletion(candidateProviderIDs...)
 
-	// We wait for NodeClaims to delete to ensure we don't start another round of disruption
-	// until this node is fully deleted.
-	for _, oldCandidate := range cmd.candidates {
-		c.waitForDeletion(ctx, oldCandidate.NodeClaim)
+	if err := c.Queue.Add(orchestration.CommandItem{
+		ReplacementKeys: nodeClaimKeys,
+		Candidates:      lo.Map(cmd.Candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode }),
+		Reason:          reason,
+	}); err != nil {
+		c.cluster.UnmarkForDeletion(candidateProviderIDs...)
+		return fmt.Errorf("adding command to queue, %w", err)
 	}
 	return nil
 }
@@ -311,6 +296,7 @@ func (c *Controller) waitForDeletion(ctx context.Context, nodeClaim *v1beta1.Nod
 	); err != nil {
 		logging.FromContext(ctx).Errorf("Waiting on node deletion, %s", err)
 	}
+	return nodeClaimKeys, nil
 }
 
 // requireNoScheduleTaint will add/remove the karpenter.sh/disruption:NoSchedule taint from the candidates.
