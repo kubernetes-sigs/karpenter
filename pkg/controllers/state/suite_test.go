@@ -24,6 +24,7 @@ import (
 
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	volumehelpers "k8s.io/component-helpers/storage/volume"
 	clock "k8s.io/utils/clock/testing"
 	"knative.dev/pkg/ptr"
 
@@ -105,7 +106,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 	var nodeClaim *v1beta1.NodeClaim
 	var node *v1.Node
 	var csiNode *storagev1.CSINode
-	var sc *storagev1.StorageClass
+	var staticSc, dynamicSc *storagev1.StorageClass
 	BeforeEach(func() {
 		instanceType := cloudProvider.InstanceTypes[0]
 		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
@@ -117,10 +118,14 @@ var _ = Describe("Volume Usage/Limits", func() {
 				ProviderID: test.RandomProviderID(),
 			},
 		})
-		sc = test.StorageClass(test.StorageClassOptions{
+		dynamicSc = test.StorageClass(test.StorageClassOptions{
 			ObjectMeta:  metav1.ObjectMeta{Name: "my-storage-class"},
 			Provisioner: ptr.String(csiProvider),
 			Zones:       []string{"test-zone-1"},
+		})
+		staticSc = test.StorageClass(test.StorageClassOptions{
+			ObjectMeta:  metav1.ObjectMeta{Name: "local-storage"},
+			Provisioner: ptr.String(volumehelpers.NotSupportedProvisioner),
 		})
 		csiNode = &storagev1.CSINode{
 			ObjectMeta: metav1.ObjectMeta{
@@ -140,15 +145,22 @@ var _ = Describe("Volume Usage/Limits", func() {
 		}
 	})
 	It("should hydrate the volume usage on a Node update", func() {
-		ExpectApplied(ctx, env.Client, sc, node, csiNode)
+		ExpectApplied(ctx, env.Client, staticSc, dynamicSc, node, csiNode)
 		for i := 0; i < 10; i++ {
-			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-				StorageClassName: ptr.String(sc.Name),
+			staticPv := test.PersistentVolume(test.PersistentVolumeOptions{
+				StorageClassName: staticSc.Name,
+				LocalNode:        node.Name,
+			})
+			staticPvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				StorageClassName: ptr.String(staticSc.Name),
+			})
+			dynamicPvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				StorageClassName: ptr.String(dynamicSc.Name),
 			})
 			pod := test.Pod(test.PodOptions{
-				PersistentVolumeClaims: []string{pvc.Name},
+				PersistentVolumeClaims: []string{staticPvc.Name, dynamicPvc.Name},
 			})
-			ExpectApplied(ctx, env.Client, pvc, pod)
+			ExpectApplied(ctx, env.Client, staticPv, staticPvc, dynamicPvc, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 		}
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
@@ -156,52 +168,87 @@ var _ = Describe("Volume Usage/Limits", func() {
 		stateNode := ExpectStateNodeExists(cluster, node)
 
 		// Adding more volumes should cause an error since we are at the volume limits
-		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.Volumes{
-			csiProvider: sets.New("test"),
+		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.VolumeTypes{
+			Dynamic: scheduling.Volumes{
+				dynamicSc.Provisioner: sets.New("test"),
+			},
+		})).ToNot(BeNil())
+		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.VolumeTypes{
+			Static: scheduling.Volumes{
+				staticSc.Name: sets.New("test"),
+			},
 		})).ToNot(BeNil())
 	})
 	It("should maintain the volume usage state when receiving NodeClaim updates", func() {
-		ExpectApplied(ctx, env.Client, sc, nodeClaim, node, csiNode)
+		ExpectApplied(ctx, env.Client, staticSc, dynamicSc, node, csiNode)
 		for i := 0; i < 10; i++ {
-			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-				StorageClassName: ptr.String(sc.Name),
+			staticPv := test.PersistentVolume(test.PersistentVolumeOptions{
+				StorageClassName: staticSc.Name,
+				LocalNode:        node.Name,
+			})
+			staticPvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				StorageClassName: ptr.String(staticSc.Name),
+			})
+			dynamicPvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				StorageClassName: ptr.String(dynamicSc.Name),
 			})
 			pod := test.Pod(test.PodOptions{
-				PersistentVolumeClaims: []string{pvc.Name},
+				PersistentVolumeClaims: []string{staticPvc.Name, dynamicPvc.Name},
 			})
-			ExpectApplied(ctx, env.Client, pvc, pod)
+			ExpectApplied(ctx, env.Client, staticPv, staticPvc, dynamicPvc, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 		}
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectStateNodeCount("==", 1)
 		stateNode := ExpectStateNodeExists(cluster, node)
 
 		// Adding more volumes should cause an error since we are at the volume limits
-		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.Volumes{
-			csiProvider: sets.New("test"),
+		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.VolumeTypes{
+			Dynamic: scheduling.Volumes{
+				dynamicSc.Provisioner: sets.New("test"),
+			},
+		})).ToNot(BeNil())
+		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.VolumeTypes{
+			Static: scheduling.Volumes{
+				staticSc.Name: sets.New("test"),
+			},
 		})).ToNot(BeNil())
 
 		// Reconcile the machine one more time to ensure that we maintain our volume usage state
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
 		// Ensure that we still consider adding another volume to the node breaching our volume limits
-		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.Volumes{
-			csiProvider: sets.New("test"),
+		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.VolumeTypes{
+			Dynamic: scheduling.Volumes{
+				dynamicSc.Provisioner: sets.New("test"),
+			},
+		})).ToNot(BeNil())
+		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.VolumeTypes{
+			Static: scheduling.Volumes{
+				staticSc.Name: sets.New("test"),
+			},
 		})).ToNot(BeNil())
 	})
 	It("should ignore the volume usage limits breach if the pod update is for an already tracked pod", func() {
-		ExpectApplied(ctx, env.Client, sc, nodeClaim, node, csiNode)
-		var pvcs []*v1.PersistentVolumeClaim
+		ExpectApplied(ctx, env.Client, staticSc, dynamicSc, node, csiNode)
+		var staticPvcs, dynamicPvcs []*v1.PersistentVolumeClaim
 		for i := 0; i < 10; i++ {
-			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-				StorageClassName: ptr.String(sc.Name),
+			staticPv := test.PersistentVolume(test.PersistentVolumeOptions{
+				StorageClassName: staticSc.Name,
+				LocalNode:        node.Name,
+			})
+			staticPvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				StorageClassName: ptr.String(staticSc.Name),
+			})
+			dynamicPvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				StorageClassName: ptr.String(dynamicSc.Name),
 			})
 			pod := test.Pod(test.PodOptions{
-				PersistentVolumeClaims: []string{pvc.Name},
+				PersistentVolumeClaims: []string{staticPvc.Name, dynamicPvc.Name},
 			})
-			pvcs = append(pvcs, pvc)
-			ExpectApplied(ctx, env.Client, pvc, pod)
+			staticPvcs = append(staticPvcs, staticPvc)
+			dynamicPvcs = append(dynamicPvcs, dynamicPvc)
+			ExpectApplied(ctx, env.Client, staticPv, staticPvc, dynamicPvc, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 		}
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
@@ -210,8 +257,13 @@ var _ = Describe("Volume Usage/Limits", func() {
 		stateNode := ExpectStateNodeExists(cluster, node)
 
 		// Adding more volumes should not cause an error since this PVC volume is already tracked
-		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.Volumes{
-			csiProvider: sets.New(client.ObjectKeyFromObject(pvcs[5]).String()),
+		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.VolumeTypes{
+			Dynamic: scheduling.Volumes{
+				dynamicSc.Provisioner: sets.New(client.ObjectKeyFromObject(dynamicPvcs[5]).String()),
+			},
+			Static: scheduling.Volumes{
+				staticSc.Name: sets.New(client.ObjectKeyFromObject(staticPvcs[5]).String()),
+			},
 		})).To(BeNil())
 	})
 })

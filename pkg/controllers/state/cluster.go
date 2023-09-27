@@ -31,6 +31,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	corev1scheduling "k8s.io/component-helpers/scheduling/corev1"
+	volumehelpers "k8s.io/component-helpers/storage/volume"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/ptr"
@@ -523,6 +525,44 @@ func (c *Cluster) populateInflight(ctx context.Context, n *StateNode) error {
 }
 
 func (c *Cluster) populateVolumeLimits(ctx context.Context, n *StateNode) error {
+	if err := c.addStaticVolumeLimits(ctx, n); err != nil {
+		return fmt.Errorf("adding static volume limits, %w", err)
+	}
+	if err := c.addDynamicVolumeLimits(ctx, n); err != nil {
+		return fmt.Errorf("adding dynamic volume limits, %w", err)
+	}
+	return nil
+}
+
+func (c *Cluster) addStaticVolumeLimits(ctx context.Context, n *StateNode) error {
+	var storageClasses storagev1.StorageClassList
+	if err := c.kubeClient.List(ctx, &storageClasses); err != nil {
+		return fmt.Errorf("getting StorageClasses to determine static volume limit for %s, %w", n.Node.Name, err)
+	}
+	var pvList v1.PersistentVolumeList
+	if err := c.kubeClient.List(ctx, &pvList); err != nil {
+		return fmt.Errorf("getting PersistentVolumes to determine static volume limit for %s, %w", n.Node.Name, err)
+	}
+	// A PersistentVolume is considered a local/static if it is:
+	// - directly attached to the node and has a matching node affinity
+	// - not bound to a provisioner (i.e. "kubernetes.io/no-provisioner")
+	localStaticPVs := lo.Filter(pvList.Items, func(pv v1.PersistentVolume, _ int) bool {
+		if pv.Spec.Local == nil || pv.Spec.NodeAffinity == nil || pv.Spec.NodeAffinity.Required == nil {
+			return false
+		}
+		matchesNode, _ := corev1scheduling.MatchNodeSelectorTerms(n.Node, pv.Spec.NodeAffinity.Required)
+
+		return matchesNode && lo.ContainsBy(storageClasses.Items, func(sc storagev1.StorageClass) bool {
+			return sc.Name == pv.Spec.StorageClassName && sc.Provisioner == volumehelpers.NotSupportedProvisioner
+		})
+	})
+	for sc, limit := range lo.CountValuesBy(localStaticPVs, func(pv v1.PersistentVolume) string { return pv.Spec.StorageClassName }) {
+		n.volumeUsage.AddStaticLimit(sc, limit)
+	}
+	return nil
+}
+
+func (c *Cluster) addDynamicVolumeLimits(ctx context.Context, n *StateNode) error {
 	var csiNode storagev1.CSINode
 	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Name}, &csiNode); err != nil {
 		return client.IgnoreNotFound(fmt.Errorf("getting CSINode to determine volume limit for %s, %w", n.Node.Name, err))
@@ -531,7 +571,7 @@ func (c *Cluster) populateVolumeLimits(ctx context.Context, n *StateNode) error 
 		if driver.Allocatable == nil {
 			continue
 		}
-		n.volumeUsage.AddLimit(driver.Name, int(ptr.Int32Value(driver.Allocatable.Count)))
+		n.volumeUsage.AddDynamicLimit(driver.Name, int(ptr.Int32Value(driver.Allocatable.Count)))
 	}
 	return nil
 }

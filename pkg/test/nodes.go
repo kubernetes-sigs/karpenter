@@ -38,7 +38,11 @@ type NodeOptions struct {
 }
 
 func Node(overrides ...NodeOptions) *v1.Node {
-	options := NodeOptions{}
+	options := NodeOptions{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: RandomName(),
+		},
+	}
 	for _, opts := range overrides {
 		if err := mergo.Merge(&options, opts, mergo.WithOverride); err != nil {
 			panic(fmt.Sprintf("Failed to merge node options: %s", err))
@@ -52,7 +56,11 @@ func Node(overrides ...NodeOptions) *v1.Node {
 	}
 
 	return &v1.Node{
-		ObjectMeta: ObjectMeta(options.ObjectMeta),
+		ObjectMeta: ObjectMeta(metav1.ObjectMeta{
+			Labels: map[string]string{
+				v1.LabelHostname: options.Name,
+			},
+		}, options.ObjectMeta),
 		Spec: v1.NodeSpec{
 			Unschedulable: options.Unschedulable,
 			Taints:        options.Taints,

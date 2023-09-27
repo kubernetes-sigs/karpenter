@@ -29,6 +29,7 @@ import (
 type PersistentVolumeOptions struct {
 	metav1.ObjectMeta
 	Zones              []string
+	LocalNode          string
 	StorageClassName   string
 	Driver             string
 	UseAWSInTreeDriver bool
@@ -51,6 +52,12 @@ func PersistentVolume(overrides ...PersistentVolumeOptions) *v1.PersistentVolume
 				VolumeID: RandomProviderID(),
 			},
 		}
+	case options.LocalNode != "":
+		source = v1.PersistentVolumeSource{
+			Local: &v1.LocalVolumeSource{
+				Path: "/data",
+			},
+		}
 	default:
 		source = v1.PersistentVolumeSource{
 			CSI: &v1.CSIPersistentVolumeSource{
@@ -60,6 +67,11 @@ func PersistentVolume(overrides ...PersistentVolumeOptions) *v1.PersistentVolume
 		}
 	}
 	var nodeAffinity *v1.VolumeNodeAffinity
+	if options.LocalNode != "" {
+		nodeAffinity = &v1.VolumeNodeAffinity{Required: &v1.NodeSelector{NodeSelectorTerms: []v1.NodeSelectorTerm{{MatchExpressions: []v1.NodeSelectorRequirement{
+			{Key: v1.LabelHostname, Operator: v1.NodeSelectorOpIn, Values: []string{options.LocalNode}},
+		}}}}}
+	}
 	if len(options.Zones) != 0 {
 		nodeAffinity = &v1.VolumeNodeAffinity{Required: &v1.NodeSelector{NodeSelectorTerms: []v1.NodeSelectorTerm{{MatchExpressions: []v1.NodeSelectorRequirement{
 			{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: options.Zones},

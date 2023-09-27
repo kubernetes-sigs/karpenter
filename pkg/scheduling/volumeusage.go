@@ -23,6 +23,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	volumehelpers "k8s.io/component-helpers/storage/volume"
 	csitranslation "k8s.io/csi-translation-lib"
 	"k8s.io/csi-translation-lib/plugins"
 	"knative.dev/pkg/logging"
@@ -37,11 +38,33 @@ var translator = csitranslation.New()
 // +k8s:deepcopy-gen=true
 type Volumes map[string]sets.Set[string]
 
-func (u Volumes) Add(provisioner string, pvcID string) {
-	existing, ok := u[provisioner]
+// +k8s:deepcopy-gen=true
+type VolumeTypes struct {
+	Dynamic Volumes
+	Static  Volumes
+}
+
+func NewVolumeTypes() VolumeTypes {
+	return VolumeTypes{
+		Dynamic: Volumes{},
+		Static:  Volumes{},
+	}
+}
+
+func (u VolumeTypes) AddDynamic(provisioner string, pvcID string) {
+	existing, ok := u.Dynamic[provisioner]
 	if !ok {
 		existing = sets.New[string]()
-		u[provisioner] = existing
+		u.Dynamic[provisioner] = existing
+	}
+	existing.Insert(pvcID)
+}
+
+func (u VolumeTypes) AddStatic(storageClassName string, pvcID string) {
+	existing, ok := u.Static[storageClassName]
+	if !ok {
+		existing = sets.New[string]()
+		u.Static[storageClassName] = existing
 	}
 	existing.Insert(pvcID)
 }
@@ -74,12 +97,12 @@ func (u Volumes) Insert(volumes Volumes) {
 }
 
 //nolint:gocyclo
-func GetVolumes(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (Volumes, error) {
+func GetVolumes(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (VolumeTypes, error) {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("pod", pod.Name))
-	podPVCs := Volumes{}
+	podPVCs := NewVolumeTypes()
 	defaultStorageClassName, err := DiscoverDefaultStorageClassName(ctx, kubeClient)
 	if err != nil {
-		return nil, fmt.Errorf("discovering default storage class, %w", err)
+		return VolumeTypes{}, fmt.Errorf("discovering default storage class, %w", err)
 	}
 	for _, volume := range pod.Spec.Volumes {
 		ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("volume", volume.Name))
@@ -87,7 +110,7 @@ func GetVolumes(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (Vol
 		var pvc v1.PersistentVolumeClaim
 		if volume.PersistentVolumeClaim != nil {
 			if err = kubeClient.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: volume.PersistentVolumeClaim.ClaimName}, &pvc); err != nil {
-				return nil, err
+				return VolumeTypes{}, err
 			}
 			pvcID = fmt.Sprintf("%s/%s", pod.Namespace, volume.PersistentVolumeClaim.ClaimName)
 			storageClassName = lo.FromPtr(pvc.Spec.StorageClassName)
@@ -105,11 +128,12 @@ func GetVolumes(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (Vol
 		}
 		driverName, err := resolveDriver(ctx, kubeClient, volumeName, storageClassName)
 		if err != nil {
-			return nil, err
+			return VolumeTypes{}, err
 		}
-		// might be a non-CSI driver, something we don't currently handle
-		if driverName != "" {
-			podPVCs.Add(driverName, pvcID)
+		if driverName == volumehelpers.NotSupportedProvisioner && storageClassName != "" {
+			podPVCs.AddStatic(storageClassName, pvcID)
+		} else if driverName != "" {
+			podPVCs.AddDynamic(driverName, pvcID)
 		}
 	}
 	return podPVCs, nil
@@ -176,42 +200,55 @@ func driverFromVolume(ctx context.Context, kubeClient client.Client, volumeName 
 // which nodes.
 // +k8s:deepcopy-gen=true
 type VolumeUsage struct {
-	volumes    Volumes
-	podVolumes map[types.NamespacedName]Volumes
-	limits     map[string]int
+	volumes       VolumeTypes
+	podVolumes    map[types.NamespacedName]VolumeTypes
+	dynamicLimits map[string]int
+	staticLimits  map[string]int
 }
 
 func NewVolumeUsage() *VolumeUsage {
 	return &VolumeUsage{
-		volumes:    Volumes{},
-		podVolumes: map[types.NamespacedName]Volumes{},
-		limits:     map[string]int{},
+		volumes:       VolumeTypes{},
+		podVolumes:    map[types.NamespacedName]VolumeTypes{},
+		dynamicLimits: map[string]int{},
+		staticLimits:  map[string]int{},
 	}
 }
 
-func (v *VolumeUsage) ExceedsLimits(vols Volumes) error {
-	for k, volumes := range v.volumes.Union(vols) {
-		if limit, hasLimit := v.limits[k]; hasLimit && len(volumes) > limit {
+func (v *VolumeUsage) ExceedsLimits(vols VolumeTypes) error {
+	for k, volumes := range v.volumes.Dynamic.Union(vols.Dynamic) {
+		if limit, hasLimit := v.dynamicLimits[k]; hasLimit && len(volumes) > limit {
+			return fmt.Errorf("would exceed volume limit for %s, %d > %d", k, len(volumes), limit)
+		}
+	}
+	for k, volumes := range v.volumes.Static.Union(vols.Static) {
+		if limit, hasLimit := v.staticLimits[k]; hasLimit && len(volumes) > limit {
 			return fmt.Errorf("would exceed volume limit for %s, %d > %d", k, len(volumes), limit)
 		}
 	}
 	return nil
 }
 
-func (v *VolumeUsage) AddLimit(storageDriver string, value int) {
-	v.limits[storageDriver] = value
+func (v *VolumeUsage) AddDynamicLimit(storageDriver string, value int) {
+	v.dynamicLimits[storageDriver] = value
 }
 
-func (v *VolumeUsage) Add(pod *v1.Pod, volumes Volumes) {
+func (v *VolumeUsage) AddStaticLimit(storageClass string, value int) {
+	v.staticLimits[storageClass] = value
+}
+
+func (v *VolumeUsage) Add(pod *v1.Pod, volumes VolumeTypes) {
 	v.podVolumes[client.ObjectKeyFromObject(pod)] = volumes
-	v.volumes = v.volumes.Union(volumes)
+	v.volumes.Dynamic = v.volumes.Dynamic.Union(volumes.Dynamic)
+	v.volumes.Static = v.volumes.Static.Union(volumes.Static)
 }
 
 func (v *VolumeUsage) DeletePod(key types.NamespacedName) {
 	delete(v.podVolumes, key)
 	// volume names could be duplicated, so we re-create our volumes
-	v.volumes = Volumes{}
+	v.volumes = VolumeTypes{}
 	for _, c := range v.podVolumes {
-		v.volumes.Insert(c)
+		v.volumes.Dynamic.Insert(c.Dynamic)
+		v.volumes.Static.Insert(c.Static)
 	}
 }
