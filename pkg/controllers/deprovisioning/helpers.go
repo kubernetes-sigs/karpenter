@@ -202,7 +202,10 @@ func buildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 
 		nodePoolInstanceTypes, err := cloudProvider.GetInstanceTypes(ctx, np)
 		if err != nil {
-			return nil, nil, fmt.Errorf("listing instance types for %s, %w", np.Name, err)
+			// don't error out on building the node pool, we just won't be able to handle any nodes that
+			// were created by it
+			logging.FromContext(ctx).Errorf("listing instance types for %s, %s", np.Name, err)
+			continue
 		}
 		if len(nodePoolInstanceTypes) == 0 {
 			continue

@@ -41,6 +41,7 @@ var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)
 type CloudProvider struct {
 	InstanceTypes            []*cloudprovider.InstanceType
 	InstanceTypesForNodePool map[string][]*cloudprovider.InstanceType
+	ErrorsForNodePool        map[string]error
 
 	mu sync.RWMutex
 	// CreateCalls contains the arguments for every create call that was made since it was cleared
@@ -58,6 +59,7 @@ func NewCloudProvider() *CloudProvider {
 		AllowedCreateCalls:       math.MaxInt,
 		CreatedNodeClaims:        map[string]*v1beta1.NodeClaim{},
 		InstanceTypesForNodePool: map[string][]*cloudprovider.InstanceType{},
+		ErrorsForNodePool:        map[string]error{},
 	}
 }
 
@@ -68,6 +70,7 @@ func (c *CloudProvider) Reset() {
 	c.CreateCalls = []*v1beta1.NodeClaim{}
 	c.CreatedNodeClaims = map[string]*v1beta1.NodeClaim{}
 	c.InstanceTypesForNodePool = map[string][]*cloudprovider.InstanceType{}
+	c.ErrorsForNodePool = map[string]error{}
 	c.AllowedCreateCalls = math.MaxInt
 	c.NextCreateErr = nil
 	c.DeleteCalls = []*v1beta1.NodeClaim{}
@@ -159,6 +162,10 @@ func (c *CloudProvider) List(_ context.Context) ([]*v1beta1.NodeClaim, error) {
 
 func (c *CloudProvider) GetInstanceTypes(_ context.Context, np *v1beta1.NodePool) ([]*cloudprovider.InstanceType, error) {
 	if np != nil {
+		if err, ok := c.ErrorsForNodePool[np.Name]; ok {
+			return nil, err
+		}
+
 		if v, ok := c.InstanceTypesForNodePool[np.Name]; ok {
 			return v, nil
 		}
