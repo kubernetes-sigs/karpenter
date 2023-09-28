@@ -105,9 +105,7 @@ var _ = BeforeEach(func() {
             IsMachine: true,
         },
     }
-    ExpectApplied(ctx, env.Client, machine1, node1, provisioner)
-    ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
-
+    // cmd = orchestration.NewCommand(replacements, [])
 })
 
 var _ = AfterEach(func() {
@@ -126,11 +124,24 @@ var _ = AfterEach(func() {
 */
 var _ = Describe("Queue", func() {
     It("should add items into the queue", func() {
+        ExpectApplied(ctx, env.Client, machine1, node1, provisioner)
+        ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
         stateNode := ExpectStateNodeExistsForMachine(cluster, machine1)
         Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", fakeClock.Now()))).To(Succeed())
     })
     It("should fail to add items into that are already in the queue", func() {
-        ExpectApplied(ctx, env.Client, machine2, node2)
+        ExpectApplied(ctx, env.Client, machine1, node1, machine2, node2, provisioner)
+        ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+        stateNode1 := ExpectStateNodeExistsForMachine(cluster, machine1)
+        stateNode2 := ExpectStateNodeExistsForMachine(cluster, machine2)
+        // This should succeed
+        Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode1, stateNode2}, "", fakeClock.Now()))).To(Succeed())
+        // Both of these should fail since the stateNodes have been added in
+        Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode1}, "", fakeClock.Now()))).ToNot(Succeed())
+        Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode2}, "", fakeClock.Now()))).ToNot(Succeed())
+    })
+    It("should fail to add items into that are already in the queue", func() {
+        ExpectApplied(ctx, env.Client, machine1, node1, machine2, node2, provisioner)
         ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
         stateNode1 := ExpectStateNodeExistsForMachine(cluster, machine1)
         stateNode2 := ExpectStateNodeExistsForMachine(cluster, machine2)
