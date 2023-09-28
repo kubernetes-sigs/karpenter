@@ -15,6 +15,7 @@ limitations under the License.
 package deprovisioning_test
 
 import (
+	"fmt"
 	"math/rand"
 	"strings"
 	"sync"
@@ -1475,6 +1476,60 @@ var _ = Describe("Machine/Consolidation", func() {
 			// No node can be deleted as it would cause one of the three pods to go pending
 			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(2))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+		})
+		It("can delete nodes while an invalid provisioner exists", func() {
+			labels := map[string]string{
+				"app": "test",
+			}
+
+			// this invalid provisioner should not be enough to stop all deprovisioning
+			badProvisioner := &v1alpha5.Provisioner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "bad-provisioner",
+				},
+			}
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					}}})
+
+			ExpectApplied(ctx, env.Client, badProvisioner, rs, pods[0], pods[1], pods[2], machine1, node1, machine2, node2, provisioner)
+			cloudProvider.ErrorsForNodePool[badProvisioner.Name] = fmt.Errorf("unable to fetch instance types")
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], node1)
+			ExpectManualBinding(ctx, env.Client, pods[1], node1)
+			ExpectManualBinding(ctx, env.Client, pods[2], node2)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			wg.Wait()
+
+			// Cascade any deletion of the machine to the node
+			ExpectMachinesCascadeDeletion(ctx, env.Client, machine2)
+
+			// we don't need a new node, but we should evict everything off one of node2 which only has a single pod
+			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			// and delete the old one
+			ExpectNotFound(ctx, env.Client, machine2, node2)
 		})
 	})
 	Context("TTL", func() {
