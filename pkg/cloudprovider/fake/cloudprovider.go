@@ -67,8 +67,9 @@ func NewCloudProvider() *CloudProvider {
 func (c *CloudProvider) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.CreateCalls = []*v1beta1.NodeClaim{}
+	c.CreateCalls = nil
 	c.CreatedNodeClaims = map[string]*v1beta1.NodeClaim{}
+	c.InstanceTypes = nil
 	c.InstanceTypesForNodePool = map[string][]*cloudprovider.InstanceType{}
 	c.ErrorsForNodePool = map[string]error{}
 	c.AllowedCreateCalls = math.MaxInt

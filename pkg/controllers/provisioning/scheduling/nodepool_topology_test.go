@@ -2390,7 +2390,7 @@ var _ = Describe("Taints", func() {
 			},
 		})
 	})
-	It("should taint nodes with nodePool taints", func() {
+	It("should taint nodes with NodePool taints", func() {
 		nodePool.Spec.Template.Spec.Taints = []v1.Taint{{Key: "test", Value: "bar", Effect: v1.TaintEffectNoSchedule}}
 		ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod(
@@ -2400,7 +2400,7 @@ var _ = Describe("Taints", func() {
 		node := ExpectScheduled(ctx, env.Client, pod)
 		Expect(node.Spec.Taints).To(ContainElement(nodePool.Spec.Template.Spec.Taints[0]))
 	})
-	It("should schedule pods that tolerate nodePool constraints", func() {
+	It("should schedule pods that tolerate NodePool constraints", func() {
 		nodePool.Spec.Template.Spec.Taints = []v1.Taint{{Key: "test-key", Value: "test-value", Effect: v1.TaintEffectNoSchedule}}
 		ExpectApplied(ctx, env.Client, nodePool)
 		pods := []*v1.Pod{

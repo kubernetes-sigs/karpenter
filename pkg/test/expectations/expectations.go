@@ -563,10 +563,11 @@ func ExpectManualBindingWithOffset(offset int, ctx context.Context, c client.Cli
 }
 
 func ExpectSkew(ctx context.Context, c client.Client, namespace string, constraint *v1.TopologySpreadConstraint) Assertion {
+	GinkgoHelper()
 	nodes := &v1.NodeList{}
-	ExpectWithOffset(1, c.List(ctx, nodes)).To(Succeed())
+	Expect(c.List(ctx, nodes)).To(Succeed())
 	pods := &v1.PodList{}
-	ExpectWithOffset(1, c.List(ctx, pods, scheduling.TopologyListOptions(namespace, constraint.LabelSelector))).To(Succeed())
+	Expect(c.List(ctx, pods, scheduling.TopologyListOptions(namespace, constraint.LabelSelector))).To(Succeed())
 	skew := map[string]int{}
 	for i, pod := range pods.Items {
 		if scheduling.IgnoredForTopology(&pods.Items[i]) {
