@@ -90,7 +90,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...*Candidat
 		return len(c.pods) == 0
 	}); len(empty) > 0 {
 		return Command{
-			Candidates: empty,
+			candidates: empty,
 		}, nil
 	}
 
@@ -112,8 +112,8 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...*Candidat
 
 		logging.FromContext(ctx).With("ttl", candidates[0].nodePool.Spec.Disruption.ExpireAfter.String()).Infof("triggering termination for expired node after TTL")
 		return Command{
-			Candidates:   []*Candidate{candidate},
-			Replacements: results.NewNodeClaims,
+			candidates:   []*Candidate{candidate},
+			replacements: results.NewNodeClaims,
 		}, nil
 	}
 	return Command{}, nil

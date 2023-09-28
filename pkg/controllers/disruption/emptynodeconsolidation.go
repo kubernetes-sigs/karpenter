@@ -64,7 +64,7 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 	}
 
 	cmd := Command{
-		Candidates: emptyCandidates,
+		candidates: emptyCandidates,
 	}
 
 	// Empty Node Consolidation doesn't use Validation as we get to take advantage of cluster.IsNodeNominated.  This

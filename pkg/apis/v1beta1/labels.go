@@ -44,10 +44,6 @@ const (
 	ProviderCompatabilityAnnotationKey   = CompatabilityGroup + "/provider"
 	ManagedByAnnotationKey               = Group + "/managed-by"
 	NodePoolHashAnnotationKey            = Group + "/nodepool-hash"
-	DisruptingAnnotationKey              = Group + "/disrupting"
-	DisruptingAnnotationCordonedValue    = "cordoned"
-	DisruptingAnnotationReplacingValue   = "cordoned"
-	DisruptingAnnotationTerminatingValue = "cordoned"
 )
 
 // Karpenter specific finalizers

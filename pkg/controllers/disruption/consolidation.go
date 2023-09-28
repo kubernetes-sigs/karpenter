@@ -131,7 +131,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	// were we able to schedule all the pods on the inflight candidates?
 	if len(results.NewNodeClaims) == 0 {
 		return Command{
-			Candidates: candidates,
+			candidates: candidates,
 		}, nil
 	}
 
@@ -186,8 +186,8 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	}
 
 	return Command{
-		Candidates:   candidates,
-		Replacements: results.NewNodeClaims,
+		candidates:   candidates,
+		replacements: results.NewNodeClaims,
 	}, nil
 }
 

@@ -56,7 +56,7 @@ func (e *Emptiness) ComputeCommand(_ context.Context, candidates ...*Candidate) 
 	}).Set(float64(len(candidates)))
 
 	return Command{
-		Candidates: emptyCandidates,
+		candidates: emptyCandidates,
 	}, nil
 }
 

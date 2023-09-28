@@ -74,8 +74,8 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	}
 	// If the orchestration queue is already considering a candidate we want to deprovision, don't consider it a candidate.
 	if err := queue.CanAdd(node.Name()); err != nil {
-		recorder.Publish(deprovisioningevents.Blocked(node.Node, node.NodeClaim, "Already being disrupted")...)
-		return nil, fmt.Errorf("candidate(s) are in an active deprovisioning command, %w", err)
+		recorder.Publish(deprovisioningevents.Blocked(node.Node, node.NodeClaim, "Already being deprovisioned")...)
+		return nil, fmt.Errorf("candidate is already being deprovisioned, %w", err)
 	}
 	if _, ok := node.Annotations()[v1beta1.DoNotDisruptAnnotationKey]; ok {
 		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Disruption is blocked with the %q annotation", v1beta1.DoNotDisruptAnnotationKey))...)
@@ -147,8 +147,8 @@ func (c *Candidate) lifetimeRemaining(clock clock.Clock) float64 {
 }
 
 type Command struct {
-	Candidates   []*Candidate
-	Replacements []*scheduling.NodeClaim
+	candidates   []*Candidate
+	replacements []*scheduling.NodeClaim
 }
 
 type Action string
@@ -161,9 +161,9 @@ var (
 
 func (o Command) Action() Action {
 	switch {
-	case len(o.Candidates) > 0 && len(o.Replacements) > 0:
+	case len(o.candidates) > 0 && len(o.replacements) > 0:
 		return ReplaceAction
-	case len(o.Candidates) > 0 && len(o.Replacements) == 0:
+	case len(o.candidates) > 0 && len(o.replacements) == 0:
 		return DeleteAction
 	default:
 		return NoOpAction
@@ -181,7 +181,7 @@ func (o Command) String() string {
 		fmt.Fprintf(&buf, "/%s", old.instanceType.Name)
 		fmt.Fprintf(&buf, "/%s", old.capacityType)
 	}
-	if len(o.Replacements) == 0 {
+	if len(o.replacements) == 0 {
 		return buf.String()
 	}
 	odNodeClaims := 0

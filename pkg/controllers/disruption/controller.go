@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/avast/retry-go"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
@@ -34,13 +35,13 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning/orchestration"
 	disruptionevents "github.com/aws/karpenter-core/pkg/controllers/disruption/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
 
 type Controller struct {
@@ -183,17 +184,13 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 		}
 	}
 
-	for _, candidate := range cmd.candidates {
-		c.recorder.Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, reason)...)
+	candidateProviderIDs := lo.Map(cmd.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
 
 	// We have the new NodeClaims created at the API server so mark the old NodeClaims for deletion
 	c.cluster.MarkForDeletion(candidateProviderIDs...)
 
-	if err := c.Queue.Add(orchestration.CommandItem{
-		ReplacementKeys: nodeClaimKeys,
-		Candidates:      lo.Map(cmd.Candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode }),
-		Reason:          reason,
-	}); err != nil {
+	if err := c.Queue.Add(orchestration.NewCommand(nodeClaimKeys,
+		lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode }), reason, c.clock.Now())); err != nil {
 		c.cluster.UnmarkForDeletion(candidateProviderIDs...)
 		return fmt.Errorf("adding command to queue, %w", err)
 	}

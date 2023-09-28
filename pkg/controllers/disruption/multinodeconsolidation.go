@@ -124,8 +124,8 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		// required
 		replacementHasValidInstanceTypes := false
 		if cmd.Action() == ReplaceAction {
-			cmd.Replacements[0].InstanceTypeOptions = filterOutSameType(cmd.Replacements[0], candidatesToConsolidate)
-			replacementHasValidInstanceTypes = len(cmd.Replacements[0].InstanceTypeOptions) > 0
+			cmd.replacements[0].InstanceTypeOptions = filterOutSameType(cmd.replacements[0], candidatesToConsolidate)
+			replacementHasValidInstanceTypes = len(cmd.replacements[0].InstanceTypeOptions) > 0
 		}
 
 		// replacementHasValidInstanceTypes will be false if the replacement action has valid instance types remaining after filtering.
