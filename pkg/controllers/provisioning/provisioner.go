@@ -230,7 +230,10 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 		// Get instance type options
 		instanceTypeOptions, err := p.cloudProvider.GetInstanceTypes(ctx, nodePool)
 		if err != nil {
-			return nil, fmt.Errorf("getting instance types, %w", err)
+			// we just log an error and skip the provisioner to prevent a single mis-configured provisioner from stopping
+			// all scheduling
+			logging.FromContext(ctx).With(lo.Ternary(nodePool.IsProvisioner, "provisioner", "nodepool"), nodePool.Name).Errorf("skipping, unable to resolve instance types, %s", err)
+			continue
 		}
 		if len(instanceTypeOptions) == 0 {
 			logging.FromContext(ctx).With(lo.Ternary(nodePool.IsProvisioner, "provisioner", "nodepool"), nodePool.Name).Info("skipping, no resolved instance types found")
