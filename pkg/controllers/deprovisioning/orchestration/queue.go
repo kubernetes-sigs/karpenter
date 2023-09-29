@@ -64,9 +64,10 @@ type Command struct {
 	LastError       error     `hash:"ignore"`
 }
 
-func (c *Command) Hash() (uint64, error) {
+// Hash will return a uint64 representing the hash of the replacements and candidates.
+func Hash(c *Command) (uint64, error) {
 	// Hash the command so that we can connect the two underlying data structures
-	// This only needs to be done once so we can make a logical connection.
+	// This only needs to be done once when it's added to the queue.
 	hash, err := hashstructure.Hash(c, hashstructure.FormatV2, &hashstructure.HashOptions{
 		SlicesAsSets:    true,
 		IgnoreZeroValue: true,
@@ -167,7 +168,7 @@ func (q *Queue) Add(cmd *Command) error {
 	if err := q.CanAdd(providerIDs...); err != nil {
 		return fmt.Errorf("adding command, %w", err)
 	}
-	hash, err := cmd.Hash()
+	hash, err := Hash(cmd)
 	if err != nil {
 		return err
 	}

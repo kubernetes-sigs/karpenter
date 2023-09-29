@@ -194,6 +194,7 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 		c.cluster.UnmarkForDeletion(candidateProviderIDs...)
 		return fmt.Errorf("adding command to queue, %w", err)
 	}
+	logging.FromContext(ctx).Infof("added command to queue: %s", cmd)
 	return nil
 }
 

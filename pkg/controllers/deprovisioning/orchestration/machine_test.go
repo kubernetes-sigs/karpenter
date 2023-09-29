@@ -62,21 +62,21 @@ var _ = Describe("Machine/Queue", func() {
 			stateNode := ExpectStateNodeExistsForMachine(cluster, machine1)
 
 			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", fakeClock.Now())
-			original, err := cmd.Hash()
+			original, err := orchestration.Hash(cmd)
 			Expect(err).To(BeNil())
 
 			cmd.Reason = test.RandomName()
-			hash, err := cmd.Hash()
+			hash, err := orchestration.Hash(cmd)
 			Expect(err).To(BeNil())
 			Expect(hash).To(Equal(original))
 
 			cmd.LastError = fmt.Errorf("fake error")
-			hash, err = cmd.Hash()
+			hash, err = orchestration.Hash(cmd)
 			Expect(err).To(BeNil())
 			Expect(hash).To(Equal(original))
 
 			cmd.TimeAdded = fakeClock.Now().Add(-24 * time.Hour)
-			hash, err = cmd.Hash()
+			hash, err = orchestration.Hash(cmd)
 			Expect(err).To(BeNil())
 			Expect(hash).To(Equal(original))
 		})
@@ -86,11 +86,11 @@ var _ = Describe("Machine/Queue", func() {
 			stateNode := ExpectStateNodeExistsForMachine(cluster, machine1)
 
 			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", fakeClock.Now())
-			original, err := cmd.Hash()
+			original, err := orchestration.Hash(cmd)
 			Expect(err).To(BeNil())
 
 			cmd.ReplacementKeys = []*orchestration.NodeClaimKey{}
-			hash, err := cmd.Hash()
+			hash, err := orchestration.Hash(cmd)
 			Expect(err).To(BeNil())
 			Expect(hash).ToNot(Equal(original))
 		})
@@ -100,12 +100,12 @@ var _ = Describe("Machine/Queue", func() {
 			stateNode := ExpectStateNodeExistsForMachine(cluster, machine1)
 
 			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", fakeClock.Now())
-			original, err := cmd.Hash()
+			original, err := orchestration.Hash(cmd)
 			Expect(err).To(BeNil())
 
 			stateNode2 := ExpectStateNodeExistsForMachine(cluster, machine2)
 			cmd.Candidates = []*state.StateNode{stateNode2}
-			hash, err := cmd.Hash()
+			hash, err := orchestration.Hash(cmd)
 			Expect(err).To(BeNil())
 			Expect(hash).ToNot(Equal(original))
 		})
