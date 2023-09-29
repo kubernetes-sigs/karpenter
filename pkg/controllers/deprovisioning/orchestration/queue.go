@@ -57,21 +57,35 @@ const (
 )
 
 type Command struct {
-	ReplacementKeys []*nodeClaimKey
+	ReplacementKeys []*NodeClaimKey
 	Candidates      []*state.StateNode
 	Reason          string    `hash:"ignore"` // reason is used for metrics
-	timeAdded       time.Time `hash:"ignore"`
-	lastError       error
+	TimeAdded       time.Time `hash:"ignore"`
+	LastError       error     `hash:"ignore"`
 }
 
-type nodeClaimKey struct {
+func (c *Command) Hash() (uint64, error) {
+	// Hash the command so that we can connect the two underlying data structures
+	// This only needs to be done once so we can make a logical connection.
+	hash, err := hashstructure.Hash(c, hashstructure.FormatV2, &hashstructure.HashOptions{
+		SlicesAsSets:    true,
+		IgnoreZeroValue: true,
+		ZeroNil:         true,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("hashing command, %w", err)
+	}
+	return hash, nil
+}
+
+type NodeClaimKey struct {
 	nodeclaim.Key
-	initialized bool // wrap a bool so we can save on recurring calls to check for initialization
+	Initialized bool // wrap a bool so we can save on recurring calls to check for initialization
 }
 
 type Queue struct {
 	workqueue.RateLimitingInterface
-	candidateProviderIDToCommandID map[string]uint64  // providerID -> commandID, used for quick checks to see if an individual candidate is in queue
+	candidateProviderIDToCommandID map[string]uint64   // providerID -> commandID, used for quick checks to see if an individual candidate is in queue
 	idToCommand                    map[uint64]*Command // commandID -> Command, used to associate a unique identifier to the Command details.
 
 	kubeClient client.Client
@@ -95,13 +109,13 @@ func NewQueue(ctx context.Context, kubeClient client.Client, recorder events.Rec
 
 // NewCommand creates a command key and adds in initial data for the orchestration queue.
 func NewCommand(replacements []nodeclaim.Key, candidates []*state.StateNode, reason string, timeAdded time.Time) *Command {
-	return &Command {
-		ReplacementKeys: lo.Map(replacements, func(key nodeclaim.Key, _ int) *nodeClaimKey {
-			return &nodeClaimKey{Key: key}
+	return &Command{
+		ReplacementKeys: lo.Map(replacements, func(key nodeclaim.Key, _ int) *NodeClaimKey {
+			return &NodeClaimKey{Key: key}
 		}),
 		Candidates: candidates,
-		Reason: reason,
-		timeAdded: timeAdded,
+		Reason:     reason,
+		TimeAdded:  timeAdded,
 	}
 }
 
@@ -115,17 +129,21 @@ func (q *Queue) Start(ctx context.Context) {
 		}
 		hash := item.(uint64)
 		cmd := q.idToCommand[hash]
-		requeue, err := q.Handle(ctx, hash, cmd)
+		requeue, err := q.Handle(ctx, cmd)
 		if !requeue {
-			// If we're not requeuing and the most recent function call had an error, return the last error.
+			// If the command timed out, log the last error.
 			if err != nil {
-				if err := q.setNodesUnschedulable(ctx, false, lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string { return s.Node.Name })...); err != nil {
-					logging.FromContext(ctx).Debugf("un-cordoning nodes, %w", err) // requeue so we can try to un-cordon again
-				}
+				// If the command failed, bail on the action.
+				// 1. Emit metrics for launch failures
+				// 2. Ensure cluster state no longer thinks these nodes are deleting
+				// 3. Remove it from the Queue's internal data structure
+				deprovisioningReplacementNodeLaunchFailedCounter.WithLabelValues(cmd.Reason).Inc()
+				q.cluster.UnmarkForDeletion(lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string { return s.ProviderID() })...)
+				err = multierr.Append(err, q.setNodesUnschedulable(ctx, false, lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string { return s.Node.Name })...))
 				logging.FromContext(ctx).Debugf("handling deprovisioning command, %w, for nodes %s", err,
-				strings.Join(lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string {
-					return s.Name()
-				}), ","))
+					strings.Join(lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string {
+						return s.Name()
+					}), ","))
 			}
 			q.Remove(hash, cmd)
 			continue
@@ -140,28 +158,35 @@ func (q *Queue) Start(ctx context.Context) {
 // Add adds commands to the Queue
 // Each command added to the queue should already be validated and ready for execution.
 func (q *Queue) Add(cmd *Command) error {
-	// First check if we can add the command.
-	if err := q.CanAdd(lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string {
+	providerIDs := lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string {
 		return s.ProviderID()
-	})...); err != nil {
+	})
+	// First check if we can add the command.
+	if err := q.CanAdd(providerIDs...); err != nil {
 		return fmt.Errorf("adding command, %w", err)
 	}
-	// Hash the command so that we can connect the two underlying data structures
-	// This only needs to be done once so we can make a logical connection.
-	hash, err := hashstructure.Hash(cmd, hashstructure.FormatV2, &hashstructure.HashOptions{
-		SlicesAsSets:    true,
-		IgnoreZeroValue: true,
-		ZeroNil:         true,
-	})
+	hash, err := cmd.Hash()
 	if err != nil {
-		return fmt.Errorf("hashing command, %w", err)
+		return err
 	}
 	for _, candidate := range cmd.Candidates {
 		q.candidateProviderIDToCommandID[candidate.ProviderID()] = hash
 		q.idToCommand[hash] = cmd
 	}
+	// Idempotently mark for deletion
+	q.cluster.MarkForDeletion(providerIDs...)
 	q.RateLimitingInterface.Add(hash)
 	return nil
+}
+
+// Remove fully clears the queue of all references of a hash/command
+func (q *Queue) Remove(hash uint64, cmd *Command) {
+	q.RateLimitingInterface.Forget(hash)
+	for _, candidate := range cmd.Candidates {
+		delete(q.candidateProviderIDToCommandID, candidate.ProviderID())
+	}
+	delete(q.idToCommand, hash)
+	q.RateLimitingInterface.Done(hash)
 }
 
 // CanAdd is a quick check to see if the candidate is already part of a deprovisioning action
@@ -177,38 +202,21 @@ func (q *Queue) CanAdd(ids ...string) error {
 
 // Handle will check for timeouts, then execute a wait or termination.
 // If there
-func (q *Queue) Handle(ctx context.Context, hash uint64, cmd *Command) (bool, error) {
-	// If the item has surpassed the max duration, bail on the action.
-	// 1. Emit metrics for launch failures
-	// 2. Ensure cluster state no longer thinks these nodes are deleting
-	// 3. Un-cordon the nodes we previously cordoned
-	// 4. Remove it from the Queue's internal data structure
-	if time.Since(cmd.timeAdded) > maxRetryDuration {
-		deprovisioningReplacementNodeLaunchFailedCounter.WithLabelValues(cmd.Reason).Inc()
-		q.cluster.UnmarkForDeletion(lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string { return s.ProviderID() })...)
-		return false, fmt.Errorf("reaching timeout, %w", cmd.lastError)
+func (q *Queue) Handle(ctx context.Context, cmd *Command) (bool, error) {
+	if time.Since(cmd.TimeAdded) > maxRetryDuration {
+		return false, fmt.Errorf("abandoning command, reached timeout, %w", cmd.LastError)
 	}
 	// If the time hasn't expired, either wait, or terminate.
 	requeue, err := q.WaitOrTerminate(ctx, cmd)
 	if err != nil {
 		// If there was an error, set this as the command's last error so that we can propagate it.
-		cmd.lastError = err
+		cmd.LastError = err
 		if !retry.IsRecoverable(err) {
 			return false, nil
 		}
 		return requeue, nil
 	}
 	return requeue, nil
-}
-
-// Remove fully clears the queue of all references of a hash/command
-func (q *Queue) Remove(hash uint64, cmd *Command) {
-	q.RateLimitingInterface.Forget(hash)
-	for _, candidate := range cmd.Candidates {
-		delete(q.candidateProviderIDToCommandID, candidate.ProviderID())
-	}
-	delete(q.idToCommand, hash)
-	q.RateLimitingInterface.Done(hash)
 }
 
 // WaitOrTerminate will wait until launched machines are ready.
@@ -221,7 +229,7 @@ func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) (bool, error)
 	for i := range cmd.ReplacementKeys {
 		key := cmd.ReplacementKeys[i]
 		// If we know the node claim is initialized, no need to check again.
-		if key.initialized {
+		if key.Initialized {
 			continue
 		}
 		// Get the nodeclaim
@@ -230,7 +238,7 @@ func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) (bool, error)
 			// The NodeClaim got deleted after an initial eventual consistency delay
 			// This means that there was an ICE error or the Node initializationTTL expired
 			// In this case, the error is unrecoverable, so don't requeue.
-			if errors.IsNotFound(err) && q.clock.Since(cmd.timeAdded) > time.Second*5 {
+			if errors.IsNotFound(err) && q.clock.Since(cmd.TimeAdded) > time.Second*5 {
 				return false, retry.Unrecoverable(fmt.Errorf("getting machine, %w", err))
 			}
 			waitErrs[i] = fmt.Errorf("getting node claim, %w", err)
@@ -244,9 +252,9 @@ func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) (bool, error)
 			waitErrs[i] = fmt.Errorf("getting node claim, %w", err)
 			continue
 		}
-		key.initialized = true
+		key.Initialized = true
 		// This should only be reached once since initialization is checked at the beginning.
-		deprovisioningReplacementNodeInitializedHistogram.Observe(time.Since(cmd.timeAdded).Seconds())
+		deprovisioningReplacementNodeInitializedHistogram.Observe(time.Since(cmd.TimeAdded).Seconds())
 	}
 	// If we have any errors, don't continue
 	if err := multierr.Combine(waitErrs...); err != nil {
@@ -262,7 +270,6 @@ func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) (bool, error)
 		errs[i] = retry.Do(func() error {
 			if err := nodeclaim.Delete(ctx, q.kubeClient, cmd.Candidates[i].NodeClaim); err != nil {
 				if !errors.IsNotFound(err) {
-					logging.FromContext(ctx).Errorf("terminating machine, %s", err)
 					return err
 				}
 			}
@@ -272,7 +279,7 @@ func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) (bool, error)
 	})
 	// If there were any deletion failures, we should requeue.
 	// In the case where we requeue, but the timeout for the command is reached, we'll
-	return true, multierr.Combine(errs...)
+	return true, fmt.Errorf("terminating candidates, %w", multierr.Combine(errs...))
 }
 
 func (q *Queue) setNodesUnschedulable(ctx context.Context, isUnschedulable bool, candidates ...string) error {
@@ -304,7 +311,7 @@ func (q *Queue) setNodesUnschedulable(ctx context.Context, isUnschedulable bool,
 
 // Reset is used for testing and clears all clears all internal data structures
 func (q *Queue) Reset() {
-	for _, hash := range q.idToCommand {
+	for hash := range q.idToCommand {
 		q.Forget(hash)
 		q.Done(hash)
 	}
