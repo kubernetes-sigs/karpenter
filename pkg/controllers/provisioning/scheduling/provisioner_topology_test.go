@@ -128,7 +128,7 @@ var _ = Describe("Topology", func() {
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 2))
 		})
-		It("should respect provisioner zonal constraints (subset)", func() {
+		It("should respect provisioner zonal constraints (subset) with requirements", func() {
 			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}
 			topology := []v1.TopologySpreadConstraint{{
