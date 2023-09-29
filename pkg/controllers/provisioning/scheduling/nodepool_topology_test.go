@@ -18,6 +18,7 @@ import (
 	"time"
 
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -121,7 +122,7 @@ var _ = Describe("Topology", func() {
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 2))
 		})
-		It("should respect nodePool zonal constraints", func() {
+		It("should respect NodePool zonal constraints", func() {
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}}
 			topology := []v1.TopologySpreadConstraint{{
@@ -136,7 +137,7 @@ var _ = Describe("Topology", func() {
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 2))
 		})
-		It("should respect nodePool zonal constraints (subset)", func() {
+		It("should respect NodePool zonal constraints (subset) with requirements", func() {
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}
 			topology := []v1.TopologySpreadConstraint{{
@@ -152,7 +153,66 @@ var _ = Describe("Topology", func() {
 			// should spread the two pods evenly across the only valid zones in our universe (the two zones from our single nodePool)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 2))
 		})
-		It("should respect nodePool zonal constraints (existing pod)", func() {
+		It("should respect NodePool zonal constraints (subset) with labels", func() {
+			nodePool.Spec.Template.Labels = lo.Assign(nodePool.Spec.Template.Labels, map[string]string{v1.LabelTopologyZone: "test-zone-1"})
+			topology := []v1.TopologySpreadConstraint{{
+				TopologyKey:       v1.LabelTopologyZone,
+				WhenUnsatisfiable: v1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+			}}
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}, 4)...,
+			)
+			// should spread the two pods evenly across the only valid zones in our universe (the two zones from our single nodePool)
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(4))
+		})
+		It("should respect NodePool zonal constraints (subset) with requirements and labels", func() {
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}
+			nodePool.Spec.Template.Labels = lo.Assign(nodePool.Spec.Template.Labels, map[string]string{v1.LabelTopologyZone: "test-zone-1"})
+			topology := []v1.TopologySpreadConstraint{{
+				TopologyKey:       v1.LabelTopologyZone,
+				WhenUnsatisfiable: v1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+			}}
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}, 4)...,
+			)
+			// should spread the two pods evenly across the only valid zones in our universe (the two zones from our single nodePool)
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(4))
+		})
+		It("should respect NodePool zonal constraints (subset) with labels across NodePools", func() {
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}
+			nodePool.Spec.Template.Labels = lo.Assign(nodePool.Spec.Template.Labels, map[string]string{v1.LabelTopologyZone: "test-zone-1"})
+			nodePool2 := test.NodePool(v1beta1.NodePool{
+				Spec: v1beta1.NodePoolSpec{
+					Template: v1beta1.NodeClaimTemplate{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: map[string]string{
+								v1.LabelTopologyZone: "test-zone-2",
+							},
+						},
+					},
+				},
+			})
+			topology := []v1.TopologySpreadConstraint{{
+				TopologyKey:       v1.LabelTopologyZone,
+				WhenUnsatisfiable: v1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+			}}
+			ExpectApplied(ctx, env.Client, nodePool, nodePool2)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}, 4)...,
+			)
+			// should spread the two pods evenly across the only valid zones in our universe (the two zones from our single nodePool)
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 2))
+		})
+		It("should respect NodePool zonal constraints (existing pod)", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 			// need enough resource requests that the first node we create fills a node and can't act as an in-flight
 			// node for the other pods
@@ -586,7 +646,7 @@ var _ = Describe("Topology", func() {
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 2))
 		})
-		It("should respect nodePool capacity type constraints", func() {
+		It("should respect NodePool capacity type constraints", func() {
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1beta1.CapacityTypeLabelKey, Operator: v1.NodeSelectorOpIn, Values: []string{v1beta1.CapacityTypeSpot, v1beta1.CapacityTypeOnDemand}}}
 			topology := []v1.TopologySpreadConstraint{{
@@ -901,7 +961,7 @@ var _ = Describe("Topology", func() {
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(7, 7, 7))
 			ExpectSkew(ctx, env.Client, "default", &topology[1]).ToNot(ContainElements(BeNumerically(">", 3)))
 		})
-		It("should balance pods across nodePool requirements", func() {
+		It("should balance pods across NodePool requirements", func() {
 			spotProv := test.Provisioner(test.ProvisionerOptions{
 				Requirements: []v1.NodeSelectorRequirement{
 					{
