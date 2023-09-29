@@ -36,14 +36,6 @@ import (
 var nodeClaim1, nodeClaim2, replacementNodeClaim *v1beta1.NodeClaim
 var nodePool *v1beta1.NodePool
 
-var _ = BeforeEach(func() {
-
-})
-
-var _ = AfterEach(func() {
-	ExpectCleanedUp(ctx, env.Client)
-})
-
 var _ = Describe("NodeClaim/Queue", func() {
 	BeforeEach(func() {
 		nodePool = test.NodePool()
