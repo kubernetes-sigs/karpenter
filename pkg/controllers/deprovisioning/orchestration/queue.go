@@ -94,7 +94,8 @@ type Queue struct {
 	clock      clock.Clock
 }
 
-func NewQueue(ctx context.Context, kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster) *Queue {
+// NewQueue creates a queue that will asynchronously orchestrate deprovisioning commands
+func NewQueue(ctx context.Context, kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clock.Clock) *Queue {
 	queue := &Queue{
 		RateLimitingInterface:          workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(queueBaseDelay, queueMaxDelay)),
 		candidateProviderIDToCommandID: map[string]uint64{},
@@ -102,8 +103,9 @@ func NewQueue(ctx context.Context, kubeClient client.Client, recorder events.Rec
 		kubeClient:                     kubeClient,
 		recorder:                       recorder,
 		cluster:                        cluster,
+		clock:                          clock,
 	}
-	go queue.Start(logging.WithLogger(ctx, logging.FromContext(ctx).Named("disruption")))
+	go queue.Start(logging.WithLogger(ctx, logging.FromContext(ctx).Named("deprovisioning")))
 	return queue
 }
 
@@ -203,7 +205,8 @@ func (q *Queue) CanAdd(ids ...string) error {
 // Handle will check for timeouts, then execute a wait or termination.
 // If there
 func (q *Queue) Handle(ctx context.Context, cmd *Command) (bool, error) {
-	if time.Since(cmd.TimeAdded) > maxRetryDuration {
+	// logging.FromContext(ctx).Infof("DEBUGGING: This is the current time: %s, this is the time added: %s", q.clock)
+	if q.clock.Since(cmd.TimeAdded) > maxRetryDuration {
 		return false, fmt.Errorf("abandoning command, reached timeout, %w", cmd.LastError)
 	}
 	// If the time hasn't expired, either wait, or terminate.
@@ -225,7 +228,7 @@ func (q *Queue) Handle(ctx context.Context, cmd *Command) (bool, error) {
 // timed out, this will return false.
 // nolint:gocyclo
 func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) (bool, error) {
-	var waitErrs []error
+	waitErrs := make([]error, len(cmd.ReplacementKeys))
 	for i := range cmd.ReplacementKeys {
 		key := cmd.ReplacementKeys[i]
 		// If we know the node claim is initialized, no need to check again.
@@ -254,7 +257,7 @@ func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) (bool, error)
 		}
 		key.Initialized = true
 		// This should only be reached once since initialization is checked at the beginning.
-		deprovisioningReplacementNodeInitializedHistogram.Observe(time.Since(cmd.TimeAdded).Seconds())
+		deprovisioningReplacementNodeInitializedHistogram.Observe(q.clock.Since(cmd.TimeAdded).Seconds())
 	}
 	// If we have any errors, don't continue
 	if err := multierr.Combine(waitErrs...); err != nil {
@@ -264,7 +267,7 @@ func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) (bool, error)
 	// Reaching here means we know that all replacements have been provisioned.
 	// All we need to do now is get a successful delete call for each node claim,
 	// then the termination controller will handle the eventual deletion of the nodes.
-	var errs []error
+	errs := make([]error, len(cmd.Candidates))
 	workqueue.ParallelizeUntil(ctx, len(cmd.Candidates), len(cmd.Candidates), func(i int) {
 		q.recorder.Publish(deprovisioningevents.Terminating(cmd.Candidates[i].Node, cmd.Candidates[i].NodeClaim, cmd.Reason)...)
 		errs[i] = retry.Do(func() error {
@@ -279,7 +282,7 @@ func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) (bool, error)
 	})
 	// If there were any deletion failures, we should requeue.
 	// In the case where we requeue, but the timeout for the command is reached, we'll
-	return true, fmt.Errorf("terminating candidates, %w", multierr.Combine(errs...))
+	return false, fmt.Errorf("terminating candidates, %w", multierr.Combine(errs...))
 }
 
 func (q *Queue) setNodesUnschedulable(ctx context.Context, isUnschedulable bool, candidates ...string) error {
