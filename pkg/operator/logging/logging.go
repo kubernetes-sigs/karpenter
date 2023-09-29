@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -44,6 +45,8 @@ import (
 const (
 	loggerCfgConfigMapName = "config-logging"
 	loggerCfgConfigMapKey  = "zap-logger-config"
+	loggerCfgDir           = "/etc/karpenter/logging"
+	loggerCfgFilePath      = loggerCfgDir + "/zap-logger-config"
 )
 
 func DefaultZapConfig() zap.Config {
@@ -78,10 +81,18 @@ func DefaultZapConfig() zap.Config {
 
 // NewLogger returns a configured *zap.SugaredLogger
 func NewLogger(ctx context.Context, component string, kubernetesInterface kubernetes.Interface) *zap.SugaredLogger {
-	if logger := loggerFromConfigMap(ctx, component, kubernetesInterface); logger != nil {
+	if logger := loggerFromFile(ctx, component); logger != nil {
+		logger.Debugf("loaded log configuration from file %q", loggerCfgFilePath)
 		return logger.Named(component)
 	}
-	return defaultLogger().Named(component)
+	// TODO @joinnis: Drop support for loading logging configuration from the apiserver discovered ConfigMap when
+	// dropping alpha support. At that point, we will only support the environment variables and file-based config
+	if logger := loggerFromConfigMap(ctx, component, kubernetesInterface); logger != nil {
+		logger.Debugf("loaded log configuration from configmap %q", types.NamespacedName{Namespace: system.Namespace(), Name: loggerCfgConfigMapName})
+		logger.Error("loading log configuration through the configmap is deprecated, use file or environment-variable based configuration instead")
+		return logger.Named(component)
+	}
+	return defaultLogger(ctx, component)
 }
 
 func WithCommit(logger *zap.SugaredLogger) *zap.SugaredLogger {
@@ -94,8 +105,44 @@ func WithCommit(logger *zap.SugaredLogger) *zap.SugaredLogger {
 	return logger.With(zap.String(logkey.Commit, revision))
 }
 
-func defaultLogger() *zap.SugaredLogger {
-	return WithCommit(lo.Must(DefaultZapConfig().Build()).Sugar())
+func defaultLogger(ctx context.Context, component string) *zap.SugaredLogger {
+	cfg := DefaultZapConfig()
+	if l := injection.GetOptions(ctx).LogLevel; l != "" {
+		// Webhook log level can only be configured directly through the zap-config
+		// Webhooks are deprecated, so support for changing their log level is also deprecated
+		if component != "webhook" {
+			cfg.Level = lo.Must(zap.ParseAtomicLevel(l))
+		}
+	}
+	return WithCommit(lo.Must(cfg.Build()).Sugar()).Named(component)
+}
+
+func loggerFromFile(ctx context.Context, component string) *zap.SugaredLogger {
+	raw, err := os.ReadFile(loggerCfgFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		log.Fatalf("retrieving logging configuration file from %q", loggerCfgFilePath)
+	}
+	cfg := DefaultZapConfig()
+	lo.Must0(json.Unmarshal(raw, &cfg))
+
+	raw, err = os.ReadFile(loggerCfgDir + fmt.Sprintf("/loglevel.%s", component))
+	if err != nil && !os.IsNotExist(err) {
+		log.Fatalf("retrieving logging controller log level file from %q", loggerCfgDir+fmt.Sprintf("/loglevel.%s", component))
+	}
+	if raw != nil {
+		cfg.Level = lo.Must(zap.ParseAtomicLevel(string(raw)))
+	}
+	if l := injection.GetOptions(ctx).LogLevel; l != "" {
+		// Webhook log level can only be configured directly through the zap-config
+		// Webhooks are deprecated, so support for changing their log level is also deprecated
+		if component != "webhook" {
+			cfg.Level = lo.Must(zap.ParseAtomicLevel(l))
+		}
+	}
+	return WithCommit(lo.Must(cfg.Build()).Sugar()).Named(component)
 }
 
 func loggerFromConfigMap(ctx context.Context, component string, kubernetesInterface kubernetes.Interface) *zap.SugaredLogger {
@@ -119,7 +166,14 @@ func loggerFromConfigMap(ctx context.Context, component string, kubernetesInterf
 	if v := cm.Data[fmt.Sprintf("loglevel.%s", component)]; v != "" {
 		cfg.Level = lo.Must(zap.ParseAtomicLevel(v))
 	}
-	return WithCommit(lo.Must(cfg.Build()).Sugar())
+	if l := injection.GetOptions(ctx).LogLevel; l != "" {
+		// Webhook log level can only be configured directly through the zap-config
+		// Webhooks are deprecated, so support for changing their log level is also deprecated
+		if component != "webhook" {
+			cfg.Level = lo.Must(zap.ParseAtomicLevel(l))
+		}
+	}
+	return WithCommit(lo.Must(cfg.Build()).Sugar()).Named(component)
 }
 
 // ConfigureGlobalLoggers sets up any package-wide loggers like "log" or "klog" that are utilized by other packages

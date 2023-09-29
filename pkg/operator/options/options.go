@@ -17,11 +17,16 @@ package options
 import (
 	"errors"
 	"flag"
+	"log"
 	"os"
 	"runtime/debug"
 
+	"github.com/samber/lo"
+
 	"github.com/aws/karpenter-core/pkg/utils/env"
 )
+
+var validLogLevels = []string{"", "debug", "info", "error"}
 
 // Options for running this binary
 type Options struct {
@@ -38,6 +43,7 @@ type Options struct {
 	EnableProfiling      bool
 	EnableLeaderElection bool
 	MemoryLimit          int64
+	LogLevel             string
 }
 
 // New creates an Options struct and registers CLI flags and environment variables to fill-in the Options struct fields
@@ -58,10 +64,14 @@ func New() *Options {
 	f.BoolVar(&opts.EnableProfiling, "enable-profiling", env.WithDefaultBool("ENABLE_PROFILING", false), "Enable the profiling on the metric endpoint")
 	f.BoolVar(&opts.EnableLeaderElection, "leader-elect", env.WithDefaultBool("LEADER_ELECT", true), "Start leader election client and gain leadership before executing the main loop. Enable this when running replicated components for high availability.")
 	f.Int64Var(&opts.MemoryLimit, "memory-limit", env.WithDefaultInt64("MEMORY_LIMIT", -1), "Memory limit on the container running the controller. The GC soft memory limit is set to 90% of this value.")
+	f.StringVar(&opts.LogLevel, "log-level", env.WithDefaultString("LOG_LEVEL", ""), "Log verbosity level. Can be one of 'debug', 'info', or 'error'")
 
 	if opts.MemoryLimit > 0 {
 		newLimit := int64(float64(opts.MemoryLimit) * 0.9)
 		debug.SetMemoryLimit(newLimit)
+	}
+	if !lo.Contains(validLogLevels, opts.LogLevel) {
+		log.Fatalf("invalid log level %q passed through environment variables or cli arguments", opts.LogLevel)
 	}
 	return opts
 }
