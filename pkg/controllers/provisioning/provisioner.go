@@ -246,13 +246,14 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 			// We need to intersect the instance type requirements with the current nodePool requirements.  This
 			// ensures that something like zones from an instance type don't expand the universe of valid domains.
 			requirements := scheduling.NewNodeSelectorRequirements(nodePool.Spec.Template.Spec.Requirements...)
+			requirements.Add(scheduling.NewLabelRequirements(nodePool.Spec.Template.Labels).Values()...)
 			requirements.Add(instanceType.Requirements.Values()...)
 
 			for key, requirement := range requirements {
-				//This code used to execute a Union between domains[key] and requirement.Values().
-				//The downside of this is that Union is immutable and takes a copy of the set it is executed upon.
-				//This resulted in a lot of memory pressure on the heap and poor performance
-				//https://github.com/aws/karpenter/issues/3565
+				// This code used to execute a Union between domains[key] and requirement.Values().
+				// The downside of this is that Union is immutable and takes a copy of the set it is executed upon.
+				// This resulted in a lot of memory pressure on the heap and poor performance
+				// https://github.com/aws/karpenter/issues/3565
 				if domains[key] == nil {
 					domains[key] = sets.New(requirement.Values()...)
 				} else {
@@ -261,7 +262,9 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 			}
 		}
 
-		for key, requirement := range scheduling.NewNodeSelectorRequirements(nodePool.Spec.Template.Spec.Requirements...) {
+		requirements := scheduling.NewNodeSelectorRequirements(nodePool.Spec.Template.Spec.Requirements...)
+		requirements.Add(scheduling.NewLabelRequirements(nodePool.Spec.Template.Labels).Values()...)
+		for key, requirement := range requirements {
 			if requirement.Operator() == v1.NodeSelectorOpIn {
 				//The following is a performance optimisation, for the explanation see the comment above
 				if domains[key] == nil {

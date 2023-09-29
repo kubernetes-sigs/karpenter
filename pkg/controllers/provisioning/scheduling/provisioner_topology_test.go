@@ -18,6 +18,7 @@ import (
 	"time"
 
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -141,6 +142,58 @@ var _ = Describe("Topology", func() {
 				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}, 4)...,
 			)
 			// should spread the two pods evenly across the only valid zones in our universe (the two zones from our single provisioner)
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 2))
+		})
+		It("should respect provisioner zonal constraints (subset) with labels", func() {
+			provisioner.Spec.Labels = lo.Assign(provisioner.Spec.Labels, map[string]string{v1.LabelTopologyZone: "test-zone-1"})
+			topology := []v1.TopologySpreadConstraint{{
+				TopologyKey:       v1.LabelTopologyZone,
+				WhenUnsatisfiable: v1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+			}}
+			ExpectApplied(ctx, env.Client, provisioner)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}, 4)...,
+			)
+			// should spread the two pods evenly across the only valid zones in our universe (the two zones from our single nodePool)
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(4))
+		})
+		It("should respect provisioner zonal constraints (subset) with labels and requirements", func() {
+			provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}
+			provisioner.Spec.Labels = lo.Assign(provisioner.Spec.Labels, map[string]string{v1.LabelTopologyZone: "test-zone-1"})
+			topology := []v1.TopologySpreadConstraint{{
+				TopologyKey:       v1.LabelTopologyZone,
+				WhenUnsatisfiable: v1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+			}}
+			ExpectApplied(ctx, env.Client, provisioner)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}, 4)...,
+			)
+			// should spread the two pods evenly across the only valid zones in our universe (the two zones from our single nodePool)
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(4))
+		})
+		It("should respect provisioner zonal constraints (subset) with labels across NodePools", func() {
+			provisioner.Spec.Labels = lo.Assign(provisioner.Spec.Labels, map[string]string{v1.LabelTopologyZone: "test-zone-1"})
+			provisioner2 := test.Provisioner(test.ProvisionerOptions{
+				Labels: map[string]string{
+					v1.LabelTopologyZone: "test-zone-2",
+				},
+			})
+			topology := []v1.TopologySpreadConstraint{{
+				TopologyKey:       v1.LabelTopologyZone,
+				WhenUnsatisfiable: v1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+			}}
+			ExpectApplied(ctx, env.Client, provisioner, provisioner2)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}, 4)...,
+			)
+			// should spread the two pods evenly across the only valid zones in our universe (the two zones from our single nodePool)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 2))
 		})
 		It("should respect provisioner zonal constraints (existing pod)", func() {
