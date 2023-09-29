@@ -17,7 +17,6 @@ package operator
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -31,10 +30,8 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/configmap/informer"
 	knativeinjection "knative.dev/pkg/injection"
-	"knative.dev/pkg/injection/sharedmain"
-	"knative.dev/pkg/logging"
+	knativelogging "knative.dev/pkg/logging"
 	"knative.dev/pkg/signals"
 	"knative.dev/pkg/system"
 	"knative.dev/pkg/webhook"
@@ -49,8 +46,10 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
+	"github.com/aws/karpenter-core/pkg/operator/logging"
 	"github.com/aws/karpenter-core/pkg/operator/options"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
+	"github.com/aws/karpenter-core/pkg/webhooks"
 )
 
 const (
@@ -73,9 +72,6 @@ func NewOperator() (context.Context, *Operator) {
 	// Root Context
 	ctx := signals.NewContext()
 	ctx = knativeinjection.WithNamespaceScope(ctx, system.Namespace())
-	// TODO: This can be removed if we eventually decide that we need leader election. Having leader election has resulted in the webhook
-	// having issues described in https://github.com/aws/karpenter/issues/2562 so these issues need to be resolved if this line is removed
-	ctx = sharedmain.WithHADisabled(ctx) // Disable leader election for webhook
 
 	// Options
 	opts := options.New().MustParse()
@@ -96,20 +92,18 @@ func NewOperator() (context.Context, *Operator) {
 
 	// Client
 	kubernetesInterface := kubernetes.NewForConfigOrDie(config)
-	configMapWatcher := informer.NewInformedWatcher(kubernetesInterface, system.Namespace())
-	lo.Must0(configMapWatcher.Start(ctx.Done()))
 
 	// Logging
-	logger := NewLogger(ctx, component, config, configMapWatcher)
-	ctx = logging.WithLogger(ctx, logger)
-	ConfigureGlobalLoggers(ctx)
+	logger := logging.NewLogger(ctx, component, kubernetesInterface)
+	ctx = knativelogging.WithLogger(ctx, logger)
+	logging.ConfigureGlobalLoggers(ctx)
 
 	// Inject settings from the ConfigMap(s) into the context
 	ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
 
 	// Manager
 	mgr, err := controllerruntime.NewManager(config, controllerruntime.Options{
-		Logger:                     ignoreDebugEvents(zapr.NewLogger(logger.Desugar())),
+		Logger:                     logging.IgnoreDebugEvents(zapr.NewLogger(logger.Desugar())),
 		LeaderElection:             opts.EnableLeaderElection,
 		LeaderElectionID:           "karpenter-leader-election",
 		LeaderElectionResourceLock: resourcelock.LeasesResourceLock,
@@ -119,9 +113,8 @@ func NewOperator() (context.Context, *Operator) {
 		HealthProbeBindAddress:     fmt.Sprintf(":%d", opts.HealthProbePort),
 		BaseContext: func() context.Context {
 			ctx := context.Background()
-			ctx = logging.WithLogger(ctx, logger)
+			ctx = knativelogging.WithLogger(ctx, logger)
 			ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
-			ctx = injection.WithConfig(ctx, config)
 			ctx = injection.WithOptions(ctx, *opts)
 			return ctx
 		},
@@ -169,11 +162,11 @@ func (o *Operator) WithControllers(ctx context.Context, controllers ...corecontr
 	return o
 }
 
-func (o *Operator) WithWebhooks(ctx context.Context, webhooks ...knativeinjection.ControllerConstructor) *Operator {
+func (o *Operator) WithWebhooks(ctx context.Context, ctors ...knativeinjection.ControllerConstructor) *Operator {
 	if !injection.GetOptions(ctx).DisableWebhook {
-		o.webhooks = append(o.webhooks, webhooks...)
-		lo.Must0(o.Manager.AddReadyzCheck("webhooks", webhookChecker(ctx)))
-		lo.Must0(o.Manager.AddHealthzCheck("webhooks", webhookChecker(ctx)))
+		o.webhooks = append(o.webhooks, ctors...)
+		lo.Must0(o.Manager.AddReadyzCheck("webhooks", webhooks.HealthProbe(ctx)))
+		lo.Must0(o.Manager.AddHealthzCheck("webhooks", webhooks.HealthProbe(ctx)))
 	}
 	return o
 }
@@ -186,36 +179,13 @@ func (o *Operator) Start(ctx context.Context) {
 		lo.Must0(o.Manager.Start(ctx))
 	}()
 	if injection.GetOptions(ctx).DisableWebhook {
-		logging.FromContext(ctx).Infof("webhook disabled")
+		knativelogging.FromContext(ctx).Infof("webhook disabled")
 	} else {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			sharedmain.MainWithConfig(sharedmain.WithHealthProbesDisabled(ctx), "webhook", o.GetConfig(), o.webhooks...)
+			webhooks.Start(ctx, o.GetConfig(), o.KubernetesInterface, o.webhooks...)
 		}()
 	}
 	wg.Wait()
-}
-
-func webhookChecker(ctx context.Context) healthz.Checker {
-	// TODO: Add knative health check port for webhooks when health port can be configured
-	// Issue: https://github.com/knative/pkg/issues/2765
-	return func(req *http.Request) (err error) {
-		res, err := http.Get(fmt.Sprintf("http://localhost:%d", injection.GetOptions(ctx).WebhookPort))
-		// If the webhook connection errors out, liveness/readiness should fail
-		if err != nil {
-			return err
-		}
-		// Close the body to avoid leaking file descriptors
-		// Always read the body so we can re-use the connection: https://stackoverflow.com/questions/17948827/reusing-http-connections-in-go
-		_, _ = io.ReadAll(res.Body)
-		res.Body.Close()
-
-		// If there is a server-side error or path not found,
-		// consider liveness to have failed
-		if res.StatusCode >= 500 || res.StatusCode == 404 {
-			return fmt.Errorf("webhook probe failed with status code %d", res.StatusCode)
-		}
-		return nil
-	}
 }

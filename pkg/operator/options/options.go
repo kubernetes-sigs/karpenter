@@ -31,6 +31,7 @@ type Options struct {
 	DisableWebhook       bool
 	WebhookPort          int
 	MetricsPort          int
+	WebhookMetricsPort   int
 	HealthProbePort      int
 	KubeClientQPS        int
 	KubeClientBurst      int
@@ -50,6 +51,7 @@ func New() *Options {
 	f.BoolVar(&opts.DisableWebhook, "disable-webhook", env.WithDefaultBool("DISABLE_WEBHOOK", false), "Disable the admission and validation webhooks")
 	f.IntVar(&opts.WebhookPort, "webhook-port", env.WithDefaultInt("WEBHOOK_PORT", 8443), "The port the webhook endpoint binds to for validation and mutation of resources")
 	f.IntVar(&opts.MetricsPort, "metrics-port", env.WithDefaultInt("METRICS_PORT", 8000), "The port the metric endpoint binds to for operating metrics about the controller itself")
+	f.IntVar(&opts.WebhookMetricsPort, "webhook-metrics-port", env.WithDefaultInt("WEBHOOK_METRICS_PORT", 8001), "The port the webhook metric endpoing binds to for operating metrics about the webhook")
 	f.IntVar(&opts.HealthProbePort, "health-probe-port", env.WithDefaultInt("HEALTH_PROBE_PORT", 8081), "The port the health probe endpoint binds to for reporting controller health")
 	f.IntVar(&opts.KubeClientQPS, "kube-client-qps", env.WithDefaultInt("KUBE_CLIENT_QPS", 200), "The smoothed rate of qps to kube-apiserver")
 	f.IntVar(&opts.KubeClientBurst, "kube-client-burst", env.WithDefaultInt("KUBE_CLIENT_BURST", 300), "The maximum allowed burst of queries to the kube-apiserver")
