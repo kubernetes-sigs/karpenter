@@ -221,13 +221,13 @@ func editDistance(s, t string) int {
 
 func labelHint(r Requirements, key string, allowedUndefined sets.Set[string]) string {
 	splitKey := strings.Split(key, "/")
-	prefix := splitKey[0]
 	suffix := splitKey[1]
 	for wellKnown := range allowedUndefined {
 		if strings.Contains(wellKnown, key) || editDistance(key, wellKnown) < len(wellKnown)/5 {
 			return fmt.Sprintf(" (typo of %q?)", wellKnown)
 		}
 		if strings.Contains(wellKnown, suffix) {
+			prefix := strings.Split(wellKnown, "/")[0]
 			return fmt.Sprintf(" (typo of %q?)", prefix)
 		}
 	}
@@ -236,6 +236,7 @@ func labelHint(r Requirements, key string, allowedUndefined sets.Set[string]) st
 			return fmt.Sprintf(" (typo of %q?)", existing)
 		}
 		if strings.Contains(existing, suffix) {
+			prefix := strings.Split(existing, "/")[0]
 			return fmt.Sprintf(" (typo of %q?)", prefix)
 		}
 	}
