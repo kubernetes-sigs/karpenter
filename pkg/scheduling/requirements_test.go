@@ -794,7 +794,8 @@ var _ = Describe("Requirements", func() {
 			Expect(unconstrained.Compatible(provisionerRequirement, AllowUndefinedWellKnownLabelsV1Alpha5).Error()).To(Equal(expectedError))
 		},
 			Entry("Zone Label #1", "topology.kubernetesio/zone", `label "topology.kubernetesio/zone" does not have known values (typo of "topology.kubernetes.io/zone"?)`),
-			Entry("Zone Label #2", "topology.kubernetes.io/regio", `label "topology.kubernetes.io/regio" does not have known values (typo of "topology.kubernetes.io/region"?)`),
+			Entry("Region Label #1", "topology.kubernetes.io/regio", `label "topology.kubernetes.io/regio" does not have known values (typo of "topology.kubernetes.io/region"?)`),
+			Entry("Region Label #2", "node.kubernetes.io/region", `label "node.kubernetes.io/region" does not have known values (typo of "topology.kubernetes.io/region"?)`),
 			Entry("Provisioner Name Label", "karpenterprovisioner-name", `label "karpenterprovisioner-name" does not have known values (typo of "karpenter.sh/provisioner-name"?)`),
 		)
 		It("should display an error message for unknown labels", func() {

@@ -219,7 +219,7 @@ func editDistance(s, t string) int {
 	return prevRow[n-1]
 }
 
-func labelHint(r Requirements, key string, allowedUndefined sets.Set[string]) string {
+func getSuffix(key string) string {
 	var suffix string
 
 	if strings.Contains(key, "/") {
@@ -228,6 +228,13 @@ func labelHint(r Requirements, key string, allowedUndefined sets.Set[string]) st
 	} else {
 		suffix = key
 	}
+
+	return suffix
+
+}
+
+func labelHint(r Requirements, key string, allowedUndefined sets.Set[string]) string {
+	suffix := getSuffix(key)
 
 	for wellKnown := range allowedUndefined {
 		if strings.Contains(wellKnown, key) || editDistance(key, wellKnown) < len(wellKnown)/5 {
