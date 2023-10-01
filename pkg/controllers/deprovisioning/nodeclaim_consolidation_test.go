@@ -17,6 +17,7 @@ package deprovisioning_test
 import (
 	"fmt"
 	"math/rand"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -71,6 +72,130 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 				ProviderID:  test.RandomProviderID(),
 				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
 			},
+		})
+	})
+	Context("Empty", func() {
+		var nodeClaim2 *v1beta1.NodeClaim
+		var node2 *v1.Node
+
+		BeforeEach(func() {
+			nodeClaim2, node2 = test.NodeClaimAndNode(v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey:     nodePool.Name,
+						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+		})
+		It("can delete empty nodes", func() {
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			wg.Wait()
+
+			// Cascade any deletion of the nodeclaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// we should delete the empty node
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		})
+		It("can delete multiple empty nodes", func() {
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodeClaim2, node2, nodePool)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
+
+			fakeClock.Step(10 * time.Minute)
+			wg := sync.WaitGroup{}
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+			// Cascade any deletion of the nodeclaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)
+
+			// we should delete the empty nodes
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+			ExpectNotFound(ctx, env.Client, nodeClaim)
+			ExpectNotFound(ctx, env.Client, nodeClaim2)
+		})
+		It("considers pending pods when consolidating", func() {
+			largeTypes := lo.Filter(cloudProvider.InstanceTypes, func(item *cloudprovider.InstanceType, index int) bool {
+				return item.Capacity.Cpu().Cmp(resource.MustParse("64")) >= 0
+			})
+			sort.Slice(largeTypes, func(i, j int) bool {
+				return largeTypes[i].Offerings[0].Price < largeTypes[j].Offerings[0].Price
+			})
+
+			largeCheapType := largeTypes[0]
+			nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey:     nodePool.Name,
+						v1.LabelInstanceTypeStable:   largeCheapType.Name,
+						v1beta1.CapacityTypeLabelKey: largeCheapType.Offerings[0].CapacityType,
+						v1.LabelTopologyZone:         largeCheapType.Offerings[0].Zone,
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  *largeCheapType.Capacity.Cpu(),
+						v1.ResourcePods: *largeCheapType.Capacity.Pods(),
+					},
+				},
+			})
+
+			// there is a pending pod that should land on the node
+			pod := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU: resource.MustParse("1"),
+					},
+				},
+			})
+			unsched := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU: resource.MustParse("62"),
+					},
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, nodeClaim, node, pod, unsched, nodePool)
+
+			// bind one of the pods to the node
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+
+			// we don't need any new nodes and consolidation should notice the huge pending pod that needs the large
+			// node to schedule, which prevents the large expensive node from being replaced
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, nodeClaim)
 		})
 	})
 	Context("Replace", func() {
@@ -389,7 +514,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
-		It("can replace nodes, considers do-not-consolidate annotation", func() {
+		It("can replace nodes, considers karpenter.sh/do-not-consolidate on nodes", func() {
 			labels := map[string]string{
 				"app": "test",
 			}
@@ -400,7 +525,8 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
 
 			pods := test.Pods(3, test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
 					OwnerReferences: []metav1.OwnerReference{
 						{
 							APIVersion:         "apps/v1",
@@ -410,11 +536,18 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 							Controller:         ptr.Bool(true),
 							BlockOwnerDeletion: ptr.Bool(true),
 						},
-					}}})
+					},
+				},
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU: resource.MustParse("2"),
+					},
+				},
+			})
 			annotatedNodeClaim, annotatedNode := test.NodeClaimAndNode(v1beta1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						v1beta1.DoNotDisruptAnnotationKey: "true",
+						v1alpha5.DoNotConsolidateNodeAnnotationKey: "true",
 					},
 					Labels: map[string]string{
 						v1beta1.NodePoolLabelKey:     nodePool.Name,
@@ -426,7 +559,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 				Status: v1beta1.NodeClaimStatus{
 					ProviderID: test.RandomProviderID(),
 					Allocatable: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourceCPU:  resource.MustParse("5"),
 						v1.ResourcePods: resource.MustParse("100"),
 					},
 				},
@@ -447,15 +580,248 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
+			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
-			// we should delete the non-annotated node
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			// we should delete the non-annotated node and replace with a cheaper node
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		})
+		It("can replace nodes, considers karpenter.sh/do-not-disrupt on nodes", func() {
+			labels := map[string]string{
+				"app": "test",
+			}
+
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					},
+				},
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU: resource.MustParse("2"),
+					},
+				},
+			})
+			annotatedNodeClaim, annotatedNode := test.NodeClaimAndNode(v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1beta1.DoNotDisruptAnnotationKey: "true",
+					},
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey:     nodePool.Name,
+						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("5"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
+			ExpectApplied(ctx, env.Client, nodeClaim, node, annotatedNodeClaim, annotatedNode)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], node)
+			ExpectManualBinding(ctx, env.Client, pods[1], node)
+			ExpectManualBinding(ctx, env.Client, pods[2], annotatedNode)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, annotatedNode}, []*v1beta1.NodeClaim{nodeClaim, annotatedNodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			wg.Wait()
+
+			// Cascade any deletion of the machine to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// we should delete the non-annotated node and replace with a cheaper node
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		})
+		It("can replace nodes, considers karpenter.sh/do-not-evict on pods", func() {
+			labels := map[string]string{
+				"app": "test",
+			}
+
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					},
+				},
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU: resource.MustParse("2"),
+					},
+				},
+			})
+			nodeClaim2, node2 := test.NodeClaimAndNode(v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey:     nodePool.Name,
+						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("5"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			// Block this pod from being deprovisioned with karpenter.sh/do-not-evict
+			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"})
+
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodeClaim2, node2)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], node)
+			ExpectManualBinding(ctx, env.Client, pods[1], node)
+			ExpectManualBinding(ctx, env.Client, pods[2], node2)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			wg.Wait()
+
+			// Cascade any deletion of the machine to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// we should delete the non-annotated node and replace with a cheaper node
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		})
+		It("can replace nodes, considers karpenter.sh/do-not-disrupt on pods", func() {
+			labels := map[string]string{
+				"app": "test",
+			}
+
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					},
+				},
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU: resource.MustParse("2"),
+					},
+				},
+			})
+			nodeClaim2, node2 := test.NodeClaimAndNode(v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey:     nodePool.Name,
+						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("5"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			// Block this pod from being deprovisioned with karpenter.sh/do-not-evict
+			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
+
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodeClaim2, node2)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], node)
+			ExpectManualBinding(ctx, env.Client, pods[1], node)
+			ExpectManualBinding(ctx, env.Client, pods[2], node2)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			wg.Wait()
+
+			// Cascade any deletion of the machine to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// we should delete the non-annotated node and replace with a cheaper node
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
 			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
 		It("won't replace node if any spot replacement is more expensive", func() {
@@ -741,11 +1107,11 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 		})
 	})
 	Context("Delete", func() {
-		var nodeClaim1, nodeClaim2 *v1beta1.NodeClaim
-		var node1, node2 *v1.Node
+		var nodeClaim2 *v1beta1.NodeClaim
+		var node2 *v1.Node
 
 		BeforeEach(func() {
-			nodeClaim1, node1 = test.NodeClaimAndNode(v1beta1.NodeClaim{
+			nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						v1beta1.NodePoolLabelKey:     nodePool.Name,
@@ -799,15 +1165,15 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 							BlockOwnerDeletion: ptr.Bool(true),
 						},
 					}}})
-			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaim1, node1, nodeClaim2, node2, nodePool)
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaim, node, nodeClaim2, node2, nodePool)
 
 			// bind pods to node
-			ExpectManualBinding(ctx, env.Client, pods[0], node1)
-			ExpectManualBinding(ctx, env.Client, pods[1], node1)
+			ExpectManualBinding(ctx, env.Client, pods[0], node)
+			ExpectManualBinding(ctx, env.Client, pods[1], node)
 			ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1, node2}, []*v1beta1.NodeClaim{nodeClaim1, nodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -846,15 +1212,15 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 					}}})
 			nodeTemplateProvisioner := test.Provisioner()
 			nodeTemplateProvisioner.Spec.Provider = nil
-			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaim1, node1, nodeClaim2, node2, nodePool)
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaim, node, nodeClaim2, node2, nodePool)
 
 			// bind pods to node
-			ExpectManualBinding(ctx, env.Client, pods[0], node1)
-			ExpectManualBinding(ctx, env.Client, pods[1], node1)
+			ExpectManualBinding(ctx, env.Client, pods[0], node)
+			ExpectManualBinding(ctx, env.Client, pods[1], node)
 			ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1, node2}, []*v1beta1.NodeClaim{nodeClaim1, nodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -900,15 +1266,15 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 					},
 				},
 			})
-			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaim1, node1, unmanagedNode, nodePool)
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaim, node, unmanagedNode, nodePool)
 
 			// bind pods to node
-			ExpectManualBinding(ctx, env.Client, pods[0], node1)
-			ExpectManualBinding(ctx, env.Client, pods[1], node1)
-			ExpectManualBinding(ctx, env.Client, pods[2], node1)
+			ExpectManualBinding(ctx, env.Client, pods[0], node)
+			ExpectManualBinding(ctx, env.Client, pods[1], node)
+			ExpectManualBinding(ctx, env.Client, pods[2], node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1, unmanagedNode}, []*v1beta1.NodeClaim{nodeClaim1})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, unmanagedNode}, []*v1beta1.NodeClaim{nodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -918,13 +1284,13 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			wg.Wait()
 
 			// Cascade any deletion of the nodeclaim to the node
-			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
 			// we can fit all of our pod capacity on the unmanaged node
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			// and delete the old one
-			ExpectNotFound(ctx, env.Client, nodeClaim1, node1)
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
 		It("can delete nodes, considers PDB", func() {
 			labels := map[string]string{
@@ -961,16 +1327,16 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 					ExpectedPods:       1,
 				},
 			})
-			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaim1, node1, nodeClaim2, node2, nodePool, pdb)
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaim, node, nodeClaim2, node2, nodePool, pdb)
 
 			// two pods on node 1
-			ExpectManualBinding(ctx, env.Client, pods[0], node1)
-			ExpectManualBinding(ctx, env.Client, pods[1], node1)
+			ExpectManualBinding(ctx, env.Client, pods[0], node)
+			ExpectManualBinding(ctx, env.Client, pods[1], node)
 			// one on node 2, but it has a PDB with zero disruptions allowed
 			ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1, node2}, []*v1beta1.NodeClaim{nodeClaim1, nodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -980,23 +1346,27 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			wg.Wait()
 
 			// Cascade any deletion of the nodeclaim to the node
-			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
 			// we don't need a new node
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-			// but we expect to delete the nodeclaim with more pods (node1) as the pod on nodeClaim2 has a PDB preventing
+			// but we expect to delete the nodeclaim with more pods (node) as the pod on nodeClaim2 has a PDB preventing
 			// eviction
-			ExpectNotFound(ctx, env.Client, nodeClaim1, node1)
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
-		It("can delete nodes, considers do-not-evict", func() {
-			// create our RS, so we can link a pod to it
+		It("can delete nodes, considers karpneter.sh/do-not-consolidate on nodes", func() {
+			labels := map[string]string{
+				"app": "test",
+			}
+
+			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
 
 			pods := test.Pods(3, test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
 					OwnerReferences: []metav1.OwnerReference{
 						{
 							APIVersion:         "apps/v1",
@@ -1007,21 +1377,121 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 							BlockOwnerDeletion: ptr.Bool(true),
 						},
 					}}})
+			nodeClaim2.Annotations = lo.Assign(nodeClaim2.Annotations, map[string]string{v1alpha5.DoNotConsolidateNodeAnnotationKey: "true"})
+			node2.Annotations = lo.Assign(nodeClaim2.Annotations, map[string]string{v1alpha5.DoNotConsolidateNodeAnnotationKey: "true"})
 
-			// only pod[2] has a do not evict annotation
-			pods[2].Annotations = map[string]string{
-				v1alpha5.DoNotEvictPodAnnotationKey: "true",
-			}
-			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaim1, node1, nodeClaim2, node2, nodePool)
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodeClaim2, node2)
 
-			// two pods on node 1
-			ExpectManualBinding(ctx, env.Client, pods[0], node1)
-			ExpectManualBinding(ctx, env.Client, pods[1], node1)
-			// one on node 2, but it has a do-not-evict annotation
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], node)
+			ExpectManualBinding(ctx, env.Client, pods[1], node)
 			ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
-			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1, node2}, []*v1beta1.NodeClaim{nodeClaim1, nodeClaim2})
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			wg.Wait()
+
+			// Cascade any deletion of the machine to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// we should delete the non-annotated node
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		})
+		It("can delete nodes, considers karpenter.sh/do-not-disrupt on nodes", func() {
+			labels := map[string]string{
+				"app": "test",
+			}
+
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					}}})
+			nodeClaim2.Annotations = lo.Assign(nodeClaim2.Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
+			node2.Annotations = lo.Assign(nodeClaim2.Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
+
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodeClaim2, node2)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], node)
+			ExpectManualBinding(ctx, env.Client, pods[1], node)
+			ExpectManualBinding(ctx, env.Client, pods[2], node2)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			wg.Wait()
+
+			// Cascade any deletion of the machine to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// we should delete the non-annotated node
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		})
+		It("can delete nodes, considers karpenter.sh/do-not-evict on pods", func() {
+			labels := map[string]string{
+				"app": "test",
+			}
+
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					}}})
+			// Block this pod from being deprovisioned with karpenter.sh/do-not-evict
+			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"})
+
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodeClaim2, node2)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], node)
+			ExpectManualBinding(ctx, env.Client, pods[1], node)
+			ExpectManualBinding(ctx, env.Client, pods[2], node2)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -1031,13 +1501,63 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			wg.Wait()
 
 			// Cascade any deletion of the nodeclaim to the node
-			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
-			// we don't need a new node
+			// we should delete the non-annotated node
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-			// but we expect to delete the nodeclaim with more pods (nodeClaim1) as the pod on nodeClaim2 has a do-not-evict annotation
-			ExpectNotFound(ctx, env.Client, nodeClaim1, node1)
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		})
+		It("can delete nodes, considers karpenter.sh/do-not-disrupt on pods", func() {
+			labels := map[string]string{
+				"app": "test",
+			}
+
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					}}})
+			// Block this pod from being deprovisioned with karpenter.sh/do-not-disrupt
+			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
+
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodeClaim2, node2)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], node)
+			ExpectManualBinding(ctx, env.Client, pods[1], node)
+			ExpectManualBinding(ctx, env.Client, pods[2], node2)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			wg.Wait()
+
+			// Cascade any deletion of the machine to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// we should delete the non-annotated node
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
 		It("can delete nodes, evicts pods without an ownerRef", func() {
 			// create our RS so we can link a pod to it
@@ -1060,16 +1580,16 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 
 			// pod[2] is a stand-alone (non ReplicaSet) pod
 			pods[2].OwnerReferences = nil
-			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaim1, node1, nodeClaim2, node2, nodePool)
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaim, node, nodeClaim2, node2, nodePool)
 
 			// two pods on node 1
-			ExpectManualBinding(ctx, env.Client, pods[0], node1)
-			ExpectManualBinding(ctx, env.Client, pods[1], node1)
+			ExpectManualBinding(ctx, env.Client, pods[0], node)
+			ExpectManualBinding(ctx, env.Client, pods[1], node)
 			// one on node 2, but it's a standalone pod
 			ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1, node2}, []*v1beta1.NodeClaim{nodeClaim1, nodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -1107,16 +1627,16 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 							BlockOwnerDeletion: ptr.Bool(true),
 						},
 					}}})
-			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaim1, node1, nodeClaim2, node2, nodePool)
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaim, node, nodeClaim2, node2, nodePool)
 
 			// bind pods to node
-			ExpectManualBinding(ctx, env.Client, pods[0], node1)
-			ExpectManualBinding(ctx, env.Client, pods[1], node1)
+			ExpectManualBinding(ctx, env.Client, pods[0], node)
+			ExpectManualBinding(ctx, env.Client, pods[1], node)
 			ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
-			// inform cluster state about nodes and nodeclaims, intentionally leaving node1 as not ready
-			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
-			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim1))
+			// inform cluster state about nodes and nodeclaims, intentionally leaving node as not ready
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node2}, []*v1beta1.NodeClaim{nodeClaim2})
 
 			var wg sync.WaitGroup
@@ -1313,15 +1833,15 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 				},
 			})
 
-			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaim1, node1, nodeClaim2, node2, nodePool, pending)
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaim, node, nodeClaim2, node2, nodePool, pending)
 
 			// bind pods to node
-			ExpectManualBinding(ctx, env.Client, pods[0], node1)
-			ExpectManualBinding(ctx, env.Client, pods[1], node1)
+			ExpectManualBinding(ctx, env.Client, pods[0], node)
+			ExpectManualBinding(ctx, env.Client, pods[1], node)
 			ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1, node2}, []*v1beta1.NodeClaim{nodeClaim1, nodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -1364,22 +1884,22 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 					}}})
 
 			// setup labels and node selectors so we force the pods onto the nodes we want
-			node1.Labels["foo"] = "1"
+			node.Labels["foo"] = "1"
 			node2.Labels["foo"] = "2"
 
 			pods[0].Spec.NodeSelector = map[string]string{"foo": "1"}
 			pods[1].Spec.NodeSelector = map[string]string{"foo": "1"}
 			pods[2].Spec.NodeSelector = map[string]string{"foo": "2"}
 
-			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaim1, node1, nodeClaim2, node2, nodePool)
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaim, node, nodeClaim2, node2, nodePool)
 
 			// bind pods to node
-			ExpectManualBinding(ctx, env.Client, pods[0], node1)
-			ExpectManualBinding(ctx, env.Client, pods[1], node1)
+			ExpectManualBinding(ctx, env.Client, pods[0], node)
+			ExpectManualBinding(ctx, env.Client, pods[1], node)
 			ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1, node2}, []*v1beta1.NodeClaim{nodeClaim1, nodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -1397,7 +1917,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			// this invalid node pool should not be enough to stop all deprovisioning
 			badNodePool := &v1beta1.NodePool{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "bad-provisioner",
+					Name: "bad-nodepool",
 				},
 				Spec: v1beta1.NodePoolSpec{
 					Template: v1beta1.NodeClaimTemplate{
@@ -1426,16 +1946,16 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 						},
 					}}})
 
-			ExpectApplied(ctx, env.Client, badNodePool, rs, pods[0], pods[1], pods[2], nodeClaim1, node1, nodeClaim2, node2, nodePool)
+			ExpectApplied(ctx, env.Client, badNodePool, rs, pods[0], pods[1], pods[2], nodeClaim, node, nodeClaim2, node2, nodePool)
 			cloudProvider.ErrorsForNodePool[badNodePool.Name] = fmt.Errorf("unable to fetch instance types")
 
 			// bind pods to node
-			ExpectManualBinding(ctx, env.Client, pods[0], node1)
-			ExpectManualBinding(ctx, env.Client, pods[1], node1)
+			ExpectManualBinding(ctx, env.Client, pods[0], node)
+			ExpectManualBinding(ctx, env.Client, pods[1], node)
 			ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
 			// inform cluster state about nodes and machines
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1, node2}, []*v1beta1.NodeClaim{nodeClaim1, nodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
 
 			fakeClock.Step(10 * time.Minute)
 
