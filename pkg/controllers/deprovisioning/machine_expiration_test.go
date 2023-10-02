@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/test"
@@ -38,12 +39,12 @@ import (
 )
 
 var _ = Describe("Machine/Expiration", func() {
-	var prov *v1alpha5.Provisioner
+	var provisioner *v1alpha5.Provisioner
 	var machine *v1alpha5.Machine
 	var node *v1.Node
 
 	BeforeEach(func() {
-		prov = test.Provisioner(test.ProvisionerOptions{
+		provisioner = test.Provisioner(test.ProvisionerOptions{
 			TTLSecondsUntilExpired: ptr.Int64(30),
 			Limits: v1.ResourceList{
 				v1.ResourceCPU: resource.MustParse("100"),
@@ -52,7 +53,7 @@ var _ = Describe("Machine/Expiration", func() {
 		machine, node = test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
 					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
@@ -70,7 +71,63 @@ var _ = Describe("Machine/Expiration", func() {
 	})
 	It("should ignore nodes without the expired status condition", func() {
 		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineExpired)
-		ExpectApplied(ctx, env.Client, machine, node, prov)
+		ExpectApplied(ctx, env.Client, machine, node, provisioner)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+		// Expect to not create or delete more machines
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		ExpectExists(ctx, env.Client, machine)
+	})
+	It("should ignore nodes with the karpenter.sh/do-not-disrupt annotation", func() {
+		node.Annotations = lo.Assign(node.Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
+		ExpectApplied(ctx, env.Client, machine, node, provisioner)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+		// Expect to not create or delete more machines
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		ExpectExists(ctx, env.Client, machine)
+	})
+	It("should ignore nodes that have pods with the karpenter.sh/do-not-evict annotation", func() {
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1alpha5.DoNotEvictPodAnnotationKey: "true",
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, machine, node, provisioner, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+		// Expect to not create or delete more machines
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		ExpectExists(ctx, env.Client, machine)
+	})
+	It("should ignore nodes that have pods with the karpenter.sh/do-not-disrupt annotation", func() {
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1beta1.DoNotDisruptAnnotationKey: "true",
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, machine, node, provisioner, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and machines
 		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
@@ -97,7 +154,7 @@ var _ = Describe("Machine/Expiration", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, machine, node, prov, pod)
+		ExpectApplied(ctx, env.Client, machine, node, provisioner, pod)
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and machines
@@ -106,7 +163,7 @@ var _ = Describe("Machine/Expiration", func() {
 		machine2, node2 := test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
 					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
@@ -143,7 +200,7 @@ var _ = Describe("Machine/Expiration", func() {
 	})
 	It("should ignore nodes with the expired status condition set to false", func() {
 		machine.StatusConditions().MarkFalse(v1alpha5.MachineExpired, "", "")
-		ExpectApplied(ctx, env.Client, machine, node, prov)
+		ExpectApplied(ctx, env.Client, machine, node, provisioner)
 
 		// inform cluster state about nodes and machines
 		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
@@ -157,7 +214,7 @@ var _ = Describe("Machine/Expiration", func() {
 		ExpectExists(ctx, env.Client, machine)
 	})
 	It("can delete expired nodes", func() {
-		ExpectApplied(ctx, env.Client, machine, node, prov)
+		ExpectApplied(ctx, env.Client, machine, node, provisioner)
 
 		// inform cluster state about nodes and machines
 		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
@@ -179,7 +236,7 @@ var _ = Describe("Machine/Expiration", func() {
 		machines, nodes := test.MachinesAndNodes(100, v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
 					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
@@ -199,7 +256,7 @@ var _ = Describe("Machine/Expiration", func() {
 		for _, n := range nodes {
 			ExpectApplied(ctx, env.Client, n)
 		}
-		ExpectApplied(ctx, env.Client, prov)
+		ExpectApplied(ctx, env.Client, provisioner)
 
 		// inform cluster state about nodes and machines
 		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, nodes, machines)
@@ -245,7 +302,7 @@ var _ = Describe("Machine/Expiration", func() {
 		machine2, node2 := test.MachineAndNode(v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: prov.Name,
+					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
 					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
 					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
 					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
@@ -262,7 +319,7 @@ var _ = Describe("Machine/Expiration", func() {
 			LastTransitionTime: apis.VolatileTime{Inner: metav1.Time{Time: time.Now().Add(-time.Hour)}},
 		})
 
-		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], machine, machine2, node, node2, prov)
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], machine, machine2, node, node2, provisioner)
 
 		// bind pods to node so that they're not empty and don't deprovision in parallel.
 		ExpectManualBinding(ctx, env.Client, pods[0], node)
@@ -310,8 +367,8 @@ var _ = Describe("Machine/Expiration", func() {
 				},
 			},
 		})
-		prov.Spec.TTLSecondsUntilExpired = ptr.Int64(30)
-		ExpectApplied(ctx, env.Client, rs, pod, machine, node, prov)
+		provisioner.Spec.TTLSecondsUntilExpired = ptr.Int64(30)
+		ExpectApplied(ctx, env.Client, rs, pod, machine, node, provisioner)
 
 		// bind pods to node
 		ExpectManualBinding(ctx, env.Client, pod, node)
@@ -363,7 +420,7 @@ var _ = Describe("Machine/Expiration", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, rs, machine, node, prov, pod)
+		ExpectApplied(ctx, env.Client, rs, machine, node, provisioner, pod)
 
 		// bind pods to node
 		ExpectManualBinding(ctx, env.Client, pod, node)
@@ -449,7 +506,7 @@ var _ = Describe("Machine/Expiration", func() {
 		})
 		node.Status.Allocatable = map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("8")}
 
-		ExpectApplied(ctx, env.Client, rs, machine, node, prov, pods[0], pods[1], pods[2])
+		ExpectApplied(ctx, env.Client, rs, machine, node, provisioner, pods[0], pods[1], pods[2])
 
 		// bind pods to node
 		ExpectManualBinding(ctx, env.Client, pods[0], node)

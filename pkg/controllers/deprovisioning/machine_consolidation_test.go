@@ -17,6 +17,7 @@ package deprovisioning_test
 import (
 	"fmt"
 	"math/rand"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -36,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
@@ -50,6 +52,148 @@ var _ = Describe("Machine/Consolidation", func() {
 	BeforeEach(func() {
 		provisioner = test.Provisioner(test.ProvisionerOptions{
 			Consolidation: &v1alpha5.Consolidation{Enabled: ptr.Bool(true)},
+		})
+	})
+	Context("Empty", func() {
+		var machine1, machine2 *v1alpha5.Machine
+		var node1, node2 *v1.Node
+		BeforeEach(func() {
+			machine1, node1 = test.MachineAndNode(v1alpha5.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+						v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			machine1.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
+			machine2, node2 = test.MachineAndNode(v1alpha5.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+						v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			machine2.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
+		})
+		It("can delete empty nodes", func() {
+			ExpectApplied(ctx, env.Client, machine1, node1, provisioner)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			wg.Wait()
+
+			// Cascade any deletion of the machine to the node
+			ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
+
+			// we should delete the empty node
+			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+			ExpectNotFound(ctx, env.Client, machine1, node1)
+		})
+		It("can delete multiple empty nodes", func() {
+			ExpectApplied(ctx, env.Client, machine1, node1, machine2, node2, provisioner)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+
+			fakeClock.Step(10 * time.Minute)
+			wg := sync.WaitGroup{}
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+			// Cascade any deletion of the machine to the node
+			ExpectMachinesCascadeDeletion(ctx, env.Client, machine1, machine2)
+
+			// we should delete the empty nodes
+			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+			ExpectNotFound(ctx, env.Client, machine1)
+			ExpectNotFound(ctx, env.Client, machine2)
+		})
+		It("considers pending pods when consolidating", func() {
+			largeTypes := lo.Filter(cloudProvider.InstanceTypes, func(item *cloudprovider.InstanceType, index int) bool {
+				return item.Capacity.Cpu().Cmp(resource.MustParse("64")) >= 0
+			})
+			sort.Slice(largeTypes, func(i, j int) bool {
+				return largeTypes[i].Offerings[0].Price < largeTypes[j].Offerings[0].Price
+			})
+
+			largeCheapType := largeTypes[0]
+			machine1, node1 = test.MachineAndNode(v1alpha5.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       largeCheapType.Name,
+						v1alpha5.LabelCapacityType:       largeCheapType.Offerings[0].CapacityType,
+						v1.LabelTopologyZone:             largeCheapType.Offerings[0].Zone,
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  *largeCheapType.Capacity.Cpu(),
+						v1.ResourcePods: *largeCheapType.Capacity.Pods(),
+					},
+				},
+			})
+
+			// there is a pending pod that should land on the node
+			pod := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU: resource.MustParse("1"),
+					},
+				},
+			})
+			unsched := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU: resource.MustParse("62"),
+					},
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, machine1, node1, pod, unsched, provisioner)
+
+			// bind one of the pods to the node
+			ExpectManualBinding(ctx, env.Client, pod, node1)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
+
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+
+			// we don't need any new nodes and consolidation should notice the huge pending pod that needs the large
+			// node to schedule, which prevents the large expensive node from being replaced
+			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, machine1)
 		})
 	})
 	Context("Replace", func() {
@@ -447,7 +591,7 @@ var _ = Describe("Machine/Consolidation", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectNotFound(ctx, env.Client, machine, node)
 		})
-		It("can replace nodes, considers do-not-consolidate annotation", func() {
+		It("can replace nodes, considers karpenter.sh/do-not-consolidate on nodes", func() {
 			labels := map[string]string{
 				"app": "test",
 			}
@@ -458,7 +602,8 @@ var _ = Describe("Machine/Consolidation", func() {
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
 
 			pods := test.Pods(3, test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
 					OwnerReferences: []metav1.OwnerReference{
 						{
 							APIVersion:         "apps/v1",
@@ -468,7 +613,14 @@ var _ = Describe("Machine/Consolidation", func() {
 							Controller:         ptr.Bool(true),
 							BlockOwnerDeletion: ptr.Bool(true),
 						},
-					}}})
+					},
+				},
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU: resource.MustParse("2"),
+					},
+				},
+			})
 			regularMachine, regularNode := test.MachineAndNode(v1alpha5.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -481,7 +633,7 @@ var _ = Describe("Machine/Consolidation", func() {
 				Status: v1alpha5.MachineStatus{
 					ProviderID: test.RandomProviderID(),
 					Allocatable: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourceCPU:  resource.MustParse("5"),
 						v1.ResourcePods: resource.MustParse("100"),
 					},
 				},
@@ -501,7 +653,7 @@ var _ = Describe("Machine/Consolidation", func() {
 				Status: v1alpha5.MachineStatus{
 					ProviderID: test.RandomProviderID(),
 					Allocatable: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourceCPU:  resource.MustParse("5"),
 						v1.ResourcePods: resource.MustParse("100"),
 					},
 				},
@@ -522,16 +674,300 @@ var _ = Describe("Machine/Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
+			ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the machine to the node
 			ExpectMachinesCascadeDeletion(ctx, env.Client, regularMachine)
 
-			// we should delete the non-annotated node
-			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
-			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			// we should delete the non-annotated node and replace with a cheaper node
+			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(2))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
 			ExpectNotFound(ctx, env.Client, regularMachine, regularNode)
+		})
+		It("can replace nodes, considers karpenter.sh/do-not-disrupt on nodes", func() {
+			labels := map[string]string{
+				"app": "test",
+			}
+
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					},
+				},
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU: resource.MustParse("2"),
+					},
+				},
+			})
+			regularMachine, regularNode := test.MachineAndNode(v1alpha5.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+						v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("5"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			annotatedMachine, annotatedNode := test.MachineAndNode(v1alpha5.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1beta1.DoNotDisruptAnnotationKey: "true",
+					},
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+						v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("5"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], provisioner)
+			ExpectApplied(ctx, env.Client, regularMachine, regularNode, annotatedMachine, annotatedNode)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], regularNode)
+			ExpectManualBinding(ctx, env.Client, pods[1], regularNode)
+			ExpectManualBinding(ctx, env.Client, pods[2], annotatedNode)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{regularNode, annotatedNode}, []*v1alpha5.Machine{regularMachine, annotatedMachine})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			wg.Wait()
+
+			// Cascade any deletion of the machine to the node
+			ExpectMachinesCascadeDeletion(ctx, env.Client, regularMachine)
+
+			// we should delete the non-annotated node and replace with a cheaper node
+			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(2))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+			ExpectNotFound(ctx, env.Client, regularMachine, regularNode)
+		})
+		It("can replace nodes, considers karpenter.sh/do-not-evict on pods", func() {
+			labels := map[string]string{
+				"app": "test",
+			}
+
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					},
+				},
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU: resource.MustParse("2"),
+					},
+				},
+			})
+			machine1, node1 := test.MachineAndNode(v1alpha5.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+						v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("5"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			machine2, node2 := test.MachineAndNode(v1alpha5.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+						v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("5"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			// Block this pod from being deprovisioned with karpenter.sh/do-not-evict
+			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"})
+
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], provisioner)
+			ExpectApplied(ctx, env.Client, machine1, node1, machine2, node2)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], node1)
+			ExpectManualBinding(ctx, env.Client, pods[1], node1)
+			ExpectManualBinding(ctx, env.Client, pods[2], node2)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			wg.Wait()
+
+			// Cascade any deletion of the machine to the node
+			ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
+
+			// we should delete the non-annotated node and replace with a cheaper node
+			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(2))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+			ExpectNotFound(ctx, env.Client, machine1, node1)
+		})
+		It("can replace nodes, considers karpenter.sh/do-not-disrupt on pods", func() {
+			labels := map[string]string{
+				"app": "test",
+			}
+
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					},
+				},
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU: resource.MustParse("2"),
+					},
+				},
+			})
+			machine1, node1 := test.MachineAndNode(v1alpha5.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+						v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("5"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			machine2, node2 := test.MachineAndNode(v1alpha5.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+						v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("5"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			// Block this pod from being deprovisioned with karpenter.sh/do-not-evict
+			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
+
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], provisioner)
+			ExpectApplied(ctx, env.Client, machine1, node1, machine2, node2)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], node1)
+			ExpectManualBinding(ctx, env.Client, pods[1], node1)
+			ExpectManualBinding(ctx, env.Client, pods[2], node2)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			wg.Wait()
+
+			// Cascade any deletion of the machine to the node
+			ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
+
+			// we should delete the non-annotated node and replace with a cheaper node
+			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(2))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+			ExpectNotFound(ctx, env.Client, machine1, node1)
 		})
 		It("won't replace node if any spot replacement is more expensive", func() {
 			currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
@@ -1077,14 +1513,18 @@ var _ = Describe("Machine/Consolidation", func() {
 			// eviction
 			ExpectNotFound(ctx, env.Client, machine1, node1)
 		})
-		It("can delete nodes, considers do-not-evict", func() {
-			// create our RS, so we can link a pod to it
+		It("can delete nodes, considers karpneter.sh/do-not-consolidate on nodes", func() {
+			labels := map[string]string{
+				"app": "test",
+			}
+
+			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
 
 			pods := test.Pods(3, test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
 					OwnerReferences: []metav1.OwnerReference{
 						{
 							APIVersion:         "apps/v1",
@@ -1095,17 +1535,15 @@ var _ = Describe("Machine/Consolidation", func() {
 							BlockOwnerDeletion: ptr.Bool(true),
 						},
 					}}})
+			machine2.Annotations = lo.Assign(machine1.Annotations, map[string]string{v1alpha5.DoNotConsolidateNodeAnnotationKey: "true"})
+			node2.Annotations = lo.Assign(machine1.Annotations, map[string]string{v1alpha5.DoNotConsolidateNodeAnnotationKey: "true"})
 
-			// only pod[2] has a do not evict annotation
-			pods[2].Annotations = map[string]string{
-				v1alpha5.DoNotEvictPodAnnotationKey: "true",
-			}
-			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], machine1, node1, machine2, node2, provisioner)
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], provisioner)
+			ExpectApplied(ctx, env.Client, machine1, node1, machine2, node2)
 
-			// two pods on node 1
+			// bind pods to node
 			ExpectManualBinding(ctx, env.Client, pods[0], node1)
 			ExpectManualBinding(ctx, env.Client, pods[1], node1)
-			// one on node 2, but it has a do-not-evict annotation
 			ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
 			// inform cluster state about nodes and machines
@@ -1121,10 +1559,162 @@ var _ = Describe("Machine/Consolidation", func() {
 			// Cascade any deletion of the machine to the node
 			ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
 
-			// we don't need a new node
+			// we should delete the non-annotated node
 			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-			// but we expect to delete the machine with more pods (machine1) as the pod on machine2 has a do-not-evict annotation
+			ExpectNotFound(ctx, env.Client, machine1, node1)
+		})
+		It("can delete nodes, considers karpenter.sh/do-not-disrupt on nodes", func() {
+			labels := map[string]string{
+				"app": "test",
+			}
+
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					}}})
+			machine2.Annotations = lo.Assign(machine1.Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
+			node2.Annotations = lo.Assign(machine1.Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
+
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], provisioner)
+			ExpectApplied(ctx, env.Client, machine1, node1, machine2, node2)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], node1)
+			ExpectManualBinding(ctx, env.Client, pods[1], node1)
+			ExpectManualBinding(ctx, env.Client, pods[2], node2)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			wg.Wait()
+
+			// Cascade any deletion of the machine to the node
+			ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
+
+			// we should delete the non-annotated node
+			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectNotFound(ctx, env.Client, machine1, node1)
+		})
+		It("can delete nodes, considers karpenter.sh/do-not-evict on pods", func() {
+			labels := map[string]string{
+				"app": "test",
+			}
+
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					}}})
+			// Block this pod from being deprovisioned with karpenter.sh/do-not-evict
+			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"})
+
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], provisioner)
+			ExpectApplied(ctx, env.Client, machine1, node1, machine2, node2)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], node1)
+			ExpectManualBinding(ctx, env.Client, pods[1], node1)
+			ExpectManualBinding(ctx, env.Client, pods[2], node2)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			wg.Wait()
+
+			// Cascade any deletion of the machine to the node
+			ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
+
+			// we should delete the non-annotated node
+			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectNotFound(ctx, env.Client, machine1, node1)
+		})
+		It("can delete nodes, considers karpenter.sh/do-not-disrupt on pods", func() {
+			labels := map[string]string{
+				"app": "test",
+			}
+
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					}}})
+			// Block this pod from being deprovisioned with karpenter.sh/do-not-disrupt
+			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
+
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], provisioner)
+			ExpectApplied(ctx, env.Client, machine1, node1, machine2, node2)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], node1)
+			ExpectManualBinding(ctx, env.Client, pods[1], node1)
+			ExpectManualBinding(ctx, env.Client, pods[2], node2)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			wg.Wait()
+
+			// Cascade any deletion of the machine to the node
+			ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
+
+			// we should delete the non-annotated node
+			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectNotFound(ctx, env.Client, machine1, node1)
 		})
 		It("can delete nodes, evicts pods without an ownerRef", func() {
