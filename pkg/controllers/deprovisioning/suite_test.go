@@ -1319,9 +1319,9 @@ func fromInt(i int) *intstr.IntOrString {
 }
 
 func ExpectQueueItemProcessed(ctx context.Context, queue *orchestration.Queue) {
-	cmd, hash, shutdown := queue.Pop()
+	cmd, shutdown := queue.Pop()
 	Expect(shutdown).To(BeFalse())
-	queue.ProcessItem(ctx, cmd, hash)
+	queue.ProcessItem(ctx, cmd)
 }
 
 func ExpectTriggerVerifyAction(wg *sync.WaitGroup) {

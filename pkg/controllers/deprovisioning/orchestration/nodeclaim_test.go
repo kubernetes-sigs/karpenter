@@ -15,7 +15,6 @@ limitations under the License.
 package orchestration_test
 
 import (
-	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -53,61 +52,6 @@ var _ = Describe("NodeClaim/Queue", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Name: ncKey.Name,
 			},
-		})
-	})
-	Context("Queue Hash", func() {
-		It("should not change hash with ignored fields", func() {
-			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
-			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
-
-			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", fakeClock.Now())
-			original, err := orchestration.Hash(cmd)
-			Expect(err).To(BeNil())
-
-			cmd.Reason = test.RandomName()
-			hash, err := orchestration.Hash(cmd)
-			Expect(err).To(BeNil())
-			Expect(hash).To(Equal(original))
-
-			cmd.LastError = fmt.Errorf("fake error")
-			hash, err = orchestration.Hash(cmd)
-			Expect(err).To(BeNil())
-			Expect(hash).To(Equal(original))
-
-			cmd.TimeAdded = fakeClock.Now().Add(-24 * time.Hour)
-			hash, err = orchestration.Hash(cmd)
-			Expect(err).To(BeNil())
-			Expect(hash).To(Equal(original))
-		})
-		It("should change hash when changing replacements", func() {
-			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
-			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
-
-			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", fakeClock.Now())
-			original, err := orchestration.Hash(cmd)
-			Expect(err).To(BeNil())
-
-			cmd.ReplacementKeys = []*orchestration.NodeClaimKey{}
-			hash, err := orchestration.Hash(cmd)
-			Expect(err).To(BeNil())
-			Expect(hash).ToNot(Equal(original))
-		})
-		It("should change hash when changing candidates", func() {
-			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodeClaim2, node2, nodePool)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1, node2}, []*v1beta1.NodeClaim{nodeClaim1, nodeClaim2})
-			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
-
-			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", fakeClock.Now())
-			original, err := orchestration.Hash(cmd)
-			Expect(err).To(BeNil())
-
-			stateNode2 := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim2)
-			cmd.Candidates = []*state.StateNode{stateNode2}
-			hash, err := orchestration.Hash(cmd)
-			Expect(err).To(BeNil())
-			Expect(hash).ToNot(Equal(original))
 		})
 	})
 	Context("Queue Add", func() {
