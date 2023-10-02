@@ -219,14 +219,27 @@ func editDistance(s, t string) int {
 	return prevRow[n-1]
 }
 
+func getSuffix(key string) string {
+	if strings.Contains(key, "/") {
+		return strings.Split(key, "/")[1]
+	}
+	return key
+}
+
 func labelHint(r Requirements, key string, allowedUndefined sets.Set[string]) string {
 	for wellKnown := range allowedUndefined {
 		if strings.Contains(wellKnown, key) || editDistance(key, wellKnown) < len(wellKnown)/5 {
 			return fmt.Sprintf(" (typo of %q?)", wellKnown)
 		}
+		if strings.HasSuffix(wellKnown, getSuffix(key)) {
+			return fmt.Sprintf(" (typo of %q?)", wellKnown)
+		}
 	}
 	for existing := range r {
 		if strings.Contains(existing, key) || editDistance(key, existing) < len(existing)/5 {
+			return fmt.Sprintf(" (typo of %q?)", existing)
+		}
+		if strings.HasSuffix(existing, getSuffix(key)) {
 			return fmt.Sprintf(" (typo of %q?)", existing)
 		}
 	}
