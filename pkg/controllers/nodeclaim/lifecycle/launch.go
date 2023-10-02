@@ -141,6 +141,7 @@ func PopulateNodeClaimDetails(nodeClaim, retrieved *v1beta1.NodeClaim) *v1beta1.
 	)
 	nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, retrieved.Annotations)
 	nodeClaim.Status.ProviderID = retrieved.Status.ProviderID
+	nodeClaim.Status.ImageID = retrieved.Status.ImageID
 	nodeClaim.Status.Allocatable = retrieved.Status.Allocatable
 	nodeClaim.Status.Capacity = retrieved.Status.Capacity
 	return nodeClaim
