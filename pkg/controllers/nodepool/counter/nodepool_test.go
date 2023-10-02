@@ -137,4 +137,19 @@ var _ = Describe("NodePool Counter", func() {
 		Expect(nodePool.Status.Resources).To(BeEquivalentTo(nodeClaim2.Status.Capacity))
 		Expect(nodePool.Status.Resources).To(BeEquivalentTo(node2.Status.Capacity))
 	})
+	It("should decrease the counter to 0 when all nodes are spun down", func() {
+		ExpectApplied(ctx, env.Client, node, nodeClaim)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
+
+		ExpectDeleted(ctx, env.Client, node, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
+
+		Expect(nodePool.Status.Resources).To(BeEmpty())
+	})
 })

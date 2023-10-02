@@ -68,7 +68,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) 
 	// Determine resource usage and update provisioner.status.resources
 	nodePool.Status.Resources = c.resourceCountsFor(lo.Ternary(nodePool.IsProvisioner, v1alpha5.ProvisionerNameLabelKey, v1beta1.NodePoolLabelKey), nodePool.Name)
 	if !equality.Semantic.DeepEqual(stored, nodePool) {
-		if err := nodepoolutil.PatchStatus(ctx, c.kubeClient, stored, nodePool); err != nil {
+		if err := nodepoolutil.UpdateStatus(ctx, c.kubeClient, nodePool); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 	}

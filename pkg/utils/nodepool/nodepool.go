@@ -159,6 +159,14 @@ func PatchStatus(ctx context.Context, c client.Client, stored, nodePool *v1beta1
 	return c.Status().Patch(ctx, nodePool, client.MergeFrom(stored))
 }
 
+func UpdateStatus(ctx context.Context, c client.Client, nodePool *v1beta1.NodePool) error {
+	if nodePool.IsProvisioner {
+		provisioner := provisionerutil.New(nodePool)
+		return c.Status().Update(ctx, provisioner)
+	}
+	return c.Status().Update(ctx, nodePool)
+}
+
 func HashAnnotation(nodePool *v1beta1.NodePool) map[string]string {
 	if nodePool.IsProvisioner {
 		provisioner := provisionerutil.New(nodePool)
