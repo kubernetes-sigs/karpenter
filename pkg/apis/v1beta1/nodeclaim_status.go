@@ -29,7 +29,7 @@ type NodeClaimStatus struct {
 	ProviderID string `json:"providerID,omitempty"`
 	// ImageId is the image the node was created from
 	// +optional
-	ImageID string `json:"imageId,omitempty"`
+	ImageID string `json:"imageID,omitempty"`
 	// Capacity is the estimated full capacity of the node
 	// +optional
 	Capacity v1.ResourceList `json:"capacity,omitempty"`
