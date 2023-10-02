@@ -234,13 +234,12 @@ func getSuffix(key string) string {
 }
 
 func labelHint(r Requirements, key string, allowedUndefined sets.Set[string]) string {
-	suffix := getSuffix(key)
 
 	for wellKnown := range allowedUndefined {
 		if strings.Contains(wellKnown, key) || editDistance(key, wellKnown) < len(wellKnown)/5 {
 			return fmt.Sprintf(" (typo of %q?)", wellKnown)
 		}
-		if strings.HasSuffix(wellKnown, suffix) {
+		if strings.HasSuffix(wellKnown, getSuffix(key)) {
 			return fmt.Sprintf(" (typo of %q?)", wellKnown)
 		}
 	}
@@ -248,7 +247,7 @@ func labelHint(r Requirements, key string, allowedUndefined sets.Set[string]) st
 		if strings.Contains(existing, key) || editDistance(key, existing) < len(existing)/5 {
 			return fmt.Sprintf(" (typo of %q?)", existing)
 		}
-		if strings.HasSuffix(existing, suffix) {
+		if strings.HasSuffix(existing, getSuffix(key)) {
 			return fmt.Sprintf(" (typo of %q?)", existing)
 		}
 	}
