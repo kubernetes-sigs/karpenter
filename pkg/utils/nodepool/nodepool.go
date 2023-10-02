@@ -59,6 +59,9 @@ func New(provisioner *v1alpha5.Provisioner) *v1beta1.NodePool {
 			},
 			Weight: provisioner.Spec.Weight,
 		},
+		Status: v1beta1.NodePoolStatus{
+			Resources: provisioner.Status.Resources,
+		},
 		IsProvisioner: true,
 	}
 	if provisioner.Spec.TTLSecondsUntilExpired != nil {

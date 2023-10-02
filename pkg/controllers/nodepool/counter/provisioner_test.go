@@ -139,4 +139,23 @@ var _ = Describe("Provisioner Counter", func() {
 		Expect(provisioner.Status.Resources).To(BeEquivalentTo(machine2.Status.Capacity))
 		Expect(provisioner.Status.Resources).To(BeEquivalentTo(node2.Status.Capacity))
 	})
+	It("should nil out the counter when all nodes are deleted", func() {
+		ExpectApplied(ctx, env.Client, node, machine)
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeController, machineController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
+		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
+		provisioner = ExpectExists(ctx, env.Client, provisioner)
+
+		// Should equal both the machine and node capacity
+		Expect(provisioner.Status.Resources).To(BeEquivalentTo(machine.Status.Capacity))
+		Expect(provisioner.Status.Resources).To(BeEquivalentTo(node.Status.Capacity))
+
+		ExpectDeleted(ctx, env.Client, node, machine)
+
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, provisionerController, client.ObjectKeyFromObject(provisioner))
+		provisioner = ExpectExists(ctx, env.Client, provisioner)
+		Expect(provisioner.Status.Resources).To(BeNil())
+	})
 })
