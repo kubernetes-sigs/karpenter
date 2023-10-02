@@ -220,21 +220,13 @@ func editDistance(s, t string) int {
 }
 
 func getSuffix(key string) string {
-	var suffix string
-
 	if strings.Contains(key, "/") {
-		splitKey := strings.Split(key, "/")
-		suffix = splitKey[1]
-	} else {
-		suffix = key
+		return strings.Split(key, "/")[1]
 	}
-
-	return suffix
-
+	return key
 }
 
 func labelHint(r Requirements, key string, allowedUndefined sets.Set[string]) string {
-
 	for wellKnown := range allowedUndefined {
 		if strings.Contains(wellKnown, key) || editDistance(key, wellKnown) < len(wellKnown)/5 {
 			return fmt.Sprintf(" (typo of %q?)", wellKnown)
