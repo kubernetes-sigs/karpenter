@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1beta1
+package v1beta1_test
 
 import (
 	"fmt"
@@ -28,9 +28,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"knative.dev/pkg/ptr"
+
+	. "github.com/aws/karpenter-core/pkg/apis/v1beta1"
 )
 
-var _ = Describe("Validation", func() {
+var _ = Describe("Webhook/Validation", func() {
 	var nodePool *NodePool
 
 	BeforeEach(func() {
@@ -514,4 +516,8 @@ var _ = Describe("Limits", func() {
 		provisioner.Status.Resources = v1.ResourceList{"cpu": resource.MustParse("17")}
 		Expect(provisioner.Spec.Limits.ExceededBy(provisioner.Status.Resources)).To(MatchError("cpu resource usage of 17 exceeds limit of 16"))
 	})
+})
+
+var _ = Describe("CEL/Validation", func() {
+
 })
