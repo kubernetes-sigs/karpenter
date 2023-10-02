@@ -65,6 +65,8 @@ type Command struct {
 }
 
 // Hash will return a uint64 representing the hash of the replacements and candidates.
+// The hash is used as a key and value for mapping a candidate -> hash -> command so we can
+// check if an individual candidate is being deprovisioned, and the command it's linked to.
 func Hash(c *Command) (uint64, error) {
 	// Hash the command so that we can connect the two underlying data structures
 	// This only needs to be done once when it's added to the queue.
@@ -81,7 +83,9 @@ func Hash(c *Command) (uint64, error) {
 
 type NodeClaimKey struct {
 	nodeclaim.Key
-	Initialized bool // wrap a bool so we can save on recurring calls to check for initialization
+	// Use a bool track if a node has already been initialized. This intentionally does not capture nodes that go
+	// initialized then go NotReady after as other pods can schedule to this node as well.
+	Initialized bool
 }
 
 type Queue struct {
@@ -96,7 +100,7 @@ type Queue struct {
 }
 
 // NewQueue creates a queue that will asynchronously orchestrate deprovisioning commands
-func NewQueue(ctx context.Context, kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clock.Clock) *Queue {
+func NewQueue(ctx context.Context, kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clock.Clock, testingMode bool) *Queue {
 	queue := &Queue{
 		RateLimitingInterface:          workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(queueBaseDelay, queueMaxDelay)),
 		candidateProviderIDToCommandID: map[string]uint64{},
@@ -106,7 +110,11 @@ func NewQueue(ctx context.Context, kubeClient client.Client, recorder events.Rec
 		cluster:                        cluster,
 		clock:                          clock,
 	}
-	go queue.Start(logging.WithLogger(ctx, logging.FromContext(ctx).Named("deprovisioning")))
+	if !testingMode {
+		go queue.Start(logging.WithLogger(ctx, logging.FromContext(ctx).Named("deprovisioning")))
+	} else {
+		logging.FromContext(ctx).Infof("debugging: in testing mode for queue")
+	}
 	return queue
 }
 
@@ -122,40 +130,62 @@ func NewCommand(replacements []nodeclaim.Key, candidates []*state.StateNode, rea
 	}
 }
 
-// Start will kick off the queue. This runs asynchronously unil Karpenter shuts down.
+// Start will kick off the queue. This runs asynchronously until Karpenter shuts down.
 func (q *Queue) Start(ctx context.Context) {
+Loop:
 	for {
-		// Get command from queue. This waits until queue is non-empty.
-		item, shutdown := q.RateLimitingInterface.Get()
-		if shutdown {
-			break
-		}
-		hash := item.(uint64)
-		cmd := q.idToCommand[hash]
-		requeue, err := q.Handle(ctx, cmd)
-		if !requeue {
-			// If the command timed out, log the last error.
-			if err != nil {
-				// If the command failed, bail on the action.
-				// 1. Emit metrics for launch failures
-				// 2. Ensure cluster state no longer thinks these nodes are deleting
-				// 3. Remove it from the Queue's internal data structure
-				deprovisioningReplacementNodeLaunchFailedCounter.WithLabelValues(cmd.Reason).Inc()
-				q.cluster.UnmarkForDeletion(lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string { return s.ProviderID() })...)
-				err = multierr.Append(err, q.setNodesUnschedulable(ctx, false, lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string { return s.Node.Name })...))
-				logging.FromContext(ctx).Debugf("handling deprovisioning command, %w, for nodes %s", err,
-					strings.Join(lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string {
-						return s.Name()
-					}), ","))
+		select {
+		case <-ctx.Done():
+			break Loop
+		default:
+			cmd, hash, shutdown := q.Pop()
+			if shutdown {
+				break Loop
 			}
-			q.Remove(hash, cmd)
-			continue
+			q.ProcessItem(ctx, cmd, hash)
 		}
-		q.RateLimitingInterface.Done(hash)
-		// Requeue command if not complete
-		q.RateLimitingInterface.AddRateLimited(hash)
 	}
 	logging.FromContext(ctx).Errorf("deprovisioning queue is broken and has shutdown")
+}
+
+// Pop returns a command and its hash and if the queue has shutdown.
+func (q *Queue) Pop() (*Command, uint64, bool) {
+	// Get command from queue. This waits until queue is non-empty.
+	item, shutdown := q.RateLimitingInterface.Get()
+	if shutdown {
+		return &Command{}, 0, true
+	}
+	hash := item.(uint64)
+	cmd := q.idToCommand[hash]
+	return cmd, hash, false
+}
+
+// ProcessItem will process a command. It will either:
+// 1. Remove all references of the command if the command completes due to timeout or success.
+// 2. Check the command and requeue if it needs to be checked again later.
+func (q *Queue) ProcessItem(ctx context.Context, cmd *Command, hash uint64) {
+	requeue, err := q.Handle(ctx, cmd)
+	if !requeue {
+		// If the command timed out, log the last error.
+		if err != nil {
+			// If the command failed, bail on the action.
+			// 1. Emit metrics for launch failures
+			// 2. Ensure cluster state no longer thinks these nodes are deleting
+			// 3. Remove it from the Queue's internal data structure
+			deprovisioningReplacementNodeLaunchFailedCounter.WithLabelValues(cmd.Reason).Inc()
+			q.cluster.UnmarkForDeletion(lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string { return s.ProviderID() })...)
+			err = multierr.Append(err, q.setNodesUnschedulable(ctx, false, lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string { return s.Node.Name })...))
+			logging.FromContext(ctx).Debugf("handling deprovisioning command, %w, for nodes %s", err,
+				strings.Join(lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string {
+					return s.Name()
+				}), ","))
+		}
+		q.Remove(hash, cmd)
+		return
+	}
+	q.RateLimitingInterface.Done(hash)
+	// Requeue command if not complete
+	q.RateLimitingInterface.AddRateLimited(hash)
 }
 
 // Add adds commands to the Queue
@@ -184,11 +214,13 @@ func (q *Queue) Add(cmd *Command) error {
 
 // Remove fully clears the queue of all references of a hash/command
 func (q *Queue) Remove(hash uint64, cmd *Command) {
-	q.RateLimitingInterface.Forget(hash)
+	// Remove all candidates linked to the command
 	for _, candidate := range cmd.Candidates {
 		delete(q.candidateProviderIDToCommandID, candidate.ProviderID())
 	}
+	// Then remove the command
 	delete(q.idToCommand, hash)
+	q.RateLimitingInterface.Forget(hash)
 	q.RateLimitingInterface.Done(hash)
 }
 
@@ -204,9 +236,7 @@ func (q *Queue) CanAdd(ids ...string) error {
 }
 
 // Handle will check for timeouts, then execute a wait or termination.
-// If there
 func (q *Queue) Handle(ctx context.Context, cmd *Command) (bool, error) {
-	// logging.FromContext(ctx).Infof("DEBUGGING: This is the current time: %s, this is the time added: %s", q.clock)
 	if q.clock.Since(cmd.TimeAdded) > maxRetryDuration {
 		return false, fmt.Errorf("abandoning command, reached timeout, %w", cmd.LastError)
 	}
@@ -313,13 +343,13 @@ func (q *Queue) setNodesUnschedulable(ctx context.Context, isUnschedulable bool,
 	return multiErr
 }
 
-// Reset is used for testing and clears all clears all internal data structures
+// Reset is used for testing and clears all internal data structures
 func (q *Queue) Reset() {
+	q.RateLimitingInterface = workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(queueBaseDelay, queueMaxDelay))
 	for hash := range q.idToCommand {
 		q.Forget(hash)
 		q.Done(hash)
 	}
 	q.candidateProviderIDToCommandID = map[string]uint64{}
 	q.idToCommand = map[uint64]*Command{}
-	q.cluster.Reset()
 }

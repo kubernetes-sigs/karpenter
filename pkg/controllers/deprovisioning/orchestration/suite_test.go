@@ -69,7 +69,7 @@ var _ = BeforeSuite(func() {
 	machineStateController = informer.NewMachineController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
-	queue = orchestration.NewQueue(ctx, env.Client, recorder, cluster, fakeClock)
+	queue = orchestration.NewQueue(ctx, env.Client, recorder, cluster, fakeClock, true)
 })
 
 var _ = AfterSuite(func() {
@@ -85,7 +85,7 @@ var _ = BeforeEach(func() {
 	// Shut down the queue and restart it to ensure no races
 	queue.ShutDown()
 	queue.Reset()
-	queue = orchestration.NewQueue(ctx, env.Client, recorder, cluster, fakeClock)
+	queue = orchestration.NewQueue(ctx, env.Client, recorder, cluster, fakeClock, true)
 })
 
 var _ = AfterEach(func() {

@@ -142,6 +142,8 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
+		// Process the item so that the nodes can be deleted.
+		ExpectQueueItemProcessed(ctx, queue)
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)
 
 		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
@@ -248,6 +250,8 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
+		// Process the item so that the nodes can be deleted.
+		ExpectQueueItemProcessed(ctx, queue)
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -290,6 +294,8 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
+		// Process the item so that the nodes can be deleted.
+		ExpectQueueItemProcessed(ctx, queue)
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims...)
 
@@ -336,6 +342,8 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
+		// Process the item so that the nodes can be deleted.
+		ExpectQueueItemProcessed(ctx, queue)
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -480,6 +488,8 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 		wg.Wait()
 
+		// Process the item so that the nodes can be deleted.
+		ExpectQueueItemProcessed(ctx, queue)
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -552,6 +562,8 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
+		// Process the item so that the nodes can be deleted.
+		ExpectQueueItemProcessed(ctx, queue)
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)
 

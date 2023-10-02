@@ -88,7 +88,7 @@ var _ = BeforeSuite(func() {
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, env.KubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
-	queue = orchestration.NewQueue(ctx, env.Client, recorder, cluster, fakeClock)
+	queue = orchestration.NewQueue(ctx, env.Client, recorder, cluster, fakeClock, true)
 	deprovisioningController = deprovisioning.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue)
 })
 
@@ -109,6 +109,9 @@ var _ = BeforeEach(func() {
 	fakeClock.SetTime(time.Now())
 	cluster.Reset()
 	cluster.MarkUnconsolidated()
+	// Clean-up queue.
+	queue.Reset()
+	//queue = orchestration.NewQueue(ctx, env.Client, recorder, cluster, fakeClock, true)
 
 	// Reset Feature Flags to test defaults
 	ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(true)}}))
@@ -1313,6 +1316,12 @@ func mostExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
 func fromInt(i int) *intstr.IntOrString {
 	v := intstr.FromInt(i)
 	return &v
+}
+
+func ExpectQueueItemProcessed(ctx context.Context, queue *orchestration.Queue) {
+	cmd, hash, shutdown := queue.Pop()
+	Expect(shutdown).To(BeFalse())
+	queue.ProcessItem(ctx, cmd, hash)
 }
 
 func ExpectTriggerVerifyAction(wg *sync.WaitGroup) {
