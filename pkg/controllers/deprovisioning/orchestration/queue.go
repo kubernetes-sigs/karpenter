@@ -37,18 +37,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
 
-// waitRetryOptions are the retry options used when trying make a successful delete call on a nodeClaim after its
-// replacements have been spun up.
-func waitRetryOptions(ctx context.Context) []retry.Option {
-	return []retry.Option{
-		retry.Context(ctx),
-		retry.Delay(2 * time.Second),
-		retry.LastErrorOnly(true),
-		retry.Attempts(10),
-		retry.MaxDelay(10 * time.Second), // 22 + (10-5)*10 =~ 1 minute in total
-	}
-}
-
 const (
 	queueBaseDelay   = 1 * time.Second
 	queueMaxDelay    = 10 * time.Second
