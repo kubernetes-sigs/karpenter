@@ -934,6 +934,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
+		ExpectQueueItemProcessed(ctx, queue)
 		// Cascade any deletion of the nodeclaims to the nodes
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims...)
 
