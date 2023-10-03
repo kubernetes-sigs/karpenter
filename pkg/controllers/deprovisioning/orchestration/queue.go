@@ -147,7 +147,7 @@ func (q *Queue) Pop() (*Command, bool) {
 // 1. Remove all references of the command if the command completes due to timeout or success.
 // 2. Check the command and requeue if it needs to be checked again later.
 func (q *Queue) ProcessItem(ctx context.Context, cmd *Command) {
-	requeue, err := q.Handle(ctx, cmd)
+	requeue, err := q.Reconcile(ctx, cmd)
 	if !requeue {
 		// If the command timed out, log the last error.
 		if err != nil {
@@ -190,33 +190,12 @@ func (q *Queue) Add(cmd *Command) error {
 	return nil
 }
 
-// Remove fully clears the queue of all references of a hash/command
-func (q *Queue) Remove(cmd *Command) {
-	// Remove all candidates linked to the command
-	for _, candidate := range cmd.Candidates {
-		delete(q.candidateProviderIDToCommand, candidate.ProviderID())
-	}
-	q.RateLimitingInterface.Forget(cmd)
-	q.RateLimitingInterface.Done(cmd)
-}
-
-// CanAdd is a quick check to see if the candidate is already part of a deprovisioning action
-func (q *Queue) CanAdd(ids ...string) error {
-	var err error
-	for _, id := range ids {
-		if _, ok := q.candidateProviderIDToCommand[id]; ok {
-			err = multierr.Append(err, fmt.Errorf("candidate is part of active deprovisioning decision"))
-		}
-	}
-	return err
-}
-
-// Handle will check for timeouts, then execute a wait or termination.
-func (q *Queue) Handle(ctx context.Context, cmd *Command) (bool, error) {
+// Reconcile will check for timeouts, then execute a wait or termination.
+func (q *Queue) Reconcile(ctx context.Context, cmd *Command) (bool, error) {
 	if q.clock.Since(cmd.TimeAdded) > maxRetryDuration {
 		return false, fmt.Errorf("abandoning command, reached timeout, %w", cmd.LastError)
 	}
-	// If the time hasn't expired, either wait, or terminate.
+	// If the time hasn't expired, either wait or terminate.
 	requeue, err := q.WaitOrTerminate(ctx, cmd)
 	if err != nil {
 		// If there was an error, set this as the command's last error so that we can propagate it.
@@ -294,6 +273,27 @@ func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) (bool, error)
 		return false, fmt.Errorf("terminating nodeclaims, %w", multiErr)
 	}
 	return false, nil
+}
+
+// Remove fully clears the queue of all references of a hash/command
+func (q *Queue) Remove(cmd *Command) {
+	// Remove all candidates linked to the command
+	for _, candidate := range cmd.Candidates {
+		delete(q.candidateProviderIDToCommand, candidate.ProviderID())
+	}
+	q.RateLimitingInterface.Forget(cmd)
+	q.RateLimitingInterface.Done(cmd)
+}
+
+// CanAdd is a quick check to see if the candidate is already part of a deprovisioning action
+func (q *Queue) CanAdd(ids ...string) error {
+	var err error
+	for _, id := range ids {
+		if _, ok := q.candidateProviderIDToCommand[id]; ok {
+			err = multierr.Append(err, fmt.Errorf("candidate is part of active deprovisioning decision"))
+		}
+	}
+	return err
 }
 
 func (q *Queue) setNodesUnschedulable(ctx context.Context, isUnschedulable bool, candidates ...string) error {

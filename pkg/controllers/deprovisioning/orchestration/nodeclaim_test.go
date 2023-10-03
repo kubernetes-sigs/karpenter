@@ -85,13 +85,13 @@ var _ = Describe("NodeClaim/Queue", func() {
 		})
 	})
 
-	Context("Queue Handle", func() {
+	Context("Queue Reconcile", func() {
 		It("should not return an error when handling commands before the timeout", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", fakeClock.Now())
-			_, err := queue.Handle(ctx, cmd)
+			_, err := queue.Reconcile(ctx, cmd)
 			Expect(err).To(BeNil())
 		})
 		It("should return an error and clean up when a command times out", func() {
@@ -104,7 +104,7 @@ var _ = Describe("NodeClaim/Queue", func() {
 			fakeClock.Step(1 * time.Hour)
 
 			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", timeNow)
-			requeue, err := queue.Handle(ctx, cmd)
+			requeue, err := queue.Reconcile(ctx, cmd)
 			Expect(requeue).To(BeFalse())
 			Expect(err).ToNot(BeNil())
 		})
@@ -114,11 +114,11 @@ var _ = Describe("NodeClaim/Queue", func() {
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", fakeClock.Now())
 
-			requeue, err := queue.Handle(ctx, cmd)
+			requeue, err := queue.Reconcile(ctx, cmd)
 			Expect(requeue).To(BeTrue())
 			Expect(err).To(BeNil())
 
-			requeue, err = queue.Handle(ctx, cmd)
+			requeue, err = queue.Reconcile(ctx, cmd)
 			Expect(requeue).To(BeTrue())
 			Expect(err).To(BeNil())
 			Expect(cmd.ReplacementKeys[0].Initialized).To(BeFalse())
@@ -126,7 +126,7 @@ var _ = Describe("NodeClaim/Queue", func() {
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{replacementNode}, []*v1beta1.NodeClaim{replacementNodeClaim})
 
-			requeue, err = queue.Handle(ctx, cmd)
+			requeue, err = queue.Reconcile(ctx, cmd)
 			Expect(requeue).To(BeFalse())
 			Expect(err).To(BeNil())
 			Expect(cmd.ReplacementKeys[0].Initialized).To(BeTrue())
@@ -153,11 +153,11 @@ var _ = Describe("NodeClaim/Queue", func() {
 
 			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", fakeClock.Now())
 
-			requeue, err := queue.Handle(ctx, cmd)
+			requeue, err := queue.Reconcile(ctx, cmd)
 			Expect(requeue).To(BeTrue())
 			Expect(err).To(BeNil())
 
-			requeue, err = queue.Handle(ctx, cmd)
+			requeue, err = queue.Reconcile(ctx, cmd)
 			Expect(requeue).To(BeTrue())
 			Expect(err).To(BeNil())
 			Expect(cmd.ReplacementKeys[0].Initialized).To(BeFalse())
@@ -166,7 +166,7 @@ var _ = Describe("NodeClaim/Queue", func() {
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{replacementNode}, []*v1beta1.NodeClaim{replacementNodeClaim})
 
-			requeue, err = queue.Handle(ctx, cmd)
+			requeue, err = queue.Reconcile(ctx, cmd)
 			Expect(requeue).To(BeTrue())
 			Expect(err).To(BeNil())
 			Expect(cmd.ReplacementKeys[0].Initialized).To(BeTrue())
@@ -175,7 +175,7 @@ var _ = Describe("NodeClaim/Queue", func() {
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{replacementNode2}, []*v1beta1.NodeClaim{replacementnodeClaim2})
 
-			requeue, err = queue.Handle(ctx, cmd)
+			requeue, err = queue.Reconcile(ctx, cmd)
 			Expect(requeue).To(BeFalse())
 			Expect(err).To(BeNil())
 			Expect(cmd.ReplacementKeys[0].Initialized).To(BeTrue())
@@ -191,7 +191,7 @@ var _ = Describe("NodeClaim/Queue", func() {
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 			cmd := orchestration.NewCommand([]nodeclaim.Key{}, []*state.StateNode{stateNode}, "", fakeClock.Now())
 
-			requeue, err := queue.Handle(ctx, cmd)
+			requeue, err := queue.Reconcile(ctx, cmd)
 			Expect(requeue).To(BeFalse())
 			Expect(err).To(BeNil())
 
@@ -208,13 +208,13 @@ var _ = Describe("NodeClaim/Queue", func() {
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "consolidation-test", fakeClock.Now())
 
-			requeue, err := queue.Handle(ctx, cmd)
+			requeue, err := queue.Reconcile(ctx, cmd)
 			Expect(requeue).To(BeTrue())
 			Expect(err).To(BeNil())
 
 			ExpectApplied(ctx, env.Client, replacementNodeClaim, replacementNode)
 
-			requeue, err = queue.Handle(ctx, cmd)
+			requeue, err = queue.Reconcile(ctx, cmd)
 			Expect(requeue).To(BeTrue())
 			Expect(err).To(BeNil())
 			Expect(cmd.ReplacementKeys[0].Initialized).To(BeFalse())
@@ -227,7 +227,7 @@ var _ = Describe("NodeClaim/Queue", func() {
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 			cmd := orchestration.NewCommand([]nodeclaim.Key{}, []*state.StateNode{stateNode}, "consolidation-test", fakeClock.Now())
 
-			requeue, err := queue.Handle(ctx, cmd)
+			requeue, err := queue.Reconcile(ctx, cmd)
 			Expect(requeue).To(BeFalse())
 			Expect(err).To(BeNil())
 			terminatingEvents := deprovisioningevents.Terminating(stateNode.Node, stateNode.NodeClaim, "consolidation-test")
