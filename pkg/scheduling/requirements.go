@@ -220,10 +220,8 @@ func editDistance(s, t string) int {
 }
 
 func getSuffix(key string) string {
-	if strings.Contains(key, "/") {
-		return strings.Split(key, "/")[1]
-	}
-	return key
+	before, after, found := strings.Cut(key, "/")
+	return lo.Ternary(found, after, before)
 }
 
 func labelHint(r Requirements, key string, allowedUndefined sets.Set[string]) string {
