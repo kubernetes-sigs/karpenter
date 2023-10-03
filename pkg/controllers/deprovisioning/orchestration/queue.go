@@ -50,7 +50,7 @@ func waitRetryOptions(ctx context.Context) []retry.Option {
 }
 
 const (
-	queueBaseDelay   = 100 * time.Millisecond
+	queueBaseDelay   = 1 * time.Second
 	queueMaxDelay    = 10 * time.Second
 	maxRetryDuration = 10 * time.Minute
 )
@@ -257,39 +257,43 @@ func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) (bool, error)
 		// We emitted this event when Deprovisioning was blocked on launching/termination.
 		// This does not block other forms of deprovisioning, but we should still emit this.
 		q.recorder.Publish(deprovisioningevents.Launching(nodeClaim, cmd.Reason))
-		if !nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized).IsTrue() {
+		initializedStatus := nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized)
+		if !initializedStatus.IsTrue() {
 			q.recorder.Publish(deprovisioningevents.WaitingOnReadiness(nodeClaim))
 			waitErrs[i] = fmt.Errorf("getting node claim, %w", err)
 			continue
 		}
 		key.Initialized = true
-		// This should only be reached once since initialization is checked at the beginning.
-		deprovisioningReplacementNodeInitializedHistogram.Observe(q.clock.Since(cmd.TimeAdded).Seconds())
+		// Subtract the last initialization time from the time the command was added to get initialization duration.
+		initLength := initializedStatus.LastTransitionTime.Inner.Time.Sub(cmd.TimeAdded).Seconds()
+		deprovisioningReplacementNodeInitializedHistogram.Observe(initLength)
 	}
 	// If we have any errors, don't continue
 	if err := multierr.Combine(waitErrs...); err != nil {
 		return true, err
 	}
 
-	// Reaching here means we know that all replacements have been provisioned.
+	// All replacements have been provisioned.
 	// All we need to do now is get a successful delete call for each node claim,
 	// then the termination controller will handle the eventual deletion of the nodes.
-	errs := make([]error, len(cmd.Candidates))
-	workqueue.ParallelizeUntil(ctx, len(cmd.Candidates), len(cmd.Candidates), func(i int) {
-		q.recorder.Publish(deprovisioningevents.Terminating(cmd.Candidates[i].Node, cmd.Candidates[i].NodeClaim, cmd.Reason)...)
-		errs[i] = retry.Do(func() error {
-			if err := nodeclaim.Delete(ctx, q.kubeClient, cmd.Candidates[i].NodeClaim); err != nil {
-				if !errors.IsNotFound(err) {
-					return err
-				}
+	var multiErr error
+	for i := range cmd.Candidates {
+		candidate := cmd.Candidates[i]
+		q.recorder.Publish(deprovisioningevents.Terminating(candidate.Node, candidate.NodeClaim, cmd.Reason)...)
+		if err := nodeclaim.Delete(ctx, q.kubeClient, candidate.NodeClaim); err != nil {
+			if !errors.IsNotFound(err) {
+				multiErr = multierr.Append(multiErr, err)
 			}
-			return nil
-		}, waitRetryOptions(ctx)...)
-		nodeclaim.TerminatedCounter(cmd.Candidates[i].NodeClaim, cmd.Reason).Inc()
-	})
+		} else {
+			nodeclaim.TerminatedCounter(cmd.Candidates[i].NodeClaim, cmd.Reason).Inc()
+		}
+	}
 	// If there were any deletion failures, we should requeue.
-	// In the case where we requeue, but the timeout for the command is reached, we'll
-	return false, fmt.Errorf("terminating candidates, %w", multierr.Combine(errs...))
+	// In the case where we requeue, but the timeout for the command is reached, we'll mark this as a failure.
+	if multiErr != nil {
+		return false, fmt.Errorf("terminating nodeclaims, %w", multiErr)
+	}
+	return false, nil
 }
 
 func (q *Queue) setNodesUnschedulable(ctx context.Context, isUnschedulable bool, candidates ...string) error {
