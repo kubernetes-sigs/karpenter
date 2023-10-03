@@ -108,6 +108,7 @@ var _ = Describe("Machine/Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 			wg.Wait()
 
+			ExpectQueueItemProcessed(ctx, queue)
 			// Cascade any deletion of the machine to the node
 			ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
 
@@ -126,7 +127,9 @@ var _ = Describe("Machine/Consolidation", func() {
 			wg := sync.WaitGroup{}
 			ExpectTriggerVerifyAction(&wg)
 			ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+			wg.Wait()
 
+			ExpectQueueItemProcessed(ctx, queue)
 			// Cascade any deletion of the machine to the node
 			ExpectMachinesCascadeDeletion(ctx, env.Client, machine1, machine2)
 
@@ -783,6 +786,7 @@ var _ = Describe("Machine/Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 			wg.Wait()
 
+			ExpectQueueItemProcessed(ctx, queue)
 			// Cascade any deletion of the machine to the node
 			ExpectMachinesCascadeDeletion(ctx, env.Client, regularMachine)
 
@@ -877,6 +881,7 @@ var _ = Describe("Machine/Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 			wg.Wait()
 
+			ExpectQueueItemProcessed(ctx, queue)
 			// Cascade any deletion of the machine to the node
 			ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
 
@@ -971,6 +976,7 @@ var _ = Describe("Machine/Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 			wg.Wait()
 
+			ExpectQueueItemProcessed(ctx, queue)
 			// Cascade any deletion of the machine to the node
 			ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
 
@@ -1540,6 +1546,7 @@ var _ = Describe("Machine/Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 			wg.Wait()
 
+			ExpectQueueItemProcessed(ctx, queue)
 			// Cascade any deletion of the machine to the node
 			ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
 
@@ -1591,6 +1598,7 @@ var _ = Describe("Machine/Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 			wg.Wait()
 
+			ExpectQueueItemProcessed(ctx, queue)
 			// Cascade any deletion of the machine to the node
 			ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
 
@@ -1642,6 +1650,7 @@ var _ = Describe("Machine/Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 			wg.Wait()
 
+			ExpectQueueItemProcessed(ctx, queue)
 			// Cascade any deletion of the machine to the node
 			ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
 
