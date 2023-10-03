@@ -33,18 +33,18 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
-const MultiMachineConsolidationTimeoutDuration = 1 * time.Minute
+const MultiNodeConsolidationTimeoutDuration = 1 * time.Minute
 
-type MultiMachineConsolidation struct {
+type MultiNodeConsolidation struct {
 	consolidation
 }
 
-func NewMultiMachineConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client,
-	provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder) *MultiMachineConsolidation {
-	return &MultiMachineConsolidation{makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
+func NewMultiNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client,
+	provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder) *MultiNodeConsolidation {
+	return &MultiNodeConsolidation{makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
 }
 
-func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
+func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	if m.isConsolidated() {
 		return Command{}, nil
 	}
@@ -54,11 +54,11 @@ func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	}
 	deprovisioningEligibleMachinesGauge.WithLabelValues(m.String()).Set(float64(len(candidates)))
 
-	// Only consider a maximum batch of 100 machines to save on computation.
+	// Only consider a maximum batch of 100 NodeClaims to save on computation.
 	// This could be further configurable in the future.
 	maxParallel := lo.Clamp(len(candidates), 0, 100)
 
-	cmd, err := m.firstNMachineConsolidationOption(ctx, candidates, maxParallel)
+	cmd, err := m.firstNConsolidationOption(ctx, candidates, maxParallel)
 	if err != nil {
 		return Command{}, err
 	}
@@ -76,16 +76,16 @@ func (m *MultiMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	}
 
 	if !isValid {
-		logging.FromContext(ctx).Debugf("abandoning multi machine consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+		logging.FromContext(ctx).Debugf("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
 		return Command{}, nil
 	}
 	return cmd, nil
 }
 
-// firstNMachineConsolidationOption looks at the first N machines to determine if they can all be consolidated at once.  The
-// machines are sorted by increasing disruption order which correlates to likelihood if being able to consolidate the machine
-func (m *MultiMachineConsolidation) firstNMachineConsolidationOption(ctx context.Context, candidates []*Candidate, max int) (Command, error) {
-	// we always operate on at least two machines at once, for single machines standard consolidation will find all solutions
+// firstNConsolidationOption looks at the first N NodeClaims to determine if they can all be consolidated at once.  The
+// NodeClaims are sorted by increasing disruption order which correlates to likelihood if being able to consolidate the node
+func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, candidates []*Candidate, max int) (Command, error) {
+	// we always operate on at least two NodeClaims at once, for single NodeClaims standard consolidation will find all solutions
 	if len(candidates) < 2 {
 		return Command{}, nil
 	}
@@ -96,15 +96,16 @@ func (m *MultiMachineConsolidation) firstNMachineConsolidationOption(ctx context
 
 	lastSavedCommand := Command{}
 	// Set a timeout
-	timeout := m.clock.Now().Add(MultiMachineConsolidationTimeoutDuration)
-	// binary search to find the maximum number of machines we can terminate
+	timeout := m.clock.Now().Add(MultiNodeConsolidationTimeoutDuration)
+	// binary search to find the maximum number of NodeClaims we can terminate
 	for min <= max {
 		if m.clock.Now().After(timeout) {
+			// TODO @joinnis: Change this to multiNodeConsolidationLabelValue when migrating
 			deprovisioningConsolidationTimeoutsCounter.WithLabelValues(multiMachineConsolidationLabelValue).Inc()
 			if lastSavedCommand.candidates == nil {
-				logging.FromContext(ctx).Debugf("failed to find a multi-machine consolidation after timeout, last considered batch had %d machines", (min+max)/2)
+				logging.FromContext(ctx).Debugf("failed to find a multi-node consolidation after timeout, last considered batch had %d", (min+max)/2)
 			} else {
-				logging.FromContext(ctx).Debugf("stopping multi-machine consolidation after timeout, returning last valid command %s", lastSavedCommand)
+				logging.FromContext(ctx).Debugf("stopping multi-node consolidation after timeout, returning last valid command %s", lastSavedCommand)
 			}
 			return lastSavedCommand, nil
 		}
@@ -126,7 +127,7 @@ func (m *MultiMachineConsolidation) firstNMachineConsolidationOption(ctx context
 
 		// replacementHasValidInstanceTypes will be false if the replacement action has valid instance types remaining after filtering.
 		if replacementHasValidInstanceTypes || cmd.Action() == DeleteAction {
-			// we can consolidate machines [0,mid]
+			// We can consolidate NodeClaims [0,mid]
 			lastSavedCommand = cmd
 			min = mid + 1
 		} else {
@@ -140,23 +141,23 @@ func (m *MultiMachineConsolidation) firstNMachineConsolidationOption(ctx context
 // consolidated if the list of replacement instance types include one of the instance types that is being removed
 //
 // This handles the following potential consolidation result:
-// machines=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.small, t3a.xlarge, t3a.2xlarge
+// NodeClaims=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.small, t3a.xlarge, t3a.2xlarge
 //
 // In this case, we shouldn't perform this consolidation at all.  This is equivalent to just
-// deleting the 2x t3a.xlarge machines.  This code will identify that t3a.small is in both lists and filter
+// deleting the 2x t3a.xlarge NodeClaims.  This code will identify that t3a.small is in both lists and filter
 // out any instance type that is the same or more expensive than the t3a.small
 //
 // For another scenario:
-// machines=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.nano, t3a.small, t3a.xlarge, t3a.2xlarge
+// NodeClaims=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.nano, t3a.small, t3a.xlarge, t3a.2xlarge
 //
 // This code sees that t3a.small is the cheapest type in both lists and filters it and anything more expensive out
 // leaving the valid consolidation:
-// machines=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.nano
-func filterOutSameType(newMachine *scheduling.NodeClaim, consolidate []*Candidate) []*cloudprovider.InstanceType {
-	existingInstanceTypes := sets.NewString()
+// NodeClaims=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.nano
+func filterOutSameType(newNodeClaim *scheduling.NodeClaim, consolidate []*Candidate) []*cloudprovider.InstanceType {
+	existingInstanceTypes := sets.New[string]()
 	pricesByInstanceType := map[string]float64{}
 
-	// get the price of the cheapest machine that we currently are considering deleting indexed by instance type
+	// get the price of the cheapest node that we currently are considering deleting indexed by instance type
 	for _, c := range consolidate {
 		existingInstanceTypes.Insert(c.instanceType.Name)
 		of, ok := c.instanceType.Offerings.Get(c.capacityType, c.zone)
@@ -173,9 +174,9 @@ func filterOutSameType(newMachine *scheduling.NodeClaim, consolidate []*Candidat
 	}
 
 	maxPrice := math.MaxFloat64
-	for _, it := range newMachine.InstanceTypeOptions {
-		// we are considering replacing multiple machines with a single machine of one of the same types, so the replacement
-		// machine must be cheaper than the price of the existing machine, or we should just keep that one and do a
+	for _, it := range newNodeClaim.InstanceTypeOptions {
+		// we are considering replacing multiple NodeClaims with a single NodeClaim of one of the same types, so the replacement
+		// node must be cheaper than the price of the existing node, or we should just keep that one and do a
 		// deletion only to reduce cluster disruption (fewer pods will re-schedule).
 		if existingInstanceTypes.Has(it.Name) {
 			if pricesByInstanceType[it.Name] < maxPrice {
@@ -184,5 +185,5 @@ func filterOutSameType(newMachine *scheduling.NodeClaim, consolidate []*Candidat
 		}
 	}
 
-	return filterByPrice(newMachine.InstanceTypeOptions, newMachine.Requirements, maxPrice)
+	return filterByPrice(newNodeClaim.InstanceTypeOptions, newNodeClaim.Requirements, maxPrice)
 }

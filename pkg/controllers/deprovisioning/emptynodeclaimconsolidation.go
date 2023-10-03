@@ -30,18 +30,18 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 )
 
-// EmptyMachineConsolidation is the consolidation controller that performs multi-machine consolidation of entirely empty machines
-type EmptyMachineConsolidation struct {
+// EmptyNodeConsolidation is the consolidation controller that performs multi-nodeclaim consolidation of entirely empty nodes
+type EmptyNodeConsolidation struct {
 	consolidation
 }
 
-func NewEmptyMachineConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client,
-	provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder) *EmptyMachineConsolidation {
-	return &EmptyMachineConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
+func NewEmptyNodeClaimConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client,
+	provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder) *EmptyNodeConsolidation {
+	return &EmptyNodeConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
 }
 
-// ComputeCommand generates a deprovisioning command given deprovisionable machines
-func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
+// ComputeCommand generates a deprovisioning command given deprovisionable NodeClaims
+func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	if c.isConsolidated() {
 		return Command{}, nil
 	}
@@ -51,7 +51,7 @@ func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	}
 	deprovisioningEligibleMachinesGauge.WithLabelValues(c.String()).Set(float64(len(candidates)))
 
-	// select the entirely empty nodes
+	// select the entirely empty NodeClaims
 	emptyCandidates := lo.Filter(candidates, func(n *Candidate, _ int) bool { return len(n.pods) == 0 })
 	if len(emptyCandidates) == 0 {
 		// none empty, so do nothing
@@ -63,7 +63,7 @@ func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 		candidates: emptyCandidates,
 	}
 
-	// empty machine consolidation doesn't use Validation as we get to take advantage of cluster.IsNodeNominated.  This
+	// Empty Node Consolidation doesn't use Validation as we get to take advantage of cluster.IsNodeNominated.  This
 	// lets us avoid a scheduling simulation (which is performed periodically while pending pods exist and drives
 	// cluster.IsNodeNominated already).
 	select {
@@ -78,12 +78,12 @@ func (c *EmptyMachineConsolidation) ComputeCommand(ctx context.Context, candidat
 	}
 	candidatesToDelete := mapCandidates(cmd.candidates, validationCandidates)
 
-	// The deletion of empty machines is easy to validate, we just ensure that:
+	// The deletion of empty NodeClaims is easy to validate, we just ensure that:
 	// 1. All the candidatesToDelete are still empty
 	// 2. The node isn't a target of a recent scheduling simulation
 	for _, n := range candidatesToDelete {
 		if len(n.pods) != 0 || c.cluster.IsNodeNominated(n.ProviderID()) {
-			logging.FromContext(ctx).Debugf("abandoning empty machine consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+			logging.FromContext(ctx).Debugf("abandoning empty node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
 			return Command{}, nil
 		}
 	}
