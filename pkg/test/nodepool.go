@@ -39,8 +39,8 @@ func NodePool(overrides ...v1beta1.NodePool) *v1beta1.NodePool {
 	if override.Spec.Limits == nil {
 		override.Spec.Limits = v1beta1.Limits(v1.ResourceList{v1.ResourceCPU: resource.MustParse("2000")})
 	}
-	if override.Spec.Template.Spec.NodeClass == nil {
-		override.Spec.Template.Spec.NodeClass = &v1beta1.NodeClassReference{
+	if override.Spec.Template.Spec.NodeClassRef == nil {
+		override.Spec.Template.Spec.NodeClassRef = &v1beta1.NodeClassReference{
 			Name: "default",
 		}
 	}

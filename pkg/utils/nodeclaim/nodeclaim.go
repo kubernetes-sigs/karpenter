@@ -197,8 +197,8 @@ func New(machine *v1alpha5.Machine) *v1beta1.NodeClaim {
 			Resources: v1beta1.ResourceRequirements{
 				Requests: machine.Spec.Resources.Requests,
 			},
-			Kubelet:   NewKubeletConfiguration(machine.Spec.Kubelet),
-			NodeClass: NewNodeClassReference(machine.Spec.MachineTemplateRef),
+			Kubelet:      NewKubeletConfiguration(machine.Spec.Kubelet),
+			NodeClassRef: NewNodeClassReference(machine.Spec.MachineTemplateRef),
 		},
 		Status: v1beta1.NodeClaimStatus{
 			NodeName:    machine.Status.NodeName,

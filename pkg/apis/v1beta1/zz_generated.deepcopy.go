@@ -267,8 +267,8 @@ func (in *NodeClaimSpec) DeepCopyInto(out *NodeClaimSpec) {
 		*out = new(KubeletConfiguration)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.NodeClass != nil {
-		in, out := &in.NodeClass, &out.NodeClass
+	if in.NodeClassRef != nil {
+		in, out := &in.NodeClassRef, &out.NodeClassRef
 		*out = new(NodeClassReference)
 		**out = **in
 	}

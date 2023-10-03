@@ -39,7 +39,7 @@ var _ = Describe("Validation", func() {
 			Spec: NodePoolSpec{
 				Template: NodeClaimTemplate{
 					Spec: NodeClaimSpec{
-						NodeClass: &NodeClassReference{
+						NodeClassRef: &NodeClassReference{
 							Kind: "NodeClaim",
 							Name: "default",
 						},

@@ -61,7 +61,7 @@ var _ = Describe("Metrics", func() {
 			Spec: v1beta1.NodePoolSpec{
 				Template: v1beta1.NodeClaimTemplate{
 					Spec: v1beta1.NodeClaimSpec{
-						NodeClass: &v1beta1.NodeClassReference{
+						NodeClassRef: &v1beta1.NodeClassReference{
 							Name: "default",
 						},
 					},

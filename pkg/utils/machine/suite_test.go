@@ -306,8 +306,8 @@ var _ = Describe("MachineUtils", func() {
 					ImageGCLowThresholdPercent:  ptr.Int32(10),
 					CPUCFSQuota:                 ptr.Bool(false),
 				},
-				NodeClass: &v1beta1.NodeClassReference{
-					Kind:       "NodeClass",
+				NodeClassRef: &v1beta1.NodeClassReference{
+					Kind:       "NodeClassRef",
 					APIVersion: "test.cloudprovider/v1",
 					Name:       "default",
 				},
@@ -410,9 +410,9 @@ var _ = Describe("MachineUtils", func() {
 		Expect(machine.Spec.Kubelet.ImageGCLowThresholdPercent).To(Equal(nodeClaim.Spec.Kubelet.ImageGCLowThresholdPercent))
 		Expect(machine.Spec.Kubelet.CPUCFSQuota).To(Equal(nodeClaim.Spec.Kubelet.CPUCFSQuota))
 
-		Expect(machine.Spec.MachineTemplateRef.Kind).To(Equal(nodeClaim.Spec.NodeClass.Kind))
-		Expect(machine.Spec.MachineTemplateRef.APIVersion).To(Equal(nodeClaim.Spec.NodeClass.APIVersion))
-		Expect(machine.Spec.MachineTemplateRef.Name).To(Equal(nodeClaim.Spec.NodeClass.Name))
+		Expect(machine.Spec.MachineTemplateRef.Kind).To(Equal(nodeClaim.Spec.NodeClassRef.Kind))
+		Expect(machine.Spec.MachineTemplateRef.APIVersion).To(Equal(nodeClaim.Spec.NodeClassRef.APIVersion))
+		Expect(machine.Spec.MachineTemplateRef.Name).To(Equal(nodeClaim.Spec.NodeClassRef.Name))
 
 		Expect(machine.Status.NodeName).To(Equal(nodeClaim.Status.NodeName))
 		Expect(machine.Status.ProviderID).To(Equal(nodeClaim.Status.ProviderID))

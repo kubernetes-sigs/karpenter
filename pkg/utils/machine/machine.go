@@ -235,7 +235,7 @@ func NewFromNodeClaim(nodeClaim *v1beta1.NodeClaim) *v1alpha5.Machine {
 				Requests: nodeClaim.Spec.Resources.Requests,
 			},
 			Kubelet:            NewKubeletConfiguration(nodeClaim.Spec.Kubelet),
-			MachineTemplateRef: NewMachineTemplateRef(nodeClaim.Spec.NodeClass),
+			MachineTemplateRef: NewMachineTemplateRef(nodeClaim.Spec.NodeClassRef),
 		},
 		Status: v1alpha5.MachineStatus{
 			NodeName:    nodeClaim.Status.NodeName,

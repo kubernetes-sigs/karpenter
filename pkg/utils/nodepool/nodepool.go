@@ -53,7 +53,7 @@ func New(provisioner *v1alpha5.Provisioner) *v1beta1.NodePool {
 					StartupTaints: provisioner.Spec.StartupTaints,
 					Requirements:  provisioner.Spec.Requirements,
 					Kubelet:       NewKubeletConfiguration(provisioner.Spec.KubeletConfiguration),
-					NodeClass:     NewNodeClassReference(provisioner.Spec.ProviderRef),
+					NodeClassRef:  NewNodeClassReference(provisioner.Spec.ProviderRef),
 					Provider:      provisioner.Spec.Provider,
 				},
 			},
