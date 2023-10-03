@@ -268,9 +268,9 @@ var _ = Describe("NodeClaimUtils", func() {
 		Expect(nodeClaim.Spec.Kubelet.ImageGCLowThresholdPercent).To(Equal(machine.Spec.Kubelet.ImageGCLowThresholdPercent))
 		Expect(nodeClaim.Spec.Kubelet.CPUCFSQuota).To(Equal(machine.Spec.Kubelet.CPUCFSQuota))
 
-		Expect(nodeClaim.Spec.NodeClass.Kind).To(Equal(machine.Spec.MachineTemplateRef.Kind))
-		Expect(nodeClaim.Spec.NodeClass.APIVersion).To(Equal(machine.Spec.MachineTemplateRef.APIVersion))
-		Expect(nodeClaim.Spec.NodeClass.Name).To(Equal(machine.Spec.MachineTemplateRef.Name))
+		Expect(nodeClaim.Spec.NodeClassRef.Kind).To(Equal(machine.Spec.MachineTemplateRef.Kind))
+		Expect(nodeClaim.Spec.NodeClassRef.APIVersion).To(Equal(machine.Spec.MachineTemplateRef.APIVersion))
+		Expect(nodeClaim.Spec.NodeClassRef.Name).To(Equal(machine.Spec.MachineTemplateRef.Name))
 
 		Expect(nodeClaim.Status.NodeName).To(Equal(machine.Status.NodeName))
 		Expect(nodeClaim.Status.ProviderID).To(Equal(machine.Status.ProviderID))
@@ -304,8 +304,8 @@ var _ = Describe("NodeClaimUtils", func() {
 	It("should retrieve a NodeClaim with a get call", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			Spec: v1beta1.NodeClaimSpec{
-				NodeClass: &v1beta1.NodeClassReference{
-					Kind:       "NodeClass",
+				NodeClassRef: &v1beta1.NodeClassReference{
+					Kind:       "NodeClassRef",
 					APIVersion: "test.cloudprovider/v1",
 					Name:       "default",
 				},
@@ -334,8 +334,8 @@ var _ = Describe("NodeClaimUtils", func() {
 		for i := 0; i < numNodeClaims; i++ {
 			ExpectApplied(ctx, env.Client, test.NodeClaim(v1beta1.NodeClaim{
 				Spec: v1beta1.NodeClaimSpec{
-					NodeClass: &v1beta1.NodeClassReference{
-						Kind:       "NodeClass",
+					NodeClassRef: &v1beta1.NodeClassReference{
+						Kind:       "NodeClassRef",
 						APIVersion: "test.cloudprovider/v1",
 						Name:       "default",
 					},
@@ -353,8 +353,8 @@ var _ = Describe("NodeClaimUtils", func() {
 	It("should update the status on a NodeClaim", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			Spec: v1beta1.NodeClaimSpec{
-				NodeClass: &v1beta1.NodeClassReference{
-					Kind:       "NodeClass",
+				NodeClassRef: &v1beta1.NodeClassReference{
+					Kind:       "NodeClassRef",
 					APIVersion: "test.cloudprovider/v1",
 					Name:       "default",
 				},
@@ -386,8 +386,8 @@ var _ = Describe("NodeClaimUtils", func() {
 	It("should patch a NodeClaim", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			Spec: v1beta1.NodeClaimSpec{
-				NodeClass: &v1beta1.NodeClassReference{
-					Kind:       "NodeClass",
+				NodeClassRef: &v1beta1.NodeClassReference{
+					Kind:       "NodeClassRef",
 					APIVersion: "test.cloudprovider/v1",
 					Name:       "default",
 				},
@@ -423,8 +423,8 @@ var _ = Describe("NodeClaimUtils", func() {
 	It("should patch the status on a NodeClaim", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			Spec: v1beta1.NodeClaimSpec{
-				NodeClass: &v1beta1.NodeClassReference{
-					Kind:       "NodeClass",
+				NodeClassRef: &v1beta1.NodeClassReference{
+					Kind:       "NodeClassRef",
 					APIVersion: "test.cloudprovider/v1",
 					Name:       "default",
 				},
@@ -458,8 +458,8 @@ var _ = Describe("NodeClaimUtils", func() {
 	It("should delete a NodeClaim with a delete call", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			Spec: v1beta1.NodeClaimSpec{
-				NodeClass: &v1beta1.NodeClassReference{
-					Kind:       "NodeClass",
+				NodeClassRef: &v1beta1.NodeClassReference{
+					Kind:       "NodeClassRef",
 					APIVersion: "test.cloudprovider/v1",
 					Name:       "default",
 				},
@@ -492,8 +492,8 @@ var _ = Describe("NodeClaimUtils", func() {
 	It("should update the owner for a Node to a NodeClaim", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			Spec: v1beta1.NodeClaimSpec{
-				NodeClass: &v1beta1.NodeClassReference{
-					Kind:       "NodeClass",
+				NodeClassRef: &v1beta1.NodeClassReference{
+					Kind:       "NodeClassRef",
 					APIVersion: "test.cloudprovider/v1",
 					Name:       "default",
 				},
@@ -529,8 +529,8 @@ var _ = Describe("NodeClaimUtils", func() {
 			Spec: v1beta1.NodePoolSpec{
 				Template: v1beta1.NodeClaimTemplate{
 					Spec: v1beta1.NodeClaimSpec{
-						NodeClass: &v1beta1.NodeClassReference{
-							Kind:       "NodeClass",
+						NodeClassRef: &v1beta1.NodeClassReference{
+							Kind:       "NodeClassRef",
 							APIVersion: "test.cloudprovider/v1",
 							Name:       "default",
 						},
@@ -545,8 +545,8 @@ var _ = Describe("NodeClaimUtils", func() {
 				},
 			},
 			Spec: v1beta1.NodeClaimSpec{
-				NodeClass: &v1beta1.NodeClassReference{
-					Kind:       "NodeClass",
+				NodeClassRef: &v1beta1.NodeClassReference{
+					Kind:       "NodeClassRef",
 					APIVersion: "test.cloudprovider/v1",
 					Name:       "default",
 				},

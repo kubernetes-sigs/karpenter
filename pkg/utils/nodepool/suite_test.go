@@ -218,9 +218,9 @@ var _ = Describe("NodePoolUtils", func() {
 		Expect(nodePool.Spec.Template.Spec.Kubelet.ImageGCLowThresholdPercent).To(Equal(provisioner.Spec.KubeletConfiguration.ImageGCLowThresholdPercent))
 		Expect(nodePool.Spec.Template.Spec.Kubelet.CPUCFSQuota).To(Equal(provisioner.Spec.KubeletConfiguration.CPUCFSQuota))
 
-		Expect(nodePool.Spec.Template.Spec.NodeClass.Kind).To(Equal(provisioner.Spec.ProviderRef.Kind))
-		Expect(nodePool.Spec.Template.Spec.NodeClass.APIVersion).To(Equal(provisioner.Spec.ProviderRef.APIVersion))
-		Expect(nodePool.Spec.Template.Spec.NodeClass.Name).To(Equal(provisioner.Spec.ProviderRef.Name))
+		Expect(nodePool.Spec.Template.Spec.NodeClassRef.Kind).To(Equal(provisioner.Spec.ProviderRef.Kind))
+		Expect(nodePool.Spec.Template.Spec.NodeClassRef.APIVersion).To(Equal(provisioner.Spec.ProviderRef.APIVersion))
+		Expect(nodePool.Spec.Template.Spec.NodeClassRef.Name).To(Equal(provisioner.Spec.ProviderRef.Name))
 
 		Expect(nodePool.Spec.Disruption.ConsolidationPolicy).To(Equal(v1beta1.ConsolidationPolicyWhenUnderutilized))
 		Expect(nodePool.Spec.Disruption.ExpireAfter.Duration.Seconds()).To(BeNumerically("==", lo.FromPtr(provisioner.Spec.TTLSecondsUntilExpired)))
@@ -252,8 +252,8 @@ var _ = Describe("NodePoolUtils", func() {
 				Spec: v1beta1.NodePoolSpec{
 					Template: v1beta1.NodeClaimTemplate{
 						Spec: v1beta1.NodeClaimSpec{
-							NodeClass: &v1beta1.NodeClassReference{
-								Kind:       "NodeClass",
+							NodeClassRef: &v1beta1.NodeClassReference{
+								Kind:       "NodeClassRef",
 								APIVersion: "test.cloudprovider/v1",
 								Name:       "default",
 							},
@@ -275,8 +275,8 @@ var _ = Describe("NodePoolUtils", func() {
 			Spec: v1beta1.NodePoolSpec{
 				Template: v1beta1.NodeClaimTemplate{
 					Spec: v1beta1.NodeClaimSpec{
-						NodeClass: &v1beta1.NodeClassReference{
-							Kind:       "NodeClass",
+						NodeClassRef: &v1beta1.NodeClassReference{
+							Kind:       "NodeClassRef",
 							APIVersion: "test.cloudprovider/v1",
 							Name:       "default",
 						},

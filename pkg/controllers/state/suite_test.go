@@ -1220,7 +1220,7 @@ var _ = Describe("Inflight Nodes", func() {
 							v1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
 						},
 					},
-					NodeClass: &v1beta1.NodeClassReference{
+					NodeClassRef: &v1beta1.NodeClassReference{
 						Name: "default",
 					},
 				},
@@ -1271,7 +1271,7 @@ var _ = Describe("Inflight Nodes", func() {
 							v1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
 						},
 					},
-					NodeClass: &v1beta1.NodeClassReference{
+					NodeClassRef: &v1beta1.NodeClassReference{
 						Name: "default",
 					},
 				},
@@ -1309,7 +1309,7 @@ var _ = Describe("Inflight Nodes", func() {
 							Values:   []string{"test-zone-1"},
 						},
 					},
-					NodeClass: &v1beta1.NodeClassReference{
+					NodeClassRef: &v1beta1.NodeClassReference{
 						Name: "default",
 					},
 				},
@@ -1357,7 +1357,7 @@ var _ = Describe("Inflight Nodes", func() {
 							Values:   []string{"test-zone-1"},
 						},
 					},
-					NodeClass: &v1beta1.NodeClassReference{
+					NodeClassRef: &v1beta1.NodeClassReference{
 						Name: "default",
 					},
 				},
@@ -1453,7 +1453,7 @@ var _ = Describe("Inflight Nodes", func() {
 							Effect: v1.TaintEffectNoExecute,
 						},
 					},
-					NodeClass: &v1beta1.NodeClassReference{
+					NodeClassRef: &v1beta1.NodeClassReference{
 						Name: "default",
 					},
 				},
@@ -1537,7 +1537,7 @@ var _ = Describe("Inflight Nodes", func() {
 							Effect: v1.TaintEffectNoExecute,
 						},
 					},
-					NodeClass: &v1beta1.NodeClassReference{
+					NodeClassRef: &v1beta1.NodeClassReference{
 						Name: "default",
 					},
 				},
@@ -1622,7 +1622,7 @@ var _ = Describe("Inflight Nodes", func() {
 							Values:   []string{"test-zone-1"},
 						},
 					},
-					NodeClass: &v1beta1.NodeClassReference{
+					NodeClassRef: &v1beta1.NodeClassReference{
 						Name: "default",
 					},
 				},
@@ -1693,7 +1693,7 @@ var _ = Describe("Inflight Nodes", func() {
 							Values:   []string{"test-zone-1"},
 						},
 					},
-					NodeClass: &v1beta1.NodeClassReference{
+					NodeClassRef: &v1beta1.NodeClassReference{
 						Name: "default",
 					},
 				},
@@ -2403,7 +2403,7 @@ var _ = Describe("Node Resource Level", func() {
 						Values:   []string{"test-zone-1"},
 					},
 				},
-				NodeClass: &v1beta1.NodeClassReference{
+				NodeClassRef: &v1beta1.NodeClassReference{
 					Name: "default",
 				},
 			},

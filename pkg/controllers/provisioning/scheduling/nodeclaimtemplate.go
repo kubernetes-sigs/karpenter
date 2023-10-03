@@ -137,11 +137,11 @@ func (i *NodeClaimTemplate) ToMachine(provisioner *v1alpha5.Provisioner) *v1alph
 			CPUCFSQuota:                 i.NodeClaimTemplate.Spec.Kubelet.CPUCFSQuota,
 		}
 	}
-	if i.NodeClaimTemplate.Spec.NodeClass != nil {
+	if i.NodeClaimTemplate.Spec.NodeClassRef != nil {
 		m.Spec.MachineTemplateRef = &v1alpha5.MachineTemplateRef{
-			Kind:       i.NodeClaimTemplate.Spec.NodeClass.Kind,
-			Name:       i.NodeClaimTemplate.Spec.NodeClass.Name,
-			APIVersion: i.NodeClaimTemplate.Spec.NodeClass.APIVersion,
+			Kind:       i.NodeClaimTemplate.Spec.NodeClassRef.Kind,
+			Name:       i.NodeClaimTemplate.Spec.NodeClassRef.Name,
+			APIVersion: i.NodeClaimTemplate.Spec.NodeClassRef.APIVersion,
 		}
 	}
 	return m

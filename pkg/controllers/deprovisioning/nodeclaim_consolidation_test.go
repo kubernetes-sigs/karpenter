@@ -1923,7 +1923,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 					Template: v1beta1.NodeClaimTemplate{
 						Spec: v1beta1.NodeClaimSpec{
 							Requirements: []v1.NodeSelectorRequirement{},
-							NodeClass: &v1beta1.NodeClassReference{
+							NodeClassRef: &v1beta1.NodeClassReference{
 								Name: "non-existent",
 							},
 						},

@@ -34,7 +34,7 @@ func New(nodePool *v1beta1.NodePool) *v1alpha5.Provisioner {
 			Requirements:         nodePool.Spec.Template.Spec.Requirements,
 			KubeletConfiguration: NewKubeletConfiguration(nodePool.Spec.Template.Spec.Kubelet),
 			Provider:             nodePool.Spec.Template.Spec.Provider,
-			ProviderRef:          NewProviderRef(nodePool.Spec.Template.Spec.NodeClass),
+			ProviderRef:          NewProviderRef(nodePool.Spec.Template.Spec.NodeClassRef),
 			Limits:               NewLimits(v1.ResourceList(nodePool.Spec.Limits)),
 			Weight:               nodePool.Spec.Weight,
 		},

@@ -235,7 +235,7 @@ func NewNodeClassNotReadyError(err error) *NodeClassNotReadyError {
 }
 
 func (e *NodeClassNotReadyError) Error() string {
-	return fmt.Sprintf("NodeClass not ready, %s", e.error)
+	return fmt.Sprintf("NodeClassRef not ready, %s", e.error)
 }
 
 func IsNodeClassNotReadyError(err error) bool {
