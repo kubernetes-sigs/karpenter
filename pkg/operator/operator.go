@@ -44,7 +44,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/events"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 	"github.com/aws/karpenter-core/pkg/operator/logging"
 	"github.com/aws/karpenter-core/pkg/operator/options"
@@ -155,7 +155,7 @@ func NewOperator() (context.Context, *Operator) {
 	}
 }
 
-func (o *Operator) WithControllers(ctx context.Context, controllers ...corecontroller.Controller) *Operator {
+func (o *Operator) WithControllers(ctx context.Context, controllers ...controller.Controller) *Operator {
 	for _, c := range controllers {
 		lo.Must0(c.Builder(ctx, o.Manager).Complete(c))
 	}

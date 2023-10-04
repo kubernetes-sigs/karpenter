@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 	set "github.com/deckarep/golang-set"
 	v1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -30,6 +31,8 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/termination/terminator/events"
 	"github.com/aws/karpenter-core/pkg/events"
@@ -38,6 +41,7 @@ import (
 const (
 	evictionQueueBaseDelay = 100 * time.Millisecond
 	evictionQueueMaxDelay  = 10 * time.Second
+	immediately            = time.Millisecond
 )
 
 type NodeDrainError struct {
@@ -71,8 +75,15 @@ func NewEvictionQueue(ctx context.Context, coreV1Client corev1.CoreV1Interface, 
 		coreV1Client:          coreV1Client,
 		recorder:              recorder,
 	}
-	go queue.Start(logging.WithLogger(ctx, logging.FromContext(ctx).Named("eviction")))
 	return queue
+}
+
+func (q *EvictionQueue) Name() string {
+	return "eviction-queue"
+}
+
+func (q *EvictionQueue) Builder(_ context.Context, m manager.Manager) controller.Builder {
+	return controller.NewSingletonManagedBy(m)
 }
 
 // Add adds pods to the EvictionQueue
@@ -85,26 +96,26 @@ func (e *EvictionQueue) Add(pods ...*v1.Pod) {
 	}
 }
 
-func (e *EvictionQueue) Start(ctx context.Context) {
-	for {
-		// Get pod from queue. This waits until queue is non-empty.
-		item, shutdown := e.RateLimitingInterface.Get()
-		if shutdown {
-			break
-		}
-		nn := item.(types.NamespacedName)
-		// Evict pod
-		if e.evict(ctx, nn) {
-			e.RateLimitingInterface.Forget(nn)
-			e.Set.Remove(nn)
-			e.RateLimitingInterface.Done(nn)
-			continue
-		}
-		e.RateLimitingInterface.Done(nn)
-		// Requeue pod if eviction failed
-		e.RateLimitingInterface.AddRateLimited(nn)
+func (e *EvictionQueue) Reconcile(ctx context.Context, _ reconcile.Request) (result reconcile.Result, err error) {
+	// Set the result to requeue immediately.
+	result = reconcile.Result{RequeueAfter: immediately}
+	// Get pod from queue. This waits until queue is non-empty.
+	item, shutdown := e.RateLimitingInterface.Get()
+	if shutdown {
+		return
 	}
-	logging.FromContext(ctx).Errorf("EvictionQueue is broken and has shutdown")
+	nn := item.(types.NamespacedName)
+	// Evict pod
+	if e.evict(ctx, nn) {
+		e.RateLimitingInterface.Forget(nn)
+		e.Set.Remove(nn)
+		e.RateLimitingInterface.Done(nn)
+		return
+	}
+	e.RateLimitingInterface.Done(nn)
+	// Requeue pod if eviction failed
+	e.RateLimitingInterface.AddRateLimited(nn)
+	return
 }
 
 // evict returns true if successful eviction call, and false if not an eviction-related error
