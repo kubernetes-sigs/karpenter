@@ -25,18 +25,13 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/aws/karpenter-core/pkg/apis"
 	. "github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/operator/scheme"
-	"github.com/aws/karpenter-core/pkg/test"
 )
 
 var _ = Describe("CEL/Validation", func() {
 	var nodePool *NodePool
-	var env *test.Environment
 
 	BeforeEach(func() {
-		env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
 		nodePool = &NodePool{
 			ObjectMeta: metav1.ObjectMeta{Name: strings.ToLower(randomdata.SillyName())},
 			Spec: NodePoolSpec{
