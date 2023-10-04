@@ -29,11 +29,11 @@ import (
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
+	"github.com/aws/karpenter-core/pkg/operator/options"
 	"github.com/aws/karpenter-core/pkg/test"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
@@ -72,7 +72,7 @@ var _ = Describe("NodeClaim/Drift", func() {
 		nodeClaim.StatusConditions().MarkTrue(v1beta1.Drifted)
 	})
 	It("should ignore drifted nodes if the feature flag is disabled", func() {
-		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(false)}}))
 		ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
 		// inform cluster state about nodes and nodeclaims

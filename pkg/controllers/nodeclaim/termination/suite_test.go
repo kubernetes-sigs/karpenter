@@ -29,12 +29,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	nodeclaimlifecycle "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/lifecycle"
 	nodeclaimtermination "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/termination"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/operator/options"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 
@@ -63,7 +63,7 @@ var _ = BeforeSuite(func() {
 			return []string{obj.(*v1.Node).Spec.ProviderID}
 		})
 	}))
-	ctx = settings.ToContext(ctx, test.Settings())
+	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	machineController = nodeclaimlifecycle.NewMachineController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
 	machineTerminationController = nodeclaimtermination.NewMachineController(env.Client, cloudProvider)

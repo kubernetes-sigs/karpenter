@@ -26,11 +26,11 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/metrics"
+	"github.com/aws/karpenter-core/pkg/operator/options"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
@@ -51,7 +51,7 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 
 	// From here there are three scenarios to handle:
 	// 1. If drift is not enabled but the NodeClaim is drifted, remove the status condition
-	if !settings.FromContext(ctx).DriftEnabled {
+	if !options.FromContext(ctx).FeatureGates.Drift {
 		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.Drifted)
 		if hasDriftedCondition {
 			logging.FromContext(ctx).Debugf("removing drift status condition, drift has been disabled")

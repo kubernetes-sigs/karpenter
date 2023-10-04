@@ -25,11 +25,11 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/nodeclaim/disruption"
 	controllerprov "github.com/aws/karpenter-core/pkg/controllers/nodepool/hash"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/operator/options"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/test"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -93,7 +93,7 @@ var _ = Describe("NodeClaim/Drift", func() {
 	})
 	It("should not detect drift if the feature flag is disabled", func() {
 		cp.Drifted = "drifted"
-		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(false)}}))
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
@@ -102,7 +102,7 @@ var _ = Describe("NodeClaim/Drift", func() {
 	})
 	It("should remove the status condition from the nodeClaim if the feature flag is disabled", func() {
 		cp.Drifted = "drifted"
-		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(false)}}))
 		nodeClaim.StatusConditions().MarkTrue(v1beta1.Drifted)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 

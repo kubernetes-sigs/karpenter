@@ -30,22 +30,7 @@ import (
 	"knative.dev/pkg/system"
 
 	"github.com/aws/karpenter-core/pkg/apis/settings"
-	"github.com/aws/karpenter-core/pkg/operator/options"
 )
-
-type optionsKey struct{}
-
-func WithOptions(ctx context.Context, opts options.Options) context.Context {
-	return context.WithValue(ctx, optionsKey{}, opts)
-}
-
-func GetOptions(ctx context.Context) options.Options {
-	retval := ctx.Value(optionsKey{})
-	if retval == nil {
-		return options.Options{}
-	}
-	return retval.(options.Options)
-}
 
 type controllerNameKeyType struct{}
 
@@ -68,7 +53,7 @@ func GetControllerName(ctx context.Context) string {
 // dynamically at runtime due to the necessity of having to build logic around re-queueing to ensure that settings are
 // properly reloaded for things like feature gates
 func WithSettingsOrDie(ctx context.Context, kubernetesInterface kubernetes.Interface, settings ...settings.Injectable) context.Context {
-	cancelCtx, cancel := context.WithCancel(ctx)
+	cancelCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	factory := informers.NewSharedInformerFactoryWithOptions(kubernetesInterface, time.Second*30, informers.WithNamespace(system.Namespace()))
@@ -76,7 +61,14 @@ func WithSettingsOrDie(ctx context.Context, kubernetesInterface kubernetes.Inter
 	factory.Start(cancelCtx.Done())
 
 	for _, setting := range settings {
-		cm := lo.Must(WaitForConfigMap(ctx, setting.ConfigMap(), informer))
+		cm, err := WaitForConfigMap(ctx, setting.ConfigMap(), informer)
+		if err != nil {
+			if !errors.IsNotFound(err) {
+				panic(fmt.Errorf("failed to get configmap %s, %w", setting.ConfigMap(), err))
+			}
+			continue
+		}
+
 		ctx = lo.Must(setting.Inject(ctx, cm))
 	}
 	return ctx

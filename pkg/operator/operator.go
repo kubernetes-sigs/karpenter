@@ -18,6 +18,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -42,6 +44,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/aws/karpenter-core/pkg/apis"
+	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
@@ -74,8 +77,13 @@ func NewOperator() (context.Context, *Operator) {
 	ctx = knativeinjection.WithNamespaceScope(ctx, system.Namespace())
 
 	// Options
-	opts := options.New().MustParse()
-	ctx = injection.WithOptions(ctx, *opts)
+	opts := options.New().MustParse(os.Args[1:]...)
+	ctx = options.ToContext(ctx, opts)
+
+	if opts.MemoryLimit > 0 {
+		newLimit := int64(float64(opts.MemoryLimit) * 0.9)
+		debug.SetMemoryLimit(newLimit)
+	}
 
 	// Webhook
 	ctx = webhook.WithOptions(ctx, webhook.Options{
@@ -100,6 +108,7 @@ func NewOperator() (context.Context, *Operator) {
 
 	// Inject settings from the ConfigMap(s) into the context
 	ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
+	opts.MergeSettings(settings.FromContext(ctx))
 
 	// Manager
 	mgr, err := controllerruntime.NewManager(config, controllerruntime.Options{
@@ -114,8 +123,8 @@ func NewOperator() (context.Context, *Operator) {
 		BaseContext: func() context.Context {
 			ctx := context.Background()
 			ctx = knativelogging.WithLogger(ctx, logger)
+			ctx = options.ToContext(ctx, opts)
 			ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
-			ctx = injection.WithOptions(ctx, *opts)
 			return ctx
 		},
 		NewCache: cache.BuilderWithOptions(cache.Options{
@@ -163,7 +172,7 @@ func (o *Operator) WithControllers(ctx context.Context, controllers ...controlle
 }
 
 func (o *Operator) WithWebhooks(ctx context.Context, ctors ...knativeinjection.ControllerConstructor) *Operator {
-	if !injection.GetOptions(ctx).DisableWebhook {
+	if !options.FromContext(ctx).DisableWebhook {
 		o.webhooks = append(o.webhooks, ctors...)
 		lo.Must0(o.Manager.AddReadyzCheck("webhooks", webhooks.HealthProbe(ctx)))
 		lo.Must0(o.Manager.AddHealthzCheck("webhooks", webhooks.HealthProbe(ctx)))
@@ -178,7 +187,7 @@ func (o *Operator) Start(ctx context.Context) {
 		defer wg.Done()
 		lo.Must0(o.Manager.Start(ctx))
 	}()
-	if injection.GetOptions(ctx).DisableWebhook {
+	if options.FromContext(ctx).DisableWebhook {
 		knativelogging.FromContext(ctx).Infof("webhook disabled")
 	} else {
 		wg.Add(1)

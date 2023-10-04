@@ -25,9 +25,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	"github.com/aws/karpenter-core/pkg/operator/options"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
 	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
@@ -391,7 +391,7 @@ func (in *StateNode) cleanupForPod(podKey types.NamespacedName) {
 }
 
 func nominationWindow(ctx context.Context) time.Duration {
-	nominationPeriod := 2 * settings.FromContext(ctx).BatchMaxDuration
+	nominationPeriod := 2 * options.FromContext(ctx).BatchMaxDuration
 	if nominationPeriod < 10*time.Second {
 		nominationPeriod = 10 * time.Second
 	}
