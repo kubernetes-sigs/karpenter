@@ -28,7 +28,12 @@ import (
 // all nodes.
 type TopologyNodeFilter []scheduling.Requirements
 
-func MakeTopologyNodeFilter(p *v1.Pod) TopologyNodeFilter {
+func MakeTopologyNodeFilter(p *v1.Pod, nodeAffinityPolicy *v1.NodeInclusionPolicy) TopologyNodeFilter {
+	var filter TopologyNodeFilter
+	nodeHonor := v1.NodeInclusionPolicyIgnore
+	if nodeAffinityPolicy == &nodeHonor {
+		return filter
+	}
 	nodeSelectorRequirements := scheduling.NewLabelRequirements(p.Spec.NodeSelector)
 	// if we only have a label selector, that's the only requirement that must match
 	if p.Spec.Affinity == nil || p.Spec.Affinity.NodeAffinity == nil || p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
@@ -37,7 +42,6 @@ func MakeTopologyNodeFilter(p *v1.Pod) TopologyNodeFilter {
 
 	// otherwise, we need to match the combination of label selector and any term of the required node affinities since
 	// those terms are OR'd together
-	var filter TopologyNodeFilter
 	for _, term := range p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
 		requirements := scheduling.NewRequirements()
 		requirements.Add(nodeSelectorRequirements.Values()...)
@@ -49,8 +53,31 @@ func MakeTopologyNodeFilter(p *v1.Pod) TopologyNodeFilter {
 }
 
 // Matches returns true if the TopologyNodeFilter doesn't prohibit node from the participating in the topology
-func (t TopologyNodeFilter) Matches(node *v1.Node) bool {
-	return t.MatchesRequirements(scheduling.NewLabelRequirements(node.Labels))
+func (t TopologyNodeFilter) Matches(node *v1.Node, pod *v1.Pod, tg *TopologyGroup) bool {
+	ignore := v1.NodeInclusionPolicyIgnore
+	if tg.nodeAffinityPolicy == &ignore && tg.nodeTaintsPolicy == &ignore {
+		return true
+	}
+
+	if tg.nodeAffinityPolicy == &ignore {
+		return t.ToleratesTaints(node, pod)
+	}
+
+	if tg.nodeTaintsPolicy == &ignore {
+		return t.MatchesRequirements(scheduling.NewLabelRequirements(node.Labels))
+	}
+
+	return t.MatchesRequirements(scheduling.NewLabelRequirements(node.Labels)) && t.ToleratesTaints(node, pod)
+
+}
+
+func (t TopologyNodeFilter) ToleratesTaints(node *v1.Node, pod *v1.Pod) bool {
+	if err := scheduling.Taints(node.Spec.Taints).Tolerates(pod); err != nil {
+		return false
+	}
+
+	return true
+
 }
 
 // MatchesRequirements returns true if the TopologyNodeFilter doesn't prohibit a node with the requirements from

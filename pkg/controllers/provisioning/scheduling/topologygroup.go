@@ -53,19 +53,22 @@ func (t TopologyType) String() string {
 // TopologyGroup is used to track pod counts that match a selector by the topology domain (e.g. SELECT COUNT(*) FROM pods GROUP BY(topology_ke
 type TopologyGroup struct {
 	// Hashed Fields
-	Key        string
-	Type       TopologyType
-	maxSkew    int32
-	minDomains *int32
-	namespaces sets.Set[string]
-	selector   *metav1.LabelSelector
-	nodeFilter TopologyNodeFilter
+	Key                string
+	Type               TopologyType
+	maxSkew            int32
+	minDomains         *int32
+	namespaces         sets.Set[string]
+	selector           *metav1.LabelSelector
+	nodeFilter         TopologyNodeFilter
+	nodeAffinityPolicy *v1.NodeInclusionPolicy
+	nodeTaintsPolicy   *v1.NodeInclusionPolicy
+
 	// Index
 	owners  map[types.UID]struct{} // Pods that have this topology as a scheduling rule
 	domains map[string]int32       // TODO(ellistarn) explore replacing with a minheap
 }
 
-func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod, namespaces sets.Set[string], labelSelector *metav1.LabelSelector, maxSkew int32, minDomains *int32, domains sets.Set[string]) *TopologyGroup {
+func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod, namespaces sets.Set[string], labelSelector *metav1.LabelSelector, maxSkew int32, minDomains *int32, domains sets.Set[string], nodeAffinityPolicy *v1.NodeInclusionPolicy, nodeTaintsPolicy *v1.NodeInclusionPolicy) *TopologyGroup {
 	domainCounts := map[string]int32{}
 	for domain := range domains {
 		domainCounts[domain] = 0
@@ -73,18 +76,20 @@ func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod
 	// the nil *TopologyNodeFilter always passes which is what we need for affinity/anti-affinity
 	var nodeSelector TopologyNodeFilter
 	if topologyType == TopologyTypeSpread {
-		nodeSelector = MakeTopologyNodeFilter(pod)
+		nodeSelector = MakeTopologyNodeFilter(pod, nodeAffinityPolicy)
 	}
 	return &TopologyGroup{
-		Type:       topologyType,
-		Key:        topologyKey,
-		namespaces: namespaces,
-		selector:   labelSelector,
-		nodeFilter: nodeSelector,
-		maxSkew:    maxSkew,
-		domains:    domainCounts,
-		owners:     map[types.UID]struct{}{},
-		minDomains: minDomains,
+		Type:               topologyType,
+		Key:                topologyKey,
+		namespaces:         namespaces,
+		selector:           labelSelector,
+		nodeFilter:         nodeSelector,
+		maxSkew:            maxSkew,
+		domains:            domainCounts,
+		owners:             map[types.UID]struct{}{},
+		minDomains:         minDomains,
+		nodeAffinityPolicy: nodeAffinityPolicy,
+		nodeTaintsPolicy:   nodeTaintsPolicy,
 	}
 }
 
