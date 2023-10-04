@@ -647,17 +647,3 @@ func ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx context.Context,
 		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(m))
 	}
 }
-
-// match nodes and domains function 
-
-func DomainsEqualsNodes(ctx context.Context,kubeClient client.Client,cluster *state.Cluster,domains map[string]sets.Set[string],pods []*v1.Pod) bool {
-	GinkgoHelper()
-	newtg,err := scheduling.NewTopology(ctx,kubeClient,cluster,domains,pods)
-	if err != nil {
-		return false
-	}
-
-	new
-
-	return true
-}
