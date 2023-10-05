@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	Immediately = time.Millisecond
+	Immediately = 1 * time.Millisecond
 )
 
 type SingletonBuilder struct {

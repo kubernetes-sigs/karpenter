@@ -117,14 +117,13 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 }
 
 func (q *Queue) ProcessItem(ctx context.Context, nn types.NamespacedName) {
+	defer q.RateLimitingInterface.Done(nn)
 	// Evict pod
 	if q.Evict(ctx, nn) {
 		q.RateLimitingInterface.Forget(nn)
 		q.Set.Remove(nn)
-		q.RateLimitingInterface.Done(nn)
 		return
 	}
-	q.RateLimitingInterface.Done(nn)
 	// Requeue pod if eviction failed
 	q.RateLimitingInterface.AddRateLimited(nn)
 }
