@@ -96,36 +96,23 @@ func (q *Queue) Add(pods ...*v1.Pod) {
 	}
 }
 
-// Pop returns a namespaced name from the queue and if the queue has shutdown.
-func (q *Queue) Pop() (types.NamespacedName, bool) {
+func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
 	// Get pod from queue. This waits until queue is non-empty.
 	item, shutdown := q.RateLimitingInterface.Get()
 	if shutdown {
-		return types.NamespacedName{}, true
+		return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 	}
 	nn := item.(types.NamespacedName)
-	return nn, false
-}
-
-func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
-	nn, shutdown := q.Pop()
-	if shutdown {
-		return reconcile.Result{}, fmt.Errorf("queue has shutdown")
-	}
-	q.ProcessItem(ctx, nn)
-	return reconcile.Result{RequeueAfter: controller.Immediately}, nil
-}
-
-func (q *Queue) ProcessItem(ctx context.Context, nn types.NamespacedName) {
 	defer q.RateLimitingInterface.Done(nn)
 	// Evict pod
 	if q.Evict(ctx, nn) {
 		q.RateLimitingInterface.Forget(nn)
 		q.Set.Remove(nn)
-		return
+		return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 	}
 	// Requeue pod if eviction failed
 	q.RateLimitingInterface.AddRateLimited(nn)
+	return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 }
 
 // Evict returns true if successful eviction call, and false if not an eviction-related error
