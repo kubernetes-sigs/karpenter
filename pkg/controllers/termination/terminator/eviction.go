@@ -97,12 +97,10 @@ func (q *Queue) Add(pods ...*v1.Pod) {
 }
 
 func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (result reconcile.Result, err error) {
-	// Set the result to requeue immediately.
-	result = reconcile.Result{RequeueAfter: controller.Immediately}
 	// Get pod from queue. This waits until queue is non-empty.
 	item, shutdown := q.RateLimitingInterface.Get()
 	if shutdown {
-		return
+		return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 	}
 	nn := item.(types.NamespacedName)
 	// Evict pod
@@ -110,12 +108,12 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (result reco
 		q.RateLimitingInterface.Forget(nn)
 		q.Set.Remove(nn)
 		q.RateLimitingInterface.Done(nn)
-		return
+		return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 	}
 	q.RateLimitingInterface.Done(nn)
 	// Requeue pod if eviction failed
 	q.RateLimitingInterface.AddRateLimited(nn)
-	return
+	return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 }
 
 // Evict returns true if successful eviction call, and false if not an eviction-related error
