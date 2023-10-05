@@ -51,7 +51,7 @@ import (
 
 var ctx context.Context
 var terminationController controller.Controller
-var evictionQueue *terminator.EvictionQueue
+var evictionQueue *terminator.Queue
 var env *test.Environment
 var defaultOwnerRefs = []metav1.OwnerReference{{Kind: "ReplicaSet", APIVersion: "appsv1", Name: "rs", UID: "1234567890"}}
 var fakeClock *clock.FakeClock
@@ -68,7 +68,7 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...), test.WithFieldIndexers(test.MachineFieldIndexer(ctx), test.NodeClaimFieldIndexer(ctx)))
 
 	cloudProvider = fake.NewCloudProvider()
-	evictionQueue = terminator.NewEvictionQueue(ctx, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}))
+	evictionQueue = terminator.NewQueue(env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}))
 	terminationController = termination.NewController(env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, evictionQueue), events.NewRecorder(&record.FakeRecorder{}))
 })
 
@@ -466,7 +466,7 @@ var _ = Describe("Termination", func() {
 	})
 })
 
-func ExpectNotEnqueuedForEviction(e *terminator.EvictionQueue, pods ...*v1.Pod) {
+func ExpectNotEnqueuedForEviction(e *terminator.Queue, pods ...*v1.Pod) {
 	for _, pod := range pods {
 		ExpectWithOffset(1, e.Contains(client.ObjectKeyFromObject(pod))).To(BeFalse())
 	}

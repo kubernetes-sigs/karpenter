@@ -15,8 +15,6 @@ limitations under the License.
 package controllers
 
 import (
-	"context"
-
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -44,7 +42,6 @@ import (
 )
 
 func NewControllers(
-	ctx context.Context,
 	clock clock.Clock,
 	kubeClient client.Client,
 	kubernetesInterface kubernetes.Interface,
@@ -54,7 +51,7 @@ func NewControllers(
 ) []controller.Controller {
 
 	p := provisioning.NewProvisioner(kubeClient, kubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
-	evictionQueue := terminator.NewEvictionQueue(ctx, kubernetesInterface.CoreV1(), recorder)
+	evictionQueue := terminator.NewQueue(kubernetesInterface.CoreV1(), recorder)
 
 	return []controller.Controller{
 		p, evictionQueue,

@@ -32,10 +32,10 @@ import (
 type Terminator struct {
 	clock         clock.Clock
 	kubeClient    client.Client
-	evictionQueue *EvictionQueue
+	evictionQueue *Queue
 }
 
-func NewTerminator(clk clock.Clock, kubeClient client.Client, eq *EvictionQueue) *Terminator {
+func NewTerminator(clk clock.Clock, kubeClient client.Client, eq *Queue) *Terminator {
 	return &Terminator{
 		clock:         clk,
 		kubeClient:    kubeClient,
@@ -86,7 +86,7 @@ func (t *Terminator) Drain(ctx context.Context, node *v1.Node) error {
 		podsToEvict = append(podsToEvict, p)
 	}
 	// Enqueue for eviction
-	t.evict(podsToEvict)
+	t.Evict(podsToEvict)
 
 	if len(podsToEvict) > 0 {
 		return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", len(podsToEvict)))
@@ -115,7 +115,7 @@ func (t *Terminator) getPods(ctx context.Context, node *v1.Node) ([]*v1.Pod, err
 	return pods, nil
 }
 
-func (t *Terminator) evict(pods []*v1.Pod) {
+func (t *Terminator) Evict(pods []*v1.Pod) {
 	// 1. Prioritize noncritical pods https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
 	critical := []*v1.Pod{}
 	nonCritical := []*v1.Pod{}

@@ -30,6 +30,10 @@ import (
 	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
+const (
+	Immediately = time.Millisecond
+)
+
 type SingletonBuilder struct {
 	mgr manager.Manager
 }
