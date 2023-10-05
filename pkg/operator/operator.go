@@ -25,9 +25,7 @@ import (
 
 	"github.com/go-logr/zapr"
 	"github.com/samber/lo"
-	coordinationv1 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/util/flowcontrol"
@@ -38,10 +36,10 @@ import (
 	"knative.dev/pkg/system"
 	"knative.dev/pkg/webhook"
 	controllerruntime "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/settings"
@@ -120,7 +118,7 @@ func NewOperator() (context.Context, *Operator) {
 		LeaderElectionResourceLock: resourcelock.LeasesResourceLock,
 		LeaderElectionNamespace:    system.Namespace(),
 		Scheme:                     scheme.Scheme,
-		MetricsBindAddress:         fmt.Sprintf(":%d", opts.MetricsPort),
+		Metrics:                    server.Options{BindAddress: fmt.Sprintf(":%d", opts.MetricsPort)},
 		HealthProbeBindAddress:     fmt.Sprintf(":%d", opts.HealthProbePort),
 		BaseContext: func() context.Context {
 			ctx := context.Background()
@@ -129,13 +127,13 @@ func NewOperator() (context.Context, *Operator) {
 			ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
 			return ctx
 		},
-		NewCache: cache.BuilderWithOptions(cache.Options{
-			SelectorsByObject: cache.SelectorsByObject{
-				&coordinationv1.Lease{}: {
-					Field: fields.SelectorFromSet(fields.Set{"metadata.namespace": "kube-node-lease"}),
-				},
-			},
-		}),
+		// NewCache: cache.NewCacheFunc(config,cache.Options{
+
+		// 	ByObject: &coordinationv1.Lease{}: {
+		// 	 		Field: fields.SelectorFromSet(fields.Set{"metadata.namespace": "kube-node-lease"}),
+		// 		},
+		// }),
+
 	})
 	mgr = lo.Must(mgr, err, "failed to setup manager")
 	if opts.EnableProfiling {

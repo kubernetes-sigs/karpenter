@@ -121,10 +121,7 @@ func NewEnvironment(scheme *runtime.Scheme, options ...functional.Option[Environ
 			return []string{pod.Spec.NodeName}
 		}))
 		c = &CacheSyncingClient{
-			Client: lo.Must(client.NewDelegatingClient(client.NewDelegatingClientInput{
-				CacheReader: cache,
-				Client:      c,
-			})),
+			Client: c,
 		}
 		go func() {
 			lo.Must0(cache.Start(ctx))

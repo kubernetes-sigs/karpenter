@@ -30,7 +30,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
@@ -148,15 +147,15 @@ func (c *NodeClaimController) Builder(ctx context.Context, m manager.Manager) co
 		)).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Watches(
-			&source.Kind{Type: &v1beta1.NodePool{}},
+			&v1beta1.NodePool{},
 			nodeclaimutil.NodePoolEventHandler(ctx, c.kubeClient),
 		).
 		Watches(
-			&source.Kind{Type: &v1.Node{}},
+			&v1.Node{},
 			nodeclaimutil.NodeEventHandler(ctx, c.kubeClient),
 		).
 		Watches(
-			&source.Kind{Type: &v1.Pod{}},
+			&v1.Pod{},
 			nodeclaimutil.PodEventHandler(ctx, c.kubeClient),
 		),
 	)
@@ -210,15 +209,15 @@ func (c *Controller) Builder(ctx context.Context, m manager.Manager) corecontrol
 		)).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Watches(
-			&source.Kind{Type: &v1alpha5.Provisioner{}},
+			&v1alpha5.Provisioner{},
 			machineutil.ProvisionerEventHandler(ctx, c.kubeClient),
 		).
 		Watches(
-			&source.Kind{Type: &v1.Node{}},
+			&v1.Node{},
 			machineutil.NodeEventHandler(ctx, c.kubeClient),
 		).
 		Watches(
-			&source.Kind{Type: &v1.Pod{}},
+			&v1.Pod{},
 			machineutil.PodEventHandler(ctx, c.kubeClient),
 		),
 	)

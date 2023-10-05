@@ -37,7 +37,7 @@ import (
 // PodEventHandler is a watcher on v1.Pods that maps Pods to NodeClaim based on the node names
 // and enqueues reconcile.Requests for the Machines
 func PodEventHandler(ctx context.Context, c client.Client) handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(o client.Object) (requests []reconcile.Request) {
+	return handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) (requests []reconcile.Request) {
 		if name := o.(*v1.Pod).Spec.NodeName; name != "" {
 			node := &v1.Node{}
 			if err := c.Get(ctx, types.NamespacedName{Name: name}, node); err != nil {
@@ -60,7 +60,7 @@ func PodEventHandler(ctx context.Context, c client.Client) handler.EventHandler 
 // NodeEventHandler is a watcher on v1.Node that maps Nodes to Machines based on provider ids
 // and enqueues reconcile.Requests for the Machines
 func NodeEventHandler(ctx context.Context, c client.Client) handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
+	return handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []reconcile.Request {
 		node := o.(*v1.Node)
 		machineList := &v1alpha5.MachineList{}
 		if err := c.List(ctx, machineList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
@@ -77,7 +77,7 @@ func NodeEventHandler(ctx context.Context, c client.Client) handler.EventHandler
 // ProvisionerEventHandler is a watcher on v1alpha5.Machine that maps Provisioner to Machines based
 // on the v1alpha5.ProvsionerNameLabelKey and enqueues reconcile.Requests for the NodeClaim
 func ProvisionerEventHandler(ctx context.Context, c client.Client) handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(o client.Object) (requests []reconcile.Request) {
+	return handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) (requests []reconcile.Request) {
 		machineList := &v1alpha5.MachineList{}
 		if err := c.List(ctx, machineList, client.MatchingLabels(map[string]string{v1alpha5.ProvisionerNameLabelKey: o.GetName()})); err != nil {
 			return requests
