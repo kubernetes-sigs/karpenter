@@ -21,9 +21,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
-	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
-	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
@@ -33,6 +30,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
+	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"

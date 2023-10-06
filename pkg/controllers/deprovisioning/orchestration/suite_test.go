@@ -19,10 +19,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	. "knative.dev/pkg/logging/testing"
+
+	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/settings"

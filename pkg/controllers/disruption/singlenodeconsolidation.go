@@ -19,10 +19,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning/orchestration"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning/orchestration"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
