@@ -22,11 +22,11 @@ require (
 	golang.org/x/text v0.13.0
 	golang.org/x/time v0.3.0
 	k8s.io/api v0.28.2
-	k8s.io/apiextensions-apiserver v0.28.0
+	k8s.io/apiextensions-apiserver v0.28.2
 	k8s.io/apimachinery v0.28.2
 	k8s.io/client-go v0.28.2
 	k8s.io/cloud-provider v0.26.6
-	k8s.io/component-base v0.28.1
+	k8s.io/component-base v0.28.2
 	k8s.io/csi-translation-lib v0.26.6
 	k8s.io/klog/v2 v2.100.1
 	k8s.io/utils v0.0.0-20230406110748-d93618cff8a2
