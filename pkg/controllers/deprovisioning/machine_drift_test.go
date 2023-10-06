@@ -135,7 +135,7 @@ var _ = Describe("Machine/Drift", func() {
 		wg.Wait()
 
 		// Process the item so that the nodes can be deleted.
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine, machine2)
 
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(2))
@@ -243,7 +243,7 @@ var _ = Describe("Machine/Drift", func() {
 		wg.Wait()
 
 		// Process the item so that the nodes can be deleted.
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
 
@@ -287,7 +287,7 @@ var _ = Describe("Machine/Drift", func() {
 		wg.Wait()
 
 		// Process the item so that the nodes can be deleted.
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machines...)
 
@@ -335,7 +335,7 @@ var _ = Describe("Machine/Drift", func() {
 		wg.Wait()
 
 		// Process the item so that the nodes can be deleted.
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
 
@@ -437,7 +437,7 @@ var _ = Describe("Machine/Drift", func() {
 		wg.Wait()
 
 		// Process the item so that the nodes can be deleted.
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
 
@@ -511,7 +511,7 @@ var _ = Describe("Machine/Drift", func() {
 		wg.Wait()
 
 		// Process the item so that the nodes can be deleted.
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine, machine2)
 

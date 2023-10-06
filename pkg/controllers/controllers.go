@@ -53,10 +53,11 @@ func NewControllers(
 
 	p := provisioning.NewProvisioner(kubeClient, kubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
 	evictionQueue := terminator.NewQueue(kubernetesInterface.CoreV1(), recorder)
+	disruptionQueue := orchestration.NewQueue(kubeClient, recorder, cluster, clock, p)
 
 	return []controller.Controller{
-		p, evictionQueue,
-		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, orchestration.NewQueue(kubeClient, recorder, cluster)),
+		p, evictionQueue, disruptionQueue,
+		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue),
 		provisioning.NewController(kubeClient, p, recorder),
 		nodepoolhash.NewNodePoolController(kubeClient),
 		informer.NewDaemonSetController(kubeClient, cluster),

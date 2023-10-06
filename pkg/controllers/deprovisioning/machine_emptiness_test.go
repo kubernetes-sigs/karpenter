@@ -74,7 +74,7 @@ var _ = Describe("Machine/Emptiness", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
 

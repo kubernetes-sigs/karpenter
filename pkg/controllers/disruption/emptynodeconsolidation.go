@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning/orchestration"
 	"github.com/samber/lo"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
@@ -37,8 +38,9 @@ type EmptyNodeConsolidation struct {
 }
 
 func NewEmptyNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client,
-	provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder) *EmptyNodeConsolidation {
-	return &EmptyNodeConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
+	provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder,
+	queue *orchestration.Queue) *EmptyNodeConsolidation {
+	return &EmptyNodeConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)}
 }
 
 // ComputeCommand generates a disruption command given candidates

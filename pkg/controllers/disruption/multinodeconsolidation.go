@@ -20,6 +20,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning/orchestration"
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
@@ -41,8 +42,9 @@ type MultiNodeConsolidation struct {
 }
 
 func NewMultiNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client,
-	provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder) *MultiNodeConsolidation {
-	return &MultiNodeConsolidation{makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
+	provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder,
+	queue *orchestration.Queue) *MultiNodeConsolidation {
+	return &MultiNodeConsolidation{makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)}
 }
 
 func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {

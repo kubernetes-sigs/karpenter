@@ -172,8 +172,8 @@ func (o Command) Action() Action {
 
 func (o Command) String() string {
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "%s, terminating %d candidates ", o.Action(), len(o.Candidates))
-	for i, old := range o.Candidates {
+	fmt.Fprintf(&buf, "%s, terminating %d candidates ", o.Action(), len(o.candidates))
+	for i, old := range o.candidates {
 		if i != 0 {
 			fmt.Fprint(&buf, ", ")
 		}
@@ -186,7 +186,7 @@ func (o Command) String() string {
 	}
 	odNodeClaims := 0
 	spotNodeClaims := 0
-	for _, nodeClaim := range o.Replacements {
+	for _, nodeClaim := range o.replacements {
 		ct := nodeClaim.Requirements.Get(v1beta1.CapacityTypeLabelKey)
 		if ct.Has(v1beta1.CapacityTypeOnDemand) {
 			odNodeClaims++
@@ -196,19 +196,19 @@ func (o Command) String() string {
 		}
 	}
 	// Print list of instance types for the first replacements.
-	if len(o.Replacements) > 1 {
+	if len(o.replacements) > 1 {
 		fmt.Fprintf(&buf, " and replacing with %d spot and %d on-demand, from types %s",
 			spotNodeClaims, odNodeClaims,
-			scheduling.InstanceTypeList(o.Replacements[0].InstanceTypeOptions))
+			scheduling.InstanceTypeList(o.replacements[0].InstanceTypeOptions))
 		return buf.String()
 	}
-	ct := o.Replacements[0].Requirements.Get(v1beta1.CapacityTypeLabelKey)
+	ct := o.replacements[0].Requirements.Get(v1beta1.CapacityTypeLabelKey)
 	nodeDesc := "node"
 	if ct.Len() == 1 {
 		nodeDesc = fmt.Sprintf("%s node", ct.Any())
 	}
 	fmt.Fprintf(&buf, " and replacing with %s from types %s",
 		nodeDesc,
-		scheduling.InstanceTypeList(o.Replacements[0].InstanceTypeOptions))
+		scheduling.InstanceTypeList(o.replacements[0].InstanceTypeOptions))
 	return buf.String()
 }

@@ -88,7 +88,7 @@ var _ = BeforeSuite(func() {
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, env.KubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
-	queue = orchestration.NewQueue(ctx, env.Client, recorder, cluster, fakeClock, true)
+	queue = orchestration.NewQueue(env.Client, recorder, cluster, fakeClock, prov)
 	deprovisioningController = deprovisioning.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue)
 })
 
@@ -406,7 +406,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		ExpectTriggerVerifyAction(&wg)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
 		// Cascade any deletion of the nodeclaim to the node
@@ -437,7 +437,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		ExpectTriggerVerifyAction(&wg)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
 		// Cascade any deletion of the nodeclaim to the node
@@ -467,7 +467,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		ExpectTriggerVerifyAction(&wg)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
 		// Cascade any deletion of the nodeclaim to the node
@@ -496,7 +496,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		ExpectTriggerVerifyAction(&wg)
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
 		// Cascade any deletion of the nodeclaim to the node
@@ -600,7 +600,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
 
@@ -716,7 +716,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the machines to the nodes
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machines...)
 
@@ -818,7 +818,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the nodeclaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -934,7 +934,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the nodeclaims to the nodes
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims...)
 
@@ -1085,7 +1085,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the machines to the nodes
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machines...)
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims...)
@@ -1238,7 +1238,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
 		wg.Wait()
 
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the machines to the nodes
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machines...)
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims...)
@@ -1332,12 +1332,6 @@ func mostExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
 func fromInt(i int) *intstr.IntOrString {
 	v := intstr.FromInt(i)
 	return &v
-}
-
-func ExpectQueueItemProcessed(ctx context.Context, queue *orchestration.Queue) {
-	cmd, shutdown := queue.Pop()
-	Expect(shutdown).To(BeFalse())
-	queue.ProcessItem(ctx, cmd)
 }
 
 func ExpectTriggerVerifyAction(wg *sync.WaitGroup) {

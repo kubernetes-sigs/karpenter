@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	. "knative.dev/pkg/logging/testing"
@@ -49,6 +50,7 @@ var nodeClaimStateController controller.Controller
 var fakeClock *clock.FakeClock
 var recorder *test.EventRecorder
 var queue *orchestration.Queue
+var prov *provisioning.Provisioner
 
 var replacements []nodeclaim.Key
 var node1, node2, replacementNode *v1.Node
@@ -69,7 +71,8 @@ var _ = BeforeSuite(func() {
 	machineStateController = informer.NewMachineController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
-	queue = orchestration.NewQueue(ctx, env.Client, recorder, cluster, fakeClock, true)
+	prov = provisioning.NewProvisioner(env.Client, env.KubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
+	queue = orchestration.NewQueue(env.Client, recorder, cluster, fakeClock, prov)
 })
 
 var _ = AfterSuite(func() {
@@ -82,12 +85,17 @@ var _ = BeforeEach(func() {
 	fakeClock.SetTime(time.Now())
 	cluster.Reset()
 	cluster.MarkUnconsolidated()
-	// Shut down the queue and restart it to ensure no races
-	queue.ShutDown()
 	queue.Reset()
-	queue = orchestration.NewQueue(ctx, env.Client, recorder, cluster, fakeClock, true)
 })
 
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 })
+
+// addCommandToQueue adds the created command directly into the queue, rather than launching nodes and adding a delay.
+func addCommandToQueue(cmd *orchestration.Command, q *orchestration.Queue) {
+	q.RateLimitingInterface.Add(cmd)
+	for _, candidate := range cmd.Candidates {
+		q.CandidateProviderIDToCommand[candidate.ProviderID()] = cmd
+	}
+}

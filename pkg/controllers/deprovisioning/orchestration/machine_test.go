@@ -30,6 +30,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 var machine1, machine2, replacementMachine *v1alpha5.Machine
@@ -54,36 +55,6 @@ var _ = Describe("Machine/Queue", func() {
 			},
 		})
 	})
-	Context("Queue Add", func() {
-		It("should add items into the queue", func() {
-			ExpectApplied(ctx, env.Client, machine1, node1, provisioner)
-			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
-			stateNode := ExpectStateNodeExistsForMachine(cluster, machine1)
-			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", fakeClock.Now()))).To(Succeed())
-		})
-		It("should fail to add items into that are already in the queue", func() {
-			ExpectApplied(ctx, env.Client, machine1, node1, machine2, node2, provisioner)
-			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
-			stateNode1 := ExpectStateNodeExistsForMachine(cluster, machine1)
-			stateNode2 := ExpectStateNodeExistsForMachine(cluster, machine2)
-			// This should succeed
-			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode1, stateNode2}, "", fakeClock.Now()))).To(Succeed())
-			// Both of these should fail since the stateNodes have been added in
-			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode1}, "", fakeClock.Now()))).ToNot(Succeed())
-			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode2}, "", fakeClock.Now()))).ToNot(Succeed())
-		})
-		It("should fail to add items into that are already in the queue", func() {
-			ExpectApplied(ctx, env.Client, machine1, node1, machine2, node2, provisioner)
-			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
-			stateNode1 := ExpectStateNodeExistsForMachine(cluster, machine1)
-			stateNode2 := ExpectStateNodeExistsForMachine(cluster, machine2)
-			// This should succeed
-			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode1, stateNode2}, "", fakeClock.Now()))).To(Succeed())
-			// Both of these should fail since the stateNodes have been added in
-			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode1}, "", fakeClock.Now()))).ToNot(Succeed())
-			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode2}, "", fakeClock.Now()))).ToNot(Succeed())
-		})
-	})
 
 	Context("Queue Reconcile", func() {
 		It("should not return an error when handling commands before the timeout", func() {
@@ -91,8 +62,9 @@ var _ = Describe("Machine/Queue", func() {
 			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
 			stateNode := ExpectStateNodeExistsForMachine(cluster, machine1)
 			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", fakeClock.Now())
-			_, err := queue.Reconcile(ctx, cmd)
-			Expect(err).To(BeNil())
+			addCommandToQueue(cmd, queue)
+			ExpectApplied(ctx, env.Client, replacementMachine, replacementNode)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		})
 		It("should return an error and clean up when a command times out", func() {
 			ExpectApplied(ctx, env.Client, machine1, node1, provisioner)
@@ -104,31 +76,23 @@ var _ = Describe("Machine/Queue", func() {
 			fakeClock.Step(1 * time.Hour)
 
 			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", timeNow)
-			requeue, err := queue.Reconcile(ctx, cmd)
-			Expect(requeue).To(BeFalse())
-			Expect(err).ToNot(BeNil())
+			addCommandToQueue(cmd, queue)
+			ExpectReconcileFailed(ctx, queue, types.NamespacedName{})
 		})
 		It("should fully handle a command when replacements are initialized", func() {
 			ExpectApplied(ctx, env.Client, machine1, node1, replacementMachine, replacementNode, provisioner)
 			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
 			stateNode := ExpectStateNodeExistsForMachine(cluster, machine1)
 			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", fakeClock.Now())
+			addCommandToQueue(cmd, queue)
 
-			requeue, err := queue.Reconcile(ctx, cmd)
-			Expect(requeue).To(BeTrue())
-			Expect(err).To(BeNil())
-
-			requeue, err = queue.Reconcile(ctx, cmd)
-			Expect(requeue).To(BeTrue())
-			Expect(err).To(BeNil())
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(cmd.ReplacementKeys[0].Initialized).To(BeFalse())
 			Expect(recorder.DetectedEvent(deprovisioningevents.WaitingOnReadiness(stateNode.NodeClaim).Message)).To(BeTrue())
 
 			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{replacementNode}, []*v1alpha5.Machine{replacementMachine})
 
-			requeue, err = queue.Reconcile(ctx, cmd)
-			Expect(requeue).To(BeFalse())
-			Expect(err).To(BeNil())
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(cmd.ReplacementKeys[0].Initialized).To(BeTrue())
 
 			ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
@@ -152,32 +116,24 @@ var _ = Describe("Machine/Queue", func() {
 			stateNode := ExpectStateNodeExistsForMachine(cluster, machine1)
 
 			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", fakeClock.Now())
+			addCommandToQueue(cmd, queue)
 
-			requeue, err := queue.Reconcile(ctx, cmd)
-			Expect(requeue).To(BeTrue())
-			Expect(err).To(BeNil())
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
-			requeue, err = queue.Reconcile(ctx, cmd)
-			Expect(requeue).To(BeTrue())
-			Expect(err).To(BeNil())
 			Expect(cmd.ReplacementKeys[0].Initialized).To(BeFalse())
 			Expect(recorder.DetectedEvent(deprovisioningevents.WaitingOnReadiness(stateNode.NodeClaim).Message)).To(BeTrue())
 			Expect(cmd.ReplacementKeys[1].Initialized).To(BeFalse())
 
 			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{replacementNode}, []*v1alpha5.Machine{replacementMachine})
 
-			requeue, err = queue.Reconcile(ctx, cmd)
-			Expect(requeue).To(BeTrue())
-			Expect(err).To(BeNil())
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(cmd.ReplacementKeys[0].Initialized).To(BeTrue())
 			Expect(cmd.ReplacementKeys[1].Initialized).To(BeFalse())
 			Expect(recorder.DetectedEvent(deprovisioningevents.WaitingOnReadiness(stateNode.NodeClaim).Message)).To(BeTrue())
 
 			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{replacementNode2}, []*v1alpha5.Machine{replacementMachine2})
 
-			requeue, err = queue.Reconcile(ctx, cmd)
-			Expect(requeue).To(BeFalse())
-			Expect(err).To(BeNil())
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(cmd.ReplacementKeys[0].Initialized).To(BeTrue())
 			Expect(cmd.ReplacementKeys[1].Initialized).To(BeTrue())
 
@@ -190,10 +146,8 @@ var _ = Describe("Machine/Queue", func() {
 			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
 			stateNode := ExpectStateNodeExistsForMachine(cluster, machine1)
 			cmd := orchestration.NewCommand([]nodeclaim.Key{}, []*state.StateNode{stateNode}, "", fakeClock.Now())
-
-			requeue, err := queue.Reconcile(ctx, cmd)
-			Expect(requeue).To(BeFalse())
-			Expect(err).To(BeNil())
+			addCommandToQueue(cmd, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			ExpectMachinesCascadeDeletion(ctx, env.Client, machine1)
 			// And expect the machine and node to be deleted
@@ -207,16 +161,11 @@ var _ = Describe("Machine/Queue", func() {
 			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
 			stateNode := ExpectStateNodeExistsForMachine(cluster, machine1)
 			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "consolidation-test", fakeClock.Now())
-
-			requeue, err := queue.Reconcile(ctx, cmd)
-			Expect(requeue).To(BeTrue())
-			Expect(err).To(BeNil())
-
+			addCommandToQueue(cmd, queue)
 			ExpectApplied(ctx, env.Client, replacementMachine, replacementNode)
 
-			requeue, err = queue.Reconcile(ctx, cmd)
-			Expect(requeue).To(BeTrue())
-			Expect(err).To(BeNil())
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
 			Expect(cmd.ReplacementKeys[0].Initialized).To(BeFalse())
 			Expect(recorder.DetectedEvent(deprovisioningevents.Launching(stateNode.NodeClaim, "consolidation-test").Message)).To(BeTrue())
 			Expect(recorder.DetectedEvent(deprovisioningevents.WaitingOnReadiness(stateNode.NodeClaim).Message)).To(BeTrue())
@@ -226,10 +175,9 @@ var _ = Describe("Machine/Queue", func() {
 			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
 			stateNode := ExpectStateNodeExistsForMachine(cluster, machine1)
 			cmd := orchestration.NewCommand([]nodeclaim.Key{}, []*state.StateNode{stateNode}, "consolidation-test", fakeClock.Now())
+			addCommandToQueue(cmd, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
-			requeue, err := queue.Reconcile(ctx, cmd)
-			Expect(requeue).To(BeFalse())
-			Expect(err).To(BeNil())
 			terminatingEvents := deprovisioningevents.Terminating(stateNode.Node, stateNode.NodeClaim, "consolidation-test")
 			Expect(recorder.DetectedEvent(terminatingEvents[0].Message)).To(BeTrue())
 			Expect(recorder.DetectedEvent(terminatingEvents[1].Message)).To(BeTrue())

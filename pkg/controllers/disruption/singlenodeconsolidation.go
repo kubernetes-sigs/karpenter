@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning/orchestration"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,8 +39,8 @@ type SingleNodeConsolidation struct {
 }
 
 func NewSingleNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cp cloudprovider.CloudProvider, recorder events.Recorder) *SingleNodeConsolidation {
-	return &SingleNodeConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
+	cp cloudprovider.CloudProvider, recorder events.Recorder, queue *orchestration.Queue) *SingleNodeConsolidation {
+	return &SingleNodeConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)}
 }
 
 // ComputeCommand generates a disruption command given candidates

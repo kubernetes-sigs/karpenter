@@ -82,11 +82,11 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 			// Delete any remaining empty NodeClaims as there is zero cost in terms of disruption.  Emptiness and
 			// emptyNodeConsolidation are mutually exclusive, only one of these will operate
 			NewEmptiness(clk),
-			NewEmptyNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
+			NewEmptyNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue),
 			// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
-			NewMultiNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
+			NewMultiNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue),
 			// And finally fall back our single NodeClaim consolidation to further reduce cluster cost.
-			NewSingleNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
+			NewSingleNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue),
 		},
 	}
 }
@@ -175,23 +175,10 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 	}).Inc()
 	logging.FromContext(ctx).Infof("disrupting via %s %s", m.Type(), cmd)
 
-	reason := fmt.Sprintf("%s/%s", m.Type(), cmd.Action())
-	if cmd.Action() == ReplaceAction {
-		if err := c.launchReplacementNodeClaims(ctx, m, cmd); err != nil {
-			// If we failed to launch the replacement, don't disrupt.  If this is some permanent failure,
-			// we don't want to disrupt workloads with no way to provision new NodeClaims for them.
-			return fmt.Errorf("launching replacement, %w", err)
-		}
-	}
-
-	candidateProviderIDs := lo.Map(cmd.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
-
-	// We have the new NodeClaims created at the API server so mark the old NodeClaims for deletion
-	c.cluster.MarkForDeletion(candidateProviderIDs...)
-
-	if err := c.Queue.Add(orchestration.NewCommand(nodeClaimKeys,
-		lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode }), reason, c.clock.Now())); err != nil {
-		c.cluster.UnmarkForDeletion(candidateProviderIDs...)
+	stateNodes := lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode {
+		return c.StateNode
+	})
+	if err := c.Queue.Add(ctx, stateNodes, cmd.replacements, reason); err != nil {
 		return fmt.Errorf("adding command to queue, %w", err)
 	}
 	logging.FromContext(ctx).Infof("deprovisioning via %s %s", d, cmd)

@@ -110,7 +110,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -131,7 +131,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 			wg.Wait()
 
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)
 
@@ -241,7 +241,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -301,7 +301,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -446,7 +446,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -516,7 +516,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -596,7 +596,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -675,7 +675,8 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
-			// Cascade any deletion of the nodeClaim to the node
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			// Cascade any deletion of the machine to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
 			// we should delete the non-annotated node and replace with a cheaper node
@@ -752,7 +753,8 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
-			// Cascade any deletion of the nodeClaim to the node
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			// Cascade any deletion of the machine to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
 			// we should delete the non-annotated node and replace with a cheaper node
@@ -829,7 +831,8 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
-			// Cascade any deletion of the nodeClaim to the node
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			// Cascade any deletion of the machine to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
 			// we should delete the non-annotated node and replace with a cheaper node
@@ -1121,7 +1124,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim2)
 
@@ -1170,7 +1173,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim2)
 
@@ -1226,7 +1229,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -1290,7 +1293,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -1344,7 +1347,8 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
-			// Cascade any deletion of the nodeClaim to the node
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			// Cascade any deletion of the machine to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
 			// we should delete the non-annotated node
@@ -1395,7 +1399,8 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
-			// Cascade any deletion of the nodeClaim to the node
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			// Cascade any deletion of the machine to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
 			// we should delete the non-annotated node
@@ -1447,7 +1452,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -1499,7 +1504,8 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
-			// Cascade any deletion of the nodeClaim to the node
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			// Cascade any deletion of the machine to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
 			// we should delete the non-annotated node
@@ -1547,7 +1553,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim2)
 
@@ -1744,7 +1750,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, consolidatableNodeClaim)
 
 			// Expect no events that state that the pods would schedule against a non-initialized node
@@ -1803,7 +1809,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim2)
 
@@ -2000,7 +2006,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1)
 
@@ -2088,7 +2094,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim2)
 
@@ -2625,7 +2631,7 @@ var _ = Describe("Consolidation", func() {
 			Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 			wg.Wait()
 
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// should have at least two nodes deleted from multi nodeClaim consolidation
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(BeNumerically("<=", numNodes-2))
 		})
@@ -2810,7 +2816,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1, nodeClaim2, nodeClaim3)
 
@@ -2879,7 +2885,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1)
 
@@ -2954,7 +2960,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1, nodeClaim2)
 
@@ -3026,7 +3032,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1, nodeClaim2, nodeClaim3)
 
@@ -3117,7 +3123,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1, nodeClaim2, nodeClaim3)
 
@@ -3212,7 +3218,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1)
 
@@ -3329,7 +3335,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectQueueItemProcessed(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, zone2NodeClaim)
 

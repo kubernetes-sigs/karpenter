@@ -194,7 +194,7 @@ var _ = Describe("Expiration", func() {
 		wg.Wait()
 
 		// Process the item so that the nodes can be deleted.
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)
 
 		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
@@ -229,7 +229,7 @@ var _ = Describe("Expiration", func() {
 		wg.Wait()
 
 		// Process the item so that the nodes can be deleted.
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -273,7 +273,7 @@ var _ = Describe("Expiration", func() {
 		wg.Wait()
 
 		// Process the item so that the nodes can be deleted.
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims...)
 
@@ -344,7 +344,7 @@ var _ = Describe("Expiration", func() {
 		wg.Wait()
 
 		// Process the item so that the nodes can be deleted.
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim2)
 
@@ -393,7 +393,7 @@ var _ = Describe("Expiration", func() {
 		wg.Wait()
 
 		// Process the item so that the nodes can be deleted.
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -448,7 +448,7 @@ var _ = Describe("Expiration", func() {
 
 		// Advance the clock to expire the item in the queue.
 		fakeClock.Step(20 * time.Minute)
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 		// We should have tried to create a new nodeClaim but failed to do so; therefore, we uncordoned the existing node
 		node = ExpectExists(ctx, env.Client, node)
@@ -539,7 +539,7 @@ var _ = Describe("Expiration", func() {
 		wg.Wait()
 
 		// Process the item so that the nodes can be deleted.
-		ExpectQueueItemProcessed(ctx, queue)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
