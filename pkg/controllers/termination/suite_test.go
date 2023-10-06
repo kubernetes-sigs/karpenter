@@ -310,10 +310,10 @@ var _ = Describe("Termination", func() {
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
-			ExpectEvicted(env.Client, podNodeCritical)
-			ExpectDeleted(ctx, env.Client, podNodeCritical)
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
+			ExpectEvicted(env.Client, podNodeCritical)
 			ExpectEvicted(env.Client, podClusterCritical)
+			ExpectDeleted(ctx, env.Client, podNodeCritical)
 			ExpectDeleted(ctx, env.Client, podClusterCritical)
 
 			// Reconcile to delete node
