@@ -49,9 +49,9 @@ const (
 	loggerCfgFilePath      = loggerCfgDir + "/zap-logger-config"
 )
 
-func DefaultZapConfig() zap.Config {
+func DefaultZapConfig(component string) zap.Config {
 	return zap.Config{
-		Level:             zap.NewAtomicLevelAt(zap.InfoLevel),
+		Level:             lo.Ternary(component != "webhook", zap.NewAtomicLevelAt(zap.InfoLevel), zap.NewAtomicLevelAt(zap.ErrorLevel)),
 		Development:       false,
 		DisableCaller:     true,
 		DisableStacktrace: true,
@@ -106,7 +106,7 @@ func WithCommit(logger *zap.SugaredLogger) *zap.SugaredLogger {
 }
 
 func defaultLogger(ctx context.Context, component string) *zap.SugaredLogger {
-	cfg := DefaultZapConfig()
+	cfg := DefaultZapConfig(component)
 	if l := injection.GetOptions(ctx).LogLevel; l != "" {
 		// Webhook log level can only be configured directly through the zap-config
 		// Webhooks are deprecated, so support for changing their log level is also deprecated
@@ -125,7 +125,7 @@ func loggerFromFile(ctx context.Context, component string) *zap.SugaredLogger {
 		}
 		log.Fatalf("retrieving logging configuration file from %q", loggerCfgFilePath)
 	}
-	cfg := DefaultZapConfig()
+	cfg := DefaultZapConfig(component)
 	lo.Must0(json.Unmarshal(raw, &cfg))
 
 	raw, err = os.ReadFile(loggerCfgDir + fmt.Sprintf("/loglevel.%s", component))
@@ -160,7 +160,7 @@ func loggerFromConfigMap(ctx context.Context, component string, kubernetesInterf
 		}
 		log.Fatalf("retrieving logging config map from %q", types.NamespacedName{Namespace: system.Namespace(), Name: loggerCfgConfigMapName})
 	}
-	cfg := DefaultZapConfig()
+	cfg := DefaultZapConfig(component)
 	lo.Must0(json.Unmarshal([]byte(cm.Data[loggerCfgConfigMapKey]), &cfg))
 
 	if v := cm.Data[fmt.Sprintf("loglevel.%s", component)]; v != "" {
