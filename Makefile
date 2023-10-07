@@ -7,9 +7,9 @@ presubmit: verify test licenses vulncheck ## Run all steps required for code to 
 test: ## Run tests
 	go test ./... \
 		-race \
-		-timeout 24m \
+		-timeout 20m \
 		--ginkgo.focus="${FOCUS}" \
-		--ginkgo.timeout=24m \
+		--ginkgo.timeout=20m \
 		--ginkgo.v \
 		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
 
