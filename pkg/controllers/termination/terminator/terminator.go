@@ -60,7 +60,7 @@ func (t *Terminator) Cordon(ctx context.Context, node *v1.Node) error {
 			return err
 		}
 		logging.FromContext(ctx).Infof("cordoned node")
-	}
+	} 
 	return nil
 }
 

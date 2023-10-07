@@ -62,13 +62,14 @@ type TopologyGroup struct {
 	nodeFilter         TopologyNodeFilter
 	nodeAffinityPolicy *v1.NodeInclusionPolicy
 	nodeTaintsPolicy   *v1.NodeInclusionPolicy
+	MatchLabelKeys     []string
 
 	// Index
 	owners  map[types.UID]struct{} // Pods that have this topology as a scheduling rule
 	domains map[string]int32       // TODO(ellistarn) explore replacing with a minheap
 }
 
-func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod, namespaces sets.Set[string], labelSelector *metav1.LabelSelector, maxSkew int32, minDomains *int32, domains sets.Set[string], nodeAffinityPolicy *v1.NodeInclusionPolicy, nodeTaintsPolicy *v1.NodeInclusionPolicy) *TopologyGroup {
+func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod, namespaces sets.Set[string], labelSelector *metav1.LabelSelector, maxSkew int32, minDomains *int32, domains sets.Set[string], nodeAffinityPolicy *v1.NodeInclusionPolicy, nodeTaintsPolicy *v1.NodeInclusionPolicy, matchLabelKeys []string) *TopologyGroup {
 	domainCounts := map[string]int32{}
 	for domain := range domains {
 		domainCounts[domain] = 0
@@ -78,6 +79,17 @@ func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod
 	if topologyType == TopologyTypeSpread {
 		nodeSelector = MakeTopologyNodeFilter(pod, nodeAffinityPolicy)
 	}
+
+	if labelSelector != nil && matchLabelKeys != nil {
+
+		for _, labelKey := range matchLabelKeys {
+			if value, ok := pod.Labels[labelKey]; ok {
+				labelSelector.MatchLabels[labelKey] = value
+			}
+		}
+
+	}
+
 	return &TopologyGroup{
 		Type:               topologyType,
 		Key:                topologyKey,
@@ -260,6 +272,7 @@ func (t *TopologyGroup) nextDomainAntiAffinity(domains *scheduling.Requirement) 
 
 // selects returns true if the given pod is selected by this topology
 func (t *TopologyGroup) selects(pod *v1.Pod) bool {
+
 	selector, err := metav1.LabelSelectorAsSelector(t.selector)
 	if err != nil {
 		selector = labels.Nothing()
