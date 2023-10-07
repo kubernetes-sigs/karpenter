@@ -663,22 +663,24 @@ var _ = Describe("Combined/Provisioning", func() {
 })
 
 func ExpectNodeClaimRequirements(nodeClaim *v1beta1.NodeClaim, requirements ...v1.NodeSelectorRequirement) {
+	GinkgoHelper()
 	for _, requirement := range requirements {
 		req, ok := lo.Find(nodeClaim.Spec.Requirements, func(r v1.NodeSelectorRequirement) bool {
 			return r.Key == requirement.Key && r.Operator == requirement.Operator
 		})
-		ExpectWithOffset(1, ok).To(BeTrue())
+		Expect(ok).To(BeTrue())
 
 		have := sets.New(req.Values...)
 		expected := sets.New(requirement.Values...)
-		ExpectWithOffset(1, have.Len()).To(Equal(expected.Len()))
-		ExpectWithOffset(1, have.Intersection(expected).Len()).To(Equal(expected.Len()))
+		Expect(have.Len()).To(Equal(expected.Len()))
+		Expect(have.Intersection(expected).Len()).To(Equal(expected.Len()))
 	}
 }
 
 func ExpectNodeClaimRequests(nodeClaim *v1beta1.NodeClaim, resources v1.ResourceList) {
+	GinkgoHelper()
 	for name, value := range resources {
 		v := nodeClaim.Spec.Resources.Requests[name]
-		ExpectWithOffset(1, v.AsApproximateFloat64()).To(BeNumerically("~", value.AsApproximateFloat64(), 10))
+		Expect(v.AsApproximateFloat64()).To(BeNumerically("~", value.AsApproximateFloat64(), 10))
 	}
 }

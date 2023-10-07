@@ -58,9 +58,10 @@ func (g *gomegaWrapper) Expect(actual interface{}, extra ...interface{}) types.A
 	return g.inner.Expect(actual, extra...)
 }
 
-func (g *gomegaWrapper) ExpectWithOffset(offset int, actual interface{}, extra ...interface{}) types.Assertion {
+func (g *gomegaWrapper) Expect(actual interface{}, extra ...interface{}) types.Assertion {
+	GinkgoHelper()
 	g.randomDelay()
-	return g.inner.ExpectWithOffset(offset, actual, extra...)
+	return g.inner.Expect(actual, extra...)
 }
 
 func (g *gomegaWrapper) Eventually(actualOrCtx interface{}, args ...interface{}) types.AsyncAssertion {
@@ -68,9 +69,10 @@ func (g *gomegaWrapper) Eventually(actualOrCtx interface{}, args ...interface{})
 	return g.inner.Eventually(actualOrCtx, args...)
 }
 
-func (g *gomegaWrapper) EventuallyWithOffset(offset int, actual interface{}, args ...interface{}) types.AsyncAssertion {
+func (g *gomegaWrapper) Eventually(actual interface{}, args ...interface{}) types.AsyncAssertion {
+	GinkgoHelper()
 	g.randomDelay()
-	return g.inner.EventuallyWithOffset(offset, actual, args...)
+	return g.inner.Eventually(actual, args...)
 }
 
 func (g *gomegaWrapper) Consistently(actualOrCtx interface{}, args ...interface{}) types.AsyncAssertion {
@@ -78,9 +80,10 @@ func (g *gomegaWrapper) Consistently(actualOrCtx interface{}, args ...interface{
 	return g.inner.Consistently(actualOrCtx, args...)
 }
 
-func (g *gomegaWrapper) ConsistentlyWithOffset(offset int, actualOrCtx interface{}, args ...interface{}) types.AsyncAssertion {
+func (g *gomegaWrapper) Consistently(actualOrCtx interface{}, args ...interface{}) types.AsyncAssertion {
+	GinkgoHelper()
 	g.randomDelay()
-	return g.inner.ConsistentlyWithOffset(offset, actualOrCtx, args...)
+	return g.inner.Consistently(actualOrCtx, args...)
 }
 
 func (g *gomegaWrapper) SetDefaultEventuallyTimeout(duration time.Duration) {
