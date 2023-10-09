@@ -1121,6 +1121,7 @@ func ExpectTriggerVerifyAction(wg *sync.WaitGroup) {
 // ExpectNewMachinesDeleted simulates the machines being created and then removed, similar to what would happen
 // during an ICE error on the created machine
 func ExpectNewMachinesDeleted(ctx context.Context, c client.Client, wg *sync.WaitGroup, numNewMachines int) {
+	GinkgoHelper()
 	existingMachines := ExpectMachines(ctx, c)
 	existingMachineNames := sets.NewString(lo.Map(existingMachines, func(m *v1alpha5.Machine, _ int) string {
 		return m.Name
