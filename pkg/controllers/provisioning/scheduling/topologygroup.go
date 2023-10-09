@@ -62,7 +62,6 @@ type TopologyGroup struct {
 	nodeFilter         TopologyNodeFilter
 	nodeAffinityPolicy *v1.NodeInclusionPolicy
 	nodeTaintsPolicy   *v1.NodeInclusionPolicy
-	MatchLabelKeys     []string
 
 	// Index
 	owners  map[types.UID]struct{} // Pods that have this topology as a scheduling rule
