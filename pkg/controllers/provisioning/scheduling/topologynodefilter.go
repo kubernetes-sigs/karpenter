@@ -53,7 +53,7 @@ func MakeTopologyNodeFilter(p *v1.Pod, nodeAffinityPolicy *v1.NodeInclusionPolic
 }
 
 // Matches returns true if the TopologyNodeFilter doesn't prohibit node from the participating in the topology
-func (t TopologyNodeFilter) Matches(node *v1.Node, pod *v1.Pod, tg *TopologyGroup) bool {
+func (t TopologyNodeFilter) Matches(node *v1.Node) bool {
 	return t.MatchesRequirements(scheduling.NewLabelRequirements(node.Labels))
 }
 

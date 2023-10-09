@@ -269,7 +269,7 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 		}
 		// nodes may or may not be considered for counting purposes for topology spread constraints depending on if they
 		// are selected by the pod's node selectors and required node affinities.  If these are unset, the node always counts.
-		if tg.nodeAffinityPolicy == &honor && !tg.nodeFilter.Matches(node, &p, tg) {
+		if tg.nodeAffinityPolicy == &honor && !tg.nodeFilter.Matches(node) {
 			continue
 		}
 		tg.Record(domain)
