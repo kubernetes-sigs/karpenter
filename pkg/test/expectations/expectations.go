@@ -593,6 +593,15 @@ func ExpectResources(expected, real v1.ResourceList) {
 	}
 }
 
+// NotExpectResources expects all the resources in expected to not exist in real with the same values
+func NotExpectResources(expected, real v1.ResourceList) {
+	GinkgoHelper()
+	for k, v := range expected {
+		realV := real[k]
+		Expect(v.Value()).ToNot(BeNumerically("~", realV.Value()))
+	}
+}
+
 func ExpectNodes(ctx context.Context, c client.Client) []*v1.Node {
 	GinkgoHelper()
 	nodeList := &v1.NodeList{}

@@ -513,6 +513,12 @@ func (c *Cluster) populateInflight(ctx context.Context, n *StateNode) error {
 	if err != nil {
 		return client.IgnoreNotFound(err)
 	}
+	if n.Initialized() {
+		n.inflightInitialized = true
+		n.inflightCapacity = n.Capacity()
+		n.inflightAllocatable = n.Allocatable()
+		return nil
+	}
 	instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, owner)
 	if err != nil {
 		return err
