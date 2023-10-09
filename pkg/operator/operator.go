@@ -18,14 +18,18 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"runtime/debug"
 	"sync"
 	"time"
 
+	coordinationv1 "k8s.io/api/coordination/v1"
+
 	"github.com/go-logr/zapr"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/util/flowcontrol"
@@ -36,6 +40,7 @@ import (
 	"knative.dev/pkg/system"
 	"knative.dev/pkg/webhook"
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -111,15 +116,17 @@ func NewOperator() (context.Context, *Operator) {
 	logging.ConfigureGlobalLoggers(ctx)
 
 	// Manager
-	mgr, err := controllerruntime.NewManager(config, controllerruntime.Options{
+	mgrOpts := controllerruntime.Options{
 		Logger:                     logging.IgnoreDebugEvents(zapr.NewLogger(logger.Desugar())),
 		LeaderElection:             opts.EnableLeaderElection,
 		LeaderElectionID:           "karpenter-leader-election",
 		LeaderElectionResourceLock: resourcelock.LeasesResourceLock,
 		LeaderElectionNamespace:    system.Namespace(),
 		Scheme:                     scheme.Scheme,
-		Metrics:                    server.Options{BindAddress: fmt.Sprintf(":%d", opts.MetricsPort)},
-		HealthProbeBindAddress:     fmt.Sprintf(":%d", opts.HealthProbePort),
+		Metrics: server.Options{
+			BindAddress: fmt.Sprintf(":%d", opts.MetricsPort),
+		},
+		HealthProbeBindAddress: fmt.Sprintf(":%d", opts.HealthProbePort),
 		BaseContext: func() context.Context {
 			ctx := context.Background()
 			ctx = knativelogging.WithLogger(ctx, logger)
@@ -127,18 +134,30 @@ func NewOperator() (context.Context, *Operator) {
 			ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
 			return ctx
 		},
-		// NewCache: cache.NewCacheFunc(config,cache.Options{
-
-		// 	ByObject: &coordinationv1.Lease{}: {
-		// 	 		Field: fields.SelectorFromSet(fields.Set{"metadata.namespace": "kube-node-lease"}),
-		// 		},
-		// }),
-
-	})
-	mgr = lo.Must(mgr, err, "failed to setup manager")
-	if opts.EnableProfiling {
-		registerPprof(mgr)
+		Cache: cache.Options{
+			ByObject: map[client.Object]cache.ByObject{
+				&coordinationv1.Lease{}: {
+					Field: fields.SelectorFromSet(fields.Set{"metadata.namespace": "kube-node-lease"}),
+				},
+			},
+		},
 	}
+	if opts.EnableProfiling {
+		mgrOpts.Metrics.ExtraHandlers = lo.Assign(mgrOpts.Metrics.ExtraHandlers, map[string]http.Handler{
+			"/debug/pprof/":             http.HandlerFunc(pprof.Index),
+			"/debug/pprof/cmdline":      http.HandlerFunc(pprof.Cmdline),
+			"/debug/pprof/profile":      http.HandlerFunc(pprof.Profile),
+			"/debug/pprof/symbol":       http.HandlerFunc(pprof.Symbol),
+			"/debug/pprof/trace":        http.HandlerFunc(pprof.Trace),
+			"/debug/pprof/allocs":       pprof.Handler("allocs"),
+			"/debug/pprof/heap":         pprof.Handler("heap"),
+			"/debug/pprof/block":        pprof.Handler("block"),
+			"/debug/pprof/goroutine":    pprof.Handler("goroutine"),
+			"/debug/pprof/threadcreate": pprof.Handler("threadcreate"),
+		})
+	}
+	mgr, err := controllerruntime.NewManager(config, mgrOpts)
+	mgr = lo.Must(mgr, err, "failed to setup manager")
 	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.Pod{}, "spec.nodeName", func(o client.Object) []string {
 		return []string{o.(*v1.Pod).Spec.NodeName}
 	}), "failed to setup pod indexer")
