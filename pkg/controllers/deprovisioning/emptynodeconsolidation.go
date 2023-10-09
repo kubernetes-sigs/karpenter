@@ -35,7 +35,7 @@ type EmptyNodeConsolidation struct {
 	consolidation
 }
 
-func NewEmptyNodeClaimConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client,
+func NewEmptyNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client,
 	provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder) *EmptyNodeConsolidation {
 	return &EmptyNodeConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
 }
