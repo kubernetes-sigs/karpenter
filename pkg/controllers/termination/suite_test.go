@@ -474,14 +474,16 @@ var _ = Describe("Termination", func() {
 })
 
 func ExpectNotEnqueuedForEviction(e *terminator.Queue, pods ...*v1.Pod) {
+	GinkgoHelper()
 	for _, pod := range pods {
-		ExpectWithOffset(1, e.Contains(client.ObjectKeyFromObject(pod))).To(BeFalse())
+		Expect(e.Contains(client.ObjectKeyFromObject(pod))).To(BeFalse())
 	}
 }
 
 func ExpectEvicted(c client.Client, pods ...*v1.Pod) {
+	GinkgoHelper()
 	for _, pod := range pods {
-		EventuallyWithOffset(1, func() bool {
+		Eventually(func() bool {
 			return ExpectPodExists(ctx, c, pod.Name, pod.Namespace).GetDeletionTimestamp().IsZero()
 		}, ReconcilerPropagationTime, RequestInterval).Should(BeFalse(), func() string {
 			return fmt.Sprintf("expected %s/%s to be evicting, but it isn't", pod.Namespace, pod.Name)
