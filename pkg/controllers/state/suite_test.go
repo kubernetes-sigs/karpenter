@@ -1219,6 +1219,11 @@ var _ = Describe("Inflight Nodes", func() {
 		})
 		It("should continue MarkedForDeletion when an inflight node becomes a real node", func() {
 			machine := test.Machine(v1alpha5.Machine{
+				Spec: v1alpha5.MachineSpec{
+					Taints: []v1.Taint{
+						v1beta1.DisruptingNoScheduleTaint,
+					},
+				},
 				Status: v1alpha5.MachineStatus{
 					ProviderID: test.RandomProviderID(),
 				},
@@ -1226,7 +1231,6 @@ var _ = Describe("Inflight Nodes", func() {
 			ExpectApplied(ctx, env.Client, machine)
 			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 			ExpectStateNodeCount("==", 1)
-			cluster.MarkForDeletion(machine.Status.ProviderID)
 			Expect(ExpectStateNodeExistsForMachine(machine).MarkedForDeletion()).To(BeTrue())
 
 			node := test.Node(test.NodeOptions{
@@ -1830,6 +1834,11 @@ var _ = Describe("Inflight Nodes", func() {
 		})
 		It("should continue MarkedForDeletion when an inflight node becomes a real node", func() {
 			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+				Spec: v1beta1.NodeClaimSpec{
+					Taints: []v1.Taint{
+						v1beta1.DisruptingNoScheduleTaint,
+					},
+				},
 				Status: v1beta1.NodeClaimStatus{
 					ProviderID: test.RandomProviderID(),
 				},
@@ -1837,7 +1846,6 @@ var _ = Describe("Inflight Nodes", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim)
 			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 			ExpectStateNodeCount("==", 1)
-			cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
 			Expect(ExpectStateNodeExistsForNodeClaim(nodeClaim).MarkedForDeletion()).To(BeTrue())
 
 			node := test.Node(test.NodeOptions{

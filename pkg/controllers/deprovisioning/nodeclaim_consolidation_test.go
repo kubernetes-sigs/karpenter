@@ -3552,7 +3552,9 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 
 			// Mark the node for deletion and re-trigger reconciliation
 			oldNodeName := nodes[0].Name
-			cluster.MarkForDeletion(nodes[0].Spec.ProviderID)
+			nodes[0].Spec.Taints = append(nodes[0].Spec.Taints, v1beta1.DisruptingNoScheduleTaint)
+			ExpectApplied(ctx, env.Client, nodes[0])
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[0]))
 			ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, lo.Map(pods, func(p *v1.Pod, _ int) *v1.Pod { return p.DeepCopy() })...)
 
 			// Make sure that the cluster state is aware of the current node state

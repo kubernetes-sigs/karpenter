@@ -338,8 +338,8 @@ func (in *StateNode) PodLimits() v1.ResourceList {
 }
 
 func (in *StateNode) MarkedForDeletion() bool {
-	// The Node is marked for the Deletion if:
-	//  1. The Node has the Disrupting Taint
+	// The Node is marked for deletion if:
+	//  1. The Node has the karpenter.sh/disrupting:NoSchedule taint
 	//  2. The Node has a NodeClaim counterpart and is actively deleting
 	//  3. The Node has no NodeClaim counterpart and is actively deleting
 	_, ok := lo.Find(in.Taints(), func(taint v1.Taint) bool {
