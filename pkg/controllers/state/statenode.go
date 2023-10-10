@@ -217,7 +217,7 @@ func (in *StateNode) Taints() []v1.Taint {
 	var taints []v1.Taint
 	// TODO @joinnis: The !in.Initialized() check can be removed when we can assume that all nodes have the v1alpha5.NodeRegisteredLabel on them
 	// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
-	if !in.Registered() && !in.Initialized() && in.NodeClaim != nil {
+	if (!in.Registered() && !in.Initialized() && in.NodeClaim != nil) || (in.Node == nil && in.Managed()) {
 		taints = in.NodeClaim.Spec.Taints
 	} else if in.Node != nil {
 		taints = in.Node.Spec.Taints

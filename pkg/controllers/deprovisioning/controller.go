@@ -321,15 +321,17 @@ func (c *Controller) requireDisruptingNoScheduleTaint(ctx context.Context, addTa
 		if ok && !node.DeletionTimestamp.IsZero() {
 			continue
 		}
-		// If the taint is how we want it, do nothing.
+		// If the taint is how we want it, do nothing
 		if ok == addTaint {
 			continue
 		}
 		stored := node.DeepCopy()
-		if ok == !addTaint {
+		// If the taint is present and we want to remove the taint, remove it.
+		if ok && !addTaint {
 			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint v1.Taint, _ int) bool {
 				return v1beta1.DisruptingNoScheduleTaint.MatchTaint(&taint)
 			})
+			// otherwise, add it.
 		} else {
 			node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptingNoScheduleTaint)
 		}
