@@ -636,6 +636,7 @@ func (c *Cluster) triggerConsolidationOnChange(old, new *StateNode) {
 		c.MarkUnconsolidated()
 		return
 	}
+	// if we're passing in a fake node
 	if old.MarkedForDeletion() != new.MarkedForDeletion() {
 		c.MarkUnconsolidated()
 		return
