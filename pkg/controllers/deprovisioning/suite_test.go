@@ -1209,6 +1209,7 @@ func ExpectMakeNewMachinesReady(ctx context.Context, c client.Client, wg *sync.W
 // ExpectNewMachinesDeleted simulates the machines being created and then removed, similar to what would happen
 // during an ICE error on the created machine
 func ExpectNewNodeClaimsDeleted(ctx context.Context, c client.Client, wg *sync.WaitGroup, numNewNodeClaims int) {
+	GinkgoHelper()
 	existingNodeClaims := ExpectNodeClaims(ctx, c)
 	existingNodeClaimNames := sets.NewString(lo.Map(existingNodeClaims, func(nc *v1beta1.NodeClaim, _ int) string {
 		return nc.Name
