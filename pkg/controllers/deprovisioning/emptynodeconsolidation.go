@@ -76,6 +76,8 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 		logging.FromContext(ctx).Errorf("computing validation candidates %s", err)
 		return Command{}, err
 	}
+	// Get the current representation of the proposed candidates from before the validation timeout
+	// We do this so that we can re-validate that the candidates that were computed before we made the decision are the same
 	candidatesToDelete := mapCandidates(cmd.candidates, validationCandidates)
 
 	// The deletion of empty NodeClaims is easy to validate, we just ensure that:
