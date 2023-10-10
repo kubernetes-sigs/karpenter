@@ -637,10 +637,16 @@ func (c *Cluster) triggerConsolidationOnChange(old, new *StateNode) {
 		c.MarkUnconsolidated()
 		return
 	}
+	// If either the old node or new node are mocked
+	if (old.Node == nil && old.NodeClaim == nil) || (new.Node == nil && new.NodeClaim == nil) {
+		c.MarkUnconsolidated()
+		return
+	}
 	if old.Initialized() != new.Initialized() {
 		c.MarkUnconsolidated()
 		return
 	}
+	// if we're passing in a fake node
 	if old.MarkedForDeletion() != new.MarkedForDeletion() {
 		c.MarkUnconsolidated()
 		return
