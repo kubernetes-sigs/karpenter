@@ -124,7 +124,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}
 
-	// Karpenter taints nodes with a karpenter.sh/disrupting taint as part of the deprovisioning process
+	// Karpenter taints nodes with a karpenter.sh/disruption taint as part of the deprovisioning process
 	// while it progresses in memory. If Karpenter restarts during a deprovisioning action, some nodes can be left tainted.
 	// Idempotently remove this taint from candidates before continuing.
 	if err := c.requireDisruptingNoScheduleTaint(ctx, false, c.cluster.Nodes()...); err != nil {
@@ -301,7 +301,7 @@ func (c *Controller) waitForDeletion(ctx context.Context, nodeClaim *v1beta1.Nod
 	}
 }
 
-// requireDisruptingNoScheduleTaint will either add/remove the karpenter.sh/disrupting taint from the candidates.
+// requireDisruptingNoScheduleTaint will either add/remove the karpenter.sh/disruption taint from the candidates.
 // This is used to enforce no taints at the beginning of deprovisioning, and
 // to add/remove taints while executing a deprovisioning action.
 func (c *Controller) requireDisruptingNoScheduleTaint(ctx context.Context, addTaint bool, nodes ...*state.StateNode) error {
@@ -314,7 +314,7 @@ func (c *Controller) requireDisruptingNoScheduleTaint(ctx context.Context, addTa
 
 		// If the node already has the taint, continue to the next
 		_, ok := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
-			return v1beta1.DisruptingNoScheduleTaint.MatchTaint(&taint)
+			return v1beta1.DisruptionNoScheduleTaint.MatchTaint(&taint)
 		})
 
 		// node is being deleted, so no need to remove taint as the node will be gone soon
@@ -329,11 +329,11 @@ func (c *Controller) requireDisruptingNoScheduleTaint(ctx context.Context, addTa
 		// If the taint is present and we want to remove the taint, remove it.
 		if ok && !addTaint {
 			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint v1.Taint, _ int) bool {
-				return v1beta1.DisruptingNoScheduleTaint.MatchTaint(&taint)
+				return v1beta1.DisruptionNoScheduleTaint.MatchTaint(&taint)
 			})
 			// otherwise, add it.
 		} else {
-			node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptingNoScheduleTaint)
+			node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
 		}
 		if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 			multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))

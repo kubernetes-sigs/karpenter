@@ -1221,7 +1221,7 @@ var _ = Describe("Inflight Nodes", func() {
 			machine := test.Machine(v1alpha5.Machine{
 				Spec: v1alpha5.MachineSpec{
 					Taints: []v1.Taint{
-						v1beta1.DisruptingNoScheduleTaint,
+						v1beta1.DisruptionNoScheduleTaint,
 					},
 				},
 				Status: v1alpha5.MachineStatus{
@@ -1404,7 +1404,7 @@ var _ = Describe("Inflight Nodes", func() {
 			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 			ExpectStateNodeCount("==", 1)
 			// Add the disrupting taint so that it's understood to be marked for deletion.
-			machine.Spec.Taints = append(machine.Spec.Taints, v1beta1.DisruptingNoScheduleTaint)
+			machine.Spec.Taints = append(machine.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
 			ExpectApplied(ctx, env.Client, machine)
 			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 			Expect(ExpectStateNodeExistsForMachine(machine).MarkedForDeletion()).To(BeTrue())
@@ -1836,7 +1836,7 @@ var _ = Describe("Inflight Nodes", func() {
 			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 				Spec: v1beta1.NodeClaimSpec{
 					Taints: []v1.Taint{
-						v1beta1.DisruptingNoScheduleTaint,
+						v1beta1.DisruptionNoScheduleTaint,
 					},
 				},
 				Status: v1beta1.NodeClaimStatus{

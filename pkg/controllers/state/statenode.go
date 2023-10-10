@@ -343,7 +343,7 @@ func (in *StateNode) MarkedForDeletion() bool {
 	//  2. The Node has a NodeClaim counterpart and is actively deleting
 	//  3. The Node has no NodeClaim counterpart and is actively deleting
 	_, ok := lo.Find(in.Taints(), func(taint v1.Taint) bool {
-		return v1beta1.DisruptingNoScheduleTaint.MatchTaint(&taint)
+		return v1beta1.DisruptionNoScheduleTaint.MatchTaint(&taint)
 	})
 	return ok ||
 		(in.NodeClaim != nil && !in.NodeClaim.DeletionTimestamp.IsZero()) ||
