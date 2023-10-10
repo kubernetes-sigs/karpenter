@@ -1121,6 +1121,7 @@ func ExpectTriggerVerifyAction(wg *sync.WaitGroup) {
 // ExpectNewMachinesDeleted simulates the machines being created and then removed, similar to what would happen
 // during an ICE error on the created machine
 func ExpectNewMachinesDeleted(ctx context.Context, c client.Client, wg *sync.WaitGroup, numNewMachines int) {
+	GinkgoHelper()
 	existingMachines := ExpectMachines(ctx, c)
 	existingMachineNames := sets.NewString(lo.Map(existingMachines, func(m *v1alpha5.Machine, _ int) string {
 		return m.Name
@@ -1128,6 +1129,7 @@ func ExpectNewMachinesDeleted(ctx context.Context, c client.Client, wg *sync.Wai
 
 	wg.Add(1)
 	go func() {
+		GinkgoHelper()
 		machinesDeleted := 0
 		ctx, cancel := context.WithTimeout(ctx, time.Second*30) // give up after 30s
 		defer GinkgoRecover()
@@ -1145,7 +1147,7 @@ func ExpectNewMachinesDeleted(ctx context.Context, c client.Client, wg *sync.Wai
 					if existingMachineNames.Has(m.Name) {
 						continue
 					}
-					ExpectWithOffset(1, client.IgnoreNotFound(c.Delete(ctx, m))).To(Succeed())
+					Expect(client.IgnoreNotFound(c.Delete(ctx, m))).To(Succeed())
 					machinesDeleted++
 					if machinesDeleted == numNewMachines {
 						return
@@ -1207,6 +1209,7 @@ func ExpectMakeNewMachinesReady(ctx context.Context, c client.Client, wg *sync.W
 // ExpectNewMachinesDeleted simulates the machines being created and then removed, similar to what would happen
 // during an ICE error on the created machine
 func ExpectNewNodeClaimsDeleted(ctx context.Context, c client.Client, wg *sync.WaitGroup, numNewNodeClaims int) {
+	GinkgoHelper()
 	existingNodeClaims := ExpectNodeClaims(ctx, c)
 	existingNodeClaimNames := sets.NewString(lo.Map(existingNodeClaims, func(nc *v1beta1.NodeClaim, _ int) string {
 		return nc.Name
@@ -1214,6 +1217,7 @@ func ExpectNewNodeClaimsDeleted(ctx context.Context, c client.Client, wg *sync.W
 
 	wg.Add(1)
 	go func() {
+		GinkgoHelper()
 		nodeClaimsDeleted := 0
 		ctx, cancel := context.WithTimeout(ctx, time.Second*30) // give up after 30s
 		defer GinkgoRecover()
@@ -1231,7 +1235,7 @@ func ExpectNewNodeClaimsDeleted(ctx context.Context, c client.Client, wg *sync.W
 					if existingNodeClaimNames.Has(m.Name) {
 						continue
 					}
-					ExpectWithOffset(1, client.IgnoreNotFound(c.Delete(ctx, m))).To(Succeed())
+					Expect(client.IgnoreNotFound(c.Delete(ctx, m))).To(Succeed())
 					nodeClaimsDeleted++
 					if nodeClaimsDeleted == numNewNodeClaims {
 						return
