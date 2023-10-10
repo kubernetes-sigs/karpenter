@@ -29,22 +29,25 @@ import (
 
 var ctx context.Context
 
-func TestSettings(t *testing.T) {
+func TestOptions(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Settings")
+	RunSpecs(t, "Options")
 }
 
 var _ = Describe("Options", func() {
 	Context("Parse", func() {
 		It("should correctly parse feature gates", func() {
-			opts := options.New().MustParse("--feature-gates", "Drift=true")
+			opts, err := options.New().Parse("--feature-gates", "Drift=true")
+			Expect(err).To(BeNil())
 			Expect(opts.FeatureGates.Drift).To(BeTrue())
-			opts = options.New().MustParse("--feature-gates", "Drift=false")
+			opts, err = options.New().Parse("--feature-gates", "Drift=false")
+			Expect(err).To(BeNil())
 			Expect(opts.FeatureGates.Drift).To(BeFalse())
 		})
 		It("should use the correct default values", func() {
-			opts := options.New().MustParse()
+			opts, err := options.New().Parse()
+			Expect(err).To(BeNil())
 			Expect(opts.ServiceName).To(Equal(""))
 			Expect(opts.DisableWebhook).To(BeFalse())
 			Expect(opts.WebhookPort).To(Equal(8443))
@@ -71,22 +74,26 @@ var _ = Describe("Options", func() {
 		}
 
 		It("shouldn't overwrite BatchMaxDuration when specified by CLI", func() {
-			opts := options.New().MustParse("--batch-max-duration", "1s")
+			opts, err := options.New().Parse("--batch-max-duration", "1s")
+			Expect(err).To(BeNil())
 			opts.MergeSettings(settings)
 			Expect(opts.BatchMaxDuration).To(Equal(time.Second))
 		})
 		It("shouldn't overwrite BatchIdleDuration when specified by CLI", func() {
-			opts := options.New().MustParse("--batch-idle-duration", "1s")
+			opts, err := options.New().Parse("--batch-idle-duration", "1s")
+			Expect(err).To(BeNil())
 			opts.MergeSettings(settings)
 			Expect(opts.BatchIdleDuration).To(Equal(time.Second))
 		})
 		It("shouldn't overwrite FeatureGates.Drift when specified by CLI", func() {
-			opts := options.New().MustParse("--feature-gates", "Drift=false")
+			opts, err := options.New().Parse("--feature-gates", "Drift=false")
+			Expect(err).To(BeNil())
 			opts.MergeSettings(settings)
 			Expect(opts.FeatureGates.Drift).To(BeFalse())
 		})
 		It("should use values from settings when not specified", func() {
-			opts := options.New().MustParse("--batch-max-duration", "1s", "--feature-gates", "Drift=false")
+			opts, err := options.New().Parse("--batch-max-duration", "1s", "--feature-gates", "Drift=false")
+			Expect(err).To(BeNil())
 			opts.MergeSettings(settings)
 			Expect(opts.BatchIdleDuration).To(Equal(50 * time.Second))
 		})
@@ -95,12 +102,14 @@ var _ = Describe("Options", func() {
 	Context("Validation", func() {
 		It("should parse valid log levels successfully", func() {
 			for _, lvl := range []string{"", "debug", "info", "error"} {
-				Expect(options.New().MustParse("--log-level", lvl)).ShouldNot(Panic())
+				_, err := options.New().Parse("--log-level", lvl)
+				Expect(err).To(BeNil())
 			}
 		})
 		It("should panic for invalid log levels", func() {
 			for _, lvl := range []string{"test", "dbug", "trace", "warn"} {
-				Expect(options.New().MustParse("--log-level", lvl)).Should(Panic())
+				_, err := options.New().Parse("--log-level", lvl)
+				Expect(err).ToNot(BeNil())
 			}
 		})
 	})

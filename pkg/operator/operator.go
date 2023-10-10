@@ -77,7 +77,7 @@ func NewOperator() (context.Context, *Operator) {
 	ctx = knativeinjection.WithNamespaceScope(ctx, system.Namespace())
 
 	// Options
-	opts := options.New().MustParse(os.Args[1:]...)
+	opts := lo.Must(options.New().Parse(os.Args[1:]...))
 
 	// Make the Karpenter binary aware of the container memory limit
 	// https://pkg.go.dev/runtime/debug#SetMemoryLimit
@@ -102,15 +102,15 @@ func NewOperator() (context.Context, *Operator) {
 	// Client
 	kubernetesInterface := kubernetes.NewForConfigOrDie(config)
 
-	// Logging
-	logger := logging.NewLogger(ctx, component, kubernetesInterface)
-	ctx = knativelogging.WithLogger(ctx, logger)
-	logging.ConfigureGlobalLoggers(ctx)
-
 	// Inject settings from the ConfigMap(s) into the context
 	ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
 	opts = opts.MergeSettings(settings.FromContext(ctx))
 	ctx = options.ToContext(ctx, opts)
+
+	// Logging
+	logger := logging.NewLogger(ctx, component, kubernetesInterface)
+	ctx = knativelogging.WithLogger(ctx, logger)
+	logging.ConfigureGlobalLoggers(ctx)
 
 	// Manager
 	mgr, err := controllerruntime.NewManager(config, controllerruntime.Options{

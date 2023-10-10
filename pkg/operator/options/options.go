@@ -18,7 +18,7 @@ import (
 	"context"
 	"errors"
 	"flag"
-	"log"
+	"fmt"
 	"os"
 	"time"
 
@@ -40,7 +40,7 @@ type FeatureGates struct {
 }
 
 type OptionFields struct {
-	*flag.FlagSet
+	FlagSet *flag.FlagSet
 	// Vendor Neutral
 	ServiceName          string
 	DisableWebhook       bool
@@ -99,22 +99,22 @@ func New() *Options {
 	return opts
 }
 
-func (o *Options) MustParse(args ...string) *Options {
-	if err := o.Parse(args); err != nil {
+func (o *Options) Parse(args ...string) (*Options, error) {
+	if err := o.FlagSet.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			os.Exit(0)
 		}
-		panic(err)
+		return nil, err
 	}
 
 	if !lo.Contains(validLogLevels, o.LogLevel) {
-		log.Fatalf("invalid log level %q passed through environment variables or cli arguments", o.LogLevel)
+		return nil, fmt.Errorf("failed to validate cli flags / env vars, invalid log level %q", o.LogLevel)
 	}
 
 	o.FeatureGates = MustParseFeatureGates(o.FeatureGates.inputStr)
 
 	// Check if shared fields have been set. If they haven't, they may be ovewritten by settings parsed from configmaps.
-	o.Visit(func(f *flag.Flag) {
+	o.FlagSet.Visit(func(f *flag.Flag) {
 		switch f.Name {
 		case "batch-max-duration":
 			o.BatchMaxDurationSet = true
@@ -134,7 +134,7 @@ func (o *Options) MustParse(args ...string) *Options {
 		o.FeatureGatesSet = true
 	}
 
-	return o
+	return o, nil
 }
 
 // MergeSettings applies settings specified in the v1alpha5 configmap to options. If the value was already specified by
