@@ -19,7 +19,7 @@ import v1 "k8s.io/api/core/v1"
 // Karpenter specific taints
 const (
 	DisruptionTaintKey   = Group + "/disruption"
-	DisruptionTaintValue = "disrupting"
+	DisruptingNoScheduleTaintValue = "disrupting"
 )
 
 var (
@@ -28,6 +28,6 @@ var (
 	DisruptionNoScheduleTaint = v1.Taint{
 		Key:    DisruptionTaintKey,
 		Effect: v1.TaintEffectNoSchedule,
-		Value:  DisruptionTaintValue,
+		Value:  DisruptingNoScheduleTaintValue,
 	}
 )
