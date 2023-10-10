@@ -91,4 +91,17 @@ var _ = Describe("Options", func() {
 			Expect(opts.BatchIdleDuration).To(Equal(50 * time.Second))
 		})
 	})
+
+	Context("Validation", func() {
+		It("should parse valid log levels successfully", func() {
+			for _, lvl := range []string{"", "debug", "info", "error"} {
+				Expect(options.New().MustParse("--log-level", lvl)).ShouldNot(Panic())
+			}
+		})
+		It("should panic for invalid log levels", func() {
+			for _, lvl := range []string{"test", "dbug", "trace", "warn"} {
+				Expect(options.New().MustParse("--log-level", lvl)).Should(Panic())
+			}
+		})
+	})
 })

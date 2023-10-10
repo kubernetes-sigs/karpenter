@@ -78,8 +78,9 @@ func NewOperator() (context.Context, *Operator) {
 
 	// Options
 	opts := options.New().MustParse(os.Args[1:]...)
-	ctx = options.ToContext(ctx, opts)
 
+	// Make the Karpenter binary aware of the container memory limit
+	// https://pkg.go.dev/runtime/debug#SetMemoryLimit
 	if opts.MemoryLimit > 0 {
 		newLimit := int64(float64(opts.MemoryLimit) * 0.9)
 		debug.SetMemoryLimit(newLimit)
@@ -108,7 +109,8 @@ func NewOperator() (context.Context, *Operator) {
 
 	// Inject settings from the ConfigMap(s) into the context
 	ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
-	opts.MergeSettings(settings.FromContext(ctx))
+	opts = opts.MergeSettings(settings.FromContext(ctx))
+	ctx = options.ToContext(ctx, opts)
 
 	// Manager
 	mgr, err := controllerruntime.NewManager(config, controllerruntime.Options{

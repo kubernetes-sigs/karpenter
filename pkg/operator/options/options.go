@@ -139,9 +139,9 @@ func (o *Options) MustParse(args ...string) *Options {
 
 // MergeSettings applies settings specified in the v1alpha5 configmap to options. If the value was already specified by
 // a CLI argument or environment variable, that value will be used.
-func (o *Options) MergeSettings(s *settings.Settings) {
+func (o *Options) MergeSettings(s *settings.Settings) *Options {
 	if s == nil {
-		return
+		return o
 	}
 
 	// Note: settings also has default values applied to it. If the option is specified by neither Settings nor Options,
@@ -149,6 +149,7 @@ func (o *Options) MergeSettings(s *settings.Settings) {
 	mergeField(&o.BatchMaxDuration, s.BatchMaxDuration, o.BatchMaxDurationSet)
 	mergeField(&o.BatchIdleDuration, s.BatchIdleDuration, o.BatchIdleDurationSet)
 	mergeField(&o.FeatureGates.Drift, s.DriftEnabled, o.FeatureGatesSet)
+	return o
 }
 
 func MustParseFeatureGates(gateStr string) FeatureGates {
