@@ -2291,7 +2291,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			// Iterate in a loop until we get to the validation action
 			// Then, apply the pods to the cluster and bind them to the nodes
 			for {
-				time.Sleep(250 * time.Millisecond)
+				time.Sleep(100 * time.Millisecond)
 				if fakeClock.HasWaiters() {
 					break
 				}
@@ -2307,7 +2307,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, doNotEvictPod, node)
 
 			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
-			fakeClock.Step(45 * time.Second)
+			ExpectTriggerVerifyAction(&wg)
 			wg.Wait()
 
 			// we would normally be able to replace a node, but we are blocked by the do-not-evict pods during validation
@@ -2339,7 +2339,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			// Iterate in a loop until we get to the validation action
 			// Then, apply the pods to the cluster and bind them to the nodes
 			for {
-				time.Sleep(250 * time.Millisecond)
+				time.Sleep(100 * time.Millisecond)
 				if fakeClock.HasWaiters() {
 					break
 				}
@@ -2355,7 +2355,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, doNotEvictPod, node)
 
 			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
-			fakeClock.Step(45 * time.Second)
+			ExpectTriggerVerifyAction(&wg)
 			wg.Wait()
 
 			// we would normally be able to replace a node, but we are blocked by the do-not-evict pods during validation
@@ -2387,7 +2387,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			// Iterate in a loop until we get to the validation action
 			// Then, apply the pods to the cluster and bind them to the nodes
 			for {
-				time.Sleep(250 * time.Millisecond)
+				time.Sleep(100 * time.Millisecond)
 				if fakeClock.HasWaiters() {
 					break
 				}
@@ -2403,19 +2403,12 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			pdb := test.PodDisruptionBudget(test.PDBOptions{
 				Labels:         labels,
 				MaxUnavailable: fromInt(0),
-				Status: &policyv1.PodDisruptionBudgetStatus{
-					ObservedGeneration: 1,
-					DisruptionsAllowed: 0,
-					CurrentHealthy:     1,
-					DesiredHealthy:     1,
-					ExpectedPods:       1,
-				},
 			})
 			ExpectApplied(ctx, env.Client, blockingPDBPod, pdb)
 			ExpectManualBinding(ctx, env.Client, blockingPDBPod, node)
 
 			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
-			fakeClock.Step(45 * time.Second)
+			ExpectTriggerVerifyAction(&wg)
 			wg.Wait()
 
 			// we would normally be able to replace a node, but we are blocked by the PDB during validation
@@ -2448,7 +2441,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			// Iterate in a loop until we get to the validation action
 			// Then, apply the pods to the cluster and bind them to the nodes
 			for {
-				time.Sleep(250 * time.Millisecond)
+				time.Sleep(100 * time.Millisecond)
 				if fakeClock.HasWaiters() {
 					break
 				}
@@ -2465,7 +2458,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, doNotEvictPods[1], node2)
 
 			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
-			fakeClock.Step(45 * time.Second)
+			ExpectTriggerVerifyAction(&wg)
 			wg.Wait()
 
 			// we would normally be able to consolidate down to a single node, but we are blocked by the do-not-evict pods during validation
@@ -2499,7 +2492,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			// Iterate in a loop until we get to the validation action
 			// Then, apply the pods to the cluster and bind them to the nodes
 			for {
-				time.Sleep(250 * time.Millisecond)
+				time.Sleep(100 * time.Millisecond)
 				if fakeClock.HasWaiters() {
 					break
 				}
@@ -2516,7 +2509,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, doNotEvictPods[1], node2)
 
 			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
-			fakeClock.Step(45 * time.Second)
+			ExpectTriggerVerifyAction(&wg)
 			wg.Wait()
 
 			// we would normally be able to consolidate down to a single node, but we are blocked by the do-not-evict pods during validation
@@ -2550,7 +2543,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			// Iterate in a loop until we get to the validation action
 			// Then, apply the pods to the cluster and bind them to the nodes
 			for {
-				time.Sleep(250 * time.Millisecond)
+				time.Sleep(100 * time.Millisecond)
 				if fakeClock.HasWaiters() {
 					break
 				}
@@ -2566,20 +2559,13 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			pdb := test.PodDisruptionBudget(test.PDBOptions{
 				Labels:         labels,
 				MaxUnavailable: fromInt(0),
-				Status: &policyv1.PodDisruptionBudgetStatus{
-					ObservedGeneration: 1,
-					DisruptionsAllowed: 0,
-					CurrentHealthy:     1,
-					DesiredHealthy:     1,
-					ExpectedPods:       1,
-				},
 			})
 			ExpectApplied(ctx, env.Client, blockingPDBPods[0], blockingPDBPods[1], pdb)
 			ExpectManualBinding(ctx, env.Client, blockingPDBPods[0], node)
 			ExpectManualBinding(ctx, env.Client, blockingPDBPods[1], node2)
 
 			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
-			fakeClock.Step(45 * time.Second)
+			ExpectTriggerVerifyAction(&wg)
 			wg.Wait()
 
 			// we would normally be able to consolidate down to a single node, but we are blocked by the PDB during validation
