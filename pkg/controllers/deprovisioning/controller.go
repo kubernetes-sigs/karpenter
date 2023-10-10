@@ -124,10 +124,10 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}
 
-	// Karpenter taints nodes as part of the deprovisioning process while it progresses in memory.
-	// If Karpenter restarts during a deprovisioning action, the nodes will remain tainted.
+	// Karpenter taints nodes with a karpenter.sh/disrupting taint as part of the deprovisioning process
+	// while it progresses in memory. If Karpenter restarts during a deprovisioning action, some nodes can be left tainted.
 	// Idempotently remove this taint from candidates before continuing.
-	if err := c.taintCandidates(ctx, false, c.cluster.Nodes()...); err != nil {
+	if err := c.requireDisruptingNoScheduleTaint(ctx, false, c.cluster.Nodes()...); err != nil {
 		return reconcile.Result{}, fmt.Errorf("removing disruption taint from nodes, %w", err)
 	}
 
@@ -219,15 +219,15 @@ func (c *Controller) launchReplacementNodeClaims(ctx context.Context, action Com
 
 	stateNodes := lo.Map(action.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode })
 
-	// cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
-	if err := c.taintCandidates(ctx, true, stateNodes...); err != nil {
+	// taint the candidate nodes before we launch the replacements to prevent new pods from scheduling to the candidate nodes
+	if err := c.requireDisruptingNoScheduleTaint(ctx, true, stateNodes...); err != nil {
 		return fmt.Errorf("cordoning nodes, %w", err)
 	}
 
 	nodeClaimKeys, err := c.provisioner.CreateNodeClaims(ctx, action.replacements, provisioning.WithReason(reason))
 	if err != nil {
-		// uncordon the nodes as the launch may fail (e.g. ICE)
-		err = multierr.Append(err, c.taintCandidates(ctx, false, stateNodes...))
+		// untaint the nodes as the launch may fail (e.g. ICE)
+		err = multierr.Append(err, c.requireDisruptingNoScheduleTaint(ctx, false, stateNodes...))
 		return err
 	}
 	if len(nodeClaimKeys) != len(action.replacements) {
@@ -245,7 +245,7 @@ func (c *Controller) launchReplacementNodeClaims(ctx context.Context, action Com
 		}
 	})
 	if err = multierr.Combine(errs...); err != nil {
-		return multierr.Combine(c.taintCandidates(ctx, false, stateNodes...),
+		return multierr.Combine(c.requireDisruptingNoScheduleTaint(ctx, false, stateNodes...),
 			fmt.Errorf("timed out checking machine readiness, %w", err))
 	}
 	return nil
@@ -301,10 +301,10 @@ func (c *Controller) waitForDeletion(ctx context.Context, nodeClaim *v1beta1.Nod
 	}
 }
 
-// taintCandidates will either add/remove the karpenter.sh/disrupting taint.
+// requireDisruptingNoScheduleTaint will either add/remove the karpenter.sh/disrupting taint from the candidates.
 // This is used to enforce no taints at the beginning of deprovisioning, and
 // to add/remove taints while executing a deprovisioning action.
-func (c *Controller) taintCandidates(ctx context.Context, addTaint bool, nodes ...*state.StateNode) error {
+func (c *Controller) requireDisruptingNoScheduleTaint(ctx context.Context, addTaint bool, nodes ...*state.StateNode) error {
 	var multiErr error
 	for _, n := range nodes {
 		node := &v1.Node{}
