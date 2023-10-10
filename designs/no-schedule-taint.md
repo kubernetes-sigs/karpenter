@@ -4,17 +4,17 @@
 
 Karpenter uses the `node.kubernetes.io/unschedulable:NoSchedule` taint to prevent pods from scheduling to nodes being deprovisioned. The `node.kubernetes.io/unschedulable` taint is well-known in Kubernetes and may be leveraged or relied on by other controllers or applications.
 
-Karpenter cordons nodes when it launching replacements for a deprovisioning action. When Karpenter crashes or restarts during a deprovisioning action, nodes can be left cordoned until manual intervention or deprovisioning possibly through Karpenter in the future. Karpenter can't distinguish between nodes that it has cordoned and nodes a user/another controller has cordoned. **Since Karpenter cannot assume it’s the only agent in the cluster managing this taint, Karpenter is unable to recover from crashes where nodes are left cordoned.**
+Karpenter cordons nodes when it launching replacements for a deprovisioning action. When Karpenter crashes or restarts during a deprovisioning action, nodes can be left cordoned until manual intervention or deprovisioning by Karpenter in the future. Karpenter can't distinguish between nodes that it has cordoned and nodes a user/another controller has cordoned. **Since Karpenter cannot assume it’s the only agent in the cluster managing this taint, Karpenter is unable to recover from crashes where nodes are left cordoned.**
 
-Karpenter is [increasing the parallelism of deprovisioning](https://github.com/aws/karpenter-core/pull/542), allowing Karpenter to execute many actions simultaneously. Once merged, Karpenter could have many actions in memory, making it likely for a Karpenter crash to have more widespread and noticeable effects. At the worst, a cluster could have all nodes being deprovisioned simultaneously, where a crash would result in all nodes being cordoned, requiring new nodes for any new pods.
-
-PR: https://github.com/aws/karpenter-core/pull/508
+Karpenter is [increasing the parallelism of deprovisioning](https://github.com/aws/karpenter-core/pull/542), allowing Karpenter to execute many actions simultaneously. Once merged, Karpenter could have many actions in memory, making it likely for a Karpenter crash to have more widespread and noticeable effects. At the worst, a cluster could have all nodes being deprovisioned simultaneously, where a crash would result in all nodes being left cordoned, requiring new nodes for any new pods.
 
 ## Proposal
 
 Karpenter should taint nodes with a `karpenter.sh/disrupting:NoSchedule` taint rather than relying on the upstream unschedulable taint.
 
 Since Karpenter is currently migrating to v1beta1, this behavior change will only be present with v1beta1 APIs.
+
+PR: https://github.com/aws/karpenter-core/pull/508
 
 ## Considerations
 
@@ -28,10 +28,10 @@ Cluster Autoscaler [uses their own `NoSchedule` taint](https://github.com/kubern
 
 ### SIG-Autoscaling Alignment
 
-Karpenter is currently in process of aligning with SIG-Autoscaling for a common experience. As part of alignment, all API groups for both projects are proposed to be renamed to `node-lifecycle.kubernetes.io`.  After this change, users migrating to `v1beta1` will need to change their daemonsets to tolerate the new Karpenter taint if they want their daemonsets not evicted. If the API group is changed as part of alignment, these API groups will change once more, requiring users to change their tolerations on their workloads once again, introducing more churn. As this alignment will be a breaking change for both CAS and Karpenter, this change is inevitable, and should be done when Karpenter once again at a future time, potentially when graduating APIs to `v1`.
+Karpenter is currently in process of [aligning with SIG-Autoscaling](https://docs.google.com/document/d/1_KCCr5CzxmurFX_6TGLav6iMwCxPOj0P/edit) for a common experience. As part of alignment, all API groups for both projects are proposed to be renamed to `node-lifecycle.kubernetes.io`.  After this change, users migrating to `v1beta1` will need to change their daemonsets to tolerate the new Karpenter taint if they don't want their daemonsets evicted. If the API group is changed as part of alignment, these API groups will change once more, requiring users to change their tolerations on their workloads once again, introducing more churn.
 
-🔑 Every change Karpenter makes to an API group causes cluster administrators to enforce application level changes. The `v1beta1` migration initially included a change for AWS API groups of `karpenter.k8s.aws->compute.k8s.aws`, where it was decided to keep as is, since the SIG-Autoscaling alignment could have changed the API group once again to `node-lifecycle.kubernetes.io`. We should change the taint now as a breaking change to behavior specific to `v1beta1`, and hold the next API group change until v1.
+🔑 There is ample ambiguity on the shared direction of Karpenter, CAS, and the entirety of upstream Kubernetes aligning around these concepts. It's unclear how this conversation will evolve and how long this conversation will take to resolve. As a result, we are choosing not to block on this conversation and, instead, taking an opinionated stance in Karpenter that we can choose to evolve later.
 
 ### How severe is this issue currently?
 
-At the moment, as far as we know, no user has reported this issue, likely since its effect and recovery are mitigated by how Karpenter deprovisions serially, executing one action at a time. If Karpenter crashes/restarts while executing a command, only one command’s worth of candidate nodes will be left cordoned. Since expiration, drift, and consolidation all have a consistent ordering, it’s then likely that each cordoned node will get chosen for a deprovisioning action soon after recovery.
+At the moment, no user has reported this issue, likely since its effect and recovery are mitigated by how Karpenter deprovisions serially, executing one action at a time. If Karpenter crashes/restarts while executing a command, only one command’s worth of candidate nodes will be left cordoned. Since expiration, drift, and consolidation all have a consistent ordering, it’s then likely that each cordoned node will get chosen for a deprovisioning action soon after recovery.
