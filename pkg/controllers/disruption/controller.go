@@ -167,6 +167,9 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	return true, nil
 }
 
+// executeCommand will add the command to the orchestration queue where:
+// 1. Candidates will be tainted
+// 2. Replacements will be launched
 func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) error {
 	disruptionActionsPerformedCounter.With(map[string]string{
 		actionLabel:            string(cmd.Action()),
