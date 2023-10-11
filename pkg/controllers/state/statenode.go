@@ -342,15 +342,11 @@ func (in *StateNode) PodLimits() v1.ResourceList {
 
 func (in *StateNode) MarkedForDeletion() bool {
 	// The Node is marked for deletion if:
-	//  1a. If it's a NodeClaim, the Node has the karpenter.sh/disruption:NoSchedule=disrupting taint
-	//  1b. If it's a Machine, the Node has MarkedForDeletion set
+	//  1. The Node has MarkedForDeletion set
 	//  2. The Node has a NodeClaim counterpart and is actively deleting
 	//  3. The Node has no NodeClaim counterpart and is actively deleting
-	_, ok := lo.Find(in.Taints(), func(taint v1.Taint) bool {
-		return v1beta1.DisruptionNoScheduleTaint.MatchTaint(&taint)
-	})
 	// TODO remove check for machine after v1alpha5 APIs are dropped.
-	return lo.Ternary(in.NodeClaim != nil && in.NodeClaim.IsMachine, in.markedForDeletion, ok) ||
+	return in.markedForDeletion ||
 		(in.NodeClaim != nil && !in.NodeClaim.DeletionTimestamp.IsZero()) ||
 		(in.Node != nil && in.NodeClaim == nil && !in.Node.DeletionTimestamp.IsZero())
 }
