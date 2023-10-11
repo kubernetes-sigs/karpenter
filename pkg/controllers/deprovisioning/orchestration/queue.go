@@ -187,10 +187,12 @@ func (q *Queue) Add(ctx context.Context, candidates []*state.StateNode, replacem
 	providerIDs := lo.Map(candidates, func(s *state.StateNode, _ int) string {
 		return s.ProviderID()
 	})
-
+	nodeNames := lo.Map(candidates, func(s *state.StateNode, _ int) string {
+		return s.Node.Name
+	})
 	// Cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
-	if err := q.setNodesUnschedulable(ctx, true, providerIDs...); err != nil {
-		return multierr.Append(fmt.Errorf("cordoning nodes, %w", err), q.setNodesUnschedulable(ctx, false, providerIDs...))
+	if err := q.setNodesUnschedulable(ctx, true, nodeNames...); err != nil {
+		return multierr.Append(fmt.Errorf("cordoning nodes, %w", err), q.setNodesUnschedulable(ctx, false, nodeNames...))
 	}
 
 	var nodeClaimKeys []nodeclaim.Key
@@ -199,7 +201,7 @@ func (q *Queue) Add(ctx context.Context, candidates []*state.StateNode, replacem
 		if nodeClaimKeys, err = q.launchReplacementNodeClaims(ctx, replacements, reason); err != nil {
 			// If we failed to launch the replacement, don't deprovision.  If this is some permanent failure,
 			// we don't want to disrupt workloads with no way to provision new nodes for them.
-			return multierr.Append(fmt.Errorf("launching replacement machine, %w", err), q.setNodesUnschedulable(ctx, false, providerIDs...))
+			return multierr.Append(fmt.Errorf("launching replacement machine, %w", err), q.setNodesUnschedulable(ctx, false, nodeNames...))
 		}
 	}
 
