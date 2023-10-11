@@ -44,7 +44,6 @@ var nodePoolInformerController controller.Controller
 var nodeClaimController controller.Controller
 var machineController controller.Controller
 var nodeController controller.Controller
-var podController controller.Controller
 var ctx context.Context
 var env *test.Environment
 var cluster *state.Cluster
@@ -68,7 +67,6 @@ var _ = BeforeSuite(func() {
 	nodeClaimController = informer.NewNodeClaimController(env.Client, cluster)
 	machineController = informer.NewMachineController(env.Client, cluster)
 	nodeController = informer.NewNodeController(env.Client, cluster)
-	podController = informer.NewPodController(env.Client, cluster)
 	provisionerInformerController = informer.NewProvisionerController(env.Client, cluster)
 	nodePoolInformerController = informer.NewNodePoolController(env.Client, cluster)
 	provisionerController = counter.NewProvisionerController(env.Client, cluster)

@@ -15,6 +15,7 @@ limitations under the License.
 package deprovisioning_test
 
 import (
+	"fmt"
 	"math/rand"
 	"strings"
 	"sync"
@@ -35,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
@@ -1476,6 +1478,60 @@ var _ = Describe("Machine/Consolidation", func() {
 			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(2))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
 		})
+		It("can delete nodes while an invalid provisioner exists", func() {
+			labels := map[string]string{
+				"app": "test",
+			}
+
+			// this invalid provisioner should not be enough to stop all deprovisioning
+			badProvisioner := &v1alpha5.Provisioner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "bad-provisioner",
+				},
+			}
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					}}})
+
+			ExpectApplied(ctx, env.Client, badProvisioner, rs, pods[0], pods[1], pods[2], machine1, node1, machine2, node2, provisioner)
+			cloudProvider.ErrorsForNodePool[badProvisioner.Name] = fmt.Errorf("unable to fetch instance types")
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], node1)
+			ExpectManualBinding(ctx, env.Client, pods[1], node1)
+			ExpectManualBinding(ctx, env.Client, pods[2], node2)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			wg.Wait()
+
+			// Cascade any deletion of the machine to the node
+			ExpectMachinesCascadeDeletion(ctx, env.Client, machine2)
+
+			// we don't need a new node, but we should evict everything off one of node2 which only has a single pod
+			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			// and delete the old one
+			ExpectNotFound(ctx, env.Client, machine2, node2)
+		})
 	})
 	Context("TTL", func() {
 		var machine1, machine2 *v1alpha5.Machine
@@ -1516,90 +1572,6 @@ var _ = Describe("Machine/Consolidation", func() {
 					},
 				},
 			})
-		})
-		It("should not deprovision nodes that receive blocking pods during the TTL", func() {
-			labels := map[string]string{
-				"app": "test",
-			}
-			// create our RS so we can link a pod to it
-			rs := test.ReplicaSet()
-			ExpectApplied(ctx, env.Client, rs)
-			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
-
-			pod := test.Pod(test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels,
-					OwnerReferences: []metav1.OwnerReference{
-						{
-							APIVersion:         "apps/v1",
-							Kind:               "ReplicaSet",
-							Name:               rs.Name,
-							UID:                rs.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
-						},
-					},
-				},
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU: resource.MustParse("1"),
-					},
-				}})
-			noEvictPod := test.Pod(test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels,
-					Annotations: map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"},
-					OwnerReferences: []metav1.OwnerReference{
-						{
-							APIVersion:         "apps/v1",
-							Kind:               "ReplicaSet",
-							Name:               rs.Name,
-							UID:                rs.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
-						},
-					},
-				},
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU: resource.MustParse("1"),
-					},
-				}})
-			ExpectApplied(ctx, env.Client, machine1, node1, provisioner, pod, noEvictPod)
-			ExpectManualBinding(ctx, env.Client, pod, node1)
-
-			// inform cluster state about nodes and machines
-			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
-
-			var wg sync.WaitGroup
-			wg.Add(1)
-			finished := atomic.Bool{}
-			go func() {
-				defer GinkgoRecover()
-				defer wg.Done()
-				defer finished.Store(true)
-				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
-			}()
-
-			// wait for the deprovisioningController to block on the validation timeout
-			Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
-			// controller should be blocking during the timeout
-			Expect(finished.Load()).To(BeFalse())
-
-			// and the node should not be deleted yet
-			ExpectExists(ctx, env.Client, node1)
-
-			// make the node non-empty by binding it
-			ExpectManualBinding(ctx, env.Client, noEvictPod, node1)
-			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
-
-			// advance the clock so that the timeout expires
-			fakeClock.Step(31 * time.Second)
-			// controller should finish
-			Eventually(finished.Load, 10*time.Second).Should(BeTrue())
-			wg.Wait()
-
-			// nothing should be removed since the node is no longer empty
-			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-			ExpectExists(ctx, env.Client, node1)
 		})
 		It("should wait for the node TTL for empty nodes before consolidating", func() {
 			ExpectApplied(ctx, env.Client, machine1, node1, provisioner)
@@ -1724,6 +1696,92 @@ var _ = Describe("Machine/Consolidation", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectNotFound(ctx, env.Client, machine2, node2)
 		})
+		It("should not consolidate if the action picks different instance types after the node TTL wait", func() {
+			labels := map[string]string{
+				"app": "test",
+			}
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					},
+				},
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU: resource.MustParse("1"),
+					},
+				}})
+			ExpectApplied(ctx, env.Client, machine1, node1, provisioner, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node1)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1}, []*v1alpha5.Machine{machine1})
+
+			var wg sync.WaitGroup
+			wg.Add(1)
+			finished := atomic.Bool{}
+			go func() {
+				defer GinkgoRecover()
+				defer wg.Done()
+				defer finished.Store(true)
+				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			}()
+
+			// wait for the deprovisioningController to block on the validation timeout
+			Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
+			// controller should be blocking during the timeout
+			Expect(finished.Load()).To(BeFalse())
+
+			// and the node should not be deleted yet
+			ExpectExists(ctx, env.Client, node1)
+
+			// add an additional pod to the node to change the consolidation decision
+			pod2 := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					},
+				},
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU: resource.MustParse("1"),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, pod2)
+			ExpectManualBinding(ctx, env.Client, pod2, node1)
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+
+			// advance the clock so that the timeout expires
+			fakeClock.Step(31 * time.Second)
+			// controller should finish
+			Eventually(finished.Load, 10*time.Second).Should(BeTrue())
+			wg.Wait()
+
+			// nothing should be removed since the node is no longer empty
+			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, node1)
+		})
 		It("should not consolidate if the action becomes invalid during the node TTL wait", func() {
 			pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{
 				Annotations: map[string]string{
@@ -1766,6 +1824,364 @@ var _ = Describe("Machine/Consolidation", func() {
 			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, machine1)
+		})
+		It("should not replace node if a pod schedules with karpenter.sh/do-not-evict during the TTL wait", func() {
+			machine, node := test.MachineAndNode(v1alpha5.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+						v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("5"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			pod := test.Pod()
+			ExpectApplied(ctx, env.Client, provisioner, machine, node, pod)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+
+			// Trigger the reconcile loop to start but don't trigger the verify action
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			}()
+
+			// Iterate in a loop until we get to the validation action
+			// Then, apply the pods to the cluster and bind them to the nodes
+			for {
+				time.Sleep(100 * time.Millisecond)
+				if fakeClock.HasWaiters() {
+					break
+				}
+			}
+			doNotEvictPod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1alpha5.DoNotEvictPodAnnotationKey: "true",
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, doNotEvictPod)
+			ExpectManualBinding(ctx, env.Client, doNotEvictPod, node)
+
+			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
+			ExpectTriggerVerifyAction(&wg)
+			wg.Wait()
+
+			// we would normally be able to replace a node, but we are blocked by the do-not-evict pods during validation
+			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, node)
+		})
+		It("should not replace node if a pod schedules with karpenter.sh/do-not-disrupt during the TTL wait", func() {
+			pod := test.Pod()
+			machine, node := test.MachineAndNode(v1alpha5.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+						v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("5"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, provisioner, machine, node, pod)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+
+			// Trigger the reconcile loop to start but don't trigger the verify action
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			}()
+
+			// Iterate in a loop until we get to the validation action
+			// Then, apply the pods to the cluster and bind them to the nodes
+			for {
+				time.Sleep(100 * time.Millisecond)
+				if fakeClock.HasWaiters() {
+					break
+				}
+			}
+			doNotEvictPod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1beta1.DoNotDisruptAnnotationKey: "true",
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, doNotEvictPod)
+			ExpectManualBinding(ctx, env.Client, doNotEvictPod, node)
+
+			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
+			ExpectTriggerVerifyAction(&wg)
+			wg.Wait()
+
+			// we would normally be able to replace a node, but we are blocked by the do-not-evict pods during validation
+			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, node)
+		})
+		It("should not replace node if a pod schedules with a blocking PDB during the TTL wait", func() {
+			pod := test.Pod()
+			machine, node := test.MachineAndNode(v1alpha5.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+						v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("5"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, provisioner, machine, node, pod)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+
+			// Trigger the reconcile loop to start but don't trigger the verify action
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			}()
+
+			// Iterate in a loop until we get to the validation action
+			// Then, apply the pods to the cluster and bind them to the nodes
+			for {
+				time.Sleep(100 * time.Millisecond)
+				if fakeClock.HasWaiters() {
+					break
+				}
+			}
+			labels := map[string]string{
+				"app": "test",
+			}
+			blockingPDBPod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
+			})
+			pdb := test.PodDisruptionBudget(test.PDBOptions{
+				Labels:         labels,
+				MaxUnavailable: fromInt(0),
+			})
+			ExpectApplied(ctx, env.Client, blockingPDBPod, pdb)
+			ExpectManualBinding(ctx, env.Client, blockingPDBPod, node)
+
+			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
+			ExpectTriggerVerifyAction(&wg)
+			wg.Wait()
+
+			// we would normally be able to replace a node, but we are blocked by the PDB during validation
+			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, node)
+		})
+		It("should not delete node if pods schedule with karpenter.sh/do-not-evict during the TTL wait", func() {
+			pods := test.Pods(2, test.PodOptions{})
+			ExpectApplied(ctx, env.Client, provisioner, machine1, node1, machine2, node2, pods[0], pods[1])
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], node1)
+			ExpectManualBinding(ctx, env.Client, pods[1], node2)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+
+			// Trigger the reconcile loop to start but don't trigger the verify action
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			}()
+
+			// Iterate in a loop until we get to the validation action
+			// Then, apply the pods to the cluster and bind them to the nodes
+			for {
+				time.Sleep(100 * time.Millisecond)
+				if fakeClock.HasWaiters() {
+					break
+				}
+			}
+			doNotEvictPods := test.Pods(2, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1alpha5.DoNotEvictPodAnnotationKey: "true",
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, doNotEvictPods[0], doNotEvictPods[1])
+			ExpectManualBinding(ctx, env.Client, doNotEvictPods[0], node1)
+			ExpectManualBinding(ctx, env.Client, doNotEvictPods[1], node2)
+
+			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
+			ExpectTriggerVerifyAction(&wg)
+			wg.Wait()
+
+			// we would normally be able to consolidate down to a single node, but we are blocked by the do-not-evict pods during validation
+			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(2))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+			ExpectExists(ctx, env.Client, node1)
+			ExpectExists(ctx, env.Client, node2)
+		})
+		It("should not delete node if pods schedule with karpenter.sh/do-not-disrupt during the TTL wait", func() {
+			pods := test.Pods(2, test.PodOptions{})
+			ExpectApplied(ctx, env.Client, provisioner, machine1, node1, machine2, node2, pods[0], pods[1])
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], node1)
+			ExpectManualBinding(ctx, env.Client, pods[1], node2)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+
+			// Trigger the reconcile loop to start but don't trigger the verify action
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			}()
+
+			// Iterate in a loop until we get to the validation action
+			// Then, apply the pods to the cluster and bind them to the nodes
+			for {
+				time.Sleep(100 * time.Millisecond)
+				if fakeClock.HasWaiters() {
+					break
+				}
+			}
+			doNotEvictPods := test.Pods(2, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1beta1.DoNotDisruptAnnotationKey: "true",
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, doNotEvictPods[0], doNotEvictPods[1])
+			ExpectManualBinding(ctx, env.Client, doNotEvictPods[0], node1)
+			ExpectManualBinding(ctx, env.Client, doNotEvictPods[1], node2)
+
+			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
+			ExpectTriggerVerifyAction(&wg)
+			wg.Wait()
+
+			// we would normally be able to consolidate down to a single node, but we are blocked by the do-not-evict pods during validation
+			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(2))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+			ExpectExists(ctx, env.Client, node1)
+			ExpectExists(ctx, env.Client, node2)
+		})
+		It("should not delete node if pods schedule with a blocking PDB during the TTL wait", func() {
+			pods := test.Pods(2, test.PodOptions{})
+			ExpectApplied(ctx, env.Client, provisioner, machine1, node1, machine2, node2, pods[0], pods[1])
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], node1)
+			ExpectManualBinding(ctx, env.Client, pods[1], node2)
+
+			// inform cluster state about nodes and machines
+			ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node1, node2}, []*v1alpha5.Machine{machine1, machine2})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+
+			// Trigger the reconcile loop to start but don't trigger the verify action
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			}()
+
+			// Iterate in a loop until we get to the validation action
+			// Then, apply the pods to the cluster and bind them to the nodes
+			for {
+				time.Sleep(100 * time.Millisecond)
+				if fakeClock.HasWaiters() {
+					break
+				}
+			}
+			labels := map[string]string{
+				"app": "test",
+			}
+			blockingPDBPods := test.Pods(2, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
+			})
+			pdb := test.PodDisruptionBudget(test.PDBOptions{
+				Labels:         labels,
+				MaxUnavailable: fromInt(0),
+			})
+			ExpectApplied(ctx, env.Client, blockingPDBPods[0], blockingPDBPods[1], pdb)
+			ExpectManualBinding(ctx, env.Client, blockingPDBPods[0], node1)
+			ExpectManualBinding(ctx, env.Client, blockingPDBPods[1], node2)
+
+			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
+			ExpectTriggerVerifyAction(&wg)
+			wg.Wait()
+
+			// we would normally be able to consolidate down to a single node, but we are blocked by the PDB during validation
+			Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(2))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+			ExpectExists(ctx, env.Client, node1)
+			ExpectExists(ctx, env.Client, node2)
 		})
 	})
 	Context("Timeout", func() {

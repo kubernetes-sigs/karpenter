@@ -228,6 +228,8 @@ var _ = Describe("NodePoolUtils", func() {
 
 		ExpectResources(v1.ResourceList(nodePool.Spec.Limits), provisioner.Spec.Limits.Resources)
 		Expect(lo.FromPtr(nodePool.Spec.Weight)).To(BeNumerically("==", lo.FromPtr(provisioner.Spec.Weight)))
+
+		ExpectResources(nodePool.Status.Resources, provisioner.Status.Resources)
 	})
 	It("should convert a Provisioner to a NodePool (with Provider)", func() {
 		provisioner.Spec.Provider = &runtime.RawExtension{Raw: lo.Must(json.Marshal(map[string]string{

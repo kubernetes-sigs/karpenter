@@ -45,9 +45,6 @@ type Validation struct {
 	provisioner      *provisioning.Provisioner
 	once             sync.Once
 	recorder         events.Recorder
-	// validationCandidates are the cached validation candidates.  We capture these when validating the first command and reuse them for
-	// validating subsequent commands.
-	validationCandidates []*Candidate
 }
 
 func NewValidation(validationPeriod time.Duration, clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder) *Validation {
@@ -76,33 +73,32 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 		case <-v.clock.After(waitDuration):
 		}
 	}
-	if len(v.validationCandidates) == 0 {
-		v.validationCandidates, err = GetCandidates(ctx, v.cluster, v.kubeClient, v.recorder, v.clock, v.cloudProvider, v.ShouldDeprovision)
-		if err != nil {
-			return false, fmt.Errorf("constructing validation candidates, %w", err)
-		}
+	validationCandidates, err := GetCandidates(ctx, v.cluster, v.kubeClient, v.recorder, v.clock, v.cloudProvider, v.ShouldDeprovision)
+	if err != nil {
+		return false, fmt.Errorf("constructing validation candidates, %w", err)
 	}
-	nodes, err := filterCandidates(ctx, v.kubeClient, v.recorder, cmd.candidates)
+	// Get the current representation of the proposed candidates from before the validation timeout
+	// We do this so that we can re-validate that the candidates that were computed before we made the decision are the same
+	// We perform filtering here to ensure that none of the proposed candidates have blocking PDBs or do-not-evict/do-not-disrupt pods scheduled to them
+	validationCandidates, err = filterCandidates(ctx, v.kubeClient, v.recorder, mapCandidates(cmd.candidates, validationCandidates))
 	if err != nil {
 		return false, fmt.Errorf("filtering candidates, %w", err)
 	}
-	// If we filtered out any candidates, return false as some nodes in the consolidation decision have changed.
-	if len(nodes) != len(cmd.candidates) {
+	// If we filtered out any candidates, return false as some NodeClaims in the consolidation decision have changed.
+	if len(validationCandidates) != len(cmd.candidates) {
 		return false, nil
 	}
 	// a candidate we are about to delete is a target of a currently pending pod, wait for that to settle
 	// before continuing consolidation
-	for _, n := range cmd.candidates {
+	for _, n := range validationCandidates {
 		if v.cluster.IsNodeNominated(n.ProviderID()) {
 			return false, nil
 		}
 	}
-
-	isValid, err := v.ValidateCommand(ctx, cmd, v.validationCandidates)
+	isValid, err := v.ValidateCommand(ctx, cmd, validationCandidates)
 	if err != nil {
 		return false, fmt.Errorf("validating command, %w", err)
 	}
-
 	return isValid, nil
 }
 
@@ -116,14 +112,10 @@ func (v *Validation) ShouldDeprovision(_ context.Context, c *Candidate) bool {
 
 // ValidateCommand validates a command for a deprovisioner
 func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidates []*Candidate) (bool, error) {
-	// map from candidates we are about to remove back into candidates with cluster state
-	candidates = mapCandidates(cmd.candidates, candidates)
-
 	// None of the chosen candidate are valid for execution, so retry
 	if len(candidates) == 0 {
 		return false, nil
 	}
-
 	results, err := simulateScheduling(ctx, v.kubeClient, v.cluster, v.provisioner, candidates...)
 	if err != nil {
 		return false, fmt.Errorf("simluating scheduling, %w", err)
