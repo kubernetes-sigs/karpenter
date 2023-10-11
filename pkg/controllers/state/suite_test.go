@@ -1217,6 +1217,27 @@ var _ = Describe("Inflight Nodes", func() {
 			ExpectStateNodeCount("==", 1)
 			Expect(ExpectStateNodeExists(node).Nominated()).To(BeTrue())
 		})
+		It("should continue to be MarkedForDeletion when an inflight node becomes a real node", func() {
+			machine := test.Machine(v1alpha5.Machine{
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			ExpectApplied(ctx, env.Client, machine)
+			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+			ExpectStateNodeCount("==", 1)
+			cluster.MarkForDeletion(machine.Status.ProviderID)
+			Expect(ExpectStateNodeExistsForMachine(machine).MarkedForDeletion()).To(BeTrue())
+
+			node := test.Node(test.NodeOptions{
+				ProviderID: machine.Status.ProviderID,
+			})
+			node.Spec.ProviderID = machine.Status.ProviderID
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			ExpectStateNodeCount("==", 1)
+			Expect(ExpectStateNodeExists(node).MarkedForDeletion()).To(BeTrue())
+		})
 	})
 	Context("NodeClaim", func() {
 		It("should ignore nodeclaims that don't yet have provider id", func() {
@@ -1368,31 +1389,6 @@ var _ = Describe("Inflight Nodes", func() {
 				v1.ResourceMemory:           resource.MustParse("30Gi"),
 				v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
 			}, ExpectStateNodeExistsForNodeClaim(nodeClaim).Allocatable())
-		})
-		It("should continue to be MarkedForDeletion when an inflight node becomes a real node", func() {
-			machine := test.Machine(v1alpha5.Machine{
-				Spec: v1alpha5.MachineSpec{
-					Taints: []v1.Taint{
-						v1beta1.DisruptionNoScheduleTaint,
-					},
-				},
-				Status: v1alpha5.MachineStatus{
-					ProviderID: test.RandomProviderID(),
-				},
-			})
-			ExpectApplied(ctx, env.Client, machine)
-			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-			ExpectStateNodeCount("==", 1)
-			Expect(ExpectStateNodeExistsForMachine(machine).MarkedForDeletion()).To(BeTrue())
-
-			node := test.Node(test.NodeOptions{
-				ProviderID: machine.Status.ProviderID,
-			})
-			node.Spec.ProviderID = machine.Status.ProviderID
-			ExpectApplied(ctx, env.Client, node)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-			ExpectStateNodeCount("==", 1)
-			Expect(ExpectStateNodeExists(node).MarkedForDeletion()).To(BeTrue())
 		})
 		It("should model the inflight capacity of the nodeclaim until the node registers and is initialized", func() {
 			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{

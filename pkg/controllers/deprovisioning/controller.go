@@ -127,7 +127,10 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	// Karpenter taints nodes with a karpenter.sh/disruption taint as part of the deprovisioning process
 	// while it progresses in memory. If Karpenter restarts during a deprovisioning action, some nodes can be left tainted.
 	// Idempotently remove this taint from candidates before continuing.
-	if err := c.requireDisruptionNoScheduleTaint(ctx, false, c.cluster.Nodes()...); err != nil {
+	nodeClaimStateNodes := lo.Filter(c.cluster.Nodes(), func(s *state.StateNode, _ int) bool {
+		return !s.NodeClaim.IsMachine
+	})
+	if err := c.requireNoScheduleTaint(ctx, false, nodeClaimStateNodes...); err != nil {
 		return reconcile.Result{}, fmt.Errorf("removing disruption taint from nodes, %w", err)
 	}
 
@@ -220,20 +223,26 @@ func (c *Controller) launchReplacementNodeClaims(ctx context.Context, action Com
 	stateNodes := lo.Map(action.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode })
 
 	// taint the candidate nodes before we launch the replacements to prevent new pods from scheduling to the candidate nodes
-	if err := c.requireDisruptionNoScheduleTaint(ctx, true, stateNodes...); err != nil {
+	if err := c.requireNoScheduleTaint(ctx, true, stateNodes...); err != nil {
 		return fmt.Errorf("cordoning nodes, %w", err)
 	}
 
 	nodeClaimKeys, err := c.provisioner.CreateNodeClaims(ctx, action.replacements, provisioning.WithReason(reason))
 	if err != nil {
 		// untaint the nodes as the launch may fail (e.g. ICE)
-		err = multierr.Append(err, c.requireDisruptionNoScheduleTaint(ctx, false, stateNodes...))
+		err = multierr.Append(err, c.requireNoScheduleTaint(ctx, false, stateNodes...))
 		return err
 	}
 	if len(nodeClaimKeys) != len(action.replacements) {
 		// shouldn't ever occur since a partially failed CreateNodeClaims should return an error
 		return fmt.Errorf("expected %d replacements, got %d", len(action.replacements), len(nodeClaimKeys))
 	}
+
+	// TODO remove this when MarkForDeletion is removed.
+	// If it's a machine, we'll need to mark it for deletion in cluster state.
+	machineCandidateProviderIDs := lo.FilterMap(action.candidates, func(c *Candidate, _ int) (string, bool) { return c.ProviderID(), c.NodeClaim.IsMachine })
+	// We have the new Machines created at the API server so mark the old Machines for deletion
+	c.cluster.MarkForDeletion(machineCandidateProviderIDs...)
 
 	errs := make([]error, len(nodeClaimKeys))
 	workqueue.ParallelizeUntil(ctx, len(nodeClaimKeys), len(nodeClaimKeys), func(i int) {
@@ -245,7 +254,8 @@ func (c *Controller) launchReplacementNodeClaims(ctx context.Context, action Com
 		}
 	})
 	if err = multierr.Combine(errs...); err != nil {
-		return multierr.Combine(c.requireDisruptionNoScheduleTaint(ctx, false, stateNodes...),
+		c.cluster.UnmarkForDeletion(machineCandidateProviderIDs...)
+		return multierr.Combine(c.requireNoScheduleTaint(ctx, false, stateNodes...),
 			fmt.Errorf("timed out checking machine readiness, %w", err))
 	}
 	return nil
@@ -301,10 +311,12 @@ func (c *Controller) waitForDeletion(ctx context.Context, nodeClaim *v1beta1.Nod
 	}
 }
 
-// requireDisruptionNoScheduleTaint will either add/remove the karpenter.sh/disruption taint from the candidates.
+// requireNoScheduleTaint will either add/remove the karpenter.sh/disruption taint from the candidates.
 // This is used to enforce no taints at the beginning of deprovisioning, and
 // to add/remove taints while executing a deprovisioning action.
-func (c *Controller) requireDisruptionNoScheduleTaint(ctx context.Context, addTaint bool, nodes ...*state.StateNode) error {
+// If the stateNode is machine, this will add/remove the node.kubernetes.io/unschedulable taint.
+// nolint:gocyclo
+func (c *Controller) requireNoScheduleTaint(ctx context.Context, addTaint bool, nodes ...*state.StateNode) error {
 	var multiErr error
 	for _, n := range nodes {
 		node := &v1.Node{}
@@ -313,27 +325,40 @@ func (c *Controller) requireDisruptionNoScheduleTaint(ctx context.Context, addTa
 		}
 
 		// If the node already has the taint, continue to the next
-		_, ok := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
+		_, hasTaint := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
 			return v1beta1.IsDisruptingTaint(taint)
 		})
+		// TODO remove when v1alpha5 APIs are removed
+		hasTaint = lo.Ternary(n.NodeClaim.IsMachine, node.Spec.Unschedulable, hasTaint)
 
 		// node is being deleted, so no need to remove taint as the node will be gone soon
-		if ok && !node.DeletionTimestamp.IsZero() {
+		if hasTaint && !node.DeletionTimestamp.IsZero() {
 			continue
 		}
 		// If the taint is how we want it, do nothing
-		if ok == addTaint {
+		if hasTaint == addTaint {
 			continue
 		}
 		stored := node.DeepCopy()
 		// If the taint is present and we want to remove the taint, remove it.
-		if ok && !addTaint {
-			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint v1.Taint, _ int) bool {
-				return v1beta1.IsDisruptingTaint(taint)
-			})
-		// otherwise, add it.
+		if hasTaint && !addTaint {
+			// TODO remove when v1alpha5 APIs are removed
+			// If the underlying node claim is a machine, we won't remove any taints.
+			if n.NodeClaim.IsMachine {
+				node.Spec.Unschedulable = false
+			} else {
+				node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint v1.Taint, _ int) bool {
+					return v1beta1.IsDisruptingTaint(taint)
+				})
+			}
+			// otherwise, add it.
 		} else {
-			node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
+			// TODO remove when v1alpha5 APIs are removed
+			if n.NodeClaim.IsMachine {
+				node.Spec.Unschedulable = true
+			} else {
+				node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
+			}
 		}
 		if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 			multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))

@@ -92,6 +92,10 @@ type StateNode struct {
 	podRequests map[types.NamespacedName]v1.ResourceList
 	podLimits   map[types.NamespacedName]v1.ResourceList
 
+	// TODO remove this when v1alpha5 APIs are deprecated. With v1beta1 APIs Karpenter relies on the existence
+	// of the karpenter.sh/disruption taint to know when a node is marked for deletion.
+	markedForDeletion bool
+
 	hostPortUsage *scheduling.HostPortUsage
 	volumeUsage   *scheduling.VolumeUsage
 
@@ -339,13 +343,15 @@ func (in *StateNode) PodLimits() v1.ResourceList {
 
 func (in *StateNode) MarkedForDeletion() bool {
 	// The Node is marked for deletion if:
-	//  1. The Node has the karpenter.sh/disruption:NoSchedule=disrupting taint
+	//  1a. If it's a NodeClaim, the Node has the karpenter.sh/disruption:NoSchedule=disrupting taint
+	//  1b. If it's a Machine, the Node has MarkedForDeletion set
 	//  2. The Node has a NodeClaim counterpart and is actively deleting
 	//  3. The Node has no NodeClaim counterpart and is actively deleting
 	_, ok := lo.Find(in.Taints(), func(taint v1.Taint) bool {
 		return v1beta1.DisruptionNoScheduleTaint.MatchTaint(&taint)
 	})
-	return ok ||
+	// TODO remove check for machine after v1alpha5 APIs are dropped.
+	return lo.Ternary(in.NodeClaim.IsMachine, in.markedForDeletion, ok) ||
 		(in.NodeClaim != nil && !in.NodeClaim.DeletionTimestamp.IsZero()) ||
 		(in.Node != nil && in.NodeClaim == nil && !in.Node.DeletionTimestamp.IsZero())
 }
