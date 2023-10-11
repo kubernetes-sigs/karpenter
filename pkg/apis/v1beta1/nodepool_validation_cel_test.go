@@ -362,4 +362,59 @@ var _ = Describe("CEL/Validation", func() {
 			})
 		})
 	})
+	Context("Taints", func() {
+		It("should succeed for valid taints", func() {
+			nodePool.Spec.Template.Spec.Taints = []v1.Taint{
+				{Key: "a", Value: "b", Effect: v1.TaintEffectNoSchedule},
+				{Key: "c", Value: "d", Effect: v1.TaintEffectNoExecute},
+				{Key: "e", Value: "f", Effect: v1.TaintEffectPreferNoSchedule},
+				{Key: "Test", Value: "f", Effect: v1.TaintEffectPreferNoSchedule},
+				{Key: "test.com/Test", Value: "f", Effect: v1.TaintEffectPreferNoSchedule},
+				{Key: "test.com.com/test", Value: "f", Effect: v1.TaintEffectPreferNoSchedule},
+				{Key: "key-only", Effect: v1.TaintEffectNoExecute},
+			}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.RuntimeValidate()).To(Succeed())
+		})
+		It("should fail for invalid taint keys", func() {
+			nodePool.Spec.Template.Spec.Taints = []v1.Taint{{Key: "test.com.com}", Effect: v1.TaintEffectNoSchedule}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+			nodePool.Spec.Template.Spec.Taints = []v1.Taint{{Key: "Test.com/test", Effect: v1.TaintEffectNoSchedule}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+			nodePool.Spec.Template.Spec.Taints = []v1.Taint{{Key: "test/test/test", Effect: v1.TaintEffectNoSchedule}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+			nodePool.Spec.Template.Spec.Taints = []v1.Taint{{Key: "test/", Effect: v1.TaintEffectNoSchedule}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+			nodePool.Spec.Template.Spec.Taints = []v1.Taint{{Key: "/test", Effect: v1.TaintEffectNoSchedule}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+		})
+		It("should fail for missing taint key", func() {
+			nodePool.Spec.Template.Spec.Taints = []v1.Taint{{Effect: v1.TaintEffectNoSchedule}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+		})
+		It("should fail for invalid taint value", func() {
+			nodePool.Spec.Template.Spec.Taints = []v1.Taint{{Key: "invalid-value", Effect: v1.TaintEffectNoSchedule, Value: "???"}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+		})
+		It("should fail for invalid taint effect", func() {
+			nodePool.Spec.Template.Spec.Taints = []v1.Taint{{Key: "invalid-effect", Effect: "???"}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+		})
+		It("should not fail for same key with different effects", func() {
+			nodePool.Spec.Template.Spec.Taints = []v1.Taint{
+				{Key: "a", Effect: v1.TaintEffectNoSchedule},
+				{Key: "a", Effect: v1.TaintEffectNoExecute},
+			}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.RuntimeValidate()).To(Succeed())
+		})
+	})
 })
