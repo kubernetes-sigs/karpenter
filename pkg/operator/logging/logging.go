@@ -40,6 +40,7 @@ import (
 	"knative.dev/pkg/system"
 
 	"github.com/aws/karpenter-core/pkg/operator/injection"
+	"github.com/aws/karpenter-core/pkg/operator/options"
 )
 
 const (
@@ -107,7 +108,7 @@ func WithCommit(logger *zap.SugaredLogger) *zap.SugaredLogger {
 
 func defaultLogger(ctx context.Context, component string) *zap.SugaredLogger {
 	cfg := DefaultZapConfig(component)
-	if l := injection.GetOptions(ctx).LogLevel; l != "" {
+	if l := options.FromContext(ctx).LogLevel; l != "" {
 		// Webhook log level can only be configured directly through the zap-config
 		// Webhooks are deprecated, so support for changing their log level is also deprecated
 		if component != "webhook" {
@@ -135,7 +136,7 @@ func loggerFromFile(ctx context.Context, component string) *zap.SugaredLogger {
 	if raw != nil {
 		cfg.Level = lo.Must(zap.ParseAtomicLevel(string(raw)))
 	}
-	if l := injection.GetOptions(ctx).LogLevel; l != "" {
+	if l := options.FromContext(ctx).LogLevel; l != "" {
 		// Webhook log level can only be configured directly through the zap-config
 		// Webhooks are deprecated, so support for changing their log level is also deprecated
 		if component != "webhook" {
@@ -166,7 +167,7 @@ func loggerFromConfigMap(ctx context.Context, component string, kubernetesInterf
 	if v := cm.Data[fmt.Sprintf("loglevel.%s", component)]; v != "" {
 		cfg.Level = lo.Must(zap.ParseAtomicLevel(v))
 	}
-	if l := injection.GetOptions(ctx).LogLevel; l != "" {
+	if l := options.FromContext(ctx).LogLevel; l != "" {
 		// Webhook log level can only be configured directly through the zap-config
 		// Webhooks are deprecated, so support for changing their log level is also deprecated
 		if component != "webhook" {
