@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
@@ -308,6 +309,8 @@ func (c *Controller) waitForDeletion(ctx context.Context, nodeClaim *v1beta1.Nod
 	}
 }
 
+// TODO remove this function when v1alpha5 APIs are no longer supported.
+// requireNoScheduleTaints will add NoSchedule Taints for Machines and NodeClaims.
 func (c *Controller) requireNoScheduleTaints(ctx context.Context, addTaint bool, nodes ...*state.StateNode) error {
 	nodeClaimErrs := c.requireNodeClaimNoScheduleTaint(ctx, addTaint, nodes...)
 	machineErrs := c.requireMachineUnschedulable(ctx, addTaint, nodes...)
@@ -336,22 +339,20 @@ func (c *Controller) requireNodeClaimNoScheduleTaint(ctx context.Context, addTai
 		if hasTaint && !node.DeletionTimestamp.IsZero() {
 			continue
 		}
-		// If the taint is how we want it, do nothing
-		if hasTaint == addTaint {
-			continue
-		}
 		stored := node.DeepCopy()
 		// If the taint is present and we want to remove the taint, remove it.
-		if hasTaint && !addTaint {
+		if !addTaint {
 			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint v1.Taint, _ int) bool {
 				return v1beta1.IsDisruptingTaint(taint)
 			})
 			// otherwise, add it.
-		} else {
+		} else if addTaint && !hasTaint {
 			node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
 		}
-		if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
-			multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
+		if !equality.Semantic.DeepEqual(stored, node) {
+			if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+				multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
+			}
 		}
 	}
 	return multiErr
@@ -375,14 +376,12 @@ func (c *Controller) requireMachineUnschedulable(ctx context.Context, isUnschedu
 		if unschedulable && !node.DeletionTimestamp.IsZero() {
 			continue
 		}
-		// If the taint is how we want it, do nothing
-		if unschedulable == isUnschedulable {
-			continue
-		}
 		stored := node.DeepCopy()
 		node.Spec.Unschedulable = isUnschedulable
-		if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
-			multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
+		if !equality.Semantic.DeepEqual(stored, node) {
+			if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+				multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
+			}
 		}
 	}
 	return multiErr
