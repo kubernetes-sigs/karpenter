@@ -395,6 +395,7 @@ func (c *Cluster) newStateFromNodeClaim(nodeClaim *v1beta1.NodeClaim, oldNode *S
 		podLimits:                oldNode.podLimits,
 		hostPortUsage:            oldNode.hostPortUsage,
 		volumeUsage:              oldNode.volumeUsage,
+		markedForDeletion:        oldNode.markedForDeletion,
 		nominatedUntil:           oldNode.nominatedUntil,
 	}
 	// Cleanup the old nodeClaim with its old providerID if its providerID changes
@@ -437,6 +438,7 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *
 		podLimits:                map[types.NamespacedName]v1.ResourceList{},
 		hostPortUsage:            scheduling.NewHostPortUsage(),
 		volumeUsage:              scheduling.NewVolumeUsage(),
+		markedForDeletion:        oldNode.markedForDeletion,
 		nominatedUntil:           oldNode.nominatedUntil,
 	}
 	if err := multierr.Combine(
@@ -636,7 +638,6 @@ func (c *Cluster) triggerConsolidationOnChange(old, new *StateNode) {
 		c.MarkUnconsolidated()
 		return
 	}
-	// if we're passing in a fake node
 	if old.MarkedForDeletion() != new.MarkedForDeletion() {
 		c.MarkUnconsolidated()
 		return
