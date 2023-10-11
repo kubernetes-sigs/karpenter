@@ -154,7 +154,7 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 		})
 		deprovisioningReplacementNodeLaunchFailedCounter.WithLabelValues(cmd.Reason).Add(float64(len(failedLaunches)))
 		q.cluster.UnmarkForDeletion(lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string { return s.ProviderID() })...)
-		err = multierr.Append(err, q.setNodesUnschedulable(ctx, false, lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string { return s.Node.Name })...))
+		err = multierr.Append(err, q.RequireNoScheduleTaint(ctx, false, cmd.Candidates...))
 		err = multierr.Append(err, cmd.LastError)
 		nodeNames := strings.Join(lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string {
 			return s.Name()
@@ -187,12 +187,9 @@ func (q *Queue) Add(ctx context.Context, candidates []*state.StateNode, replacem
 	providerIDs := lo.Map(candidates, func(s *state.StateNode, _ int) string {
 		return s.ProviderID()
 	})
-	nodeNames := lo.Map(candidates, func(s *state.StateNode, _ int) string {
-		return s.Node.Name
-	})
 	// Cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
-	if err := q.setNodesUnschedulable(ctx, true, nodeNames...); err != nil {
-		return multierr.Append(fmt.Errorf("cordoning nodes, %w", err), q.setNodesUnschedulable(ctx, false, nodeNames...))
+	if err := q.RequireNoScheduleTaint(ctx, true, candidates...); err != nil {
+		return multierr.Append(fmt.Errorf("cordoning nodes, %w", err), q.RequireNoScheduleTaint(ctx, false, candidates...))
 	}
 
 	var nodeClaimKeys []nodeclaim.Key
@@ -201,7 +198,7 @@ func (q *Queue) Add(ctx context.Context, candidates []*state.StateNode, replacem
 		if nodeClaimKeys, err = q.launchReplacementNodeClaims(ctx, replacements, reason); err != nil {
 			// If we failed to launch the replacement, don't deprovision.  If this is some permanent failure,
 			// we don't want to disrupt workloads with no way to provision new nodes for them.
-			return multierr.Append(fmt.Errorf("launching replacement machine, %w", err), q.setNodesUnschedulable(ctx, false, nodeNames...))
+			return multierr.Append(fmt.Errorf("launching replacement machine, %w", err), q.RequireNoScheduleTaint(ctx, false, candidates...))
 		}
 	}
 
@@ -305,26 +302,50 @@ func (q *Queue) Remove(cmd *Command) {
 	q.RateLimitingInterface.Done(cmd)
 }
 
-func (q *Queue) setNodesUnschedulable(ctx context.Context, isUnschedulable bool, candidates ...string) error {
+func (q *Queue) RequireNoScheduleTaint(ctx context.Context, addTaint bool, nodes ...*state.StateNode) error {
 	var multiErr error
-	for _, cn := range candidates {
+	for _, n := range nodes {
 		node := &v1.Node{}
-		if err := q.kubeClient.Get(ctx, client.ObjectKey{Name: cn}, node); err != nil {
+		if err := q.kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Name}, node); client.IgnoreNotFound(err) != nil {
 			multiErr = multierr.Append(multiErr, fmt.Errorf("getting node, %w", err))
 		}
 
-		// node is being deleted already, so no need to un-cordon
-		if !isUnschedulable && !node.DeletionTimestamp.IsZero() {
+		// If the node already has the taint, continue to the next
+		_, hasTaint := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
+			return v1beta1.IsDisruptingTaint(taint)
+		})
+		// TODO remove when v1alpha5 APIs are removed
+		hasTaint = lo.Ternary(n.NodeClaim.IsMachine, node.Spec.Unschedulable, hasTaint)
+
+		// node is being deleted, so no need to remove taint as the node will be gone soon
+		if hasTaint && !node.DeletionTimestamp.IsZero() {
 			continue
 		}
-
-		// already matches the state we want to be in
-		if node.Spec.Unschedulable == isUnschedulable {
+		// If the taint is how we want it, do nothing
+		if hasTaint == addTaint {
 			continue
 		}
-
 		stored := node.DeepCopy()
-		node.Spec.Unschedulable = isUnschedulable
+		// If the taint is present and we want to remove the taint, remove it.
+		if hasTaint && !addTaint {
+			// TODO remove when v1alpha5 APIs are removed
+			// If the underlying node claim is a machine, we won't remove any taints.
+			if n.NodeClaim.IsMachine {
+				node.Spec.Unschedulable = false
+			} else {
+				node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint v1.Taint, _ int) bool {
+					return v1beta1.IsDisruptingTaint(taint)
+				})
+			}
+			// otherwise, add it.
+		} else {
+			// TODO remove when v1alpha5 APIs are removed
+			if n.NodeClaim.IsMachine {
+				node.Spec.Unschedulable = true
+			} else {
+				node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
+			}
+		}
 		if err := q.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 			multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
 		}
