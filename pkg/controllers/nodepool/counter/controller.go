@@ -23,7 +23,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
@@ -113,8 +112,8 @@ func (c *NodePoolController) Builder(_ context.Context, m manager.Manager) corec
 		NewControllerManagedBy(m).
 		For(&v1beta1.NodePool{}).
 		Watches(
-			&source.Kind{Type: &v1beta1.NodeClaim{}},
-			handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
+			&v1beta1.NodeClaim{},
+			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []reconcile.Request {
 				if name, ok := o.GetLabels()[v1beta1.NodePoolLabelKey]; ok {
 					return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: name}}}
 				}
@@ -122,8 +121,8 @@ func (c *NodePoolController) Builder(_ context.Context, m manager.Manager) corec
 			}),
 		).
 		Watches(
-			&source.Kind{Type: &v1.Node{}},
-			handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
+			&v1.Node{},
+			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []reconcile.Request {
 				if name, ok := o.GetLabels()[v1beta1.NodePoolLabelKey]; ok {
 					return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: name}}}
 				}
@@ -156,8 +155,8 @@ func (c *ProvisionerController) Builder(_ context.Context, m manager.Manager) co
 		NewControllerManagedBy(m).
 		For(&v1alpha5.Provisioner{}).
 		Watches(
-			&source.Kind{Type: &v1alpha5.Machine{}},
-			handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
+			&v1alpha5.Machine{},
+			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []reconcile.Request {
 				if name, ok := o.GetLabels()[v1alpha5.ProvisionerNameLabelKey]; ok {
 					return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: name}}}
 				}
@@ -165,8 +164,8 @@ func (c *ProvisionerController) Builder(_ context.Context, m manager.Manager) co
 			}),
 		).
 		Watches(
-			&source.Kind{Type: &v1.Node{}},
-			handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
+			&v1.Node{},
+			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []reconcile.Request {
 				if name, ok := o.GetLabels()[v1alpha5.ProvisionerNameLabelKey]; ok {
 					return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: name}}}
 				}
