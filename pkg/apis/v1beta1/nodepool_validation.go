@@ -18,9 +18,7 @@ import (
 	"context"
 	"fmt"
 
-	"go.uber.org/multierr"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"knative.dev/pkg/apis"
 )
@@ -41,7 +39,11 @@ func (in *NodePool) Validate(_ context.Context) (errs *apis.FieldError) {
 
 // RuntimeValidate will be used to validate any part of the CRD that can not be validated at CRD creation
 func (in *NodePool) RuntimeValidate() (errs *apis.FieldError) {
-	return in.Spec.Template.Spec.validateTaints()
+	return errs.Also(
+		in.Spec.Template.Spec.validateTaints(),
+		in.Spec.Template.Spec.validateRequirements(),
+		in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist(),
+	)
 }
 
 func (in *NodePoolSpec) validate() (errs *apis.FieldError) {
@@ -57,7 +59,7 @@ func (in *NodeClaimTemplate) validate() (errs *apis.FieldError) {
 	}
 	return errs.Also(
 		in.validateLabels().ViaField("metadata"),
-		in.validateRequirements().ViaField("spec.requirements"),
+		in.validateRequirementsNodePoolKeyDoesNotExist().ViaField("spec.requirements"),
 		in.Spec.validate().ViaField("spec"),
 	)
 }
@@ -80,25 +82,11 @@ func (in *NodeClaimTemplate) validateLabels() (errs *apis.FieldError) {
 	return errs
 }
 
-func (in *NodeClaimTemplate) validateRequirements() (errs *apis.FieldError) {
+func (in *NodeClaimTemplate) validateRequirementsNodePoolKeyDoesNotExist() (errs *apis.FieldError) {
 	for i, requirement := range in.Spec.Requirements {
 		if requirement.Key == NodePoolLabelKey {
 			errs = errs.Also(apis.ErrInvalidArrayValue(fmt.Sprintf("%s is restricted", requirement.Key), "requirements", i))
 		}
-		if err := in.validateRequirement(requirement); err != nil {
-			errs = errs.Also(apis.ErrInvalidArrayValue(err, "requirements", i))
-		}
-	}
-	return errs
-}
-
-func (in *NodeClaimTemplate) validateRequirement(requirement v1.NodeSelectorRequirement) error {
-	var errs error
-	if normalized, ok := NormalizedLabels[requirement.Key]; ok {
-		requirement.Key = normalized
-	}
-	if e := IsRestrictedLabel(requirement.Key); e != nil {
-		errs = multierr.Append(errs, e)
 	}
 	return errs
 }

@@ -25,6 +25,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"knative.dev/pkg/ptr"
 
 	. "github.com/aws/karpenter-core/pkg/apis/v1beta1"
@@ -415,6 +416,124 @@ var _ = Describe("CEL/Validation", func() {
 			}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 			Expect(nodePool.RuntimeValidate()).To(Succeed())
+		})
+	})
+	Context("Requirements", func() {
+		It("should succeed for valid requirement keys", func() {
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+				{Key: "Test", Operator: v1.NodeSelectorOpExists},
+				{Key: "test.com/Test", Operator: v1.NodeSelectorOpExists},
+				{Key: "test.com.com/test", Operator: v1.NodeSelectorOpExists},
+				{Key: "key-only", Operator: v1.NodeSelectorOpExists},
+			}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.RuntimeValidate()).To(Succeed())
+		})
+		It("should fail for invalid requirement keys", func() {
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{{Key: "test.com.com}", Operator: v1.NodeSelectorOpExists}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{{Key: "Test.com/test", Operator: v1.NodeSelectorOpExists}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{{Key: "test/test/test", Operator: v1.NodeSelectorOpExists}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{{Key: "test/", Operator: v1.NodeSelectorOpExists}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{{Key: "/test", Operator: v1.NodeSelectorOpExists}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+		})
+		It("should fail for the karpenter.sh/nodepool label", func() {
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+				{Key: NodePoolLabelKey, Operator: v1.NodeSelectorOpIn, Values: []string{randomdata.SillyName()}},
+			}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+		})
+		It("should allow supported ops", func() {
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"1"}},
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{"1"}},
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn},
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpExists},
+			}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.RuntimeValidate()).To(Succeed())
+		})
+		It("should fail for unsupported ops", func() {
+			for _, op := range []v1.NodeSelectorOperator{"unknown"} {
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+					{Key: v1.LabelTopologyZone, Operator: op, Values: []string{"test"}},
+				}
+				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+				Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+			}
+		})
+		It("should fail for restricted domains", func() {
+			for label := range RestrictedLabelDomains {
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+					{Key: label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+				}
+				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+				Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+			}
+		})
+		It("should allow restricted domains exceptions", func() {
+			oldNodepool := nodePool.DeepCopy()
+			for label := range LabelDomainExceptions {
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+					{Key: label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+				}
+				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+				Expect(nodePool.RuntimeValidate()).To(Succeed())
+				Expect(env.Client.Delete(ctx, nodePool)).To(Succeed())
+				nodePool = oldNodepool.DeepCopy()
+			}
+		})
+		It("should allow well known label exceptions", func() {
+			orgNodepool := nodePool.DeepCopy()
+			for label := range WellKnownLabels.Difference(sets.New(NodePoolLabelKey)) {
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+					{Key: label, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+				}
+				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+				Expect(nodePool.RuntimeValidate()).To(Succeed())
+				Expect(env.Client.Delete(ctx, nodePool)).To(Succeed())
+				nodePool = orgNodepool.DeepCopy()
+			}
+		})
+		It("should allow non-empty set after removing overlapped value", func() {
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test", "foo"}},
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn, Values: []string{"test", "bar"}},
+			}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.RuntimeValidate()).To(Succeed())
+		})
+		It("should allow empty requirements", func() {
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.RuntimeValidate()).To(Succeed())
+		})
+		It("should fail with invalid GT or LT values", func() {
+			for _, requirement := range []v1.NodeSelectorRequirement{
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{}},
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"1", "2"}},
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"a"}},
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"-1"}},
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{}},
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{"1", "2"}},
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{"a"}},
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{"-1"}},
+			} {
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{requirement}
+				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+				Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+			}
 		})
 	})
 })
