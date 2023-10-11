@@ -31,3 +31,7 @@ var (
 		Value:  DisruptingNoScheduleTaintValue,
 	}
 )
+
+func IsDisruptingTaint(taint v1.Taint) bool {
+	return taint.MatchTaint(&DisruptionNoScheduleTaint) && taint.Value == DisruptingNoScheduleTaintValue
+}

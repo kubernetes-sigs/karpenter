@@ -308,13 +308,13 @@ func (c *Controller) requireDisruptionNoScheduleTaint(ctx context.Context, addTa
 	var multiErr error
 	for _, n := range nodes {
 		node := &v1.Node{}
-		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Name()}, node); client.IgnoreNotFound(err) != nil {
+		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Name}, node); client.IgnoreNotFound(err) != nil {
 			multiErr = multierr.Append(multiErr, fmt.Errorf("getting node, %w", err))
 		}
 
 		// If the node already has the taint, continue to the next
 		_, ok := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
-			return v1beta1.DisruptionNoScheduleTaint.MatchTaint(&taint)
+			return v1beta1.IsDisruptingTaint(taint)
 		})
 
 		// node is being deleted, so no need to remove taint as the node will be gone soon
@@ -329,9 +329,9 @@ func (c *Controller) requireDisruptionNoScheduleTaint(ctx context.Context, addTa
 		// If the taint is present and we want to remove the taint, remove it.
 		if ok && !addTaint {
 			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint v1.Taint, _ int) bool {
-				return v1beta1.DisruptionNoScheduleTaint.MatchTaint(&taint)
+				return v1beta1.IsDisruptingTaint(taint)
 			})
-			// otherwise, add it.
+		// otherwise, add it.
 		} else {
 			node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
 		}
