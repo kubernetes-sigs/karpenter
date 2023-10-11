@@ -106,7 +106,6 @@ func NewEnvironment(scheme *runtime.Scheme, options ...functional.Option[Environ
 		// Ref: https://github.com/aws/karpenter-core/pull/330
 		environment.ControlPlane.GetAPIServer().Configure().Set("feature-gates", "MinDomainsInPodTopologySpread=true")
 	}
-	environment.ControlPlane.GetAPIServer().Configure().Append("feature-gates", "CustomResourceValidationExpressions=true")
 
 	_ = lo.Must(environment.Start())
 	c := lo.Must(client.New(environment.Config, client.Options{Scheme: scheme}))
