@@ -92,6 +92,10 @@ type StateNode struct {
 	podRequests map[types.NamespacedName]v1.ResourceList
 	podLimits   map[types.NamespacedName]v1.ResourceList
 
+	// TODO remove this when v1alpha5 APIs are deprecated. With v1beta1 APIs Karpenter relies on the existence
+	// of the karpenter.sh/disruption taint to know when a node is marked for deletion.
+	markedForDeletion bool
+
 	hostPortUsage *scheduling.HostPortUsage
 	volumeUsage   *scheduling.VolumeUsage
 
