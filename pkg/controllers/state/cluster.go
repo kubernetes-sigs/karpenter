@@ -505,6 +505,11 @@ func (c *Cluster) populateInflight(ctx context.Context, n *StateNode) error {
 	if n.inflightInitialized {
 		return nil
 	}
+	// If the node ies already initialized, we don't need to populate its inflight capacity
+	// since its capacity is already represented by the node status
+	if n.Initialized() {
+		return nil
+	}
 
 	if nodeclaimutil.OwnerKey(n).Name == "" {
 		return nil
@@ -512,12 +517,6 @@ func (c *Cluster) populateInflight(ctx context.Context, n *StateNode) error {
 	owner, err := nodeclaimutil.Owner(ctx, c.kubeClient, n)
 	if err != nil {
 		return client.IgnoreNotFound(err)
-	}
-	if n.Initialized() {
-		n.inflightInitialized = true
-		n.inflightCapacity = n.Capacity()
-		n.inflightAllocatable = n.Allocatable()
-		return nil
 	}
 	instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, owner)
 	if err != nil {
