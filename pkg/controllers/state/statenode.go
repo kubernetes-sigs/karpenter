@@ -98,7 +98,7 @@ type StateNode struct {
 	// TODO remove this when v1alpha5 APIs are deprecated. With v1beta1 APIs Karpenter relies on the existence
 	// of the karpenter.sh/disruption taint to know when a node is marked for deletion.
 	markedForDeletion bool
-	nominatedUntil metav1.Time
+	nominatedUntil    metav1.Time
 }
 
 func NewNode() *StateNode {
@@ -350,7 +350,7 @@ func (in *StateNode) MarkedForDeletion() bool {
 		return v1beta1.DisruptionNoScheduleTaint.MatchTaint(&taint)
 	})
 	// TODO remove check for machine after v1alpha5 APIs are dropped.
-	return lo.Ternary(in.NodeClaim.IsMachine, in.markedForDeletion, ok) ||
+	return lo.Ternary(in.NodeClaim != nil && in.NodeClaim.IsMachine, in.markedForDeletion, ok) ||
 		(in.NodeClaim != nil && !in.NodeClaim.DeletionTimestamp.IsZero()) ||
 		(in.Node != nil && in.NodeClaim == nil && !in.Node.DeletionTimestamp.IsZero())
 }

@@ -128,7 +128,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	// while it progresses in memory. If Karpenter restarts during a deprovisioning action, some nodes can be left tainted.
 	// Idempotently remove this taint from candidates before continuing.
 	nodeClaimStateNodes := lo.Filter(c.cluster.Nodes(), func(s *state.StateNode, _ int) bool {
-		return !s.NodeClaim.IsMachine
+		return s.NodeClaim != nil && !s.NodeClaim.IsMachine
 	})
 	if err := c.requireNoScheduleTaint(ctx, false, nodeClaimStateNodes...); err != nil {
 		return reconcile.Result{}, fmt.Errorf("removing disruption taint from nodes, %w", err)
