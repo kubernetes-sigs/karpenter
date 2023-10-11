@@ -31,6 +31,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	corecloudprovider "github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
@@ -523,6 +524,30 @@ var _ = Describe("Inflight Nodes", func() {
 		// Still expect to succeed w/o instance type since inflight details are set once
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 	})
+	It("should populate node from the cluster if we have no instance types", func() {
+		cloudProvider.InstanceTypes = []*corecloudprovider.InstanceType{}
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+				v1beta1.NodeInitializedLabelKey:  "true",
+			}},
+			ProviderID: test.RandomProviderID(),
+			Capacity: v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 64)),
+				v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 128)),
+			},
+			Allocatable: v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 32)),
+				v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 64)),
+			},
+		})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		ExpectStateNodeCount("==", 1)
+		ExpectResources(node.Status.Allocatable, ExpectStateNodeExists(node).Allocatable())
+		ExpectResources(node.Status.Capacity, ExpectStateNodeExists(node).Capacity())
+	})
 	It("should consider the node capacity/allocatable as a combination of instance type and current node", func() {
 		instanceType := cloudProvider.InstanceTypes[0]
 		node := test.Node(test.NodeOptions{
@@ -552,6 +577,31 @@ var _ = Describe("Inflight Nodes", func() {
 			v1.ResourceCPU:              *instanceType.Capacity.Cpu(),
 			v1.ResourceEphemeralStorage: resource.MustParse("100Gi"), // pulled from the node's real capacity
 		}, ExpectStateNodeExists(node).Capacity())
+	})
+	It("should consider the node capacity/allocatable to be equal to the node when the node is initialized", func() {
+		instanceType := cloudProvider.InstanceTypes[0]
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+				v1.LabelInstanceTypeStable:       instanceType.Name,
+				v1beta1.NodeInitializedLabelKey:  "true",
+			}},
+			ProviderID: test.RandomProviderID(),
+			Capacity: v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 64)),
+				v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 128)),
+			},
+			Allocatable: v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 32)),
+				v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 64)),
+			},
+		})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		ExpectStateNodeCount("==", 1)
+		ExpectResources(node.Status.Allocatable, ExpectStateNodeExists(node).Allocatable())
+		ExpectResources(node.Status.Capacity, ExpectStateNodeExists(node).Capacity())
 	})
 	It("should only set startup taints once", func() {
 		taints := []v1.Taint{
