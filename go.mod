@@ -25,9 +25,9 @@ require (
 	k8s.io/apiextensions-apiserver v0.28.2
 	k8s.io/apimachinery v0.28.2
 	k8s.io/client-go v0.28.2
-	k8s.io/cloud-provider v0.26.6
+	k8s.io/cloud-provider v0.28.2
 	k8s.io/component-base v0.28.2
-	k8s.io/csi-translation-lib v0.26.6
+	k8s.io/csi-translation-lib v0.28.2
 	k8s.io/klog/v2 v2.100.1
 	k8s.io/utils v0.0.0-20230406110748-d93618cff8a2
 	knative.dev/pkg v0.0.0-20230712131115-7051d301e7f4
