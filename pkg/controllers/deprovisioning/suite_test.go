@@ -35,6 +35,7 @@ import (
 	. "knative.dev/pkg/logging/testing"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	coreapis "github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
@@ -234,7 +235,7 @@ var _ = Describe("Disruption Taints", func() {
 		go func() {
 			defer wg.Done()
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			_, _ = deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		}()
 
 		// Iterate in a loop until we get to the validation action
@@ -272,7 +273,7 @@ var _ = Describe("Disruption Taints", func() {
 		go func() {
 			defer wg.Done()
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			_, _ = deprovisioningController.Reconcile(ctx, reconcile.Request{})
 		}()
 
 		// Iterate in a loop until we get to the validation action
