@@ -129,7 +129,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	// while it progresses in memory. If Karpenter restarts during a deprovisioning action, some nodes can be left tainted.
 	// Idempotently remove this taint from candidates before continuing.
 	if err := c.requireNodeClaimNoScheduleTaint(ctx, false, c.cluster.Nodes()...); err != nil {
-		return reconcile.Result{}, fmt.Errorf("removing disruption taint from nodes, %w", err)
+		return reconcile.Result{}, fmt.Errorf("removing taint from nodes, %w", err)
 	}
 
 	// Attempt different deprovisioning methods. We'll only let one method perform an action
