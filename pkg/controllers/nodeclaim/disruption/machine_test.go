@@ -25,8 +25,8 @@ import (
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/operator/options"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 
 	"github.com/aws/karpenter-core/pkg/test"
@@ -73,7 +73,7 @@ var _ = Describe("Machine/Disruption", func() {
 		ExpectMakeMachinesInitialized(ctx, env.Client, machine)
 
 		// Drift, Expiration, and Emptiness are disabled through configuration
-		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(false)}}))
 		ExpectReconcileSucceeded(ctx, machineDisruptionController, client.ObjectKeyFromObject(machine))
 
 		machine = ExpectExists(ctx, env.Client, machine)

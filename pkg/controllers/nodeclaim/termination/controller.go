@@ -34,7 +34,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
@@ -127,14 +126,14 @@ func (c *NodeClaimController) Finalize(ctx context.Context, nodeClaim *v1beta1.N
 	return c.Controller.Finalize(ctx, nodeClaim)
 }
 
-func (c *NodeClaimController) Builder(ctx context.Context, m manager.Manager) corecontroller.Builder {
+func (c *NodeClaimController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1beta1.NodeClaim{}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		Watches(
-			&source.Kind{Type: &v1.Node{}},
-			nodeclaimutil.NodeEventHandler(ctx, c.kubeClient),
+			&v1.Node{},
+			nodeclaimutil.NodeEventHandler(c.kubeClient),
 			// Watch for node deletion events
 			builder.WithPredicates(predicate.Funcs{
 				CreateFunc: func(e event.CreateEvent) bool { return false },
@@ -177,14 +176,14 @@ func (c *MachineController) Finalize(ctx context.Context, machine *v1alpha5.Mach
 	return c.Controller.Finalize(ctx, nodeclaimutil.New(machine))
 }
 
-func (c *MachineController) Builder(ctx context.Context, m manager.Manager) corecontroller.Builder {
+func (c *MachineController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1alpha5.Machine{}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		Watches(
-			&source.Kind{Type: &v1.Node{}},
-			machineutil.NodeEventHandler(ctx, c.kubeClient),
+			&v1.Node{},
+			machineutil.NodeEventHandler(c.kubeClient),
 			// Watch for node deletion events
 			builder.WithPredicates(predicate.Funcs{
 				CreateFunc: func(e event.CreateEvent) bool { return false },

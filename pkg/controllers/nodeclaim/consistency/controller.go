@@ -30,7 +30,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
@@ -130,13 +129,13 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, nodeClaim *v1beta1.
 	return c.Controller.Reconcile(ctx, nodeClaim)
 }
 
-func (c *NodeClaimController) Builder(ctx context.Context, m manager.Manager) corecontroller.Builder {
+func (c *NodeClaimController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1beta1.NodeClaim{}).
 		Watches(
-			&source.Kind{Type: &v1.Node{}},
-			nodeclaimutil.NodeEventHandler(ctx, c.kubeClient),
+			&v1.Node{},
+			nodeclaimutil.NodeEventHandler(c.kubeClient),
 		).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
 	)
@@ -162,13 +161,13 @@ func (c *MachineController) Reconcile(ctx context.Context, machine *v1alpha5.Mac
 	return c.Controller.Reconcile(ctx, nodeclaimutil.New(machine))
 }
 
-func (c *MachineController) Builder(ctx context.Context, m manager.Manager) corecontroller.Builder {
+func (c *MachineController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1alpha5.Machine{}).
 		Watches(
-			&source.Kind{Type: &v1.Node{}},
-			machineutil.NodeEventHandler(ctx, c.kubeClient),
+			&v1.Node{},
+			machineutil.NodeEventHandler(c.kubeClient),
 		).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
 	)

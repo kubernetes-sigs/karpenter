@@ -106,12 +106,11 @@ func NewEnvironment(scheme *runtime.Scheme, options ...functional.Option[Environ
 		// Ref: https://github.com/aws/karpenter-core/pull/330
 		environment.ControlPlane.GetAPIServer().Configure().Set("feature-gates", "MinDomainsInPodTopologySpread=true")
 	}
-	environment.ControlPlane.GetAPIServer().Configure().Append("feature-gates", "CustomResourceValidationExpressions=true")
 
 	_ = lo.Must(environment.Start())
-	c := lo.Must(client.New(environment.Config, client.Options{Scheme: scheme}))
 
 	// We use a modified client if we need field indexers
+	var c client.Client
 	if len(opts.fieldIndexers) > 0 {
 		cache := lo.Must(cache.New(environment.Config, cache.Options{Scheme: scheme}))
 		for _, index := range opts.fieldIndexers {
@@ -122,10 +121,7 @@ func NewEnvironment(scheme *runtime.Scheme, options ...functional.Option[Environ
 			return []string{pod.Spec.NodeName}
 		}))
 		c = &CacheSyncingClient{
-			Client: lo.Must(client.NewDelegatingClient(client.NewDelegatingClientInput{
-				CacheReader: cache,
-				Client:      c,
-			})),
+			Client: lo.Must(client.New(environment.Config, client.Options{Scheme: scheme, Cache: &client.CacheOptions{Reader: cache}})),
 		}
 		go func() {
 			lo.Must0(cache.Start(ctx))
@@ -133,6 +129,8 @@ func NewEnvironment(scheme *runtime.Scheme, options ...functional.Option[Environ
 		if !cache.WaitForCacheSync(ctx) {
 			log.Fatalf("cache failed to sync")
 		}
+	} else {
+		c = lo.Must(client.New(environment.Config, client.Options{Scheme: scheme}))
 	}
 	// TODO @joinnis: Remove this internal flag when the v1beta1 APIs are released
 	nodepoolutil.EnableNodePools = true

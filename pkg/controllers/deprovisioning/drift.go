@@ -25,13 +25,13 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
+	"github.com/aws/karpenter-core/pkg/operator/options"
 )
 
 // Drift is a subreconciler that deletes drifted candidates.
@@ -53,7 +53,7 @@ func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *pro
 
 // ShouldDeprovision is a predicate used to filter deprovisionable candidates
 func (d *Drift) ShouldDeprovision(ctx context.Context, c *Candidate) bool {
-	return settings.FromContext(ctx).DriftEnabled &&
+	return options.FromContext(ctx).FeatureGates.Drift &&
 		c.NodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).IsTrue()
 }
 
