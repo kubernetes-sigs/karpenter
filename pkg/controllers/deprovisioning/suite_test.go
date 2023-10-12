@@ -35,7 +35,6 @@ import (
 	. "knative.dev/pkg/logging/testing"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	coreapis "github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
@@ -213,8 +212,7 @@ var _ = Describe("Disruption Taints", func() {
 			replacementInstance,
 		}
 	})
-	It("should add the disruption taint when nodes with nodeclaims are disrupted", func() {
-		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
+	It("should remove taints from NodeClaims that were left tainted from a previous deprovisioning action", func() {
 		pod := test.Pod(test.PodOptions{
 			ResourceRequirements: v1.ResourceRequirements{
 				Requests: v1.ResourceList{
@@ -223,6 +221,8 @@ var _ = Describe("Disruption Taints", func() {
 				},
 			},
 		})
+		nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: nil}
+		nodeClaimNode.Spec.Taints = append(nodeClaimNode.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, nodeClaimNode, pod)
 		ExpectManualBinding(ctx, env.Client, pod, nodeClaimNode)
 
@@ -235,59 +235,13 @@ var _ = Describe("Disruption Taints", func() {
 		go func() {
 			defer wg.Done()
 			ExpectTriggerVerifyAction(&wg)
-			_, _ = deprovisioningController.Reconcile(ctx, reconcile.Request{})
+			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
 		}()
-
-		// Iterate in a loop until we get to the validation action
-		// Then, apply the pods to the cluster and bind them to the nodes
-		for {
-			time.Sleep(100 * time.Millisecond)
-			if len(ExpectNodeClaims(ctx, env.Client)) == 2 {
-				break
-			}
-		}
+		wg.Wait()
 		nodeClaimNode = ExpectNodeExists(ctx, env.Client, nodeClaimNode.Name)
-		Expect(nodeClaimNode.Spec.Taints).To(ContainElement(v1beta1.DisruptionNoScheduleTaint))
+		Expect(nodeClaimNode.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 	})
-	It("should add the disruption taint when nodes with machines are disrupted", func() {
-		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
-		pod := test.Pod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: v1.ResourceList{
-					v1.ResourceCPU:    resource.MustParse("100m"),
-					v1.ResourceMemory: resource.MustParse("100Mi"),
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, provisioner, machine, machineNode, pod)
-		ExpectManualBinding(ctx, env.Client, pod, machineNode)
-
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{machineNode}, []*v1alpha5.Machine{machine})
-
-		fakeClock.Step(10 * time.Minute)
-
-		// Trigger the reconcile loop to start but don't trigger the verify action
-		wg := sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			ExpectTriggerVerifyAction(&wg)
-			_, _ = deprovisioningController.Reconcile(ctx, reconcile.Request{})
-		}()
-
-		// Iterate in a loop until we get to the validation action
-		// Then, apply the pods to the cluster and bind them to the nodes
-		for {
-			time.Sleep(100 * time.Millisecond)
-			if len(ExpectMachines(ctx, env.Client)) == 2 {
-				break
-			}
-		}
-		machineNode = ExpectNodeExists(ctx, env.Client, machineNode.Name)
-		Expect(machineNode.Spec.Unschedulable).To(BeTrue())
-	})
-	It("should remove taints from NodeClaims that fail to deprovision", func() {
+	It("should add and remove taints from NodeClaims that fail to deprovision", func() {
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
 		pod := test.Pod(test.PodOptions{
 			ResourceRequirements: v1.ResourceRequirements{
@@ -334,7 +288,7 @@ var _ = Describe("Disruption Taints", func() {
 		nodeClaimNode = ExpectNodeExists(ctx, env.Client, nodeClaimNode.Name)
 		Expect(nodeClaimNode.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 	})
-	It("should remove taints from Machines that fail to deprovision", func() {
+	It("should add and remove taints from Machines that fail to deprovision", func() {
 		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
 		pod := test.Pod(test.PodOptions{
 			ResourceRequirements: v1.ResourceRequirements{

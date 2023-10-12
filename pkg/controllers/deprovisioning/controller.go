@@ -312,7 +312,7 @@ func (c *Controller) waitForDeletion(ctx context.Context, nodeClaim *v1beta1.Nod
 func (c *Controller) requireNoScheduleTaints(ctx context.Context, addTaint bool, nodes ...*state.StateNode) error {
 	nodeClaimErrs := c.requireNodeClaimNoScheduleTaint(ctx, addTaint, nodes...)
 	machineErrs := c.requireMachineUnschedulable(ctx, addTaint, nodes...)
-	return multierr.Append(nodeClaimErrs, machineErrs)
+	return multierr.Combine(nodeClaimErrs, machineErrs)
 }
 
 // requireNodeClaimNoScheduleTaint will add/remove the karpenter.sh/disruption taint from the candidates.
