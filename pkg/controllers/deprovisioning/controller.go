@@ -322,7 +322,7 @@ func (c *Controller) requireNoScheduleTaints(ctx context.Context, addTaint bool,
 func (c *Controller) requireNodeClaimNoScheduleTaint(ctx context.Context, addTaint bool, nodes ...*state.StateNode) error {
 	var multiErr error
 	for _, n := range nodes {
-		if n.NodeClaim != nil && n.NodeClaim.IsMachine {
+		if n.Node == nil || (n.NodeClaim != nil && n.NodeClaim.IsMachine) {
 			continue
 		}
 		node := &v1.Node{}
@@ -361,7 +361,7 @@ func (c *Controller) requireNodeClaimNoScheduleTaint(ctx context.Context, addTai
 func (c *Controller) requireMachineUnschedulable(ctx context.Context, isUnschedulable bool, nodes ...*state.StateNode) error {
 	var multiErr error
 	for _, n := range nodes {
-		if n.NodeClaim != nil && !n.NodeClaim.IsMachine {
+		if n.Node == nil || (n.NodeClaim != nil && !n.NodeClaim.IsMachine) {
 			continue
 		}
 		node := &v1.Node{}
