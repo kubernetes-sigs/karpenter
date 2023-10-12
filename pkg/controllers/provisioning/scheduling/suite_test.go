@@ -1664,10 +1664,15 @@ var _ = Context("NodePool", func() {
 					},
 				},
 					InitImage: "pause",
-					InitResourceRequirements: v1.ResourceRequirements{
-						Requests: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceMemory: resource.MustParse("1Gi"),
-							v1.ResourceCPU:    resource.MustParse("2"),
+					InitContainers: []test.InitContainersOptions{
+						{
+							Resources: v1.ResourceRequirements{
+
+								Requests: map[v1.ResourceName]resource.Quantity{
+									v1.ResourceMemory: resource.MustParse("1Gi"),
+									v1.ResourceCPU:    resource.MustParse("2"),
+								},
+							},
 						},
 					},
 				})
@@ -1685,12 +1690,15 @@ var _ = Context("NodePool", func() {
 					},
 				},
 					InitImage: "pause",
-					InitResourceRequirements: v1.ResourceRequirements{
-						Requests: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceMemory: resource.MustParse("1Ti"),
-							v1.ResourceCPU:    resource.MustParse("2"),
+					InitContainers: []test.InitContainersOptions{{
+						Resources: v1.ResourceRequirements{
+
+							Requests: map[v1.ResourceName]resource.Quantity{
+								v1.ResourceMemory: resource.MustParse("1Ti"),
+								v1.ResourceCPU:    resource.MustParse("2"),
+							},
 						},
-					},
+					}},
 				})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			ExpectNotScheduled(ctx, env.Client, pod)

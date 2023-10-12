@@ -35,7 +35,7 @@ type PodOptions struct {
 	InitImage                     string
 	NodeName                      string
 	PriorityClassName             string
-	InitResourceRequirements      v1.ResourceRequirements
+	InitContainers                []InitContainersOptions
 	ResourceRequirements          v1.ResourceRequirements
 	NodeSelector                  map[string]string
 	NodeRequirements              []v1.NodeSelectorRequirement
@@ -57,6 +57,11 @@ type PodOptions struct {
 	LivenessProbe                 *v1.Probe
 	PreStopSleep                  *int64
 	Command                       []string
+}
+
+type InitContainersOptions struct {
+	Resources     v1.ResourceRequirements
+	RestartPolicy *v1.ContainerRestartPolicy
 }
 
 type PDBOptions struct {
@@ -165,12 +170,25 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 		p.Spec.Containers[0].Command = options.Command
 	}
 	if options.InitImage != "" {
-		p.Spec.InitContainers = []v1.Container{{
-			Name:      RandomName(),
-			Image:     options.InitImage,
-			Resources: options.InitResourceRequirements,
-		}}
+		// always := v1.ContainerRestartPolicyAlways
+
+		for _, init := range options.InitContainers {
+
+			cont := v1.Container{
+				Name:      RandomName(),
+				Image:     options.InitImage,
+				Resources: init.Resources,
+			}
+			if init.RestartPolicy != nil {
+				cont.RestartPolicy = init.RestartPolicy
+				fmt.Println("received sidecar resource limit is", cont.Resources.Limits.Cpu())
+			}
+			p.Spec.InitContainers = append(p.Spec.InitContainers, cont)
+		}
+
+		fmt.Println("length of init container is", len(p.Spec.InitContainers))
 	}
+
 	return p
 }
 
