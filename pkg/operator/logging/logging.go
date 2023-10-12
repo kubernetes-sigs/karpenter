@@ -84,14 +84,14 @@ func DefaultZapConfig(component string) zap.Config {
 func NewLogger(ctx context.Context, component string, kubernetesInterface kubernetes.Interface) *zap.SugaredLogger {
 	if logger := loggerFromFile(ctx, component); logger != nil {
 		logger.Debugf("loaded log configuration from file %q", loggerCfgFilePath)
-		return logger.Named(component)
+		return logger
 	}
 	// TODO @joinnis: Drop support for loading logging configuration from the apiserver discovered ConfigMap when
 	// dropping alpha support. At that point, we will only support the environment variables and file-based config
 	if logger := loggerFromConfigMap(ctx, component, kubernetesInterface); logger != nil {
 		logger.Debugf("loaded log configuration from configmap %q", types.NamespacedName{Namespace: system.Namespace(), Name: loggerCfgConfigMapName})
 		logger.Error("loading log configuration through the configmap is deprecated, use file or environment-variable based configuration instead")
-		return logger.Named(component)
+		return logger
 	}
 	return defaultLogger(ctx, component)
 }
