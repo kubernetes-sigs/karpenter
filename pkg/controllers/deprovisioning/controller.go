@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
@@ -123,6 +124,14 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		logging.FromContext(ctx).Debugf("waiting on cluster sync")
 		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}
+
+	// Karpenter taints nodes with a karpenter.sh/disruption taint as part of the deprovisioning process
+	// while it progresses in memory. If Karpenter restarts during a deprovisioning action, some nodes can be left tainted.
+	// Idempotently remove this taint from candidates before continuing.
+	if err := c.requireNodeClaimNoScheduleTaint(ctx, false, c.cluster.Nodes()...); err != nil {
+		return reconcile.Result{}, fmt.Errorf("removing taint from nodes, %w", err)
+	}
+
 	// Attempt different deprovisioning methods. We'll only let one method perform an action
 	for _, d := range c.deprovisioners {
 		c.recordRun(fmt.Sprintf("%T", d))
@@ -209,15 +218,17 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 func (c *Controller) launchReplacementNodeClaims(ctx context.Context, action Command, reason string) error {
 	defer metrics.Measure(deprovisioningReplacementNodeInitializedHistogram)()
 
-	// cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
-	if err := c.setNodesUnschedulable(ctx, true, action.candidates...); err != nil {
+	stateNodes := lo.Map(action.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode })
+
+	// taint the candidate nodes before we launch the replacements to prevent new pods from scheduling to the candidate nodes
+	if err := c.requireNoScheduleTaints(ctx, true, stateNodes...); err != nil {
 		return fmt.Errorf("cordoning nodes, %w", err)
 	}
 
 	nodeClaimKeys, err := c.provisioner.CreateNodeClaims(ctx, action.replacements, provisioning.WithReason(reason))
 	if err != nil {
-		// uncordon the nodes as the launch may fail (e.g. ICE)
-		err = multierr.Append(err, c.setNodesUnschedulable(ctx, false, action.candidates...))
+		// untaint the nodes as the launch may fail (e.g. ICE)
+		err = multierr.Append(err, c.requireNoScheduleTaints(ctx, false, stateNodes...))
 		return err
 	}
 	if len(nodeClaimKeys) != len(action.replacements) {
@@ -226,7 +237,6 @@ func (c *Controller) launchReplacementNodeClaims(ctx context.Context, action Com
 	}
 
 	candidateProviderIDs := lo.Map(action.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
-
 	// We have the new NodeClaims created at the API server so mark the old NodeClaims for deletion
 	c.cluster.MarkForDeletion(candidateProviderIDs...)
 
@@ -241,8 +251,8 @@ func (c *Controller) launchReplacementNodeClaims(ctx context.Context, action Com
 	})
 	if err = multierr.Combine(errs...); err != nil {
 		c.cluster.UnmarkForDeletion(candidateProviderIDs...)
-		return multierr.Combine(c.setNodesUnschedulable(ctx, false, action.candidates...),
-			fmt.Errorf("timed out checking readiness, %w", err))
+		return multierr.Combine(c.requireNoScheduleTaints(ctx, false, stateNodes...),
+			fmt.Errorf("timed out checking node readiness, %w", err))
 	}
 	return nil
 }
@@ -297,28 +307,79 @@ func (c *Controller) waitForDeletion(ctx context.Context, nodeClaim *v1beta1.Nod
 	}
 }
 
-func (c *Controller) setNodesUnschedulable(ctx context.Context, isUnschedulable bool, candidates ...*Candidate) error {
+// TODO remove this function when v1alpha5 APIs are no longer supported.
+// requireNoScheduleTaints will add NoSchedule Taints for Machines and NodeClaims.
+func (c *Controller) requireNoScheduleTaints(ctx context.Context, addTaint bool, nodes ...*state.StateNode) error {
+	nodeClaimErrs := c.requireNodeClaimNoScheduleTaint(ctx, addTaint, nodes...)
+	machineErrs := c.requireMachineUnschedulable(ctx, addTaint, nodes...)
+	return multierr.Combine(nodeClaimErrs, machineErrs)
+}
+
+// requireNodeClaimNoScheduleTaint will add/remove the karpenter.sh/disruption taint from the candidates.
+// This is used to enforce no taints at the beginning of deprovisioning, and
+// to add/remove taints while executing a deprovisioning action.
+// nolint:gocyclo
+func (c *Controller) requireNodeClaimNoScheduleTaint(ctx context.Context, addTaint bool, nodes ...*state.StateNode) error {
 	var multiErr error
-	for _, cn := range candidates {
+	for _, n := range nodes {
+		if n.Node == nil || (n.NodeClaim != nil && n.NodeClaim.IsMachine) {
+			continue
+		}
 		node := &v1.Node{}
-		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: cn.Node.Name}, node); err != nil {
+		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Name}, node); client.IgnoreNotFound(err) != nil {
 			multiErr = multierr.Append(multiErr, fmt.Errorf("getting node, %w", err))
 		}
-
-		// node is being deleted already, so no need to un-cordon
-		if !isUnschedulable && !node.DeletionTimestamp.IsZero() {
+		// If the node already has the taint, continue to the next
+		_, hasTaint := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
+			return v1beta1.IsDisruptingTaint(taint)
+		})
+		// node is being deleted, so no need to remove taint as the node will be gone soon
+		if hasTaint && !node.DeletionTimestamp.IsZero() {
 			continue
 		}
+		stored := node.DeepCopy()
+		// If the taint is present and we want to remove the taint, remove it.
+		if !addTaint {
+			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint v1.Taint, _ int) bool {
+				return v1beta1.IsDisruptingTaint(taint)
+			})
+			// otherwise, add it.
+		} else if addTaint && !hasTaint {
+			node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
+		}
+		if !equality.Semantic.DeepEqual(stored, node) {
+			if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+				multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
+			}
+		}
+	}
+	return multiErr
+}
 
-		// already matches the state we want to be in
-		if node.Spec.Unschedulable == isUnschedulable {
+// TODO remove this function when removing v1alpha5 APIs.
+// requireMachineUnschedulable will add/remove the node.kubernetes.io/unschedulable taint from the candidates.
+func (c *Controller) requireMachineUnschedulable(ctx context.Context, isUnschedulable bool, nodes ...*state.StateNode) error {
+	var multiErr error
+	for _, n := range nodes {
+		if n.Node == nil || (n.NodeClaim != nil && !n.NodeClaim.IsMachine) {
 			continue
 		}
-
+		node := &v1.Node{}
+		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Name}, node); client.IgnoreNotFound(err) != nil {
+			multiErr = multierr.Append(multiErr, fmt.Errorf("getting node, %w", err))
+		}
+		// If the node already has the taint, continue to the next
+		unschedulable := node.Spec.Unschedulable
+		// node is being deleted, so no need to remove taint as the node will be gone soon
+		if unschedulable && !node.DeletionTimestamp.IsZero() {
+			continue
+		}
 		stored := node.DeepCopy()
 		node.Spec.Unschedulable = isUnschedulable
-		if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
-			multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
+		if !equality.Semantic.DeepEqual(stored, node) {
+			if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+				multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
+			}
 		}
 	}
 	return multiErr

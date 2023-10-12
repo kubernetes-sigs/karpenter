@@ -213,6 +213,8 @@ func (c *Cluster) NominateNodeForPod(ctx context.Context, providerID string) {
 	}
 }
 
+// TODO remove this when v1alpha5 APIs are deprecated. With v1beta1 APIs Karpenter relies on the existence
+// of the karpenter.sh/disruption taint to know when a node is marked for deletion.
 // UnmarkForDeletion removes the marking on the node as a node the controller intends to delete
 func (c *Cluster) UnmarkForDeletion(providerIDs ...string) {
 	c.mu.Lock()
@@ -225,6 +227,8 @@ func (c *Cluster) UnmarkForDeletion(providerIDs ...string) {
 	}
 }
 
+// TODO remove this when v1alpha5 APIs are deprecated. With v1beta1 APIs Karpenter relies on the existence
+// of the karpenter.sh/disruption taint to know when a node is marked for deletion.
 // MarkForDeletion marks the node as pending deletion in the internal cluster state
 func (c *Cluster) MarkForDeletion(providerIDs ...string) {
 	c.mu.Lock()
@@ -636,6 +640,11 @@ func (c *Cluster) updatePodAntiAffinities(pod *v1.Pod) {
 
 func (c *Cluster) triggerConsolidationOnChange(old, new *StateNode) {
 	if old == nil || new == nil {
+		c.MarkUnconsolidated()
+		return
+	}
+	// If either the old node or new node are mocked
+	if (old.Node == nil && old.NodeClaim == nil) || (new.Node == nil && new.NodeClaim == nil) {
 		c.MarkUnconsolidated()
 		return
 	}

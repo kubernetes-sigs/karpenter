@@ -95,6 +95,8 @@ type StateNode struct {
 	hostPortUsage *scheduling.HostPortUsage
 	volumeUsage   *scheduling.VolumeUsage
 
+	// TODO remove this when v1alpha5 APIs are deprecated. With v1beta1 APIs Karpenter relies on the existence
+	// of the karpenter.sh/disruption taint to know when a node is marked for deletion.
 	markedForDeletion bool
 	nominatedUntil    metav1.Time
 }
@@ -218,7 +220,7 @@ func (in *StateNode) Taints() []v1.Taint {
 	var taints []v1.Taint
 	// TODO @joinnis: The !in.Initialized() check can be removed when we can assume that all nodes have the v1alpha5.NodeRegisteredLabel on them
 	// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
-	if !in.Registered() && !in.Initialized() && in.NodeClaim != nil {
+	if (!in.Registered() && !in.Initialized() && in.NodeClaim != nil) || in.Node == nil {
 		taints = in.NodeClaim.Spec.Taints
 	} else {
 		taints = in.Node.Spec.Taints
@@ -339,10 +341,11 @@ func (in *StateNode) PodLimits() v1.ResourceList {
 }
 
 func (in *StateNode) MarkedForDeletion() bool {
-	// The Node is marked for the Deletion if:
-	//  1. The Node has explicitly MarkedForDeletion
+	// The Node is marked for deletion if:
+	//  1. The Node has MarkedForDeletion set
 	//  2. The Node has a NodeClaim counterpart and is actively deleting
 	//  3. The Node has no NodeClaim counterpart and is actively deleting
+	// TODO remove check for machine after v1alpha5 APIs are dropped.
 	return in.markedForDeletion ||
 		(in.NodeClaim != nil && !in.NodeClaim.DeletionTimestamp.IsZero()) ||
 		(in.Node != nil && in.NodeClaim == nil && !in.Node.DeletionTimestamp.IsZero())

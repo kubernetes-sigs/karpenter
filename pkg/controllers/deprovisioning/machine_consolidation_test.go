@@ -3771,6 +3771,7 @@ var _ = Describe("Machine/Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[0]))
 
 			// Mark the node for deletion and re-trigger reconciliation
+			// TODO change this when MarkForDeletion is removed
 			oldNodeName := nodes[0].Name
 			cluster.MarkForDeletion(nodes[0].Spec.ProviderID)
 			ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, lo.Map(pods, func(p *v1.Pod, _ int) *v1.Pod { return p.DeepCopy() })...)
