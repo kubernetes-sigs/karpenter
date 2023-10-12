@@ -236,11 +236,9 @@ func (c *Controller) launchReplacementNodeClaims(ctx context.Context, action Com
 		return fmt.Errorf("expected %d replacements, got %d", len(action.replacements), len(nodeClaimKeys))
 	}
 
-	// TODO remove this when MarkForDeletion is removed.
-	// If it's a machine, we'll need to mark it for deletion in cluster state.
-	machineCandidateProviderIDs := lo.FilterMap(action.candidates, func(c *Candidate, _ int) (string, bool) { return c.ProviderID(), c.NodeClaim.IsMachine })
-	// We have the new Machines created at the API server so mark the old Machines for deletion
-	c.cluster.MarkForDeletion(machineCandidateProviderIDs...)
+	candidateProviderIDs := lo.Map(action.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
+	// We have the new NodeClaims created at the API server so mark the old NodeClaims for deletion
+	c.cluster.MarkForDeletion(candidateProviderIDs...)
 
 	errs := make([]error, len(nodeClaimKeys))
 	workqueue.ParallelizeUntil(ctx, len(nodeClaimKeys), len(nodeClaimKeys), func(i int) {
@@ -252,9 +250,9 @@ func (c *Controller) launchReplacementNodeClaims(ctx context.Context, action Com
 		}
 	})
 	if err = multierr.Combine(errs...); err != nil {
-		c.cluster.UnmarkForDeletion(machineCandidateProviderIDs...)
+		c.cluster.UnmarkForDeletion(candidateProviderIDs...)
 		return multierr.Combine(c.requireNoScheduleTaints(ctx, false, stateNodes...),
-			fmt.Errorf("timed out checking machine readiness, %w", err))
+			fmt.Errorf("timed out checking node readiness, %w", err))
 	}
 	return nil
 }

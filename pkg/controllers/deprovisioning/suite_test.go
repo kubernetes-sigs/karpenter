@@ -1022,6 +1022,154 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		ExpectNotFound(ctx, env.Client, lo.Map(nodeClaims, func(nc *v1beta1.NodeClaim, _ int) client.Object { return nc })...)
 		ExpectNotFound(ctx, env.Client, lo.Map(nodes, func(n *v1.Node, _ int) client.Object { return n })...)
 	})
+	It("should remove taints from Machines and NodeClaims that fail to deprovision", func() {
+		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
+		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
+		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "current-on-demand",
+			Offerings: []cloudprovider.Offering{
+				{
+					CapacityType: v1alpha5.CapacityTypeOnDemand,
+					Zone:         "test-zone-1a",
+					Price:        1.5,
+					Available:    false,
+				},
+			},
+		})
+		replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "spot-replacement",
+			Offerings: []cloudprovider.Offering{
+				{
+					CapacityType: v1alpha5.CapacityTypeSpot,
+					Zone:         "test-zone-1a",
+					Price:        1.0,
+					Available:    true,
+				},
+				{
+					CapacityType: v1alpha5.CapacityTypeSpot,
+					Zone:         "test-zone-1b",
+					Price:        0.2,
+					Available:    true,
+				},
+				{
+					CapacityType: v1alpha5.CapacityTypeSpot,
+					Zone:         "test-zone-1c",
+					Price:        0.4,
+					Available:    true,
+				},
+			},
+		})
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			currentInstance,
+			replacementInstance,
+		}
+		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+			{
+				Key:      v1.LabelInstanceTypeStable,
+				Operator: v1.NodeSelectorOpIn,
+				Values:   []string{currentInstance.Name},
+			},
+		}
+		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
+			{
+				Key:      v1.LabelInstanceTypeStable,
+				Operator: v1.NodeSelectorOpIn,
+				Values:   []string{replacementInstance.Name},
+			},
+			{
+				Key:      v1alpha5.LabelCapacityType,
+				Operator: v1.NodeSelectorOpExists,
+			},
+		}
+
+		ExpectApplied(ctx, env.Client, provisioner, nodePool)
+
+		var machines []*v1alpha5.Machine
+		var nodeClaims []*v1beta1.NodeClaim
+		var machineNodes []*v1.Node
+		var nodeClaimNodes []*v1.Node
+		for i := 0; i < 2; i++ {
+			m, n := test.MachineAndNode(v1alpha5.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       currentInstance.Name,
+						v1alpha5.LabelCapacityType:       currentInstance.Offerings[0].CapacityType,
+						v1.LabelTopologyZone:             currentInstance.Offerings[0].Zone,
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			pod := test.Pod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("100m"),
+						v1.ResourceMemory: resource.MustParse("100Mi"),
+					},
+				},
+			})
+			machines = append(machines, m)
+			machineNodes = append(machineNodes, n)
+			ExpectApplied(ctx, env.Client, m, n, pod)
+			ExpectManualBinding(ctx, env.Client, pod, n)
+		}
+		for i := 0; i < 2; i++ {
+			nc, n := test.NodeClaimAndNode(v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey:     nodePool.Name,
+						v1.LabelInstanceTypeStable:   currentInstance.Name,
+						v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
+						v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			pod := test.Pod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("100m"),
+						v1.ResourceMemory: resource.MustParse("100Mi"),
+					},
+				},
+			})
+			nodeClaims = append(nodeClaims, nc)
+			nodeClaimNodes = append(nodeClaimNodes, n)
+			ExpectApplied(ctx, env.Client, nc, n, pod)
+			ExpectManualBinding(ctx, env.Client, pod, n)
+		}
+
+		// inform cluster state about nodes and machines
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, machineNodes, machines)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodeClaimNodes, nodeClaims)
+
+		fakeClock.Step(10 * time.Minute)
+		wg := sync.WaitGroup{}
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileFailed(ctx, deprovisioningController, types.NamespacedName{})
+
+		for _, n := range machineNodes {
+			Expect(n.Spec.Unschedulable).To(BeFalse())
+		}
+		for _, n := range nodeClaimNodes {
+			_, found := lo.Find(n.Spec.Taints, func (t v1.Taint) bool {
+				return t.MatchTaint(&v1beta1.DisruptionNoScheduleTaint) && t.Value == v1beta1.DisruptingNoScheduleTaintValue
+			})
+			Expect(found).To(BeFalse())
+		}
+	})
 })
 
 var _ = Describe("Pod Eviction Cost", func() {
