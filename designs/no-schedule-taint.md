@@ -10,7 +10,7 @@ Karpenter is [increasing the parallelism of deprovisioning](https://github.com/a
 
 ## Proposal
 
-Karpenter should taint nodes with a `karpenter.sh/disrupting:NoSchedule` taint rather than relying on the upstream unschedulable taint.
+Karpenter should taint nodes with a `karpenter.sh/disruption=disrupting:NoSchedule` taint rather than relying on the upstream unschedulable taint.
 
 Since Karpenter is currently migrating to v1beta1, this behavior change will only be present with v1beta1 APIs.
 
