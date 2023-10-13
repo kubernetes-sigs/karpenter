@@ -32,10 +32,10 @@ import (
 type PodOptions struct {
 	metav1.ObjectMeta
 	Image                         string
-	InitImage                     string
 	NodeName                      string
+	Overhead                      v1.ResourceList
 	PriorityClassName             string
-	InitContainers                []InitContainersOptions
+	InitContainers                []v1.Container
 	ResourceRequirements          v1.ResourceRequirements
 	NodeSelector                  map[string]string
 	NodeRequirements              []v1.NodeSelectorRequirement
@@ -59,10 +59,12 @@ type PodOptions struct {
 	Command                       []string
 }
 
-type InitContainersOptions struct {
-	Resources     v1.ResourceRequirements
-	RestartPolicy *v1.ContainerRestartPolicy
-}
+var InitImage = "pause"
+
+// type InitContainersOptions struct {
+// 	Resources     v1.ResourceRequirements
+// 	RestartPolicy *v1.ContainerRestartPolicy
+// }
 
 type PDBOptions struct {
 	metav1.ObjectMeta
@@ -169,24 +171,27 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 	if options.Command != nil {
 		p.Spec.Containers[0].Command = options.Command
 	}
-	if options.InitImage != "" {
+	if options.Overhead != nil {
+		p.Spec.Overhead = options.Overhead
+	}
+	if options.InitContainers != nil {
 		// always := v1.ContainerRestartPolicyAlways
 
 		for _, init := range options.InitContainers {
 
-			cont := v1.Container{
-				Name:      RandomName(),
-				Image:     options.InitImage,
-				Resources: init.Resources,
-			}
-			if init.RestartPolicy != nil {
-				cont.RestartPolicy = init.RestartPolicy
-				fmt.Println("received sidecar resource limit is", cont.Resources.Limits.Cpu())
-			}
-			p.Spec.InitContainers = append(p.Spec.InitContainers, cont)
+			// cont := v1.Container{
+			// 	Name:      RandomName(),
+			// 	Image:     InitImage,
+			// 	Resources: init.Resources,
+			// }
+			// if init.RestartPolicy != nil {
+			// 	cont.RestartPolicy = init.RestartPolicy
+			// }
+			init.Name = RandomName()
+			init.Image = InitImage
+			p.Spec.InitContainers = append(p.Spec.InitContainers, init)
 		}
 
-		fmt.Println("length of init container is", len(p.Spec.InitContainers))
 	}
 
 	return p

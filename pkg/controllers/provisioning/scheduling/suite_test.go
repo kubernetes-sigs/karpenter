@@ -1663,8 +1663,7 @@ var _ = Context("NodePool", func() {
 						v1.ResourceCPU:    resource.MustParse("1"),
 					},
 				},
-					InitImage: "pause",
-					InitContainers: []test.InitContainersOptions{
+					InitContainers: []v1.Container{
 						{
 							Resources: v1.ResourceRequirements{
 
@@ -1689,8 +1688,7 @@ var _ = Context("NodePool", func() {
 						v1.ResourceCPU:    resource.MustParse("1"),
 					},
 				},
-					InitImage: "pause",
-					InitContainers: []test.InitContainersOptions{{
+					InitContainers: []v1.Container{{
 						Resources: v1.ResourceRequirements{
 
 							Requests: map[v1.ResourceName]resource.Quantity{
