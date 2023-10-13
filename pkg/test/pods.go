@@ -178,15 +178,6 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 		// always := v1.ContainerRestartPolicyAlways
 
 		for _, init := range options.InitContainers {
-
-			// cont := v1.Container{
-			// 	Name:      RandomName(),
-			// 	Image:     InitImage,
-			// 	Resources: init.Resources,
-			// }
-			// if init.RestartPolicy != nil {
-			// 	cont.RestartPolicy = init.RestartPolicy
-			// }
 			init.Name = RandomName()
 			init.Image = InitImage
 			p.Spec.InitContainers = append(p.Spec.InitContainers, init)
