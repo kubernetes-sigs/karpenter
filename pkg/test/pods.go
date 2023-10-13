@@ -175,7 +175,6 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 		p.Spec.Overhead = options.Overhead
 	}
 	if options.InitContainers != nil {
-		// always := v1.ContainerRestartPolicyAlways
 
 		for _, init := range options.InitContainers {
 			init.Name = RandomName()
