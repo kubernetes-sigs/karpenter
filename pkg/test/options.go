@@ -56,24 +56,22 @@ func Options(overrides ...OptionsFields) *options.Options {
 	}
 
 	return &options.Options{
-		OptionFields: options.OptionFields{
-			ServiceName:          lo.FromPtrOr(opts.ServiceName, ""),
-			DisableWebhook:       lo.FromPtrOr(opts.DisableWebhook, false),
-			WebhookPort:          lo.FromPtrOr(opts.WebhookPort, 8443),
-			MetricsPort:          lo.FromPtrOr(opts.MetricsPort, 8000),
-			WebhookMetricsPort:   lo.FromPtrOr(opts.WebhookMetricsPort, 8001),
-			HealthProbePort:      lo.FromPtrOr(opts.HealthProbePort, 8081),
-			KubeClientQPS:        lo.FromPtrOr(opts.KubeClientQPS, 200),
-			KubeClientBurst:      lo.FromPtrOr(opts.KubeClientBurst, 300),
-			EnableProfiling:      lo.FromPtrOr(opts.EnableProfiling, false),
-			EnableLeaderElection: lo.FromPtrOr(opts.EnableLeaderElection, true),
-			MemoryLimit:          lo.FromPtrOr(opts.MemoryLimit, -1),
-			LogLevel:             lo.FromPtrOr(opts.LogLevel, ""),
-			BatchMaxDuration:     lo.FromPtrOr(opts.BatchMaxDuration, 10*time.Second),
-			BatchIdleDuration:    lo.FromPtrOr(opts.BatchIdleDuration, time.Second),
-			FeatureGates: options.FeatureGates{
-				Drift: lo.FromPtrOr(opts.FeatureGates.Drift, false),
-			},
+		ServiceName:          lo.FromPtrOr(opts.ServiceName, ""),
+		DisableWebhook:       lo.FromPtrOr(opts.DisableWebhook, false),
+		WebhookPort:          lo.FromPtrOr(opts.WebhookPort, 8443),
+		MetricsPort:          lo.FromPtrOr(opts.MetricsPort, 8000),
+		WebhookMetricsPort:   lo.FromPtrOr(opts.WebhookMetricsPort, 8001),
+		HealthProbePort:      lo.FromPtrOr(opts.HealthProbePort, 8081),
+		KubeClientQPS:        lo.FromPtrOr(opts.KubeClientQPS, 200),
+		KubeClientBurst:      lo.FromPtrOr(opts.KubeClientBurst, 300),
+		EnableProfiling:      lo.FromPtrOr(opts.EnableProfiling, false),
+		EnableLeaderElection: lo.FromPtrOr(opts.EnableLeaderElection, true),
+		MemoryLimit:          lo.FromPtrOr(opts.MemoryLimit, -1),
+		LogLevel:             lo.FromPtrOr(opts.LogLevel, ""),
+		BatchMaxDuration:     lo.FromPtrOr(opts.BatchMaxDuration, 10*time.Second),
+		BatchIdleDuration:    lo.FromPtrOr(opts.BatchIdleDuration, time.Second),
+		FeatureGates: options.FeatureGates{
+			Drift: lo.FromPtrOr(opts.FeatureGates.Drift, false),
 		},
 	}
 }

@@ -16,13 +16,14 @@ package injection
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"time"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	kubeerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
@@ -51,8 +52,15 @@ func GetControllerName(ctx context.Context) string {
 }
 
 func WithOptionsOrDie(ctx context.Context, opts ...options.Injectable) context.Context {
+	fs := flag.NewFlagSet("karpenter", flag.ContinueOnError)
 	for _, opt := range opts {
-		ctx = lo.Must(opt.Inject(ctx, os.Args[1:]...))
+		opt.AddFlags(fs)
+	}
+	for _, opt := range opts {
+		lo.Must0(opt.Parse(fs, os.Args[1:]...))
+	}
+	for _, opt := range opts {
+		ctx = opt.ToContext(ctx)
 	}
 	return ctx
 }
@@ -72,7 +80,7 @@ func WithSettingsOrDie(ctx context.Context, kubernetesInterface kubernetes.Inter
 	for _, setting := range settings {
 		cm, err := WaitForConfigMap(ctx, setting.ConfigMap(), informer)
 		if err != nil {
-			if !errors.IsNotFound(err) {
+			if !kubeerrors.IsNotFound(err) {
 				panic(fmt.Errorf("failed to get configmap %s, %w", setting.ConfigMap(), err))
 			}
 			continue
@@ -98,7 +106,7 @@ func WaitForConfigMap(ctx context.Context, name string, informer cache.SharedInd
 				// return the last seen error
 				return nil, fmt.Errorf("context canceled, %w", err)
 			}
-			return nil, fmt.Errorf("context canceled, %w", errors.NewNotFound(schema.GroupResource{Resource: "configmaps"}, types.NamespacedName{Namespace: system.Namespace(), Name: name}.String()))
+			return nil, fmt.Errorf("context canceled, %w", kubeerrors.NewNotFound(schema.GroupResource{Resource: "configmaps"}, types.NamespacedName{Namespace: system.Namespace(), Name: name}.String()))
 		case <-time.After(time.Millisecond * 500):
 		}
 	}

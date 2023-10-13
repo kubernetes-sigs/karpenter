@@ -14,10 +14,28 @@ limitations under the License.
 
 package options
 
-import "context"
+import (
+	"context"
+	"flag"
+)
 
-// Injectable defines a ConfigMap registration to be loaded into context on startup
+// Injectable defines a set of flag based options to be parsed and injected
+// into Karpenter's contexts
+// type Injectable interface {
+// 	// Inject is used to inject the Options into the context and set up flags.
+// 	// Called before flag.Parse().
+// 	Inject(context.Context) context.Context
+//
+// 	// Validate is called after flag.Parse and should validate the values of
+// 	// individual fields as well as do any required post-processing.
+// 	Validate(context.Context) error
+//
+// 	MergeSettings(context.Context) context.Context
+// }
+
 type Injectable interface {
-	Inject(context.Context, ...string) (context.Context, error)
-	MergeSettings(context.Context) context.Context
+	AddFlags(*flag.FlagSet)
+	Parse(*flag.FlagSet, ...string) error
+	ToContext(context.Context) context.Context
+	MergeSettings(context.Context)
 }

@@ -107,8 +107,9 @@ func NewOperator() (context.Context, *Operator) {
 	ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
 
 	// Temporarily merge settings into options until configmap is removed
+	// Note: injectables are pointer to those already in context
 	for _, o := range options.Injectables {
-		ctx = o.MergeSettings(ctx)
+		o.MergeSettings(ctx)
 	}
 
 	// Logging
@@ -134,7 +135,7 @@ func NewOperator() (context.Context, *Operator) {
 			ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
 			ctx = injection.WithOptionsOrDie(ctx, options.Injectables...)
 			for _, o := range options.Injectables {
-				ctx = o.MergeSettings(ctx)
+				o.MergeSettings(ctx)
 			}
 			return ctx
 		},
