@@ -26,7 +26,9 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clock "k8s.io/utils/clock/testing"
@@ -49,6 +51,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/test"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
+	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
+	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 )
 
 var ctx context.Context
@@ -122,10 +126,930 @@ var _ = BeforeEach(func() {
 	})
 	leastExpensiveInstance, mostExpensiveInstance = onDemandInstances[0], onDemandInstances[len(onDemandInstances)-1]
 	leastExpensiveOffering, mostExpensiveOffering = leastExpensiveInstance.Offerings[0], mostExpensiveInstance.Offerings[0]
+
+	nodepoolutil.EnableNodePools = true
+	nodeclaimutil.EnableNodeClaims = true
 })
 
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
+})
+
+var _ = Describe("Combined/Deprovisioning", func() {
+	var provisioner *v1alpha5.Provisioner
+	var machine *v1alpha5.Machine
+	var nodePool *v1beta1.NodePool
+	var nodeClaim *v1beta1.NodeClaim
+	var machineNode, nodeClaimNode *v1.Node
+	BeforeEach(func() {
+		provisioner = test.Provisioner()
+		machine, machineNode = test.MachineAndNode(v1alpha5.Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
+					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1alpha5.MachineStatus{
+				ProviderID: test.RandomProviderID(),
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		nodePool = test.NodePool()
+		nodeClaim, nodeClaimNode = test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1beta1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+	})
+	It("should deprovision all empty Machine and NodeClaims in parallel (Emptiness)", func() {
+		provisioner.Spec.TTLSecondsAfterEmpty = lo.ToPtr[int64](30)
+		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
+		nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)}
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Empty)
+		ExpectApplied(ctx, env.Client, provisioner, nodePool, machine, nodeClaim, machineNode, nodeClaimNode)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{machineNode}, []*v1alpha5.Machine{machine})
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodeClaimNode}, []*v1beta1.NodeClaim{nodeClaim})
+
+		fakeClock.Step(10 * time.Minute)
+		wg := sync.WaitGroup{}
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+		// Cascade any deletion of the nodeclaim to the node
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+		// Expect that the empty machine is gone
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
+		// Expect that the empty nodeclaim is gone
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+		ExpectNotFound(ctx, env.Client, machine, nodeClaim, machineNode, nodeClaimNode)
+	})
+	It("should deprovision all empty Machine and NodeClaims in parallel (Expiration)", func() {
+		provisioner.Spec.TTLSecondsUntilExpired = lo.ToPtr[int64](30)
+		nodePool.Spec.Disruption.ExpireAfter = v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)}
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineExpired)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Expired)
+		ExpectApplied(ctx, env.Client, provisioner, nodePool, machine, nodeClaim, machineNode, nodeClaimNode)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{machineNode}, []*v1alpha5.Machine{machine})
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodeClaimNode}, []*v1beta1.NodeClaim{nodeClaim})
+
+		fakeClock.Step(10 * time.Minute)
+		wg := sync.WaitGroup{}
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+		// Cascade any deletion of the nodeclaim to the node
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+		// Expect that the expired machine is gone
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
+		// Expect that the expired nodeclaim is gone
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+		ExpectNotFound(ctx, env.Client, machine, nodeClaim, machineNode, nodeClaimNode)
+	})
+	It("should deprovision all empty Machine and NodeClaims in parallel (Drift)", func() {
+		machine.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Drifted)
+
+		ExpectApplied(ctx, env.Client, provisioner, nodePool, machine, nodeClaim, machineNode, nodeClaimNode)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{machineNode}, []*v1alpha5.Machine{machine})
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodeClaimNode}, []*v1beta1.NodeClaim{nodeClaim})
+
+		fakeClock.Step(10 * time.Minute)
+		wg := sync.WaitGroup{}
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+		// Cascade any deletion of the nodeclaim to the node
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+		// Expect that the drifted machine is gone
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
+		// Expect that the drifted nodeclaim is gone
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+		ExpectNotFound(ctx, env.Client, machine, nodeClaim, machineNode, nodeClaimNode)
+	})
+	It("should deprovision all empty Machine and NodeClaims in parallel (Consolidation)", func() {
+		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
+		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
+		ExpectApplied(ctx, env.Client, provisioner, nodePool, machine, nodeClaim, machineNode, nodeClaimNode)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{machineNode}, []*v1alpha5.Machine{machine})
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodeClaimNode}, []*v1beta1.NodeClaim{nodeClaim})
+
+		fakeClock.Step(10 * time.Minute)
+		wg := sync.WaitGroup{}
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+		// Cascade any deletion of the nodeclaim to the node
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+		// Expect that the empty machine is gone due to consolidation
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
+		// Expect that the empty nodeclaim is gone due to consolidation
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+		ExpectNotFound(ctx, env.Client, machine, nodeClaim, machineNode, nodeClaimNode)
+	})
+	It("should deprovision a Machine and replace with a cheaper NodeClaim", func() {
+		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
+		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
+		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "current-on-demand",
+			Offerings: []cloudprovider.Offering{
+				{
+					CapacityType: v1alpha5.CapacityTypeOnDemand,
+					Zone:         "test-zone-1a",
+					Price:        1.5,
+					Available:    false,
+				},
+			},
+		})
+		replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "spot-replacement",
+			Offerings: []cloudprovider.Offering{
+				{
+					CapacityType: v1alpha5.CapacityTypeSpot,
+					Zone:         "test-zone-1a",
+					Price:        1.0,
+					Available:    true,
+				},
+				{
+					CapacityType: v1alpha5.CapacityTypeSpot,
+					Zone:         "test-zone-1b",
+					Price:        0.2,
+					Available:    true,
+				},
+				{
+					CapacityType: v1alpha5.CapacityTypeSpot,
+					Zone:         "test-zone-1c",
+					Price:        0.4,
+					Available:    true,
+				},
+			},
+		})
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			currentInstance,
+			replacementInstance,
+		}
+		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+			{
+				Key:      v1.LabelInstanceTypeStable,
+				Operator: v1.NodeSelectorOpIn,
+				Values:   []string{replacementInstance.Name},
+			},
+			{
+				Key:      v1alpha5.LabelCapacityType,
+				Operator: v1.NodeSelectorOpExists,
+			},
+		}
+		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
+			{
+				Key:      v1.LabelInstanceTypeStable,
+				Operator: v1.NodeSelectorOpIn,
+				Values:   []string{currentInstance.Name},
+			},
+		}
+		machine.Labels = lo.Assign(machine.Labels, map[string]string{
+			v1.LabelInstanceTypeStable: currentInstance.Name,
+			v1alpha5.LabelCapacityType: currentInstance.Offerings[0].CapacityType,
+			v1.LabelTopologyZone:       currentInstance.Offerings[0].Zone,
+		})
+		machineNode.Labels = lo.Assign(machineNode.Labels, map[string]string{
+			v1.LabelInstanceTypeStable: currentInstance.Name,
+			v1alpha5.LabelCapacityType: currentInstance.Offerings[0].CapacityType,
+			v1.LabelTopologyZone:       currentInstance.Offerings[0].Zone,
+		})
+		pod := test.Pod(test.PodOptions{
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("100m"),
+					v1.ResourceMemory: resource.MustParse("100Mi"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, provisioner, nodePool, machine, machineNode, pod)
+		ExpectManualBinding(ctx, env.Client, pod, machineNode)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{machineNode}, []*v1alpha5.Machine{machine})
+
+		fakeClock.Step(10 * time.Minute)
+		wg := sync.WaitGroup{}
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+		// Cascade any deletion of the machine to the node
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+
+		// a machine should be replaced with a single nodeclaim
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		ExpectNotFound(ctx, env.Client, machine, machineNode)
+	})
+	It("should deprovision multiple Machines and replace with a single cheaper NodeClaim", func() {
+		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
+		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
+		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "current-on-demand",
+			Offerings: []cloudprovider.Offering{
+				{
+					CapacityType: v1alpha5.CapacityTypeOnDemand,
+					Zone:         "test-zone-1a",
+					Price:        1.5,
+					Available:    false,
+				},
+			},
+		})
+		replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "spot-replacement",
+			Offerings: []cloudprovider.Offering{
+				{
+					CapacityType: v1alpha5.CapacityTypeSpot,
+					Zone:         "test-zone-1a",
+					Price:        1.0,
+					Available:    true,
+				},
+				{
+					CapacityType: v1alpha5.CapacityTypeSpot,
+					Zone:         "test-zone-1b",
+					Price:        0.2,
+					Available:    true,
+				},
+				{
+					CapacityType: v1alpha5.CapacityTypeSpot,
+					Zone:         "test-zone-1c",
+					Price:        0.4,
+					Available:    true,
+				},
+			},
+		})
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			currentInstance,
+			replacementInstance,
+		}
+		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+			{
+				Key:      v1.LabelInstanceTypeStable,
+				Operator: v1.NodeSelectorOpIn,
+				Values:   []string{replacementInstance.Name},
+			},
+		}
+		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
+			{
+				Key:      v1.LabelInstanceTypeStable,
+				Operator: v1.NodeSelectorOpIn,
+				Values:   []string{currentInstance.Name},
+			},
+			{
+				Key:      v1alpha5.LabelCapacityType,
+				Operator: v1.NodeSelectorOpExists,
+			},
+		}
+
+		ExpectApplied(ctx, env.Client, provisioner, nodePool)
+
+		var machines []*v1alpha5.Machine
+		var nodes []*v1.Node
+		for i := 0; i < 5; i++ {
+			m, n := test.MachineAndNode(v1alpha5.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       currentInstance.Name,
+						v1alpha5.LabelCapacityType:       currentInstance.Offerings[0].CapacityType,
+						v1.LabelTopologyZone:             currentInstance.Offerings[0].Zone,
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			pod := test.Pod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("100m"),
+						v1.ResourceMemory: resource.MustParse("100Mi"),
+					},
+				},
+			})
+			machines = append(machines, m)
+			nodes = append(nodes, n)
+			ExpectApplied(ctx, env.Client, m, n, pod)
+			ExpectManualBinding(ctx, env.Client, pod, n)
+		}
+
+		// inform cluster state about nodes and machines
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, nodes, machines)
+
+		fakeClock.Step(10 * time.Minute)
+		wg := sync.WaitGroup{}
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+		// Cascade any deletion of the machines to the nodes
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machines...)
+
+		// all machines should be replaced with a single nodeclaim
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+
+		ExpectNotFound(ctx, env.Client, lo.Map(machines, func(m *v1alpha5.Machine, _ int) client.Object { return m })...)
+		ExpectNotFound(ctx, env.Client, lo.Map(nodes, func(n *v1.Node, _ int) client.Object { return n })...)
+	})
+	It("should deprovision a NodeClaim and replace with a cheaper Machine", func() {
+		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
+		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
+		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "current-on-demand",
+			Offerings: []cloudprovider.Offering{
+				{
+					CapacityType: v1alpha5.CapacityTypeOnDemand,
+					Zone:         "test-zone-1a",
+					Price:        1.5,
+					Available:    false,
+				},
+			},
+		})
+		replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "spot-replacement",
+			Offerings: []cloudprovider.Offering{
+				{
+					CapacityType: v1alpha5.CapacityTypeSpot,
+					Zone:         "test-zone-1a",
+					Price:        1.0,
+					Available:    true,
+				},
+				{
+					CapacityType: v1alpha5.CapacityTypeSpot,
+					Zone:         "test-zone-1b",
+					Price:        0.2,
+					Available:    true,
+				},
+				{
+					CapacityType: v1alpha5.CapacityTypeSpot,
+					Zone:         "test-zone-1c",
+					Price:        0.4,
+					Available:    true,
+				},
+			},
+		})
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			currentInstance,
+			replacementInstance,
+		}
+		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+			{
+				Key:      v1.LabelInstanceTypeStable,
+				Operator: v1.NodeSelectorOpIn,
+				Values:   []string{currentInstance.Name},
+			},
+		}
+		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
+			{
+				Key:      v1.LabelInstanceTypeStable,
+				Operator: v1.NodeSelectorOpIn,
+				Values:   []string{replacementInstance.Name},
+			},
+			{
+				Key:      v1alpha5.LabelCapacityType,
+				Operator: v1.NodeSelectorOpExists,
+			},
+		}
+		nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
+			v1.LabelInstanceTypeStable:   currentInstance.Name,
+			v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
+			v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
+		})
+		nodeClaimNode.Labels = lo.Assign(nodeClaimNode.Labels, map[string]string{
+			v1.LabelInstanceTypeStable:   currentInstance.Name,
+			v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
+			v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
+		})
+		pod := test.Pod(test.PodOptions{
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("100m"),
+					v1.ResourceMemory: resource.MustParse("100Mi"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, provisioner, nodePool, nodeClaim, nodeClaimNode, pod)
+		ExpectManualBinding(ctx, env.Client, pod, nodeClaimNode)
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodeClaimNode}, []*v1beta1.NodeClaim{nodeClaim})
+
+		fakeClock.Step(10 * time.Minute)
+		wg := sync.WaitGroup{}
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+		// Cascade any deletion of the nodeclaim to the node
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+		// a nodeclaim should be replaced with a single machine
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		ExpectNotFound(ctx, env.Client, nodeClaim, nodeClaimNode)
+	})
+	It("should deprovision multiple NodeClaims and replace with a single cheaper Machine", func() {
+		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
+		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
+		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "current-on-demand",
+			Offerings: []cloudprovider.Offering{
+				{
+					CapacityType: v1alpha5.CapacityTypeOnDemand,
+					Zone:         "test-zone-1a",
+					Price:        1.5,
+					Available:    false,
+				},
+			},
+		})
+		replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "spot-replacement",
+			Offerings: []cloudprovider.Offering{
+				{
+					CapacityType: v1alpha5.CapacityTypeSpot,
+					Zone:         "test-zone-1a",
+					Price:        1.0,
+					Available:    true,
+				},
+				{
+					CapacityType: v1alpha5.CapacityTypeSpot,
+					Zone:         "test-zone-1b",
+					Price:        0.2,
+					Available:    true,
+				},
+				{
+					CapacityType: v1alpha5.CapacityTypeSpot,
+					Zone:         "test-zone-1c",
+					Price:        0.4,
+					Available:    true,
+				},
+			},
+		})
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			currentInstance,
+			replacementInstance,
+		}
+		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+			{
+				Key:      v1.LabelInstanceTypeStable,
+				Operator: v1.NodeSelectorOpIn,
+				Values:   []string{currentInstance.Name},
+			},
+		}
+		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
+			{
+				Key:      v1.LabelInstanceTypeStable,
+				Operator: v1.NodeSelectorOpIn,
+				Values:   []string{replacementInstance.Name},
+			},
+			{
+				Key:      v1alpha5.LabelCapacityType,
+				Operator: v1.NodeSelectorOpExists,
+			},
+		}
+
+		ExpectApplied(ctx, env.Client, provisioner, nodePool)
+
+		var nodeClaims []*v1beta1.NodeClaim
+		var nodes []*v1.Node
+		for i := 0; i < 5; i++ {
+			nc, n := test.NodeClaimAndNode(v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey:     nodePool.Name,
+						v1.LabelInstanceTypeStable:   currentInstance.Name,
+						v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
+						v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			pod := test.Pod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("100m"),
+						v1.ResourceMemory: resource.MustParse("100Mi"),
+					},
+				},
+			})
+			nodeClaims = append(nodeClaims, nc)
+			nodes = append(nodes, n)
+			ExpectApplied(ctx, env.Client, nc, n, pod)
+			ExpectManualBinding(ctx, env.Client, pod, n)
+		}
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+		fakeClock.Step(10 * time.Minute)
+		wg := sync.WaitGroup{}
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+		// Cascade any deletion of the nodeclaims to the nodes
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims...)
+
+		// all nodeClaims should be replaced with a single machine
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+
+		ExpectNotFound(ctx, env.Client, lo.Map(nodeClaims, func(nc *v1beta1.NodeClaim, _ int) client.Object { return nc })...)
+		ExpectNotFound(ctx, env.Client, lo.Map(nodes, func(n *v1.Node, _ int) client.Object { return n })...)
+	})
+	It("should deprovision Machines and NodeClaims to consolidate pods onto a single NodeClaim", func() {
+		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
+		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
+		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "current-on-demand",
+			Offerings: []cloudprovider.Offering{
+				{
+					CapacityType: v1alpha5.CapacityTypeOnDemand,
+					Zone:         "test-zone-1a",
+					Price:        1.5,
+					Available:    false,
+				},
+			},
+		})
+		replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "spot-replacement",
+			Offerings: []cloudprovider.Offering{
+				{
+					CapacityType: v1alpha5.CapacityTypeSpot,
+					Zone:         "test-zone-1a",
+					Price:        1.0,
+					Available:    true,
+				},
+				{
+					CapacityType: v1alpha5.CapacityTypeSpot,
+					Zone:         "test-zone-1b",
+					Price:        0.2,
+					Available:    true,
+				},
+				{
+					CapacityType: v1alpha5.CapacityTypeSpot,
+					Zone:         "test-zone-1c",
+					Price:        0.4,
+					Available:    true,
+				},
+			},
+		})
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			currentInstance,
+			replacementInstance,
+		}
+		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+			{
+				Key:      v1.LabelInstanceTypeStable,
+				Operator: v1.NodeSelectorOpIn,
+				Values:   []string{replacementInstance.Name},
+			},
+		}
+		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
+			{
+				Key:      v1.LabelInstanceTypeStable,
+				Operator: v1.NodeSelectorOpIn,
+				Values:   []string{currentInstance.Name},
+			},
+			{
+				Key:      v1alpha5.LabelCapacityType,
+				Operator: v1.NodeSelectorOpExists,
+			},
+		}
+
+		ExpectApplied(ctx, env.Client, provisioner, nodePool)
+
+		var machines []*v1alpha5.Machine
+		var nodeClaims []*v1beta1.NodeClaim
+		var nodes []*v1.Node
+		for i := 0; i < 2; i++ {
+			m, n := test.MachineAndNode(v1alpha5.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       currentInstance.Name,
+						v1alpha5.LabelCapacityType:       currentInstance.Offerings[0].CapacityType,
+						v1.LabelTopologyZone:             currentInstance.Offerings[0].Zone,
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			pod := test.Pod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("100m"),
+						v1.ResourceMemory: resource.MustParse("100Mi"),
+					},
+				},
+			})
+			machines = append(machines, m)
+			nodes = append(nodes, n)
+			ExpectApplied(ctx, env.Client, m, n, pod)
+			ExpectManualBinding(ctx, env.Client, pod, n)
+		}
+		for i := 0; i < 2; i++ {
+			nc, n := test.NodeClaimAndNode(v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey:     nodePool.Name,
+						v1.LabelInstanceTypeStable:   currentInstance.Name,
+						v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
+						v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			pod := test.Pod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("100m"),
+						v1.ResourceMemory: resource.MustParse("100Mi"),
+					},
+				},
+			})
+			nodeClaims = append(nodeClaims, nc)
+			nodes = append(nodes, n)
+			ExpectApplied(ctx, env.Client, nc, n, pod)
+			ExpectManualBinding(ctx, env.Client, pod, n)
+		}
+
+		// inform cluster state about nodes and machines
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, nodes, machines)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+		fakeClock.Step(10 * time.Minute)
+		wg := sync.WaitGroup{}
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+		// Cascade any deletion of the machines to the nodes
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machines...)
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims...)
+
+		// all machines and nodeclaims should be replaced with a single nodeclaim
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+
+		ExpectNotFound(ctx, env.Client, lo.Map(machines, func(m *v1alpha5.Machine, _ int) client.Object { return m })...)
+		ExpectNotFound(ctx, env.Client, lo.Map(nodeClaims, func(nc *v1beta1.NodeClaim, _ int) client.Object { return nc })...)
+		ExpectNotFound(ctx, env.Client, lo.Map(nodes, func(n *v1.Node, _ int) client.Object { return n })...)
+	})
+	It("should deprovision Machines and NodeClaims to consolidate pods onto a single Machine", func() {
+		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
+		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
+		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "current-on-demand",
+			Offerings: []cloudprovider.Offering{
+				{
+					CapacityType: v1alpha5.CapacityTypeOnDemand,
+					Zone:         "test-zone-1a",
+					Price:        1.5,
+					Available:    false,
+				},
+			},
+		})
+		replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "spot-replacement",
+			Offerings: []cloudprovider.Offering{
+				{
+					CapacityType: v1alpha5.CapacityTypeSpot,
+					Zone:         "test-zone-1a",
+					Price:        1.0,
+					Available:    true,
+				},
+				{
+					CapacityType: v1alpha5.CapacityTypeSpot,
+					Zone:         "test-zone-1b",
+					Price:        0.2,
+					Available:    true,
+				},
+				{
+					CapacityType: v1alpha5.CapacityTypeSpot,
+					Zone:         "test-zone-1c",
+					Price:        0.4,
+					Available:    true,
+				},
+			},
+		})
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			currentInstance,
+			replacementInstance,
+		}
+		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+			{
+				Key:      v1.LabelInstanceTypeStable,
+				Operator: v1.NodeSelectorOpIn,
+				Values:   []string{currentInstance.Name},
+			},
+		}
+		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
+			{
+				Key:      v1.LabelInstanceTypeStable,
+				Operator: v1.NodeSelectorOpIn,
+				Values:   []string{replacementInstance.Name},
+			},
+			{
+				Key:      v1alpha5.LabelCapacityType,
+				Operator: v1.NodeSelectorOpExists,
+			},
+		}
+
+		ExpectApplied(ctx, env.Client, provisioner, nodePool)
+
+		var machines []*v1alpha5.Machine
+		var nodeClaims []*v1beta1.NodeClaim
+		var nodes []*v1.Node
+		for i := 0; i < 2; i++ {
+			m, n := test.MachineAndNode(v1alpha5.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+						v1.LabelInstanceTypeStable:       currentInstance.Name,
+						v1alpha5.LabelCapacityType:       currentInstance.Offerings[0].CapacityType,
+						v1.LabelTopologyZone:             currentInstance.Offerings[0].Zone,
+					},
+				},
+				Status: v1alpha5.MachineStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			pod := test.Pod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("100m"),
+						v1.ResourceMemory: resource.MustParse("100Mi"),
+					},
+				},
+			})
+			machines = append(machines, m)
+			nodes = append(nodes, n)
+			ExpectApplied(ctx, env.Client, m, n, pod)
+			ExpectManualBinding(ctx, env.Client, pod, n)
+		}
+		for i := 0; i < 2; i++ {
+			nc, n := test.NodeClaimAndNode(v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey:     nodePool.Name,
+						v1.LabelInstanceTypeStable:   currentInstance.Name,
+						v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
+						v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			pod := test.Pod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("100m"),
+						v1.ResourceMemory: resource.MustParse("100Mi"),
+					},
+				},
+			})
+			nodeClaims = append(nodeClaims, nc)
+			nodes = append(nodes, n)
+			ExpectApplied(ctx, env.Client, nc, n, pod)
+			ExpectManualBinding(ctx, env.Client, pod, n)
+		}
+
+		// inform cluster state about nodes and machines
+		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, nodes, machines)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+		fakeClock.Step(10 * time.Minute)
+		wg := sync.WaitGroup{}
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+		// Cascade any deletion of the machines to the nodes
+		ExpectMachinesCascadeDeletion(ctx, env.Client, machines...)
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims...)
+
+		// all machines and nodeclaims should be replaced with a single nodeclaim
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+
+		ExpectNotFound(ctx, env.Client, lo.Map(machines, func(m *v1alpha5.Machine, _ int) client.Object { return m })...)
+		ExpectNotFound(ctx, env.Client, lo.Map(nodeClaims, func(nc *v1beta1.NodeClaim, _ int) client.Object { return nc })...)
+		ExpectNotFound(ctx, env.Client, lo.Map(nodes, func(n *v1.Node, _ int) client.Object { return n })...)
+	})
+	It("shouldn't consider a NodeClaim as a candidate if EnableNodePools/EnableNodeClaims isn't enabled", func() {
+		nodepoolutil.EnableNodePools = false
+		nodeclaimutil.EnableNodeClaims = false
+
+		nodePool.Spec.Disruption.ExpireAfter = v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)}
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Expired)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, nodeClaimNode)
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodeClaimNode}, []*v1beta1.NodeClaim{nodeClaim})
+
+		fakeClock.Step(10 * time.Minute)
+		wg := sync.WaitGroup{}
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+
+		// Expect that the expired nodeclaim is not gone
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		ExpectExists(ctx, env.Client, nodeClaim)
+		ExpectExists(ctx, env.Client, nodeClaimNode)
+	})
 })
 
 var _ = Describe("Pod Eviction Cost", func() {
