@@ -80,8 +80,11 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...*Candidat
 	if err != nil {
 		return Command{}, fmt.Errorf("filtering candidates, %w", err)
 	}
-	deprovisioningEligibleMachinesGauge.WithLabelValues(e.String()).Set(float64(len(candidates)))
-	disruptionEligibleNodesGauge.WithLabelValues(e.String()).Set(float64(len(candidates)))
+	deprovisioningEligibleMachinesGauge.WithLabelValues(e.Type()).Set(float64(len(candidates)))
+	disruptionEligibleNodesGauge.With(map[string]string{
+		methodLabel:            e.Type(),
+		consolidationTypeLabel: e.ConsolidationType(),
+	}).Set(float64(len(candidates)))
 
 	// Disrupt all empty expired candidates, as they require no scheduling simulations.
 	if empty := lo.Filter(candidates, func(c *Candidate, _ int) bool {
@@ -118,7 +121,10 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...*Candidat
 	return Command{}, nil
 }
 
-// String is the string representation of the Method
-func (e *Expiration) String() string {
+func (e *Expiration) Type() string {
 	return metrics.ExpirationReason
+}
+
+func (e *Expiration) ConsolidationType() string {
+	return ""
 }

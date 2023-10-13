@@ -76,8 +76,11 @@ func (d *Drift) ComputeCommand(ctx context.Context, candidates ...*Candidate) (C
 	if err != nil {
 		return Command{}, err
 	}
-	deprovisioningEligibleMachinesGauge.WithLabelValues(d.String()).Set(float64(len(candidates)))
-	disruptionEligibleNodesGauge.WithLabelValues(d.String()).Set(float64(len(candidates)))
+	deprovisioningEligibleMachinesGauge.WithLabelValues(d.Type()).Set(float64(len(candidates)))
+	disruptionEligibleNodesGauge.With(map[string]string{
+		methodLabel:            d.Type(),
+		consolidationTypeLabel: d.ConsolidationType(),
+	}).Set(float64(len(candidates)))
 
 	// Disrupt all empty drifted candidates, as they require no scheduling simulations.
 	if empty := lo.Filter(candidates, func(c *Candidate, _ int) bool {
@@ -117,7 +120,10 @@ func (d *Drift) ComputeCommand(ctx context.Context, candidates ...*Candidate) (C
 	return Command{}, nil
 }
 
-// String is the string representation of the Method
-func (d *Drift) String() string {
+func (d *Drift) Type() string {
 	return metrics.DriftReason
+}
+
+func (d *Drift) ConsolidationType() string {
+	return ""
 }

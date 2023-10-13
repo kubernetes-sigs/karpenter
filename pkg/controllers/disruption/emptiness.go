@@ -50,15 +50,21 @@ func (e *Emptiness) ComputeCommand(_ context.Context, candidates ...*Candidate) 
 	emptyCandidates := lo.Filter(candidates, func(cn *Candidate, _ int) bool {
 		return cn.NodeClaim.DeletionTimestamp.IsZero() && len(cn.pods) == 0
 	})
-	deprovisioningEligibleMachinesGauge.WithLabelValues(e.String()).Set(float64(len(candidates)))
-	disruptionEligibleNodesGauge.WithLabelValues(e.String()).Set(float64(len(candidates)))
+	deprovisioningEligibleMachinesGauge.WithLabelValues(e.Type()).Set(float64(len(candidates)))
+	disruptionEligibleNodesGauge.With(map[string]string{
+		methodLabel:            e.Type(),
+		consolidationTypeLabel: e.ConsolidationType(),
+	}).Set(float64(len(candidates)))
 
 	return Command{
 		candidates: emptyCandidates,
 	}, nil
 }
 
-// String is the string representation of the Method
-func (e *Emptiness) String() string {
+func (e *Emptiness) Type() string {
 	return metrics.EmptinessReason
+}
+
+func (e *Emptiness) ConsolidationType() string {
+	return ""
 }

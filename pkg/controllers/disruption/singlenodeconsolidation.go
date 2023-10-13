@@ -27,6 +27,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
+	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
 const SingleNodeConsolidationTimeoutDuration = 3 * time.Minute
@@ -51,8 +52,11 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, candidates
 	if err != nil {
 		return Command{}, fmt.Errorf("sorting candidates, %w", err)
 	}
-	deprovisioningEligibleMachinesGauge.WithLabelValues(s.String()).Set(float64(len(candidates)))
-	disruptionEligibleNodesGauge.WithLabelValues(s.String()).Set(float64(len(candidates)))
+	deprovisioningEligibleMachinesGauge.WithLabelValues(s.Type()).Set(float64(len(candidates)))
+	disruptionEligibleNodesGauge.With(map[string]string{
+		methodLabel:            s.Type(),
+		consolidationTypeLabel: s.ConsolidationType(),
+	}).Set(float64(len(candidates)))
 
 	v := NewValidation(consolidationTTL, s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder)
 
@@ -62,7 +66,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, candidates
 	for i, candidate := range candidates {
 		if s.clock.Now().After(timeout) {
 			deprovisioningConsolidationTimeoutsCounter.WithLabelValues(singleMachineConsolidationLabelValue).Inc()
-			deprovisioningConsolidationTimeoutsCounter.WithLabelValues(singleNodeConsolidationLabelValue).Inc()
+			deprovisioningConsolidationTimeoutsCounter.WithLabelValues(s.ConsolidationType()).Inc()
 			logging.FromContext(ctx).Debugf("abandoning single-node consolidation due to timeout after evaluating %d candidates", i)
 			return Command{}, nil
 		}
@@ -88,4 +92,12 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, candidates
 	// couldn't remove any candidate
 	s.markConsolidated()
 	return Command{}, nil
+}
+
+func (s *SingleNodeConsolidation) Type() string {
+	return metrics.ConsolidationReason
+}
+
+func (s *SingleNodeConsolidation) ConsolidationType() string {
+	return "single"
 }

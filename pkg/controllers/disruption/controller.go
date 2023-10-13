@@ -132,11 +132,11 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	}
 
 	// Attempt different disruption methods. We'll only let one method perform an action
-	for _, d := range c.methods {
-		c.recordRun(fmt.Sprintf("%T", d))
-		success, err := c.disrupt(ctx, d)
+	for _, m := range c.methods {
+		c.recordRun(fmt.Sprintf("%T", m))
+		success, err := c.disrupt(ctx, m)
 		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("disrupting via %q, %w", d, err)
+			return reconcile.Result{}, fmt.Errorf("disrupting via %q, %w", m.Type(), err)
 		}
 		if success {
 			return reconcile.Result{RequeueAfter: controller.Immediately}, nil
@@ -148,8 +148,11 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 }
 
 func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {
-	defer metrics.Measure(deprovisioningDurationHistogram.WithLabelValues(disruption.String()))()
-	defer metrics.Measure(disruptionEvaluationDurationHistogram.WithLabelValues(disruption.String()))
+	defer metrics.Measure(deprovisioningDurationHistogram.WithLabelValues(disruption.Type()))()
+	defer metrics.Measure(disruptionEvaluationDurationHistogram.With(map[string]string{
+		methodLabel:            disruption.Type(),
+		consolidationTypeLabel: disruption.ConsolidationType(),
+	}))()
 	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
@@ -176,28 +179,28 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	return true, nil
 }
 
-func (c *Controller) executeCommand(ctx context.Context, d Method, command Command) error {
+func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) error {
 	deprovisioningActionsPerformedCounter.With(map[string]string{
-		// TODO: make this just command.Action() since we've added the deprovisioner as its own label.
-		actionLabel:        fmt.Sprintf("%s/%s", d, command.Action()),
-		deprovisionerLabel: d.String(),
+		actionLabel:        fmt.Sprintf("%s/%s", m, cmd.Action()),
+		deprovisionerLabel: m.Type(),
 	}).Inc()
 	disruptionActionsPerformedCounter.With(map[string]string{
-		actionLabel:         string(command.Action()),
-		disruptionTypeLabel: d.String(),
+		actionLabel:            string(cmd.Action()),
+		methodLabel:            m.Type(),
+		consolidationTypeLabel: m.ConsolidationType(),
 	}).Inc()
-	logging.FromContext(ctx).Infof("disrupting via %s %s", d, command)
+	logging.FromContext(ctx).Infof("disrupting via %s %s", m, cmd)
 
-	reason := fmt.Sprintf("%s/%s", d, command.Action())
-	if command.Action() == ReplaceAction {
-		if err := c.launchReplacementNodeClaims(ctx, command, reason); err != nil {
+	reason := fmt.Sprintf("%s/%s", m.Type(), cmd.Action())
+	if cmd.Action() == ReplaceAction {
+		if err := c.launchReplacementNodeClaims(ctx, m, cmd); err != nil {
 			// If we failed to launch the replacement, don't disrupt.  If this is some permanent failure,
 			// we don't want to disrupt workloads with no way to provision new NodeClaims for them.
 			return fmt.Errorf("launching replacement, %w", err)
 		}
 	}
 
-	for _, candidate := range command.candidates {
+	for _, candidate := range cmd.candidates {
 		c.recorder.Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, reason)...)
 
 		if err := nodeclaimutil.Delete(ctx, c.kubeClient, candidate.NodeClaim); err != nil {
@@ -211,7 +214,7 @@ func (c *Controller) executeCommand(ctx context.Context, d Method, command Comma
 
 	// We wait for NodeClaims to delete to ensure we don't start another round of disruption
 	// until this node is fully deleted.
-	for _, oldCandidate := range command.candidates {
+	for _, oldCandidate := range cmd.candidates {
 		c.waitForDeletion(ctx, oldCandidate.NodeClaim)
 	}
 	return nil
@@ -219,29 +222,30 @@ func (c *Controller) executeCommand(ctx context.Context, d Method, command Comma
 
 // launchReplacementNodeClaims launches replacement NodeClaims and blocks until it is ready
 // nolint:gocyclo
-func (c *Controller) launchReplacementNodeClaims(ctx context.Context, action Command, reason string) error {
+func (c *Controller) launchReplacementNodeClaims(ctx context.Context, m Method, cmd Command) error {
+	reason := fmt.Sprintf("%s/%s", m.Type(), cmd.Action())
 	defer metrics.Measure(deprovisioningReplacementNodeInitializedHistogram)()
 	defer metrics.Measure(disruptionReplacementNodeClaimInitializedHistogram)()
 
-	stateNodes := lo.Map(action.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode })
+	stateNodes := lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode })
 
 	// taint the candidate nodes before we launch the replacements to prevent new pods from scheduling to the candidate nodes
 	if err := c.requireNoScheduleTaints(ctx, true, stateNodes...); err != nil {
 		return fmt.Errorf("cordoning nodes, %w", err)
 	}
 
-	nodeClaimKeys, err := c.provisioner.CreateNodeClaims(ctx, action.replacements, provisioning.WithReason(reason))
+	nodeClaimKeys, err := c.provisioner.CreateNodeClaims(ctx, cmd.replacements, provisioning.WithReason(reason))
 	if err != nil {
 		// untaint the nodes as the launch may fail (e.g. ICE)
 		err = multierr.Append(err, c.requireNoScheduleTaints(ctx, false, stateNodes...))
 		return err
 	}
-	if len(nodeClaimKeys) != len(action.replacements) {
+	if len(nodeClaimKeys) != len(cmd.replacements) {
 		// shouldn't ever occur since a partially failed CreateNodeClaims should return an error
-		return fmt.Errorf("expected %d replacements, got %d", len(action.replacements), len(nodeClaimKeys))
+		return fmt.Errorf("expected %d replacements, got %d", len(cmd.replacements), len(nodeClaimKeys))
 	}
 
-	candidateProviderIDs := lo.Map(action.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
+	candidateProviderIDs := lo.Map(cmd.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
 	// We have the new NodeClaims created at the API server so mark the old NodeClaims for deletion
 	c.cluster.MarkForDeletion(candidateProviderIDs...)
 
@@ -251,7 +255,10 @@ func (c *Controller) launchReplacementNodeClaims(ctx context.Context, action Com
 		// other transient error
 		if err := c.waitForReadiness(ctx, nodeClaimKeys[i], reason); err != nil {
 			deprovisioningReplacementNodeLaunchFailedCounter.WithLabelValues(reason).Inc()
-			disruptionReplacementNodeClaimFailedCounter.WithLabelValues(reason).Inc()
+			disruptionReplacementNodeClaimFailedCounter.With(map[string]string{
+				methodLabel:            m.Type(),
+				consolidationTypeLabel: m.ConsolidationType(),
+			}).Inc()
 			errs[i] = err
 		}
 	})

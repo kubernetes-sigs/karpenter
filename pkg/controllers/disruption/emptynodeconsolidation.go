@@ -28,6 +28,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
+	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
 // EmptyNodeConsolidation is the consolidation controller that performs multi-nodeclaim consolidation of entirely empty nodes
@@ -49,8 +50,11 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 	if err != nil {
 		return Command{}, fmt.Errorf("sorting candidates, %w", err)
 	}
-	deprovisioningEligibleMachinesGauge.WithLabelValues(c.String()).Set(float64(len(candidates)))
-	disruptionEligibleNodesGauge.WithLabelValues(c.String()).Set(float64(len(candidates)))
+	deprovisioningEligibleMachinesGauge.WithLabelValues(c.Type()).Set(float64(len(candidates)))
+	disruptionEligibleNodesGauge.With(map[string]string{
+		methodLabel:            c.Type(),
+		consolidationTypeLabel: c.ConsolidationType(),
+	}).Set(float64(len(candidates)))
 
 	// select the entirely empty NodeClaims
 	emptyCandidates := lo.Filter(candidates, func(n *Candidate, _ int) bool { return len(n.pods) == 0 })
@@ -91,4 +95,12 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 		}
 	}
 	return cmd, nil
+}
+
+func (c *EmptyNodeConsolidation) Type() string {
+	return metrics.ConsolidationReason
+}
+
+func (c *EmptyNodeConsolidation) ConsolidationType() string {
+	return "empty"
 }

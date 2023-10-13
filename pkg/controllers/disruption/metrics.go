@@ -32,16 +32,13 @@ const (
 	deprovisioningSubsystem = "deprovisioning"
 	deprovisionerLabel      = "deprovisioner"
 
-	disruptionSubsystem = "disruption"
-	disruptionTypeLabel = "disruption_type"
-	actionLabel         = "action"
-	consolidationType   = "consolidation_type"
+	disruptionSubsystem    = "disruption"
+	actionLabel            = "action"
+	methodLabel            = "method"
+	consolidationTypeLabel = "consolidation_type"
 
 	multiMachineConsolidationLabelValue  = "multi-machine"
 	singleMachineConsolidationLabelValue = "single-machine"
-
-	multiNodeConsolidationLabelValue  = "multi_node"
-	singleNodeConsolidationLabelValue = "single_node"
 )
 
 var (
@@ -88,7 +85,7 @@ var (
 			Name:      "consolidation_timeouts",
 			Help:      "Number of times the Consolidation algorithm has reached a timeout. Labeled by consolidation type.",
 		},
-		[]string{consolidationType},
+		[]string{consolidationTypeLabel},
 	)
 	deprovisioningReplacementNodeLaunchFailedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -106,11 +103,11 @@ var (
 		prometheus.HistogramOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: disruptionSubsystem,
-			Name:      "evluation_duration_seconds",
+			Name:      "evaluation_duration_seconds",
 			Help:      "Duration of the disruption evaluation process in seconds.",
 			Buckets:   metrics.DurationBuckets(),
 		},
-		[]string{disruptionTypeLabel},
+		[]string{methodLabel, consolidationTypeLabel},
 	)
 	disruptionReplacementNodeClaimInitializedHistogram = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
@@ -124,37 +121,37 @@ var (
 	disruptionReplacementNodeClaimFailedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metrics.Namespace,
-			Subsystem: deprovisioningSubsystem,
-			Name:      "replacement_nodeclaim_failures",
+			Subsystem: disruptionSubsystem,
+			Name:      "replacement_nodeclaim_failures_total",
 			Help:      "The number of times that Karpenter failed to launch a replacement node for disruption. Labeled by disruption type.",
 		},
-		[]string{disruptionTypeLabel},
+		[]string{methodLabel, consolidationTypeLabel},
 	)
 	disruptionActionsPerformedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: disruptionSubsystem,
-			Name:      "actions_performed",
-			Help:      "Number of deprovisioning actions performed. Labeled by disruption type.",
+			Name:      "actions_performed_total",
+			Help:      "Number of disruption methods performed. Labeled by disruption type.",
 		},
-		[]string{actionLabel, disruptionTypeLabel},
+		[]string{actionLabel, methodLabel, consolidationTypeLabel},
 	)
 	disruptionEligibleNodesGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: disruptionSubsystem,
 			Name:      "eligible_nodes",
-			Help:      "Number of nodes eligible for disruption by Karpenter. Labeled by disruption type",
+			Help:      "Number of nodes eligible for disruption by Karpenter. Labeled by disruption type.",
 		},
-		[]string{disruptionTypeLabel},
+		[]string{methodLabel, consolidationTypeLabel},
 	)
 	disruptionConsolidationTimeoutTotalCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: disruptionSubsystem,
-			Name:      "consolidation_timeout_total",
+			Name:      "consolidation_timeouts_total",
 			Help:      "Number of times the Consolidation algorithm has reached a timeout. Labeled by consolidation type.",
 		},
-		[]string{consolidationType},
+		[]string{consolidationTypeLabel},
 	)
 )

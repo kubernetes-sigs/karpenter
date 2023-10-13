@@ -1249,7 +1249,7 @@ var _ = Describe("Combined/Disruption", func() {
 		fakeClock.Step(10 * time.Minute)
 		wg := sync.WaitGroup{}
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Expect that the expired nodeclaim is not gone
 		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))

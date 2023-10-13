@@ -38,7 +38,8 @@ import (
 type Method interface {
 	ShouldDisrupt(context.Context, *Candidate) bool
 	ComputeCommand(context.Context, ...*Candidate) (Command, error)
-	String() string
+	Type() string
+	ConsolidationType() string
 }
 
 type CandidateFilter func(context.Context, *Candidate) bool

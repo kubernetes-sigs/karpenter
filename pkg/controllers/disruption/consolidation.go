@@ -33,7 +33,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
-	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 )
 
@@ -62,11 +61,6 @@ func makeConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient cli
 		cloudProvider: cloudProvider,
 		recorder:      recorder,
 	}
-}
-
-// String is the string representation of the Method
-func (c *consolidation) String() string {
-	return metrics.ConsolidationReason
 }
 
 // sortAndFilterCandidates orders candidates by the disruptionCost, removing any that we already know won't
