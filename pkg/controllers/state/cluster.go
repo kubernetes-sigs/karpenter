@@ -41,6 +41,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
+	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
@@ -266,7 +267,7 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 
 	if node.Spec.ProviderID == "" {
 		// If we know that we own this node, we shouldn't allow the providerID to be empty
-		if node.Labels[v1alpha5.ProvisionerNameLabelKey] != "" || node.Labels[v1beta1.NodePoolLabelKey] != "" {
+		if node.Labels[v1alpha5.ProvisionerNameLabelKey] != "" || (node.Labels[v1beta1.NodePoolLabelKey] != "" && nodepoolutil.EnableNodePools) {
 			return nil
 		}
 		node.Spec.ProviderID = node.Name
@@ -509,7 +510,7 @@ func (c *Cluster) populateInflight(ctx context.Context, n *StateNode) error {
 	if n.inflightInitialized {
 		return nil
 	}
-	// If the node ies already initialized, we don't need to populate its inflight capacity
+	// If the node is already initialized, we don't need to populate its inflight capacity
 	// since its capacity is already represented by the node status
 	if n.Initialized() {
 		return nil
