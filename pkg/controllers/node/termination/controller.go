@@ -35,8 +35,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/controllers/termination/terminator"
-	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/termination/terminator/events"
+	"github.com/aws/karpenter-core/pkg/controllers/node/termination/terminator"
+	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/node/termination/terminator/events"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
@@ -64,7 +64,7 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 }
 
 func (c *Controller) Name() string {
-	return "termination"
+	return "node.termination"
 }
 
 func (c *Controller) Reconcile(_ context.Context, _ *v1.Node) (reconcile.Result, error) {

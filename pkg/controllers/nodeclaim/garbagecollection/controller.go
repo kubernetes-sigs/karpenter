@@ -49,7 +49,7 @@ func NewController(c clock.Clock, kubeClient client.Client, cloudProvider cloudp
 }
 
 func (c *Controller) Name() string {
-	return "machine.garbagecollection"
+	return "nodeclaim.garbagecollection"
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {

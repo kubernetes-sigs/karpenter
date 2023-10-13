@@ -33,9 +33,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/node/termination/terminator/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 
-	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/termination/terminator/events"
 	"github.com/aws/karpenter-core/pkg/events"
 )
 

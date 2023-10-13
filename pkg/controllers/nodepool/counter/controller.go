@@ -104,7 +104,7 @@ func NewNodePoolController(kubeClient client.Client, cluster *state.Cluster) cor
 }
 
 func (c *NodePoolController) Name() string {
-	return "counter"
+	return "nodepool.counter"
 }
 
 func (c *NodePoolController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {

@@ -122,7 +122,7 @@ func NewNodeClaimController(clk clock.Clock, kubeClient client.Client, recorder 
 }
 
 func (c *NodeClaimController) Name() string {
-	return "consistency"
+	return "nodeclaim.consistency"
 }
 
 func (c *NodeClaimController) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
