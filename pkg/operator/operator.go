@@ -78,27 +78,26 @@ func NewOperator() (context.Context, *Operator) {
 	ctx = knativeinjection.WithNamespaceScope(ctx, system.Namespace())
 
 	// Options
-	ctx = injection.WithOptionsOrDie(ctx, apis.Options...)
-	opts := options.FromContext(ctx)
+	ctx = injection.WithOptionsOrDie(ctx, options.Injectables...)
 
 	// Make the Karpenter binary aware of the container memory limit
 	// https://pkg.go.dev/runtime/debug#SetMemoryLimit
-	if opts.MemoryLimit > 0 {
-		newLimit := int64(float64(opts.MemoryLimit) * 0.9)
+	if options.FromContext(ctx).MemoryLimit > 0 {
+		newLimit := int64(float64(options.FromContext(ctx).MemoryLimit) * 0.9)
 		debug.SetMemoryLimit(newLimit)
 	}
 
 	// Webhook
 	ctx = webhook.WithOptions(ctx, webhook.Options{
-		Port:        opts.WebhookPort,
-		ServiceName: opts.ServiceName,
-		SecretName:  fmt.Sprintf("%s-cert", opts.ServiceName),
+		Port:        options.FromContext(ctx).WebhookPort,
+		ServiceName: options.FromContext(ctx).ServiceName,
+		SecretName:  fmt.Sprintf("%s-cert", options.FromContext(ctx).ServiceName),
 		GracePeriod: 5 * time.Second,
 	})
 
 	// Client Config
 	config := controllerruntime.GetConfigOrDie()
-	config.RateLimiter = flowcontrol.NewTokenBucketRateLimiter(float32(opts.KubeClientQPS), opts.KubeClientBurst)
+	config.RateLimiter = flowcontrol.NewTokenBucketRateLimiter(float32(options.FromContext(ctx).KubeClientQPS), options.FromContext(ctx).KubeClientBurst)
 	config.UserAgent = appName
 
 	// Client
@@ -108,8 +107,8 @@ func NewOperator() (context.Context, *Operator) {
 	ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
 
 	// Temporarily merge settings into options until configmap is removed
-	for _, o := range apis.Options {
-		ctx = o.MergeSettings(ctx, apis.Settings...)
+	for _, o := range options.Injectables {
+		ctx = o.MergeSettings(ctx)
 	}
 
 	// Logging
@@ -120,21 +119,24 @@ func NewOperator() (context.Context, *Operator) {
 	// Manager
 	mgrOpts := controllerruntime.Options{
 		Logger:                     logging.IgnoreDebugEvents(zapr.NewLogger(logger.Desugar())),
-		LeaderElection:             opts.EnableLeaderElection,
+		LeaderElection:             options.FromContext(ctx).EnableLeaderElection,
 		LeaderElectionID:           "karpenter-leader-election",
 		LeaderElectionResourceLock: resourcelock.LeasesResourceLock,
 		LeaderElectionNamespace:    system.Namespace(),
 		Scheme:                     scheme.Scheme,
 		Metrics: server.Options{
-			BindAddress: fmt.Sprintf(":%d", opts.MetricsPort),
+			BindAddress: fmt.Sprintf(":%d", options.FromContext(ctx).MetricsPort),
 		},
-		HealthProbeBindAddress: fmt.Sprintf(":%d", opts.HealthProbePort),
+		HealthProbeBindAddress: fmt.Sprintf(":%d", options.FromContext(ctx).HealthProbePort),
 		BaseContext: func() context.Context {
-			mgrCtx := context.Background()
-			mgrCtx = knativelogging.WithLogger(mgrCtx, logger)
-			mgrCtx = injection.WithSettingsOrDie(mgrCtx, kubernetesInterface, apis.Settings...)
-			mgrCtx = injection.WithOptionsFromContext(mgrCtx, ctx, apis.Options...)
-			return mgrCtx
+			ctx := context.Background()
+			ctx = knativelogging.WithLogger(ctx, logger)
+			ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
+			ctx = injection.WithOptionsOrDie(ctx, options.Injectables...)
+			for _, o := range options.Injectables {
+				ctx = o.MergeSettings(ctx)
+			}
+			return ctx
 		},
 		Cache: cache.Options{
 			ByObject: map[client.Object]cache.ByObject{
@@ -144,7 +146,7 @@ func NewOperator() (context.Context, *Operator) {
 			},
 		},
 	}
-	if opts.EnableProfiling {
+	if options.FromContext(ctx).EnableProfiling {
 		// TODO @joinnis: Investigate the mgrOpts.PprofBindAddress that would allow native support for pprof
 		// On initial look, it seems like this native pprof doesn't support some of the routes that we have here
 		// like "/debug/pprof/heap" or "/debug/pprof/block"

@@ -70,17 +70,19 @@ var _ = Describe("Options", func() {
 	})
 
 	Context("Merge", func() {
-		settings := &settings.Settings{
-			BatchMaxDuration:  50 * time.Second,
-			BatchIdleDuration: 50 * time.Second,
-			DriftEnabled:      true,
-		}
+		BeforeEach(func() {
+			ctx = settings.ToContext(ctx, &settings.Settings{
+				BatchMaxDuration:  50 * time.Second,
+				BatchIdleDuration: 50 * time.Second,
+				DriftEnabled:      true,
+			})
+		})
 
 		It("shouldn't overwrite BatchMaxDuration when specified by CLI", func() {
 			ctx, err := options.New().Inject(ctx, "--batch-max-duration", "1s")
 			opts := options.FromContext(ctx)
 			Expect(err).To(BeNil())
-			ctx = opts.MergeSettings(ctx, settings)
+			ctx = opts.MergeSettings(ctx, &settings.Settings{})
 			opts = options.FromContext(ctx)
 			Expect(opts.BatchMaxDuration).To(Equal(time.Second))
 		})
@@ -88,7 +90,7 @@ var _ = Describe("Options", func() {
 			ctx, err := options.New().Inject(ctx, "--batch-idle-duration", "1s")
 			opts := options.FromContext(ctx)
 			Expect(err).To(BeNil())
-			ctx = opts.MergeSettings(ctx, settings)
+			ctx = opts.MergeSettings(ctx, &settings.Settings{})
 			opts = options.FromContext(ctx)
 			Expect(opts.BatchIdleDuration).To(Equal(time.Second))
 		})
@@ -96,7 +98,7 @@ var _ = Describe("Options", func() {
 			ctx, err := options.New().Inject(ctx, "--feature-gates", "Drift=false")
 			opts := options.FromContext(ctx)
 			Expect(err).To(BeNil())
-			ctx = opts.MergeSettings(ctx, settings)
+			ctx = opts.MergeSettings(ctx, &settings.Settings{})
 			opts = options.FromContext(ctx)
 			Expect(opts.FeatureGates.Drift).To(BeFalse())
 		})
@@ -104,7 +106,7 @@ var _ = Describe("Options", func() {
 			ctx, err := options.New().Inject(ctx, "--batch-max-duration", "1s", "--feature-gates", "Drift=false")
 			opts := options.FromContext(ctx)
 			Expect(err).To(BeNil())
-			ctx = opts.MergeSettings(ctx, settings)
+			ctx = opts.MergeSettings(ctx, &settings.Settings{})
 			opts = options.FromContext(ctx)
 			Expect(opts.BatchIdleDuration).To(Equal(50 * time.Second))
 		})

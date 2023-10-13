@@ -24,7 +24,4 @@ import (
 type Injectable interface {
 	ConfigMap() string
 	Inject(context.Context, *v1.ConfigMap) (context.Context, error)
-
-	// Needed for merging settings into options. May be removed with configmap.
-	FromContext(context.Context) Injectable
 }

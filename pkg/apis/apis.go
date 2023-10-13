@@ -24,7 +24,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/operator/options"
 	"github.com/aws/karpenter-core/pkg/utils/functional"
 )
 
@@ -37,7 +36,6 @@ var (
 	// AddToScheme may be used to add all resources defined in the project to a Scheme
 	AddToScheme = Builder.AddToScheme
 	Settings    = []settings.Injectable{&settings.Settings{}}
-	Options     = []options.Injectable{&options.Options{}}
 )
 
 //go:generate controller-gen crd:generateEmbeddedObjectMeta=true object:headerFile="../../hack/boilerplate.go.txt" paths="./..." output:crd:artifacts:config=crds

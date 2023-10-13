@@ -57,13 +57,6 @@ func WithOptionsOrDie(ctx context.Context, opts ...options.Injectable) context.C
 	return ctx
 }
 
-func WithOptionsFromContext(dest context.Context, source context.Context, opts ...options.Injectable) context.Context {
-	for _, opt := range opts {
-		dest = opt.ToContext(dest, opt.FromContext(source))
-	}
-	return dest
-}
-
 // WithSettingsOrDie injects the settings into the context for all configMaps passed through the registrations
 // NOTE: Settings are resolved statically into the global context.Context at startup. This was changed from updating them
 // dynamically at runtime due to the necessity of having to build logic around re-queueing to ensure that settings are

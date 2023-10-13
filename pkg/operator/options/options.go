@@ -29,7 +29,11 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/env"
 )
 
-var validLogLevels = []string{"", "debug", "info", "error"}
+var (
+	validLogLevels = []string{"", "debug", "info", "error"}
+
+	Injectables = []Injectable{&Options{}}
+)
 
 type optionsKey struct{}
 
@@ -112,7 +116,7 @@ func (*Options) Inject(ctx context.Context, args ...string) (context.Context, er
 		return ctx, fmt.Errorf("failed to validate cli flags / env vars, invalid log level %q", o.LogLevel)
 	}
 
-	o.FeatureGates = FeatureGatesFromStr(o.FeatureGates.inputStr)
+	o.FeatureGates = MustParseFeatureGates(o.FeatureGates.inputStr)
 
 	// Check if shared fields have been set. If they haven't, they may be ovewritten by settings parsed from configmaps.
 	o.FlagSet.Visit(func(f *flag.Flag) {
@@ -135,44 +139,26 @@ func (*Options) Inject(ctx context.Context, args ...string) (context.Context, er
 		o.FeatureGatesSet = true
 	}
 
-	ctx = ToContext(ctx, o)
-	return ctx, nil
+	return ToContext(ctx, o), nil
 }
 
-// MergeSettings applies settings specified in the v1alpha5 configmap to options. If the value was already specified by
-// a CLI argument or environment variable, that value will be used.
-func (*Options) MergeSettings(ctx context.Context, injectables ...settings.Injectable) context.Context {
-	for _, in := range injectables {
-		_, ok := in.(*settings.Settings)
-		if !ok {
-			continue
-		}
-		s := in.FromContext(ctx).(*settings.Settings)
-		o := FromContext(ctx)
-		mergeField(&o.BatchMaxDuration, s.BatchMaxDuration, o.BatchMaxDurationSet)
-		mergeField(&o.BatchIdleDuration, s.BatchIdleDuration, o.BatchIdleDurationSet)
-		mergeField(&o.FeatureGates.Drift, s.DriftEnabled, o.FeatureGatesSet)
-		ctx = ToContext(ctx, o)
+// MergeSettings merges the settings in the context with the options in the context. Values already set in options take
+// precedent. If a value is specified in neither settings nor options, the default value is used.
+// Note: default values are applied to settings so its safe to use settings for unset option fields without knowing if
+// the value was set by the configmap.
+func (*Options) MergeSettings(ctx context.Context) context.Context {
+	s := settings.FromContext(ctx)
+	if s == nil {
+		return ctx
 	}
-
-	// Note: settings also has default values applied to it. If the option is specified by neither Settings nor Options,
-	// the default value is used from Settings.
-	return ctx
+	o := FromContext(ctx)
+	mergeField(&o.BatchMaxDuration, s.BatchMaxDuration, o.BatchMaxDurationSet)
+	mergeField(&o.BatchIdleDuration, s.BatchIdleDuration, o.BatchIdleDurationSet)
+	mergeField(&o.FeatureGates.Drift, s.DriftEnabled, o.FeatureGatesSet)
+	return ToContext(ctx, o)
 }
 
-func (*Options) ToContext(ctx context.Context, in Injectable) context.Context {
-	opts, ok := in.(*Options)
-	if !ok {
-		panic("failed to inject options into context, incorrect type")
-	}
-	return ToContext(ctx, opts)
-}
-
-func (*Options) FromContext(ctx context.Context) Injectable {
-	return FromContext(ctx)
-}
-
-func FeatureGatesFromStr(gateStr string) FeatureGates {
+func MustParseFeatureGates(gateStr string) FeatureGates {
 	gateMap := map[string]bool{}
 	gates := FeatureGates{}
 

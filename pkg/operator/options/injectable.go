@@ -14,18 +14,10 @@ limitations under the License.
 
 package options
 
-import (
-	"context"
-
-	"github.com/aws/karpenter-core/pkg/apis/settings"
-)
+import "context"
 
 // Injectable defines a ConfigMap registration to be loaded into context on startup
 type Injectable interface {
 	Inject(context.Context, ...string) (context.Context, error)
-	MergeSettings(context.Context, ...settings.Injectable) context.Context
-
-	// Note: required to extract options from root context and insert into manager context
-	ToContext(context.Context, Injectable) context.Context
-	FromContext(context.Context) Injectable
+	MergeSettings(context.Context) context.Context
 }
