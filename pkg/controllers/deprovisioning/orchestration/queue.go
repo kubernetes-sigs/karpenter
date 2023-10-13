@@ -131,6 +131,12 @@ func (q *Queue) Builder(_ context.Context, m manager.Manager) controller.Builder
 }
 
 func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
+	// Check if the queue is empty. client-go recommends not using this function to gate the subsequent
+	// get call, but since we're popping items off the queue synchronously, there should be no synchonization
+	// issues.
+	if q.Len() == 0 {
+		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
+	}
 	// Get command from queue. This waits until queue is non-empty.
 	item, shutdown := q.RateLimitingInterface.Get()
 	if shutdown {
@@ -181,7 +187,7 @@ func (q *Queue) Process(ctx context.Context, cmd *Command) error {
 	return nil
 }
 
-// Add adds commands to the Queue
+// Add will launch replacement nodeClaims and add the command to the queue
 // Each command added to the queue should already be validated and ready for execution.
 func (q *Queue) Add(ctx context.Context, candidates []*state.StateNode, replacements []*scheduling.NodeClaim, reason string) error {
 	providerIDs := lo.Map(candidates, func(s *state.StateNode, _ int) string {
