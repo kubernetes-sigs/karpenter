@@ -116,7 +116,7 @@ func NewNode() *StateNode {
 }
 
 func (in *StateNode) OwnerKey() nodepoolutil.Key {
-	if in.Labels()[v1beta1.NodePoolLabelKey] != "" {
+	if in.Labels()[v1beta1.NodePoolLabelKey] != "" && nodepoolutil.EnableNodePools {
 		return nodepoolutil.Key{Name: in.Labels()[v1beta1.NodePoolLabelKey], IsProvisioner: false}
 	}
 	if in.Labels()[v1alpha5.ProvisionerNameLabelKey] != "" {
@@ -362,7 +362,7 @@ func (in *StateNode) Nominated() bool {
 func (in *StateNode) Managed() bool {
 	return in.NodeClaim != nil ||
 		(in.Node != nil && in.Node.Labels[v1alpha5.ProvisionerNameLabelKey] != "") ||
-		(in.Node != nil && in.Node.Labels[v1beta1.NodePoolLabelKey] != "")
+		(in.Node != nil && in.Node.Labels[v1beta1.NodePoolLabelKey] != "" && nodepoolutil.EnableNodePools)
 }
 
 func (in *StateNode) updateForPod(ctx context.Context, kubeClient client.Client, pod *v1.Pod) error {
