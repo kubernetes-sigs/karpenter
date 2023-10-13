@@ -97,6 +97,12 @@ func (q *Queue) Add(pods ...*v1.Pod) {
 }
 
 func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
+	// Check if the queue is empty. client-go recommends not using this function to gate the subsequent
+	// get call, but since we're popping items off the queue synchronously, there should be no synchonization
+	// issues.
+	if q.Len() == 0 {
+		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
+	}
 	// Get pod from queue. This waits until queue is non-empty.
 	item, shutdown := q.RateLimitingInterface.Get()
 	if shutdown {
