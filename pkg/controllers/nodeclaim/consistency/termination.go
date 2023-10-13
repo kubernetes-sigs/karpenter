@@ -22,7 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
+	"github.com/aws/karpenter-core/pkg/controllers/disruption"
 	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
 )
 
@@ -42,7 +42,7 @@ func (t *Termination) Check(ctx context.Context, node *v1.Node, nodeClaim *v1bet
 	if nodeClaim.DeletionTimestamp.IsZero() {
 		return nil, nil
 	}
-	pdbs, err := deprovisioning.NewPDBLimits(ctx, t.kubeClient)
+	pdbs, err := disruption.NewPDBLimits(ctx, t.kubeClient)
 	if err != nil {
 		return nil, err
 	}

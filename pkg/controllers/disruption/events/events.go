@@ -41,7 +41,7 @@ func Launching(nodeClaim *v1beta1.NodeClaim, reason string) events.Event {
 	return events.Event{
 		InvolvedObject: nodeClaim,
 		Type:           v1.EventTypeNormal,
-		Reason:         "DeprovisioningLaunching",
+		Reason:         "DisruptionLaunching",
 		Message:        fmt.Sprintf("Launching NodeClaim: %s", cases.Title(language.Und, cases.NoLower).String(reason)),
 		DedupeValues:   []string{string(nodeClaim.UID), reason},
 	}
@@ -61,8 +61,8 @@ func WaitingOnReadiness(nodeClaim *v1beta1.NodeClaim) events.Event {
 	return events.Event{
 		InvolvedObject: nodeClaim,
 		Type:           v1.EventTypeNormal,
-		Reason:         "DeprovisioningWaitingReadiness",
-		Message:        "Waiting on readiness to continue deprovisioning",
+		Reason:         "DisruptionWaitingReadiness",
+		Message:        "Waiting on readiness to continue disruption",
 		DedupeValues:   []string{string(nodeClaim.UID)},
 	}
 }
@@ -81,47 +81,75 @@ func WaitingOnDeletion(nodeClaim *v1beta1.NodeClaim) events.Event {
 	return events.Event{
 		InvolvedObject: nodeClaim,
 		Type:           v1.EventTypeNormal,
-		Reason:         "DeprovisioningWaitingDeletion",
-		Message:        "Waiting on deletion to continue deprovisioning",
+		Reason:         "DisruptionWaitingDeletion",
+		Message:        "Waiting on deletion to continue disruption",
 		DedupeValues:   []string{string(nodeClaim.UID)},
 	}
 }
 
 func Terminating(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) []events.Event {
-	evts := []events.Event{
+	if nodeClaim.IsMachine {
+		machine := machineutil.NewFromNodeClaim(nodeClaim)
+		return []events.Event{
+			{
+				InvolvedObject: node,
+				Type:           v1.EventTypeNormal,
+				Reason:         "DeprovisioningTerminating",
+				Message:        fmt.Sprintf("Deprovisioning Node: %s", cases.Title(language.Und, cases.NoLower).String(reason)),
+				DedupeValues:   []string{string(node.UID), reason},
+			},
+			{
+				InvolvedObject: machine,
+				Type:           v1.EventTypeNormal,
+				Reason:         "DeprovisioningTerminating",
+				Message:        fmt.Sprintf("Deprovisioning Machine: %s", cases.Title(language.Und, cases.NoLower).String(reason)),
+				DedupeValues:   []string{string(machine.UID), reason},
+			},
+		}
+	}
+	return []events.Event{
 		{
 			InvolvedObject: node,
 			Type:           v1.EventTypeNormal,
-			Reason:         "DeprovisioningTerminating",
-			Message:        fmt.Sprintf("Deprovisioning Node: %s", cases.Title(language.Und, cases.NoLower).String(reason)),
+			Reason:         "DisruptionTerminating",
+			Message:        fmt.Sprintf("Disrupting Node: %s", cases.Title(language.Und, cases.NoLower).String(reason)),
 			DedupeValues:   []string{string(node.UID), reason},
 		},
-	}
-	if nodeClaim.IsMachine {
-		machine := machineutil.NewFromNodeClaim(nodeClaim)
-		evts = append(evts, events.Event{
-			InvolvedObject: machine,
-			Type:           v1.EventTypeNormal,
-			Reason:         "DeprovisioningTerminating",
-			Message:        fmt.Sprintf("Deprovisioning Machine: %s", cases.Title(language.Und, cases.NoLower).String(reason)),
-			DedupeValues:   []string{string(machine.UID), reason},
-		})
-	} else {
-		evts = append(evts, events.Event{
+		{
 			InvolvedObject: nodeClaim,
 			Type:           v1.EventTypeNormal,
-			Reason:         "DeprovisioningTerminating",
-			Message:        fmt.Sprintf("Deprovisioning NodeClaim: %s", cases.Title(language.Und, cases.NoLower).String(reason)),
+			Reason:         "DisruptionTerminating",
+			Message:        fmt.Sprintf("Disrupting NodeClaim: %s", cases.Title(language.Und, cases.NoLower).String(reason)),
 			DedupeValues:   []string{string(nodeClaim.UID), reason},
-		})
+		},
 	}
-	return evts
 }
 
 // Unconsolidatable is an event that informs the user that a Machine/Node combination cannot be consolidated
 // due to the state of the Machine/Node or due to some state of the pods that are scheduled to the Machine/Node
 func Unconsolidatable(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) []events.Event {
-	evts := []events.Event{
+	if nodeClaim.IsMachine {
+		machine := machineutil.NewFromNodeClaim(nodeClaim)
+		return []events.Event{
+			{
+				InvolvedObject: node,
+				Type:           v1.EventTypeNormal,
+				Reason:         "Unconsolidatable",
+				Message:        reason,
+				DedupeValues:   []string{string(node.UID)},
+				DedupeTimeout:  time.Minute * 15,
+			},
+			{
+				InvolvedObject: machine,
+				Type:           v1.EventTypeNormal,
+				Reason:         "Unconsolidatable",
+				Message:        reason,
+				DedupeValues:   []string{string(machine.UID)},
+				DedupeTimeout:  time.Minute * 15,
+			},
+		}
+	}
+	return []events.Event{
 		{
 			InvolvedObject: node,
 			Type:           v1.EventTypeNormal,
@@ -130,59 +158,53 @@ func Unconsolidatable(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string
 			DedupeValues:   []string{string(node.UID)},
 			DedupeTimeout:  time.Minute * 15,
 		},
-	}
-	if nodeClaim.IsMachine {
-		machine := machineutil.NewFromNodeClaim(nodeClaim)
-		evts = append(evts, events.Event{
-			InvolvedObject: machine,
-			Type:           v1.EventTypeNormal,
-			Reason:         "Unconsolidatable",
-			Message:        reason,
-			DedupeValues:   []string{string(machine.UID)},
-			DedupeTimeout:  time.Minute * 15,
-		})
-	} else {
-		evts = append(evts, events.Event{
+		{
 			InvolvedObject: nodeClaim,
 			Type:           v1.EventTypeNormal,
 			Reason:         "Unconsolidatable",
 			Message:        reason,
 			DedupeValues:   []string{string(nodeClaim.UID)},
 			DedupeTimeout:  time.Minute * 15,
-		})
+		},
 	}
-	return evts
 }
 
 // Blocked is an event that informs the user that a Machine/Node combination is blocked on deprovisioning
 // due to the state of the Machine/Node or due to some state of the pods that are scheduled to the Machine/Node
 func Blocked(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) []events.Event {
-	evts := []events.Event{
+	if nodeClaim.IsMachine {
+		machine := machineutil.NewFromNodeClaim(nodeClaim)
+		return []events.Event{
+			{
+				InvolvedObject: node,
+				Type:           v1.EventTypeNormal,
+				Reason:         "DeprovisioningBlocked",
+				Message:        fmt.Sprintf("Cannot deprovision Node: %s", reason),
+				DedupeValues:   []string{string(node.UID)},
+			},
+			{
+				InvolvedObject: machine,
+				Type:           v1.EventTypeNormal,
+				Reason:         "DeprovisioningBlocked",
+				Message:        fmt.Sprintf("Cannot deprovision Machine: %s", reason),
+				DedupeValues:   []string{string(machine.UID)},
+			},
+		}
+	}
+	return []events.Event{
 		{
 			InvolvedObject: node,
 			Type:           v1.EventTypeNormal,
-			Reason:         "DeprovisioningBlocked",
-			Message:        fmt.Sprintf("Cannot deprovision Node: %s", reason),
+			Reason:         "DisruptionBlocked",
+			Message:        fmt.Sprintf("Cannot disrupt Node: %s", reason),
 			DedupeValues:   []string{string(node.UID)},
 		},
-	}
-	if nodeClaim.IsMachine {
-		machine := machineutil.NewFromNodeClaim(nodeClaim)
-		evts = append(evts, events.Event{
-			InvolvedObject: machine,
-			Type:           v1.EventTypeNormal,
-			Reason:         "DeprovisioningBlocked",
-			Message:        fmt.Sprintf("Cannot deprovision Machine: %s", reason),
-			DedupeValues:   []string{string(machine.UID)},
-		})
-	} else {
-		evts = append(evts, events.Event{
+		{
 			InvolvedObject: nodeClaim,
 			Type:           v1.EventTypeNormal,
-			Reason:         "DeprovisioningBlocked",
-			Message:        fmt.Sprintf("Cannot deprovision NodeClaim: %s", reason),
+			Reason:         "DisruptionBlocked",
+			Message:        fmt.Sprintf("Cannot disrupt NodeClaim: %s", reason),
 			DedupeValues:   []string{string(nodeClaim.UID)},
-		})
+		},
 	}
-	return evts
 }

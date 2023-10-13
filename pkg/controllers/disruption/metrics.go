@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package deprovisioning
+package disruption
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
@@ -23,17 +23,25 @@ import (
 
 func init() {
 	crmetrics.Registry.MustRegister(deprovisioningDurationHistogram, deprovisioningReplacementNodeInitializedHistogram, deprovisioningActionsPerformedCounter,
-		deprovisioningEligibleMachinesGauge, deprovisioningReplacementNodeLaunchFailedCounter, deprovisioningConsolidationTimeoutsCounter)
+		deprovisioningEligibleMachinesGauge, deprovisioningReplacementNodeLaunchFailedCounter, deprovisioningConsolidationTimeoutsCounter,
+		disruptionEvaluationDurationHistogram, disruptionReplacementNodeClaimInitializedHistogram, disruptionReplacementNodeClaimFailedCounter,
+		disruptionActionsPerformedCounter, disruptionEligibleNodesGauge, disruptionConsolidationTimeoutTotalCounter)
 }
 
 const (
 	deprovisioningSubsystem = "deprovisioning"
 	deprovisionerLabel      = "deprovisioner"
-	actionLabel             = "action"
-	consolidationType       = "consolidation_type"
+
+	disruptionSubsystem = "disruption"
+	disruptionTypeLabel = "disruption_type"
+	actionLabel         = "action"
+	consolidationType   = "consolidation_type"
 
 	multiMachineConsolidationLabelValue  = "multi-machine"
 	singleMachineConsolidationLabelValue = "single-machine"
+
+	multiNodeConsolidationLabelValue  = "multi_node"
+	singleNodeConsolidationLabelValue = "single_node"
 )
 
 var (
@@ -45,7 +53,8 @@ var (
 			Help:      "Duration of the deprovisioning evaluation process in seconds.",
 			Buckets:   metrics.DurationBuckets(),
 		},
-		[]string{"method"})
+		[]string{"method"},
+	)
 	deprovisioningReplacementNodeInitializedHistogram = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: metrics.Namespace,
@@ -89,5 +98,63 @@ var (
 			Help:      "The number of times that Karpenter failed to launch a replacement node for deprovisioning. Labeled by deprovisioner.",
 		},
 		[]string{deprovisionerLabel},
+	)
+)
+
+var (
+	disruptionEvaluationDurationHistogram = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: disruptionSubsystem,
+			Name:      "evluation_duration_seconds",
+			Help:      "Duration of the disruption evaluation process in seconds.",
+			Buckets:   metrics.DurationBuckets(),
+		},
+		[]string{disruptionTypeLabel},
+	)
+	disruptionReplacementNodeClaimInitializedHistogram = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: disruptionSubsystem,
+			Name:      "replacement_nodeclaim_initialized_seconds",
+			Help:      "Amount of time required for a replacement nodeclaim to become initialized.",
+			Buckets:   metrics.DurationBuckets(),
+		},
+	)
+	disruptionReplacementNodeClaimFailedCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: deprovisioningSubsystem,
+			Name:      "replacement_nodeclaim_failures",
+			Help:      "The number of times that Karpenter failed to launch a replacement node for disruption. Labeled by disruption type.",
+		},
+		[]string{disruptionTypeLabel},
+	)
+	disruptionActionsPerformedCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: disruptionSubsystem,
+			Name:      "actions_performed",
+			Help:      "Number of deprovisioning actions performed. Labeled by disruption type.",
+		},
+		[]string{actionLabel, disruptionTypeLabel},
+	)
+	disruptionEligibleNodesGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: disruptionSubsystem,
+			Name:      "eligible_nodes",
+			Help:      "Number of nodes eligible for disruption by Karpenter. Labeled by disruption type",
+		},
+		[]string{disruptionTypeLabel},
+	)
+	disruptionConsolidationTimeoutTotalCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: disruptionSubsystem,
+			Name:      "consolidation_timeout_total",
+			Help:      "Number of times the Consolidation algorithm has reached a timeout. Labeled by consolidation type.",
+		},
+		[]string{consolidationType},
 	)
 )

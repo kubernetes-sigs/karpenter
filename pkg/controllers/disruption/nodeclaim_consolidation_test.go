@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package deprovisioning_test
+package disruption_test
 
 import (
 	"fmt"
@@ -40,7 +40,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
-	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
+	"github.com/aws/karpenter-core/pkg/controllers/disruption"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/test"
@@ -107,7 +107,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the nodeclaim to the node
@@ -127,7 +127,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			fakeClock.Step(10 * time.Minute)
 			wg := sync.WaitGroup{}
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)
@@ -189,7 +189,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 
 			// we don't need any new nodes and consolidation should notice the huge pending pod that needs the large
 			// node to schedule, which prevents the large expensive node from being replaced
@@ -234,7 +234,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the nodeclaim to the node
@@ -292,7 +292,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the nodeclaim to the node
@@ -358,7 +358,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 
 			fakeClock.Step(10 * time.Minute)
 
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 
 			// we didn't create a new nodeclaim or delete the old one
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
@@ -435,7 +435,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the nodeclaim to the node
@@ -503,7 +503,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the nodeclaim to the node
@@ -581,7 +581,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the nodeclaim to the node
@@ -659,7 +659,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the machine to the node
@@ -717,7 +717,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 					},
 				},
 			})
-			// Block this pod from being deprovisioned with karpenter.sh/do-not-evict
+			// Block this pod from being disrupted with karpenter.sh/do-not-evict
 			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"})
 
 			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
@@ -736,7 +736,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the machine to the node
@@ -794,7 +794,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 					},
 				},
 			})
-			// Block this pod from being deprovisioned with karpenter.sh/do-not-evict
+			// Block this pod from being disrupted with karpenter.sh/do-not-evict
 			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
 
 			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
@@ -813,7 +813,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the machine to the node
@@ -910,7 +910,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			fakeClock.Step(10 * time.Minute)
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Expect to not create or delete more nodeclaims
@@ -1021,7 +1021,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			fakeClock.Step(10 * time.Minute)
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Expect to not create or delete more nodeclaims
@@ -1072,7 +1072,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			var consolidationFinished atomic.Bool
 			go func() {
 				defer GinkgoRecover()
-				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 				consolidationFinished.Store(true)
 			}()
 			wg.Wait()
@@ -1179,7 +1179,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the nodeclaim to the node
@@ -1226,7 +1226,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the nodeclaim to the node
@@ -1280,7 +1280,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the nodeclaim to the node
@@ -1342,7 +1342,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the nodeclaim to the node
@@ -1395,7 +1395,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the machine to the node
@@ -1446,7 +1446,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the machine to the node
@@ -1479,7 +1479,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 							BlockOwnerDeletion: ptr.Bool(true),
 						},
 					}}})
-			// Block this pod from being deprovisioned with karpenter.sh/do-not-evict
+			// Block this pod from being disrupted with karpenter.sh/do-not-evict
 			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"})
 
 			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
@@ -1497,7 +1497,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the nodeclaim to the node
@@ -1530,7 +1530,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 							BlockOwnerDeletion: ptr.Bool(true),
 						},
 					}}})
-			// Block this pod from being deprovisioned with karpenter.sh/do-not-disrupt
+			// Block this pod from being disrupted with karpenter.sh/do-not-disrupt
 			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
 
 			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
@@ -1548,7 +1548,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the machine to the node
@@ -1595,7 +1595,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the nodeclaim to the node
@@ -1641,7 +1641,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// shouldn't delete the node
@@ -1790,7 +1790,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, consolidatableNodeClaim)
@@ -1847,7 +1847,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the nodeclaim to the node
@@ -1903,7 +1903,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 
 			fakeClock.Step(10 * time.Minute)
 
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 
 			// No node can be deleted as it would cause one of the three pods to go pending
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
@@ -1914,7 +1914,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 				"app": "test",
 			}
 
-			// this invalid node pool should not be enough to stop all deprovisioning
+			// this invalid node pool should not be enough to stop all disruption
 			badNodePool := &v1beta1.NodePool{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "bad-nodepool",
@@ -1961,7 +1961,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the machine to the node
@@ -2027,7 +2027,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 				defer finished.Store(true)
-				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			}()
 
 			// wait for the controller to block on the validation timeout
@@ -2111,7 +2111,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			go func() {
 				defer wg.Done()
 				defer finished.Store(true)
-				ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+				ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 			}()
 
 			// wait for the controller to block on the validation timeout
@@ -2178,10 +2178,10 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 				defer finished.Store(true)
-				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			}()
 
-			// wait for the deprovisioningController to block on the validation timeout
+			// wait for the disruptionController to block on the validation timeout
 			Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
 			// controller should be blocking during the timeout
 			Expect(finished.Load()).To(BeFalse())
@@ -2242,10 +2242,10 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 				defer finished.Store(true)
-				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			}()
 
-			// wait for the deprovisioningController to block on the validation timeout
+			// wait for the disruptionController to block on the validation timeout
 			Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
 			// controller should be blocking during the timeout
 			Expect(finished.Load()).To(BeFalse())
@@ -2285,7 +2285,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			}()
 
 			// Iterate in a loop until we get to the validation action
@@ -2333,7 +2333,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			}()
 
 			// Iterate in a loop until we get to the validation action
@@ -2381,7 +2381,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			}()
 
 			// Iterate in a loop until we get to the validation action
@@ -2435,7 +2435,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			}()
 
 			// Iterate in a loop until we get to the validation action
@@ -2486,7 +2486,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			}()
 
 			// Iterate in a loop until we get to the validation action
@@ -2537,7 +2537,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			}()
 
 			// Iterate in a loop until we get to the validation action
@@ -2642,11 +2642,11 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 				defer finished.Store(true)
-				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			}()
 
 			// advance the clock so that the timeout expires
-			fakeClock.Step(deprovisioning.MultiNodeConsolidationTimeoutDuration)
+			fakeClock.Step(disruption.MultiNodeConsolidationTimeoutDuration)
 
 			// wait for the controller to block on the validation timeout
 			Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
@@ -2734,13 +2734,13 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 				defer finished.Store(true)
-				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			}()
 
 			// advance the clock so that the timeout expires for multi-nodeClaim
-			fakeClock.Step(deprovisioning.MultiNodeConsolidationTimeoutDuration)
+			fakeClock.Step(disruption.MultiNodeConsolidationTimeoutDuration)
 			// advance the clock so that the timeout expires for single-nodeClaim
-			fakeClock.Step(deprovisioning.SingleNodeConsolidationTimeoutDuration)
+			fakeClock.Step(disruption.SingleNodeConsolidationTimeoutDuration)
 
 			ExpectTriggerVerifyAction(&wg)
 
@@ -2845,7 +2845,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the nodeclaim to the node
@@ -2912,7 +2912,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the nodeclaim to the node
@@ -2970,7 +2970,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 				defer finished.Store(true)
-				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			}()
 
 			// wait for the controller to block on the validation timeout
@@ -3027,7 +3027,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 				defer finished.Store(true)
-				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			}()
 
 			// wait for the controller to block on the validation timeout
@@ -3103,7 +3103,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 				defer finished.Store(true)
-				ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			}()
 
 			// wait for the controller to block on the validation timeout
@@ -3236,7 +3236,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the nodeclaim to the node
@@ -3351,7 +3351,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// Cascade any deletion of the nodeclaim to the node
@@ -3436,7 +3436,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
 			// our nodes are already the cheapest available, so we can't replace them.  If we delete, it would
@@ -3492,7 +3492,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			ExpectTriggerVerifyAction(&wg)
 			go func() {
 				defer GinkgoRecover()
-				_, _ = deprovisioningController.Reconcile(ctx, reconcile.Request{})
+				_, _ = disruptionController.Reconcile(ctx, reconcile.Request{})
 			}()
 			wg.Wait()
 
@@ -3577,7 +3577,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			// consolidation shouldn't trigger additional actions
 			fakeClock.Step(10 * time.Minute)
 
-			result, err := deprovisioningController.Reconcile(ctx, reconcile.Request{})
+			result, err := disruptionController.Reconcile(ctx, reconcile.Request{})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 		})

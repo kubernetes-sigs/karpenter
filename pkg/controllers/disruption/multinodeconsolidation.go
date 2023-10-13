@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package deprovisioning
+package disruption
 
 import (
 	"context"
@@ -53,6 +53,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 		return Command{}, fmt.Errorf("sorting candidates, %w", err)
 	}
 	deprovisioningEligibleMachinesGauge.WithLabelValues(m.String()).Set(float64(len(candidates)))
+	disruptionEligibleNodesGauge.WithLabelValues(m.String()).Set(float64(len(candidates)))
 
 	// Only consider a maximum batch of 100 NodeClaims to save on computation.
 	// This could be further configurable in the future.
@@ -100,8 +101,8 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	// binary search to find the maximum number of NodeClaims we can terminate
 	for min <= max {
 		if m.clock.Now().After(timeout) {
-			// TODO @joinnis: Change this to multiNodeConsolidationLabelValue when migrating
 			deprovisioningConsolidationTimeoutsCounter.WithLabelValues(multiMachineConsolidationLabelValue).Inc()
+			disruptionConsolidationTimeoutTotalCounter.WithLabelValues(multiNodeConsolidationLabelValue).Inc()
 			if lastSavedCommand.candidates == nil {
 				logging.FromContext(ctx).Debugf("failed to find a multi-node consolidation after timeout, last considered batch had %d", (min+max)/2)
 			} else {

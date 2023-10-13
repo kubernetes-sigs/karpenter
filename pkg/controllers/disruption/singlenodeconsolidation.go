@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package deprovisioning
+package disruption
 
 import (
 	"context"
@@ -41,7 +41,7 @@ func NewSingleNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeCli
 	return &SingleNodeConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
 }
 
-// ComputeCommand generates a deprovisioning command given deprovisionable NodeClaims
+// ComputeCommand generates a disruption command given candidates
 // nolint:gocyclo
 func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	if s.isConsolidated() {
@@ -52,6 +52,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, candidates
 		return Command{}, fmt.Errorf("sorting candidates, %w", err)
 	}
 	deprovisioningEligibleMachinesGauge.WithLabelValues(s.String()).Set(float64(len(candidates)))
+	disruptionEligibleNodesGauge.WithLabelValues(s.String()).Set(float64(len(candidates)))
 
 	v := NewValidation(consolidationTTL, s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder)
 
@@ -60,8 +61,8 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, candidates
 	// binary search to find the maximum number of NodeClaims we can terminate
 	for i, candidate := range candidates {
 		if s.clock.Now().After(timeout) {
-			// TODO @joinnis: Change this to singleNodeClaimConsolidationLabelValue when migrating
 			deprovisioningConsolidationTimeoutsCounter.WithLabelValues(singleMachineConsolidationLabelValue).Inc()
+			deprovisioningConsolidationTimeoutsCounter.WithLabelValues(singleNodeConsolidationLabelValue).Inc()
 			logging.FromContext(ctx).Debugf("abandoning single-node consolidation due to timeout after evaluating %d candidates", i)
 			return Command{}, nil
 		}

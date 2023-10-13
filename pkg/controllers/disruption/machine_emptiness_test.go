@@ -13,7 +13,7 @@ limitations under the License.
 */
 
 // nolint:gosec
-package deprovisioning_test
+package disruption_test
 
 import (
 	"sync"
@@ -71,7 +71,7 @@ var _ = Describe("Machine/Emptiness", func() {
 		fakeClock.Step(10 * time.Minute)
 		wg := sync.WaitGroup{}
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
@@ -88,7 +88,7 @@ var _ = Describe("Machine/Emptiness", func() {
 		// inform cluster state about nodes and machines
 		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Expect to not create or delete more machines
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
@@ -102,7 +102,7 @@ var _ = Describe("Machine/Emptiness", func() {
 		// inform cluster state about nodes and machines
 		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Expect to not create or delete more machines
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
@@ -123,7 +123,7 @@ var _ = Describe("Machine/Emptiness", func() {
 		// inform cluster state about nodes and machines
 		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Expect to not create or delete more machines
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
@@ -144,7 +144,7 @@ var _ = Describe("Machine/Emptiness", func() {
 		// inform cluster state about nodes and machines
 		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Expect to not create or delete more machines
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
@@ -160,7 +160,7 @@ var _ = Describe("Machine/Emptiness", func() {
 
 		fakeClock.Step(10 * time.Minute)
 
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Expect to not create or delete more machines
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))

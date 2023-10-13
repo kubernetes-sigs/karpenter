@@ -20,7 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
+	"github.com/aws/karpenter-core/pkg/controllers/disruption"
 	"github.com/aws/karpenter-core/pkg/controllers/leasegarbagecollection"
 	metricsnode "github.com/aws/karpenter-core/pkg/controllers/metrics/node"
 	metricspod "github.com/aws/karpenter-core/pkg/controllers/metrics/pod"
@@ -55,7 +55,7 @@ func NewControllers(
 
 	return []controller.Controller{
 		p, evictionQueue,
-		deprovisioning.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster),
+		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster),
 		provisioning.NewController(kubeClient, p, recorder),
 		nodepoolhash.NewProvisionerController(kubeClient),
 		informer.NewDaemonSetController(kubeClient, cluster),

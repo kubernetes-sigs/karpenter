@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package deprovisioning
+package disruption
 
 import (
 	"context"
@@ -35,7 +35,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
+	disruptionevents "github.com/aws/karpenter-core/pkg/controllers/disruption/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
@@ -44,20 +44,19 @@ import (
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
 
-// Controller is the deprovisioning controller.
 type Controller struct {
-	kubeClient     client.Client
-	cluster        *state.Cluster
-	provisioner    *provisioning.Provisioner
-	recorder       events.Recorder
-	clock          clock.Clock
-	cloudProvider  cloudprovider.CloudProvider
-	deprovisioners []Deprovisioner
-	mu             sync.Mutex
-	lastRun        map[string]time.Time
+	kubeClient    client.Client
+	cluster       *state.Cluster
+	provisioner   *provisioning.Provisioner
+	recorder      events.Recorder
+	clock         clock.Clock
+	cloudProvider cloudprovider.CloudProvider
+	methods       []Method
+	mu            sync.Mutex
+	lastRun       map[string]time.Time
 }
 
-// pollingPeriod that we inspect cluster to look for opportunities to deprovision
+// pollingPeriod that we inspect cluster to look for opportunities to disrupt
 const pollingPeriod = 10 * time.Second
 
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")
@@ -86,7 +85,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 		recorder:      recorder,
 		cloudProvider: cp,
 		lastRun:       map[string]time.Time{},
-		deprovisioners: []Deprovisioner{
+		methods: []Method{
 			// Expire any NodeClaims that must be deleted, allowing their pods to potentially land on currently
 			NewExpiration(clk, kubeClient, cluster, provisioner, recorder),
 			// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
@@ -104,7 +103,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 }
 
 func (c *Controller) Name() string {
-	return "deprovisioning"
+	return "disruption"
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) controller.Builder {
@@ -115,7 +114,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	// this won't catch if the reconcile loop hangs forever, but it will catch other issues
 	c.logAbnormalRuns(ctx)
 	defer c.logAbnormalRuns(ctx)
-	c.recordRun("deprovisioning-loop")
+	c.recordRun("disruption-loop")
 
 	// We need to ensure that our internal cluster state mechanism is synced before we proceed
 	// with making any scheduling decision off of our state nodes. Otherwise, we have the potential to make
@@ -125,76 +124,81 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}
 
-	// Karpenter taints nodes with a karpenter.sh/disruption taint as part of the deprovisioning process
-	// while it progresses in memory. If Karpenter restarts during a deprovisioning action, some nodes can be left tainted.
+	// Karpenter taints nodes with a karpenter.sh/disruption taint as part of the disruption process
+	// while it progresses in memory. If Karpenter restarts during a disruption action, some nodes can be left tainted.
 	// Idempotently remove this taint from candidates before continuing.
 	if err := c.requireNodeClaimNoScheduleTaint(ctx, false, c.cluster.Nodes()...); err != nil {
 		return reconcile.Result{}, fmt.Errorf("removing taint from nodes, %w", err)
 	}
 
-	// Attempt different deprovisioning methods. We'll only let one method perform an action
-	for _, d := range c.deprovisioners {
+	// Attempt different disruption methods. We'll only let one method perform an action
+	for _, d := range c.methods {
 		c.recordRun(fmt.Sprintf("%T", d))
-		success, err := c.deprovision(ctx, d)
+		success, err := c.disrupt(ctx, d)
 		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("deprovisioning via %q, %w", d, err)
+			return reconcile.Result{}, fmt.Errorf("disrupting via %q, %w", d, err)
 		}
 		if success {
 			return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 		}
 	}
 
-	// All deprovisioners did nothing, so return nothing to do
+	// All methods did nothing, so return nothing to do
 	return reconcile.Result{RequeueAfter: pollingPeriod}, nil
 }
 
-func (c *Controller) deprovision(ctx context.Context, deprovisioner Deprovisioner) (bool, error) {
-	defer metrics.Measure(deprovisioningDurationHistogram.WithLabelValues(deprovisioner.String()))()
-	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, deprovisioner.ShouldDeprovision)
+func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {
+	defer metrics.Measure(deprovisioningDurationHistogram.WithLabelValues(disruption.String()))()
+	defer metrics.Measure(disruptionEvaluationDurationHistogram.WithLabelValues(disruption.String()))
+	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}
-	// If there are no candidates, move to the next deprovisioner
+	// If there are no candidates, move to the next disruption
 	if len(candidates) == 0 {
 		return false, nil
 	}
 
-	// Determine the deprovisioning action
-	cmd, err := deprovisioner.ComputeCommand(ctx, candidates...)
+	// Determine the disruption action
+	cmd, err := disruption.ComputeCommand(ctx, candidates...)
 	if err != nil {
-		return false, fmt.Errorf("computing deprovisioning decision, %w", err)
+		return false, fmt.Errorf("computing disruption decision, %w", err)
 	}
 	if cmd.Action() == NoOpAction {
 		return false, nil
 	}
 
-	// Attempt to deprovision
-	if err := c.executeCommand(ctx, deprovisioner, cmd); err != nil {
-		return false, fmt.Errorf("deprovisioning candidates, %w", err)
+	// Attempt to disrupt
+	if err := c.executeCommand(ctx, disruption, cmd); err != nil {
+		return false, fmt.Errorf("disrupting candidates, %w", err)
 	}
 
 	return true, nil
 }
 
-func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, command Command) error {
+func (c *Controller) executeCommand(ctx context.Context, d Method, command Command) error {
 	deprovisioningActionsPerformedCounter.With(map[string]string{
 		// TODO: make this just command.Action() since we've added the deprovisioner as its own label.
 		actionLabel:        fmt.Sprintf("%s/%s", d, command.Action()),
 		deprovisionerLabel: d.String(),
 	}).Inc()
-	logging.FromContext(ctx).Infof("deprovisioning via %s %s", d, command)
+	disruptionActionsPerformedCounter.With(map[string]string{
+		actionLabel:         string(command.Action()),
+		disruptionTypeLabel: d.String(),
+	}).Inc()
+	logging.FromContext(ctx).Infof("disrupting via %s %s", d, command)
 
 	reason := fmt.Sprintf("%s/%s", d, command.Action())
 	if command.Action() == ReplaceAction {
 		if err := c.launchReplacementNodeClaims(ctx, command, reason); err != nil {
-			// If we failed to launch the replacement, don't deprovision.  If this is some permanent failure,
+			// If we failed to launch the replacement, don't disrupt.  If this is some permanent failure,
 			// we don't want to disrupt workloads with no way to provision new NodeClaims for them.
 			return fmt.Errorf("launching replacement, %w", err)
 		}
 	}
 
 	for _, candidate := range command.candidates {
-		c.recorder.Publish(deprovisioningevents.Terminating(candidate.Node, candidate.NodeClaim, reason)...)
+		c.recorder.Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, reason)...)
 
 		if err := nodeclaimutil.Delete(ctx, c.kubeClient, candidate.NodeClaim); err != nil {
 			if !errors.IsNotFound(err) {
@@ -205,8 +209,8 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 		nodeclaimutil.TerminatedCounter(candidate.NodeClaim, reason).Inc()
 	}
 
-	// We wait for NodeClaims to delete to ensure we don't start another round of deprovisioning until this node is fully
-	// deleted.
+	// We wait for NodeClaims to delete to ensure we don't start another round of disruption
+	// until this node is fully deleted.
 	for _, oldCandidate := range command.candidates {
 		c.waitForDeletion(ctx, oldCandidate.NodeClaim)
 	}
@@ -217,6 +221,7 @@ func (c *Controller) executeCommand(ctx context.Context, d Deprovisioner, comman
 // nolint:gocyclo
 func (c *Controller) launchReplacementNodeClaims(ctx context.Context, action Command, reason string) error {
 	defer metrics.Measure(deprovisioningReplacementNodeInitializedHistogram)()
+	defer metrics.Measure(disruptionReplacementNodeClaimInitializedHistogram)()
 
 	stateNodes := lo.Map(action.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode })
 
@@ -246,6 +251,7 @@ func (c *Controller) launchReplacementNodeClaims(ctx context.Context, action Com
 		// other transient error
 		if err := c.waitForReadiness(ctx, nodeClaimKeys[i], reason); err != nil {
 			deprovisioningReplacementNodeLaunchFailedCounter.WithLabelValues(reason).Inc()
+			disruptionReplacementNodeClaimFailedCounter.WithLabelValues(reason).Inc()
 			errs[i] = err
 		}
 	})
@@ -257,7 +263,7 @@ func (c *Controller) launchReplacementNodeClaims(ctx context.Context, action Com
 	return nil
 }
 
-// TODO @njtran: Allow to bypass this check for certain deprovisioners
+// TODO @njtran: Allow to bypass this check for certain methods
 func (c *Controller) waitForReadiness(ctx context.Context, key nodeclaimutil.Key, reason string) error {
 	// Wait for the NodeClaim to be initialized
 	var once sync.Once
@@ -273,11 +279,11 @@ func (c *Controller) waitForReadiness(ctx context.Context, key nodeclaimutil.Key
 			return fmt.Errorf("getting %s, %w", lo.Ternary(key.IsMachine, "machine", "nodeclaim"), err)
 		}
 		once.Do(func() {
-			c.recorder.Publish(deprovisioningevents.Launching(nodeClaim, reason))
+			c.recorder.Publish(disruptionevents.Launching(nodeClaim, reason))
 		})
 		if !nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized).IsTrue() {
-			// make the user aware of why deprovisioning is paused
-			c.recorder.Publish(deprovisioningevents.WaitingOnReadiness(nodeClaim))
+			// make the user aware of why disruption is paused
+			c.recorder.Publish(disruptionevents.WaitingOnReadiness(nodeClaim))
 			return fmt.Errorf("node is not initialized")
 		}
 		return nil
@@ -294,8 +300,8 @@ func (c *Controller) waitForDeletion(ctx context.Context, nodeClaim *v1beta1.Nod
 		if errors.IsNotFound(nerr) {
 			return nil
 		}
-		// make the user aware of why deprovisioning is paused
-		c.recorder.Publish(deprovisioningevents.WaitingOnDeletion(nc))
+		// make the user aware of why disruption is paused
+		c.recorder.Publish(disruptionevents.WaitingOnDeletion(nc))
 		if nerr != nil {
 			return fmt.Errorf("expected to be not found, %w", nerr)
 		}
@@ -316,8 +322,8 @@ func (c *Controller) requireNoScheduleTaints(ctx context.Context, addTaint bool,
 }
 
 // requireNodeClaimNoScheduleTaint will add/remove the karpenter.sh/disruption taint from the candidates.
-// This is used to enforce no taints at the beginning of deprovisioning, and
-// to add/remove taints while executing a deprovisioning action.
+// This is used to enforce no taints at the beginning of disruption, and
+// to add/remove taints while executing a disruption action.
 // nolint:gocyclo
 func (c *Controller) requireNodeClaimNoScheduleTaint(ctx context.Context, addTaint bool, nodes ...*state.StateNode) error {
 	var multiErr error
