@@ -39,6 +39,8 @@ import (
 	"knative.dev/pkg/logging/logkey"
 	"knative.dev/pkg/system"
 
+	ctrl "sigs.k8s.io/controller-runtime/pkg/log"
+
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 	"github.com/aws/karpenter-core/pkg/operator/options"
 )
@@ -181,6 +183,7 @@ func loggerFromConfigMap(ctx context.Context, component string, kubernetesInterf
 // to use the configured *zap.SugaredLogger from the context
 func ConfigureGlobalLoggers(ctx context.Context) {
 	klog.SetLogger(zapr.NewLogger(logging.FromContext(ctx).Desugar()))
+	ctrl.SetLogger(zapr.NewLogger(logging.FromContext(ctx).Desugar()))
 	w := &zapio.Writer{Log: logging.FromContext(ctx).Desugar(), Level: zap.DebugLevel}
 	log.SetFlags(0)
 	log.SetOutput(w)
