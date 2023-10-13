@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package deprovisioning
+package disruption
 
 import (
 	"context"
@@ -36,8 +36,8 @@ func NewEmptiness(clk clock.Clock) *Emptiness {
 	}
 }
 
-// ShouldDeprovision is a predicate used to filter deprovisionable candidates
-func (e *Emptiness) ShouldDeprovision(_ context.Context, c *Candidate) bool {
+// ShouldDisrupt is a predicate used to filter candidates
+func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 	return c.nodePool.Spec.Disruption.ConsolidateAfter != nil &&
 		c.nodePool.Spec.Disruption.ConsolidateAfter.Duration != nil &&
 		c.nodePool.Spec.Disruption.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenEmpty &&
@@ -45,19 +45,26 @@ func (e *Emptiness) ShouldDeprovision(_ context.Context, c *Candidate) bool {
 		!e.clock.Now().Before(c.NodeClaim.StatusConditions().GetCondition(v1beta1.Empty).LastTransitionTime.Inner.Add(*c.nodePool.Spec.Disruption.ConsolidateAfter.Duration))
 }
 
-// ComputeCommand generates a deprovisioning command given deprovisionable candidates
+// ComputeCommand generates a disruption command given candidates
 func (e *Emptiness) ComputeCommand(_ context.Context, candidates ...*Candidate) (Command, error) {
 	emptyCandidates := lo.Filter(candidates, func(cn *Candidate, _ int) bool {
 		return cn.NodeClaim.DeletionTimestamp.IsZero() && len(cn.pods) == 0
 	})
-	deprovisioningEligibleMachinesGauge.WithLabelValues(e.String()).Set(float64(len(candidates)))
+	deprovisioningEligibleMachinesGauge.WithLabelValues(e.Type()).Set(float64(len(candidates)))
+	disruptionEligibleNodesGauge.With(map[string]string{
+		methodLabel:            e.Type(),
+		consolidationTypeLabel: e.ConsolidationType(),
+	}).Set(float64(len(candidates)))
 
 	return Command{
 		candidates: emptyCandidates,
 	}, nil
 }
 
-// string is the string representation of the deprovisioner
-func (e *Emptiness) String() string {
+func (e *Emptiness) Type() string {
 	return metrics.EmptinessReason
+}
+
+func (e *Emptiness) ConsolidationType() string {
+	return ""
 }

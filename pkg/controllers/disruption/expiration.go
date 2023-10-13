@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package deprovisioning
+package disruption
 
 import (
 	"context"
@@ -28,7 +28,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
+	disruptionevents "github.com/aws/karpenter-core/pkg/controllers/disruption/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
@@ -55,8 +55,8 @@ func NewExpiration(clk clock.Clock, kubeClient client.Client, cluster *state.Clu
 	}
 }
 
-// ShouldDeprovision is a predicate used to filter deprovisionable candidates
-func (e *Expiration) ShouldDeprovision(_ context.Context, c *Candidate) bool {
+// ShouldDisrupt is a predicate used to filter candidates
+func (e *Expiration) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 	return c.nodePool.Spec.Disruption.ExpireAfter.Duration != nil &&
 		c.NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).IsTrue()
 }
@@ -74,15 +74,19 @@ func (e *Expiration) filterAndSortCandidates(ctx context.Context, candidates []*
 	return candidates, nil
 }
 
-// ComputeCommand generates a deprovisioning command given deprovisionable candidates
+// ComputeCommand generates a disrpution command given candidates
 func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	candidates, err := e.filterAndSortCandidates(ctx, candidates)
 	if err != nil {
 		return Command{}, fmt.Errorf("filtering candidates, %w", err)
 	}
-	deprovisioningEligibleMachinesGauge.WithLabelValues(e.String()).Set(float64(len(candidates)))
+	deprovisioningEligibleMachinesGauge.WithLabelValues(e.Type()).Set(float64(len(candidates)))
+	disruptionEligibleNodesGauge.With(map[string]string{
+		methodLabel:            e.Type(),
+		consolidationTypeLabel: e.ConsolidationType(),
+	}).Set(float64(len(candidates)))
 
-	// Deprovision all empty expired candidates, as they require no scheduling simulations.
+	// Disrupt all empty expired candidates, as they require no scheduling simulations.
 	if empty := lo.Filter(candidates, func(c *Candidate, _ int) bool {
 		return len(c.pods) == 0
 	}); len(empty) > 0 {
@@ -104,7 +108,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...*Candidat
 		// Log when all pods can't schedule, as the command will get executed immediately.
 		if !results.AllNonPendingPodsScheduled() {
 			logging.FromContext(ctx).With(lo.Ternary(candidate.NodeClaim.IsMachine, "machine", "nodeclaim"), candidate.NodeClaim.Name, "node", candidate.Node.Name).Debugf("cannot terminate since scheduling simulation failed to schedule all pods, %s", results.NonPendingPodSchedulingErrors())
-			e.recorder.Publish(deprovisioningevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
+			e.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
 			continue
 		}
 
@@ -117,7 +121,10 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...*Candidat
 	return Command{}, nil
 }
 
-// String is the string representation of the deprovisioner
-func (e *Expiration) String() string {
+func (e *Expiration) Type() string {
 	return metrics.ExpirationReason
+}
+
+func (e *Expiration) ConsolidationType() string {
+	return ""
 }

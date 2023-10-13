@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package deprovisioning_test
+package disruption_test
 
 import (
 	"sync"
@@ -75,7 +75,7 @@ var _ = Describe("Machine/Drift", func() {
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
 		// Expect to not create or delete more machines
@@ -127,11 +127,11 @@ var _ = Describe("Machine/Drift", func() {
 		// inform cluster state about nodes and machines
 		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node2}, []*v1alpha5.Machine{machine2})
 
-		// deprovisioning won't delete the old node until the new node is ready
+		// disruption won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine, machine2)
@@ -150,7 +150,7 @@ var _ = Describe("Machine/Drift", func() {
 
 		fakeClock.Step(10 * time.Minute)
 
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Expect to not create or delete more machines
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
@@ -163,7 +163,7 @@ var _ = Describe("Machine/Drift", func() {
 		// inform cluster state about nodes and machines
 		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Expect to not create or delete more machines
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
@@ -184,7 +184,7 @@ var _ = Describe("Machine/Drift", func() {
 		// inform cluster state about nodes and machines
 		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Expect to not create or delete more machines
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
@@ -205,7 +205,7 @@ var _ = Describe("Machine/Drift", func() {
 		// inform cluster state about nodes and machines
 		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
 
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Expect to not create or delete more machines
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
@@ -221,7 +221,7 @@ var _ = Describe("Machine/Drift", func() {
 
 		fakeClock.Step(10 * time.Minute)
 
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Expect to not create or delete more machines
 		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
@@ -237,7 +237,7 @@ var _ = Describe("Machine/Drift", func() {
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
 		// Cascade any deletion of the machine to the node
@@ -248,7 +248,7 @@ var _ = Describe("Machine/Drift", func() {
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
 		ExpectNotFound(ctx, env.Client, machine, node)
 	})
-	It("should deprovision all empty drifted nodes in parallel", func() {
+	It("should disrupt all empty drifted nodes in parallel", func() {
 		machines, nodes := test.MachinesAndNodes(100, v1alpha5.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -279,7 +279,7 @@ var _ = Describe("Machine/Drift", func() {
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
 		// Cascade any deletion of the machine to the node
@@ -321,11 +321,11 @@ var _ = Describe("Machine/Drift", func() {
 
 		fakeClock.Step(10 * time.Minute)
 
-		// deprovisioning won't delete the old machine until the new machine is ready
+		// disruption won't delete the old machine until the new machine is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
 		// Cascade any deletion of the machine to the node
@@ -421,11 +421,11 @@ var _ = Describe("Machine/Drift", func() {
 
 		fakeClock.Step(10 * time.Minute)
 
-		// deprovisioning won't delete the old node until the new node is ready
+		// disruption won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 3)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 		wg.Wait()
 
 		// Cascade any deletion of the machine to the node
@@ -486,18 +486,18 @@ var _ = Describe("Machine/Drift", func() {
 
 		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], machine, node, machine2, node2, provisioner)
 
-		// bind pods to node so that they're not empty and don't deprovision in parallel.
+		// bind pods to node so that they're not empty and don't disrupt in parallel.
 		ExpectManualBinding(ctx, env.Client, pods[0], node)
 		ExpectManualBinding(ctx, env.Client, pods[1], node2)
 
 		// inform cluster state about nodes and machines
 		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node, node2}, []*v1alpha5.Machine{machine, machine2})
 
-		// deprovisioning won't delete the old node until the new node is ready
+		// disruption won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
 		// Cascade any deletion of the machine to the node

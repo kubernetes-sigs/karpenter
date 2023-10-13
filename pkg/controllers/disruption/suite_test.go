@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package deprovisioning_test
+package disruption_test
 
 import (
 	"context"
@@ -41,7 +41,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
-	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
+	"github.com/aws/karpenter-core/pkg/controllers/disruption"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
@@ -58,7 +58,7 @@ import (
 var ctx context.Context
 var env *test.Environment
 var cluster *state.Cluster
-var deprovisioningController *deprovisioning.Controller
+var disruptionController *disruption.Controller
 var prov *provisioning.Provisioner
 var cloudProvider *fake.CloudProvider
 var nodeStateController controller.Controller
@@ -88,7 +88,7 @@ var _ = BeforeSuite(func() {
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, env.KubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
-	deprovisioningController = deprovisioning.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster)
+	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster)
 })
 
 var _ = AfterSuite(func() {
@@ -217,7 +217,7 @@ var _ = Describe("Disruption Taints", func() {
 			replacementInstance,
 		}
 	})
-	It("should remove taints from NodeClaims that were left tainted from a previous deprovisioning action", func() {
+	It("should remove taints from NodeClaims that were left tainted from a previous disruption action", func() {
 		pod := test.Pod(test.PodOptions{
 			ResourceRequirements: v1.ResourceRequirements{
 				Requests: v1.ResourceList{
@@ -240,13 +240,13 @@ var _ = Describe("Disruption Taints", func() {
 		go func() {
 			defer wg.Done()
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 		}()
 		wg.Wait()
 		nodeClaimNode = ExpectNodeExists(ctx, env.Client, nodeClaimNode.Name)
 		Expect(nodeClaimNode.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 	})
-	It("should add and remove taints from NodeClaims that fail to deprovision", func() {
+	It("should add and remove taints from NodeClaims that fail to disrupt", func() {
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
 		pod := test.Pod(test.PodOptions{
 			ResourceRequirements: v1.ResourceRequirements{
@@ -268,7 +268,7 @@ var _ = Describe("Disruption Taints", func() {
 		go func() {
 			defer wg.Done()
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileFailed(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileFailed(ctx, disruptionController, client.ObjectKey{})
 		}()
 
 		// Iterate in a loop until we get to the validation action
@@ -293,7 +293,7 @@ var _ = Describe("Disruption Taints", func() {
 		nodeClaimNode = ExpectNodeExists(ctx, env.Client, nodeClaimNode.Name)
 		Expect(nodeClaimNode.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 	})
-	It("should add and remove taints from Machines that fail to deprovision", func() {
+	It("should add and remove taints from Machines that fail to disrupt", func() {
 		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
 		pod := test.Pod(test.PodOptions{
 			ResourceRequirements: v1.ResourceRequirements{
@@ -317,7 +317,7 @@ var _ = Describe("Disruption Taints", func() {
 		go func() {
 			defer wg.Done()
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileFailed(ctx, deprovisioningController, client.ObjectKey{})
+			ExpectReconcileFailed(ctx, disruptionController, client.ObjectKey{})
 		}()
 
 		// Iterate in a loop until we get to the validation action
@@ -343,7 +343,7 @@ var _ = Describe("Disruption Taints", func() {
 	})
 })
 
-var _ = Describe("Combined/Deprovisioning", func() {
+var _ = Describe("Combined/Disruption", func() {
 	var provisioner *v1alpha5.Provisioner
 	var machine *v1alpha5.Machine
 	var nodePool *v1beta1.NodePool
@@ -387,7 +387,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 			},
 		})
 	})
-	It("should deprovision all empty Machine and NodeClaims in parallel (Emptiness)", func() {
+	It("should disrupt all empty Machine and NodeClaims in parallel (Emptiness)", func() {
 		provisioner.Spec.TTLSecondsAfterEmpty = lo.ToPtr[int64](30)
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
 		nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)}
@@ -403,7 +403,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		fakeClock.Step(10 * time.Minute)
 		wg := sync.WaitGroup{}
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
@@ -418,7 +418,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
 		ExpectNotFound(ctx, env.Client, machine, nodeClaim, machineNode, nodeClaimNode)
 	})
-	It("should deprovision all empty Machine and NodeClaims in parallel (Expiration)", func() {
+	It("should disrupt all empty Machine and NodeClaims in parallel (Expiration)", func() {
 		provisioner.Spec.TTLSecondsUntilExpired = lo.ToPtr[int64](30)
 		nodePool.Spec.Disruption.ExpireAfter = v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)}
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineExpired)
@@ -433,7 +433,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		fakeClock.Step(10 * time.Minute)
 		wg := sync.WaitGroup{}
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
@@ -448,7 +448,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
 		ExpectNotFound(ctx, env.Client, machine, nodeClaim, machineNode, nodeClaimNode)
 	})
-	It("should deprovision all empty Machine and NodeClaims in parallel (Drift)", func() {
+	It("should disrupt all empty Machine and NodeClaims in parallel (Drift)", func() {
 		machine.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
 		nodeClaim.StatusConditions().MarkTrue(v1beta1.Drifted)
 
@@ -462,7 +462,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		fakeClock.Step(10 * time.Minute)
 		wg := sync.WaitGroup{}
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
@@ -477,7 +477,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
 		ExpectNotFound(ctx, env.Client, machine, nodeClaim, machineNode, nodeClaimNode)
 	})
-	It("should deprovision all empty Machine and NodeClaims in parallel (Consolidation)", func() {
+	It("should disrupt all empty Machine and NodeClaims in parallel (Consolidation)", func() {
 		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
 		ExpectApplied(ctx, env.Client, provisioner, nodePool, machine, nodeClaim, machineNode, nodeClaimNode)
@@ -490,7 +490,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		fakeClock.Step(10 * time.Minute)
 		wg := sync.WaitGroup{}
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
@@ -505,7 +505,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
 		ExpectNotFound(ctx, env.Client, machine, nodeClaim, machineNode, nodeClaimNode)
 	})
-	It("should deprovision a Machine and replace with a cheaper NodeClaim", func() {
+	It("should disrupt a Machine and replace with a cheaper NodeClaim", func() {
 		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
 		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
@@ -592,7 +592,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		wg := sync.WaitGroup{}
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
@@ -603,7 +603,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 		ExpectNotFound(ctx, env.Client, machine, machineNode)
 	})
-	It("should deprovision multiple Machines and replace with a single cheaper NodeClaim", func() {
+	It("should disrupt multiple Machines and replace with a single cheaper NodeClaim", func() {
 		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
 		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
@@ -706,7 +706,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		wg := sync.WaitGroup{}
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Cascade any deletion of the machines to the nodes
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machines...)
@@ -719,7 +719,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		ExpectNotFound(ctx, env.Client, lo.Map(machines, func(m *v1alpha5.Machine, _ int) client.Object { return m })...)
 		ExpectNotFound(ctx, env.Client, lo.Map(nodes, func(n *v1.Node, _ int) client.Object { return n })...)
 	})
-	It("should deprovision a NodeClaim and replace with a cheaper Machine", func() {
+	It("should disrupt a NodeClaim and replace with a cheaper Machine", func() {
 		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
 		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
@@ -806,7 +806,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		wg := sync.WaitGroup{}
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Cascade any deletion of the nodeclaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
@@ -817,7 +817,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 		ExpectNotFound(ctx, env.Client, nodeClaim, nodeClaimNode)
 	})
-	It("should deprovision multiple NodeClaims and replace with a single cheaper Machine", func() {
+	It("should disrupt multiple NodeClaims and replace with a single cheaper Machine", func() {
 		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
 		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
@@ -920,7 +920,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		wg := sync.WaitGroup{}
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Cascade any deletion of the nodeclaims to the nodes
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims...)
@@ -933,7 +933,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		ExpectNotFound(ctx, env.Client, lo.Map(nodeClaims, func(nc *v1beta1.NodeClaim, _ int) client.Object { return nc })...)
 		ExpectNotFound(ctx, env.Client, lo.Map(nodes, func(n *v1.Node, _ int) client.Object { return n })...)
 	})
-	It("should deprovision Machines and NodeClaims to consolidate pods onto a single NodeClaim", func() {
+	It("should disrupt Machines and NodeClaims to consolidate pods onto a single NodeClaim", func() {
 		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
 		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
@@ -1069,7 +1069,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		wg := sync.WaitGroup{}
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Cascade any deletion of the machines to the nodes
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machines...)
@@ -1084,7 +1084,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		ExpectNotFound(ctx, env.Client, lo.Map(nodeClaims, func(nc *v1beta1.NodeClaim, _ int) client.Object { return nc })...)
 		ExpectNotFound(ctx, env.Client, lo.Map(nodes, func(n *v1.Node, _ int) client.Object { return n })...)
 	})
-	It("should deprovision Machines and NodeClaims to consolidate pods onto a single Machine", func() {
+	It("should disrupt Machines and NodeClaims to consolidate pods onto a single Machine", func() {
 		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
 		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
@@ -1220,7 +1220,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		wg := sync.WaitGroup{}
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Cascade any deletion of the machines to the nodes
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machines...)
@@ -1249,7 +1249,7 @@ var _ = Describe("Combined/Deprovisioning", func() {
 		fakeClock.Step(10 * time.Minute)
 		wg := sync.WaitGroup{}
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, deprovisioningController, types.NamespacedName{})
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
 		// Expect that the expired nodeclaim is not gone
 		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
@@ -1263,11 +1263,11 @@ var _ = Describe("Combined/Deprovisioning", func() {
 var _ = Describe("Pod Eviction Cost", func() {
 	const standardPodCost = 1.0
 	It("should have a standard disruptionCost for a pod with no priority or disruptionCost specified", func() {
-		cost := deprovisioning.GetPodEvictionCost(ctx, &v1.Pod{})
+		cost := disruption.GetPodEvictionCost(ctx, &v1.Pod{})
 		Expect(cost).To(BeNumerically("==", standardPodCost))
 	})
 	It("should have a higher disruptionCost for a pod with a positive deletion disruptionCost", func() {
-		cost := deprovisioning.GetPodEvictionCost(ctx, &v1.Pod{
+		cost := disruption.GetPodEvictionCost(ctx, &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.PodDeletionCost: "100",
 			}},
@@ -1275,7 +1275,7 @@ var _ = Describe("Pod Eviction Cost", func() {
 		Expect(cost).To(BeNumerically(">", standardPodCost))
 	})
 	It("should have a lower disruptionCost for a pod with a positive deletion disruptionCost", func() {
-		cost := deprovisioning.GetPodEvictionCost(ctx, &v1.Pod{
+		cost := disruption.GetPodEvictionCost(ctx, &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.PodDeletionCost: "-100",
 			}},
@@ -1283,17 +1283,17 @@ var _ = Describe("Pod Eviction Cost", func() {
 		Expect(cost).To(BeNumerically("<", standardPodCost))
 	})
 	It("should have higher costs for higher deletion costs", func() {
-		cost1 := deprovisioning.GetPodEvictionCost(ctx, &v1.Pod{
+		cost1 := disruption.GetPodEvictionCost(ctx, &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.PodDeletionCost: "101",
 			}},
 		})
-		cost2 := deprovisioning.GetPodEvictionCost(ctx, &v1.Pod{
+		cost2 := disruption.GetPodEvictionCost(ctx, &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.PodDeletionCost: "100",
 			}},
 		})
-		cost3 := deprovisioning.GetPodEvictionCost(ctx, &v1.Pod{
+		cost3 := disruption.GetPodEvictionCost(ctx, &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.PodDeletionCost: "99",
 			}},
@@ -1302,13 +1302,13 @@ var _ = Describe("Pod Eviction Cost", func() {
 		Expect(cost2).To(BeNumerically(">", cost3))
 	})
 	It("should have a higher disruptionCost for a pod with a higher priority", func() {
-		cost := deprovisioning.GetPodEvictionCost(ctx, &v1.Pod{
+		cost := disruption.GetPodEvictionCost(ctx, &v1.Pod{
 			Spec: v1.PodSpec{Priority: ptr.Int32(1)},
 		})
 		Expect(cost).To(BeNumerically(">", standardPodCost))
 	})
 	It("should have a lower disruptionCost for a pod with a lower priority", func() {
-		cost := deprovisioning.GetPodEvictionCost(ctx, &v1.Pod{
+		cost := disruption.GetPodEvictionCost(ctx, &v1.Pod{
 			Spec: v1.PodSpec{Priority: ptr.Int32(-1)},
 		})
 		Expect(cost).To(BeNumerically("<", standardPodCost))
