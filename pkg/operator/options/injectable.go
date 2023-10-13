@@ -12,19 +12,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package settings
+package options
 
 import (
 	"context"
 
-	v1 "k8s.io/api/core/v1"
+	"github.com/aws/karpenter-core/pkg/apis/settings"
 )
 
 // Injectable defines a ConfigMap registration to be loaded into context on startup
 type Injectable interface {
-	ConfigMap() string
-	Inject(context.Context, *v1.ConfigMap) (context.Context, error)
+	Inject(context.Context, ...string) (context.Context, error)
+	MergeSettings(context.Context, ...settings.Injectable) context.Context
 
-	// Needed for merging settings into options. May be removed with configmap.
+	// Note: required to extract options from root context and insert into manager context
+	ToContext(context.Context, Injectable) context.Context
 	FromContext(context.Context) Injectable
 }

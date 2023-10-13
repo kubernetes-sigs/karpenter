@@ -72,6 +72,10 @@ func (in *Settings) Validate() (err error) {
 	return err
 }
 
+func (*Settings) FromContext(ctx context.Context) Injectable {
+	return FromContext(ctx)
+}
+
 func ToContext(ctx context.Context, s *Settings) context.Context {
 	return context.WithValue(ctx, ContextKey, s)
 }

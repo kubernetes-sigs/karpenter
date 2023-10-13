@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/pprof"
-	"os"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -47,7 +46,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
@@ -80,7 +78,8 @@ func NewOperator() (context.Context, *Operator) {
 	ctx = knativeinjection.WithNamespaceScope(ctx, system.Namespace())
 
 	// Options
-	opts := lo.Must(options.New().Parse(os.Args[1:]...))
+	ctx = injection.WithOptionsOrDie(ctx, apis.Options...)
+	opts := options.FromContext(ctx)
 
 	// Make the Karpenter binary aware of the container memory limit
 	// https://pkg.go.dev/runtime/debug#SetMemoryLimit
@@ -107,8 +106,11 @@ func NewOperator() (context.Context, *Operator) {
 
 	// Inject settings from the ConfigMap(s) into the context
 	ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
-	opts = opts.MergeSettings(settings.FromContext(ctx))
-	ctx = options.ToContext(ctx, opts)
+
+	// Temporarily merge settings into options until configmap is removed
+	for _, o := range apis.Options {
+		ctx = o.MergeSettings(ctx, apis.Settings...)
+	}
 
 	// Logging
 	logger := logging.NewLogger(ctx, component, kubernetesInterface)
@@ -128,11 +130,11 @@ func NewOperator() (context.Context, *Operator) {
 		},
 		HealthProbeBindAddress: fmt.Sprintf(":%d", opts.HealthProbePort),
 		BaseContext: func() context.Context {
-			ctx := context.Background()
-			ctx = knativelogging.WithLogger(ctx, logger)
-			ctx = options.ToContext(ctx, opts)
-			ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
-			return ctx
+			mgrCtx := context.Background()
+			mgrCtx = knativelogging.WithLogger(mgrCtx, logger)
+			mgrCtx = injection.WithSettingsOrDie(mgrCtx, kubernetesInterface, apis.Settings...)
+			mgrCtx = injection.WithOptionsFromContext(mgrCtx, ctx, apis.Options...)
+			return mgrCtx
 		},
 		Cache: cache.Options{
 			ByObject: map[client.Object]cache.ByObject{
