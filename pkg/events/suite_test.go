@@ -28,8 +28,8 @@ import (
 	"k8s.io/client-go/util/flowcontrol"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/node/termination/terminator/events"
 	schedulingevents "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
-	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/termination/terminator/events"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/test"
 )

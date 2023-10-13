@@ -27,9 +27,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	. "knative.dev/pkg/logging/testing"
 
-	"github.com/aws/karpenter-core/pkg/controllers/termination/terminator"
-
 	v1 "k8s.io/api/core/v1"
+
+	"github.com/aws/karpenter-core/pkg/controllers/node/termination/terminator"
 
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/operator/options"
