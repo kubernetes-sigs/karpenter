@@ -97,6 +97,7 @@ func Subtract(lhs, rhs v1.ResourceList) v1.ResourceList {
 }
 
 // inspired from https://github.com/kubernetes/kubernetes/blob/e2afa175e4077d767745246662170acd86affeaf/pkg/api/v1/resource/helpers.go#L96
+// https://kubernetes.io/blog/2023/08/25/native-sidecar-containers/
 // Ceiling calculates the max between the sum of container resources and max of initContainers along with sidecar feature consideration
 func Ceiling(pod *v1.Pod) v1.ResourceRequirements {
 	var resources v1.ResourceRequirements
