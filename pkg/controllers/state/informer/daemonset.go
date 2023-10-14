@@ -45,7 +45,7 @@ func NewDaemonSetController(kubeClient client.Client, cluster *state.Cluster) co
 }
 
 func (c *Controller) Name() string {
-	return "daemonset"
+	return "state.daemonset"
 }
 
 // Reconcile the resource

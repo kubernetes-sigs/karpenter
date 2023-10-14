@@ -17,7 +17,7 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.template.spec.nodeClass.name
+    - jsonPath: .spec.template.spec.nodeClassRef.name
       name: NodeClass
       type: string
     - jsonPath: .spec.weight
@@ -79,6 +79,14 @@ spec:
                     pattern: ^(([0-9]+(s|m|h))+)|(Never)$
                     type: string
                 type: object
+                x-kubernetes-validations:
+                - message: consolidateAfter cannot be combined with consolidationPolicy=WhenUnderutilized
+                  rule: 'has(self.consolidateAfter) ? self.consolidationPolicy !=
+                    ''WhenUnderutilized'' || self.consolidateAfter == ''Never'' :
+                    true'
+                - message: consolidateAfter must be specified with consolidationPolicy=WhenEmpty
+                  rule: 'self.consolidationPolicy == ''WhenEmpty'' ? has(self.consolidateAfter)
+                    : true'
               limits:
                 additionalProperties:
                   anyOf:
@@ -219,9 +227,9 @@ spec:
                               for OS system daemons and kernel memory.
                             type: object
                         type: object
-                      nodeClass:
-                        description: NodeClass is a reference to an object that defines
-                          provider specific configuration
+                      nodeClassRef:
+                        description: NodeClassRef is a reference to an object that
+                          defines provider specific configuration
                         properties:
                           apiVersion:
                             description: API version of the referent
@@ -351,7 +359,7 @@ spec:
                           type: object
                         type: array
                     required:
-                    - nodeClass
+                    - nodeClassRef
                     - requirements
                     type: object
                 type: object

@@ -41,9 +41,9 @@ type NodeClaimSpec struct {
 	// They are a subset of the upstream types, recognizing not all options may be supported.
 	// Wherever possible, the types and names should reflect the upstream kubelet types.
 	Kubelet *KubeletConfiguration `json:"kubelet,omitempty"`
-	// NodeClass is a reference to an object that defines provider specific configuration
+	// NodeClassRef is a reference to an object that defines provider specific configuration
 	// +required
-	NodeClass *NodeClassReference `json:"nodeClass"`
+	NodeClassRef *NodeClassReference `json:"nodeClassRef"`
 	// Provider stores CloudProvider-specific details from a conversion from a v1alpha5.Provisioner
 	// TODO @joinnis: Remove this field when v1alpha5 is unsupported in a future version of Karpenter
 	Provider *Provider `json:"-"`
@@ -150,7 +150,7 @@ type Provider = runtime.RawExtension
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description=""
 // +kubebuilder:printcolumn:name="Capacity",type="string",JSONPath=".metadata.labels.karpenter\\.sh/capacity-type",priority=1,description=""
 // +kubebuilder:printcolumn:name="NodePool",type="string",JSONPath=".metadata.labels.karpenter\\.sh/nodepool",priority=1,description=""
-// +kubebuilder:printcolumn:name="NodeClass",type="string",JSONPath=".spec.nodeClass.name",priority=1,description=""
+// +kubebuilder:printcolumn:name="NodeClass",type="string",JSONPath=".spec.nodeClassRef.name",priority=1,description=""
 type NodeClaim struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

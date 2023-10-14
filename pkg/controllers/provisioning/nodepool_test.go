@@ -955,7 +955,7 @@ var _ = Describe("NodePool/Provisioning", func() {
 				Spec: v1beta1.NodePoolSpec{
 					Template: v1beta1.NodeClaimTemplate{
 						Spec: v1beta1.NodeClaimSpec{
-							NodeClass: &v1beta1.NodeClassReference{
+							NodeClassRef: &v1beta1.NodeClassReference{
 								APIVersion: "cloudprovider.karpenter.sh/v1beta1",
 								Kind:       "CloudProvider",
 								Name:       "default",
@@ -969,7 +969,7 @@ var _ = Describe("NodePool/Provisioning", func() {
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 
 			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
-			Expect(cloudProvider.CreateCalls[0].Spec.NodeClass).To(Equal(
+			Expect(cloudProvider.CreateCalls[0].Spec.NodeClassRef).To(Equal(
 				&v1beta1.NodeClassReference{
 					APIVersion: "cloudprovider.karpenter.sh/v1beta1",
 					Kind:       "CloudProvider",

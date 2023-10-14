@@ -15,18 +15,18 @@ limitations under the License.
 package controllers
 
 import (
-	"context"
-
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning"
+	"github.com/aws/karpenter-core/pkg/controllers/disruption"
 	"github.com/aws/karpenter-core/pkg/controllers/leasegarbagecollection"
 	metricsnode "github.com/aws/karpenter-core/pkg/controllers/metrics/node"
 	metricspod "github.com/aws/karpenter-core/pkg/controllers/metrics/pod"
 	metricsprovisioner "github.com/aws/karpenter-core/pkg/controllers/metrics/provisioner"
+	"github.com/aws/karpenter-core/pkg/controllers/node/termination"
+	"github.com/aws/karpenter-core/pkg/controllers/node/termination/terminator"
 	nodeclaimconsistency "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/consistency"
 	nodeclaimdisruption "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/disruption"
 	nodeclaimgarbagecollection "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/garbagecollection"
@@ -37,14 +37,11 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
-	"github.com/aws/karpenter-core/pkg/controllers/termination"
-	"github.com/aws/karpenter-core/pkg/controllers/termination/terminator"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 )
 
 func NewControllers(
-	ctx context.Context,
 	clock clock.Clock,
 	kubeClient client.Client,
 	kubernetesInterface kubernetes.Interface,
@@ -54,11 +51,11 @@ func NewControllers(
 ) []controller.Controller {
 
 	p := provisioning.NewProvisioner(kubeClient, kubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
-	terminator := terminator.NewTerminator(clock, kubeClient, terminator.NewEvictionQueue(ctx, kubernetesInterface.CoreV1(), recorder))
+	evictionQueue := terminator.NewQueue(kubernetesInterface.CoreV1(), recorder)
 
 	return []controller.Controller{
-		p,
-		deprovisioning.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster),
+		p, evictionQueue,
+		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster),
 		provisioning.NewController(kubeClient, p, recorder),
 		nodepoolhash.NewProvisionerController(kubeClient),
 		informer.NewDaemonSetController(kubeClient, cluster),
@@ -66,7 +63,7 @@ func NewControllers(
 		informer.NewPodController(kubeClient, cluster),
 		informer.NewProvisionerController(kubeClient, cluster),
 		informer.NewMachineController(kubeClient, cluster),
-		termination.NewController(kubeClient, cloudProvider, terminator, recorder),
+		termination.NewController(kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue), recorder),
 		metricspod.NewController(kubeClient),
 		metricsprovisioner.NewController(kubeClient),
 		metricsnode.NewController(cluster),

@@ -15,17 +15,32 @@ limitations under the License.
 package options
 
 import (
+	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"os"
-	"runtime/debug"
+	"time"
 
+	"github.com/samber/lo"
+	cliflag "k8s.io/component-base/cli/flag"
+
+	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/utils/env"
 )
 
-// Options for running this binary
-type Options struct {
-	*flag.FlagSet
+var validLogLevels = []string{"", "debug", "info", "error"}
+
+type optionsKey struct{}
+
+type FeatureGates struct {
+	Drift bool
+
+	inputStr string
+}
+
+type OptionFields struct {
+	FlagSet *flag.FlagSet
 	// Vendor Neutral
 	ServiceName          string
 	DisableWebhook       bool
@@ -38,6 +53,22 @@ type Options struct {
 	EnableProfiling      bool
 	EnableLeaderElection bool
 	MemoryLimit          int64
+	LogLevel             string
+	BatchMaxDuration     time.Duration
+	BatchIdleDuration    time.Duration
+	FeatureGates         FeatureGates
+}
+
+// Note: temporary flags to note if merged fields have been set
+type optionFlags struct {
+	BatchMaxDurationSet  bool
+	BatchIdleDurationSet bool
+	FeatureGatesSet      bool
+}
+
+type Options struct {
+	OptionFields
+	optionFlags
 }
 
 // New creates an Options struct and registers CLI flags and environment variables to fill-in the Options struct fields
@@ -58,24 +89,99 @@ func New() *Options {
 	f.BoolVar(&opts.EnableProfiling, "enable-profiling", env.WithDefaultBool("ENABLE_PROFILING", false), "Enable the profiling on the metric endpoint")
 	f.BoolVar(&opts.EnableLeaderElection, "leader-elect", env.WithDefaultBool("LEADER_ELECT", true), "Start leader election client and gain leadership before executing the main loop. Enable this when running replicated components for high availability.")
 	f.Int64Var(&opts.MemoryLimit, "memory-limit", env.WithDefaultInt64("MEMORY_LIMIT", -1), "Memory limit on the container running the controller. The GC soft memory limit is set to 90% of this value.")
+	f.StringVar(&opts.LogLevel, "log-level", env.WithDefaultString("LOG_LEVEL", ""), "Log verbosity level. Can be one of 'debug', 'info', or 'error'")
 
-	if opts.MemoryLimit > 0 {
-		newLimit := int64(float64(opts.MemoryLimit) * 0.9)
-		debug.SetMemoryLimit(newLimit)
-	}
+	// Vars that must be merged with settings
+	f.DurationVar(&opts.BatchMaxDuration, "batch-max-duration", env.WithDefaultDuration("BATCH_MAX_DURATION", 10*time.Second), "The maximum length of a batch window. The longer this is, the more pods we can consider for provisioning at one time which usually results in fewer but larger nodes.")
+	f.DurationVar(&opts.BatchIdleDuration, "batch-idle-duration", env.WithDefaultDuration("BATCH_IDLE_DURATION", time.Second), "The maximum amount of time with no new pending pods that if exceeded ends the current batching window. If pods arrive faster than this time, the batching window will be extended up to the maxDuration. If they arrive slower, the pods will be batched separately.")
+	f.StringVar(&opts.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "Drift=false"), "Optional features can be enabled / disabled using feature gates. Current options are: Drift")
+
 	return opts
 }
 
-// MustParse reads the user passed flags, environment variables, and default values.
-// Options are valided and panics if an error is returned
-func (o *Options) MustParse() *Options {
-	err := o.Parse(os.Args[1:])
+func (o *Options) Parse(args ...string) (*Options, error) {
+	if err := o.FlagSet.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
+		return nil, err
+	}
 
-	if errors.Is(err, flag.ErrHelp) {
-		os.Exit(0)
+	if !lo.Contains(validLogLevels, o.LogLevel) {
+		return nil, fmt.Errorf("failed to validate cli flags / env vars, invalid log level %q", o.LogLevel)
 	}
-	if err != nil {
-		panic(err)
+
+	o.FeatureGates = MustParseFeatureGates(o.FeatureGates.inputStr)
+
+	// Check if shared fields have been set. If they haven't, they may be ovewritten by settings parsed from configmaps.
+	o.FlagSet.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "batch-max-duration":
+			o.BatchMaxDurationSet = true
+		case "batch-idle-duration":
+			o.BatchIdleDurationSet = true
+		case "feature-gates":
+			o.FeatureGatesSet = true
+		}
+	})
+	if _, ok := os.LookupEnv("BATCH_MAX_DURATION"); ok {
+		o.BatchMaxDurationSet = true
 	}
+	if _, ok := os.LookupEnv("BATCH_IDLE_DURATION"); ok {
+		o.BatchIdleDurationSet = true
+	}
+	if _, ok := os.LookupEnv("FEATURE_GATES"); ok {
+		o.FeatureGatesSet = true
+	}
+
+	return o, nil
+}
+
+// MergeSettings applies settings specified in the v1alpha5 configmap to options. If the value was already specified by
+// a CLI argument or environment variable, that value will be used.
+func (o *Options) MergeSettings(s *settings.Settings) *Options {
+	if s == nil {
+		return o
+	}
+
+	// Note: settings also has default values applied to it. If the option is specified by neither Settings nor Options,
+	// the default value is used from Settings.
+	mergeField(&o.BatchMaxDuration, s.BatchMaxDuration, o.BatchMaxDurationSet)
+	mergeField(&o.BatchIdleDuration, s.BatchIdleDuration, o.BatchIdleDurationSet)
+	mergeField(&o.FeatureGates.Drift, s.DriftEnabled, o.FeatureGatesSet)
 	return o
+}
+
+func MustParseFeatureGates(gateStr string) FeatureGates {
+	gateMap := map[string]bool{}
+	gates := FeatureGates{}
+
+	// Parses feature gates with the upstream mechanism. This is meant to be used with flag directly but this enables
+	// simple merging with environment vars.
+	lo.Must0(cliflag.NewMapStringBool(&gateMap).Set(gateStr))
+	if val, ok := gateMap["Drift"]; ok {
+		gates.Drift = val
+	}
+
+	return gates
+}
+
+func ToContext(ctx context.Context, opts *Options) context.Context {
+	return context.WithValue(ctx, optionsKey{}, opts)
+}
+
+func FromContext(ctx context.Context) *Options {
+	retval := ctx.Value(optionsKey{})
+	if retval == nil {
+		// This is a developer error if this happens, so we should panic
+		panic("options doesn't exist in context")
+	}
+	return retval.(*Options)
+}
+
+func mergeField[T any](dest *T, val T, isSet bool) {
+	if isSet {
+		return
+	}
+	*dest = val
 }

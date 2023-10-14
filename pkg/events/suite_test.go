@@ -28,8 +28,8 @@ import (
 	"k8s.io/client-go/util/flowcontrol"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/node/termination/terminator/events"
 	schedulingevents "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
-	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/termination/terminator/events"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/test"
 )
@@ -137,7 +137,6 @@ var _ = Describe("Rate Limiting", func() {
 			eventRecorder.Publish(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), NodeClaimWithUID()))
 		}
 		Expect(internalRecorder.Calls(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), NodeClaimWithUID()).Reason)).To(Equal(10))
-
 	})
 	It("should allow many events over time due to smoothed rate limiting", func() {
 		for i := 0; i < 3; i++ {

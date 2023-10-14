@@ -33,7 +33,6 @@ import (
 	. "knative.dev/pkg/logging/testing"
 
 	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -43,6 +42,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/operator/options"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
@@ -66,7 +66,7 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
-	ctx = settings.ToContext(ctx, test.Settings())
+	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
@@ -81,7 +81,7 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = BeforeEach(func() {
-	ctx = settings.ToContext(ctx, test.Settings())
+	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider.Reset()
 })
 
@@ -663,22 +663,24 @@ var _ = Describe("Combined/Provisioning", func() {
 })
 
 func ExpectNodeClaimRequirements(nodeClaim *v1beta1.NodeClaim, requirements ...v1.NodeSelectorRequirement) {
+	GinkgoHelper()
 	for _, requirement := range requirements {
 		req, ok := lo.Find(nodeClaim.Spec.Requirements, func(r v1.NodeSelectorRequirement) bool {
 			return r.Key == requirement.Key && r.Operator == requirement.Operator
 		})
-		ExpectWithOffset(1, ok).To(BeTrue())
+		Expect(ok).To(BeTrue())
 
 		have := sets.New(req.Values...)
 		expected := sets.New(requirement.Values...)
-		ExpectWithOffset(1, have.Len()).To(Equal(expected.Len()))
-		ExpectWithOffset(1, have.Intersection(expected).Len()).To(Equal(expected.Len()))
+		Expect(have.Len()).To(Equal(expected.Len()))
+		Expect(have.Intersection(expected).Len()).To(Equal(expected.Len()))
 	}
 }
 
 func ExpectNodeClaimRequests(nodeClaim *v1beta1.NodeClaim, resources v1.ResourceList) {
+	GinkgoHelper()
 	for name, value := range resources {
 		v := nodeClaim.Spec.Resources.Requests[name]
-		ExpectWithOffset(1, v.AsApproximateFloat64()).To(BeNumerically("~", value.AsApproximateFloat64(), 10))
+		Expect(v.AsApproximateFloat64()).To(BeNumerically("~", value.AsApproximateFloat64(), 10))
 	}
 }

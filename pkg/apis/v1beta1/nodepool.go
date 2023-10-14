@@ -36,6 +36,8 @@ type NodePoolSpec struct {
 	Template NodeClaimTemplate `json:"template,omitempty"`
 	// Disruption contains the parameters that relate to Karpenter's disruption logic
 	// +kubebuilder:default={"consolidationPolicy": "WhenUnderutilized", "expireAfter": "720h"}
+	// +kubebuilder:validation:XValidation:message="consolidateAfter cannot be combined with consolidationPolicy=WhenUnderutilized",rule="has(self.consolidateAfter) ? self.consolidationPolicy != 'WhenUnderutilized' || self.consolidateAfter == 'Never' : true"
+	// +kubebuilder:validation:XValidation:message="consolidateAfter must be specified with consolidationPolicy=WhenEmpty",rule="self.consolidationPolicy == 'WhenEmpty' ? has(self.consolidateAfter) : true"
 	// +optional
 	Disruption Disruption `json:"disruption"`
 	// Limits define a set of bounds for provisioning capacity.
@@ -109,7 +111,7 @@ type NodeClaimTemplate struct {
 // NodePool is the Schema for the NodePools API
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=nodepools,scope=Cluster,categories=karpenter
-// +kubebuilder:printcolumn:name="NodeClass",type="string",JSONPath=".spec.template.spec.nodeClass.name",description=""
+// +kubebuilder:printcolumn:name="NodeClass",type="string",JSONPath=".spec.template.spec.nodeClassRef.name",description=""
 // +kubebuilder:printcolumn:name="Weight",type="string",JSONPath=".spec.weight",priority=1,description=""
 // +kubebuilder:subresource:status
 type NodePool struct {

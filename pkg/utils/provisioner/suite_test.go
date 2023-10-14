@@ -161,8 +161,8 @@ var _ = Describe("ProvisionerUtils", func() {
 							ImageGCLowThresholdPercent:  ptr.Int32(10),
 							CPUCFSQuota:                 ptr.Bool(false),
 						},
-						NodeClass: &v1beta1.NodeClassReference{
-							Kind:       "NodeClass",
+						NodeClassRef: &v1beta1.NodeClassReference{
+							Kind:       "NodeClassRef",
 							APIVersion: "test.cloudprovider/v1",
 							Name:       "default",
 						},
@@ -214,9 +214,9 @@ var _ = Describe("ProvisionerUtils", func() {
 		Expect(provisioner.Spec.KubeletConfiguration.ImageGCLowThresholdPercent).To(Equal(nodePool.Spec.Template.Spec.Kubelet.ImageGCLowThresholdPercent))
 		Expect(provisioner.Spec.KubeletConfiguration.CPUCFSQuota).To(Equal(nodePool.Spec.Template.Spec.Kubelet.CPUCFSQuota))
 
-		Expect(provisioner.Spec.ProviderRef.Kind).To(Equal(nodePool.Spec.Template.Spec.NodeClass.Kind))
-		Expect(provisioner.Spec.ProviderRef.APIVersion).To(Equal(nodePool.Spec.Template.Spec.NodeClass.APIVersion))
-		Expect(provisioner.Spec.ProviderRef.Name).To(Equal(nodePool.Spec.Template.Spec.NodeClass.Name))
+		Expect(provisioner.Spec.ProviderRef.Kind).To(Equal(nodePool.Spec.Template.Spec.NodeClassRef.Kind))
+		Expect(provisioner.Spec.ProviderRef.APIVersion).To(Equal(nodePool.Spec.Template.Spec.NodeClassRef.APIVersion))
+		Expect(provisioner.Spec.ProviderRef.Name).To(Equal(nodePool.Spec.Template.Spec.NodeClassRef.Name))
 
 		Expect(provisioner.Spec.Consolidation).ToNot(BeNil())
 		Expect(provisioner.Spec.Consolidation.Enabled).ToNot(BeNil())
@@ -227,13 +227,15 @@ var _ = Describe("ProvisionerUtils", func() {
 
 		ExpectResources(provisioner.Spec.Limits.Resources, v1.ResourceList(nodePool.Spec.Limits))
 		Expect(lo.FromPtr(provisioner.Spec.Weight)).To(BeNumerically("==", lo.FromPtr(nodePool.Spec.Weight)))
+
+		ExpectResources(provisioner.Status.Resources, nodePool.Status.Resources)
 	})
 	It("should convert a Provisioner to a NodePool (with Provider)", func() {
 		nodePool.Spec.Template.Spec.Provider = &runtime.RawExtension{Raw: lo.Must(json.Marshal(map[string]string{
 			"test-key":  "test-value",
 			"test-key2": "test-value2",
 		}))}
-		nodePool.Spec.Template.Spec.NodeClass = nil
+		nodePool.Spec.Template.Spec.NodeClassRef = nil
 
 		provisioner := provisionerutil.New(nodePool)
 		Expect(provisioner.Spec.Provider).To(Equal(nodePool.Spec.Template.Spec.Provider))

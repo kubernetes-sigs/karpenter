@@ -135,7 +135,7 @@ func NewController(cluster *state.Cluster) *Controller {
 }
 
 func (c *Controller) Name() string {
-	return "metric_scraper"
+	return "metrics.node"
 }
 
 func (c *Controller) Reconcile(_ context.Context, _ reconcile.Request) (reconcile.Result, error) {

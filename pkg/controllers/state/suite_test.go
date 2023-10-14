@@ -29,14 +29,17 @@ import (
 	"knative.dev/pkg/ptr"
 
 	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	corecloudprovider "github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/operator/options"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/scheduling"
+	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
+	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -78,7 +81,7 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
-	ctx = settings.ToContext(ctx, test.Settings())
+	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
@@ -100,6 +103,8 @@ var _ = BeforeEach(func() {
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 	provisioner = test.Provisioner(test.ProvisionerOptions{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
 	nodePool = test.NodePool(v1beta1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
+	nodepoolutil.EnableNodePools = true
+	nodeclaimutil.EnableNodeClaims = true
 	ExpectApplied(ctx, env.Client, provisioner, nodePool)
 })
 var _ = AfterEach(func() {
@@ -523,6 +528,30 @@ var _ = Describe("Inflight Nodes", func() {
 		// Still expect to succeed w/o instance type since inflight details are set once
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 	})
+	It("should populate node from the cluster if we have no instance types", func() {
+		cloudProvider.InstanceTypes = []*corecloudprovider.InstanceType{}
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+				v1beta1.NodeInitializedLabelKey:  "true",
+			}},
+			ProviderID: test.RandomProviderID(),
+			Capacity: v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 64)),
+				v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 128)),
+			},
+			Allocatable: v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 32)),
+				v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 64)),
+			},
+		})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		ExpectStateNodeCount("==", 1)
+		ExpectResources(node.Status.Allocatable, ExpectStateNodeExists(node).Allocatable())
+		ExpectResources(node.Status.Capacity, ExpectStateNodeExists(node).Capacity())
+	})
 	It("should consider the node capacity/allocatable as a combination of instance type and current node", func() {
 		instanceType := cloudProvider.InstanceTypes[0]
 		node := test.Node(test.NodeOptions{
@@ -552,6 +581,31 @@ var _ = Describe("Inflight Nodes", func() {
 			v1.ResourceCPU:              *instanceType.Capacity.Cpu(),
 			v1.ResourceEphemeralStorage: resource.MustParse("100Gi"), // pulled from the node's real capacity
 		}, ExpectStateNodeExists(node).Capacity())
+	})
+	It("should consider the node capacity/allocatable to be equal to the node when the node is initialized", func() {
+		instanceType := cloudProvider.InstanceTypes[0]
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+				v1.LabelInstanceTypeStable:       instanceType.Name,
+				v1beta1.NodeInitializedLabelKey:  "true",
+			}},
+			ProviderID: test.RandomProviderID(),
+			Capacity: v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 64)),
+				v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 128)),
+			},
+			Allocatable: v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 32)),
+				v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 64)),
+			},
+		})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+		ExpectStateNodeCount("==", 1)
+		ExpectResources(node.Status.Allocatable, ExpectStateNodeExists(node).Allocatable())
+		ExpectResources(node.Status.Capacity, ExpectStateNodeExists(node).Capacity())
 	})
 	It("should only set startup taints once", func() {
 		taints := []v1.Taint{
@@ -632,6 +686,28 @@ var _ = Describe("Inflight Nodes", func() {
 			ExpectApplied(ctx, env.Client, machine)
 			ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
 			ExpectStateNodeNotFoundForMachine(machine)
+		})
+		It("should ignore node updates if nodes don't have provider id and are owned", func() {
+			node := test.Node(test.NodeOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					},
+				},
+				Capacity: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("1800m"),
+					v1.ResourceMemory:           resource.MustParse("0"), // Should use the inflight capacity for this value
+					v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
+				},
+				Allocatable: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("0"), // Should use the inflight allocatable for this value
+					v1.ResourceMemory:           resource.MustParse("29250Mi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("0"), // Should use the inflight allocatable for this value
+				},
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			ExpectStateNodeCount("==", 0)
 		})
 		It("should model the inflight data as machine with no node", func() {
 			machine := test.Machine(v1alpha5.Machine{
@@ -1168,7 +1244,7 @@ var _ = Describe("Inflight Nodes", func() {
 			ExpectStateNodeCount("==", 1)
 			Expect(ExpectStateNodeExists(node).Nominated()).To(BeTrue())
 		})
-		It("should continue MarkedForDeletion when an inflight node becomes a real node", func() {
+		It("should continue to be MarkedForDeletion when an inflight node becomes a real node", func() {
 			machine := test.Machine(v1alpha5.Machine{
 				Status: v1alpha5.MachineStatus{
 					ProviderID: test.RandomProviderID(),
@@ -1220,7 +1296,7 @@ var _ = Describe("Inflight Nodes", func() {
 							v1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
 						},
 					},
-					NodeClass: &v1beta1.NodeClassReference{
+					NodeClassRef: &v1beta1.NodeClassReference{
 						Name: "default",
 					},
 				},
@@ -1229,6 +1305,104 @@ var _ = Describe("Inflight Nodes", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim)
 			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 			ExpectStateNodeNotFoundForNodeClaim(nodeClaim)
+		})
+		It("should ignore node updates if nodes don't have provider id and are owned", func() {
+			node := test.Node(test.NodeOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey: nodePool.Name,
+					},
+				},
+				Capacity: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("1800m"),
+					v1.ResourceMemory:           resource.MustParse("0"), // Should use the inflight capacity for this value
+					v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
+				},
+				Allocatable: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("0"), // Should use the inflight allocatable for this value
+					v1.ResourceMemory:           resource.MustParse("29250Mi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("0"), // Should use the inflight allocatable for this value
+				},
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			ExpectStateNodeCount("==", 0)
+		})
+		It("shouldn't ignore node updates if nodes don't have provider id and EnableNodePools/EnableNodeClaims isn't enabled", func() {
+			nodepoolutil.EnableNodePools = false
+			nodeclaimutil.EnableNodeClaims = false
+
+			node := test.Node(test.NodeOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey: nodePool.Name,
+					},
+				},
+				Capacity: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("1800m"),
+					v1.ResourceMemory:           resource.MustParse("0"), // Should use the inflight capacity for this value
+					v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
+				},
+				Allocatable: v1.ResourceList{
+					v1.ResourceCPU:              resource.MustParse("0"), // Should use the inflight allocatable for this value
+					v1.ResourceMemory:           resource.MustParse("29250Mi"),
+					v1.ResourceEphemeralStorage: resource.MustParse("0"), // Should use the inflight allocatable for this value
+				},
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			ExpectStateNodeCount("==", 1)
+		})
+		It("shouldn't populate inflight capacity if EnableNodePools/EnableNodeClaims isn't enabled", func() {
+			nodepoolutil.EnableNodePools = false
+			nodeclaimutil.EnableNodeClaims = false
+
+			instanceType := cloudProvider.InstanceTypes[0]
+			node := test.Node(test.NodeOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:   nodePool.Name,
+					v1.LabelInstanceTypeStable: instanceType.Name,
+				}},
+				ProviderID: test.RandomProviderID(),
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			ExpectStateNodeCount("==", 1)
+			Expect(ExpectStateNodeExists(node).Allocatable()).To(HaveLen(0))
+			Expect(ExpectStateNodeExists(node).Capacity()).To(HaveLen(0))
+		})
+		It("shouldn't populate startup taints if EnableNodePools/EnableNodeClaims isn't enabled", func() {
+			nodepoolutil.EnableNodePools = false
+			nodeclaimutil.EnableNodeClaims = false
+
+			instanceType := cloudProvider.InstanceTypes[0]
+			nodePool.Spec.Template.Spec.StartupTaints = []v1.Taint{
+				{
+					Key:    "test",
+					Effect: v1.TaintEffectNoSchedule,
+				},
+			}
+			node := test.Node(test.NodeOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:   nodePool.Name,
+					v1.LabelInstanceTypeStable: instanceType.Name,
+				}},
+				Taints: []v1.Taint{
+					{
+						Key:    "test",
+						Effect: v1.TaintEffectNoSchedule,
+					},
+				},
+				ProviderID: test.RandomProviderID(),
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			ExpectStateNodeCount("==", 1)
+
+			// This taint wouldn't show if we discovered the startup taints
+			Expect(ExpectStateNodeExists(node).Taints()).To(HaveLen(1))
 		})
 		It("should model the inflight data as nodeclaim with no node", func() {
 			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
@@ -1271,7 +1445,7 @@ var _ = Describe("Inflight Nodes", func() {
 							v1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
 						},
 					},
-					NodeClass: &v1beta1.NodeClassReference{
+					NodeClassRef: &v1beta1.NodeClassReference{
 						Name: "default",
 					},
 				},
@@ -1309,7 +1483,7 @@ var _ = Describe("Inflight Nodes", func() {
 							Values:   []string{"test-zone-1"},
 						},
 					},
-					NodeClass: &v1beta1.NodeClassReference{
+					NodeClassRef: &v1beta1.NodeClassReference{
 						Name: "default",
 					},
 				},
@@ -1329,7 +1503,6 @@ var _ = Describe("Inflight Nodes", func() {
 			})
 			ExpectApplied(ctx, env.Client, nodeClaim)
 			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-
 			ExpectStateNodeCount("==", 1)
 			ExpectResources(v1.ResourceList{
 				v1.ResourceCPU:              resource.MustParse("2"),
@@ -1357,7 +1530,7 @@ var _ = Describe("Inflight Nodes", func() {
 							Values:   []string{"test-zone-1"},
 						},
 					},
-					NodeClass: &v1beta1.NodeClassReference{
+					NodeClassRef: &v1beta1.NodeClassReference{
 						Name: "default",
 					},
 				},
@@ -1453,7 +1626,7 @@ var _ = Describe("Inflight Nodes", func() {
 							Effect: v1.TaintEffectNoExecute,
 						},
 					},
-					NodeClass: &v1beta1.NodeClassReference{
+					NodeClassRef: &v1beta1.NodeClassReference{
 						Name: "default",
 					},
 				},
@@ -1537,7 +1710,7 @@ var _ = Describe("Inflight Nodes", func() {
 							Effect: v1.TaintEffectNoExecute,
 						},
 					},
-					NodeClass: &v1beta1.NodeClassReference{
+					NodeClassRef: &v1beta1.NodeClassReference{
 						Name: "default",
 					},
 				},
@@ -1622,7 +1795,7 @@ var _ = Describe("Inflight Nodes", func() {
 							Values:   []string{"test-zone-1"},
 						},
 					},
-					NodeClass: &v1beta1.NodeClassReference{
+					NodeClassRef: &v1beta1.NodeClassReference{
 						Name: "default",
 					},
 				},
@@ -1693,7 +1866,7 @@ var _ = Describe("Inflight Nodes", func() {
 							Values:   []string{"test-zone-1"},
 						},
 					},
-					NodeClass: &v1beta1.NodeClassReference{
+					NodeClassRef: &v1beta1.NodeClassReference{
 						Name: "default",
 					},
 				},
@@ -1765,7 +1938,7 @@ var _ = Describe("Inflight Nodes", func() {
 			ExpectStateNodeCount("==", 1)
 			Expect(ExpectStateNodeExists(node).Nominated()).To(BeTrue())
 		})
-		It("should continue MarkedForDeletion when an inflight node becomes a real node", func() {
+		It("should continue to be MarkedForDeletion when an inflight node becomes a real node", func() {
 			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 				Status: v1beta1.NodeClaimStatus{
 					ProviderID: test.RandomProviderID(),
@@ -2403,7 +2576,7 @@ var _ = Describe("Node Resource Level", func() {
 						Values:   []string{"test-zone-1"},
 					},
 				},
-				NodeClass: &v1beta1.NodeClassReference{
+				NodeClassRef: &v1beta1.NodeClassReference{
 					Name: "default",
 				},
 			},

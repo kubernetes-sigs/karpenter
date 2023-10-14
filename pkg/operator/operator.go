@@ -18,12 +18,16 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/pprof"
+	"os"
+	"runtime/debug"
 	"sync"
 	"time"
 
+	coordinationv1 "k8s.io/api/coordination/v1"
+
 	"github.com/go-logr/zapr"
 	"github.com/samber/lo"
-	coordinationv1 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
@@ -40,11 +44,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/aws/karpenter-core/pkg/apis"
+	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/events"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
 	"github.com/aws/karpenter-core/pkg/operator/logging"
 	"github.com/aws/karpenter-core/pkg/operator/options"
@@ -74,8 +80,14 @@ func NewOperator() (context.Context, *Operator) {
 	ctx = knativeinjection.WithNamespaceScope(ctx, system.Namespace())
 
 	// Options
-	opts := options.New().MustParse()
-	ctx = injection.WithOptions(ctx, *opts)
+	opts := lo.Must(options.New().Parse(os.Args[1:]...))
+
+	// Make the Karpenter binary aware of the container memory limit
+	// https://pkg.go.dev/runtime/debug#SetMemoryLimit
+	if opts.MemoryLimit > 0 {
+		newLimit := int64(float64(opts.MemoryLimit) * 0.9)
+		debug.SetMemoryLimit(newLimit)
+	}
 
 	// Webhook
 	ctx = webhook.WithOptions(ctx, webhook.Options{
@@ -93,43 +105,62 @@ func NewOperator() (context.Context, *Operator) {
 	// Client
 	kubernetesInterface := kubernetes.NewForConfigOrDie(config)
 
+	// Inject settings from the ConfigMap(s) into the context
+	ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
+	opts = opts.MergeSettings(settings.FromContext(ctx))
+	ctx = options.ToContext(ctx, opts)
+
 	// Logging
 	logger := logging.NewLogger(ctx, component, kubernetesInterface)
 	ctx = knativelogging.WithLogger(ctx, logger)
 	logging.ConfigureGlobalLoggers(ctx)
 
-	// Inject settings from the ConfigMap(s) into the context
-	ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
-
 	// Manager
-	mgr, err := controllerruntime.NewManager(config, controllerruntime.Options{
+	mgrOpts := controllerruntime.Options{
 		Logger:                     logging.IgnoreDebugEvents(zapr.NewLogger(logger.Desugar())),
 		LeaderElection:             opts.EnableLeaderElection,
 		LeaderElectionID:           "karpenter-leader-election",
 		LeaderElectionResourceLock: resourcelock.LeasesResourceLock,
 		LeaderElectionNamespace:    system.Namespace(),
 		Scheme:                     scheme.Scheme,
-		MetricsBindAddress:         fmt.Sprintf(":%d", opts.MetricsPort),
-		HealthProbeBindAddress:     fmt.Sprintf(":%d", opts.HealthProbePort),
+		Metrics: server.Options{
+			BindAddress: fmt.Sprintf(":%d", opts.MetricsPort),
+		},
+		HealthProbeBindAddress: fmt.Sprintf(":%d", opts.HealthProbePort),
 		BaseContext: func() context.Context {
 			ctx := context.Background()
 			ctx = knativelogging.WithLogger(ctx, logger)
+			ctx = options.ToContext(ctx, opts)
 			ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
-			ctx = injection.WithOptions(ctx, *opts)
 			return ctx
 		},
-		NewCache: cache.BuilderWithOptions(cache.Options{
-			SelectorsByObject: cache.SelectorsByObject{
+		Cache: cache.Options{
+			ByObject: map[client.Object]cache.ByObject{
 				&coordinationv1.Lease{}: {
 					Field: fields.SelectorFromSet(fields.Set{"metadata.namespace": "kube-node-lease"}),
 				},
 			},
-		}),
-	})
-	mgr = lo.Must(mgr, err, "failed to setup manager")
-	if opts.EnableProfiling {
-		registerPprof(mgr)
+		},
 	}
+	if opts.EnableProfiling {
+		// TODO @joinnis: Investigate the mgrOpts.PprofBindAddress that would allow native support for pprof
+		// On initial look, it seems like this native pprof doesn't support some of the routes that we have here
+		// like "/debug/pprof/heap" or "/debug/pprof/block"
+		mgrOpts.Metrics.ExtraHandlers = lo.Assign(mgrOpts.Metrics.ExtraHandlers, map[string]http.Handler{
+			"/debug/pprof/":             http.HandlerFunc(pprof.Index),
+			"/debug/pprof/cmdline":      http.HandlerFunc(pprof.Cmdline),
+			"/debug/pprof/profile":      http.HandlerFunc(pprof.Profile),
+			"/debug/pprof/symbol":       http.HandlerFunc(pprof.Symbol),
+			"/debug/pprof/trace":        http.HandlerFunc(pprof.Trace),
+			"/debug/pprof/allocs":       pprof.Handler("allocs"),
+			"/debug/pprof/heap":         pprof.Handler("heap"),
+			"/debug/pprof/block":        pprof.Handler("block"),
+			"/debug/pprof/goroutine":    pprof.Handler("goroutine"),
+			"/debug/pprof/threadcreate": pprof.Handler("threadcreate"),
+		})
+	}
+	mgr, err := controllerruntime.NewManager(config, mgrOpts)
+	mgr = lo.Must(mgr, err, "failed to setup manager")
 	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.Pod{}, "spec.nodeName", func(o client.Object) []string {
 		return []string{o.(*v1.Pod).Spec.NodeName}
 	}), "failed to setup pod indexer")
@@ -155,7 +186,7 @@ func NewOperator() (context.Context, *Operator) {
 	}
 }
 
-func (o *Operator) WithControllers(ctx context.Context, controllers ...corecontroller.Controller) *Operator {
+func (o *Operator) WithControllers(ctx context.Context, controllers ...controller.Controller) *Operator {
 	for _, c := range controllers {
 		lo.Must0(c.Builder(ctx, o.Manager).Complete(c))
 	}
@@ -163,7 +194,7 @@ func (o *Operator) WithControllers(ctx context.Context, controllers ...corecontr
 }
 
 func (o *Operator) WithWebhooks(ctx context.Context, ctors ...knativeinjection.ControllerConstructor) *Operator {
-	if !injection.GetOptions(ctx).DisableWebhook {
+	if !options.FromContext(ctx).DisableWebhook {
 		o.webhooks = append(o.webhooks, ctors...)
 		lo.Must0(o.Manager.AddReadyzCheck("webhooks", webhooks.HealthProbe(ctx)))
 		lo.Must0(o.Manager.AddHealthzCheck("webhooks", webhooks.HealthProbe(ctx)))
@@ -178,7 +209,7 @@ func (o *Operator) Start(ctx context.Context) {
 		defer wg.Done()
 		lo.Must0(o.Manager.Start(ctx))
 	}()
-	if injection.GetOptions(ctx).DisableWebhook {
+	if options.FromContext(ctx).DisableWebhook {
 		knativelogging.FromContext(ctx).Infof("webhook disabled")
 	} else {
 		wg.Add(1)

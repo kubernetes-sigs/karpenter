@@ -52,8 +52,8 @@ type Key struct {
 
 // PodEventHandler is a watcher on v1.Pods that maps Pods to NodeClaim based on the node names
 // and enqueues reconcile.Requests for the NodeClaims
-func PodEventHandler(ctx context.Context, c client.Client) handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(o client.Object) (requests []reconcile.Request) {
+func PodEventHandler(c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
 		if name := o.(*v1.Pod).Spec.NodeName; name != "" {
 			node := &v1.Node{}
 			if err := c.Get(ctx, types.NamespacedName{Name: name}, node); err != nil {
@@ -75,8 +75,8 @@ func PodEventHandler(ctx context.Context, c client.Client) handler.EventHandler 
 
 // NodeEventHandler is a watcher on v1.Node that maps Nodes to NodeClaims based on provider ids
 // and enqueues reconcile.Requests for the NodeClaims
-func NodeEventHandler(ctx context.Context, c client.Client) handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
+func NodeEventHandler(c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
 		node := o.(*v1.Node)
 		nodeClaimList := &v1beta1.NodeClaimList{}
 		if err := c.List(ctx, nodeClaimList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
@@ -92,8 +92,8 @@ func NodeEventHandler(ctx context.Context, c client.Client) handler.EventHandler
 
 // NodePoolEventHandler is a watcher on v1beta1.NodeClaim that maps Provisioner to NodeClaims based
 // on the v1beta1.NodePoolLabelKey and enqueues reconcile.Requests for the NodeClaim
-func NodePoolEventHandler(ctx context.Context, c client.Client) handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(o client.Object) (requests []reconcile.Request) {
+func NodePoolEventHandler(c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
 		nodeClaimList := &v1beta1.NodeClaimList{}
 		if err := c.List(ctx, nodeClaimList, client.MatchingLabels(map[string]string{v1beta1.NodePoolLabelKey: o.GetName()})); err != nil {
 			return requests
@@ -197,8 +197,8 @@ func New(machine *v1alpha5.Machine) *v1beta1.NodeClaim {
 			Resources: v1beta1.ResourceRequirements{
 				Requests: machine.Spec.Resources.Requests,
 			},
-			Kubelet:   NewKubeletConfiguration(machine.Spec.Kubelet),
-			NodeClass: NewNodeClassReference(machine.Spec.MachineTemplateRef),
+			Kubelet:      NewKubeletConfiguration(machine.Spec.Kubelet),
+			NodeClassRef: NewNodeClassReference(machine.Spec.MachineTemplateRef),
 		},
 		Status: v1beta1.NodeClaimStatus{
 			NodeName:    machine.Status.NodeName,
@@ -474,7 +474,7 @@ func UpdateNodeOwnerReferences(nodeClaim *v1beta1.NodeClaim, node *v1.Node) *v1.
 }
 
 func Owner(ctx context.Context, c client.Client, obj interface{ GetLabels() map[string]string }) (*v1beta1.NodePool, error) {
-	if v, ok := obj.GetLabels()[v1beta1.NodePoolLabelKey]; ok {
+	if v, ok := obj.GetLabels()[v1beta1.NodePoolLabelKey]; ok && EnableNodeClaims {
 		nodePool := &v1beta1.NodePool{}
 		if err := c.Get(ctx, types.NamespacedName{Name: v}, nodePool); err != nil {
 			return nil, err
@@ -492,7 +492,7 @@ func Owner(ctx context.Context, c client.Client, obj interface{ GetLabels() map[
 }
 
 func OwnerKey(obj interface{ GetLabels() map[string]string }) nodepoolutil.Key {
-	if v, ok := obj.GetLabels()[v1beta1.NodePoolLabelKey]; ok {
+	if v, ok := obj.GetLabels()[v1beta1.NodePoolLabelKey]; ok && EnableNodeClaims {
 		return nodepoolutil.Key{Name: v, IsProvisioner: false}
 	}
 	if v, ok := obj.GetLabels()[v1alpha5.ProvisionerNameLabelKey]; ok {
