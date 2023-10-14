@@ -502,6 +502,60 @@ var _ = Describe("Topology", func() {
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(4, 4, 3))
 		})
+
+		It("should respect nodeAffinityPolicy constraints", func() {
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}}
+			honor := v1.NodeInclusionPolicyHonor
+			// Define a topology spread constraint with nodeAffinityPolicy set to Honor
+			topology := []v1.TopologySpreadConstraint{{
+				TopologyKey:        v1.LabelTopologyZone,
+				WhenUnsatisfiable:  v1.DoNotSchedule,
+				LabelSelector:      &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:            1,
+				NodeAffinityPolicy: &honor,
+			}}
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			// Provision three unschedulable pods with the same label and topology spread constraint
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
+					NodeSelector: map[string]string{
+						v1.LabelTopologyZone: "test-zone-1",
+					},
+					TopologySpreadConstraints: topology}, 3)...,
+			)
+			// Expect that the skew is zero and all pods are scheduled on nodes with zone=test-zone-1
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(3, 0, 0))
+		})
+
+		It("should respect nodeAffinityPolicy constraints", func() {
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}}
+			ignore := v1.NodeInclusionPolicyIgnore
+			// Define a topology spread constraint with nodeAffinityPolicy set to Honor
+			topology := []v1.TopologySpreadConstraint{{
+				TopologyKey:        v1.LabelTopologyZone,
+				WhenUnsatisfiable:  v1.DoNotSchedule,
+				LabelSelector:      &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:            1,
+				NodeAffinityPolicy: &ignore,
+			}}
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			// Provision three unschedulable pods with the same label and topology spread constraint
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
+					NodeSelector: map[string]string{
+						v1.LabelTopologyZone: "test-zone-1",
+					},
+					TopologySpreadConstraints: topology}, 3)...,
+			)
+			// Expect that the skew is zero and all pods are scheduled on nodes with zone=test-zone-1
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 0, 0))
+		})
+
+
 		It("satisfied minDomains constraints (greater than minimum) should allow expected pod scheduling", func() {
 			if env.Version.Minor() < 24 {
 				Skip("MinDomains TopologySpreadConstraint is only available starting in K8s >= 1.24.x")

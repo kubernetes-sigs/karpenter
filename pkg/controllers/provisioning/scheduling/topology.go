@@ -231,7 +231,6 @@ func (t *Topology) updateInverseAntiAffinity(ctx context.Context, pod *v1.Pod, d
 // against the cluster for any existing pods.
 func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 	podList := &v1.PodList{}
-	honor := v1.NodeInclusionPolicyHonor
 
 	// collect the pods from all the specified namespaces (don't see a way to query multiple namespaces
 	// simultaneously)
@@ -269,7 +268,7 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 		}
 		// nodes may or may not be considered for counting purposes for topology spread constraints depending on if they
 		// are selected by the pod's node selectors and required node affinities.  If these are unset, the node always counts.
-		if tg.nodeAffinityPolicy == &honor && !tg.nodeFilter.Matches(node) {
+		if !tg.nodeFilter.Matches(node) {
 			continue
 		}
 		tg.Record(domain)

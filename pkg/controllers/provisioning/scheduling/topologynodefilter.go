@@ -28,12 +28,9 @@ import (
 // all nodes.
 type TopologyNodeFilter []scheduling.Requirements
 
-func MakeTopologyNodeFilter(p *v1.Pod, nodeAffinityPolicy *v1.NodeInclusionPolicy) TopologyNodeFilter {
+func MakeTopologyNodeFilter(p *v1.Pod) TopologyNodeFilter {
 	var filter TopologyNodeFilter
-	ignore := v1.NodeInclusionPolicyIgnore
-	if nodeAffinityPolicy == &ignore {
-		return filter
-	}
+
 	nodeSelectorRequirements := scheduling.NewLabelRequirements(p.Spec.NodeSelector)
 	// if we only have a label selector, that's the only requirement that must match
 	if p.Spec.Affinity == nil || p.Spec.Affinity.NodeAffinity == nil || p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
