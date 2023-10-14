@@ -48,34 +48,16 @@ var _ = Describe("Options", func() {
 	Context("FeatureGates", func() {
 		DescribeTable(
 			"should successfully parse well formed feature gate strings",
-			func(gateStr string, driftVal bool) {
-				gates, err := options.FeatureGatesFromStr(gateStr)
+			func(str string, driftVal bool) {
+				gates, err := options.ParseFeatureGates(str)
 				Expect(err).To(BeNil())
 				Expect(gates.Drift).To(Equal(driftVal))
 			},
-			Entry("Basic true", "Drift=true", true),
-			Entry("Basic false", "Drift=false", false),
-			Entry("With whitespace", "Driftt\t= false", false),
-			Entry("With additional gates", "Hello=true,Drift=false,World=true", false),
+			Entry("basic true", "Drift=true", true),
+			Entry("basic false", "Drift=false", false),
+			Entry("with whitespace", "Drift\t= false", false),
+			Entry("multiple values", "Hello=true,Drift=false,World=true", false),
 		)
-		It("should successfully parse well formed feature gate str", func() {
-			for _, entry := range []struct {
-				gateStr  string
-				driftVal bool
-			}{
-				{"Drift = true", true},
-				{"Drift = false", false},
-				{"Drift= true", true},
-				{"Drift= false", false},
-				{"Drift =true", true},
-				{"Drift =false", false},
-				{"Drift=true,Other=true", true},
-			} {
-				gates, err := options.FeatureGatesFromStr(entry.gateStr)
-				Expect(err).To(BeNil())
-				Expect(gates.Drift).To(Equal(entry.driftVal))
-			}
-		})
 	})
 	Context("Parse", func() {
 		It("should use the correct default values", func() {

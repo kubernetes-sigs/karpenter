@@ -43,6 +43,7 @@ type FeatureGates struct {
 	inputStr string
 }
 
+// Options contains all CLI flags / env vars for karpenter-core. It adheres to the options.Injectable interface.
 type Options struct {
 	ServiceName          string
 	DisableWebhook       bool
@@ -63,7 +64,6 @@ type Options struct {
 	setFlags map[string]bool
 }
 
-// New creates an Options struct and registers CLI flags and environment variables to fill-in the Options struct fields
 func (o *Options) AddFlags(fs *flag.FlagSet) {
 	fs.StringVar(&o.ServiceName, "karpenter-service", env.WithDefaultString("KARPENTER_SERVICE", ""), "The Karpenter Service name for the dynamic webhook certificate")
 	fs.BoolVar(&o.DisableWebhook, "disable-webhook", env.WithDefaultBool("DISABLE_WEBHOOK", false), "Disable the admission and validation webhooks")
@@ -87,20 +87,22 @@ func (o *Options) Parse(fs *flag.FlagSet, args ...string) error {
 		if errors.Is(err, flag.ErrHelp) {
 			os.Exit(0)
 		}
-		return err
+		return fmt.Errorf("parsing flags, %w", err)
 	}
 
 	if !lo.Contains(validLogLevels, o.LogLevel) {
-		return fmt.Errorf("failed to validate cli flags / env vars, invalid log level %q", o.LogLevel)
+		return fmt.Errorf("validating cli flags / env vars, invalid log level %q", o.LogLevel)
 	}
-	gates, err := FeatureGatesFromStr(o.FeatureGates.inputStr)
+	gates, err := ParseFeatureGates(o.FeatureGates.inputStr)
 	if err != nil {
-		return fmt.Errorf("failed to parse feature gates, %w", err)
+		return fmt.Errorf("parsing feature gates, %w", err)
 	}
 	o.FeatureGates = gates
 
-	o.setFlags = make(map[string]bool)
+	o.setFlags = map[string]bool{}
 	fs.VisitAll(func(f *flag.Flag) {
+		// NOTE: This assumes all CLI flags can be transformed into their corresponding environment variable. If a cli
+		// flag / env var pair does not follow this pattern, this will break.
 		envName := strings.ReplaceAll(strings.ToUpper(f.Name), "-", "_")
 		_, ok := os.LookupEnv(envName)
 		o.setFlags[f.Name] = ok
@@ -116,10 +118,6 @@ func (o *Options) ToContext(ctx context.Context) context.Context {
 	return ToContext(ctx, o)
 }
 
-// MergeSettings merges the settings in the context with the options in the context. Values already set in options take
-// precedent. If a value is specified in neither settings nor options, the default value is used.
-// Note: default values are applied to settings so its safe to use settings for unset option fields without knowing if
-// the value was set by the configmap.
 func (o *Options) MergeSettings(ctx context.Context) {
 	s := settings.FromContext(ctx)
 	if s == nil {
@@ -137,7 +135,7 @@ func (o *Options) MergeSettings(ctx context.Context) {
 	}
 }
 
-func FeatureGatesFromStr(gateStr string) (FeatureGates, error) {
+func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	gateMap := map[string]bool{}
 	gates := FeatureGates{}
 

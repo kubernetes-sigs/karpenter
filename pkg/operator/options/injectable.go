@@ -21,21 +21,17 @@ import (
 
 // Injectable defines a set of flag based options to be parsed and injected
 // into Karpenter's contexts
-// type Injectable interface {
-// 	// Inject is used to inject the Options into the context and set up flags.
-// 	// Called before flag.Parse().
-// 	Inject(context.Context) context.Context
-//
-// 	// Validate is called after flag.Parse and should validate the values of
-// 	// individual fields as well as do any required post-processing.
-// 	Validate(context.Context) error
-//
-// 	MergeSettings(context.Context) context.Context
-// }
-
 type Injectable interface {
+	// AddFlags adds the injectable's flags to karpenter's flag set
 	AddFlags(*flag.FlagSet)
+	// Parse parses the flag set and handles any required post-processing on
+	// the flags
 	Parse(*flag.FlagSet, ...string) error
+	// ToContext injects the callee into the given context
 	ToContext(context.Context) context.Context
+	// MergeSettings extracts settings from the given context and merges them
+	// with the options in-place. Values that were previously set by CLI flags
+	// or environment variables take precedent over settings.
+	// TODO: Remove with karpenter-global-settings
 	MergeSettings(context.Context)
 }
