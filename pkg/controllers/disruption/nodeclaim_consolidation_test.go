@@ -128,6 +128,7 @@ var _ = Describe("NodeClaim/Consolidation", func() {
 			wg := sync.WaitGroup{}
 			ExpectTriggerVerifyAction(&wg)
 			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			wg.Wait()
 
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)

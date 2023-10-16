@@ -77,6 +77,7 @@ var _ = Describe("NodeClaim/Emptiness", func() {
 		wg := sync.WaitGroup{}
 		ExpectTriggerVerifyAction(&wg)
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		wg.Wait()
 
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)

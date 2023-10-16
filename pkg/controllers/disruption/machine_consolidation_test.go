@@ -126,6 +126,7 @@ var _ = Describe("Machine/Consolidation", func() {
 			wg := sync.WaitGroup{}
 			ExpectTriggerVerifyAction(&wg)
 			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			wg.Wait()
 
 			// Cascade any deletion of the machine to the node
 			ExpectMachinesCascadeDeletion(ctx, env.Client, machine1, machine2)
