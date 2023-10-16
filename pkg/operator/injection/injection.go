@@ -79,13 +79,9 @@ func WithSettingsOrDie(ctx context.Context, kubernetesInterface kubernetes.Inter
 
 	for _, setting := range settings {
 		cm, err := WaitForConfigMap(ctx, setting.ConfigMap(), informer)
-		if err != nil {
-			if !errors.IsNotFound(err) {
-				panic(fmt.Errorf("failed to get configmap %s, %w", setting.ConfigMap(), err))
-			}
-			continue
+		if err != nil && !errors.IsNotFound(err) {
+			panic(fmt.Errorf("failed to get configmap %s, %w", setting.ConfigMap(), err))
 		}
-
 		ctx = lo.Must(setting.Inject(ctx, cm))
 	}
 	return ctx
