@@ -148,7 +148,7 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *v1.Node) error {
 		// We use stored.DeletionTimestamp since the api-server may give back a node after the patch without a deletionTimestamp
 		TerminationSummary.With(prometheus.Labels{
 			metrics.ProvisionerLabel: n.Labels[v1alpha5.ProvisionerNameLabelKey],
-			metrics.NodePoolLabel: n.Labels[v1beta1.NodePoolLabelKey],
+			metrics.NodePoolLabel:    n.Labels[v1beta1.NodePoolLabelKey],
 		}).Observe(time.Since(stored.DeletionTimestamp.Time).Seconds())
 		logging.FromContext(ctx).Infof("deleted node")
 	}
