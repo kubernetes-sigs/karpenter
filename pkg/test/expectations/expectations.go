@@ -309,7 +309,11 @@ func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *s
 				Node: node.Node,
 			}
 			if node.NodeClaim != nil {
-				bindings[pod].Machine = machineutil.NewFromNodeClaim(node.NodeClaim)
+				if node.NodeClaim.IsMachine {
+					bindings[pod].Machine = machineutil.NewFromNodeClaim(node.NodeClaim)
+				} else {
+					bindings[pod].NodeClaim = node.NodeClaim
+				}
 			}
 		}
 	}
