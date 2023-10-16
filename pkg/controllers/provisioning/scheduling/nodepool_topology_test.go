@@ -503,17 +503,18 @@ var _ = Describe("Topology", func() {
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(4, 4, 3))
 		})
 
-		It("should respect nodeAffinityPolicy constraints when honor", func() {
+		It("should respect nodeAffinityPolicy constraints when it is honor", func() {
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}}
-			honor := v1.NodeInclusionPolicyHonor
 			topology := []v1.TopologySpreadConstraint{{
-				TopologyKey:        v1.LabelTopologyZone,
-				WhenUnsatisfiable:  v1.DoNotSchedule,
-				LabelSelector:      &metav1.LabelSelector{MatchLabels: labels},
-				MaxSkew:            1,
-				NodeAffinityPolicy: &honor,
+				TopologyKey:       v1.LabelTopologyZone,
+				WhenUnsatisfiable: v1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+				NodeAffinityPolicy: new(v1.NodeInclusionPolicy),
 			}}
+
+			*topology[0].NodeAffinityPolicy = v1.NodeInclusionPolicyHonor
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
@@ -526,18 +527,20 @@ var _ = Describe("Topology", func() {
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(3))
 		})
 
-		It("should respect nodeAffinityPolicy constraints of ignore of type1", func() {
+		It("should respect nodeAffinityPolicy constraint when it is ignore of type1", func() {
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}}
-			ignore := v1.NodeInclusionPolicyIgnore
+			// ignore := v1.NodeInclusionPolicyIgnore
 			// Define a topology spread constraint with nodeAffinityPolicy set to Honor
 			topology := []v1.TopologySpreadConstraint{{
 				TopologyKey:        v1.LabelTopologyZone,
 				WhenUnsatisfiable:  v1.DoNotSchedule,
 				LabelSelector:      &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:            1,
-				NodeAffinityPolicy: &ignore,
+				NodeAffinityPolicy: new(v1.NodeInclusionPolicy),
 			}}
+
+			*topology[0].NodeAffinityPolicy = v1.NodeInclusionPolicyIgnore
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			// Provision three unschedulable pods with the same label and topology spread constraint
@@ -554,30 +557,30 @@ var _ = Describe("Topology", func() {
 		It("should respect nodeAffinityPolicy constraints when ignore of type2", func() {
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}}
-			ignore := v1.NodeInclusionPolicyIgnore
 			topology := []v1.TopologySpreadConstraint{{
 				TopologyKey:        v1.LabelTopologyZone,
 				WhenUnsatisfiable:  v1.DoNotSchedule,
 				LabelSelector:      &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:            2,
-				NodeAffinityPolicy: &ignore,
-					MatchLabelKeys: []string{"bullshit"},
+				NodeAffinityPolicy: new(v1.NodeInclusionPolicy),
 			}}
 
+			*topology[0].NodeAffinityPolicy = v1.NodeInclusionPolicyIgnore
+
 			ExpectApplied(ctx, env.Client, nodePool)
-				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
 				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
 					NodeSelector: map[string]string{
 						v1.LabelTopologyZone: "test-zone-2",
 					},
-					}, 1)...,
+				}, 1)...,
 			)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
 				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
 					NodeSelector: map[string]string{
 						v1.LabelTopologyZone: "test-zone-3",
 					},
-					}, 1)...,
+				}, 1)...,
 			)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
 				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
@@ -586,11 +589,9 @@ var _ = Describe("Topology", func() {
 					},
 					TopologySpreadConstraints: topology}, 3)...,
 			)
-		
-			
-			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2,1,1))
-		})
 
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 1, 1))
+		})
 
 		It("satisfied minDomains constraints (greater than minimum) should allow expected pod scheduling", func() {
 			if env.Version.Minor() < 24 {

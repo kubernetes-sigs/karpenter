@@ -79,10 +79,10 @@ func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod
 		nodeSelector = MakeTopologyNodeFilter(pod)
 	}
 
-	honor := v1.NodeInclusionPolicyHonor
 
 	if nodeAffinityPolicy == nil {
-		nodeAffinityPolicy = &honor
+		nodeAffinityPolicy = new(v1.NodeInclusionPolicy)
+		*nodeAffinityPolicy = v1.NodeInclusionPolicyHonor
 	}
 
 	return &TopologyGroup{
@@ -170,14 +170,13 @@ func (t *TopologyGroup) Hash() uint64 {
 func (t *TopologyGroup) nextDomainTopologySpread(pod *v1.Pod, podDomains, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
 	selfSelecting := t.selects(pod)
 
-	honor := v1.NodeInclusionPolicyHonor
 	min := t.domainMinCount(podDomains)
 
 	minDomain := ""
 	minCount := int32(math.MaxInt32)
 	for domain := range t.domains {
 		// but we can only choose from the node domains
-		if *t.nodeAffinityPolicy == honor {
+		if lo.FromPtr(t.nodeAffinityPolicy) == v1.NodeInclusionPolicyHonor {
 
 			if nodeDomains.Has(domain) {
 				// comment from kube-scheduler regarding the viable choices to schedule to based on skew is:
@@ -212,7 +211,6 @@ func (t *TopologyGroup) nextDomainTopologySpread(pod *v1.Pod, podDomains, nodeDo
 }
 
 func (t *TopologyGroup) domainMinCount(domains *scheduling.Requirement) int32 {
-	honor := v1.NodeInclusionPolicyHonor
 	// hostname based topologies always have a min pod count of zero since we can create one
 	if t.Key == v1.LabelHostname {
 		return 0
@@ -222,7 +220,7 @@ func (t *TopologyGroup) domainMinCount(domains *scheduling.Requirement) int32 {
 	var numPodSupportedDomains int32
 	// determine our current min count
 	for domain, count := range t.domains {
-		if *t.nodeAffinityPolicy == honor {
+		if *t.nodeAffinityPolicy == v1.NodeInclusionPolicyHonor {
 
 			if domains.Has(domain) {
 				numPodSupportedDomains++
