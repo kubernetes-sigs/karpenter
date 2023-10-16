@@ -517,7 +517,3 @@ var _ = Describe("Limits", func() {
 		Expect(provisioner.Spec.Limits.ExceededBy(provisioner.Status.Resources)).To(MatchError("cpu resource usage of 17 exceeds limit of 16"))
 	})
 })
-
-var _ = Describe("CEL/Validation", func() {
-
-})
