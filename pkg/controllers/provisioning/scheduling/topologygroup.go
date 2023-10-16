@@ -79,7 +79,6 @@ func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod
 		nodeSelector = MakeTopologyNodeFilter(pod)
 	}
 
-
 	if nodeAffinityPolicy == nil {
 		nodeAffinityPolicy = new(v1.NodeInclusionPolicy)
 		*nodeAffinityPolicy = v1.NodeInclusionPolicyHonor
@@ -167,6 +166,9 @@ func (t *TopologyGroup) Hash() uint64 {
 	}, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true}))
 }
 
+// nextDomainTopologySpread returns a scheduling.Requirement that includes a node domain that a pod should be scheduled to.
+// If there are multiple eligible domains, we return any random domain that satisfies the `maxSkew` configuration.
+// If there are no eligible domains, we return a `DoesNotExist` requirement, implying that we could not satisfy the topologySpread requirement.
 func (t *TopologyGroup) nextDomainTopologySpread(pod *v1.Pod, podDomains, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
 	selfSelecting := t.selects(pod)
 
