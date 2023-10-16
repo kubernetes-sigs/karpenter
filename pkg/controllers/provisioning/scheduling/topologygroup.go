@@ -79,14 +79,10 @@ func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod
 		nodeSelector = MakeTopologyNodeFilter(pod)
 	}
 
-	if labelSelector != nil && matchLabelKeys != nil {
+	honor := v1.NodeInclusionPolicyHonor
 
-		for _, labelKey := range matchLabelKeys {
-			if value, ok := pod.Labels[labelKey]; ok {
-				labelSelector.MatchLabels[labelKey] = value
-			}
-		}
-
+	if nodeAffinityPolicy == nil {
+		nodeAffinityPolicy = &honor
 	}
 
 	return &TopologyGroup{
@@ -171,54 +167,21 @@ func (t *TopologyGroup) Hash() uint64 {
 	}, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true}))
 }
 
-// nextDomainTopologySpread returns a scheduling.Requirement that includes a node domain that a pod should be scheduled to.
-// If there are multiple eligible domains, we return any random domain that satisfies the `maxSkew` configuration.
-// If there are no eligible domains, we return a `DoesNotExist` requirement, implying that we could not satisfy the topologySpread requirement.
-// func (t *TopologyGroup) nextDomainTopologySpread(pod *v1.Pod, podDomains, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
-// 	min := t.domainMinCount(podDomains)
-// 	// lets confirm if poddomains is the domains that r for satisfy node affinity
-// 	selfSelecting := t.selects(pod)
-
-// 	fmt.Println("node domains is ",nodeDomains)
-
-// 	minDomain := ""
-// 	minCount := int32(math.MaxInt32)
-// 	for domain := range t.domains {
-// 		// but we can only choose from the node domains
-// 		if nodeDomains.Has(domain) {
-// 			// comment from kube-scheduler regarding the viable choices to schedule to based on skew is:
-// 			// 'existing matching num' + 'if self-match (1 or 0)' - 'global min matching num' <= 'maxSkew'
-// 			count := t.domains[domain]
-// 			if selfSelecting {
-// 				count++
-// 			}
-// 			if count-min <= t.maxSkew && count < minCount {
-// 				minDomain = domain
-// 				minCount = count
-// 			}
-// 		}
-// 	}
-// 	if minDomain == "" {
-// 		// avoids an error message about 'zone in [""]', preferring 'zone in []'
-// 		return scheduling.NewRequirement(podDomains.Key, v1.NodeSelectorOpDoesNotExist)
-// 	}
-// 	return scheduling.NewRequirement(podDomains.Key, v1.NodeSelectorOpIn, minDomain)
-// }
-
 func (t *TopologyGroup) nextDomainTopologySpread(pod *v1.Pod, podDomains, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
-	min := t.domainMinCount(podDomains)
 	selfSelecting := t.selects(pod)
 
 	honor := v1.NodeInclusionPolicyHonor
+	min := t.domainMinCount(podDomains)
 
 	minDomain := ""
 	minCount := int32(math.MaxInt32)
 	for domain := range t.domains {
-		// Check if nodeAffinityPolicy is Honor or Ignore
-		if t.nodeAffinityPolicy == &honor {
-			// If Honor, only consider domains that match podDomains
-			if podDomains.Has(domain) {
-				// The rest of the logic is unchanged
+		// but we can only choose from the node domains
+		if *t.nodeAffinityPolicy == honor {
+
+			if nodeDomains.Has(domain) {
+				// comment from kube-scheduler regarding the viable choices to schedule to based on skew is:
+				// 'existing matching num' + 'if self-match (1 or 0)' - 'global min matching num' <= 'maxSkew'
 				count := t.domains[domain]
 				if selfSelecting {
 					count++
@@ -229,9 +192,7 @@ func (t *TopologyGroup) nextDomainTopologySpread(pod *v1.Pod, podDomains, nodeDo
 				}
 			}
 		} else {
-			// If Ignore, consider all domains that match nodeDomains
-			if nodeDomains.Has(domain) {
-				// The rest of the logic is unchanged
+			if podDomains.Has(domain) {
 				count := t.domains[domain]
 				if selfSelecting {
 					count++
@@ -251,6 +212,7 @@ func (t *TopologyGroup) nextDomainTopologySpread(pod *v1.Pod, podDomains, nodeDo
 }
 
 func (t *TopologyGroup) domainMinCount(domains *scheduling.Requirement) int32 {
+	honor := v1.NodeInclusionPolicyHonor
 	// hostname based topologies always have a min pod count of zero since we can create one
 	if t.Key == v1.LabelHostname {
 		return 0
@@ -260,8 +222,15 @@ func (t *TopologyGroup) domainMinCount(domains *scheduling.Requirement) int32 {
 	var numPodSupportedDomains int32
 	// determine our current min count
 	for domain, count := range t.domains {
-		fmt.Println("pod domain is ", domain)
-		if domains.Has(domain) {
+		if *t.nodeAffinityPolicy == honor {
+
+			if domains.Has(domain) {
+				numPodSupportedDomains++
+				if count < min {
+					min = count
+				}
+			}
+		} else {
 			numPodSupportedDomains++
 			if count < min {
 				min = count

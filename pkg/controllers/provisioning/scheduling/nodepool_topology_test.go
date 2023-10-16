@@ -503,11 +503,10 @@ var _ = Describe("Topology", func() {
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(4, 4, 3))
 		})
 
-		It("should respect nodeAffinityPolicy constraints", func() {
+		It("should respect nodeAffinityPolicy constraints when honor", func() {
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}}
 			honor := v1.NodeInclusionPolicyHonor
-			// Define a topology spread constraint with nodeAffinityPolicy set to Honor
 			topology := []v1.TopologySpreadConstraint{{
 				TopologyKey:        v1.LabelTopologyZone,
 				WhenUnsatisfiable:  v1.DoNotSchedule,
@@ -517,7 +516,6 @@ var _ = Describe("Topology", func() {
 			}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
-			// Provision three unschedulable pods with the same label and topology spread constraint
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
 				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
 					NodeSelector: map[string]string{
@@ -525,11 +523,10 @@ var _ = Describe("Topology", func() {
 					},
 					TopologySpreadConstraints: topology}, 3)...,
 			)
-			// Expect that the skew is zero and all pods are scheduled on nodes with zone=test-zone-1
-			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(3, 0, 0))
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(3))
 		})
 
-		It("should respect nodeAffinityPolicy constraints", func() {
+		It("should respect nodeAffinityPolicy constraints of ignore of type1", func() {
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}}
 			ignore := v1.NodeInclusionPolicyIgnore
@@ -551,8 +548,47 @@ var _ = Describe("Topology", func() {
 					},
 					TopologySpreadConstraints: topology}, 3)...,
 			)
-			// Expect that the skew is zero and all pods are scheduled on nodes with zone=test-zone-1
-			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 0, 0))
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1))
+		})
+
+		It("should respect nodeAffinityPolicy constraints when ignore of type2", func() {
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}}
+			ignore := v1.NodeInclusionPolicyIgnore
+			topology := []v1.TopologySpreadConstraint{{
+				TopologyKey:        v1.LabelTopologyZone,
+				WhenUnsatisfiable:  v1.DoNotSchedule,
+				LabelSelector:      &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:            2,
+				NodeAffinityPolicy: &ignore,
+					MatchLabelKeys: []string{"bullshit"},
+			}}
+
+			ExpectApplied(ctx, env.Client, nodePool)
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
+					NodeSelector: map[string]string{
+						v1.LabelTopologyZone: "test-zone-2",
+					},
+					}, 1)...,
+			)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
+					NodeSelector: map[string]string{
+						v1.LabelTopologyZone: "test-zone-3",
+					},
+					}, 1)...,
+			)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels},
+					NodeSelector: map[string]string{
+						v1.LabelTopologyZone: "test-zone-1",
+					},
+					TopologySpreadConstraints: topology}, 3)...,
+			)
+		
+			
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2,1,1))
 		})
 
 
