@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/pprof"
-	"os"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -47,7 +46,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
@@ -80,26 +78,26 @@ func NewOperator() (context.Context, *Operator) {
 	ctx = knativeinjection.WithNamespaceScope(ctx, system.Namespace())
 
 	// Options
-	opts := lo.Must(options.New().Parse(os.Args[1:]...))
+	ctx = injection.WithOptionsOrDie(ctx, options.Injectables...)
 
 	// Make the Karpenter binary aware of the container memory limit
 	// https://pkg.go.dev/runtime/debug#SetMemoryLimit
-	if opts.MemoryLimit > 0 {
-		newLimit := int64(float64(opts.MemoryLimit) * 0.9)
+	if options.FromContext(ctx).MemoryLimit > 0 {
+		newLimit := int64(float64(options.FromContext(ctx).MemoryLimit) * 0.9)
 		debug.SetMemoryLimit(newLimit)
 	}
 
 	// Webhook
 	ctx = webhook.WithOptions(ctx, webhook.Options{
-		Port:        opts.WebhookPort,
-		ServiceName: opts.ServiceName,
-		SecretName:  fmt.Sprintf("%s-cert", opts.ServiceName),
+		Port:        options.FromContext(ctx).WebhookPort,
+		ServiceName: options.FromContext(ctx).ServiceName,
+		SecretName:  fmt.Sprintf("%s-cert", options.FromContext(ctx).ServiceName),
 		GracePeriod: 5 * time.Second,
 	})
 
 	// Client Config
 	config := controllerruntime.GetConfigOrDie()
-	config.RateLimiter = flowcontrol.NewTokenBucketRateLimiter(float32(opts.KubeClientQPS), opts.KubeClientBurst)
+	config.RateLimiter = flowcontrol.NewTokenBucketRateLimiter(float32(options.FromContext(ctx).KubeClientQPS), options.FromContext(ctx).KubeClientBurst)
 	config.UserAgent = appName
 
 	// Client
@@ -107,8 +105,12 @@ func NewOperator() (context.Context, *Operator) {
 
 	// Inject settings from the ConfigMap(s) into the context
 	ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
-	opts = opts.MergeSettings(settings.FromContext(ctx))
-	ctx = options.ToContext(ctx, opts)
+
+	// Temporarily merge settings into options until configmap is removed
+	// Note: injectables are pointer to those already in context
+	for _, o := range options.Injectables {
+		o.MergeSettings(ctx)
+	}
 
 	// Logging
 	logger := logging.NewLogger(ctx, component, kubernetesInterface)
@@ -118,20 +120,23 @@ func NewOperator() (context.Context, *Operator) {
 	// Manager
 	mgrOpts := controllerruntime.Options{
 		Logger:                     logging.IgnoreDebugEvents(zapr.NewLogger(logger.Desugar())),
-		LeaderElection:             opts.EnableLeaderElection,
+		LeaderElection:             options.FromContext(ctx).EnableLeaderElection,
 		LeaderElectionID:           "karpenter-leader-election",
 		LeaderElectionResourceLock: resourcelock.LeasesResourceLock,
 		LeaderElectionNamespace:    system.Namespace(),
 		Scheme:                     scheme.Scheme,
 		Metrics: server.Options{
-			BindAddress: fmt.Sprintf(":%d", opts.MetricsPort),
+			BindAddress: fmt.Sprintf(":%d", options.FromContext(ctx).MetricsPort),
 		},
-		HealthProbeBindAddress: fmt.Sprintf(":%d", opts.HealthProbePort),
+		HealthProbeBindAddress: fmt.Sprintf(":%d", options.FromContext(ctx).HealthProbePort),
 		BaseContext: func() context.Context {
 			ctx := context.Background()
 			ctx = knativelogging.WithLogger(ctx, logger)
-			ctx = options.ToContext(ctx, opts)
 			ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
+			ctx = injection.WithOptionsOrDie(ctx, options.Injectables...)
+			for _, o := range options.Injectables {
+				o.MergeSettings(ctx)
+			}
 			return ctx
 		},
 		Cache: cache.Options{
@@ -142,7 +147,7 @@ func NewOperator() (context.Context, *Operator) {
 			},
 		},
 	}
-	if opts.EnableProfiling {
+	if options.FromContext(ctx).EnableProfiling {
 		// TODO @joinnis: Investigate the mgrOpts.PprofBindAddress that would allow native support for pprof
 		// On initial look, it seems like this native pprof doesn't support some of the routes that we have here
 		// like "/debug/pprof/heap" or "/debug/pprof/block"

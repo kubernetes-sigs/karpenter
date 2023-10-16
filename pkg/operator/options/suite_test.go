@@ -16,6 +16,7 @@ package options_test
 
 import (
 	"context"
+	"flag"
 	"testing"
 	"time"
 
@@ -28,6 +29,8 @@ import (
 )
 
 var ctx context.Context
+var fs *flag.FlagSet
+var opts *options.Options
 
 func TestOptions(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -36,17 +39,29 @@ func TestOptions(t *testing.T) {
 }
 
 var _ = Describe("Options", func() {
+	BeforeEach(func() {
+		fs = flag.NewFlagSet("karpenter", flag.ContinueOnError)
+		opts = &options.Options{}
+		opts.AddFlags(fs)
+	})
+
+	Context("FeatureGates", func() {
+		DescribeTable(
+			"should successfully parse well formed feature gate strings",
+			func(str string, driftVal bool) {
+				gates, err := options.ParseFeatureGates(str)
+				Expect(err).To(BeNil())
+				Expect(gates.Drift).To(Equal(driftVal))
+			},
+			Entry("basic true", "Drift=true", true),
+			Entry("basic false", "Drift=false", false),
+			Entry("with whitespace", "Drift\t= false", false),
+			Entry("multiple values", "Hello=true,Drift=false,World=true", false),
+		)
+	})
 	Context("Parse", func() {
-		It("should correctly parse feature gates", func() {
-			opts, err := options.New().Parse("--feature-gates", "Drift=true")
-			Expect(err).To(BeNil())
-			Expect(opts.FeatureGates.Drift).To(BeTrue())
-			opts, err = options.New().Parse("--feature-gates", "Drift=false")
-			Expect(err).To(BeNil())
-			Expect(opts.FeatureGates.Drift).To(BeFalse())
-		})
 		It("should use the correct default values", func() {
-			opts, err := options.New().Parse()
+			err := opts.Parse(fs)
 			Expect(err).To(BeNil())
 			Expect(opts.ServiceName).To(Equal(""))
 			Expect(opts.DisableWebhook).To(BeFalse())
@@ -67,50 +82,55 @@ var _ = Describe("Options", func() {
 	})
 
 	Context("Merge", func() {
-		settings := &settings.Settings{
-			BatchMaxDuration:  50 * time.Second,
-			BatchIdleDuration: 50 * time.Second,
-			DriftEnabled:      true,
-		}
+		BeforeEach(func() {
+			ctx = settings.ToContext(ctx, &settings.Settings{
+				BatchMaxDuration:  50 * time.Second,
+				BatchIdleDuration: 50 * time.Second,
+				DriftEnabled:      true,
+			})
+		})
 
 		It("shouldn't overwrite BatchMaxDuration when specified by CLI", func() {
-			opts, err := options.New().Parse("--batch-max-duration", "1s")
+			err := opts.Parse(fs, "--batch-max-duration", "1s")
 			Expect(err).To(BeNil())
-			opts.MergeSettings(settings)
+			opts.MergeSettings(ctx)
 			Expect(opts.BatchMaxDuration).To(Equal(time.Second))
 		})
 		It("shouldn't overwrite BatchIdleDuration when specified by CLI", func() {
-			opts, err := options.New().Parse("--batch-idle-duration", "1s")
+			err := opts.Parse(fs, "--batch-idle-duration", "1s")
 			Expect(err).To(BeNil())
-			opts.MergeSettings(settings)
+			opts.MergeSettings(ctx)
 			Expect(opts.BatchIdleDuration).To(Equal(time.Second))
 		})
 		It("shouldn't overwrite FeatureGates.Drift when specified by CLI", func() {
-			opts, err := options.New().Parse("--feature-gates", "Drift=false")
+			err := opts.Parse(fs, "--feature-gates", "Drift=false")
 			Expect(err).To(BeNil())
-			opts.MergeSettings(settings)
+			opts.MergeSettings(ctx)
 			Expect(opts.FeatureGates.Drift).To(BeFalse())
 		})
 		It("should use values from settings when not specified", func() {
-			opts, err := options.New().Parse("--batch-max-duration", "1s", "--feature-gates", "Drift=false")
+			err := opts.Parse(fs, "--batch-max-duration", "1s", "--feature-gates", "Drift=false")
 			Expect(err).To(BeNil())
-			opts.MergeSettings(settings)
+			opts.MergeSettings(ctx)
 			Expect(opts.BatchIdleDuration).To(Equal(50 * time.Second))
 		})
 	})
 
 	Context("Validation", func() {
-		It("should parse valid log levels successfully", func() {
-			for _, lvl := range []string{"", "debug", "info", "error"} {
-				_, err := options.New().Parse("--log-level", lvl)
+		DescribeTable(
+			"should parse valid log levels successfully",
+			func(level string) {
+				err := opts.Parse(fs, "--log-level", level)
 				Expect(err).To(BeNil())
-			}
-		})
-		It("should panic for invalid log levels", func() {
-			for _, lvl := range []string{"test", "dbug", "trace", "warn"} {
-				_, err := options.New().Parse("--log-level", lvl)
-				Expect(err).ToNot(BeNil())
-			}
+			},
+			Entry("empty string", ""),
+			Entry("debug", "debug"),
+			Entry("info", "info"),
+			Entry("error", "error"),
+		)
+		It("should error with an invalid log level", func() {
+			err := opts.Parse(fs, "--log-level", "hello")
+			Expect(err).ToNot(BeNil())
 		})
 	})
 })
