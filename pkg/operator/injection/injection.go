@@ -16,7 +16,9 @@ package injection
 
 import (
 	"context"
+	"flag"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/samber/lo"
@@ -30,6 +32,7 @@ import (
 	"knative.dev/pkg/system"
 
 	"github.com/aws/karpenter-core/pkg/apis/settings"
+	"github.com/aws/karpenter-core/pkg/operator/options"
 )
 
 type controllerNameKeyType struct{}
@@ -46,6 +49,20 @@ func GetControllerName(ctx context.Context) string {
 		return ""
 	}
 	return name.(string)
+}
+
+func WithOptionsOrDie(ctx context.Context, opts ...options.Injectable) context.Context {
+	fs := flag.NewFlagSet("karpenter", flag.ContinueOnError)
+	for _, opt := range opts {
+		opt.AddFlags(fs)
+	}
+	for _, opt := range opts {
+		lo.Must0(opt.Parse(fs, os.Args[1:]...))
+	}
+	for _, opt := range opts {
+		ctx = opt.ToContext(ctx)
+	}
+	return ctx
 }
 
 // WithSettingsOrDie injects the settings into the context for all configMaps passed through the registrations
