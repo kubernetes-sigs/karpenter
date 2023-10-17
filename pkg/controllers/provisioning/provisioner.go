@@ -80,12 +80,11 @@ type Provisioner struct {
 	batcher        *Batcher
 	volumeTopology *scheduler.VolumeTopology
 	cluster        *state.Cluster
-	recorder       events.Recorder
 	cm             *pretty.ChangeMonitor
 }
 
 func NewProvisioner(kubeClient client.Client, coreV1Client corev1.CoreV1Interface,
-	recorder events.Recorder, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Provisioner {
+	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Provisioner {
 	p := &Provisioner{
 		batcher:        NewBatcher(),
 		cloudProvider:  cloudProvider,
@@ -93,7 +92,6 @@ func NewProvisioner(kubeClient client.Client, coreV1Client corev1.CoreV1Interfac
 		coreV1Client:   coreV1Client,
 		volumeTopology: scheduler.NewVolumeTopology(kubeClient),
 		cluster:        cluster,
-		recorder:       recorder,
 		cm:             pretty.NewChangeMonitor(),
 	}
 	return p
@@ -288,7 +286,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	if err != nil {
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
-	return scheduler.NewScheduler(ctx, p.kubeClient, nodeClaimTemplates, nodePoolList.Items, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, opts), nil
+	return scheduler.NewScheduler(ctx, p.kubeClient, nodeClaimTemplates, nodePoolList.Items, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, opts), nil
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (*scheduler.Results, error) {
@@ -363,7 +361,7 @@ func (p *Provisioner) launchMachine(ctx context.Context, n *scheduler.NodeClaim,
 	}).Inc()
 	if functional.ResolveOptions(opts...).RecordPodNomination {
 		for _, pod := range n.Pods {
-			p.recorder.Publish(scheduler.NominatePodEvent(pod, nil, nodeclaimutil.New(machine)))
+			events.FromContext(ctx).Publish(scheduler.NominatePodEvent(pod, nil, nodeclaimutil.New(machine)))
 		}
 	}
 	return nodeclaimutil.Key{Name: machine.Name, IsMachine: true}, nil
@@ -391,7 +389,7 @@ func (p *Provisioner) launchNodeClaim(ctx context.Context, n *scheduler.NodeClai
 	}).Inc()
 	if functional.ResolveOptions(opts...).RecordPodNomination {
 		for _, pod := range n.Pods {
-			p.recorder.Publish(scheduler.NominatePodEvent(pod, nil, nodeClaim))
+			events.FromContext(ctx).Publish(scheduler.NominatePodEvent(pod, nil, nodeClaim))
 		}
 	}
 	return nodeclaimutil.Key{Name: nodeClaim.Name}, nil

@@ -15,6 +15,7 @@ limitations under the License.
 package events
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -34,6 +35,8 @@ type Event struct {
 	DedupeTimeout  time.Duration
 	RateLimiter    flowcontrol.RateLimiter
 }
+
+type RecorderKey struct{}
 
 func (e Event) dedupeKey() string {
 	return fmt.Sprintf("%s-%s",
@@ -90,4 +93,17 @@ func (r *recorder) shouldCreateEvent(key string, timeout time.Duration) bool {
 	}
 	r.cache.Set(key, nil, timeout)
 	return true
+}
+
+func ToContext(ctx context.Context, opts Recorder) context.Context {
+	return context.WithValue(ctx, RecorderKey{}, opts)
+}
+
+func FromContext(ctx context.Context) Recorder {
+	retval := ctx.Value(RecorderKey{})
+	if retval == nil {
+		// This is a developer error if this happens, so we should panic
+		panic("options doesn't exist in context")
+	}
+	return retval.(Recorder)
 }

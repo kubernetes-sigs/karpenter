@@ -48,7 +48,7 @@ type SchedulerOptions struct {
 func NewScheduler(ctx context.Context, kubeClient client.Client, nodeClaimTemplates []*NodeClaimTemplate,
 	nodePools []v1beta1.NodePool, cluster *state.Cluster, stateNodes []*state.StateNode, topology *Topology,
 	instanceTypes map[nodepoolutil.Key][]*cloudprovider.InstanceType, daemonSetPods []*v1.Pod,
-	recorder events.Recorder, opts SchedulerOptions) *Scheduler {
+	 opts SchedulerOptions) *Scheduler {
 
 	// if any of the nodePools add a taint with a prefer no schedule effect, we add a toleration for the taint
 	// during preference relaxation
@@ -69,7 +69,6 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, nodeClaimTempla
 		cluster:            cluster,
 		instanceTypes:      instanceTypes,
 		daemonOverhead:     getDaemonOverhead(nodeClaimTemplates, daemonSetPods),
-		recorder:           recorder,
 		opts:               opts,
 		preferences:        &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
 		remainingResources: map[nodepoolutil.Key]v1.ResourceList{},

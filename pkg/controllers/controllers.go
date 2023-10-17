@@ -50,7 +50,7 @@ func NewControllers(
 	cloudProvider cloudprovider.CloudProvider,
 ) []controller.Controller {
 
-	p := provisioning.NewProvisioner(kubeClient, kubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
+	p := provisioning.NewProvisioner(kubeClient, kubernetesInterface.CoreV1(), cloudProvider, cluster)
 	evictionQueue := terminator.NewQueue(kubernetesInterface.CoreV1(), recorder)
 
 	return []controller.Controller{
