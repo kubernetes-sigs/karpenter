@@ -527,7 +527,7 @@ var _ = Describe("Topology", func() {
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(3))
 		})
 
-		It("should respect nodeAffinityPolicy constraint when it is ignore of type1", func() {
+		FIt("should respect nodeAffinityPolicy constraint when it is ignore of type1", func() {
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}}
 			// ignore := v1.NodeInclusionPolicyIgnore
@@ -554,7 +554,7 @@ var _ = Describe("Topology", func() {
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1))
 		})
 
-		It("should respect nodeAffinityPolicy constraints when ignore of type2", func() {
+		FIt("should respect nodeAffinityPolicy constraints when ignore of type2", func() {
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}}
 			topology := []v1.TopologySpreadConstraint{{

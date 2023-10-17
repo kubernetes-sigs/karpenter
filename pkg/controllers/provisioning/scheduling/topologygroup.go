@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/utils/functional"
 )
@@ -82,6 +83,11 @@ func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod
 	if nodeAffinityPolicy == nil {
 		nodeAffinityPolicy = new(v1.NodeInclusionPolicy)
 		*nodeAffinityPolicy = v1.NodeInclusionPolicyHonor
+	}
+
+	if nodeTaintsPolicy == nil {
+		nodeTaintsPolicy = new(v1.NodeInclusionPolicy)
+		*nodeTaintsPolicy = v1.NodeInclusionPolicyIgnore
 	}
 
 	return &TopologyGroup{
@@ -166,11 +172,39 @@ func (t *TopologyGroup) Hash() uint64 {
 	}, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true}))
 }
 
+func (t *TopologyGroup) filterByNodeTaintsPolicy(pod *v1.Pod) {
+
+	c := state.Cluster{}
+	nodes := lo.Filter(c.Nodes(), func(n *state.StateNode, _ int) bool {
+		errs := scheduling.Taints(n.Taints()).Tolerates(pod)
+		return errs == nil
+	})
+
+	var newDomains map[string]int32
+
+	for _, n := range nodes {
+		newDomains[n.Labels()[t.Key]] = 1
+	}
+
+	for domain, count := range t.domains {
+		if newDomains[domain] == 1 {
+			newDomains[domain] = count
+		}
+	}
+
+	t.domains = newDomains
+
+}
+
 // nextDomainTopologySpread returns a scheduling.Requirement that includes a node domain that a pod should be scheduled to.
 // If there are multiple eligible domains, we return any random domain that satisfies the `maxSkew` configuration.
 // If there are no eligible domains, we return a `DoesNotExist` requirement, implying that we could not satisfy the topologySpread requirement.
 func (t *TopologyGroup) nextDomainTopologySpread(pod *v1.Pod, podDomains, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
 	selfSelecting := t.selects(pod)
+
+	if lo.FromPtr(t.nodeTaintsPolicy) == v1.NodeInclusionPolicyHonor {
+		t.filterByNodeTaintsPolicy(pod)
+	}
 
 	min := t.domainMinCount(podDomains)
 
