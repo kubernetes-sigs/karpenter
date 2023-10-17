@@ -42,16 +42,14 @@ type Expiration struct {
 	kubeClient  client.Client
 	cluster     *state.Cluster
 	provisioner *provisioning.Provisioner
-	recorder    events.Recorder
 }
 
-func NewExpiration(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder) *Expiration {
+func NewExpiration(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner) *Expiration {
 	return &Expiration{
 		clock:       clk,
 		kubeClient:  kubeClient,
 		cluster:     cluster,
 		provisioner: provisioner,
-		recorder:    recorder,
 	}
 }
 
@@ -63,7 +61,7 @@ func (e *Expiration) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 
 // SortCandidates orders expired candidates by when they've expired
 func (e *Expiration) filterAndSortCandidates(ctx context.Context, candidates []*Candidate) ([]*Candidate, error) {
-	candidates, err := filterCandidates(ctx, e.kubeClient, e.recorder, candidates)
+	candidates, err := filterCandidates(ctx, e.kubeClient, candidates)
 	if err != nil {
 		return nil, fmt.Errorf("filtering candidates, %w", err)
 	}
@@ -108,7 +106,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...*Candidat
 		// Log when all pods can't schedule, as the command will get executed immediately.
 		if !results.AllNonPendingPodsScheduled() {
 			logging.FromContext(ctx).With(lo.Ternary(candidate.NodeClaim.IsMachine, "machine", "nodeclaim"), candidate.NodeClaim.Name, "node", candidate.Node.Name).Debugf("cannot terminate since scheduling simulation failed to schedule all pods, %s", results.NonPendingPodSchedulingErrors())
-			e.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
+			events.FromContext(ctx).Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
 			continue
 		}
 

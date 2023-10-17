@@ -30,7 +30,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
@@ -41,8 +40,8 @@ type MultiNodeConsolidation struct {
 }
 
 func NewMultiNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client,
-	provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder) *MultiNodeConsolidation {
-	return &MultiNodeConsolidation{makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
+	provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider) *MultiNodeConsolidation {
+	return &MultiNodeConsolidation{makeConsolidation(clk, cluster, kubeClient, provisioner, cp)}
 }
 
 func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
@@ -74,7 +73,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 		return cmd, nil
 	}
 
-	v := NewValidation(consolidationTTL, m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder)
+	v := NewValidation(consolidationTTL, m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider)
 	isValid, err := v.IsValid(ctx, cmd)
 	if err != nil {
 		return Command{}, fmt.Errorf("validating, %w", err)

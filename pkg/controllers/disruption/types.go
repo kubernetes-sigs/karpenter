@@ -57,7 +57,7 @@ type Candidate struct {
 }
 
 //nolint:gocyclo
-func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode,
+func NewCandidate(ctx context.Context, kubeClient client.Client, clk clock.Clock, node *state.StateNode,
 	nodePoolMap map[nodepoolutil.Key]*v1beta1.NodePool, nodePoolToInstanceTypesMap map[nodepoolutil.Key]map[string]*cloudprovider.InstanceType) (*Candidate, error) {
 
 	if node.Node == nil || node.NodeClaim == nil {
@@ -72,7 +72,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		return nil, fmt.Errorf("state node isn't initialized")
 	}
 	if _, ok := node.Annotations()[v1beta1.DoNotDisruptAnnotationKey]; ok {
-		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Disruption is blocked with the %q annotation", v1beta1.DoNotDisruptAnnotationKey))...)
+		events.FromContext(ctx).Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Disruption is blocked with the %q annotation", v1beta1.DoNotDisruptAnnotationKey))...)
 		return nil, fmt.Errorf("disruption is blocked through the %q annotation", v1beta1.DoNotDisruptAnnotationKey)
 	}
 	// check whether the node has all the labels we need
@@ -81,7 +81,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		v1.LabelTopologyZone,
 	} {
 		if _, ok := node.Labels()[label]; !ok {
-			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Required label %q doesn't exist", label))...)
+			events.FromContext(ctx).Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Required label %q doesn't exist", label))...)
 			return nil, fmt.Errorf("state node doesn't have required label %q", label)
 		}
 	}
@@ -93,18 +93,18 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	instanceTypeMap := nodePoolToInstanceTypesMap[ownerKey]
 	// skip any candidates where we can't determine the nodePool
 	if nodePool == nil || instanceTypeMap == nil {
-		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Owning %s %q not found", lo.Ternary(ownerKey.IsProvisioner, "provisioner", "nodepool"), ownerKey.Name))...)
+		events.FromContext(ctx).Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Owning %s %q not found", lo.Ternary(ownerKey.IsProvisioner, "provisioner", "nodepool"), ownerKey.Name))...)
 		return nil, fmt.Errorf("%s %q can't be resolved for state node", lo.Ternary(ownerKey.IsProvisioner, "provisioner", "nodepool"), ownerKey.Name)
 	}
 	instanceType := instanceTypeMap[node.Labels()[v1.LabelInstanceTypeStable]]
 	// skip any candidates that we can't determine the instance of
 	if instanceType == nil {
-		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Instance type %q not found", node.Labels()[v1.LabelInstanceTypeStable]))...)
+		events.FromContext(ctx).Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Instance type %q not found", node.Labels()[v1.LabelInstanceTypeStable]))...)
 		return nil, fmt.Errorf("instance type '%s' can't be resolved", node.Labels()[v1.LabelInstanceTypeStable])
 	}
 	// skip the node if it is nominated by a recent provisioning pass to be the target of a pending pod.
 	if node.Nominated() {
-		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, "Nominated for a pending pod")...)
+		events.FromContext(ctx).Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, "Nominated for a pending pod")...)
 		return nil, fmt.Errorf("state node is nominated for a pending pod")
 	}
 	pods, err := node.Pods(ctx, kubeClient)

@@ -76,6 +76,7 @@ func TestRecorder(t *testing.T) {
 var _ = BeforeEach(func() {
 	internalRecorder = NewInternalRecorder()
 	eventRecorder = events.NewRecorder(internalRecorder)
+
 	schedulingevents.PodNominationRateLimiter = flowcontrol.NewTokenBucketRateLimiter(5, 10)
 
 })

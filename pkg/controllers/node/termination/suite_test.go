@@ -68,8 +68,9 @@ var _ = BeforeSuite(func() {
 
 	cloudProvider = fake.NewCloudProvider()
 	recorder = test.NewEventRecorder()
-	queue = terminator.NewQueue(env.KubernetesInterface.CoreV1(), recorder)
-	terminationController = termination.NewController(env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, queue), recorder)
+
+	queue = terminator.NewQueue(env.KubernetesInterface.CoreV1())
+	terminationController = termination.NewController(env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, queue))
 })
 
 var _ = AfterSuite(func() {

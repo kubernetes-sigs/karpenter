@@ -65,15 +65,13 @@ type Queue struct {
 	set.Set
 
 	coreV1Client corev1.CoreV1Interface
-	recorder     events.Recorder
 }
 
-func NewQueue(coreV1Client corev1.CoreV1Interface, recorder events.Recorder) *Queue {
+func NewQueue(coreV1Client corev1.CoreV1Interface) *Queue {
 	queue := &Queue{
 		RateLimitingInterface: workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(evictionQueueBaseDelay, evictionQueueMaxDelay)),
 		Set:                   set.NewSet(),
 		coreV1Client:          coreV1Client,
-		recorder:              recorder,
 	}
 	return queue
 }
@@ -133,7 +131,7 @@ func (q *Queue) Evict(ctx context.Context, nn types.NamespacedName) bool {
 			return true
 		}
 		if apierrors.IsTooManyRequests(err) { // 429 - PDB violation
-			q.recorder.Publish(terminatorevents.NodeFailedToDrain(&v1.Node{ObjectMeta: metav1.ObjectMeta{
+			events.FromContext(ctx).Publish(terminatorevents.NodeFailedToDrain(&v1.Node{ObjectMeta: metav1.ObjectMeta{
 				Name:      nn.Name,
 				Namespace: nn.Namespace,
 			}}, fmt.Errorf("evicting pod %s/%s violates a PDB", nn.Namespace, nn.Name)))
@@ -142,7 +140,7 @@ func (q *Queue) Evict(ctx context.Context, nn types.NamespacedName) bool {
 		logging.FromContext(ctx).Errorf("evicting pod, %s", err)
 		return false
 	}
-	q.recorder.Publish(terminatorevents.EvictPod(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: nn.Name, Namespace: nn.Namespace}}))
+	events.FromContext(ctx).Publish(terminatorevents.EvictPod(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: nn.Name, Namespace: nn.Namespace}}))
 	return true
 }
 

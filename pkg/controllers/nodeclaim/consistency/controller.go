@@ -44,7 +44,6 @@ type Controller struct {
 	clock       clock.Clock
 	kubeClient  client.Client
 	checks      []Check
-	recorder    events.Recorder
 	lastScanned *cache.Cache
 }
 
@@ -59,13 +58,12 @@ type Check interface {
 // scanPeriod is how often we inspect and report issues that are found.
 const scanPeriod = 10 * time.Minute
 
-func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Recorder,
+func NewController(clk clock.Clock, kubeClient client.Client, 
 	provider cloudprovider.CloudProvider) *Controller {
 
 	return &Controller{
 		clock:       clk,
 		kubeClient:  kubeClient,
-		recorder:    recorder,
 		lastScanned: cache.New(scanPeriod, 1*time.Minute),
 		checks: []Check{
 			NewTermination(kubeClient),
@@ -103,7 +101,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 		for _, issue := range issues {
 			logging.FromContext(ctx).Errorf("check failed, %s", issue)
 			consistencyErrors.With(prometheus.Labels{checkLabel: reflect.TypeOf(check).Elem().Name()}).Inc()
-			c.recorder.Publish(FailedConsistencyCheckEvent(nodeClaim, string(issue)))
+			events.FromContext(ctx).Publish(FailedConsistencyCheckEvent(nodeClaim, string(issue)))
 		}
 	}
 	return reconcile.Result{RequeueAfter: scanPeriod}, nil
@@ -113,11 +111,11 @@ type NodeClaimController struct {
 	*Controller
 }
 
-func NewNodeClaimController(clk clock.Clock, kubeClient client.Client, recorder events.Recorder,
+func NewNodeClaimController(clk clock.Clock, kubeClient client.Client,
 	provider cloudprovider.CloudProvider) corecontroller.Controller {
 
 	return corecontroller.Typed[*v1beta1.NodeClaim](kubeClient, &NodeClaimController{
-		Controller: NewController(clk, kubeClient, recorder, provider),
+		Controller: NewController(clk, kubeClient, provider),
 	})
 }
 
@@ -145,11 +143,11 @@ type MachineController struct {
 	*Controller
 }
 
-func NewMachineController(clk clock.Clock, kubeClient client.Client, recorder events.Recorder,
+func NewMachineController(clk clock.Clock, kubeClient client.Client, 
 	provider cloudprovider.CloudProvider) corecontroller.Controller {
 
 	return corecontroller.Typed[*v1alpha5.Machine](kubeClient, &MachineController{
-		Controller: NewController(clk, kubeClient, recorder, provider),
+		Controller: NewController(clk, kubeClient,  provider),
 	})
 }
 

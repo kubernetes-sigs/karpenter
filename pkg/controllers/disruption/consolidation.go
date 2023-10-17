@@ -47,26 +47,24 @@ type consolidation struct {
 	kubeClient             client.Client
 	provisioner            *provisioning.Provisioner
 	cloudProvider          cloudprovider.CloudProvider
-	recorder               events.Recorder
 	lastConsolidationState time.Time
 }
 
 func makeConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) consolidation {
+	cloudProvider cloudprovider.CloudProvider) consolidation {
 	return consolidation{
 		clock:         clock,
 		cluster:       cluster,
 		kubeClient:    kubeClient,
 		provisioner:   provisioner,
 		cloudProvider: cloudProvider,
-		recorder:      recorder,
 	}
 }
 
 // sortAndFilterCandidates orders candidates by the disruptionCost, removing any that we already know won't
 // be viable consolidation options.
 func (c *consolidation) sortAndFilterCandidates(ctx context.Context, candidates []*Candidate) ([]*Candidate, error) {
-	candidates, err := filterCandidates(ctx, c.kubeClient, c.recorder, candidates)
+	candidates, err := filterCandidates(ctx, c.kubeClient, candidates)
 	if err != nil {
 		return nil, fmt.Errorf("filtering candidates, %w", err)
 	}
@@ -88,14 +86,14 @@ func (c *consolidation) markConsolidated() {
 }
 
 // ShouldDisrupt is a predicate used to filter candidates
-func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
+func (c *consolidation) ShouldDisrupt(ctx context.Context, cn *Candidate) bool {
 	if cn.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey] == "true" {
-		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s annotation exists", v1alpha5.DoNotConsolidateNodeAnnotationKey))...)
+		events.FromContext(ctx).Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s annotation exists", v1alpha5.DoNotConsolidateNodeAnnotationKey))...)
 		return false
 	}
 	if cn.nodePool.Spec.Disruption.ConsolidationPolicy != v1beta1.ConsolidationPolicyWhenUnderutilized ||
 		(cn.nodePool.Spec.Disruption.ConsolidateAfter != nil && cn.nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil) {
-		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s %q has consolidation disabled", lo.Ternary(cn.nodePool.IsProvisioner, "Provisioner", "NodePool"), cn.nodePool.Name))...)
+		events.FromContext(ctx).Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s %q has consolidation disabled", lo.Ternary(cn.nodePool.IsProvisioner, "Provisioner", "NodePool"), cn.nodePool.Name))...)
 		return false
 	}
 	return true
@@ -119,7 +117,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	if !results.AllNonPendingPodsScheduled() {
 		// This method is used by multi-node consolidation as well, so we'll only report in the single node case
 		if len(candidates) == 1 {
-			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, results.NonPendingPodSchedulingErrors())...)
+			events.FromContext(ctx).Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, results.NonPendingPodSchedulingErrors())...)
 		}
 		return Command{}, nil
 	}
@@ -134,7 +132,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	// we're not going to turn a single node into multiple candidates
 	if len(results.NewNodeClaims) != 1 {
 		if len(candidates) == 1 {
-			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("Can't remove without creating %d candidates", len(results.NewNodeClaims)))...)
+			events.FromContext(ctx).Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("Can't remove without creating %d candidates", len(results.NewNodeClaims)))...)
 		}
 		return Command{}, nil
 	}
@@ -148,7 +146,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	results.NewNodeClaims[0].InstanceTypeOptions = filterByPrice(results.NewNodeClaims[0].InstanceTypeOptions, results.NewNodeClaims[0].Requirements, candidatePrice)
 	if len(results.NewNodeClaims[0].InstanceTypeOptions) == 0 {
 		if len(candidates) == 1 {
-			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace with a cheaper node")...)
+			events.FromContext(ctx).Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace with a cheaper node")...)
 		}
 		// no instance types remain after filtering by price
 		return Command{}, nil
@@ -167,7 +165,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	if allExistingAreSpot &&
 		results.NewNodeClaims[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeSpot) {
 		if len(candidates) == 1 {
-			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace a spot node with a spot node")...)
+			events.FromContext(ctx).Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace a spot node with a spot node")...)
 		}
 		return Command{}, nil
 	}

@@ -50,16 +50,14 @@ type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	terminator    *terminator.Terminator
-	recorder      events.Recorder
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, terminator *terminator.Terminator, recorder events.Recorder) corecontroller.Controller {
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, terminator *terminator.Terminator) corecontroller.Controller {
 	return corecontroller.Typed[*v1.Node](kubeClient, &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		terminator:    terminator,
-		recorder:      recorder,
 	})
 }
 
@@ -68,6 +66,7 @@ func (c *Controller) Name() string {
 }
 
 func (c *Controller) Reconcile(_ context.Context, _ *v1.Node) (reconcile.Result, error) {
+
 	return reconcile.Result{}, nil
 }
 
@@ -89,7 +88,7 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 		if !terminator.IsNodeDrainError(err) {
 			return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 		}
-		c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
+		events.FromContext(ctx).Publish(terminatorevents.NodeFailedToDrain(node, err))
 		// If the underlying machine no longer exists.
 		if _, err := c.cloudProvider.Get(ctx, node.Spec.ProviderID); err != nil {
 			if cloudprovider.IsNodeClaimNotFoundError(err) {

@@ -39,15 +39,13 @@ type Drift struct {
 	kubeClient  client.Client
 	cluster     *state.Cluster
 	provisioner *provisioning.Provisioner
-	recorder    events.Recorder
 }
 
-func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder) *Drift {
+func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner) *Drift {
 	return &Drift{
 		kubeClient:  kubeClient,
 		cluster:     cluster,
 		provisioner: provisioner,
-		recorder:    recorder,
 	}
 }
 
@@ -59,7 +57,7 @@ func (d *Drift) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 
 // SortCandidates orders drifted candidates by when they've drifted
 func (d *Drift) filterAndSortCandidates(ctx context.Context, candidates []*Candidate) ([]*Candidate, error) {
-	candidates, err := filterCandidates(ctx, d.kubeClient, d.recorder, candidates)
+	candidates, err := filterCandidates(ctx, d.kubeClient, candidates)
 	if err != nil {
 		return nil, fmt.Errorf("filtering candidates, %w", err)
 	}
@@ -104,7 +102,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, candidates ...*Candidate) (C
 		// Log when all pods can't schedule, as the command will get executed immediately.
 		if !results.AllNonPendingPodsScheduled() {
 			logging.FromContext(ctx).With(lo.Ternary(candidate.NodeClaim.IsMachine, "machine", "nodeclaim"), candidate.NodeClaim.Name, "node", candidate.Node.Name).Debugf("cannot terminate since scheduling simulation failed to schedule all pods %s", results.NonPendingPodSchedulingErrors())
-			d.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
+			events.FromContext(ctx).Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
 			continue
 		}
 		if len(results.NewNodeClaims) == 0 {

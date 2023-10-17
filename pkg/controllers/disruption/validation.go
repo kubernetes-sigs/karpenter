@@ -47,7 +47,7 @@ type Validation struct {
 	recorder         events.Recorder
 }
 
-func NewValidation(validationPeriod time.Duration, clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder) *Validation {
+func NewValidation(validationPeriod time.Duration, clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider) *Validation {
 	return &Validation{
 		validationPeriod: validationPeriod,
 		clock:            clk,
@@ -55,7 +55,6 @@ func NewValidation(validationPeriod time.Duration, clk clock.Clock, cluster *sta
 		kubeClient:       kubeClient,
 		provisioner:      provisioner,
 		cloudProvider:    cp,
-		recorder:         recorder,
 	}
 }
 
@@ -73,14 +72,14 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 		case <-v.clock.After(waitDuration):
 		}
 	}
-	validationCandidates, err := GetCandidates(ctx, v.cluster, v.kubeClient, v.recorder, v.clock, v.cloudProvider, v.ShouldDisrupt)
+	validationCandidates, err := GetCandidates(ctx, v.cluster, v.kubeClient, v.clock, v.cloudProvider, v.ShouldDisrupt)
 	if err != nil {
 		return false, fmt.Errorf("constructing validation candidates, %w", err)
 	}
 	// Get the current representation of the proposed candidates from before the validation timeout
 	// We do this so that we can re-validate that the candidates that were computed before we made the decision are the same
 	// We perform filtering here to ensure that none of the proposed candidates have blocking PDBs or do-not-evict/do-not-disrupt pods scheduled to them
-	validationCandidates, err = filterCandidates(ctx, v.kubeClient, v.recorder, mapCandidates(cmd.candidates, validationCandidates))
+	validationCandidates, err = filterCandidates(ctx, v.kubeClient, mapCandidates(cmd.candidates, validationCandidates))
 	if err != nil {
 		return false, fmt.Errorf("filtering candidates, %w", err)
 	}

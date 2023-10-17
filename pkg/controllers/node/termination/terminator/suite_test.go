@@ -55,7 +55,7 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
 	ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(true)}}))
 	recorder = test.NewEventRecorder()
-	queue = terminator.NewQueue(env.KubernetesInterface.CoreV1(), recorder)
+	queue = terminator.NewQueue(env.KubernetesInterface.CoreV1())
 })
 
 var _ = AfterSuite(func() {

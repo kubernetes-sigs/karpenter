@@ -91,7 +91,6 @@ type Scheduler struct {
 	preferences        *Preferences
 	topology           *Topology
 	cluster            *state.Cluster
-	recorder           events.Recorder
 	opts               SchedulerOptions
 	kubeClient         client.Client
 }
@@ -190,7 +189,7 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 	// Report failures and nominations
 	for _, pod := range failedToSchedule {
 		logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(pod)).Errorf("Could not schedule pod, %s", errors[pod])
-		s.recorder.Publish(PodFailedToScheduleEvent(pod, errors[pod]))
+		events.FromContext(ctx).Publish(PodFailedToScheduleEvent(pod, errors[pod]))
 	}
 
 	for _, existing := range s.existingNodes {
@@ -198,7 +197,7 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 			s.cluster.NominateNodeForPod(ctx, existing.ProviderID())
 		}
 		for _, pod := range existing.Pods {
-			s.recorder.Publish(NominatePodEvent(pod, existing.Node, existing.NodeClaim))
+			events.FromContext(ctx).Publish(NominatePodEvent(pod, existing.Node, existing.NodeClaim))
 		}
 	}
 

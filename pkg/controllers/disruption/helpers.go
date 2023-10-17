@@ -41,7 +41,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
-func filterCandidates(ctx context.Context, kubeClient client.Client, recorder events.Recorder, nodes []*Candidate) ([]*Candidate, error) {
+func filterCandidates(ctx context.Context, kubeClient client.Client, nodes []*Candidate) ([]*Candidate, error) {
 	pdbs, err := NewPDBLimits(ctx, kubeClient)
 	if err != nil {
 		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
@@ -50,15 +50,15 @@ func filterCandidates(ctx context.Context, kubeClient client.Client, recorder ev
 	// filter out nodes that can't be terminated
 	nodes = lo.Filter(nodes, func(cn *Candidate, _ int) bool {
 		if !cn.Node.DeletionTimestamp.IsZero() {
-			recorder.Publish(disruptionevents.Blocked(cn.Node, cn.NodeClaim, "Node in the process of deletion")...)
+			events.FromContext(ctx).Publish(disruptionevents.Blocked(cn.Node, cn.NodeClaim, "Node in the process of deletion")...)
 			return false
 		}
 		if pdb, ok := pdbs.CanEvictPods(cn.pods); !ok {
-			recorder.Publish(disruptionevents.Blocked(cn.Node, cn.NodeClaim, fmt.Sprintf("PDB %q prevents pod evictions", pdb))...)
+			events.FromContext(ctx).Publish(disruptionevents.Blocked(cn.Node, cn.NodeClaim, fmt.Sprintf("PDB %q prevents pod evictions", pdb))...)
 			return false
 		}
 		if p, ok := hasDoNotDisruptPod(cn); ok {
-			recorder.Publish(disruptionevents.Blocked(cn.Node, cn.NodeClaim, fmt.Sprintf("Pod %q has do not evict annotation", client.ObjectKeyFromObject(p)))...)
+			events.FromContext(ctx).Publish(disruptionevents.Blocked(cn.Node, cn.NodeClaim, fmt.Sprintf("Pod %q has do not evict annotation", client.ObjectKeyFromObject(p)))...)
 			return false
 		}
 		return true
@@ -174,13 +174,13 @@ func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
 }
 
 // GetCandidates returns nodes that appear to be currently disruptable based off of their nodePool
-func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter) ([]*Candidate, error) {
+func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, clk clock.Clock, cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter) ([]*Candidate, error) {
 	nodePoolMap, nodePoolToInstanceTypesMap, err := buildNodePoolMap(ctx, kubeClient, cloudProvider)
 	if err != nil {
 		return nil, err
 	}
 	candidates := lo.FilterMap(cluster.Nodes(), func(n *state.StateNode, _ int) (*Candidate, bool) {
-		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, nodePoolMap, nodePoolToInstanceTypesMap)
+		cn, e := NewCandidate(ctx, kubeClient, clk, n, nodePoolMap, nodePoolToInstanceTypesMap)
 		return cn, e == nil
 	})
 	// Filter only the valid candidates that we should disrupt

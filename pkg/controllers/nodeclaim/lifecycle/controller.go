@@ -40,7 +40,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
@@ -64,11 +63,11 @@ type Controller struct {
 	liveness       *Liveness
 }
 
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) *Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
 	return &Controller{
 		kubeClient: kubeClient,
 
-		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Minute, time.Second*10), recorder: recorder},
+		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Minute, time.Second*10)},
 		registration:   &Registration{kubeClient: kubeClient},
 		initialization: &Initialization{kubeClient: kubeClient},
 		liveness:       &Liveness{clock: clk, kubeClient: kubeClient},
@@ -125,9 +124,9 @@ type NodeClaimController struct {
 	*Controller
 }
 
-func NewNodeClaimController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) corecontroller.Controller {
+func NewNodeClaimController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
 	return corecontroller.Typed[*v1beta1.NodeClaim](kubeClient, &NodeClaimController{
-		Controller: NewController(clk, kubeClient, cloudProvider, recorder),
+		Controller: NewController(clk, kubeClient, cloudProvider),
 	})
 }
 
@@ -170,9 +169,9 @@ type MachineController struct {
 	*Controller
 }
 
-func NewMachineController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) corecontroller.Controller {
+func NewMachineController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
 	return corecontroller.Typed[*v1alpha5.Machine](kubeClient, &MachineController{
-		Controller: NewController(clk, kubeClient, cloudProvider, recorder),
+		Controller: NewController(clk, kubeClient, cloudProvider),
 	})
 }
 

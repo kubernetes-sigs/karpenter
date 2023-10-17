@@ -37,7 +37,6 @@ type Launch struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	cache         *cache.Cache // exists due to eventual consistency on the cache
-	recorder      events.Recorder
 }
 
 func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
@@ -106,7 +105,7 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeCla
 	if err != nil {
 		switch {
 		case cloudprovider.IsInsufficientCapacityError(err):
-			l.recorder.Publish(InsufficientCapacityErrorEvent(nodeClaim, err))
+			events.FromContext(ctx).Publish(InsufficientCapacityErrorEvent(nodeClaim, err))
 			logging.FromContext(ctx).Error(err)
 			if err = nodeclaimutil.Delete(ctx, l.kubeClient, nodeClaim); err != nil {
 				return nil, client.IgnoreNotFound(err)
@@ -114,7 +113,7 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeCla
 			nodeclaimutil.TerminatedCounter(nodeClaim, "insufficient_capacity").Inc()
 			return nil, nil
 		case cloudprovider.IsNodeClassNotReadyError(err):
-			l.recorder.Publish(NodeClassNotReadyEvent(nodeClaim, err))
+			events.FromContext(ctx).Publish(NodeClassNotReadyEvent(nodeClaim, err))
 			nodeClaim.StatusConditions().MarkFalse(v1beta1.Launched, "LaunchFailed", truncateMessage(err.Error()))
 			return nil, fmt.Errorf("launching %s, %w", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"), err)
 		default:

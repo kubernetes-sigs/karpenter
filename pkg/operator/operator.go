@@ -183,10 +183,11 @@ func NewOperator() (context.Context, *Operator) {
 	lo.Must0(mgr.AddHealthzCheck("healthz", healthz.Ping))
 	lo.Must0(mgr.AddReadyzCheck("readyz", healthz.Ping))
 
+	ctx = events.ToContext(ctx,events.NewRecorder(mgr.GetEventRecorderFor(appName)))
+
 	return ctx, &Operator{
 		Manager:             mgr,
 		KubernetesInterface: kubernetesInterface,
-		EventRecorder:       events.NewRecorder(mgr.GetEventRecorderFor(appName)),
 		Clock:               clock.RealClock{},
 	}
 }

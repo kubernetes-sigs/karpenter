@@ -40,11 +40,10 @@ type Controller struct {
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client, provisioner *Provisioner, recorder events.Recorder) corecontroller.Controller {
+func NewController(kubeClient client.Client, provisioner *Provisioner) corecontroller.Controller {
 	return corecontroller.Typed[*v1.Pod](kubeClient, &Controller{
 		kubeClient:  kubeClient,
 		provisioner: provisioner,
-		recorder:    recorder,
 	})
 }
 
@@ -53,7 +52,7 @@ func (c *Controller) Name() string {
 }
 
 // Reconcile the resource
-func (c *Controller) Reconcile(_ context.Context, p *v1.Pod) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, p *v1.Pod) (reconcile.Result, error) {
 	if !pod.IsProvisionable(p) {
 		return reconcile.Result{}, nil
 	}

@@ -48,7 +48,6 @@ type Controller struct {
 	kubeClient    client.Client
 	cluster       *state.Cluster
 	provisioner   *provisioning.Provisioner
-	recorder      events.Recorder
 	clock         clock.Clock
 	cloudProvider cloudprovider.CloudProvider
 	methods       []Method
@@ -75,29 +74,28 @@ func waitRetryOptions(ctx context.Context) []retry.Option {
 }
 
 func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster) *Controller {
+	cp cloudprovider.CloudProvider,  cluster *state.Cluster) *Controller {
 
 	return &Controller{
 		clock:         clk,
 		kubeClient:    kubeClient,
 		cluster:       cluster,
 		provisioner:   provisioner,
-		recorder:      recorder,
 		cloudProvider: cp,
 		lastRun:       map[string]time.Time{},
 		methods: []Method{
 			// Expire any NodeClaims that must be deleted, allowing their pods to potentially land on currently
-			NewExpiration(clk, kubeClient, cluster, provisioner, recorder),
+			NewExpiration(clk, kubeClient, cluster, provisioner),
 			// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
-			NewDrift(kubeClient, cluster, provisioner, recorder),
+			NewDrift(kubeClient, cluster, provisioner),
 			// Delete any remaining empty NodeClaims as there is zero cost in terms of disruption.  Emptiness and
 			// emptyNodeConsolidation are mutually exclusive, only one of these will operate
 			NewEmptiness(clk),
-			NewEmptyNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
+			NewEmptyNodeConsolidation(clk, cluster, kubeClient, provisioner, cp),
 			// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
-			NewMultiNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
+			NewMultiNodeConsolidation(clk, cluster, kubeClient, provisioner, cp),
 			// And finally fall back our single NodeClaim consolidation to further reduce cluster cost.
-			NewSingleNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder),
+			NewSingleNodeConsolidation(clk, cluster, kubeClient, provisioner, cp),
 		},
 	}
 }
@@ -153,7 +151,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		methodLabel:            disruption.Type(),
 		consolidationTypeLabel: disruption.ConsolidationType(),
 	}))()
-	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt)
+	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient,  c.clock, c.cloudProvider, disruption.ShouldDisrupt)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}
@@ -201,7 +199,7 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 	}
 
 	for _, candidate := range cmd.candidates {
-		c.recorder.Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, reason)...)
+		events.FromContext(ctx).Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, reason)...)
 
 		if err := nodeclaimutil.Delete(ctx, c.kubeClient, candidate.NodeClaim); err != nil {
 			if !errors.IsNotFound(err) {
@@ -286,11 +284,11 @@ func (c *Controller) waitForReadiness(ctx context.Context, key nodeclaimutil.Key
 			return fmt.Errorf("getting %s, %w", lo.Ternary(key.IsMachine, "machine", "nodeclaim"), err)
 		}
 		once.Do(func() {
-			c.recorder.Publish(disruptionevents.Launching(nodeClaim, reason))
+			events.FromContext(ctx).Publish(disruptionevents.Launching(nodeClaim, reason))
 		})
 		if !nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized).IsTrue() {
 			// make the user aware of why disruption is paused
-			c.recorder.Publish(disruptionevents.WaitingOnReadiness(nodeClaim))
+			events.FromContext(ctx).Publish(disruptionevents.WaitingOnReadiness(nodeClaim))
 			return fmt.Errorf("node is not initialized")
 		}
 		return nil
@@ -308,7 +306,7 @@ func (c *Controller) waitForDeletion(ctx context.Context, nodeClaim *v1beta1.Nod
 			return nil
 		}
 		// make the user aware of why disruption is paused
-		c.recorder.Publish(disruptionevents.WaitingOnDeletion(nc))
+		events.FromContext(ctx).Publish(disruptionevents.WaitingOnDeletion(nc))
 		if nerr != nil {
 			return fmt.Errorf("expected to be not found, %w", nerr)
 		}
