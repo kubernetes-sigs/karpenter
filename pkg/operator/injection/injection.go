@@ -30,6 +30,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"knative.dev/pkg/system"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/operator/options"
@@ -79,7 +80,7 @@ func WithSettingsOrDie(ctx context.Context, kubernetesInterface kubernetes.Inter
 
 	for _, setting := range settings {
 		cm, err := WaitForConfigMap(ctx, setting.ConfigMap(), informer)
-		if err != nil && !errors.IsNotFound(err) {
+		if client.IgnoreNotFound(err) != nil {
 			panic(fmt.Errorf("failed to get configmap %s, %w", setting.ConfigMap(), err))
 		}
 		ctx = lo.Must(setting.Inject(ctx, cm))
