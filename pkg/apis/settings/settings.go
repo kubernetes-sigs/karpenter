@@ -49,6 +49,10 @@ func (*Settings) ConfigMap() string {
 // Inject creates a Settings from the supplied ConfigMap
 func (*Settings) Inject(ctx context.Context, cm *v1.ConfigMap) (context.Context, error) {
 	s := defaultSettings.DeepCopy()
+	if cm == nil {
+		return ToContext(ctx, s), nil
+	}
+
 	if err := configmap.Parse(cm.Data,
 		configmap.AsDuration("batchMaxDuration", &s.BatchMaxDuration),
 		configmap.AsDuration("batchIdleDuration", &s.BatchIdleDuration),
@@ -79,7 +83,7 @@ func ToContext(ctx context.Context, s *Settings) context.Context {
 func FromContext(ctx context.Context) *Settings {
 	data := ctx.Value(ContextKey)
 	if data == nil {
-		return nil
+		panic("settings not in context")
 	}
 	return data.(*Settings)
 }

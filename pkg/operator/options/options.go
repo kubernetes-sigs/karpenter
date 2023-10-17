@@ -120,10 +120,6 @@ func (o *Options) ToContext(ctx context.Context) context.Context {
 
 func (o *Options) MergeSettings(ctx context.Context) {
 	s := settings.FromContext(ctx)
-	if s == nil {
-		return
-	}
-
 	if !o.setFlags["batch-max-duration"] {
 		o.BatchMaxDuration = s.BatchMaxDuration
 	}
