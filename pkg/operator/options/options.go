@@ -70,7 +70,7 @@ type FlagSet struct {
 
 // BoolVarWithEnv defines a bool flag with a specified name, default value, usage string, and fallback environment
 // variable.
-func (fs *FlagSet) BoolVarWithEnv(p *bool, name string, val bool, envVar string, usage string) {
+func (fs *FlagSet) BoolVarWithEnv(p *bool, name string, envVar string, val bool, usage string) {
 	*p = env.WithDefaultBool(envVar, val)
 	fs.BoolFunc(name, usage, func(val string) error {
 		if val != "true" && val != "false" {
