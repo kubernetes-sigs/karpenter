@@ -59,13 +59,6 @@ type PodOptions struct {
 	Command                       []string
 }
 
-var InitImage = "pause"
-
-// type InitContainersOptions struct {
-// 	Resources     v1.ResourceRequirements
-// 	RestartPolicy *v1.ContainerRestartPolicy
-// }
-
 type PDBOptions struct {
 	metav1.ObjectMeta
 	Labels         map[string]string
@@ -178,7 +171,7 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 
 		for _, init := range options.InitContainers {
 			init.Name = RandomName()
-			init.Image = InitImage
+			init.Image = "pause"
 			p.Spec.InitContainers = append(p.Spec.InitContainers, init)
 		}
 

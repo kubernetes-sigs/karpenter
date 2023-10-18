@@ -1646,8 +1646,6 @@ var _ = Describe("Provisioning", func() {
 		})
 	})
 	Context("Resource Calculations", func() {
-		always := v1.ContainerRestartPolicyAlways
-
 		It("should schedule based on the sum of containers and sidecarContainers", func() {
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
@@ -1657,7 +1655,7 @@ var _ = Describe("Provisioning", func() {
 
 				InitContainers: []v1.Container{
 					{
-						RestartPolicy: &always,
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
 						Resources: v1.ResourceRequirements{
 							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("4"), v1.ResourceMemory: resource.MustParse("2Gi")},
 							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
@@ -1689,7 +1687,7 @@ var _ = Describe("Provisioning", func() {
 						},
 					},
 					{
-						RestartPolicy: &always,
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
 						Resources: v1.ResourceRequirements{
 							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("3"), v1.ResourceMemory: resource.MustParse("3Gi")},
 							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
@@ -1703,8 +1701,6 @@ var _ = Describe("Provisioning", func() {
 		})
 
 		It("should schedule based on the max resource requests of containers and initContainers with sidecarContainers for order of type1", func() {
-			always := v1.ContainerRestartPolicyAlways
-
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
 					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("1Gi")},
@@ -1713,7 +1709,7 @@ var _ = Describe("Provisioning", func() {
 
 				InitContainers: []v1.Container{
 					{
-						RestartPolicy: &always,
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
 						Resources: v1.ResourceRequirements{
 							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("4"), v1.ResourceMemory: resource.MustParse("2Gi")},
 							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
@@ -1734,8 +1730,6 @@ var _ = Describe("Provisioning", func() {
 		})
 
 		It("should schedule based on the max resource requests of containers and initContainers with sidecarContainers for order of type2", func() {
-			always := v1.ContainerRestartPolicyAlways
-
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
 					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("1Gi")},
@@ -1744,7 +1738,7 @@ var _ = Describe("Provisioning", func() {
 
 				InitContainers: []v1.Container{
 					{
-						RestartPolicy: &always,
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
 						Resources: v1.ResourceRequirements{
 							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("4"), v1.ResourceMemory: resource.MustParse("2Gi")},
 							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
@@ -1765,8 +1759,6 @@ var _ = Describe("Provisioning", func() {
 		})
 
 		It("should schedule based on the max resource requests of containers and initContainers with sidecarContainers for order of type3", func() {
-			always := v1.ContainerRestartPolicyAlways
-
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
 					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("3"), v1.ResourceMemory: resource.MustParse("3Gi")},
@@ -1775,28 +1767,28 @@ var _ = Describe("Provisioning", func() {
 
 				InitContainers: []v1.Container{
 					{
-						RestartPolicy: &always,
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
 						Resources: v1.ResourceRequirements{
 							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("2Gi")},
 							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
 						},
 					},
 					{
-						RestartPolicy: &always,
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
 						Resources: v1.ResourceRequirements{
 							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
 							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
 						},
 					},
 					{
-						RestartPolicy: &always,
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
 						Resources: v1.ResourceRequirements{
 							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("3"), v1.ResourceMemory: resource.MustParse("3Gi")},
 							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
 						},
 					},
 					{
-						RestartPolicy: &always,
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
 						Resources: v1.ResourceRequirements{
 							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("5Gi")},
 							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
@@ -1817,8 +1809,6 @@ var _ = Describe("Provisioning", func() {
 		})
 
 		It("should schedule based on the max resource requests of containers and initContainers with sidecarContainers for order of type4", func() {
-			always := v1.ContainerRestartPolicyAlways
-
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
 					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("3"), v1.ResourceMemory: resource.MustParse("3Gi")},
@@ -1827,28 +1817,28 @@ var _ = Describe("Provisioning", func() {
 
 				InitContainers: []v1.Container{
 					{
-						RestartPolicy: &always,
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
 						Resources: v1.ResourceRequirements{
 							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("2Gi")},
 							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
 						},
 					},
 					{
-						RestartPolicy: &always,
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
 						Resources: v1.ResourceRequirements{
 							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
 							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
 						},
 					},
 					{
-						RestartPolicy: &always,
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
 						Resources: v1.ResourceRequirements{
 							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("3"), v1.ResourceMemory: resource.MustParse("3Gi")},
 							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
 						},
 					},
 					{
-						RestartPolicy: &always,
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
 						Resources: v1.ResourceRequirements{
 							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("5Gi")},
 							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
@@ -1869,8 +1859,6 @@ var _ = Describe("Provisioning", func() {
 		})
 
 		It("should schedule based on the max resource requests of containers and initContainers with sidecarContainers for order of type5", func() {
-			always := v1.ContainerRestartPolicyAlways
-
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
 					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("3"), v1.ResourceMemory: resource.MustParse("3Gi")},
@@ -1885,7 +1873,7 @@ var _ = Describe("Provisioning", func() {
 						},
 					},
 					{
-						RestartPolicy: &always,
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
 						Resources: v1.ResourceRequirements{
 							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
 							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
@@ -1905,7 +1893,7 @@ var _ = Describe("Provisioning", func() {
 						},
 					},
 					{
-						RestartPolicy: &always,
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
 						Resources: v1.ResourceRequirements{
 							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("5Gi")},
 							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
@@ -1924,7 +1912,7 @@ var _ = Describe("Provisioning", func() {
 						},
 					},
 					{
-						RestartPolicy: &always,
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
 						Resources: v1.ResourceRequirements{
 							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
 							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
@@ -1939,8 +1927,6 @@ var _ = Describe("Provisioning", func() {
 		})
 
 		It("should schedule based on the max resource requests of containers and initContainers with sidecarContainers for order of type6", func() {
-			always := v1.ContainerRestartPolicyAlways
-
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
 					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("3"), v1.ResourceMemory: resource.MustParse("3Gi")},
@@ -1955,7 +1941,7 @@ var _ = Describe("Provisioning", func() {
 						},
 					},
 					{
-						RestartPolicy: &always,
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
 						Resources: v1.ResourceRequirements{
 							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
 							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
@@ -1975,7 +1961,7 @@ var _ = Describe("Provisioning", func() {
 						},
 					},
 					{
-						RestartPolicy: &always,
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
 						Resources: v1.ResourceRequirements{
 							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("5Gi")},
 							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
@@ -1994,7 +1980,7 @@ var _ = Describe("Provisioning", func() {
 						},
 					},
 					{
-						RestartPolicy: &always,
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
 						Resources: v1.ResourceRequirements{
 							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
 							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
