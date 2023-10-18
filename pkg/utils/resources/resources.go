@@ -103,28 +103,26 @@ func podRequests(pod *v1.Pod) v1.ResourceList {
 	requests := v1.ResourceList{}
 	restartableInitContainerReqs := v1.ResourceList{}
 	maxInitContainerReqs := v1.ResourceList{}
-	restartableInitContainerLimits := v1.ResourceList{}
 
 	for _, container := range pod.Spec.Containers {
-		requests = MergeInto(requests, MergeResourceLimitsIntoRequests(container))
+		if container.Resources.Requests == nil {
+			container.Resources.Requests = container.Resources.Limits
+		}
+		requests = MergeInto(requests, container.Resources.Requests)
 	}
 
 	for _, container := range pod.Spec.InitContainers {
-		containerReqs := MergeResourceLimitsIntoRequests(container)
-		containerLimits := container.Resources.Limits
 
 		if lo.FromPtr(container.RestartPolicy) == v1.ContainerRestartPolicyAlways {
-			requests = MergeInto(requests, containerReqs)
-			MergeInto(restartableInitContainerReqs, containerReqs)
-			containerReqs = restartableInitContainerReqs
-			MergeInto(restartableInitContainerLimits, containerLimits)
-			containerLimits = restartableInitContainerLimits
+			requests = MergeInto(requests, container.Resources.Requests)
+			MergeInto(restartableInitContainerReqs, container.Resources.Requests)
+			container.Resources.Requests = restartableInitContainerReqs
+
 		} else {
-			MergeInto(containerReqs, restartableInitContainerReqs)
-			MergeInto(containerLimits, restartableInitContainerLimits)
+			MergeInto(container.Resources.Requests, restartableInitContainerReqs)
 		}
 
-		maxInitContainerReqs = MaxResources(maxInitContainerReqs, containerReqs)
+		maxInitContainerReqs = MaxResources(maxInitContainerReqs, container.Resources.Requests)
 	}
 
 	requests = MaxResources(requests, maxInitContainerReqs)
@@ -146,18 +144,16 @@ func podLimits(pod *v1.Pod) v1.ResourceList {
 	}
 
 	for _, container := range pod.Spec.InitContainers {
-		containerReqs := MergeResourceLimitsIntoRequests(container)
-		containerLimits := container.Resources.Limits
 
 		if lo.FromPtr(container.RestartPolicy) == v1.ContainerRestartPolicyAlways {
-			limits = MergeInto(limits, containerLimits)
-			MergeInto(restartableInitContainerLimits, containerLimits)
-			containerLimits = restartableInitContainerLimits
+			limits = MergeInto(limits, container.Resources.Limits)
+			MergeInto(restartableInitContainerLimits, container.Resources.Limits)
+			container.Resources.Limits = restartableInitContainerLimits
 		} else {
-			MergeInto(containerReqs, restartableInitContainerLimits)
+			MergeInto(container.Resources.Limits, restartableInitContainerLimits)
 		}
 
-		maxInitContainerLimits = MaxResources(maxInitContainerLimits, containerLimits)
+		maxInitContainerLimits = MaxResources(maxInitContainerLimits, container.Resources.Limits)
 	}
 
 	limits = MaxResources(limits, maxInitContainerLimits)
@@ -193,23 +189,6 @@ func MaxResources(resources ...v1.ResourceList) v1.ResourceList {
 		}
 	}
 	return resourceList
-}
-
-// MergeResourceLimitsIntoRequests merges resource limits into requests if no request exists for the given resource
-func MergeResourceLimitsIntoRequests(container v1.Container) v1.ResourceList {
-	resources := container.Resources.DeepCopy()
-	if resources.Requests == nil {
-		resources.Requests = v1.ResourceList{}
-	}
-
-	if resources.Limits != nil {
-		for resourceName, quantity := range resources.Limits {
-			if _, ok := resources.Requests[resourceName]; !ok {
-				resources.Requests[resourceName] = quantity
-			}
-		}
-	}
-	return resources.Requests
 }
 
 // Quantity parses the string value into a *Quantity

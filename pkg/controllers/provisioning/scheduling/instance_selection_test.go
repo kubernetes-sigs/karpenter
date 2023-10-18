@@ -507,7 +507,7 @@ var _ = Describe("Instance Type Selection", func() {
 		ExpectNotScheduled(ctx, env.Client, pod)
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
 	})
-	FIt("should schedule on an instance with enough resources", func() {
+	It("should schedule on an instance with enough resources", func() {
 		// this is a pretty thorough exercise of scheduling, so we also check an invariant that scheduling doesn't
 		// modify the instance type's Overhead() or Resources() maps so they can return the same map every time instead
 		// of re-alllocating a new one per call
