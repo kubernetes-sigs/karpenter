@@ -123,7 +123,7 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: disruptionSubsystem,
 			Name:      "replacement_nodeclaim_failures_total",
-			Help:      "The number of times that Karpenter failed to launch a replacement node for disruption. Labeled by disruption type.",
+			Help:      "The number of times that Karpenter failed to launch a replacement node for disruption. Labeled by disruption method.",
 		},
 		[]string{methodLabel, consolidationTypeLabel},
 	)
@@ -132,7 +132,7 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: disruptionSubsystem,
 			Name:      "actions_performed_total",
-			Help:      "Number of disruption methods performed. Labeled by disruption type.",
+			Help:      "Number of disruption actions performed. Labeled by disruption method.",
 		},
 		[]string{actionLabel, methodLabel, consolidationTypeLabel},
 	)
@@ -141,7 +141,7 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: disruptionSubsystem,
 			Name:      "eligible_nodes",
-			Help:      "Number of nodes eligible for disruption by Karpenter. Labeled by disruption type.",
+			Help:      "Number of nodes eligible for disruption by Karpenter. Labeled by disruption method.",
 		},
 		[]string{methodLabel, consolidationTypeLabel},
 	)
