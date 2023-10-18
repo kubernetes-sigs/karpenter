@@ -40,11 +40,6 @@ import (
 	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 )
 
-// EnableNodeClaims is an internal feature flag to allow functions that could List NodeClaims to work
-// This flag is currently here to enable testing
-// TODO @joinnis: Remove this internal flag when the v1beta1 APIs are released
-var EnableNodeClaims = false
-
 type Key struct {
 	Name      string
 	IsMachine bool
@@ -320,10 +315,8 @@ func List(ctx context.Context, c client.Client, opts ...client.ListOption) (*v1b
 		return *New(&m)
 	})
 	nodeClaimList := &v1beta1.NodeClaimList{}
-	if EnableNodeClaims {
-		if err := c.List(ctx, nodeClaimList, opts...); err != nil {
-			return nil, err
-		}
+	if err := c.List(ctx, nodeClaimList, opts...); err != nil {
+		return nil, err
 	}
 	nodeClaimList.Items = append(nodeClaimList.Items, convertedNodeClaims...)
 	return nodeClaimList, nil
@@ -474,7 +467,7 @@ func UpdateNodeOwnerReferences(nodeClaim *v1beta1.NodeClaim, node *v1.Node) *v1.
 }
 
 func Owner(ctx context.Context, c client.Client, obj interface{ GetLabels() map[string]string }) (*v1beta1.NodePool, error) {
-	if v, ok := obj.GetLabels()[v1beta1.NodePoolLabelKey]; ok && EnableNodeClaims {
+	if v, ok := obj.GetLabels()[v1beta1.NodePoolLabelKey]; ok {
 		nodePool := &v1beta1.NodePool{}
 		if err := c.Get(ctx, types.NamespacedName{Name: v}, nodePool); err != nil {
 			return nil, err
@@ -492,7 +485,7 @@ func Owner(ctx context.Context, c client.Client, obj interface{ GetLabels() map[
 }
 
 func OwnerKey(obj interface{ GetLabels() map[string]string }) nodepoolutil.Key {
-	if v, ok := obj.GetLabels()[v1beta1.NodePoolLabelKey]; ok && EnableNodeClaims {
+	if v, ok := obj.GetLabels()[v1beta1.NodePoolLabelKey]; ok {
 		return nodepoolutil.Key{Name: v, IsProvisioner: false}
 	}
 	if v, ok := obj.GetLabels()[v1alpha5.ProvisionerNameLabelKey]; ok {

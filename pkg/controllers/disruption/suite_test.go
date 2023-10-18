@@ -51,8 +51,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/test"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 )
 
 var ctx context.Context
@@ -126,9 +124,6 @@ var _ = BeforeEach(func() {
 	})
 	leastExpensiveInstance, mostExpensiveInstance = onDemandInstances[0], onDemandInstances[len(onDemandInstances)-1]
 	leastExpensiveOffering, mostExpensiveOffering = leastExpensiveInstance.Offerings[0], mostExpensiveInstance.Offerings[0]
-
-	nodepoolutil.EnableNodePools = true
-	nodeclaimutil.EnableNodeClaims = true
 })
 
 var _ = AfterEach(func() {
@@ -1244,30 +1239,6 @@ var _ = Describe("Combined/Disruption", func() {
 		ExpectNotFound(ctx, env.Client, lo.Map(machines, func(m *v1alpha5.Machine, _ int) client.Object { return m })...)
 		ExpectNotFound(ctx, env.Client, lo.Map(nodeClaims, func(nc *v1beta1.NodeClaim, _ int) client.Object { return nc })...)
 		ExpectNotFound(ctx, env.Client, lo.Map(nodes, func(n *v1.Node, _ int) client.Object { return n })...)
-	})
-	It("shouldn't consider a NodeClaim as a candidate if EnableNodePools/EnableNodeClaims isn't enabled", func() {
-		nodepoolutil.EnableNodePools = false
-		nodeclaimutil.EnableNodeClaims = false
-
-		nodePool.Spec.Disruption.ExpireAfter = v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)}
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.Expired)
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, nodeClaimNode)
-
-		// inform cluster state about nodes and nodeclaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodeClaimNode}, []*v1beta1.NodeClaim{nodeClaim})
-
-		fakeClock.Step(10 * time.Minute)
-		wg := sync.WaitGroup{}
-		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
-		wg.Wait()
-
-		// Expect that the expired nodeclaim is not gone
-		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		ExpectExists(ctx, env.Client, nodeClaim)
-		ExpectExists(ctx, env.Client, nodeClaimNode)
 	})
 })
 
