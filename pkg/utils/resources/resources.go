@@ -105,24 +105,22 @@ func podRequests(pod *v1.Pod) v1.ResourceList {
 	maxInitContainerReqs := v1.ResourceList{}
 
 	for _, container := range pod.Spec.Containers {
-		if container.Resources.Requests == nil {
-			container.Resources.Requests = container.Resources.Limits
-		}
-		requests = MergeInto(requests, container.Resources.Requests)
+
+		requests = MergeInto(requests, MergeResourceLimitsIntoRequests(container))
 	}
 
 	for _, container := range pod.Spec.InitContainers {
 
 		if lo.FromPtr(container.RestartPolicy) == v1.ContainerRestartPolicyAlways {
-			requests = MergeInto(requests, container.Resources.Requests)
-			MergeInto(restartableInitContainerReqs, container.Resources.Requests)
+			requests = MergeInto(requests, MergeResourceLimitsIntoRequests(container))
+			MergeInto(restartableInitContainerReqs, MergeResourceLimitsIntoRequests(container))
 			container.Resources.Requests = restartableInitContainerReqs
 
 		} else {
 			MergeInto(container.Resources.Requests, restartableInitContainerReqs)
 		}
 
-		maxInitContainerReqs = MaxResources(maxInitContainerReqs, container.Resources.Requests)
+		maxInitContainerReqs = MaxResources(maxInitContainerReqs, MergeResourceLimitsIntoRequests(container))
 	}
 
 	requests = MaxResources(requests, maxInitContainerReqs)
@@ -189,6 +187,23 @@ func MaxResources(resources ...v1.ResourceList) v1.ResourceList {
 		}
 	}
 	return resourceList
+}
+
+// MergeResourceLimitsIntoRequests merges resource limits into requests if no request exists for the given resource
+func MergeResourceLimitsIntoRequests(container v1.Container) v1.ResourceList {
+	resources := container.Resources.DeepCopy()
+	if resources.Requests == nil {
+		resources.Requests = v1.ResourceList{}
+	}
+
+	if resources.Limits != nil {
+		for resourceName, quantity := range resources.Limits {
+			if _, ok := resources.Requests[resourceName]; !ok {
+				resources.Requests[resourceName] = quantity
+			}
+		}
+	}
+	return resources.Requests
 }
 
 // Quantity parses the string value into a *Quantity
