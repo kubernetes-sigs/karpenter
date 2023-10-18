@@ -40,6 +40,9 @@ type NodeClaimSpec struct {
 	// Kubelet defines args to be used when configuring kubelet on provisioned nodes.
 	// They are a subset of the upstream types, recognizing not all options may be supported.
 	// Wherever possible, the types and names should reflect the upstream kubelet types.
+	// +kubebuilder:validation:XValidation:message="imageGCHighThresholdPercent must be greater than imageGCLowThresholdPercent",rule="has(self.imageGCHighThresholdPercent) && has(self.imageGCLowThresholdPercent) ?  self.imageGCHighThresholdPercent > self.imageGCLowThresholdPercent  : true"
+	// +kubebuilder:validation:XValidation:message="evictionSoft OwnerKey does not have a matching evictionSoftGracePeriod",rule="has(self.evictionSoft) ? self.evictionSoft.all(e, (e in self.evictionSoftGracePeriod)):true"
+	// +kubebuilder:validation:XValidation:message="evictionSoftGracePeriod OwnerKey does not have a matching evictionSoft",rule="has(self.evictionSoftGracePeriod) ? self.evictionSoftGracePeriod.all(e, (e in self.evictionSoft)):true"
 	Kubelet *KubeletConfiguration `json:"kubelet,omitempty"`
 	// NodeClassRef is a reference to an object that defines provider specific configuration
 	// +required
@@ -83,18 +86,25 @@ type KubeletConfiguration struct {
 	// +optional
 	PodsPerCore *int32 `json:"podsPerCore,omitempty"`
 	// SystemReserved contains resources reserved for OS system daemons and kernel memory.
+	// +kubebuilder:validation:XValidation:message="valid keys for systemReserved are ['cpu','memory','ephemeral-storage','pid']",rule="self.all(x, x=='cpu' || x=='memory' || x=='ephemeral-storage' || x=='pid')"
+	// +kubebuilder:validation:XValidation:message="systemReserved value cannot be a negative resource quantity",rule="self.all(x, !self[x].startsWith('-'))"
 	// +optional
 	SystemReserved v1.ResourceList `json:"systemReserved,omitempty"`
 	// KubeReserved contains resources reserved for Kubernetes system components.
+	// +kubebuilder:validation:XValidation:message="valid keys for kubeReserved are ['cpu','memory','ephemeral-storage','pid']",rule="self.all(x, x=='cpu' || x=='memory' || x=='ephemeral-storage' || x=='pid')"
+	// +kubebuilder:validation:XValidation:message="kubeReserved value cannot be a negative resource quantity",rule="self.all(x, !self[x].startsWith('-'))"
 	// +optional
 	KubeReserved v1.ResourceList `json:"kubeReserved,omitempty"`
 	// EvictionHard is the map of signal names to quantities that define hard eviction thresholds
+	// +kubebuilder:validation:XValidation:message="valid keys for evictionHard are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']",rule="self.all(x, x in ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available'])"
 	// +optional
 	EvictionHard map[string]string `json:"evictionHard,omitempty"`
 	// EvictionSoft is the map of signal names to quantities that define soft eviction thresholds
+	// +kubebuilder:validation:XValidation:message="valid keys for evictionSoft are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']",rule="self.all(x, x in ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available'])"
 	// +optional
 	EvictionSoft map[string]string `json:"evictionSoft,omitempty"`
 	// EvictionSoftGracePeriod is the map of signal names to quantities that define grace periods for each eviction signal
+	// +kubebuilder:validation:XValidation:message="valid keys for evictionSoftGracePeriod are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']",rule="self.all(x, x in ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available'])"
 	// +optional
 	EvictionSoftGracePeriod map[string]metav1.Duration `json:"evictionSoftGracePeriod,omitempty"`
 	// EvictionMaxPodGracePeriod is the maximum allowed grace period (in seconds) to use when terminating pods in

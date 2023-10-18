@@ -16,7 +16,9 @@ package injection
 
 import (
 	"context"
+	"flag"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/samber/lo"
@@ -28,8 +30,10 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"knative.dev/pkg/system"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/settings"
+	"github.com/aws/karpenter-core/pkg/operator/options"
 )
 
 type controllerNameKeyType struct{}
@@ -48,6 +52,20 @@ func GetControllerName(ctx context.Context) string {
 	return name.(string)
 }
 
+func WithOptionsOrDie(ctx context.Context, opts ...options.Injectable) context.Context {
+	fs := flag.NewFlagSet("karpenter", flag.ContinueOnError)
+	for _, opt := range opts {
+		opt.AddFlags(fs)
+	}
+	for _, opt := range opts {
+		lo.Must0(opt.Parse(fs, os.Args[1:]...))
+	}
+	for _, opt := range opts {
+		ctx = opt.ToContext(ctx)
+	}
+	return ctx
+}
+
 // WithSettingsOrDie injects the settings into the context for all configMaps passed through the registrations
 // NOTE: Settings are resolved statically into the global context.Context at startup. This was changed from updating them
 // dynamically at runtime due to the necessity of having to build logic around re-queueing to ensure that settings are
@@ -62,13 +80,9 @@ func WithSettingsOrDie(ctx context.Context, kubernetesInterface kubernetes.Inter
 
 	for _, setting := range settings {
 		cm, err := WaitForConfigMap(ctx, setting.ConfigMap(), informer)
-		if err != nil {
-			if !errors.IsNotFound(err) {
-				panic(fmt.Errorf("failed to get configmap %s, %w", setting.ConfigMap(), err))
-			}
-			continue
+		if client.IgnoreNotFound(err) != nil {
+			panic(fmt.Errorf("failed to get configmap %s, %w", setting.ConfigMap(), err))
 		}
-
 		ctx = lo.Must(setting.Inject(ctx, cm))
 	}
 	return ctx
