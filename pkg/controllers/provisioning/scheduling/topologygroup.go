@@ -90,6 +90,15 @@ func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod
 		*nodeTaintsPolicy = v1.NodeInclusionPolicyIgnore
 	}
 
+	if (labelSelector.MatchLabels != nil || labelSelector.MatchExpressions != nil) && len(matchLabelKeys) > 0 {
+
+		for _, labelKey := range matchLabelKeys {
+			if value, ok := pod.Labels[labelKey]; ok {
+				labelSelector.MatchLabels[labelKey] = value
+			}
+		}
+	}
+
 	return &TopologyGroup{
 		Type:               topologyType,
 		Key:                topologyKey,
