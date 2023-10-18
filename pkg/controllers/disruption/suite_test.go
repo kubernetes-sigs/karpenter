@@ -1232,7 +1232,6 @@ var _ = Describe("Combined/Disruption", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
-
 		// Cascade any deletion of the machines to the nodes
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machines...)
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims...)
