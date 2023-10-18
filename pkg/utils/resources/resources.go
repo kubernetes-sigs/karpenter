@@ -99,56 +99,87 @@ func Subtract(lhs, rhs v1.ResourceList) v1.ResourceList {
 // inspired from https://github.com/kubernetes/kubernetes/blob/e2afa175e4077d767745246662170acd86affeaf/pkg/api/v1/resource/helpers.go#L96
 // https://kubernetes.io/blog/2023/08/25/native-sidecar-containers/
 // Ceiling calculates the max between the sum of container resources and max of initContainers along with sidecar feature consideration
-func Ceiling(pod *v1.Pod) v1.ResourceRequirements {
-	var resources v1.ResourceRequirements
-
-	for _, container := range pod.Spec.Containers {
-		resources.Requests = MergeInto(resources.Requests, MergeResourceLimitsIntoRequests(container))
-		resources.Limits = MergeInto(resources.Limits, container.Resources.Limits)
-	}
-
+func podRequests(pod *v1.Pod) v1.ResourceList {
+	requests := v1.ResourceList{}
 	restartableInitContainerReqs := v1.ResourceList{}
 	maxInitContainerReqs := v1.ResourceList{}
 	restartableInitContainerLimits := v1.ResourceList{}
-	maxInitContainerLimits := v1.ResourceList{}
+
+	for _, container := range pod.Spec.Containers {
+		requests = MergeInto(requests, MergeResourceLimitsIntoRequests(container))
+	}
 
 	for _, container := range pod.Spec.InitContainers {
 		containerReqs := MergeResourceLimitsIntoRequests(container)
 		containerLimits := container.Resources.Limits
 
 		if lo.FromPtr(container.RestartPolicy) == v1.ContainerRestartPolicyAlways {
-			resources.Requests = MergeInto(resources.Requests, containerReqs)
-			resources.Limits = MergeInto(resources.Limits, containerLimits)
-
+			requests = MergeInto(requests, containerReqs)
 			MergeInto(restartableInitContainerReqs, containerReqs)
 			containerReqs = restartableInitContainerReqs
-
 			MergeInto(restartableInitContainerLimits, containerLimits)
 			containerLimits = restartableInitContainerLimits
 		} else {
-
 			MergeInto(containerReqs, restartableInitContainerReqs)
 			MergeInto(containerLimits, restartableInitContainerLimits)
 		}
 
 		maxInitContainerReqs = MaxResources(maxInitContainerReqs, containerReqs)
+	}
+
+	requests = MaxResources(requests, maxInitContainerReqs)
+
+	if pod.Spec.Overhead != nil {
+		requests = MergeInto(requests, pod.Spec.Overhead)
+	}
+
+	return requests
+}
+
+func podLimits(pod *v1.Pod) v1.ResourceList {
+	limits := v1.ResourceList{}
+	restartableInitContainerLimits := v1.ResourceList{}
+	maxInitContainerLimits := v1.ResourceList{}
+
+	for _, container := range pod.Spec.Containers {
+		limits = MergeInto(limits, container.Resources.Limits)
+	}
+
+	for _, container := range pod.Spec.InitContainers {
+		containerReqs := MergeResourceLimitsIntoRequests(container)
+		containerLimits := container.Resources.Limits
+
+		if lo.FromPtr(container.RestartPolicy) == v1.ContainerRestartPolicyAlways {
+			limits = MergeInto(limits, containerLimits)
+			MergeInto(restartableInitContainerLimits, containerLimits)
+			containerLimits = restartableInitContainerLimits
+		} else {
+			MergeInto(containerReqs, restartableInitContainerLimits)
+		}
+
 		maxInitContainerLimits = MaxResources(maxInitContainerLimits, containerLimits)
 	}
 
-	resources.Requests = MaxResources(resources.Requests, maxInitContainerReqs)
-	resources.Limits = MaxResources(resources.Limits, maxInitContainerLimits)
+	limits = MaxResources(limits, maxInitContainerLimits)
 
 	if pod.Spec.Overhead != nil {
-		resources.Requests = MergeInto(resources.Requests, pod.Spec.Overhead)
 		for name, quantity := range pod.Spec.Overhead {
-			if value, ok := resources.Limits[name]; ok && !value.IsZero() {
+			if value, ok := limits[name]; ok && !value.IsZero() {
 				value.Add(quantity)
-				resources.Limits[name] = value
+				limits[name] = value
 			}
 		}
 	}
 
-	return resources
+	return limits
+}
+
+func Ceiling(pod *v1.Pod) v1.ResourceRequirements {
+	return v1.ResourceRequirements{
+		Requests: podRequests(pod),
+		Limits:   podLimits(pod),
+	}
+
 }
 
 // MaxResources returns the maximum quantities for a given list of resources
