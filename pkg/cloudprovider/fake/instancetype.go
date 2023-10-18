@@ -85,6 +85,9 @@ func NewInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 		scheduling.NewRequirement(ExoticInstanceLabelKey, v1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(IntegerInstanceLabelKey, v1.NodeSelectorOpIn, fmt.Sprint(options.Resources.Cpu().Value())),
 	)
+
+	fmt.Println("options resource cpu is",options.Resources.Cpu())
+
 	if options.Resources.Cpu().Cmp(resource.MustParse("4")) > 0 &&
 		options.Resources.Memory().Cmp(resource.MustParse("8Gi")) > 0 {
 		requirements.Get(LabelInstanceSize).Insert("large")

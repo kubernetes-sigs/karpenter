@@ -23,6 +23,7 @@ import (
 	"github.com/mitchellh/hashstructure/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -506,7 +507,7 @@ var _ = Describe("Instance Type Selection", func() {
 		ExpectNotScheduled(ctx, env.Client, pod)
 		Expect(cloudProvider.CreateCalls).To(HaveLen(0))
 	})
-	It("should schedule on an instance with enough resources", func() {
+	FIt("should schedule on an instance with enough resources", func() {
 		// this is a pretty thorough exercise of scheduling, so we also check an invariant that scheduling doesn't
 		// modify the instance type's Overhead() or Resources() maps so they can return the same map every time instead
 		// of re-alllocating a new one per call
@@ -530,8 +531,45 @@ var _ = Describe("Instance Type Selection", func() {
 						v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%0.1f", cpu)),
 						v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%0.1fGi", mem)),
 					}}}
+				opts1 := test.PodOptions{
+
+					InitContainers: []v1.Container{{
+						Resources: v1.ResourceRequirements{
+							Requests: map[v1.ResourceName]resource.Quantity{
+								v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%0.1f", cpu)),
+								v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%0.1fGi", mem)),
+							},
+							Limits: map[v1.ResourceName]resource.Quantity{
+								v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%0.1f", cpu)),
+								v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%0.1fGi", mem)),
+							},
+						},
+					}},
+					ResourceRequirements: v1.ResourceRequirements{Requests: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%0.1f", cpu)),
+						v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%0.1fGi", mem)),
+					}}}
+				opts2 := test.PodOptions{
+
+					InitContainers: []v1.Container{{
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
+						Resources: v1.ResourceRequirements{
+							Requests: map[v1.ResourceName]resource.Quantity{
+								v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%0.1f", cpu)),
+								v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%0.1fGi", mem)),
+							},
+							Limits: map[v1.ResourceName]resource.Quantity{
+								v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%0.1f", cpu)),
+								v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%0.1fGi", mem)),
+							},
+						},
+					}},
+					ResourceRequirements: v1.ResourceRequirements{Requests: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%0.1f", cpu)),
+						v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%0.1fGi", mem)),
+					}}}
 				pods := []*v1.Pod{
-					test.UnschedulablePod(opts), test.UnschedulablePod(opts), test.UnschedulablePod(opts),
+					test.UnschedulablePod(opts), test.UnschedulablePod(opts1), test.UnschedulablePod(opts2),
 				}
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
 				nodeNames := sets.NewString()
