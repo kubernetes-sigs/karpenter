@@ -63,7 +63,6 @@ var _ = AfterSuite(func() {
 })
 
 var _ = BeforeEach(func() {
-	recorder.Reset() // Reset the events that we captured during the run
 	// Shut down the queue and restart it to ensure no races
 	queue.Reset()
 })

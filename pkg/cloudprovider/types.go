@@ -137,8 +137,7 @@ type Offerings []Offering
 // passed zone and capacity type
 func (ofs Offerings) Get(ct, zone string) (Offering, bool) {
 	return lo.Find(ofs, func(of Offering) bool {
-		return of.CapacityType == ct && of.Zone ==
-		 zone
+		return of.CapacityType == ct && of.Zone == zone
 	})
 }
 

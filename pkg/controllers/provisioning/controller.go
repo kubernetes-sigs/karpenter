@@ -52,7 +52,7 @@ func (c *Controller) Name() string {
 }
 
 // Reconcile the resource
-func (c *Controller) Reconcile(ctx context.Context, p *v1.Pod) (reconcile.Result, error) {
+func (c *Controller) Reconcile(_ context.Context, p *v1.Pod) (reconcile.Result, error) {
 	if !pod.IsProvisionable(p) {
 		return reconcile.Result{}, nil
 	}

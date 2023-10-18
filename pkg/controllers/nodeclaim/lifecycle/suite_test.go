@@ -22,6 +22,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
 	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -30,6 +31,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	nodeclaimlifecycle "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/lifecycle"
+	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/options"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
@@ -59,6 +61,9 @@ var _ = BeforeSuite(func() {
 		})
 	}))
 	ctx = options.ToContext(ctx, test.Options())
+
+	recorder := events.NewRecorder(&record.FakeRecorder{})
+	ctx = events.ToContext(ctx,recorder)
 
 	cloudProvider = fake.NewCloudProvider()
 	machineController = nodeclaimlifecycle.NewMachineController(fakeClock, env.Client, cloudProvider)

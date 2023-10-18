@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/controllers/nodeclaim/consistency"
+	"github.com/aws/karpenter-core/pkg/events"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 
 	"github.com/aws/karpenter-core/pkg/apis"
@@ -62,6 +63,8 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 	cp = &fake.CloudProvider{}
 	recorder = test.NewEventRecorder()
+	ctx = events.ToContext(ctx,recorder)
+
 	machineConsistencyController = consistency.NewMachineController(fakeClock, env.Client,  cp)
 	nodeClaimConsistencyController = consistency.NewNodeClaimController(fakeClock, env.Client,  cp)
 })
@@ -70,10 +73,6 @@ var _ = AfterSuite(func() {
 	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
 })
 
-var _ = BeforeEach(func() {
-
-	recorder.Reset()
-})
 
 var _ = AfterEach(func() {
 	fakeClock.SetTime(time.Now())
