@@ -116,7 +116,7 @@ func Ceiling(pod *v1.Pod) v1.ResourceRequirements {
 		containerReqs := MergeResourceLimitsIntoRequests(container)
 		containerLimits := container.Resources.Limits
 
-		if container.RestartPolicy != nil && lo.FromPtr(container.RestartPolicy) == v1.ContainerRestartPolicyAlways {
+		if lo.FromPtr(container.RestartPolicy) == v1.ContainerRestartPolicyAlways {
 			resources.Requests = MergeInto(resources.Requests, containerReqs)
 			resources.Limits = MergeInto(resources.Limits, containerLimits)
 
