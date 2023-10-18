@@ -93,7 +93,7 @@ func HasDoNotDisrupt(pod *v1.Pod) bool {
 
 // ToleratesUnschedulableTaint returns true if the pod tolerates node.kubernetes.io/unschedulable taint
 func ToleratesUnschedulableTaint(pod *v1.Pod) bool {
-	return (scheduling.Taints{{Key: v1.TaintNodeUnschedulable, Effect: v1.TaintEffectNoSchedule}}).Tolerates(pod) == nil
+	return (scheduling.Taints{{Key: v1.TaintNodeUnschedulable, Effect: v1.TaintEffectNoSchedule}}).ToleratesPod(pod) == nil
 }
 
 // ToleratesDisruptionNoScheduleTaint returns true if the pod tolerates karpenter.sh/disruption:NoSchedule=Disrupting taint
