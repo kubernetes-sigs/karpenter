@@ -404,6 +404,7 @@ var _ = Describe("Combined/Disruption", func() {
 		wg := sync.WaitGroup{}
 		ExpectTriggerVerifyAction(&wg)
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		wg.Wait()
 
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
@@ -434,6 +435,7 @@ var _ = Describe("Combined/Disruption", func() {
 		wg := sync.WaitGroup{}
 		ExpectTriggerVerifyAction(&wg)
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		wg.Wait()
 
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
@@ -463,6 +465,7 @@ var _ = Describe("Combined/Disruption", func() {
 		wg := sync.WaitGroup{}
 		ExpectTriggerVerifyAction(&wg)
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		wg.Wait()
 
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
@@ -491,6 +494,7 @@ var _ = Describe("Combined/Disruption", func() {
 		wg := sync.WaitGroup{}
 		ExpectTriggerVerifyAction(&wg)
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		wg.Wait()
 
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
@@ -593,6 +597,7 @@ var _ = Describe("Combined/Disruption", func() {
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		wg.Wait()
 
 		// Cascade any deletion of the machine to the node
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
@@ -707,6 +712,7 @@ var _ = Describe("Combined/Disruption", func() {
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		wg.Wait()
 
 		// Cascade any deletion of the machines to the nodes
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machines...)
@@ -807,6 +813,7 @@ var _ = Describe("Combined/Disruption", func() {
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		wg.Wait()
 
 		// Cascade any deletion of the nodeclaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
@@ -921,6 +928,7 @@ var _ = Describe("Combined/Disruption", func() {
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		wg.Wait()
 
 		// Cascade any deletion of the nodeclaims to the nodes
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims...)
@@ -1070,6 +1078,7 @@ var _ = Describe("Combined/Disruption", func() {
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		wg.Wait()
 
 		// Cascade any deletion of the machines to the nodes
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machines...)
@@ -1221,6 +1230,7 @@ var _ = Describe("Combined/Disruption", func() {
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		wg.Wait()
 
 		// Cascade any deletion of the machines to the nodes
 		ExpectMachinesCascadeDeletion(ctx, env.Client, machines...)
@@ -1250,6 +1260,7 @@ var _ = Describe("Combined/Disruption", func() {
 		wg := sync.WaitGroup{}
 		ExpectTriggerVerifyAction(&wg)
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		wg.Wait()
 
 		// Expect that the expired nodeclaim is not gone
 		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
