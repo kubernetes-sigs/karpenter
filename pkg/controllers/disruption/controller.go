@@ -38,7 +38,7 @@ import (
 	disruptionevents "github.com/aws/karpenter-core/pkg/controllers/disruption/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/events"
+	recorder "github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
@@ -199,7 +199,7 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 	}
 
 	for _, candidate := range cmd.candidates {
-		events.FromContext(ctx).Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, reason)...)
+		recorder.FromContext(ctx).Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, reason)...)
 
 		if err := nodeclaimutil.Delete(ctx, c.kubeClient, candidate.NodeClaim); err != nil {
 			if !errors.IsNotFound(err) {
@@ -284,11 +284,11 @@ func (c *Controller) waitForReadiness(ctx context.Context, key nodeclaimutil.Key
 			return fmt.Errorf("getting %s, %w", lo.Ternary(key.IsMachine, "machine", "nodeclaim"), err)
 		}
 		once.Do(func() {
-			events.FromContext(ctx).Publish(disruptionevents.Launching(nodeClaim, reason))
+			recorder.FromContext(ctx).Publish(disruptionevents.Launching(nodeClaim, reason))
 		})
 		if !nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized).IsTrue() {
 			// make the user aware of why disruption is paused
-			events.FromContext(ctx).Publish(disruptionevents.WaitingOnReadiness(nodeClaim))
+			recorder.FromContext(ctx).Publish(disruptionevents.WaitingOnReadiness(nodeClaim))
 			return fmt.Errorf("node is not initialized")
 		}
 		return nil
@@ -306,7 +306,7 @@ func (c *Controller) waitForDeletion(ctx context.Context, nodeClaim *v1beta1.Nod
 			return nil
 		}
 		// make the user aware of why disruption is paused
-		events.FromContext(ctx).Publish(disruptionevents.WaitingOnDeletion(nc))
+		recorder.FromContext(ctx).Publish(disruptionevents.WaitingOnDeletion(nc))
 		if nerr != nil {
 			return fmt.Errorf("expected to be not found, %w", nerr)
 		}

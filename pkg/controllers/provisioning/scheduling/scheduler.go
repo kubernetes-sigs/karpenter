@@ -30,7 +30,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/events"
+	recorder "github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
@@ -189,7 +189,7 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 	// Report failures and nominations
 	for _, pod := range failedToSchedule {
 		logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(pod)).Errorf("Could not schedule pod, %s", errors[pod])
-		events.FromContext(ctx).Publish(PodFailedToScheduleEvent(pod, errors[pod]))
+		recorder.FromContext(ctx).Publish(PodFailedToScheduleEvent(pod, errors[pod]))
 	}
 
 	for _, existing := range s.existingNodes {
@@ -197,7 +197,7 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 			s.cluster.NominateNodeForPod(ctx, existing.ProviderID())
 		}
 		for _, pod := range existing.Pods {
-			events.FromContext(ctx).Publish(NominatePodEvent(pod, existing.Node, existing.NodeClaim))
+			recorder.FromContext(ctx).Publish(NominatePodEvent(pod, existing.Node, existing.NodeClaim))
 		}
 	}
 

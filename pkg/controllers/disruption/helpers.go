@@ -34,7 +34,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/events"
+	recorder "github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
 	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
@@ -50,15 +50,15 @@ func filterCandidates(ctx context.Context, kubeClient client.Client, nodes []*Ca
 	// filter out nodes that can't be terminated
 	nodes = lo.Filter(nodes, func(cn *Candidate, _ int) bool {
 		if !cn.Node.DeletionTimestamp.IsZero() {
-			events.FromContext(ctx).Publish(disruptionevents.Blocked(cn.Node, cn.NodeClaim, "Node in the process of deletion")...)
+			recorder.FromContext(ctx).Publish(disruptionevents.Blocked(cn.Node, cn.NodeClaim, "Node in the process of deletion")...)
 			return false
 		}
 		if pdb, ok := pdbs.CanEvictPods(cn.pods); !ok {
-			events.FromContext(ctx).Publish(disruptionevents.Blocked(cn.Node, cn.NodeClaim, fmt.Sprintf("PDB %q prevents pod evictions", pdb))...)
+			recorder.FromContext(ctx).Publish(disruptionevents.Blocked(cn.Node, cn.NodeClaim, fmt.Sprintf("PDB %q prevents pod evictions", pdb))...)
 			return false
 		}
 		if p, ok := hasDoNotDisruptPod(cn); ok {
-			events.FromContext(ctx).Publish(disruptionevents.Blocked(cn.Node, cn.NodeClaim, fmt.Sprintf("Pod %q has do not evict annotation", client.ObjectKeyFromObject(p)))...)
+			recorder.FromContext(ctx).Publish(disruptionevents.Blocked(cn.Node, cn.NodeClaim, fmt.Sprintf("Pod %q has do not evict annotation", client.ObjectKeyFromObject(p)))...)
 			return false
 		}
 		return true

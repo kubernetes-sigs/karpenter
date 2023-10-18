@@ -37,7 +37,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/node/termination/terminator"
 	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/node/termination/terminator/events"
-	"github.com/aws/karpenter-core/pkg/events"
+	recorder "github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
@@ -88,7 +88,7 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 		if !terminator.IsNodeDrainError(err) {
 			return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 		}
-		events.FromContext(ctx).Publish(terminatorevents.NodeFailedToDrain(node, err))
+		recorder.FromContext(ctx).Publish(terminatorevents.NodeFailedToDrain(node, err))
 		// If the underlying machine no longer exists.
 		if _, err := c.cloudProvider.Get(ctx, node.Spec.ProviderID); err != nil {
 			if cloudprovider.IsNodeClaimNotFoundError(err) {

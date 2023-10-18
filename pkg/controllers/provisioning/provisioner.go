@@ -47,7 +47,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	scheduler "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/events"
+	recorder "github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
 )
@@ -361,7 +361,7 @@ func (p *Provisioner) launchMachine(ctx context.Context, n *scheduler.NodeClaim,
 	}).Inc()
 	if functional.ResolveOptions(opts...).RecordPodNomination {
 		for _, pod := range n.Pods {
-			events.FromContext(ctx).Publish(scheduler.NominatePodEvent(pod, nil, nodeclaimutil.New(machine)))
+			recorder.FromContext(ctx).Publish(scheduler.NominatePodEvent(pod, nil, nodeclaimutil.New(machine)))
 		}
 	}
 	return nodeclaimutil.Key{Name: machine.Name, IsMachine: true}, nil
@@ -389,7 +389,7 @@ func (p *Provisioner) launchNodeClaim(ctx context.Context, n *scheduler.NodeClai
 	}).Inc()
 	if functional.ResolveOptions(opts...).RecordPodNomination {
 		for _, pod := range n.Pods {
-			events.FromContext(ctx).Publish(scheduler.NominatePodEvent(pod, nil, nodeClaim))
+			recorder.FromContext(ctx).Publish(scheduler.NominatePodEvent(pod, nil, nodeClaim))
 		}
 	}
 	return nodeclaimutil.Key{Name: nodeClaim.Name}, nil

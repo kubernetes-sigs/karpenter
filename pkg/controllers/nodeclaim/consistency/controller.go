@@ -34,7 +34,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/events"
+	recorder "github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
@@ -101,7 +101,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 		for _, issue := range issues {
 			logging.FromContext(ctx).Errorf("check failed, %s", issue)
 			consistencyErrors.With(prometheus.Labels{checkLabel: reflect.TypeOf(check).Elem().Name()}).Inc()
-			events.FromContext(ctx).Publish(FailedConsistencyCheckEvent(nodeClaim, string(issue)))
+			recorder.FromContext(ctx).Publish(FailedConsistencyCheckEvent(nodeClaim, string(issue)))
 		}
 	}
 	return reconcile.Result{RequeueAfter: scanPeriod}, nil

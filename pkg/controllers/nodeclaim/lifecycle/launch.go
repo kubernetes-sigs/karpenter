@@ -28,7 +28,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/events"
+	recorder "github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
@@ -105,7 +105,7 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeCla
 	if err != nil {
 		switch {
 		case cloudprovider.IsInsufficientCapacityError(err):
-			events.FromContext(ctx).Publish(InsufficientCapacityErrorEvent(nodeClaim, err))
+			recorder.FromContext(ctx).Publish(InsufficientCapacityErrorEvent(nodeClaim, err))
 			logging.FromContext(ctx).Error(err)
 			if err = nodeclaimutil.Delete(ctx, l.kubeClient, nodeClaim); err != nil {
 				return nil, client.IgnoreNotFound(err)
@@ -113,7 +113,7 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeCla
 			nodeclaimutil.TerminatedCounter(nodeClaim, "insufficient_capacity").Inc()
 			return nil, nil
 		case cloudprovider.IsNodeClassNotReadyError(err):
-			events.FromContext(ctx).Publish(NodeClassNotReadyEvent(nodeClaim, err))
+			recorder.FromContext(ctx).Publish(NodeClassNotReadyEvent(nodeClaim, err))
 			nodeClaim.StatusConditions().MarkFalse(v1beta1.Launched, "LaunchFailed", truncateMessage(err.Error()))
 			return nil, fmt.Errorf("launching %s, %w", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"), err)
 		default:

@@ -36,7 +36,7 @@ import (
 	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/node/termination/terminator/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 
-	"github.com/aws/karpenter-core/pkg/events"
+	recorder "github.com/aws/karpenter-core/pkg/events"
 )
 
 const (
@@ -131,7 +131,7 @@ func (q *Queue) Evict(ctx context.Context, nn types.NamespacedName) bool {
 			return true
 		}
 		if apierrors.IsTooManyRequests(err) { // 429 - PDB violation
-			events.FromContext(ctx).Publish(terminatorevents.NodeFailedToDrain(&v1.Node{ObjectMeta: metav1.ObjectMeta{
+			recorder.FromContext(ctx).Publish(terminatorevents.NodeFailedToDrain(&v1.Node{ObjectMeta: metav1.ObjectMeta{
 				Name:      nn.Name,
 				Namespace: nn.Namespace,
 			}}, fmt.Errorf("evicting pod %s/%s violates a PDB", nn.Namespace, nn.Name)))
@@ -140,7 +140,7 @@ func (q *Queue) Evict(ctx context.Context, nn types.NamespacedName) bool {
 		logging.FromContext(ctx).Errorf("evicting pod, %s", err)
 		return false
 	}
-	events.FromContext(ctx).Publish(terminatorevents.EvictPod(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: nn.Name, Namespace: nn.Namespace}}))
+	recorder.FromContext(ctx).Publish(terminatorevents.EvictPod(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: nn.Name, Namespace: nn.Namespace}}))
 	return true
 }
 
