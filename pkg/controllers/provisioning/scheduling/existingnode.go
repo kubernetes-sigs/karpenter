@@ -67,7 +67,7 @@ func NewExistingNode(n *state.StateNode, topology *Topology, taints []v1.Taint, 
 
 func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v1.Pod, podData *PodData) error {
 	// Check Taints
-	if err := scheduling.Taints(n.cachedTaints).Tolerates(pod); err != nil {
+	if err := scheduling.Taints(n.cachedTaints).ToleratesPod(pod); err != nil {
 		return err
 	}
 	// determine the volumes that will be mounted if the pod schedules

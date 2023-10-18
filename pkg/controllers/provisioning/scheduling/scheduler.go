@@ -345,7 +345,7 @@ func (s *Scheduler) calculateExistingNodeClaims(stateNodes []*state.StateNode, d
 		taints := node.Taints()
 		var daemons []*corev1.Pod
 		for _, p := range daemonSetPods {
-			if err := scheduling.Taints(taints).Tolerates(p); err != nil {
+			if err := scheduling.Taints(taints).ToleratesPod(p); err != nil {
 				continue
 			}
 			if err := scheduling.NewLabelRequirements(node.Labels()).Compatible(scheduling.NewPodRequirements(p)); err != nil {
@@ -388,7 +388,7 @@ func isDaemonPodCompatible(nodeClaimTemplate *NodeClaimTemplate, pod *corev1.Pod
 	preferences := &Preferences{}
 	// Add a toleration for PreferNoSchedule since a daemon pod shouldn't respect the preference
 	_ = preferences.toleratePreferNoScheduleTaints(pod)
-	if err := scheduling.Taints(nodeClaimTemplate.Spec.Taints).Tolerates(pod); err != nil {
+	if err := scheduling.Taints(nodeClaimTemplate.Spec.Taints).ToleratesPod(pod); err != nil {
 		return false
 	}
 	for {
