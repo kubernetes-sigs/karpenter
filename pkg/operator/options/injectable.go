@@ -14,19 +14,16 @@ limitations under the License.
 
 package options
 
-import (
-	"context"
-	"flag"
-)
+import "context"
 
 // Injectable defines a set of flag based options to be parsed and injected
 // into Karpenter's contexts
 type Injectable interface {
 	// AddFlags adds the injectable's flags to karpenter's flag set
-	AddFlags(*flag.FlagSet)
+	AddFlags(*FlagSet)
 	// Parse parses the flag set and handles any required post-processing on
 	// the flags
-	Parse(*flag.FlagSet, ...string) error
+	Parse(*FlagSet, ...string) error
 	// ToContext injects the callee into the given context
 	ToContext(context.Context) context.Context
 	// MergeSettings extracts settings from the given context and merges them

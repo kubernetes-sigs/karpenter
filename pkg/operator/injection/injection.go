@@ -53,7 +53,9 @@ func GetControllerName(ctx context.Context) string {
 }
 
 func WithOptionsOrDie(ctx context.Context, opts ...options.Injectable) context.Context {
-	fs := flag.NewFlagSet("karpenter", flag.ContinueOnError)
+	fs := &options.FlagSet{
+		FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
+	}
 	for _, opt := range opts {
 		opt.AddFlags(fs)
 	}

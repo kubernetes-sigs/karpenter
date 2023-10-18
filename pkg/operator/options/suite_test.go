@@ -29,7 +29,7 @@ import (
 )
 
 var ctx context.Context
-var fs *flag.FlagSet
+var fs *options.FlagSet
 var opts *options.Options
 
 func TestOptions(t *testing.T) {
@@ -40,7 +40,9 @@ func TestOptions(t *testing.T) {
 
 var _ = Describe("Options", func() {
 	BeforeEach(func() {
-		fs = flag.NewFlagSet("karpenter", flag.ContinueOnError)
+		fs = &options.FlagSet{
+			FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
+		}
 		opts = &options.Options{}
 		opts.AddFlags(fs)
 	})

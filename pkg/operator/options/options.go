@@ -64,9 +64,26 @@ type Options struct {
 	setFlags map[string]bool
 }
 
-func (o *Options) AddFlags(fs *flag.FlagSet) {
+type FlagSet struct {
+	*flag.FlagSet
+}
+
+// BoolVarWithEnv defines a bool flag with a specified name, default value, usage string, and fallback environment
+// variable.
+func (fs *FlagSet) BoolVarWithEnv(p *bool, name string, val bool, envVar string, usage string) {
+	*p = env.WithDefaultBool(envVar, val)
+	fs.BoolFunc(name, usage, func(val string) error {
+		if val != "true" && val != "false" {
+			return fmt.Errorf("%q is not a valid value, must be true or false", val)
+		}
+		*p = (val) == "true"
+		return nil
+	})
+}
+
+func (o *Options) AddFlags(fs *FlagSet) {
 	fs.StringVar(&o.ServiceName, "karpenter-service", env.WithDefaultString("KARPENTER_SERVICE", ""), "The Karpenter Service name for the dynamic webhook certificate")
-	fs.BoolVar(&o.DisableWebhook, "disable-webhook", env.WithDefaultBool("DISABLE_WEBHOOK", false), "Disable the admission and validation webhooks")
+	fs.BoolVarWithEnv(&o.DisableWebhook, "disable-webhook", false, "DISABLE_WEBHOOK", "Disable the admission and validation webhooks")
 	fs.IntVar(&o.WebhookPort, "webhook-port", env.WithDefaultInt("WEBHOOK_PORT", 8443), "The port the webhook endpoint binds to for validation and mutation of resources")
 	fs.IntVar(&o.MetricsPort, "metrics-port", env.WithDefaultInt("METRICS_PORT", 8000), "The port the metric endpoint binds to for operating metrics about the controller itself")
 	fs.IntVar(&o.WebhookMetricsPort, "webhook-metrics-port", env.WithDefaultInt("WEBHOOK_METRICS_PORT", 8001), "The port the webhook metric endpoing binds to for operating metrics about the webhook")
@@ -82,7 +99,7 @@ func (o *Options) AddFlags(fs *flag.FlagSet) {
 	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "Drift=false"), "Optional features can be enabled / disabled using feature gates. Current options are: Drift")
 }
 
-func (o *Options) Parse(fs *flag.FlagSet, args ...string) error {
+func (o *Options) Parse(fs *FlagSet, args ...string) error {
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			os.Exit(0)
