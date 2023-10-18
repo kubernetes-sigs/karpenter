@@ -25,7 +25,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
 )
@@ -36,7 +35,6 @@ var _ corecontroller.TypedController[*v1.Pod] = (*Controller)(nil)
 type Controller struct {
 	kubeClient  client.Client
 	provisioner *Provisioner
-	recorder    events.Recorder
 }
 
 // NewController constructs a controller instance
