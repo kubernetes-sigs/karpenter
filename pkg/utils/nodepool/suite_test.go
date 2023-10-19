@@ -292,6 +292,7 @@ var _ = Describe("NodePoolUtils", func() {
 			v1.ResourceMemory:           resource.MustParse("10Mi"),
 			v1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
 		}
+		nodePool.Status.InstanceTypes = []string{"test1", "test2"}
 		Expect(nodepoolutil.PatchStatus(ctx, env.Client, stored, nodePool)).To(Succeed())
 
 		retrieved := &v1beta1.NodePool{}

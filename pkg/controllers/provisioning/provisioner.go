@@ -26,6 +26,7 @@ import (
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -382,6 +383,15 @@ func (p *Provisioner) launchNodeClaim(ctx context.Context, n *scheduler.NodeClai
 	nodeClaim := n.ToNodeClaim(latest)
 	if err := p.kubeClient.Create(ctx, nodeClaim); err != nil {
 		return nodeclaimutil.Key{}, err
+	}
+	stored := latest.DeepCopy()
+	latest.Status.InstanceTypes = lo.Map(n.InstanceTypeOptions, func(i *cloudprovider.InstanceType, _ int) string { return i.Name })
+	if !equality.Semantic.DeepEqual(stored, latest) {
+		err := nodepoolutil.PatchStatus(ctx, p.kubeClient, stored, latest)
+
+		if err != nil {
+			logging.FromContext(ctx).With("could not update status of nodepool", latest.GenerateName)
+		}
 	}
 	instanceTypeRequirement, _ := lo.Find(nodeClaim.Spec.Requirements, func(req v1.NodeSelectorRequirement) bool { return req.Key == v1.LabelInstanceTypeStable })
 	logging.FromContext(ctx).With("nodeclaim", nodeClaim.Name, "requests", nodeClaim.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).Infof("created nodeclaim")
