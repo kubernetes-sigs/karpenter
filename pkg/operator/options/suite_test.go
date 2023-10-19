@@ -17,19 +17,22 @@ package options_test
 import (
 	"context"
 	"flag"
+	"os"
 	"testing"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	. "knative.dev/pkg/logging/testing"
 
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/operator/options"
+	"github.com/aws/karpenter-core/pkg/test"
 )
 
 var ctx context.Context
-var fs *flag.FlagSet
+var fs *options.FlagSet
 var opts *options.Options
 
 func TestOptions(t *testing.T) {
@@ -39,10 +42,48 @@ func TestOptions(t *testing.T) {
 }
 
 var _ = Describe("Options", func() {
+	var envState map[string]string
+	var environmentVariables = []string{
+		"KARPENTER_SERVICE",
+		"DISABLE_WEBHOOK",
+		"WEBHOOK_PORT",
+		"METRICS_PORT",
+		"WEBHOOK_METRICS_PORT",
+		"HEALTH_PROBE_PORT",
+		"KUBE_CLIENT_BURST",
+		"ENABLE_PROFILING",
+		"LEADER_ELECT",
+		"MEMORY_LIMIT",
+		"LOG_LEVEL",
+		"BATCH_MAX_DURATION",
+		"BATCH_IDLE_DURATION",
+		"FEATURE_GATES",
+	}
+
 	BeforeEach(func() {
-		fs = flag.NewFlagSet("karpenter", flag.ContinueOnError)
+		envState = map[string]string{}
+		for _, ev := range environmentVariables {
+			val, ok := os.LookupEnv(ev)
+			if ok {
+				envState[ev] = val
+			}
+			os.Unsetenv(ev)
+		}
+
+		fs = &options.FlagSet{
+			FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
+		}
 		opts = &options.Options{}
 		opts.AddFlags(fs)
+	})
+
+	AfterEach(func() {
+		for _, ev := range environmentVariables {
+			os.Unsetenv(ev)
+		}
+		for ev, val := range envState {
+			os.Setenv(ev, val)
+		}
 	})
 
 	Context("FeatureGates", func() {
@@ -59,26 +100,173 @@ var _ = Describe("Options", func() {
 			Entry("multiple values", "Hello=true,Drift=false,World=true", false),
 		)
 	})
+
 	Context("Parse", func() {
 		It("should use the correct default values", func() {
 			err := opts.Parse(fs)
 			Expect(err).To(BeNil())
-			Expect(opts.ServiceName).To(Equal(""))
-			Expect(opts.DisableWebhook).To(BeFalse())
-			Expect(opts.WebhookPort).To(Equal(8443))
-			Expect(opts.MetricsPort).To(Equal(8000))
-			Expect(opts.WebhookMetricsPort).To(Equal(8001))
-			Expect(opts.HealthProbePort).To(Equal(8081))
-			Expect(opts.KubeClientQPS).To(Equal(200))
-			Expect(opts.KubeClientBurst).To(Equal(300))
-			Expect(opts.EnableProfiling).To(BeFalse())
-			Expect(opts.EnableLeaderElection).To(BeTrue())
-			Expect(opts.MemoryLimit).To(Equal(int64(-1)))
-			Expect(opts.LogLevel).To(Equal(""))
-			Expect(opts.BatchMaxDuration).To(Equal(10 * time.Second))
-			Expect(opts.BatchIdleDuration).To(Equal(time.Second))
-			Expect(opts.FeatureGates.Drift).To(BeFalse())
+			expectOptionsMatch(opts, test.Options(test.OptionsFields{
+				ServiceName:          lo.ToPtr(""),
+				DisableWebhook:       lo.ToPtr(false),
+				WebhookPort:          lo.ToPtr(8443),
+				MetricsPort:          lo.ToPtr(8000),
+				WebhookMetricsPort:   lo.ToPtr(8001),
+				HealthProbePort:      lo.ToPtr(8081),
+				KubeClientQPS:        lo.ToPtr(200),
+				KubeClientBurst:      lo.ToPtr(300),
+				EnableProfiling:      lo.ToPtr(false),
+				EnableLeaderElection: lo.ToPtr(true),
+				MemoryLimit:          lo.ToPtr[int64](-1),
+				LogLevel:             lo.ToPtr(""),
+				BatchMaxDuration:     lo.ToPtr(10 * time.Second),
+				BatchIdleDuration:    lo.ToPtr(time.Second),
+				FeatureGates: test.FeatureGates{
+					Drift: lo.ToPtr(false),
+				},
+			}))
 		})
+
+		It("shouldn't overwrite CLI flags with environment variables", func() {
+			err := opts.Parse(
+				fs,
+				"--karpenter-service", "cli",
+				"--disable-webhook",
+				"--webhook-port", "0",
+				"--metrics-port", "0",
+				"--webhook-metrics-port", "0",
+				"--health-probe-port", "0",
+				"--kube-client-qps", "0",
+				"--kube-client-burst", "0",
+				"--enable-profiling",
+				"--leader-elect=false",
+				"--memory-limit", "0",
+				"--log-level", "debug",
+				"--batch-max-duration", "5s",
+				"--batch-idle-duration", "5s",
+				"--feature-gates", "Drift=true",
+			)
+			Expect(err).To(BeNil())
+			expectOptionsMatch(opts, test.Options(test.OptionsFields{
+				ServiceName:          lo.ToPtr("cli"),
+				DisableWebhook:       lo.ToPtr(true),
+				WebhookPort:          lo.ToPtr(0),
+				MetricsPort:          lo.ToPtr(0),
+				WebhookMetricsPort:   lo.ToPtr(0),
+				HealthProbePort:      lo.ToPtr(0),
+				KubeClientQPS:        lo.ToPtr(0),
+				KubeClientBurst:      lo.ToPtr(0),
+				EnableProfiling:      lo.ToPtr(true),
+				EnableLeaderElection: lo.ToPtr(false),
+				MemoryLimit:          lo.ToPtr[int64](0),
+				LogLevel:             lo.ToPtr("debug"),
+				BatchMaxDuration:     lo.ToPtr(5 * time.Second),
+				BatchIdleDuration:    lo.ToPtr(5 * time.Second),
+				FeatureGates: test.FeatureGates{
+					Drift: lo.ToPtr(true),
+				},
+			}))
+		})
+
+		It("should use environment variables when CLI flags aren't set", func() {
+			os.Setenv("KARPENTER_SERVICE", "env")
+			os.Setenv("DISABLE_WEBHOOK", "true")
+			os.Setenv("WEBHOOK_PORT", "0")
+			os.Setenv("METRICS_PORT", "0")
+			os.Setenv("WEBHOOK_METRICS_PORT", "0")
+			os.Setenv("HEALTH_PROBE_PORT", "0")
+			os.Setenv("KUBE_CLIENT_QPS", "0")
+			os.Setenv("KUBE_CLIENT_BURST", "0")
+			os.Setenv("ENABLE_PROFILING", "true")
+			os.Setenv("LEADER_ELECT", "false")
+			os.Setenv("MEMORY_LIMIT", "0")
+			os.Setenv("LOG_LEVEL", "debug")
+			os.Setenv("BATCH_MAX_DURATION", "5s")
+			os.Setenv("BATCH_IDLE_DURATION", "5s")
+			os.Setenv("FEATURE_GATES", "Drift=true")
+			fs = &options.FlagSet{
+				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
+			}
+			opts.AddFlags(fs)
+			err := opts.Parse(fs)
+			Expect(err).To(BeNil())
+			expectOptionsMatch(opts, test.Options(test.OptionsFields{
+				ServiceName:          lo.ToPtr("env"),
+				DisableWebhook:       lo.ToPtr(true),
+				WebhookPort:          lo.ToPtr(0),
+				MetricsPort:          lo.ToPtr(0),
+				WebhookMetricsPort:   lo.ToPtr(0),
+				HealthProbePort:      lo.ToPtr(0),
+				KubeClientQPS:        lo.ToPtr(0),
+				KubeClientBurst:      lo.ToPtr(0),
+				EnableProfiling:      lo.ToPtr(true),
+				EnableLeaderElection: lo.ToPtr(false),
+				MemoryLimit:          lo.ToPtr[int64](0),
+				LogLevel:             lo.ToPtr("debug"),
+				BatchMaxDuration:     lo.ToPtr(5 * time.Second),
+				BatchIdleDuration:    lo.ToPtr(5 * time.Second),
+				FeatureGates: test.FeatureGates{
+					Drift: lo.ToPtr(true),
+				},
+			}))
+		})
+
+		It("should correctly merge CLI flags and environment variables", func() {
+			os.Setenv("WEBHOOK_PORT", "0")
+			os.Setenv("METRICS_PORT", "0")
+			os.Setenv("WEBHOOK_METRICS_PORT", "0")
+			os.Setenv("HEALTH_PROBE_PORT", "0")
+			os.Setenv("KUBE_CLIENT_QPS", "0")
+			os.Setenv("KUBE_CLIENT_BURST", "0")
+			os.Setenv("ENABLE_PROFILING", "true")
+			os.Setenv("LEADER_ELECT", "false")
+			os.Setenv("MEMORY_LIMIT", "0")
+			os.Setenv("LOG_LEVEL", "debug")
+			os.Setenv("BATCH_MAX_DURATION", "5s")
+			os.Setenv("BATCH_IDLE_DURATION", "5s")
+			os.Setenv("FEATURE_GATES", "Drift=true")
+			fs = &options.FlagSet{
+				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
+			}
+			opts.AddFlags(fs)
+			err := opts.Parse(
+				fs,
+				"--karpenter-service", "cli",
+				"--disable-webhook",
+			)
+			Expect(err).To(BeNil())
+			expectOptionsMatch(opts, test.Options(test.OptionsFields{
+				ServiceName:          lo.ToPtr("cli"),
+				DisableWebhook:       lo.ToPtr(true),
+				WebhookPort:          lo.ToPtr(0),
+				MetricsPort:          lo.ToPtr(0),
+				WebhookMetricsPort:   lo.ToPtr(0),
+				HealthProbePort:      lo.ToPtr(0),
+				KubeClientQPS:        lo.ToPtr(0),
+				KubeClientBurst:      lo.ToPtr(0),
+				EnableProfiling:      lo.ToPtr(true),
+				EnableLeaderElection: lo.ToPtr(false),
+				MemoryLimit:          lo.ToPtr[int64](0),
+				LogLevel:             lo.ToPtr("debug"),
+				BatchMaxDuration:     lo.ToPtr(5 * time.Second),
+				BatchIdleDuration:    lo.ToPtr(5 * time.Second),
+				FeatureGates: test.FeatureGates{
+					Drift: lo.ToPtr(true),
+				},
+			}))
+		})
+
+		DescribeTable(
+			"should correctly parse boolean values",
+			func(arg string, expected bool) {
+				err := opts.Parse(fs, arg)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(opts.DisableWebhook).To(Equal(expected))
+			},
+			Entry("explicit true", "--disable-webhook=true", true),
+			Entry("explicit false", "--disable-webhook=false", false),
+			Entry("implicit true", "--disable-webhook", true),
+			Entry("implicit false", "", false),
+		)
 	})
 
 	Context("Merge", func() {
@@ -134,3 +322,27 @@ var _ = Describe("Options", func() {
 		})
 	})
 })
+
+func expectOptionsMatch(optsA, optsB *options.Options) {
+	GinkgoHelper()
+	if optsA == nil && optsB == nil {
+		return
+	}
+	Expect(optsA).ToNot(BeNil())
+	Expect(optsB).ToNot(BeNil())
+	Expect(optsA.ServiceName).To(Equal(optsB.ServiceName))
+	Expect(optsA.DisableWebhook).To(Equal(optsB.DisableWebhook))
+	Expect(optsA.WebhookPort).To(Equal(optsB.WebhookPort))
+	Expect(optsA.MetricsPort).To(Equal(optsB.MetricsPort))
+	Expect(optsA.WebhookMetricsPort).To(Equal(optsB.WebhookMetricsPort))
+	Expect(optsA.HealthProbePort).To(Equal(optsB.HealthProbePort))
+	Expect(optsA.KubeClientQPS).To(Equal(optsB.KubeClientQPS))
+	Expect(optsA.KubeClientBurst).To(Equal(optsB.KubeClientBurst))
+	Expect(optsA.EnableProfiling).To(Equal(optsB.EnableProfiling))
+	Expect(optsA.EnableLeaderElection).To(Equal(optsB.EnableLeaderElection))
+	Expect(optsA.MemoryLimit).To(Equal(optsB.MemoryLimit))
+	Expect(optsA.LogLevel).To(Equal(optsB.LogLevel))
+	Expect(optsA.BatchMaxDuration).To(Equal(optsB.BatchMaxDuration))
+	Expect(optsA.BatchIdleDuration).To(Equal(optsB.BatchIdleDuration))
+	Expect(optsA.FeatureGates.Drift).To(Equal(optsB.FeatureGates.Drift))
+}
