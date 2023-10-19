@@ -38,8 +38,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/options"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/scheduling"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -103,8 +101,6 @@ var _ = BeforeEach(func() {
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 	provisioner = test.Provisioner(test.ProvisionerOptions{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
 	nodePool = test.NodePool(v1beta1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
-	nodepoolutil.EnableNodePools = true
-	nodeclaimutil.EnableNodeClaims = true
 	ExpectApplied(ctx, env.Client, provisioner, nodePool)
 })
 var _ = AfterEach(func() {
@@ -1327,82 +1323,6 @@ var _ = Describe("Inflight Nodes", func() {
 			ExpectApplied(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 			ExpectStateNodeCount("==", 0)
-		})
-		It("shouldn't ignore node updates if nodes don't have provider id and EnableNodePools/EnableNodeClaims isn't enabled", func() {
-			nodepoolutil.EnableNodePools = false
-			nodeclaimutil.EnableNodeClaims = false
-
-			node := test.Node(test.NodeOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1beta1.NodePoolLabelKey: nodePool.Name,
-					},
-				},
-				Capacity: v1.ResourceList{
-					v1.ResourceCPU:              resource.MustParse("1800m"),
-					v1.ResourceMemory:           resource.MustParse("0"), // Should use the inflight capacity for this value
-					v1.ResourceEphemeralStorage: resource.MustParse("19000Mi"),
-				},
-				Allocatable: v1.ResourceList{
-					v1.ResourceCPU:              resource.MustParse("0"), // Should use the inflight allocatable for this value
-					v1.ResourceMemory:           resource.MustParse("29250Mi"),
-					v1.ResourceEphemeralStorage: resource.MustParse("0"), // Should use the inflight allocatable for this value
-				},
-			})
-			ExpectApplied(ctx, env.Client, node)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-			ExpectStateNodeCount("==", 1)
-		})
-		It("shouldn't populate inflight capacity if EnableNodePools/EnableNodeClaims isn't enabled", func() {
-			nodepoolutil.EnableNodePools = false
-			nodeclaimutil.EnableNodeClaims = false
-
-			instanceType := cloudProvider.InstanceTypes[0]
-			node := test.Node(test.NodeOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-					v1beta1.NodePoolLabelKey:   nodePool.Name,
-					v1.LabelInstanceTypeStable: instanceType.Name,
-				}},
-				ProviderID: test.RandomProviderID(),
-			})
-			ExpectApplied(ctx, env.Client, node)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-
-			ExpectStateNodeCount("==", 1)
-			Expect(ExpectStateNodeExists(node).Allocatable()).To(HaveLen(0))
-			Expect(ExpectStateNodeExists(node).Capacity()).To(HaveLen(0))
-		})
-		It("shouldn't populate startup taints if EnableNodePools/EnableNodeClaims isn't enabled", func() {
-			nodepoolutil.EnableNodePools = false
-			nodeclaimutil.EnableNodeClaims = false
-
-			instanceType := cloudProvider.InstanceTypes[0]
-			nodePool.Spec.Template.Spec.StartupTaints = []v1.Taint{
-				{
-					Key:    "test",
-					Effect: v1.TaintEffectNoSchedule,
-				},
-			}
-			node := test.Node(test.NodeOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-					v1beta1.NodePoolLabelKey:   nodePool.Name,
-					v1.LabelInstanceTypeStable: instanceType.Name,
-				}},
-				Taints: []v1.Taint{
-					{
-						Key:    "test",
-						Effect: v1.TaintEffectNoSchedule,
-					},
-				},
-				ProviderID: test.RandomProviderID(),
-			})
-			ExpectApplied(ctx, env.Client, node)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-
-			ExpectStateNodeCount("==", 1)
-
-			// This taint wouldn't show if we discovered the startup taints
-			Expect(ExpectStateNodeExists(node).Taints()).To(HaveLen(1))
 		})
 		It("should model the inflight data as nodeclaim with no node", func() {
 			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{

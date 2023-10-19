@@ -121,10 +121,8 @@ func (c *Controller) deleteAllMachines(ctx context.Context, node *v1.Node) error
 
 func (c *Controller) deleteAllNodeClaims(ctx context.Context, node *v1.Node) error {
 	nodeClaimList := &v1beta1.NodeClaimList{}
-	if nodeclaimutil.EnableNodeClaims {
-		if err := c.kubeClient.List(ctx, nodeClaimList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
-			return err
-		}
+	if err := c.kubeClient.List(ctx, nodeClaimList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
+		return err
 	}
 	for i := range nodeClaimList.Items {
 		if err := c.kubeClient.Delete(ctx, &nodeClaimList.Items[i]); err != nil {

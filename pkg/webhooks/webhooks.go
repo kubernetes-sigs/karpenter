@@ -42,6 +42,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/operator/logging"
 	"github.com/aws/karpenter-core/pkg/operator/options"
 )
@@ -50,6 +51,8 @@ const component = "webhook"
 
 var Resources = map[schema.GroupVersionKind]resourcesemantics.GenericCRD{
 	v1alpha5.SchemeGroupVersion.WithKind("Provisioner"): &v1alpha5.Provisioner{},
+	v1beta1.SchemeGroupVersion.WithKind("NodePool"):     &v1beta1.NodePool{},
+	v1beta1.SchemeGroupVersion.WithKind("NodeClaim"):    &v1beta1.NodeClaim{},
 }
 
 func NewWebhooks() []knativeinjection.ControllerConstructor {
