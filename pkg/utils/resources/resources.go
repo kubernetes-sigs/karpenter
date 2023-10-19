@@ -106,27 +106,27 @@ func podRequests(pod *v1.Pod) v1.ResourceList {
 
 	for _, container := range pod.Spec.Containers {
 
-		requests = MergeInto(requests, MergeResourceLimitsIntoRequests(container))
+		MergeInto(requests, MergeResourceLimitsIntoRequests(container))
 	}
 
 	for _, container := range pod.Spec.InitContainers {
-
+		containerReqs := MergeResourceLimitsIntoRequests(container)
 		if lo.FromPtr(container.RestartPolicy) == v1.ContainerRestartPolicyAlways {
-			requests = MergeInto(requests, MergeResourceLimitsIntoRequests(container))
-			MergeInto(restartableInitContainerReqs, MergeResourceLimitsIntoRequests(container))
+			MergeInto(requests, containerReqs)
+			MergeInto(restartableInitContainerReqs, containerReqs)
 			container.Resources.Requests = restartableInitContainerReqs
 
 		} else {
 			MergeInto(container.Resources.Requests, restartableInitContainerReqs)
 		}
 
-		maxInitContainerReqs = MaxResources(maxInitContainerReqs, MergeResourceLimitsIntoRequests(container))
+		maxInitContainerReqs = MaxResources(maxInitContainerReqs, containerReqs)
 	}
 
 	requests = MaxResources(requests, maxInitContainerReqs)
 
 	if pod.Spec.Overhead != nil {
-		requests = MergeInto(requests, pod.Spec.Overhead)
+		MergeInto(requests, pod.Spec.Overhead)
 	}
 
 	return requests
@@ -138,13 +138,13 @@ func podLimits(pod *v1.Pod) v1.ResourceList {
 	maxInitContainerLimits := v1.ResourceList{}
 
 	for _, container := range pod.Spec.Containers {
-		limits = MergeInto(limits, container.Resources.Limits)
+		MergeInto(limits, container.Resources.Limits)
 	}
 
 	for _, container := range pod.Spec.InitContainers {
 
 		if lo.FromPtr(container.RestartPolicy) == v1.ContainerRestartPolicyAlways {
-			limits = MergeInto(limits, container.Resources.Limits)
+			MergeInto(limits, container.Resources.Limits)
 			MergeInto(restartableInitContainerLimits, container.Resources.Limits)
 			container.Resources.Limits = restartableInitContainerLimits
 		} else {
