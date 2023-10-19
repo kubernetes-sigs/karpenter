@@ -62,6 +62,10 @@ const (
 	component = "controller"
 )
 
+// Version is the karpenter app version injected during compilation
+// when using the Makefile
+var Version = "unspecified"
+
 type Operator struct {
 	manager.Manager
 
@@ -99,7 +103,7 @@ func NewOperator() (context.Context, *Operator) {
 	// Client Config
 	config := controllerruntime.GetConfigOrDie()
 	config.RateLimiter = flowcontrol.NewTokenBucketRateLimiter(float32(options.FromContext(ctx).KubeClientQPS), options.FromContext(ctx).KubeClientBurst)
-	config.UserAgent = appName
+	config.UserAgent = fmt.Sprintf("%s/%s", appName, Version)
 
 	// Client
 	kubernetesInterface := kubernetes.NewForConfigOrDie(config)
@@ -117,6 +121,8 @@ func NewOperator() (context.Context, *Operator) {
 	logger := logging.NewLogger(ctx, component, kubernetesInterface)
 	ctx = knativelogging.WithLogger(ctx, logger)
 	logging.ConfigureGlobalLoggers(ctx)
+
+	knativelogging.FromContext(ctx).With("version", Version).Debugf("discovered karpenter version")
 
 	// Manager
 	mgrOpts := controllerruntime.Options{
