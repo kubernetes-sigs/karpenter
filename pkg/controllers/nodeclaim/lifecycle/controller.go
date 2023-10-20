@@ -116,7 +116,10 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 		// USE CAUTION when determining whether to increase this timeout or remove this line
 		time.Sleep(time.Second)
 	}
-	return result.Min(results...), errs
+	if errs != nil {
+		return reconcile.Result{}, errs
+	}
+	return result.Min(results...), nil
 }
 
 var _ corecontroller.TypedController[*v1beta1.NodeClaim] = (*NodeClaimController)(nil)

@@ -96,7 +96,10 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 	}
-	return result.Min(results...), errs
+	if errs != nil {
+		return reconcile.Result{}, errs
+	}
+	return result.Min(results...), nil
 }
 
 var _ corecontroller.TypedController[*v1beta1.NodeClaim] = (*NodeClaimController)(nil)
