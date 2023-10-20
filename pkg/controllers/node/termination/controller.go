@@ -99,11 +99,13 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 		}
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
-
 	if err := c.cloudProvider.Delete(ctx, nodeclaimutil.NewFromNode(node)); cloudprovider.IgnoreNodeClaimNotFoundError(err) != nil {
 		return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
 	}
-	return reconcile.Result{}, c.removeFinalizer(ctx, node)
+	if err := c.removeFinalizer(ctx, node); err != nil {
+		return reconcile.Result{}, err
+	}
+	return reconcile.Result{}, nil
 }
 
 func (c *Controller) deleteAllMachines(ctx context.Context, node *v1.Node) error {

@@ -89,7 +89,10 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 			Debugf("garbage collecting %s with no cloudprovider representation", lo.Ternary(nodeClaims[i].IsMachine, "machine", "nodeclaim"))
 		nodeclaimutil.TerminatedCounter(nodeClaims[i], "garbage_collected").Inc()
 	})
-	return reconcile.Result{RequeueAfter: time.Minute * 2}, multierr.Combine(errs...)
+	if err = multierr.Combine(errs...); err != nil {
+		return reconcile.Result{}, err
+	}
+	return reconcile.Result{RequeueAfter: time.Minute * 2}, nil
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
