@@ -370,7 +370,7 @@ var _ = Describe("NodeClaim/Drift", func() {
 				ObjectMeta: nodePool.ObjectMeta,
 				Spec: v1beta1.NodePoolSpec{
 					Template: v1beta1.NodeClaimTemplate{
-						ObjectMeta: metav1.ObjectMeta{
+						ObjectMeta: v1beta1.ObjectMeta{
 							Annotations: map[string]string{
 								"keyAnnotation":  "valueAnnotation",
 								"keyAnnotation2": "valueAnnotation2",
@@ -411,8 +411,8 @@ var _ = Describe("NodeClaim/Drift", func() {
 
 			// Change one static field for the same nodePool
 			nodePoolFieldToChange := []*v1beta1.NodePool{
-				test.NodePool(nodePoolOptions, v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"keyAnnotationTest": "valueAnnotationTest"}}}}}),
-				test.NodePool(nodePoolOptions, v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"keyLabelTest": "valueLabelTest"}}}}}),
+				test.NodePool(nodePoolOptions, v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{ObjectMeta: v1beta1.ObjectMeta{Annotations: map[string]string{"keyAnnotationTest": "valueAnnotationTest"}}}}}),
+				test.NodePool(nodePoolOptions, v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{ObjectMeta: v1beta1.ObjectMeta{Labels: map[string]string{"keyLabelTest": "valueLabelTest"}}}}}),
 				test.NodePool(nodePoolOptions, v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Taints: []v1.Taint{{Key: "keytest2taint", Effect: v1.TaintEffectNoExecute}}}}}}),
 				test.NodePool(nodePoolOptions, v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{StartupTaints: []v1.Taint{{Key: "keytest2startuptaint", Effect: v1.TaintEffectNoExecute}}}}}}),
 				test.NodePool(nodePoolOptions, v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{MaxPods: ptr.Int32(30)}}}}}),

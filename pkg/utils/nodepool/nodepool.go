@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -39,7 +38,7 @@ func New(provisioner *v1alpha5.Provisioner) *v1beta1.NodePool {
 		ObjectMeta: provisioner.ObjectMeta,
 		Spec: v1beta1.NodePoolSpec{
 			Template: v1beta1.NodeClaimTemplate{
-				ObjectMeta: metav1.ObjectMeta{
+				ObjectMeta: v1beta1.ObjectMeta{
 					Annotations: provisioner.Spec.Annotations,
 					Labels:      provisioner.Spec.Labels,
 				},
