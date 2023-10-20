@@ -104,8 +104,24 @@ func (l Limits) ExceededBy(resources v1.ResourceList) error {
 }
 
 type NodeClaimTemplate struct {
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Spec              NodeClaimSpec `json:"spec,omitempty"`
+	ObjectMeta `json:"metadata,omitempty"`
+	Spec       NodeClaimSpec `json:"spec,omitempty"`
+}
+
+type ObjectMeta struct {
+	// Map of string keys and values that can be used to organize and categorize
+	// (scope and select) objects. May match selectors of replication controllers
+	// and services.
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels
+	// +optional
+	Labels map[string]string `json:"labels,omitempty"`
+
+	// Annotations is an unstructured key value map stored with a resource that may be
+	// set by external tools to store and retrieve arbitrary metadata. They are not
+	// queryable and should be preserved when modifying objects.
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations
+	// +optional
+	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
 // NodePool is the Schema for the NodePools API

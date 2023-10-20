@@ -22,7 +22,6 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -37,7 +36,7 @@ var _ = Describe("NodePool Static Drift Hash", func() {
 		nodePool = test.NodePool(v1beta1.NodePool{
 			Spec: v1beta1.NodePoolSpec{
 				Template: v1beta1.NodeClaimTemplate{
-					ObjectMeta: metav1.ObjectMeta{
+					ObjectMeta: v1beta1.ObjectMeta{
 						Annotations: map[string]string{
 							"keyAnnotation":  "valueAnnotation",
 							"keyAnnotation2": "valueAnnotation2",

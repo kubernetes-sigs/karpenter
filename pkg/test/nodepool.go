@@ -52,6 +52,6 @@ func NodePool(overrides ...v1beta1.NodePool) *v1beta1.NodePool {
 		Spec:       override.Spec,
 		Status:     override.Status,
 	}
-	np.Spec.Template.ObjectMeta = ObjectMeta(np.Spec.Template.ObjectMeta)
+	np.Spec.Template.ObjectMeta = TemplateObjectMeta(np.Spec.Template.ObjectMeta)
 	return np
 }

@@ -191,7 +191,7 @@ var _ = Describe("Topology", func() {
 			nodePool2 := test.NodePool(v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
 					Template: v1beta1.NodeClaimTemplate{
-						ObjectMeta: metav1.ObjectMeta{
+						ObjectMeta: v1beta1.ObjectMeta{
 							Labels: map[string]string{
 								v1.LabelTopologyZone: "test-zone-2",
 							},

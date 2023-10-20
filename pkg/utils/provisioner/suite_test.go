@@ -60,7 +60,7 @@ var _ = Describe("ProvisionerUtils", func() {
 			},
 			Spec: v1beta1.NodePoolSpec{
 				Template: v1beta1.NodeClaimTemplate{
-					ObjectMeta: metav1.ObjectMeta{
+					ObjectMeta: v1beta1.ObjectMeta{
 						Annotations: map[string]string{
 							"test-annotation-key":  "test-annotation-value",
 							"test-annotation-key2": "test-annotation-value2",
