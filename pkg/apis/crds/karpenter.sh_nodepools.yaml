@@ -311,7 +311,7 @@ spec:
             status:
               description: NodePoolStatus defines the observed state of NodePool
               properties:
-                InstanceTypes:
+                instanceTypes:
                   items:
                     type: string
                   type: array
