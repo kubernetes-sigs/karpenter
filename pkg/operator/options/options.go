@@ -64,17 +64,34 @@ type Options struct {
 	setFlags map[string]bool
 }
 
-func (o *Options) AddFlags(fs *flag.FlagSet) {
+type FlagSet struct {
+	*flag.FlagSet
+}
+
+// BoolVarWithEnv defines a bool flag with a specified name, default value, usage string, and fallback environment
+// variable.
+func (fs *FlagSet) BoolVarWithEnv(p *bool, name string, envVar string, val bool, usage string) {
+	*p = env.WithDefaultBool(envVar, val)
+	fs.BoolFunc(name, usage, func(val string) error {
+		if val != "true" && val != "false" {
+			return fmt.Errorf("%q is not a valid value, must be true or false", val)
+		}
+		*p = (val) == "true"
+		return nil
+	})
+}
+
+func (o *Options) AddFlags(fs *FlagSet) {
 	fs.StringVar(&o.ServiceName, "karpenter-service", env.WithDefaultString("KARPENTER_SERVICE", ""), "The Karpenter Service name for the dynamic webhook certificate")
-	fs.BoolVar(&o.DisableWebhook, "disable-webhook", env.WithDefaultBool("DISABLE_WEBHOOK", false), "Disable the admission and validation webhooks")
+	fs.BoolVarWithEnv(&o.DisableWebhook, "disable-webhook", "DISABLE_WEBHOOK", false, "Disable the admission and validation webhooks")
 	fs.IntVar(&o.WebhookPort, "webhook-port", env.WithDefaultInt("WEBHOOK_PORT", 8443), "The port the webhook endpoint binds to for validation and mutation of resources")
 	fs.IntVar(&o.MetricsPort, "metrics-port", env.WithDefaultInt("METRICS_PORT", 8000), "The port the metric endpoint binds to for operating metrics about the controller itself")
 	fs.IntVar(&o.WebhookMetricsPort, "webhook-metrics-port", env.WithDefaultInt("WEBHOOK_METRICS_PORT", 8001), "The port the webhook metric endpoing binds to for operating metrics about the webhook")
 	fs.IntVar(&o.HealthProbePort, "health-probe-port", env.WithDefaultInt("HEALTH_PROBE_PORT", 8081), "The port the health probe endpoint binds to for reporting controller health")
 	fs.IntVar(&o.KubeClientQPS, "kube-client-qps", env.WithDefaultInt("KUBE_CLIENT_QPS", 200), "The smoothed rate of qps to kube-apiserver")
 	fs.IntVar(&o.KubeClientBurst, "kube-client-burst", env.WithDefaultInt("KUBE_CLIENT_BURST", 300), "The maximum allowed burst of queries to the kube-apiserver")
-	fs.BoolVar(&o.EnableProfiling, "enable-profiling", env.WithDefaultBool("ENABLE_PROFILING", false), "Enable the profiling on the metric endpoint")
-	fs.BoolVar(&o.EnableLeaderElection, "leader-elect", env.WithDefaultBool("LEADER_ELECT", true), "Start leader election client and gain leadership before executing the main loop. Enable this when running replicated components for high availability.")
+	fs.BoolVarWithEnv(&o.EnableProfiling, "enable-profiling", "ENABLE_PROFILING", false, "Enable the profiling on the metric endpoint")
+	fs.BoolVarWithEnv(&o.EnableLeaderElection, "leader-elect", "LEADER_ELECT", true, "Start leader election client and gain leadership before executing the main loop. Enable this when running replicated components for high availability.")
 	fs.Int64Var(&o.MemoryLimit, "memory-limit", env.WithDefaultInt64("MEMORY_LIMIT", -1), "Memory limit on the container running the controller. The GC soft memory limit is set to 90% of this value.")
 	fs.StringVar(&o.LogLevel, "log-level", env.WithDefaultString("LOG_LEVEL", ""), "Log verbosity level. Can be one of 'debug', 'info', or 'error'")
 	fs.DurationVar(&o.BatchMaxDuration, "batch-max-duration", env.WithDefaultDuration("BATCH_MAX_DURATION", 10*time.Second), "The maximum length of a batch window. The longer this is, the more pods we can consider for provisioning at one time which usually results in fewer but larger nodes.")
@@ -82,7 +99,7 @@ func (o *Options) AddFlags(fs *flag.FlagSet) {
 	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "Drift=false"), "Optional features can be enabled / disabled using feature gates. Current options are: Drift")
 }
 
-func (o *Options) Parse(fs *flag.FlagSet, args ...string) error {
+func (o *Options) Parse(fs *FlagSet, args ...string) error {
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			os.Exit(0)
@@ -120,10 +137,6 @@ func (o *Options) ToContext(ctx context.Context) context.Context {
 
 func (o *Options) MergeSettings(ctx context.Context) {
 	s := settings.FromContext(ctx)
-	if s == nil {
-		return
-	}
-
 	if !o.setFlags["batch-max-duration"] {
 		o.BatchMaxDuration = s.BatchMaxDuration
 	}

@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -28,11 +27,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	provisionerutil "github.com/aws/karpenter-core/pkg/utils/provisioner"
 )
-
-// EnableNodePools is an internal feature flag to allow functions that could List NodePools to work
-// This flag is currently here to enable testing
-// TODO @joinnis: Remove this internal flag when the v1beta1 APIs are released
-var EnableNodePools = false
 
 type Key struct {
 	Name          string
@@ -44,7 +38,7 @@ func New(provisioner *v1alpha5.Provisioner) *v1beta1.NodePool {
 		ObjectMeta: provisioner.ObjectMeta,
 		Spec: v1beta1.NodePoolSpec{
 			Template: v1beta1.NodeClaimTemplate{
-				ObjectMeta: metav1.ObjectMeta{
+				ObjectMeta: v1beta1.ObjectMeta{
 					Annotations: provisioner.Spec.Annotations,
 					Labels:      provisioner.Spec.Labels,
 				},
@@ -135,10 +129,8 @@ func List(ctx context.Context, c client.Client, opts ...client.ListOption) (*v1b
 		return *New(&p)
 	})
 	nodePoolList := &v1beta1.NodePoolList{}
-	if EnableNodePools {
-		if err := c.List(ctx, nodePoolList, opts...); err != nil {
-			return nil, err
-		}
+	if err := c.List(ctx, nodePoolList, opts...); err != nil {
+		return nil, err
 	}
 	nodePoolList.Items = append(nodePoolList.Items, convertedNodePools...)
 	return nodePoolList, nil

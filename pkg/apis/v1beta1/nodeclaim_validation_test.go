@@ -90,12 +90,6 @@ var _ = Describe("Validation", func() {
 		})
 	})
 	Context("Requirements", func() {
-		It("should fail for the karpenter.sh/nodepool label", func() {
-			nodeClaim.Spec.Requirements = []v1.NodeSelectorRequirement{
-				{Key: NodePoolLabelKey, Operator: v1.NodeSelectorOpIn, Values: []string{randomdata.SillyName()}},
-			}
-			Expect(nodeClaim.Validate(ctx)).ToNot(Succeed())
-		})
 		It("should allow supported ops", func() {
 			nodeClaim.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
@@ -307,35 +301,25 @@ var _ = Describe("Validation", func() {
 			})
 		})
 		Context("GCThresholdPercent", func() {
-			Context("ImageGCHighThresholdPercent", func() {
-				It("should succeed on a imageGCHighThresholdPercent", func() {
-					nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-						ImageGCHighThresholdPercent: ptr.Int32(10),
-					}
-					Expect(nodeClaim.Validate(ctx)).To(Succeed())
-				})
-				It("should fail when imageGCHighThresholdPercent is less than imageGCLowThresholdPercent", func() {
-					nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-						ImageGCHighThresholdPercent: ptr.Int32(50),
-						ImageGCLowThresholdPercent:  ptr.Int32(60),
-					}
-					Expect(nodeClaim.Validate(ctx)).ToNot(Succeed())
-				})
+			It("should succeed on a valid imageGCHighThresholdPercent", func() {
+				nodeClaim.Spec.Kubelet = &KubeletConfiguration{
+					ImageGCHighThresholdPercent: ptr.Int32(10),
+				}
+				Expect(nodeClaim.Validate(ctx)).To(Succeed())
 			})
-			Context("ImageGCLowThresholdPercent", func() {
-				It("should succeed on a imageGCLowThresholdPercent", func() {
-					nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-						ImageGCLowThresholdPercent: ptr.Int32(10),
-					}
-					Expect(nodeClaim.Validate(ctx)).To(Succeed())
-				})
-				It("should fail when imageGCLowThresholdPercent is greather than imageGCHighThresheldPercent", func() {
-					nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-						ImageGCHighThresholdPercent: ptr.Int32(50),
-						ImageGCLowThresholdPercent:  ptr.Int32(60),
-					}
-					Expect(nodeClaim.Validate(ctx)).ToNot(Succeed())
-				})
+			It("should fail when imageGCHighThresholdPercent is less than imageGCLowThresholdPercent", func() {
+				nodeClaim.Spec.Kubelet = &KubeletConfiguration{
+					ImageGCHighThresholdPercent: ptr.Int32(50),
+					ImageGCLowThresholdPercent:  ptr.Int32(60),
+				}
+				Expect(nodeClaim.Validate(ctx)).ToNot(Succeed())
+			})
+			It("should fail when imageGCLowThresholdPercent is greather than imageGCHighThresheldPercent", func() {
+				nodeClaim.Spec.Kubelet = &KubeletConfiguration{
+					ImageGCHighThresholdPercent: ptr.Int32(50),
+					ImageGCLowThresholdPercent:  ptr.Int32(60),
+				}
+				Expect(nodeClaim.Validate(ctx)).ToNot(Succeed())
 			})
 		})
 		Context("Eviction Soft Grace Period", func() {

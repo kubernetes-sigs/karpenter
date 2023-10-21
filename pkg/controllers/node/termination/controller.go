@@ -99,11 +99,13 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 		}
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
-
 	if err := c.cloudProvider.Delete(ctx, nodeclaimutil.NewFromNode(node)); cloudprovider.IgnoreNodeClaimNotFoundError(err) != nil {
 		return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
 	}
-	return reconcile.Result{}, c.removeFinalizer(ctx, node)
+	if err := c.removeFinalizer(ctx, node); err != nil {
+		return reconcile.Result{}, err
+	}
+	return reconcile.Result{}, nil
 }
 
 func (c *Controller) deleteAllMachines(ctx context.Context, node *v1.Node) error {
@@ -121,10 +123,8 @@ func (c *Controller) deleteAllMachines(ctx context.Context, node *v1.Node) error
 
 func (c *Controller) deleteAllNodeClaims(ctx context.Context, node *v1.Node) error {
 	nodeClaimList := &v1beta1.NodeClaimList{}
-	if nodeclaimutil.EnableNodeClaims {
-		if err := c.kubeClient.List(ctx, nodeClaimList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
-			return err
-		}
+	if err := c.kubeClient.List(ctx, nodeClaimList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
+		return err
 	}
 	for i := range nodeClaimList.Items {
 		if err := c.kubeClient.Delete(ctx, &nodeClaimList.Items[i]); err != nil {
@@ -148,6 +148,7 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *v1.Node) error {
 		// We use stored.DeletionTimestamp since the api-server may give back a node after the patch without a deletionTimestamp
 		TerminationSummary.With(prometheus.Labels{
 			metrics.ProvisionerLabel: n.Labels[v1alpha5.ProvisionerNameLabelKey],
+			metrics.NodePoolLabel:    n.Labels[v1beta1.NodePoolLabelKey],
 		}).Observe(time.Since(stored.DeletionTimestamp.Time).Seconds())
 		logging.FromContext(ctx).Infof("deleted node")
 	}

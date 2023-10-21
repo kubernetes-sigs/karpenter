@@ -30,7 +30,7 @@ var (
 			Help:       "The time taken between a node's deletion request and the removal of its finalizer",
 			Objectives: metrics.SummaryObjectives(),
 		},
-		[]string{metrics.ProvisionerLabel},
+		[]string{metrics.ProvisionerLabel, metrics.NodePoolLabel},
 	)
 )
 

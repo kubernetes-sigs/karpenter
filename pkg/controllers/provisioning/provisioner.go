@@ -198,7 +198,7 @@ func (p *Provisioner) consolidationWarnings(ctx context.Context, po v1.Pod) {
 	}
 }
 
-var ErrProvisionersNotFound = errors.New("no provisioners found")
+var ErrNodePoolsNotFound = errors.New("no nodepools or provisioners found")
 
 //nolint:gocyclo
 func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNodes []*state.StateNode, opts scheduler.SchedulerOptions) (*scheduler.Scheduler, error) {
@@ -212,10 +212,14 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 		return nil, err
 	}
 	nodePoolList.Items = lo.Filter(nodePoolList.Items, func(n v1beta1.NodePool, _ int) bool {
+		if err := n.RuntimeValidate(); err != nil {
+			logging.FromContext(ctx).With("nodepool", n.Name).Errorf("nodepool failed validation, %s", err)
+			return false
+		}
 		return n.DeletionTimestamp.IsZero()
 	})
 	if len(nodePoolList.Items) == 0 {
-		return nil, ErrProvisionersNotFound
+		return nil, ErrNodePoolsNotFound
 	}
 
 	// nodeTemplates generated from NodePools are ordered by weight
@@ -325,8 +329,8 @@ func (p *Provisioner) Schedule(ctx context.Context) (*scheduler.Results, error) 
 	}
 	s, err := p.NewScheduler(ctx, pods, nodes.Active(), scheduler.SchedulerOptions{})
 	if err != nil {
-		if errors.Is(err, ErrProvisionersNotFound) {
-			logging.FromContext(ctx).Info(ErrProvisionersNotFound)
+		if errors.Is(err, ErrNodePoolsNotFound) {
+			logging.FromContext(ctx).Info(ErrNodePoolsNotFound)
 			return &scheduler.Results{}, nil
 		}
 		return nil, fmt.Errorf("creating scheduler, %w", err)

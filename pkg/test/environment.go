@@ -35,8 +35,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/utils/env"
 	"github.com/aws/karpenter-core/pkg/utils/functional"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 )
 
 type Environment struct {
@@ -132,9 +130,6 @@ func NewEnvironment(scheme *runtime.Scheme, options ...functional.Option[Environ
 	} else {
 		c = lo.Must(client.New(environment.Config, client.Options{Scheme: scheme}))
 	}
-	// TODO @joinnis: Remove this internal flag when the v1beta1 APIs are released
-	nodepoolutil.EnableNodePools = true
-	nodeclaimutil.EnableNodeClaims = true
 	return &Environment{
 		Environment:         environment,
 		Client:              c,

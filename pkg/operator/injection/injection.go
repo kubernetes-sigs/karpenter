@@ -30,6 +30,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"knative.dev/pkg/system"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/operator/options"
@@ -52,7 +53,9 @@ func GetControllerName(ctx context.Context) string {
 }
 
 func WithOptionsOrDie(ctx context.Context, opts ...options.Injectable) context.Context {
-	fs := flag.NewFlagSet("karpenter", flag.ContinueOnError)
+	fs := &options.FlagSet{
+		FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
+	}
 	for _, opt := range opts {
 		opt.AddFlags(fs)
 	}
@@ -79,13 +82,9 @@ func WithSettingsOrDie(ctx context.Context, kubernetesInterface kubernetes.Inter
 
 	for _, setting := range settings {
 		cm, err := WaitForConfigMap(ctx, setting.ConfigMap(), informer)
-		if err != nil {
-			if !errors.IsNotFound(err) {
-				panic(fmt.Errorf("failed to get configmap %s, %w", setting.ConfigMap(), err))
-			}
-			continue
+		if client.IgnoreNotFound(err) != nil {
+			panic(fmt.Errorf("failed to get configmap %s, %w", setting.ConfigMap(), err))
 		}
-
 		ctx = lo.Must(setting.Inject(ctx, cm))
 	}
 	return ctx

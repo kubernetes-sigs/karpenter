@@ -557,7 +557,7 @@ var _ = Describe("NodePool/Provisioning", func() {
 			nodePool := test.NodePool(v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
 					Template: v1beta1.NodeClaimTemplate{
-						ObjectMeta: metav1.ObjectMeta{
+						ObjectMeta: v1beta1.ObjectMeta{
 							Labels: map[string]string{
 								"foo": "voo",
 							},
@@ -571,7 +571,7 @@ var _ = Describe("NodePool/Provisioning", func() {
 			nodePoolDaemonset := test.NodePool(v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
 					Template: v1beta1.NodeClaimTemplate{
-						ObjectMeta: metav1.ObjectMeta{
+						ObjectMeta: v1beta1.ObjectMeta{
 							Labels: map[string]string{
 								"foo": "bar",
 							},
@@ -638,7 +638,7 @@ var _ = Describe("NodePool/Provisioning", func() {
 			nodePool := test.NodePool(v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
 					Template: v1beta1.NodeClaimTemplate{
-						ObjectMeta: metav1.ObjectMeta{
+						ObjectMeta: v1beta1.ObjectMeta{
 							Annotations: map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"},
 						},
 					},
@@ -656,7 +656,7 @@ var _ = Describe("NodePool/Provisioning", func() {
 			nodePool := test.NodePool(v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
 					Template: v1beta1.NodeClaimTemplate{
-						ObjectMeta: metav1.ObjectMeta{
+						ObjectMeta: v1beta1.ObjectMeta{
 							Labels: map[string]string{"test-key-1": "test-value-1"},
 						},
 						Spec: v1beta1.NodeClaimSpec{
@@ -690,7 +690,7 @@ var _ = Describe("NodePool/Provisioning", func() {
 				nodePool := test.NodePool(v1beta1.NodePool{
 					Spec: v1beta1.NodePoolSpec{
 						Template: v1beta1.NodeClaimTemplate{
-							ObjectMeta: metav1.ObjectMeta{
+							ObjectMeta: v1beta1.ObjectMeta{
 								Labels: map[string]string{domain + "/test": "test-value"},
 							},
 						},
@@ -1399,7 +1399,7 @@ var _ = Describe("NodePool/Provisioning", func() {
 			nodePool := test.NodePool(v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
 					Template: v1beta1.NodeClaimTemplate{
-						ObjectMeta: metav1.ObjectMeta{
+						ObjectMeta: v1beta1.ObjectMeta{
 							Labels: map[string]string{"foo": "bar"},
 						},
 					},

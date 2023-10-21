@@ -181,7 +181,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 
 func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) error {
 	deprovisioningActionsPerformedCounter.With(map[string]string{
-		actionLabel:        fmt.Sprintf("%s/%s", m, cmd.Action()),
+		actionLabel:        fmt.Sprintf("%s/%s", m.Type(), cmd.Action()),
 		deprovisionerLabel: m.Type(),
 	}).Inc()
 	disruptionActionsPerformedCounter.With(map[string]string{
@@ -189,7 +189,7 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 		methodLabel:            m.Type(),
 		consolidationTypeLabel: m.ConsolidationType(),
 	}).Inc()
-	logging.FromContext(ctx).Infof("disrupting via %s %s", m, cmd)
+	logging.FromContext(ctx).Infof("disrupting via %s %s", m.Type(), cmd)
 
 	reason := fmt.Sprintf("%s/%s", m.Type(), cmd.Action())
 	if cmd.Action() == ReplaceAction {
