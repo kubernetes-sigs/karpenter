@@ -288,7 +288,8 @@ var _ = Describe("Disruption Taints", func() {
 		nodeClaimNode = ExpectNodeExists(ctx, env.Client, nodeClaimNode.Name)
 		Expect(nodeClaimNode.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 	})
-	FIt("should add noExecute taints to NodeClaims before termination", func() {
+	// provision an empty node to get it under consolidation
+	It("should add noExecute taints to NodeClaims before termination", func() {
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
 
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, nodeClaimNode)
