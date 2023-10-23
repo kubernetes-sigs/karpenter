@@ -131,6 +131,10 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		return reconcile.Result{}, fmt.Errorf("removing taint from nodes, %w", err)
 	}
 
+	if err := c.requireNodeclaimTaint(ctx, false, v1beta1.TerminationNoExecuteTaint, c.cluster.Nodes()...); err != nil {
+		return reconcile.Result{}, fmt.Errorf("removing taint from nodes, %w", err)
+	}
+
 	// Attempt different disruption methods. We'll only let one method perform an action
 	for _, m := range c.methods {
 		c.recordRun(fmt.Sprintf("%T", m))
