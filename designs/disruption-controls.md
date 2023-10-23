@@ -50,9 +50,9 @@ type Disruption struct {
 // number of Node Claims that can be terminated at a time.
 // Unless specified, a budget is always active.
 type Budget struct {
-    // MaxUnavailable dictates how many Node Claims owned by this NodePool
+    // MaxUnavailable dictates how many NodeClaims owned by this NodePool
     // can be terminating at once.
-    // This only respects and considers nodes with a DeletionTimestamp set.
+    // This only respects and considers NodeClaims with the karpenter.sh/disruption taint.
     MaxUnavailable intstr.IntOrString `json:"maxUnavailable" hash:"ignore"`
     // Crontab specifies when a budget begins being active.
     // Crontab uses the same syntax as a Cronjob.
@@ -68,7 +68,7 @@ type Budget struct {
 
 ## Validation/Defaults
 
-For each `Budget`, `MaxUnavailable` is required, and must be non-negative. Users can disable scale down for a NodePool by setting this to `0`. Users must either omit both `Crontab` and `Duration` or set both of them, since `Crontab` and `Duration` are inherently linked. Omitting these two fields will be equivalent to an always active `Budget`. Users cannot define a seconds value in `Duration`, since the smallest denomination of time in upstream Crontabs are minutes.
+For each `Budget`, `MaxUnavailable` is required, and must be non-negative. Users can disable scale down for a NodePool by setting this to `0`. Users must either omit both `Crontab` and `Duration` or set both of them, since `Crontab` and `Duration` are inherently linked. Omitting these two fields will be equivalent to an always active `Budget`. Users cannot define a seconds value in `Duration`, since the smallest denomination of time in upstream Crontabs are minutes. Note that `MaxUnavailable` will only refer to nodes with the `karpenter.sh/disruption` taint set.
 
 - Omitting the field `Budgets` will cause the field to be defaulted to one `Budget` with `MaxUnavailable: 10%`.
 - `ConsolidationPolicy` will be defaulted to `WhenUnderutilized`, with a `consolidateAfter` value of `15s`, which is the same value for Consolidation in v1alpha5.
