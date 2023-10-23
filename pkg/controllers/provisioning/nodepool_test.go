@@ -58,7 +58,7 @@ var _ = Describe("NodePool/Provisioning", func() {
 	It("should provision nodes for pods with supported node selectors", func() {
 		nodePool := test.NodePool()
 		schedulable := []*v1.Pod{
-			// Constrained by provisioner
+			// Constrained by nodepool
 			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1beta1.NodePoolLabelKey: nodePool.Name}}),
 			// Constrained by zone
 			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelTopologyZone: "test-zone-1"}}),
@@ -70,7 +70,7 @@ var _ = Describe("NodePool/Provisioning", func() {
 			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelOSStable: string(v1.Linux)}}),
 		}
 		unschedulable := []*v1.Pod{
-			// Ignored, matches another provisioner
+			// Ignored, matches another nodepool
 			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1beta1.NodePoolLabelKey: "unknown"}}),
 			// Ignored, invalid zone
 			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelTopologyZone: "unknown"}}),
@@ -84,6 +84,46 @@ var _ = Describe("NodePool/Provisioning", func() {
 			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1beta1.CapacityTypeLabelKey: "unknown"}}),
 			// Ignored, label selector does not match
 			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{"foo": "bar"}}),
+		}
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, schedulable...)
+		for _, pod := range schedulable {
+			ExpectScheduled(ctx, env.Client, pod)
+		}
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, unschedulable...)
+		for _, pod := range unschedulable {
+			ExpectNotScheduled(ctx, env.Client, pod)
+		}
+	})
+	It("should provision nodes for pods with supported node affinities", func() {
+		nodePool := test.NodePool()
+		schedulable := []*v1.Pod{
+			// Constrained by nodepool
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1beta1.NodePoolLabelKey, Operator: v1.NodeSelectorOpIn, Values: []string{nodePool.Name}}}}),
+			// Constrained by zone
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}}),
+			// Constrained by instanceType
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"default-instance-type"}}}}),
+			// Constrained by architecture
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1.LabelArchStable, Operator: v1.NodeSelectorOpIn, Values: []string{"arm64"}}}}),
+			// Constrained by operatingSystem
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1.LabelOSStable, Operator: v1.NodeSelectorOpIn, Values: []string{string(v1.Linux)}}}}),
+		}
+		unschedulable := []*v1.Pod{
+			// Ignored, matches another nodepool
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1beta1.NodePoolLabelKey, Operator: v1.NodeSelectorOpIn, Values: []string{"unknown"}}}}),
+			// Ignored, invalid zone
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"unknown"}}}}),
+			// Ignored, invalid instance type
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"unknown"}}}}),
+			// Ignored, invalid architecture
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1.LabelArchStable, Operator: v1.NodeSelectorOpIn, Values: []string{"unknown"}}}}),
+			// Ignored, invalid operating system
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1.LabelOSStable, Operator: v1.NodeSelectorOpIn, Values: []string{"unknown"}}}}),
+			// Ignored, invalid capacity type
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1beta1.CapacityTypeLabelKey, Operator: v1.NodeSelectorOpIn, Values: []string{"unknown"}}}}),
+			// Ignored, label selector does not match
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: "foo", Operator: v1.NodeSelectorOpIn, Values: []string{"bar"}}}}),
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, schedulable...)
