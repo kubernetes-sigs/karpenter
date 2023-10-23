@@ -130,7 +130,9 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	if err := c.requireNodeclaimTaint(ctx, false, v1beta1.DisruptionNoScheduleTaint, c.cluster.Nodes()...); err != nil {
 		return reconcile.Result{}, fmt.Errorf("removing taint from nodes, %w", err)
 	}
-
+	if err := c.requireNodeclaimTaint(ctx, false, v1beta1.CandidatePreferNoScheduleTaint, c.cluster.Nodes()...); err != nil {
+		return reconcile.Result{}, fmt.Errorf("removing taint from nodes, %w", err)
+	}
 	if err := c.requireNodeclaimTaint(ctx, false, v1beta1.TerminationNoExecuteTaint, c.cluster.Nodes()...); err != nil {
 		return reconcile.Result{}, fmt.Errorf("removing taint from nodes, %w", err)
 	}
@@ -165,10 +167,15 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	if len(candidates) == 0 {
 		return false, nil
 	}
+	stateNodes := lo.Map(candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode })
+	if err := c.requireNodeclaimTaint(ctx, true, v1beta1.CandidatePreferNoScheduleTaint, stateNodes...); err != nil {
+		return false, fmt.Errorf("choosing candidates %w", err)
+	}
 
 	// Determine the disruption action
 	cmd, err := disruption.ComputeCommand(ctx, candidates...)
 	if err != nil {
+		err = multierr.Append(err, c.requireNodeclaimTaint(ctx, false, v1beta1.CandidatePreferNoScheduleTaint, stateNodes...))
 		return false, fmt.Errorf("computing disruption decision, %w", err)
 	}
 	if cmd.Action() == NoOpAction {
@@ -177,6 +184,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 
 	// Attempt to disrupt
 	if err := c.executeCommand(ctx, disruption, cmd); err != nil {
+		err = multierr.Append(err, c.requireNodeclaimTaint(ctx, false, v1beta1.CandidatePreferNoScheduleTaint, stateNodes...))
 		return false, fmt.Errorf("disrupting candidates, %w", err)
 	}
 
@@ -354,7 +362,7 @@ func (c *Controller) requireNodeclaimTaint(ctx context.Context, addTaint bool, t
 		_, hasTaint := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
 			return v1beta1.TaintFuncs[taintType](taint)
 		})
-		// node is being deleted, so no need to remove taint as the node will be gone soon
+		// // node is being deleted, so no need to remove taint as the node will be gone soon
 		if hasTaint && !node.DeletionTimestamp.IsZero() {
 			continue
 		}

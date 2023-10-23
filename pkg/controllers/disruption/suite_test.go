@@ -288,6 +288,29 @@ var _ = Describe("Disruption Taints", func() {
 		nodeClaimNode = ExpectNodeExists(ctx, env.Client, nodeClaimNode.Name)
 		Expect(nodeClaimNode.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 	})
+	It("should add preferNoSchedule taints to NodeClaims as choosen candidates for disruption", func() {
+		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
+
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, nodeClaimNode)
+
+		// inform cluster state about nodes and machines
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodeClaimNode}, []*v1beta1.NodeClaim{nodeClaim})
+
+		// Trigger the reconcile loop to start but don't trigger the verify action
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+		}()
+
+		wg.Wait()
+		nodeClaimNode = ExpectNodeExists(ctx, env.Client, nodeClaimNode.Name)
+		Expect(nodeClaimNode.Spec.Taints).To(ContainElement(v1beta1.CandidatePreferNoScheduleTaint))
+
+	})
+
 	// provision an empty node to get it under consolidation
 	It("should add noExecute taints to NodeClaims before termination", func() {
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
