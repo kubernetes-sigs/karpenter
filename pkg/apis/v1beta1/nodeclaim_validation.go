@@ -105,7 +105,7 @@ func (in *NodeClaimSpec) validateTaintsField(taints []v1.Taint, existing map[tai
 		switch taint.Effect {
 		case v1.TaintEffectNoSchedule, v1.TaintEffectPreferNoSchedule, v1.TaintEffectNoExecute, "":
 		default:
-			errs = errs.Also(apis.ErrInvalidArrayValue(taint.Effect, "effect", i))
+			errs = errs.Also(apis.ErrInvalidArrayValue(taint.Effect, fieldName, i))
 		}
 
 		// Check for duplicate OwnerKey/Effect pairs
