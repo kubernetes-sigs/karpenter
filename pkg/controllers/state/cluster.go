@@ -262,12 +262,19 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	managed := node.Labels[v1alpha5.ProvisionerNameLabelKey] != "" || node.Labels[v1beta1.NodePoolLabelKey] != ""
+	initialized := node.Labels[v1beta1.NodeInitializedLabelKey] != ""
 	if node.Spec.ProviderID == "" {
 		// If we know that we own this node, we shouldn't allow the providerID to be empty
-		if node.Labels[v1alpha5.ProvisionerNameLabelKey] != "" || (node.Labels[v1beta1.NodePoolLabelKey] != "") {
+		if managed {
 			return nil
 		}
 		node.Spec.ProviderID = node.Name
+	}
+	// If we have a managed node with no instance type label that hasn't been initialized,
+	// we need to wait until the instance type label gets propagated on it
+	if managed && node.Labels[v1.LabelInstanceTypeStable] == "" && !initialized {
+		return nil
 	}
 	n, err := c.newStateFromNode(ctx, node, c.nodes[node.Spec.ProviderID])
 	if err != nil {
