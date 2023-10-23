@@ -124,14 +124,14 @@ func (in *NodeClaimSpec) validateTaintsField(taints []v1.Taint, existing map[tai
 // NodeClaim requirements only support well known labels.
 func (in *NodeClaimSpec) validateRequirements() (errs *apis.FieldError) {
 	for i, requirement := range in.Requirements {
-		if err := in.validateRequirement(requirement); err != nil {
+		if err := ValidateRequirement(requirement); err != nil {
 			errs = errs.Also(apis.ErrInvalidArrayValue(err, "requirements", i))
 		}
 	}
 	return errs
 }
 
-func (in *NodeClaimSpec) validateRequirement(requirement v1.NodeSelectorRequirement) error { //nolint:gocyclo
+func ValidateRequirement(requirement v1.NodeSelectorRequirement) error { //nolint:gocyclo
 	var errs error
 	if normalized, ok := NormalizedLabels[requirement.Key]; ok {
 		requirement.Key = normalized
