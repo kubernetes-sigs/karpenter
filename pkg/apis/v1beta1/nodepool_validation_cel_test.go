@@ -15,6 +15,7 @@ limitations under the License.
 package v1beta1_test
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -394,6 +395,17 @@ var _ = Describe("CEL/Validation", func() {
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
 		})
+		It("should fail at runtime for taint keys that are too long", func() {
+			oldNodePool := nodePool.DeepCopy()
+			nodePool.Spec.Template.Spec.Taints = []v1.Taint{{Key: fmt.Sprintf("test.com.test.%s/test", strings.ToLower(randomdata.Alphanumeric(250))), Effect: v1.TaintEffectNoSchedule}}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(env.Client.Delete(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+			nodePool = oldNodePool.DeepCopy()
+			nodePool.Spec.Template.Spec.Taints = []v1.Taint{{Key: fmt.Sprintf("test.com.test/test-%s", strings.ToLower(randomdata.Alphanumeric(250))), Effect: v1.TaintEffectNoSchedule}}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+		})
 		It("should fail for missing taint key", func() {
 			nodePool.Spec.Template.Spec.Taints = []v1.Taint{{Effect: v1.TaintEffectNoSchedule}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
@@ -446,6 +458,17 @@ var _ = Describe("CEL/Validation", func() {
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
 		})
+		It("should fail at runtime for requirement keys that are too long", func() {
+			oldNodePool := nodePool.DeepCopy()
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{{Key: fmt.Sprintf("test.com.test.%s/test", strings.ToLower(randomdata.Alphanumeric(250))), Operator: v1.NodeSelectorOpExists}}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(env.Client.Delete(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+			nodePool = oldNodePool.DeepCopy()
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{{Key: fmt.Sprintf("test.com.test/test-%s", strings.ToLower(randomdata.Alphanumeric(250))), Operator: v1.NodeSelectorOpExists}}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+		})
 		It("should fail for the karpenter.sh/nodepool label", func() {
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
 				{Key: NodePoolLabelKey, Operator: v1.NodeSelectorOpIn, Values: []string{randomdata.SillyName()}},
@@ -483,7 +506,7 @@ var _ = Describe("CEL/Validation", func() {
 			}
 		})
 		It("should allow restricted domains exceptions", func() {
-			oldNodepool := nodePool.DeepCopy()
+			oldNodePool := nodePool.DeepCopy()
 			for label := range LabelDomainExceptions {
 				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
 					{Key: label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
@@ -491,11 +514,11 @@ var _ = Describe("CEL/Validation", func() {
 				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 				Expect(nodePool.RuntimeValidate()).To(Succeed())
 				Expect(env.Client.Delete(ctx, nodePool)).To(Succeed())
-				nodePool = oldNodepool.DeepCopy()
+				nodePool = oldNodePool.DeepCopy()
 			}
 		})
 		It("should allow well known label exceptions", func() {
-			orgNodepool := nodePool.DeepCopy()
+			oldNodePool := nodePool.DeepCopy()
 			for label := range WellKnownLabels.Difference(sets.New(NodePoolLabelKey)) {
 				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
 					{Key: label, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
@@ -503,7 +526,7 @@ var _ = Describe("CEL/Validation", func() {
 				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 				Expect(nodePool.RuntimeValidate()).To(Succeed())
 				Expect(env.Client.Delete(ctx, nodePool)).To(Succeed())
-				nodePool = orgNodepool.DeepCopy()
+				nodePool = oldNodePool.DeepCopy()
 			}
 		})
 		It("should allow non-empty set after removing overlapped value", func() {
@@ -533,6 +556,80 @@ var _ = Describe("CEL/Validation", func() {
 				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{requirement}
 				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 				Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+			}
+		})
+	})
+	Context("Labels", func() {
+		It("should allow unrecognized labels", func() {
+			nodePool.Spec.Template.Labels = map[string]string{"foo": randomdata.SillyName()}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.RuntimeValidate()).To(Succeed())
+		})
+		It("should fail for the karpenter.sh/nodepool label", func() {
+			nodePool.Spec.Template.Labels = map[string]string{NodePoolLabelKey: randomdata.SillyName()}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+		})
+		It("should fail for invalid label keys", func() {
+			nodePool.Spec.Template.Labels = map[string]string{"spaces are not allowed": randomdata.SillyName()}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+		})
+		It("should fail at runtime for label keys that are too long", func() {
+			oldNodePool := nodePool.DeepCopy()
+			nodePool.Spec.Template.Labels = map[string]string{fmt.Sprintf("test.com.test.%s/test", strings.ToLower(randomdata.Alphanumeric(250))): randomdata.SillyName()}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(env.Client.Delete(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+			nodePool = oldNodePool.DeepCopy()
+			nodePool.Spec.Template.Labels = map[string]string{fmt.Sprintf("test.com.test/test-%s", strings.ToLower(randomdata.Alphanumeric(250))): randomdata.SillyName()}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+		})
+		It("should fail for invalid label values", func() {
+			nodePool.Spec.Template.Labels = map[string]string{randomdata.SillyName(): "/ is not allowed"}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+		})
+		It("should fail for restricted label domains", func() {
+			for label := range RestrictedLabelDomains {
+				fmt.Println(label)
+				nodePool.Spec.Template.Labels = map[string]string{label + "/unknown": randomdata.SillyName()}
+				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+				Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+			}
+		})
+		It("should allow labels kOps require", func() {
+			nodePool.Spec.Template.Labels = map[string]string{
+				"kops.k8s.io/instancegroup": "karpenter-nodes",
+				"kops.k8s.io/gpu":           "1",
+			}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.RuntimeValidate()).To(Succeed())
+		})
+		It("should allow labels in restricted domains exceptions list", func() {
+			oldNodePool := nodePool.DeepCopy()
+			for label := range LabelDomainExceptions {
+				fmt.Println(label)
+				nodePool.Spec.Template.Labels = map[string]string{
+					label: "test-value",
+				}
+				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+				Expect(env.Client.Delete(ctx, nodePool)).To(Succeed())
+				Expect(nodePool.RuntimeValidate()).To(Succeed())
+				nodePool = oldNodePool.DeepCopy()
+			}
+		})
+		It("should allow labels prefixed with the restricted domain exceptions", func() {
+			oldNodePool := nodePool.DeepCopy()
+			for label := range LabelDomainExceptions {
+				nodePool.Spec.Template.Labels = map[string]string{
+					fmt.Sprintf("%s/key", label): "test-value",
+				}
+				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+				Expect(env.Client.Delete(ctx, nodePool)).To(Succeed())
+				Expect(nodePool.RuntimeValidate()).To(Succeed())
+				nodePool = oldNodePool.DeepCopy()
 			}
 		})
 	})

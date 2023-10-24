@@ -40,9 +40,10 @@ func (in *NodePool) Validate(_ context.Context) (errs *apis.FieldError) {
 // RuntimeValidate will be used to validate any part of the CRD that can not be validated at CRD creation
 func (in *NodePool) RuntimeValidate() (errs *apis.FieldError) {
 	return errs.Also(
-		in.Spec.Template.Spec.validateTaints(),
-		in.Spec.Template.Spec.validateRequirements(),
-		in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist(),
+		in.Spec.Template.validateLabels().ViaField("spec.template.metadata"),
+		in.Spec.Template.Spec.validateTaints().ViaField("spec.template.spec"),
+		in.Spec.Template.Spec.validateRequirements().ViaField("spec.template.spec"),
+		in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist().ViaField("spec.template.spec"),
 	)
 }
 
