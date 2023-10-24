@@ -222,11 +222,11 @@ spec:
                                 pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*(\/))?([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]$
                                 x-kubernetes-validations:
                                   - message: label domain "kubernetes.io" is restricted
-                                    rule: self == "beta.kubernetes.io/instance-type" || self == "failure-domain.beta.kubernetes.io/region"|| self == "beta.kubernetes.io/os" || self == "beta.kubernetes.io/arch" || self == "failure-domain.beta.kubernetes.io/zone" || self.startsWith("node.kubernetes.io/") || self.startsWith("node-restriction.kubernetes.io/") || self == "topology.kubernetes.io/zone" || self == "topology.kubernetes.io/region" || self == "node.kubernetes.io/instance-type" || self == "kubernetes.io/arch"|| self == "kubernetes.io/os" || self ==  "node.kubernetes.io/windows-build" || !self.find("^([^/]+)").endsWith("kubernetes.io")
+                                    rule: self in ["beta.kubernetes.io/instance-type", "failure-domain.beta.kubernetes.io/region", "beta.kubernetes.io/os", "beta.kubernetes.io/arch", "failure-domain.beta.kubernetes.io/zone", "topology.kubernetes.io/zone", "topology.kubernetes.io/region", "node.kubernetes.io/instance-type", "kubernetes.io/arch", "kubernetes.io/os", "node.kubernetes.io/windows-build"] || self.startsWith("node.kubernetes.io/") || self.startsWith("node-restriction.kubernetes.io/") || !self.find("^([^/]+)").endsWith("kubernetes.io")
                                   - message: label domain "k8s.io" is restricted
                                     rule: self.startsWith("kops.k8s.io/") || !self.find("^([^/]+)").endsWith("k8s.io")
                                   - message: label domain "karpenter.sh" is restricted
-                                    rule: self == "karpenter.sh/capacity-type"|| self == "karpenter.sh/nodepool" || !self.find("^([^/]+)").endsWith("karpenter.sh")
+                                    rule: self in ["karpenter.sh/capacity-type", "karpenter.sh/nodepool"] || !self.find("^([^/]+)").endsWith("karpenter.sh")
                                   - message: label "karpenter.sh/nodepool" is restricted
                                     rule: self != "karpenter.sh/nodepool"
                                   - message: label "kubernetes.io/hostname" is restricted
