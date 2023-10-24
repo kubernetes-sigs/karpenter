@@ -319,6 +319,10 @@ spec:
             status:
               description: NodePoolStatus defines the observed state of NodePool
               properties:
+                nodesDisrupting:
+                  items:
+                    type: string
+                  type: array
                 resources:
                   additionalProperties:
                     anyOf:

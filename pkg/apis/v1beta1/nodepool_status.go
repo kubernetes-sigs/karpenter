@@ -22,5 +22,6 @@ import (
 type NodePoolStatus struct {
 	// Resources is the list of resources that have been provisioned.
 	// +optional
-	Resources v1.ResourceList `json:"resources,omitempty"`
+	Resources       v1.ResourceList `json:"resources,omitempty"`
+	NodesDisrupting []string        `json:"nodesDisrupting,omitempty"`
 }

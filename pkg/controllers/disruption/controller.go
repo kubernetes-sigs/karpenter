@@ -42,6 +42,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
+	"github.com/aws/karpenter-core/pkg/utils/nodepool"
 )
 
 type Controller struct {
@@ -170,13 +171,51 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	if cmd.Action() == NoOpAction {
 		return false, nil
 	}
+	if err := c.UpdateNodePoolCandidates(ctx, candidates); err != nil {
+		return false, err
+	}
 
 	// Attempt to disrupt
 	if err := c.executeCommand(ctx, disruption, cmd); err != nil {
 		return false, fmt.Errorf("disrupting candidates, %w", err)
 	}
 
+	if err := c.UpdateNodePoolCandidates(ctx, []*Candidate{}); err != nil {
+		return false, err
+	}
+
 	return true, nil
+}
+
+func (c *Controller) UpdateNodePoolCandidates(ctx context.Context, candidates []*Candidate) error {
+	nodepools, err := nodepool.List(ctx, c.kubeClient)
+	if err != nil {
+		return fmt.Errorf("fetching nodepools, %w", err)
+	}
+
+	for _, np := range nodepools.Items {
+		stored := np.DeepCopy()
+		if len(candidates) > 0 {
+
+			for _, can := range candidates {
+				if can.nodePool.Name == np.Name {
+					fmt.Println("candidate name is", can.Name())
+					np.Status.NodesDisrupting = append(np.Status.NodesDisrupting, can.Node.Name)
+				}
+			}
+		} else {
+			np.Status.NodesDisrupting = []string{""}
+		}
+		fmt.Println("stored status", stored.Status.NodesDisrupting)
+		fmt.Println("np status", np.Status.NodesDisrupting)
+		if !equality.Semantic.DeepEqual(stored, np) {
+
+			if err := nodepool.PatchStatus(ctx, c.kubeClient, stored, &np); err != nil {
+				return fmt.Errorf("updating nodepools, %w", err)
+			}
+		}
+	}
+	return nil
 }
 
 func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) error {
