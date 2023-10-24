@@ -21,7 +21,6 @@ import (
 
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"knative.dev/pkg/logging"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -68,22 +67,10 @@ var (
 			nodePoolNameLabel,
 		},
 	)
-	usagePctGaugeVec = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: nodePoolSubsystem,
-			Name:      "usage_pct",
-			Help:      "The nodepool usage percentage is the percentage of each resource used based on the resources provisioned and the limits that have been configured.  Labeled by nodepool name and resource type.",
-		},
-		[]string{
-			resourceTypeLabel,
-			nodePoolNameLabel,
-		},
-	)
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(limitGaugeVec, usageGaugeVec, usagePctGaugeVec)
+	crmetrics.Registry.MustRegister(limitGaugeVec, usageGaugeVec)
 }
 
 type Controller struct {
@@ -120,9 +107,8 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 func buildMetrics(nodePool *v1beta1.NodePool) (res []*metrics.StoreMetric) {
 	for gaugeVec, resourceList := range map[*prometheus.GaugeVec]v1.ResourceList{
-		usageGaugeVec:    nodePool.Status.Resources,
-		limitGaugeVec:    getLimits(nodePool),
-		usagePctGaugeVec: getUsagePercentage(nodePool),
+		usageGaugeVec: nodePool.Status.Resources,
+		limitGaugeVec: getLimits(nodePool),
 	} {
 		for k, v := range resourceList {
 			res = append(res, &metrics.StoreMetric{
@@ -140,20 +126,6 @@ func getLimits(nodePool *v1beta1.NodePool) v1.ResourceList {
 		return v1.ResourceList(nodePool.Spec.Limits)
 	}
 	return v1.ResourceList{}
-}
-
-func getUsagePercentage(nodePool *v1beta1.NodePool) v1.ResourceList {
-	usage := v1.ResourceList{}
-	for k, v := range getLimits(nodePool) {
-		limitValue := v.AsApproximateFloat64()
-		usedValue := nodePool.Status.Resources[k]
-		if limitValue == 0 {
-			usage[k] = *resource.NewQuantity(100, resource.DecimalSI)
-		} else {
-			usage[k] = *resource.NewQuantity(int64(usedValue.AsApproximateFloat64()/limitValue*100), resource.DecimalSI)
-		}
-	}
-	return usage
 }
 
 func makeLabels(nodePool *v1beta1.NodePool, resourceTypeName string) prometheus.Labels {

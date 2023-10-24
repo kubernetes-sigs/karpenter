@@ -108,34 +108,8 @@ var _ = Describe("Metrics", func() {
 			Expect(m.GetGauge().GetValue()).To(BeNumerically("~", v.AsApproximateFloat64()))
 		}
 	})
-	It("should update the usage percentage metrics correctly", func() {
-		resources := v1.ResourceList{
-			v1.ResourceCPU:              resource.MustParse("10"),
-			v1.ResourceMemory:           resource.MustParse("10Mi"),
-			v1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
-		}
-		limits := v1beta1.Limits{
-			v1.ResourceCPU:              resource.MustParse("100"),
-			v1.ResourceMemory:           resource.MustParse("100Mi"),
-			v1.ResourceEphemeralStorage: resource.MustParse("1000Gi"),
-		}
-		nodePool.Spec.Limits = limits
-		nodePool.Status.Resources = resources
-
-		ExpectApplied(ctx, env.Client, nodePool)
-		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
-
-		for k := range resources {
-			m, found := FindMetricWithLabelValues("karpenter_nodepool_usage_pct", map[string]string{
-				"nodepool":      nodePool.GetName(),
-				"resource_type": strings.ReplaceAll(k.String(), "-", "_"),
-			})
-			Expect(found).To(BeTrue())
-			Expect(m.GetGauge().GetValue()).To(BeNumerically("~", 10))
-		}
-	})
 	It("should delete the nodepool state metrics on nodepool delete", func() {
-		expectedMetrics := []string{"karpenter_nodepool_limit", "karpenter_nodepool_usage", "karpenter_nodepool_usage_pct"}
+		expectedMetrics := []string{"karpenter_nodepool_limit", "karpenter_nodepool_usage"}
 		nodePool.Spec.Limits = v1beta1.Limits{
 			v1.ResourceCPU:              resource.MustParse("100"),
 			v1.ResourceMemory:           resource.MustParse("100Mi"),
