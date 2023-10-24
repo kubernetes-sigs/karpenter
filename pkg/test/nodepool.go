@@ -18,8 +18,10 @@ import (
 	"fmt"
 
 	"github.com/imdario/mergo"
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 )
@@ -54,4 +56,16 @@ func NodePool(overrides ...v1beta1.NodePool) *v1beta1.NodePool {
 	}
 	np.Spec.Template.ObjectMeta = TemplateObjectMeta(np.Spec.Template.ObjectMeta)
 	return np
+}
+
+// ReplaceRequirements any current requirements on the passed through NodePool with the passed in requirements
+// If any of the keys match between the existing requirements and the new requirements, the new requirement with the same
+// key will replace the old requirement with that key
+func ReplaceRequirements(nodePool *v1beta1.NodePool, reqs ...v1.NodeSelectorRequirement) *v1beta1.NodePool {
+	keys := sets.New[string](lo.Map(reqs, func(r v1.NodeSelectorRequirement, _ int) string { return r.Key })...)
+	nodePool.Spec.Template.Spec.Requirements = lo.Reject(nodePool.Spec.Template.Spec.Requirements, func(r v1.NodeSelectorRequirement, _ int) bool {
+		return keys.Has(r.Key)
+	})
+	nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, reqs...)
+	return nodePool
 }
