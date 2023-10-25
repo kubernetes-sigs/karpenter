@@ -79,6 +79,15 @@ var _ = Describe("MachineController", func() {
 						v1alpha5.LabelNodeInitialized:    "true",
 					},
 				},
+				Spec: v1alpha5.MachineSpec{
+					Resources: v1alpha5.ResourceRequirements{
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("8"),
+							v1.ResourceMemory: resource.MustParse("64Gi"),
+							v1.ResourcePods:   resource.MustParse("5"),
+						},
+					},
+				},
 				Status: v1alpha5.MachineStatus{
 					ProviderID: test.RandomProviderID(),
 					Capacity: v1.ResourceList{
