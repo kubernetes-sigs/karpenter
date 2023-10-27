@@ -112,10 +112,7 @@ func (t *Terminator) Drain(ctx context.Context, node *v1.Node) error {
 
 func (t *Terminator) Evict(pods []*v1.Pod) {
 	// 1. Prioritize noncritical pods, non-daemon pods https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
-	criticalNonDaemon := []*v1.Pod{}
-	criticalDaemon := []*v1.Pod{}
-	nonCriticalNonDaemon := []*v1.Pod{}
-	nonCriticalDaemon := []*v1.Pod{}
+	var criticalNonDaemon, criticalDaemon, nonCriticalNonDaemon, nonCriticalDaemon []*v1.Pod
 	for _, pod := range pods {
 		if !pod.DeletionTimestamp.IsZero() {
 			continue
