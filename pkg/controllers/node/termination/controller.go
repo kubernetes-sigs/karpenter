@@ -82,8 +82,8 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 	if err := c.deleteAllNodeClaims(ctx, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("deleting nodeclaims, %w", err)
 	}
-	if err := c.terminator.Cordon(ctx, node); err != nil {
-		return reconcile.Result{}, fmt.Errorf("cordoning node, %w", err)
+	if err := c.terminator.Taint(ctx, node); err != nil {
+		return reconcile.Result{}, fmt.Errorf("tainting node, %w", err)
 	}
 	if err := c.terminator.Drain(ctx, node); err != nil {
 		if !terminator.IsNodeDrainError(err) {
@@ -136,7 +136,7 @@ func (c *Controller) deleteAllNodeClaims(ctx context.Context, node *v1.Node) err
 
 func (c *Controller) removeFinalizer(ctx context.Context, n *v1.Node) error {
 	stored := n.DeepCopy()
-	controllerutil.RemoveFinalizer(n, v1alpha5.TerminationFinalizer)
+	controllerutil.RemoveFinalizer(n, v1beta1.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(stored, n) {
 		if err := c.kubeClient.Patch(ctx, n, client.MergeFrom(stored)); err != nil {
 			return client.IgnoreNotFound(fmt.Errorf("patching node, %w", err))
