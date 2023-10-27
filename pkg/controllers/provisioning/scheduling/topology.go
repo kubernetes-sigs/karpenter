@@ -23,6 +23,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/utils/functional"
 
+	"k8s.io/apimachinery/pkg/api/errors"
+
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -229,6 +231,8 @@ func (t *Topology) updateInverseAntiAffinity(ctx context.Context, pod *v1.Pod, d
 
 // countDomains initializes the topology group by registereding any well known domains and performing pod counts
 // against the cluster for any existing pods.
+//
+//nolint:gocyclo
 func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 	podList := &v1.PodList{}
 
@@ -252,6 +256,14 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 		}
 		node := &v1.Node{}
 		if err := t.kubeClient.Get(ctx, types.NamespacedName{Name: p.Spec.NodeName}, node); err != nil {
+			// Pods that cannot be evicted can be leaked in the API Server after
+			// a Node is removed. Since pod bindings are immutable, these pods
+			// cannot be recovered, and will be deleted by the pod lifecycle
+			// garbage collector. These pods are not running, and should not
+			// impact future topology calculations.
+			if errors.IsNotFound(err) {
+				continue
+			}
 			return fmt.Errorf("getting node %s, %w", p.Spec.NodeName, err)
 		}
 		domain, ok := node.Labels[tg.Key]

@@ -78,6 +78,21 @@ var _ = Describe("Topology", func() {
 		ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2))
 	})
 
+	It("should ignore pods if node does not exist", func() {
+		topology := []v1.TopologySpreadConstraint{{
+			TopologyKey:       v1.LabelTopologyZone,
+			WhenUnsatisfiable: v1.DoNotSchedule,
+			LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+			MaxSkew:           1,
+		}}
+		podAwaitingGC := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology, NodeName: "does-not-exist"})
+		ExpectApplied(ctx, env.Client, provisioner, podAwaitingGC)
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+			test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}, 4)...,
+		)
+		ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 2))
+	})
+
 	Context("Zonal", func() {
 		It("should balance pods across zones (match labels)", func() {
 			topology := []v1.TopologySpreadConstraint{{
