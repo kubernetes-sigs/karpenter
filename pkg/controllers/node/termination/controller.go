@@ -82,7 +82,7 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 	if err := c.deleteAllNodeClaims(ctx, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("deleting nodeclaims, %w", err)
 	}
-	if err := c.terminator.Cordon(ctx, node); err != nil {
+	if err := c.terminator.Taint(ctx, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("tainting node, %w", err)
 	}
 	if err := c.terminator.Drain(ctx, node); err != nil {

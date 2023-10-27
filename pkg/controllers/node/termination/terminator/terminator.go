@@ -45,16 +45,16 @@ func NewTerminator(clk clock.Clock, kubeClient client.Client, eq *Queue) *Termin
 	}
 }
 
-// Cordon adds the karpenter.sh/disruption taint to a node with a NodeClaim
+// Taint adds the karpenter.sh/disruption taint to a node with a NodeClaim
 // If the node is linked to a machine, it will use the node.kubernetes.io/unschedulable taint.
-func (t *Terminator) Cordon(ctx context.Context, node *v1.Node) error {
+func (t *Terminator) Taint(ctx context.Context, node *v1.Node) error {
 	stored := node.DeepCopy()
 
 	if _, isMachine := node.Labels[v1alpha5.ProvisionerNameLabelKey]; isMachine {
 		node.Spec.Unschedulable = true
 	} else {
 		node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t v1.Taint, _ int) bool {
-			return t.Key == v1beta1.DisruptionTaintKey
+			return v1beta1.IsDisruptingTaint(t)
 		})
 		node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
 	}
@@ -88,7 +88,8 @@ func (t *Terminator) Drain(ctx context.Context, node *v1.Node) error {
 	// Skip node due to pods that are not able to be evicted
 	podsToEvict := lo.FilterMap(pods.Items, func(po v1.Pod, _ int) (*v1.Pod, bool) {
 		p := lo.ToPtr(po)
-		// ignore pods that tolerate the noSchedule taint.
+		// Ignore pods that tolerate the node.kubernetes.io/unschedulable taint if linked to a machine
+		// or pods that tolerate the karpenter.sh/disruption taint if linked to a nodeclaim.
 		if lo.Ternary(isMachine, podutil.ToleratesUnschedulableTaint(p), podutil.ToleratesDisruptionNoScheduleTaint(p)) ||
 			// Ignore static mirror pods
 			podutil.IsOwnedByNode(p) ||

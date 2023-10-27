@@ -133,6 +133,7 @@ var _ = Describe("NodeClaim/Termination", func() {
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectNotEnqueuedForEviction(queue, podSkip)
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
 
 			// Expect node to exist and be draining
@@ -155,6 +156,35 @@ var _ = Describe("NodeClaim/Termination", func() {
 				ObjectMeta:  metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
 			})
 			ExpectApplied(ctx, env.Client, node, podEvict, podSkip)
+
+			// Trigger Termination Controller
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectNotEnqueuedForEviction(queue, podSkip)
+			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
+
+			// Expect node to exist and be draining
+			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
+
+			// Expect podEvict to be evicting, and delete it
+			ExpectEvicted(env.Client, podEvict)
+			ExpectDeleted(ctx, env.Client, podEvict)
+
+			ExpectNotEnqueuedForEviction(queue, podSkip)
+
+			// Reconcile to delete node
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectNotFound(ctx, env.Client, node)
+		})
+		It("should evict pods that tolerate the node.kubernetes.io/unschedulable taint", func() {
+			podEvict := test.Pod(test.PodOptions{
+				NodeName:    node.Name,
+				Tolerations: []v1.Toleration{{Key: v1.TaintNodeUnschedulable, Operator: v1.TolerationOpExists, Effect: v1.TaintEffectNoSchedule}},
+				ObjectMeta:  metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
+			})
+			ExpectApplied(ctx, env.Client, node, podEvict)
 
 			// Trigger Termination Controller
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())

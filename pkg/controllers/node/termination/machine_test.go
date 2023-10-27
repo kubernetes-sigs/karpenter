@@ -135,6 +135,59 @@ var _ = Describe("Machine/Termination", func() {
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectNotEnqueuedForEviction(queue, podSkip)
+			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
+
+			// Expect node to exist and be draining
+			ExpectNodeWithMachineDraining(env.Client, node.Name)
+
+			// Expect podEvict to be evicting, and delete it
+			ExpectEvicted(env.Client, podEvict)
+			ExpectDeleted(ctx, env.Client, podEvict)
+
+			// Reconcile to delete node
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectNotFound(ctx, env.Client, node)
+		})
+		It("should evict pods that tolerate the karpenter.sh/disruption taint with an equals operator", func() {
+			podEvict := test.Pod(test.PodOptions{
+				NodeName:    node.Name,
+				Tolerations: []v1.Toleration{{Key: v1beta1.DisruptionTaintKey, Operator: v1.TolerationOpEqual, Effect: v1beta1.DisruptionNoScheduleTaint.Effect, Value: v1beta1.DisruptionNoScheduleTaint.Value}},
+				ObjectMeta:  metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
+			})
+			ExpectApplied(ctx, env.Client, node, podEvict)
+
+			// Trigger Termination Controller
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
+
+			// Expect node to exist and be draining
+			ExpectNodeWithMachineDraining(env.Client, node.Name)
+
+			// Expect podEvict to be evicting, and delete it
+			ExpectEvicted(env.Client, podEvict)
+			ExpectDeleted(ctx, env.Client, podEvict)
+
+			// Reconcile to delete node
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectNotFound(ctx, env.Client, node)
+		})
+		It("should evict pods that tolerate the karpenter.sh/disruption taint with an exists operator", func() {
+			podEvict := test.Pod(test.PodOptions{
+				NodeName:    node.Name,
+				Tolerations: []v1.Toleration{{Key: v1beta1.DisruptionTaintKey, Operator: v1.TolerationOpExists, Effect: v1beta1.DisruptionNoScheduleTaint.Effect}},
+				ObjectMeta:  metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
+			})
+			ExpectApplied(ctx, env.Client, node, podEvict)
+
+			// Trigger Termination Controller
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
 
 			// Expect node to exist and be draining
