@@ -27,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	podutil "github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
@@ -44,10 +45,19 @@ func NewTerminator(clk clock.Clock, kubeClient client.Client, eq *Queue) *Termin
 	}
 }
 
-// Cordon cordons a node
+// Cordon adds the karpenter.sh/disruption taint to a node with a NodeClaim
+// If the node is linked to a machine, it will use the node.kubernetes.io/unschedulable taint.
 func (t *Terminator) Cordon(ctx context.Context, node *v1.Node) error {
 	stored := node.DeepCopy()
-	node.Spec.Unschedulable = true
+
+	if _, isMachine := node.Labels[v1alpha5.ProvisionerNameLabelKey]; isMachine {
+		node.Spec.Unschedulable = true
+	} else {
+		node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t v1.Taint, _ int) bool {
+			return t.Key == v1beta1.DisruptionTaintKey
+		})
+		node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
+	}
 	// Adding this label to the node ensures that the node is removed from the load-balancer target group
 	// while it is draining and before it is terminated. This prevents 500s coming prior to health check
 	// when the load balancer controller hasn't yet determined that the node and underlying connections are gone
@@ -60,7 +70,7 @@ func (t *Terminator) Cordon(ctx context.Context, node *v1.Node) error {
 		if err := t.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 			return err
 		}
-		logging.FromContext(ctx).Infof("cordoned node")
+		logging.FromContext(ctx).Infof("tainted node")
 	}
 	return nil
 }
@@ -112,13 +122,15 @@ func (t *Terminator) Evict(pods []*v1.Pod) {
 		if pod.Spec.PriorityClassName == "system-cluster-critical" || pod.Spec.PriorityClassName == "system-node-critical" {
 			if podutil.IsOwnedByDaemonSet(pod) {
 				criticalDaemon = append(criticalDaemon, pod)
+			} else {
+				criticalNonDaemon = append(criticalNonDaemon, pod)
 			}
-			criticalNonDaemon = append(criticalNonDaemon, pod)
 		} else {
 			if podutil.IsOwnedByDaemonSet(pod) {
 				nonCriticalDaemon = append(nonCriticalDaemon, pod)
+			} else {
+				nonCriticalNonDaemon = append(nonCriticalNonDaemon, pod)
 			}
-			nonCriticalNonDaemon = append(nonCriticalNonDaemon, pod)
 		}
 	}
 	// 2. Evict in order:
@@ -131,7 +143,7 @@ func (t *Terminator) Evict(pods []*v1.Pod) {
 	} else if len(nonCriticalDaemon) != 0 {
 		t.evictionQueue.Add(nonCriticalDaemon...)
 	} else if len(criticalNonDaemon) != 0 {
-		t.evictionQueue.Add(nonCriticalDaemon...)
+		t.evictionQueue.Add(criticalNonDaemon...)
 	} else if len(criticalDaemon) != 0 {
 		t.evictionQueue.Add(criticalDaemon...)
 	}

@@ -43,6 +43,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	. "knative.dev/pkg/logging/testing"
+	"knative.dev/pkg/ptr"
 
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
@@ -82,8 +83,9 @@ var _ = Describe("Termination", func() {
 	var machine *v1alpha5.Machine
 
 	BeforeEach(func() {
-		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1beta1.TerminationFinalizer}}})
-		machine = test.Machine(v1alpha5.Machine{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1beta1.TerminationFinalizer}}, Status: v1alpha5.MachineStatus{ProviderID: node.Spec.ProviderID}})
+		// nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1beta1.TerminationFinalizer}}})
+		machine, node = test.MachineAndNode(v1alpha5.Machine{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1beta1.TerminationFinalizer}}})
+		node.Labels[v1alpha5.ProvisionerNameLabelKey] = test.Provisioner().Name
 		cloudProvider.CreatedNodeClaims[node.Spec.ProviderID] = nodeclaimutil.New(machine)
 		queue.Reset()
 	})
@@ -186,7 +188,7 @@ var _ = Describe("Termination", func() {
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
 
 			// Expect node to exist and be draining
-			ExpectNodeDraining(env.Client, node.Name)
+			ExpectNodeWithMachineDraining(env.Client, node.Name)
 
 			// Expect podEvict to be evicting, and delete it
 			ExpectEvicted(env.Client, podEvict)
@@ -215,7 +217,7 @@ var _ = Describe("Termination", func() {
 			ExpectEvicted(env.Client, pod)
 
 			// Expect node to exist and be draining
-			ExpectNodeDraining(env.Client, node.Name)
+			ExpectNodeWithMachineDraining(env.Client, node.Name)
 
 			// Delete no owner refs pod to simulate successful eviction
 			ExpectDeleted(ctx, env.Client, pod)
@@ -270,7 +272,7 @@ var _ = Describe("Termination", func() {
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
 
 			// Expect node to exist and be draining
-			ExpectNodeDraining(env.Client, node.Name)
+			ExpectNodeWithMachineDraining(env.Client, node.Name)
 
 			// Expect podNoEvict to fail eviction due to PDB, and be retried
 			Eventually(func() int {
@@ -280,6 +282,92 @@ var _ = Describe("Termination", func() {
 			// Delete pod to simulate successful eviction
 			ExpectDeleted(ctx, env.Client, podNoEvict)
 			ExpectNotFound(ctx, env.Client, podNoEvict)
+
+			// Reconcile to delete node
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectNotFound(ctx, env.Client, node)
+		})
+		It("should evict pods in order", func() {
+			daemonEvict := test.DaemonSet()
+			daemonNodeCritical := test.DaemonSet(test.DaemonSetOptions{PodOptions: test.PodOptions{PriorityClassName: "system-node-critical"}})
+			daemonClusterCritical := test.DaemonSet(test.DaemonSetOptions{PodOptions: test.PodOptions{PriorityClassName: "system-cluster-critical"}})
+			ExpectApplied(ctx, env.Client, node, daemonEvict, daemonNodeCritical, daemonClusterCritical)
+
+			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
+			podDaemonEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+				APIVersion:         "apps/v1",
+				Kind:               "DaemonSet",
+				Name:               daemonEvict.Name,
+				UID:                daemonEvict.UID,
+				Controller:         ptr.Bool(true),
+				BlockOwnerDeletion: ptr.Bool(true),
+			}}}})
+			podNodeCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-node-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
+			podClusterCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-cluster-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
+			podDaemonNodeCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-node-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+				APIVersion:         "apps/v1",
+				Kind:               "DaemonSet",
+				Name:               daemonNodeCritical.Name,
+				UID:                daemonNodeCritical.UID,
+				Controller:         ptr.Bool(true),
+				BlockOwnerDeletion: ptr.Bool(true),
+			}}}})
+			podDaemonClusterCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-cluster-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+				APIVersion:         "apps/v1",
+				Kind:               "DaemonSet",
+				Name:               daemonClusterCritical.Name,
+				UID:                daemonClusterCritical.UID,
+				Controller:         ptr.Bool(true),
+				BlockOwnerDeletion: ptr.Bool(true),
+			}}}})
+
+			ExpectApplied(ctx, env.Client, node, podEvict, podNodeCritical, podClusterCritical, podDaemonEvict, podDaemonNodeCritical, podDaemonClusterCritical)
+
+			// Trigger Termination Controller
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectPodExists(ctx, env.Client, podEvict.Name, podEvict.Namespace)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
+			// Expect node to exist and be draining
+			ExpectNodeWithMachineDraining(env.Client, node.Name)
+
+			// Expect podEvict to be evicting, and delete it
+			ExpectEvicted(env.Client, podEvict)
+			ExpectDeleted(ctx, env.Client, podEvict)
+
+			// Expect the noncritical Daemon pod to be evicted
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectPodExists(ctx, env.Client, podDaemonEvict.Name, podDaemonEvict.Namespace)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
+			ExpectEvicted(env.Client, podDaemonEvict)
+			ExpectDeleted(ctx, env.Client, podDaemonEvict)
+
+			// Expect the critical pods to be evicted and deleted
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectPodExists(ctx, env.Client, podNodeCritical.Name, podNodeCritical.Namespace)
+			ExpectPodExists(ctx, env.Client, podClusterCritical.Name, podClusterCritical.Namespace)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
+			ExpectEvicted(env.Client, podNodeCritical)
+			ExpectEvicted(env.Client, podClusterCritical)
+			ExpectDeleted(ctx, env.Client, podNodeCritical)
+			ExpectDeleted(ctx, env.Client, podClusterCritical)
+
+			// Expect the critical daemon pods to be evicted and deleted
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectPodExists(ctx, env.Client, podDaemonNodeCritical.Name, podDaemonNodeCritical.Namespace)
+			ExpectPodExists(ctx, env.Client, podDaemonClusterCritical.Name, podDaemonClusterCritical.Namespace)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
+			ExpectEvicted(env.Client, podDaemonNodeCritical)
+			ExpectEvicted(env.Client, podDaemonClusterCritical)
+			ExpectDeleted(ctx, env.Client, podDaemonNodeCritical)
+			ExpectDeleted(ctx, env.Client, podDaemonClusterCritical)
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
@@ -300,7 +388,7 @@ var _ = Describe("Termination", func() {
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
 
 			// Expect node to exist and be draining
-			ExpectNodeDraining(env.Client, node.Name)
+			ExpectNodeWithMachineDraining(env.Client, node.Name)
 
 			// Expect podEvict to be evicting, and delete it
 			ExpectEvicted(env.Client, podEvict)
@@ -351,7 +439,7 @@ var _ = Describe("Termination", func() {
 			ExpectEvicted(env.Client, podEvict)
 
 			// Expect node to exist and be draining
-			ExpectNodeDraining(env.Client, node.Name)
+			ExpectNodeWithMachineDraining(env.Client, node.Name)
 
 			// Reconcile node to evict pod
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
@@ -383,14 +471,14 @@ var _ = Describe("Termination", func() {
 			// Expect node to exist and be draining, but not deleted
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
-			ExpectNodeDraining(env.Client, node.Name)
+			ExpectNodeWithMachineDraining(env.Client, node.Name)
 
 			ExpectDeleted(ctx, env.Client, pods[1])
 
 			// Expect node to exist and be draining, but not deleted
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
-			ExpectNodeDraining(env.Client, node.Name)
+			ExpectNodeWithMachineDraining(env.Client, node.Name)
 
 			ExpectDeleted(ctx, env.Client, pods[0])
 
@@ -416,7 +504,7 @@ var _ = Describe("Termination", func() {
 			// Expect node to exist and be draining, but not deleted
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
-			ExpectNodeDraining(env.Client, node.Name)
+			ExpectNodeWithMachineDraining(env.Client, node.Name)
 
 			// After this, the node still has one pod that is evicting.
 			ExpectDeleted(ctx, env.Client, pods[1])
@@ -491,7 +579,16 @@ func ExpectEvicted(c client.Client, pods ...*v1.Pod) {
 	}
 }
 
-func ExpectNodeDraining(c client.Client, nodeName string) *v1.Node {
+func ExpectNodeWithNodeClaimDraining(c client.Client, nodeName string) *v1.Node {
+	GinkgoHelper()
+	node := ExpectNodeExists(ctx, c, nodeName)
+	Expect(node.Spec.Taints).To(ContainElement(v1beta1.DisruptionNoScheduleTaint))
+	Expect(lo.Contains(node.Finalizers, v1beta1.TerminationFinalizer)).To(BeTrue())
+	Expect(node.DeletionTimestamp.IsZero()).To(BeFalse())
+	return node
+}
+
+func ExpectNodeWithMachineDraining(c client.Client, nodeName string) *v1.Node {
 	GinkgoHelper()
 	node := ExpectNodeExists(ctx, c, nodeName)
 	Expect(node.Spec.Unschedulable).To(BeTrue())
