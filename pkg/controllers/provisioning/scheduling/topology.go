@@ -256,6 +256,11 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 		}
 		node := &v1.Node{}
 		if err := t.kubeClient.Get(ctx, types.NamespacedName{Name: p.Spec.NodeName}, node); err != nil {
+			// Pods that cannot be evicted can be leaked in the API Server after
+			// a Node is removed. Since pod bindings are immutable, these pods
+			// cannot be recovered, and will be deleted by the pod lifecycle
+			// garbage collector. These pods are not running, and should not
+			// impact future topology calculations.
 			if errors.IsNotFound(err) {
 				continue
 			}
