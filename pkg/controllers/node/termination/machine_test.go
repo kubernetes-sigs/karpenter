@@ -494,7 +494,7 @@ var _ = Describe("Machine/Termination", func() {
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 
-			m, ok := FindMetricWithLabelValues("karpenter_nodes_termination_time_seconds", map[string]string{"provisioner": ""})
+			m, ok := FindMetricWithLabelValues("karpenter_nodes_termination_time_seconds", map[string]string{"provisioner": node.Labels[v1alpha5.ProvisionerNameLabelKey]})
 			Expect(ok).To(BeTrue())
 			Expect(m.GetSummary().GetSampleCount()).To(BeNumerically("==", 1))
 		})
@@ -504,7 +504,7 @@ var _ = Describe("Machine/Termination", func() {
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 
-			m, ok := FindMetricWithLabelValues("karpenter_nodes_terminated", map[string]string{"provisioner": ""})
+			m, ok := FindMetricWithLabelValues("karpenter_nodes_terminated", map[string]string{"provisioner": node.Labels[v1alpha5.ProvisionerNameLabelKey]})
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.GetCounter().Value)).To(BeNumerically("==", 1))
 		})

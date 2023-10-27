@@ -120,11 +120,38 @@ var _ = Describe("NodeClaim/Termination", func() {
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			Expect(node.Labels[v1.LabelNodeExcludeBalancers]).Should(Equal("karpenter"))
 		})
-		It("should not evict pods that tolerate unschedulable taint", func() {
+		It("should not evict pods that tolerate karpenter disruption taint with equal operator", func() {
 			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
 			podSkip := test.Pod(test.PodOptions{
 				NodeName:    node.Name,
-				Tolerations: []v1.Toleration{{Key: v1.TaintNodeUnschedulable, Operator: v1.TolerationOpExists, Effect: v1.TaintEffectNoSchedule}},
+				Tolerations: []v1.Toleration{{Key: v1beta1.DisruptionTaintKey, Operator: v1.TolerationOpEqual, Effect: v1beta1.DisruptionNoScheduleTaint.Effect, Value: v1beta1.DisruptionNoScheduleTaint.Value}},
+				ObjectMeta:  metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
+			})
+			ExpectApplied(ctx, env.Client, node, podEvict, podSkip)
+
+			// Trigger Termination Controller
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
+
+			// Expect node to exist and be draining
+			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
+
+			// Expect podEvict to be evicting, and delete it
+			ExpectEvicted(env.Client, podEvict)
+			ExpectDeleted(ctx, env.Client, podEvict)
+
+			// Reconcile to delete node
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectNotFound(ctx, env.Client, node)
+		})
+		It("should not evict pods that tolerate karpenter disruption taint with exists operator", func() {
+			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
+			podSkip := test.Pod(test.PodOptions{
+				NodeName:    node.Name,
+				Tolerations: []v1.Toleration{{Key: v1beta1.DisruptionTaintKey, Operator: v1.TolerationOpExists, Effect: v1beta1.DisruptionNoScheduleTaint.Effect}},
 				ObjectMeta:  metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
 			})
 			ExpectApplied(ctx, env.Client, node, podEvict, podSkip)
@@ -492,7 +519,7 @@ var _ = Describe("NodeClaim/Termination", func() {
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 
-			m, ok := FindMetricWithLabelValues("karpenter_nodes_termination_time_seconds", map[string]string{"nodepool": ""})
+			m, ok := FindMetricWithLabelValues("karpenter_nodes_termination_time_seconds", map[string]string{"nodepool": node.Labels[v1beta1.NodePoolLabelKey]})
 			Expect(ok).To(BeTrue())
 			Expect(m.GetSummary().GetSampleCount()).To(BeNumerically("==", 1))
 		})
@@ -502,7 +529,7 @@ var _ = Describe("NodeClaim/Termination", func() {
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 
-			m, ok := FindMetricWithLabelValues("karpenter_nodes_terminated", map[string]string{"nodepool": ""})
+			m, ok := FindMetricWithLabelValues("karpenter_nodes_terminated", map[string]string{"nodepool": node.Labels[v1beta1.NodePoolLabelKey]})
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.GetCounter().Value)).To(BeNumerically("==", 1))
 		})
