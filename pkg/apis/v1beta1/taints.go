@@ -14,13 +14,27 @@ limitations under the License.
 
 package v1beta1
 
-import v1 "k8s.io/api/core/v1"
+import (
+	"fmt"
+
+	v1 "k8s.io/api/core/v1"
+)
 
 // Karpenter specific taints
 const (
-	DisruptionTaintKey             = Group + "/disruption"
-	DisruptingNoScheduleTaintValue = "disrupting"
+	DisruptionTaintKey                  = Group + "/disruption"
+	DisruptingNoScheduleTaintValue      = "disrupting"
+	TerminationTaintKey                 = Group + "/termination"
+	TerminationNoExecuteTaintValue      = "termination"
+	CandidateTaintKey                   = Group + "/candidate"
+	CandidatePreferNoScheduleTaintValue = "candidate"
 )
+
+var TaintFuncs = map[v1.Taint]func(taint v1.Taint) bool{
+	DisruptionNoScheduleTaint:      IsDisruptingTaint,
+	TerminationNoExecuteTaint:      IsTerminatingTaint,
+	CandidatePreferNoScheduleTaint: IsCandidateTaint,
+}
 
 var (
 	// DisruptionNoScheduleTaint is used by the deprovisioning controller to ensure no pods
@@ -30,8 +44,27 @@ var (
 		Effect: v1.TaintEffectNoSchedule,
 		Value:  DisruptingNoScheduleTaintValue,
 	}
+	TerminationNoExecuteTaint = v1.Taint{
+		Key:    TerminationTaintKey,
+		Effect: v1.TaintEffectNoExecute,
+		Value:  TerminationNoExecuteTaintValue,
+	}
+	CandidatePreferNoScheduleTaint = v1.Taint{
+		Key:    CandidateTaintKey,
+		Effect: v1.TaintEffectPreferNoSchedule,
+		Value:  CandidatePreferNoScheduleTaintValue,
+	}
 )
 
 func IsDisruptingTaint(taint v1.Taint) bool {
+	fmt.Println("taint recieved is", taint)
 	return taint.MatchTaint(&DisruptionNoScheduleTaint) && taint.Value == DisruptingNoScheduleTaintValue
+}
+
+func IsTerminatingTaint(taint v1.Taint) bool {
+	return taint.MatchTaint(&TerminationNoExecuteTaint) && taint.Value == TerminationNoExecuteTaintValue
+}
+
+func IsCandidateTaint(taint v1.Taint) bool {
+	return taint.MatchTaint(&CandidatePreferNoScheduleTaint) && taint.Value == CandidatePreferNoScheduleTaintValue
 }
