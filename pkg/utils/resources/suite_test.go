@@ -54,8 +54,8 @@ var _ = Describe("Resources Handling", func() {
 				},
 			})
 			podResources := Ceiling(pod)
-			Expect(podResources.Limits.Cpu().CmpInt64(6)).To(Equal(0))
-			Expect(podResources.Limits.Memory().CmpInt64(3221225472)).To(Equal(0))
+			Expect(podResources.Limits.Cpu().Value()).To(BeNumerically("==", 6))
+			Expect(podResources.Limits.Memory().Value()).To(BeNumerically("==", 3221225472))
 		})
 
 		It("should schedule based on the sum of containers , sidecarContainers and overhead with max of initcontainers", func() {
@@ -86,11 +86,11 @@ var _ = Describe("Resources Handling", func() {
 				},
 			})
 			podResources := Ceiling(pod)
-			Expect(podResources.Limits.Cpu().CmpInt64(10)).To(Equal(0))
-			Expect(podResources.Limits.Memory().CmpInt64(4819255296)).To(Equal(0))
+			Expect(podResources.Limits.Cpu().Value()).To(BeNumerically("==", 10))
+			Expect(podResources.Limits.Memory().Value()).To(BeNumerically("==", 4819255296))
 		})
 
-		It("should schedule based on the max resource requests of containers and initContainers with sidecarContainers for order of type1", func() {
+		It("should schedule based on the max resource requests of containers and initContainers with sidecarContainers when there is a large initcontainer", func() {
 
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
@@ -115,12 +115,12 @@ var _ = Describe("Resources Handling", func() {
 				},
 			})
 			podResources := Ceiling(pod)
-			Expect(podResources.Limits.Cpu().CmpInt64(14)).To(Equal(0))
-			Expect(podResources.Limits.Memory().CmpInt64(4294967296)).To(Equal(0))
+			Expect(podResources.Limits.Cpu().Value()).To(BeNumerically("==", 14))
+			Expect(podResources.Limits.Memory().Value()).To(BeNumerically("==", 4294967296))
 
 		})
 
-		It("should schedule based on the max resource requests of containers and initContainers with sidecarContainers for order of type2", func() {
+		It("should schedule based on the max resource requests of containers and initContainers with sidecarContainers when there is a large sidecar container", func() {
 
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
@@ -145,12 +145,12 @@ var _ = Describe("Resources Handling", func() {
 				},
 			})
 			podResources := Ceiling(pod)
-			Expect(podResources.Limits.Cpu().CmpInt64(6)).To(Equal(0))
-			Expect(podResources.Limits.Memory().CmpInt64(4294967296)).To(Equal(0))
+			Expect(podResources.Limits.Cpu().Value()).To(BeNumerically("==", 6))
+			Expect(podResources.Limits.Memory().Value()).To(BeNumerically("==", 4294967296))
 
 		})
 
-		It("should schedule based on the max resource requests of containers and initContainers with sidecarContainers for order of type3", func() {
+		It("should schedule based on the max resource requests of containers and initContainers with sidecarContainers when considering multiple sidecars and a large initcontainer", func() {
 
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
@@ -196,12 +196,12 @@ var _ = Describe("Resources Handling", func() {
 				},
 			})
 			podResources := Ceiling(pod)
-			Expect(podResources.Limits.Cpu().CmpInt64(31)).To(Equal(0))
-			Expect(podResources.Limits.Memory().CmpInt64(33285996544)).To(Equal(0))
+			Expect(podResources.Limits.Cpu().Value()).To(BeNumerically("==", 31))
+			Expect(podResources.Limits.Memory().Value()).To(BeNumerically("==", 33285996544))
 
 		})
 
-		It("should schedule based on the max resource requests of containers and initContainers with sidecarContainers for order of type4", func() {
+		It("should schedule based on the max resource requests of containers and initContainers with sidecarContainers for multiple sidecars and a small initcontainer", func() {
 
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
@@ -247,12 +247,12 @@ var _ = Describe("Resources Handling", func() {
 				},
 			})
 			podResources := Ceiling(pod)
-			Expect(podResources.Limits.Cpu().CmpInt64(14)).To(Equal(0))
-			Expect(podResources.Limits.Memory().CmpInt64(15032385536)).To(Equal(0))
+			Expect(podResources.Limits.Cpu().Value()).To(BeNumerically("==", 14))
+			Expect(podResources.Limits.Memory().Value()).To(BeNumerically("==", 15032385536))
 
 		})
 
-		It("should schedule based on the max resource requests of containers and initContainers with sidecarContainers for order of type5", func() {
+		It("should schedule based on the max resource requests of containers and initContainers with sidecarContainers with multiple sidecars and initcontainers where one of the initcontainer exceeds the sum of them", func() {
 
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
@@ -316,12 +316,12 @@ var _ = Describe("Resources Handling", func() {
 				},
 			})
 			podResources := Ceiling(pod)
-			Expect(podResources.Limits.Cpu().CmpInt64(25)).To(Equal(0))
-			Expect(podResources.Limits.Memory().CmpInt64(26843545600)).To(Equal(0))
+			Expect(podResources.Limits.Cpu().Value()).To(BeNumerically("==", 25))
+			Expect(podResources.Limits.Memory().Value()).To(BeNumerically("==", 26843545600))
 
 		})
 
-		It("should schedule based on the max resource requests of containers and initContainers with sidecarContainers for order of type6", func() {
+		It("should schedule based on the max resource requests of containers and initContainers with sidecarContainers with multiple sidecars and initcontainers where one of the initcontainer does not exceed the sum of them", func() {
 
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
@@ -385,8 +385,8 @@ var _ = Describe("Resources Handling", func() {
 				},
 			})
 			podResources := Ceiling(pod)
-			Expect(podResources.Limits.Cpu().CmpInt64(10)).To(Equal(0))
-			Expect(podResources.Limits.Memory().CmpInt64(10737418240)).To(Equal(0))
+			Expect(podResources.Limits.Cpu().Value()).To(BeNumerically("==", 10))
+			Expect(podResources.Limits.Memory().Value()).To(BeNumerically("==", 10737418240))
 
 		})
 

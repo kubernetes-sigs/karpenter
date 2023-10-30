@@ -110,16 +110,18 @@ func podRequests(pod *v1.Pod) v1.ResourceList {
 
 	for _, container := range pod.Spec.InitContainers {
 		containerReqs := MergeResourceLimitsIntoRequests(container)
+		// If the init container's policy is "Always", then we need to add this container's requests to the total requests. We also need to track this container's request as the required requests for other initContainers
 		if lo.FromPtr(container.RestartPolicy) == v1.ContainerRestartPolicyAlways {
 			MergeInto(requests, containerReqs)
 			MergeInto(restartableInitContainerReqs, containerReqs)
 			maxInitContainerReqs = MaxResources(maxInitContainerReqs, restartableInitContainerReqs)
 
 		} else {
+			// Else, check whether the current container's resource requests combined with the restartableInitContainer requests are greater than the current max
 			maxInitContainerReqs = MaxResources(maxInitContainerReqs, Merge(containerReqs, restartableInitContainerReqs))
 		}
 	}
-
+	// The container's needed requests are the max of all of the container requests combined with native sidecar container requests OR the requests required for a large init containers with native sidecar container requests to run
 	requests = MaxResources(requests, maxInitContainerReqs)
 
 	if pod.Spec.Overhead != nil {
@@ -139,15 +141,17 @@ func podLimits(pod *v1.Pod) v1.ResourceList {
 	}
 
 	for _, container := range pod.Spec.InitContainers {
+		// If the init container's policy is "Always", then we need to add this container's limits to the total limits. We also need to track this container's limit as the required limits for other initContainers
 		if lo.FromPtr(container.RestartPolicy) == v1.ContainerRestartPolicyAlways {
 			MergeInto(limits, container.Resources.Limits)
 			MergeInto(restartableInitContainerLimits, container.Resources.Limits)
 			maxInitContainerLimits = MaxResources(maxInitContainerLimits, restartableInitContainerLimits)
 		} else {
+			// Else, check whether the current container's resource limits combined with the restartableInitContainer limits are greater than the current max
 			maxInitContainerLimits = MaxResources(maxInitContainerLimits, Merge(container.Resources.Limits, restartableInitContainerLimits))
 		}
 	}
-
+	// The container's needed limits are the max of all of the container limits combined with native sidecar container limits OR the limits required for a large init containers with native sidecar container limits to run
 	limits = MaxResources(limits, maxInitContainerLimits)
 
 	if pod.Spec.Overhead != nil {

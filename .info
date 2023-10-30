@@ -1,1 +1,0 @@
-check if karpenter removes daemonsets during draining or if it checks if daemonsets r there when its marks the node to be empty
