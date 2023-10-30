@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	. "github.com/aws/karpenter-core/pkg/test/expectations"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
@@ -77,6 +78,10 @@ var _ = AfterSuite(func() {
 	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
 })
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 0aae222e (remove v1alpha5 metrics and counter)
 var nodePool *v1beta1.NodePool
 var nodeClaim, nodeClaim2 *v1beta1.NodeClaim
 
