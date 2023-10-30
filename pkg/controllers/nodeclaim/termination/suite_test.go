@@ -45,8 +45,6 @@ var ctx context.Context
 var env *test.Environment
 var fakeClock *clock.FakeClock
 var cloudProvider *fake.CloudProvider
-var machineController controller.Controller
-var machineTerminationController controller.Controller
 var nodeClaimController controller.Controller
 var nodeClaimTerminationController controller.Controller
 
@@ -65,8 +63,6 @@ var _ = BeforeSuite(func() {
 	}))
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
-	machineController = nodeclaimlifecycle.NewMachineController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
-	machineTerminationController = nodeclaimtermination.NewMachineController(env.Client, cloudProvider)
 	nodeClaimController = nodeclaimlifecycle.NewNodeClaimController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
 	nodeClaimTerminationController = nodeclaimtermination.NewNodeClaimController(env.Client, cloudProvider)
 })

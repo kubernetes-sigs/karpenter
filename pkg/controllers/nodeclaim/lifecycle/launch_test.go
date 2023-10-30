@@ -32,7 +32,7 @@ import (
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
-var _ = Describe("NodeClaim/Launch", func() {
+var _ = Describe("Launch", func() {
 	var nodePool *v1beta1.NodePool
 	BeforeEach(func() {
 		nodePool = test.NodePool()

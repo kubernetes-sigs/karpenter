@@ -22,16 +22,17 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/workqueue"
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	. "knative.dev/pkg/logging/testing"
 
 	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	nodeclaimgarbagecollection "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/garbagecollection"
@@ -41,13 +42,11 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/options"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
 var ctx context.Context
-var machineController controller.Controller
 var nodeClaimController controller.Controller
 var garbageCollectionController controller.Controller
 var env *test.Environment
@@ -70,7 +69,6 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	garbageCollectionController = nodeclaimgarbagecollection.NewController(fakeClock, env.Client, cloudProvider)
-	machineController = nodeclaimlifcycle.NewMachineController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
 	nodeClaimController = nodeclaimlifcycle.NewNodeClaimController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
 })
 
@@ -84,23 +82,13 @@ var _ = AfterEach(func() {
 	cloudProvider.Reset()
 })
 
-var _ = Describe("Combined/GarbageCollection", func() {
-	var provisioner *v1alpha5.Provisioner
+var _ = Describe("NodeClaim/GarbageCollection", func() {
 	var nodePool *v1beta1.NodePool
 
 	BeforeEach(func() {
-		provisioner = test.Provisioner()
 		nodePool = test.NodePool()
 	})
-
-	It("should delete both NodeClaims and Machines when the Node never appears and the instance is gone", func() {
-		machine := test.Machine(v1alpha5.Machine{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-				},
-			},
-		})
+	It("should delete the NodeClaim when the Node never appears and the instance is gone", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -108,23 +96,76 @@ var _ = Describe("Combined/GarbageCollection", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, provisioner, machine, nodePool, nodeClaim)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-		machine = ExpectExists(ctx, env.Client, machine)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		// Step forward to move past the cache eventual consistency timeout
 		fakeClock.SetTime(time.Now().Add(time.Second * 20))
 
-		// Delete the NodeClaim and Machine from the cloudprovider
-		Expect(cloudProvider.Delete(ctx, nodeclaimutil.New(machine))).To(Succeed())
+		// Delete the nodeClaim from the cloudprovider
 		Expect(cloudProvider.Delete(ctx, nodeClaim)).To(Succeed())
 
 		// Expect the NodeClaim to be removed now that the Instance is gone
 		ExpectReconcileSucceeded(ctx, garbageCollectionController, client.ObjectKey{})
-		ExpectFinalizersRemoved(ctx, env.Client, machine)
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
-		ExpectNotFound(ctx, env.Client, machine, nodeClaim)
+		ExpectNotFound(ctx, env.Client, nodeClaim)
+	})
+	It("should delete many NodeClaims when the Node never appears and the instance is gone", func() {
+		var nodeClaims []*v1beta1.NodeClaim
+		for i := 0; i < 100; i++ {
+			nodeClaims = append(nodeClaims, test.NodeClaim(v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey: nodePool.Name,
+					},
+				},
+			}))
+		}
+		ExpectApplied(ctx, env.Client, nodePool)
+		workqueue.ParallelizeUntil(ctx, len(nodeClaims), len(nodeClaims), func(i int) {
+			defer GinkgoRecover()
+			ExpectApplied(ctx, env.Client, nodeClaims[i])
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaims[i]))
+			nodeClaims[i] = ExpectExists(ctx, env.Client, nodeClaims[i])
+		})
+
+		// Step forward to move past the cache eventual consistency timeout
+		fakeClock.SetTime(time.Now().Add(time.Second * 20))
+
+		workqueue.ParallelizeUntil(ctx, len(nodeClaims), len(nodeClaims), func(i int) {
+			defer GinkgoRecover()
+			// Delete the NodeClaim from the cloudprovider
+			Expect(cloudProvider.Delete(ctx, nodeClaims[i])).To(Succeed())
+		})
+
+		// Expect the NodeClaims to be removed now that the Instance is gone
+		ExpectReconcileSucceeded(ctx, garbageCollectionController, client.ObjectKey{})
+
+		workqueue.ParallelizeUntil(ctx, len(nodeClaims), len(nodeClaims), func(i int) {
+			defer GinkgoRecover()
+			ExpectFinalizersRemoved(ctx, env.Client, nodeClaims[i])
+		})
+		ExpectNotFound(ctx, env.Client, lo.Map(nodeClaims, func(n *v1beta1.NodeClaim, _ int) client.Object { return n })...)
+	})
+	It("shouldn't delete the NodeClaim when the Node isn't there but the instance is there", func() {
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		// Step forward to move past the cache eventual consistency timeout
+		fakeClock.SetTime(time.Now().Add(time.Second * 20))
+
+		// Reconcile the NodeClaim. It should not be deleted by this flow since it has never been registered
+		ExpectReconcileSucceeded(ctx, garbageCollectionController, client.ObjectKey{})
+		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+		ExpectExists(ctx, env.Client, nodeClaim)
 	})
 })

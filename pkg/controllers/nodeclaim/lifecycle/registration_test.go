@@ -19,7 +19,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/test"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -28,149 +28,149 @@ import (
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
-var _ = Describe("Machine/Registration", func() {
-	var provisioner *v1alpha5.Provisioner
+var _ = Describe("Registration", func() {
+	var nodePool *v1beta1.NodePool
 	BeforeEach(func() {
-		provisioner = test.Provisioner()
+		nodePool = test.NodePool()
 	})
-	It("should match the Machine to the Node when the Node comes online", func() {
-		machine := test.Machine(v1alpha5.Machine{
+	It("should match the nodeClaim to the Node when the Node comes online", func() {
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
-		node := test.Node(test.NodeOptions{ProviderID: machine.Status.ProviderID})
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
 		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
-		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineRegistered).Status).To(Equal(v1.ConditionTrue))
-		Expect(machine.Status.NodeName).To(Equal(node.Name))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
+		Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
 	})
 	It("should add the owner reference to the Node when the Node comes online", func() {
-		machine := test.Machine(v1alpha5.Machine{
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
-		node := test.Node(test.NodeOptions{ProviderID: machine.Status.ProviderID})
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
 		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
 		node = ExpectExists(ctx, env.Client, node)
-		ExpectOwnerReferenceExists(node, machine)
+		ExpectOwnerReferenceExists(node, nodeClaim)
 	})
 	It("should sync the karpenter.sh/registered label to the Node when the Node comes online", func() {
-		machine := test.Machine(v1alpha5.Machine{
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
-		node := test.Node(test.NodeOptions{ProviderID: machine.Status.ProviderID})
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
 		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		node = ExpectExists(ctx, env.Client, node)
-		Expect(node.Labels).To(HaveKeyWithValue(v1alpha5.LabelNodeRegistered, "true"))
+		Expect(node.Labels).To(HaveKeyWithValue(v1beta1.NodeRegisteredLabelKey, "true"))
 	})
-	It("should sync the karpenter.sh/registered label to the Node if the Machine already registered", func() {
-		machine := test.Machine(v1alpha5.Machine{
+	It("should sync the karpenter.sh/registered label to the Node if the nodeClaim already registered", func() {
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
 		})
-		machine.StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
-		machine.StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
-		machine.StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Launched)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Registered)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Initialized)
 
-		node := test.Node(test.NodeOptions{ProviderID: machine.Status.ProviderID})
-		ExpectApplied(ctx, env.Client, machine, node)
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
+		ExpectApplied(ctx, env.Client, nodeClaim, node)
 
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		node = ExpectExists(ctx, env.Client, node)
-		Expect(node.Labels).To(HaveKeyWithValue(v1alpha5.LabelNodeRegistered, "true"))
+		Expect(node.Labels).To(HaveKeyWithValue(v1beta1.NodeRegisteredLabelKey, "true"))
 	})
 	It("should sync the labels to the Node when the Node comes online", func() {
-		machine := test.Machine(v1alpha5.Machine{
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-					"custom-label":                   "custom-value",
-					"other-custom-label":             "other-custom-value",
+					v1beta1.NodePoolLabelKey: nodePool.Name,
+					"custom-label":           "custom-value",
+					"other-custom-label":     "other-custom-value",
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(machine.Labels).To(HaveKeyWithValue("custom-label", "custom-value"))
-		Expect(machine.Labels).To(HaveKeyWithValue("other-custom-label", "other-custom-value"))
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.Labels).To(HaveKeyWithValue("custom-label", "custom-value"))
+		Expect(nodeClaim.Labels).To(HaveKeyWithValue("other-custom-label", "other-custom-value"))
 
-		node := test.Node(test.NodeOptions{ProviderID: machine.Status.ProviderID})
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
 		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		node = ExpectExists(ctx, env.Client, node)
 
-		// Expect Node to have all the labels that the Machine has
-		for k, v := range machine.Labels {
+		// Expect Node to have all the labels that the nodeClaim has
+		for k, v := range nodeClaim.Labels {
 			Expect(node.Labels).To(HaveKeyWithValue(k, v))
 		}
 	})
 	It("should sync the annotations to the Node when the Node comes online", func() {
-		machine := test.Machine(v1alpha5.Machine{
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 				Annotations: map[string]string{
-					v1alpha5.DoNotConsolidateNodeAnnotationKey: "true",
-					"my-custom-annotation":                     "my-custom-value",
+					v1beta1.DoNotDisruptAnnotationKey: "true",
+					"my-custom-annotation":            "my-custom-value",
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(machine.Annotations).To(HaveKeyWithValue(v1alpha5.DoNotConsolidateNodeAnnotationKey, "true"))
-		Expect(machine.Annotations).To(HaveKeyWithValue("my-custom-annotation", "my-custom-value"))
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1beta1.DoNotDisruptAnnotationKey, "true"))
+		Expect(nodeClaim.Annotations).To(HaveKeyWithValue("my-custom-annotation", "my-custom-value"))
 
-		node := test.Node(test.NodeOptions{ProviderID: machine.Status.ProviderID})
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
 		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		node = ExpectExists(ctx, env.Client, node)
 
-		// Expect Node to have all the annotations that the Machine has
-		for k, v := range machine.Annotations {
+		// Expect Node to have all the annotations that the nodeClaim has
+		for k, v := range nodeClaim.Annotations {
 			Expect(node.Annotations).To(HaveKeyWithValue(k, v))
 		}
 	})
 	It("should sync the taints to the Node when the Node comes online", func() {
-		machine := test.Machine(v1alpha5.Machine{
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1alpha5.MachineSpec{
+			Spec: v1beta1.NodeClaimSpec{
 				Taints: []v1.Taint{
 					{
 						Key:    "custom-taint",
@@ -185,10 +185,10 @@ var _ = Describe("Machine/Registration", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(machine.Spec.Taints).To(ContainElements(
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.Spec.Taints).To(ContainElements(
 			v1.Taint{
 				Key:    "custom-taint",
 				Effect: v1.TaintEffectNoSchedule,
@@ -201,9 +201,9 @@ var _ = Describe("Machine/Registration", func() {
 			},
 		))
 
-		node := test.Node(test.NodeOptions{ProviderID: machine.Status.ProviderID})
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
 		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		node = ExpectExists(ctx, env.Client, node)
 
 		Expect(node.Spec.Taints).To(ContainElements(
@@ -220,13 +220,13 @@ var _ = Describe("Machine/Registration", func() {
 		))
 	})
 	It("should sync the startupTaints to the Node when the Node comes online", func() {
-		machine := test.Machine(v1alpha5.Machine{
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1alpha5.MachineSpec{
+			Spec: v1beta1.NodeClaimSpec{
 				Taints: []v1.Taint{
 					{
 						Key:    "custom-taint",
@@ -253,10 +253,10 @@ var _ = Describe("Machine/Registration", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(machine.Spec.StartupTaints).To(ContainElements(
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.Spec.StartupTaints).To(ContainElements(
 			v1.Taint{
 				Key:    "custom-startup-taint",
 				Effect: v1.TaintEffectNoSchedule,
@@ -269,9 +269,9 @@ var _ = Describe("Machine/Registration", func() {
 			},
 		))
 
-		node := test.Node(test.NodeOptions{ProviderID: machine.Status.ProviderID})
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
 		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		node = ExpectExists(ctx, env.Client, node)
 
 		Expect(node.Spec.Taints).To(ContainElements(
@@ -298,13 +298,13 @@ var _ = Describe("Machine/Registration", func() {
 		))
 	})
 	It("should not re-sync the startupTaints to the Node when the startupTaints are removed", func() {
-		machine := test.Machine(v1alpha5.Machine{
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1alpha5.MachineSpec{
+			Spec: v1beta1.NodeClaimSpec{
 				StartupTaints: []v1.Taint{
 					{
 						Key:    "custom-startup-taint",
@@ -319,13 +319,13 @@ var _ = Describe("Machine/Registration", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
-		node := test.Node(test.NodeOptions{ProviderID: machine.Status.ProviderID})
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
 		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		node = ExpectExists(ctx, env.Client, node)
 
 		Expect(node.Spec.Taints).To(ContainElements(
@@ -343,7 +343,7 @@ var _ = Describe("Machine/Registration", func() {
 		node.Spec.Taints = []v1.Taint{}
 		ExpectApplied(ctx, env.Client, node)
 
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		node = ExpectExists(ctx, env.Client, node)
 		Expect(node.Spec.Taints).To(HaveLen(0))
 	})

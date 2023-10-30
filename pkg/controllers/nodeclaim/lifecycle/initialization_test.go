@@ -21,7 +21,7 @@ import (
 	cloudproviderapi "k8s.io/cloud-provider/api"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/test"
 
@@ -31,21 +31,21 @@ import (
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
-var _ = Describe("Machine/Initialization", func() {
-	var provisioner *v1alpha5.Provisioner
+var _ = Describe("Initialization", func() {
+	var nodePool *v1beta1.NodePool
 
 	BeforeEach(func() {
-		provisioner = test.Provisioner()
+		nodePool = test.NodePool()
 	})
-	It("should consider the Machine initialized when all initialization conditions are met", func() {
-		machine := test.Machine(v1alpha5.Machine{
+	It("should consider the nodeClaim initialized when all initialization conditions are met", func() {
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1alpha5.MachineSpec{
-				Resources: v1alpha5.ResourceRequirements{
+			Spec: v1beta1.NodeClaimSpec{
+				Resources: v1beta1.ResourceRequirements{
 					Requests: v1.ResourceList{
 						v1.ResourceCPU:    resource.MustParse("2"),
 						v1.ResourceMemory: resource.MustParse("50Mi"),
@@ -54,21 +54,21 @@ var _ = Describe("Machine/Initialization", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
-			ProviderID: machine.Status.ProviderID,
+			ProviderID: nodeClaim.Status.ProviderID,
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
-		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineRegistered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineInitialized).Status).To(Equal(v1.ConditionFalse))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionFalse))
 
 		node = ExpectExists(ctx, env.Client, node)
 		node.Status.Capacity = v1.ResourceList{
@@ -82,21 +82,21 @@ var _ = Describe("Machine/Initialization", func() {
 			v1.ResourcePods:   resource.MustParse("110"),
 		}
 		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
-		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineRegistered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineInitialized).Status).To(Equal(v1.ConditionTrue))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionTrue))
 	})
-	It("should add the initialization label to the node when the Machine is initialized", func() {
-		machine := test.Machine(v1alpha5.Machine{
+	It("should add the initialization label to the node when the nodeClaim is initialized", func() {
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1alpha5.MachineSpec{
-				Resources: v1alpha5.ResourceRequirements{
+			Spec: v1beta1.NodeClaimSpec{
+				Resources: v1beta1.ResourceRequirements{
 					Requests: v1.ResourceList{
 						v1.ResourceCPU:    resource.MustParse("2"),
 						v1.ResourceMemory: resource.MustParse("50Mi"),
@@ -105,12 +105,12 @@ var _ = Describe("Machine/Initialization", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
-			ProviderID: machine.Status.ProviderID,
+			ProviderID: nodeClaim.Status.ProviderID,
 			Capacity: v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("10"),
 				v1.ResourceMemory: resource.MustParse("100Mi"),
@@ -125,20 +125,20 @@ var _ = Describe("Machine/Initialization", func() {
 		ExpectApplied(ctx, env.Client, node)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
 		node = ExpectExists(ctx, env.Client, node)
-		Expect(node.Labels).To(HaveKeyWithValue(v1alpha5.LabelNodeInitialized, "true"))
+		Expect(node.Labels).To(HaveKeyWithValue(v1beta1.NodeInitializedLabelKey, "true"))
 	})
 	It("should not consider the Node to be initialized when the status of the Node is NotReady", func() {
-		machine := test.Machine(v1alpha5.Machine{
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1alpha5.MachineSpec{
-				Resources: v1alpha5.ResourceRequirements{
+			Spec: v1beta1.NodeClaimSpec{
+				Resources: v1beta1.ResourceRequirements{
 					Requests: v1.ResourceList{
 						v1.ResourceCPU:    resource.MustParse("2"),
 						v1.ResourceMemory: resource.MustParse("50Mi"),
@@ -147,12 +147,12 @@ var _ = Describe("Machine/Initialization", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
-			ProviderID: machine.Status.ProviderID,
+			ProviderID: nodeClaim.Status.ProviderID,
 			Capacity: v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("10"),
 				v1.ResourceMemory: resource.MustParse("100Mi"),
@@ -166,21 +166,21 @@ var _ = Describe("Machine/Initialization", func() {
 			ReadyStatus: v1.ConditionFalse,
 		})
 		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
-		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineRegistered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineInitialized).Status).To(Equal(v1.ConditionFalse))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionFalse))
 	})
 	It("should not consider the Node to be initialized when all requested resources aren't registered", func() {
-		machine := test.Machine(v1alpha5.Machine{
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1alpha5.MachineSpec{
-				Resources: v1alpha5.ResourceRequirements{
+			Spec: v1beta1.NodeClaimSpec{
+				Resources: v1beta1.ResourceRequirements{
 					Requests: v1.ResourceList{
 						v1.ResourceCPU:          resource.MustParse("2"),
 						v1.ResourceMemory:       resource.MustParse("50Mi"),
@@ -190,18 +190,18 @@ var _ = Describe("Machine/Initialization", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
-		// Update the machine to add mock the instance type having an extended resource
-		machine.Status.Capacity[fake.ResourceGPUVendorA] = resource.MustParse("2")
-		machine.Status.Allocatable[fake.ResourceGPUVendorA] = resource.MustParse("2")
-		ExpectApplied(ctx, env.Client, machine)
+		// Update the nodeClaim to add mock the instance type having an extended resource
+		nodeClaim.Status.Capacity[fake.ResourceGPUVendorA] = resource.MustParse("2")
+		nodeClaim.Status.Allocatable[fake.ResourceGPUVendorA] = resource.MustParse("2")
+		ExpectApplied(ctx, env.Client, nodeClaim)
 
 		// Extended resource hasn't registered yet by the daemonset
 		node := test.Node(test.NodeOptions{
-			ProviderID: machine.Status.ProviderID,
+			ProviderID: nodeClaim.Status.ProviderID,
 			Capacity: v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("10"),
 				v1.ResourceMemory: resource.MustParse("100Mi"),
@@ -216,21 +216,21 @@ var _ = Describe("Machine/Initialization", func() {
 		ExpectApplied(ctx, env.Client, node)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
-		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineRegistered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineInitialized).Status).To(Equal(v1.ConditionFalse))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionFalse))
 	})
 	It("should consider the node to be initialized once all the resources are registered", func() {
-		machine := test.Machine(v1alpha5.Machine{
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1alpha5.MachineSpec{
-				Resources: v1alpha5.ResourceRequirements{
+			Spec: v1beta1.NodeClaimSpec{
+				Resources: v1beta1.ResourceRequirements{
 					Requests: v1.ResourceList{
 						v1.ResourceCPU:          resource.MustParse("2"),
 						v1.ResourceMemory:       resource.MustParse("50Mi"),
@@ -240,18 +240,18 @@ var _ = Describe("Machine/Initialization", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
-		// Update the machine to add mock the instance type having an extended resource
-		machine.Status.Capacity[fake.ResourceGPUVendorA] = resource.MustParse("2")
-		machine.Status.Allocatable[fake.ResourceGPUVendorA] = resource.MustParse("2")
-		ExpectApplied(ctx, env.Client, machine)
+		// Update the nodeClaim to add mock the instance type having an extended resource
+		nodeClaim.Status.Capacity[fake.ResourceGPUVendorA] = resource.MustParse("2")
+		nodeClaim.Status.Allocatable[fake.ResourceGPUVendorA] = resource.MustParse("2")
+		ExpectApplied(ctx, env.Client, nodeClaim)
 
 		// Extended resource hasn't registered yet by the daemonset
 		node := test.Node(test.NodeOptions{
-			ProviderID: machine.Status.ProviderID,
+			ProviderID: nodeClaim.Status.ProviderID,
 			Capacity: v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("10"),
 				v1.ResourceMemory: resource.MustParse("100Mi"),
@@ -266,11 +266,11 @@ var _ = Describe("Machine/Initialization", func() {
 		ExpectApplied(ctx, env.Client, node)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
-		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineRegistered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineInitialized).Status).To(Equal(v1.ConditionFalse))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionFalse))
 
 		// Node now registers the resource
 		node = ExpectExists(ctx, env.Client, node)
@@ -278,21 +278,21 @@ var _ = Describe("Machine/Initialization", func() {
 		node.Status.Allocatable[fake.ResourceGPUVendorA] = resource.MustParse("2")
 		ExpectApplied(ctx, env.Client, node)
 
-		// Reconcile the machine and the Machine/Node should now be initilized
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineRegistered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineInitialized).Status).To(Equal(v1.ConditionTrue))
+		// Reconcile the nodeClaim and the nodeClaim/Node should now be initilized
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionTrue))
 	})
 	It("should not consider the Node to be initialized when all startupTaints aren't removed", func() {
-		machine := test.Machine(v1alpha5.Machine{
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1alpha5.MachineSpec{
-				Resources: v1alpha5.ResourceRequirements{
+			Spec: v1beta1.NodeClaimSpec{
+				Resources: v1beta1.ResourceRequirements{
 					Requests: v1.ResourceList{
 						v1.ResourceCPU:    resource.MustParse("2"),
 						v1.ResourceMemory: resource.MustParse("50Mi"),
@@ -313,12 +313,12 @@ var _ = Describe("Machine/Initialization", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
-			ProviderID: machine.Status.ProviderID,
+			ProviderID: nodeClaim.Status.ProviderID,
 			Capacity: v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("10"),
 				v1.ResourceMemory: resource.MustParse("100Mi"),
@@ -334,7 +334,7 @@ var _ = Describe("Machine/Initialization", func() {
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 		// Should add the startup taints to the node
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		node = ExpectExists(ctx, env.Client, node)
 		Expect(node.Spec.Taints).To(ContainElements(
 			v1.Taint{
@@ -350,20 +350,20 @@ var _ = Describe("Machine/Initialization", func() {
 		))
 
 		// Shouldn't consider the node ready since the startup taints still exist
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineRegistered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineInitialized).Status).To(Equal(v1.ConditionFalse))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionFalse))
 	})
 	It("should consider the Node to be initialized once the startupTaints are removed", func() {
-		machine := test.Machine(v1alpha5.Machine{
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1alpha5.MachineSpec{
-				Resources: v1alpha5.ResourceRequirements{
+			Spec: v1beta1.NodeClaimSpec{
+				Resources: v1beta1.ResourceRequirements{
 					Requests: v1.ResourceList{
 						v1.ResourceCPU:    resource.MustParse("2"),
 						v1.ResourceMemory: resource.MustParse("50Mi"),
@@ -384,12 +384,12 @@ var _ = Describe("Machine/Initialization", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
-			ProviderID: machine.Status.ProviderID,
+			ProviderID: nodeClaim.Status.ProviderID,
 			Capacity: v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("10"),
 				v1.ResourceMemory: resource.MustParse("100Mi"),
@@ -405,30 +405,30 @@ var _ = Describe("Machine/Initialization", func() {
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 		// Shouldn't consider the node ready since the startup taints still exist
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineRegistered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineInitialized).Status).To(Equal(v1.ConditionFalse))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionFalse))
 
 		node = ExpectExists(ctx, env.Client, node)
 		node.Spec.Taints = []v1.Taint{}
 		ExpectApplied(ctx, env.Client, node)
 
-		// Machine should now be ready since all startup taints are removed
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineRegistered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineInitialized).Status).To(Equal(v1.ConditionTrue))
+		// nodeClaim should now be ready since all startup taints are removed
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionTrue))
 	})
 	It("should not consider the Node to be initialized when all ephemeralTaints aren't removed", func() {
-		machine := test.Machine(v1alpha5.Machine{
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1alpha5.MachineSpec{
-				Resources: v1alpha5.ResourceRequirements{
+			Spec: v1beta1.NodeClaimSpec{
+				Resources: v1beta1.ResourceRequirements{
 					Requests: v1.ResourceList{
 						v1.ResourceCPU:    resource.MustParse("2"),
 						v1.ResourceMemory: resource.MustParse("50Mi"),
@@ -449,12 +449,12 @@ var _ = Describe("Machine/Initialization", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
-			ProviderID: machine.Status.ProviderID,
+			ProviderID: nodeClaim.Status.ProviderID,
 			Capacity: v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("10"),
 				v1.ResourceMemory: resource.MustParse("100Mi"),
@@ -484,20 +484,20 @@ var _ = Describe("Machine/Initialization", func() {
 		ExpectApplied(ctx, env.Client, node)
 
 		// Shouldn't consider the node ready since the ephemeral taints still exist
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineRegistered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineInitialized).Status).To(Equal(v1.ConditionFalse))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionFalse))
 	})
 	It("should consider the Node to be initialized once the ephemeralTaints are removed", func() {
-		machine := test.Machine(v1alpha5.Machine{
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1alpha5.MachineSpec{
-				Resources: v1alpha5.ResourceRequirements{
+			Spec: v1beta1.NodeClaimSpec{
+				Resources: v1beta1.ResourceRequirements{
 					Requests: v1.ResourceList{
 						v1.ResourceCPU:    resource.MustParse("2"),
 						v1.ResourceMemory: resource.MustParse("50Mi"),
@@ -518,12 +518,12 @@ var _ = Describe("Machine/Initialization", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
-			ProviderID: machine.Status.ProviderID,
+			ProviderID: nodeClaim.Status.ProviderID,
 			Capacity: v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("10"),
 				v1.ResourceMemory: resource.MustParse("100Mi"),
@@ -553,19 +553,19 @@ var _ = Describe("Machine/Initialization", func() {
 		ExpectApplied(ctx, env.Client, node)
 
 		// Shouldn't consider the node ready since the ephemeral taints still exist
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineRegistered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineInitialized).Status).To(Equal(v1.ConditionFalse))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionFalse))
 
 		node = ExpectExists(ctx, env.Client, node)
 		node.Spec.Taints = []v1.Taint{}
 		ExpectApplied(ctx, env.Client, node)
 
-		// Machine should now be ready since all startup taints are removed
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineRegistered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineInitialized).Status).To(Equal(v1.ConditionTrue))
+		// nodeClaim should now be ready since all startup taints are removed
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionTrue))
 	})
 })
