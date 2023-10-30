@@ -31,12 +31,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 	"github.com/aws/karpenter-core/pkg/utils/result"
 )
@@ -160,68 +158,6 @@ func (c *NodeClaimController) Builder(_ context.Context, m manager.Manager) core
 		Watches(
 			&v1.Pod{},
 			nodeclaimutil.PodEventHandler(c.kubeClient),
-		),
-	)
-}
-
-var _ corecontroller.TypedController[*v1alpha5.Machine] = (*MachineController)(nil)
-
-type MachineController struct {
-	*Controller
-}
-
-func NewMachineController(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
-	return corecontroller.Typed[*v1alpha5.Machine](kubeClient, &MachineController{
-		Controller: NewController(clk, kubeClient, cluster, cloudProvider),
-	})
-}
-
-func (c *MachineController) Name() string {
-	return "machine.disruption"
-}
-
-func (c *MachineController) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	return c.Controller.Reconcile(ctx, nodeclaimutil.New(machine))
-}
-
-func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(controllerruntime.
-		NewControllerManagedBy(m).
-		For(&v1alpha5.Machine{}, builder.WithPredicates(
-			predicate.Or(
-				predicate.GenerationChangedPredicate{},
-				predicate.Funcs{
-					UpdateFunc: func(e event.UpdateEvent) bool {
-						oldMachine := e.ObjectOld.(*v1alpha5.Machine)
-						newMachine := e.ObjectNew.(*v1alpha5.Machine)
-
-						// One of the status conditions that affects disruption has changed
-						// which means that we should re-consider this for disruption
-						for _, cond := range v1alpha5.LivingConditions {
-							if !equality.Semantic.DeepEqual(
-								oldMachine.StatusConditions().GetCondition(cond),
-								newMachine.StatusConditions().GetCondition(cond),
-							) {
-								return true
-							}
-						}
-						return false
-					},
-				},
-			),
-		)).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
-		Watches(
-			&v1alpha5.Provisioner{},
-			machineutil.ProvisionerEventHandler(c.kubeClient),
-		).
-		Watches(
-			&v1.Node{},
-			machineutil.NodeEventHandler(c.kubeClient),
-		).
-		Watches(
-			&v1.Pod{},
-			machineutil.PodEventHandler(c.kubeClient),
 		),
 	)
 }

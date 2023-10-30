@@ -23,12 +23,14 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clock "k8s.io/utils/clock/testing"
 	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	nodeclaimdisruption "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/disruption"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -41,7 +43,6 @@ import (
 )
 
 var ctx context.Context
-var machineDisruptionController controller.Controller
 var nodeClaimDisruptionController controller.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
@@ -64,7 +65,6 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 	cp = fake.NewCloudProvider()
 	cluster = state.NewCluster(fakeClock, env.Client, cp)
-	machineDisruptionController = nodeclaimdisruption.NewMachineController(fakeClock, env.Client, cluster, cp)
 	nodeClaimDisruptionController = nodeclaimdisruption.NewNodeClaimController(fakeClock, env.Client, cluster, cp)
 })
 
@@ -81,4 +81,56 @@ var _ = AfterEach(func() {
 	cp.Reset()
 	cluster.Reset()
 	ExpectCleanedUp(ctx, env.Client)
+})
+
+var _ = Describe("NodeClaim/Disruption", func() {
+	var nodePool *v1beta1.NodePool
+	var nodeClaim *v1beta1.NodeClaim
+	var node *v1.Node
+
+	BeforeEach(func() {
+		nodePool = test.NodePool()
+		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{v1beta1.NodePoolLabelKey: nodePool.Name},
+			},
+		})
+	})
+	It("should set multiple disruption conditions simultaneously", func() {
+		cp.Drifted = "drifted"
+		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
+		nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)}
+		nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 30)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+
+		// step forward to make the node expired and empty
+		fakeClock.Step(60 * time.Second)
+		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Empty).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Expired).IsTrue()).To(BeTrue())
+	})
+	It("should remove multiple disruption conditions simultaneously", func() {
+		nodePool.Spec.Disruption.ExpireAfter.Duration = nil
+		nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: nil}
+
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Drifted)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Empty)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Expired)
+
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+
+		// Drift, Expiration, and Emptiness are disabled through configuration
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(false)}}))
+		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Empty)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Expired)).To(BeNil())
+	})
 })

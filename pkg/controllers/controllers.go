@@ -57,7 +57,6 @@ func NewControllers(
 		p, evictionQueue,
 		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster),
 		provisioning.NewController(kubeClient, p, recorder),
-		nodepoolhash.NewProvisionerController(kubeClient),
 		nodepoolhash.NewNodePoolController(kubeClient),
 		informer.NewDaemonSetController(kubeClient, cluster),
 		informer.NewNodeController(kubeClient, cluster),
@@ -78,7 +77,6 @@ func NewControllers(
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimtermination.NewMachineController(kubeClient, cloudProvider),
 		nodeclaimtermination.NewNodeClaimController(kubeClient, cloudProvider),
-		nodeclaimdisruption.NewMachineController(clock, kubeClient, cluster, cloudProvider),
 		nodeclaimdisruption.NewNodeClaimController(clock, kubeClient, cluster, cloudProvider),
 		leasegarbagecollection.NewController(kubeClient),
 	}
