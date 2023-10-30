@@ -19,7 +19,6 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/aws/karpenter-core/pkg/test/expectations"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
@@ -28,6 +27,8 @@ import (
 	clock "k8s.io/utils/clock/testing"
 	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	. "github.com/aws/karpenter-core/pkg/test/expectations"
 
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
@@ -40,7 +41,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/test"
 )
 
-var provisionerController controller.Controller
 var provisionerInformerController controller.Controller
 var nodePoolController controller.Controller
 var nodePoolInformerController controller.Controller
@@ -76,7 +76,6 @@ var _ = BeforeSuite(func() {
 var _ = AfterSuite(func() {
 	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
 })
-
 
 var nodePool *v1beta1.NodePool
 var nodeClaim, nodeClaim2 *v1beta1.NodeClaim
