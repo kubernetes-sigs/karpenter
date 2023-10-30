@@ -38,7 +38,7 @@ import (
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
-var _ = Describe("Provisioning", func() {
+var _ = Describe("Provisioner/Provisioning", func() {
 	It("should provision nodes", func() {
 		ExpectApplied(ctx, env.Client, test.Provisioner())
 		pod := test.UnschedulablePod()
@@ -110,6 +110,46 @@ var _ = Describe("Provisioning", func() {
 			ExpectNotScheduled(ctx, env.Client, pod)
 		}
 	})
+	It("should provision nodes for pods with supported node affinities", func() {
+		provisioner := test.Provisioner()
+		schedulable := []*v1.Pod{
+			// Constrained by provisioner
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1alpha5.ProvisionerNameLabelKey, Operator: v1.NodeSelectorOpIn, Values: []string{provisioner.Name}}}}),
+			// Constrained by zone
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}}),
+			// Constrained by instanceType
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"default-instance-type"}}}}),
+			// Constrained by architecture
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1.LabelArchStable, Operator: v1.NodeSelectorOpIn, Values: []string{"arm64"}}}}),
+			// Constrained by operatingSystem
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1.LabelOSStable, Operator: v1.NodeSelectorOpIn, Values: []string{string(v1.Linux)}}}}),
+		}
+		unschedulable := []*v1.Pod{
+			// Ignored, matches another provisioner
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1alpha5.ProvisionerNameLabelKey, Operator: v1.NodeSelectorOpIn, Values: []string{"unknown"}}}}),
+			// Ignored, invalid zone
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"unknown"}}}}),
+			// Ignored, invalid instance type
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"unknown"}}}}),
+			// Ignored, invalid architecture
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1.LabelArchStable, Operator: v1.NodeSelectorOpIn, Values: []string{"unknown"}}}}),
+			// Ignored, invalid operating system
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1.LabelOSStable, Operator: v1.NodeSelectorOpIn, Values: []string{"unknown"}}}}),
+			// Ignored, invalid capacity type
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1alpha5.LabelCapacityType, Operator: v1.NodeSelectorOpIn, Values: []string{"unknown"}}}}),
+			// Ignored, label selector does not match
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: "foo", Operator: v1.NodeSelectorOpIn, Values: []string{"bar"}}}}),
+		}
+		ExpectApplied(ctx, env.Client, provisioner)
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, schedulable...)
+		for _, pod := range schedulable {
+			ExpectScheduled(ctx, env.Client, pod)
+		}
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, unschedulable...)
+		for _, pod := range unschedulable {
+			ExpectNotScheduled(ctx, env.Client, pod)
+		}
+	})
 	It("should provision nodes for accelerators", func() {
 		ExpectApplied(ctx, env.Client, test.Provisioner())
 		pods := []*v1.Pod{
@@ -126,7 +166,7 @@ var _ = Describe("Provisioning", func() {
 		}
 	})
 	It("should provision multiple nodes when maxPods is set", func() {
-		// KubeletConfiguration is actually not observed here, the scheduler is relying on the
+		// Kubelet is actually not observed here, the scheduler is relying on the
 		// pods resource value which is statically set in the fake cloudprovider
 		ExpectApplied(ctx, env.Client, test.Provisioner(test.ProvisionerOptions{
 			Kubelet: &v1alpha5.KubeletConfiguration{MaxPods: ptr.Int32(1)},
@@ -149,7 +189,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectScheduled(ctx, env.Client, pod)
 		}
 	})
-	It("should schedule all pods on one node when node is in deleting state", func() {
+	It("should schedule all pods on one inflight node while node is in deleting state", func() {
 		provisioner := test.Provisioner()
 		its, err := cloudProvider.GetInstanceTypes(ctx, nodepoolutil.New(provisioner))
 		Expect(err).To(BeNil())
@@ -537,6 +577,73 @@ var _ = Describe("Provisioning", func() {
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
 		})
+		It("should account for daemonset spec affinity", func() {
+			provisioner := test.Provisioner(test.ProvisionerOptions{
+				Labels: map[string]string{
+					"foo": "voo",
+				},
+				Limits: v1.ResourceList{
+					v1.ResourceCPU: resource.MustParse("2"),
+				},
+			})
+			provisionerDaemonset := test.Provisioner(test.ProvisionerOptions{
+				Labels: map[string]string{
+					"foo": "bar",
+				},
+			})
+			// Create a daemonset with large resource requests
+			daemonset := test.DaemonSet(
+				test.DaemonSetOptions{PodOptions: test.PodOptions{
+					NodeRequirements: []v1.NodeSelectorRequirement{
+						{
+							Key:      "foo",
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"bar"},
+						},
+					},
+					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4"), v1.ResourceMemory: resource.MustParse("4Gi")}},
+				}},
+			)
+			ExpectApplied(ctx, env.Client, provisionerDaemonset, daemonset)
+			// Create the actual daemonSet pod with lower resource requests and expect to use the pod
+			daemonsetPod := test.UnschedulablePod(
+				test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								APIVersion:         "apps/v1",
+								Kind:               "DaemonSet",
+								Name:               daemonset.Name,
+								UID:                daemonset.UID,
+								Controller:         ptr.Bool(true),
+								BlockOwnerDeletion: ptr.Bool(true),
+							},
+						},
+					},
+					NodeRequirements: []v1.NodeSelectorRequirement{
+						{
+							Key:      metav1.ObjectNameField,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"node-name"},
+						},
+					},
+					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4"), v1.ResourceMemory: resource.MustParse("4Gi")}},
+				})
+			ExpectApplied(ctx, env.Client, daemonsetPod)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, daemonsetPod)
+			ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
+
+			//Deploy pod
+			pod := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+				NodeSelector: map[string]string{
+					"foo": "voo",
+				},
+			})
+			ExpectApplied(ctx, env.Client, provisioner, pod)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectScheduled(ctx, env.Client, pod)
+		})
 	})
 	Context("Annotations", func() {
 		It("should annotate nodes", func() {
@@ -819,7 +926,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 
 			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
-			Expect(cloudProvider.CreateCalls[0].Spec.NodeClass).To(Equal(
+			Expect(cloudProvider.CreateCalls[0].Spec.NodeClassRef).To(Equal(
 				&v1beta1.NodeClassReference{
 					APIVersion: "cloudprovider.karpenter.sh/v1alpha1",
 					Kind:       "CloudProvider",
@@ -900,398 +1007,395 @@ var _ = Describe("Provisioning", func() {
 			ExpectScheduled(ctx, env.Client, pod)
 		})
 	})
-})
-
-var _ = Describe("Volume Topology Requirements", func() {
-	var storageClass *storagev1.StorageClass
-	BeforeEach(func() {
-		storageClass = test.StorageClass(test.StorageClassOptions{Zones: []string{"test-zone-2", "test-zone-3"}})
-	})
-	It("should not schedule if invalid pvc", func() {
-		ExpectApplied(ctx, env.Client, test.Provisioner())
-		pod := test.UnschedulablePod(test.PodOptions{
-			PersistentVolumeClaims: []string{"invalid"},
+	Context("Volume Topology Requirements", func() {
+		var storageClass *storagev1.StorageClass
+		BeforeEach(func() {
+			storageClass = test.StorageClass(test.StorageClassOptions{Zones: []string{"test-zone-2", "test-zone-3"}})
 		})
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-		ExpectNotScheduled(ctx, env.Client, pod)
-	})
-	It("should schedule with an empty storage class", func() {
-		storageClass := ""
-		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{StorageClassName: &storageClass})
-		ExpectApplied(ctx, env.Client, test.Provisioner(), persistentVolumeClaim)
-		pod := test.UnschedulablePod(test.PodOptions{
-			PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
-		})
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-		ExpectScheduled(ctx, env.Client, pod)
-	})
-	It("should schedule valid pods when a pod with an invalid pvc is encountered (pvc)", func() {
-		ExpectApplied(ctx, env.Client, test.Provisioner())
-		invalidPod := test.UnschedulablePod(test.PodOptions{
-			PersistentVolumeClaims: []string{"invalid"},
-		})
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, invalidPod)
-		pod := test.UnschedulablePod()
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-		ExpectNotScheduled(ctx, env.Client, invalidPod)
-		ExpectScheduled(ctx, env.Client, pod)
-	})
-	It("should schedule valid pods when a pod with an invalid pvc is encountered (storage class)", func() {
-		invalidStorageClass := "invalid-storage-class"
-		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{StorageClassName: &invalidStorageClass})
-		ExpectApplied(ctx, env.Client, test.Provisioner(), persistentVolumeClaim)
-		invalidPod := test.UnschedulablePod(test.PodOptions{
-			PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
-		})
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, invalidPod)
-		pod := test.UnschedulablePod()
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-		ExpectNotScheduled(ctx, env.Client, invalidPod)
-		ExpectScheduled(ctx, env.Client, pod)
-	})
-	It("should schedule valid pods when a pod with an invalid pvc is encountered (volume name)", func() {
-		invalidVolumeName := "invalid-volume-name"
-		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{VolumeName: invalidVolumeName})
-		ExpectApplied(ctx, env.Client, test.Provisioner(), persistentVolumeClaim)
-		invalidPod := test.UnschedulablePod(test.PodOptions{
-			PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
-		})
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, invalidPod)
-		pod := test.UnschedulablePod()
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-		ExpectNotScheduled(ctx, env.Client, invalidPod)
-		ExpectScheduled(ctx, env.Client, pod)
-	})
-	It("should schedule to storage class zones if volume does not exist", func() {
-		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{StorageClassName: &storageClass.Name})
-		ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, persistentVolumeClaim)
-		pod := test.UnschedulablePod(test.PodOptions{
-			PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
-			NodeRequirements: []v1.NodeSelectorRequirement{{
-				Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-3"},
-			}},
-		})
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-		node := ExpectScheduled(ctx, env.Client, pod)
-		Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
-	})
-	It("should schedule to storage class zones if volume does not exist (ephemeral volume)", func() {
-		pod := test.UnschedulablePod(test.PodOptions{
-			EphemeralVolumeTemplates: []test.EphemeralVolumeTemplateOptions{
-				{
-					StorageClassName: &storageClass.Name,
-				},
-			},
-			NodeRequirements: []v1.NodeSelectorRequirement{{
-				Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-3"},
-			}},
-		})
-		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: fmt.Sprintf("%s-%s", pod.Name, pod.Spec.Volumes[0].Name),
-			},
-			StorageClassName: &storageClass.Name,
-		})
-		ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, persistentVolumeClaim)
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-		node := ExpectScheduled(ctx, env.Client, pod)
-		Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
-	})
-	It("should not schedule if storage class zones are incompatible", func() {
-		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{StorageClassName: &storageClass.Name})
-		ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, persistentVolumeClaim)
-		pod := test.UnschedulablePod(test.PodOptions{
-			PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
-			NodeRequirements: []v1.NodeSelectorRequirement{{
-				Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"},
-			}},
-		})
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-		ExpectNotScheduled(ctx, env.Client, pod)
-	})
-	It("should not schedule if storage class zones are incompatible (ephemeral volume)", func() {
-		pod := test.UnschedulablePod(test.PodOptions{
-			EphemeralVolumeTemplates: []test.EphemeralVolumeTemplateOptions{
-				{
-					StorageClassName: &storageClass.Name,
-				},
-			},
-			NodeRequirements: []v1.NodeSelectorRequirement{{
-				Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"},
-			}},
-		})
-		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: fmt.Sprintf("%s-%s", pod.Name, pod.Spec.Volumes[0].Name),
-			},
-			StorageClassName: &storageClass.Name,
-		})
-		ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, persistentVolumeClaim)
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-		ExpectNotScheduled(ctx, env.Client, pod)
-	})
-	It("should schedule to volume zones if volume already bound", func() {
-		persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{Zones: []string{"test-zone-3"}})
-		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{VolumeName: persistentVolume.Name, StorageClassName: &storageClass.Name})
-		ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, persistentVolumeClaim, persistentVolume)
-		pod := test.UnschedulablePod(test.PodOptions{
-			PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
-		})
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-		node := ExpectScheduled(ctx, env.Client, pod)
-		Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
-	})
-	It("should schedule to volume zones if volume already bound (ephemeral volume)", func() {
-		pod := test.UnschedulablePod(test.PodOptions{
-			EphemeralVolumeTemplates: []test.EphemeralVolumeTemplateOptions{
-				{
-					StorageClassName: &storageClass.Name,
-				},
-			},
-		})
-		persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{Zones: []string{"test-zone-3"}})
-		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: fmt.Sprintf("%s-%s", pod.Name, pod.Spec.Volumes[0].Name),
-			},
-			VolumeName:       persistentVolume.Name,
-			StorageClassName: &storageClass.Name,
-		})
-		ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, pod, persistentVolumeClaim, persistentVolume)
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-		node := ExpectScheduled(ctx, env.Client, pod)
-		Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
-	})
-	It("should not schedule if volume zones are incompatible", func() {
-		persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{Zones: []string{"test-zone-3"}})
-		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{VolumeName: persistentVolume.Name, StorageClassName: &storageClass.Name})
-		ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, persistentVolumeClaim, persistentVolume)
-		pod := test.UnschedulablePod(test.PodOptions{
-			PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
-			NodeRequirements: []v1.NodeSelectorRequirement{{
-				Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"},
-			}},
-		})
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-		ExpectNotScheduled(ctx, env.Client, pod)
-	})
-	It("should not schedule if volume zones are incompatible (ephemeral volume)", func() {
-		pod := test.UnschedulablePod(test.PodOptions{
-			EphemeralVolumeTemplates: []test.EphemeralVolumeTemplateOptions{
-				{
-					StorageClassName: &storageClass.Name,
-				},
-			},
-			NodeRequirements: []v1.NodeSelectorRequirement{{
-				Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"},
-			}},
-		})
-		persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{Zones: []string{"test-zone-3"}})
-		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: fmt.Sprintf("%s-%s", pod.Name, pod.Spec.Volumes[0].Name),
-			},
-			VolumeName:       persistentVolume.Name,
-			StorageClassName: &storageClass.Name,
-		})
-		ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, pod, persistentVolumeClaim, persistentVolume)
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-		ExpectNotScheduled(ctx, env.Client, pod)
-	})
-	It("should not relax an added volume topology zone node-selector away", func() {
-		persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{Zones: []string{"test-zone-3"}})
-		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{VolumeName: persistentVolume.Name, StorageClassName: &storageClass.Name})
-		ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, persistentVolumeClaim, persistentVolume)
-
-		pod := test.UnschedulablePod(test.PodOptions{
-			PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
-			NodeRequirements: []v1.NodeSelectorRequirement{
-				{
-					Key:      "example.com/label",
-					Operator: v1.NodeSelectorOpIn,
-					Values:   []string{"unsupported"},
-				},
-			},
-		})
-
-		// Add the second capacity type that is OR'd with the first. Previously we only added the volume topology requirement
-		// to a single node selector term which would sometimes get relaxed away.  Now we add it to all of them to AND
-		// it with each existing term.
-		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = append(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms,
-			v1.NodeSelectorTerm{
-				MatchExpressions: []v1.NodeSelectorRequirement{
-					{
-						Key:      v1alpha5.LabelCapacityType,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{v1alpha5.CapacityTypeOnDemand},
-					},
-				},
+		It("should not schedule if invalid pvc", func() {
+			ExpectApplied(ctx, env.Client, test.Provisioner())
+			pod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{"invalid"},
 			})
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-		node := ExpectScheduled(ctx, env.Client, pod)
-		Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
-	})
-})
-
-var _ = Describe("Preferential Fallback", func() {
-	Context("Required", func() {
-		It("should not relax the final term", func() {
-			pod := test.UnschedulablePod()
-			pod.Spec.Affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &v1.NodeSelector{NodeSelectorTerms: []v1.NodeSelectorTerm{
-				{MatchExpressions: []v1.NodeSelectorRequirement{
-					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"invalid"}}, // Should not be relaxed
-				}},
-			}}}}
-			// Don't relax
-			ExpectApplied(ctx, env.Client, test.Provisioner(test.ProvisionerOptions{Requirements: []v1.NodeSelectorRequirement{{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}}))
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
-		It("should relax multiple terms", func() {
-			pod := test.UnschedulablePod()
-			pod.Spec.Affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &v1.NodeSelector{NodeSelectorTerms: []v1.NodeSelectorTerm{
-				{MatchExpressions: []v1.NodeSelectorRequirement{
-					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"invalid"}},
-				}},
-				{MatchExpressions: []v1.NodeSelectorRequirement{
-					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"invalid"}},
-				}},
-				{MatchExpressions: []v1.NodeSelectorRequirement{
-					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}},
-				}},
-				{MatchExpressions: []v1.NodeSelectorRequirement{
-					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-2"}}, // OR operator, never get to this one
-				}},
-			}}}}
-			// Success
-			ExpectApplied(ctx, env.Client, test.Provisioner())
-			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-			node := ExpectScheduled(ctx, env.Client, pod)
-			Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-1"))
-		})
-	})
-	Context("Preferences", func() {
-		It("should relax all node affinity terms", func() {
-			pod := test.UnschedulablePod()
-			pod.Spec.Affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []v1.PreferredSchedulingTerm{
-				{
-					Weight: 1, Preference: v1.NodeSelectorTerm{MatchExpressions: []v1.NodeSelectorRequirement{
-						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"invalid"}},
-					}},
-				},
-				{
-					Weight: 1, Preference: v1.NodeSelectorTerm{MatchExpressions: []v1.NodeSelectorRequirement{
-						{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"invalid"}},
-					}},
-				},
-			}}}
-			// Success
-			ExpectApplied(ctx, env.Client, test.Provisioner())
+		It("should schedule with an empty storage class", func() {
+			storageClass := ""
+			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{StorageClassName: &storageClass})
+			ExpectApplied(ctx, env.Client, test.Provisioner(), persistentVolumeClaim)
+			pod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+			})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			ExpectScheduled(ctx, env.Client, pod)
 		})
-		It("should relax to use lighter weights", func() {
+		It("should schedule valid pods when a pod with an invalid pvc is encountered (pvc)", func() {
+			ExpectApplied(ctx, env.Client, test.Provisioner())
+			invalidPod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{"invalid"},
+			})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, invalidPod)
 			pod := test.UnschedulablePod()
-			pod.Spec.Affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []v1.PreferredSchedulingTerm{
-				{
-					Weight: 100, Preference: v1.NodeSelectorTerm{MatchExpressions: []v1.NodeSelectorRequirement{
-						{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-3"}},
-					}},
-				},
-				{
-					Weight: 50, Preference: v1.NodeSelectorTerm{MatchExpressions: []v1.NodeSelectorRequirement{
-						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-2"}},
-					}},
-				},
-				{
-					Weight: 1, Preference: v1.NodeSelectorTerm{MatchExpressions: []v1.NodeSelectorRequirement{ // OR operator, never get to this one
-						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}},
-					}},
-				},
-			}}}
-			// Success
-			ExpectApplied(ctx, env.Client, test.Provisioner(test.ProvisionerOptions{Requirements: []v1.NodeSelectorRequirement{{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}}))
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, invalidPod)
+			ExpectScheduled(ctx, env.Client, pod)
+		})
+		It("should schedule valid pods when a pod with an invalid pvc is encountered (storage class)", func() {
+			invalidStorageClass := "invalid-storage-class"
+			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{StorageClassName: &invalidStorageClass})
+			ExpectApplied(ctx, env.Client, test.Provisioner(), persistentVolumeClaim)
+			invalidPod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+			})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, invalidPod)
+			pod := test.UnschedulablePod()
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, invalidPod)
+			ExpectScheduled(ctx, env.Client, pod)
+		})
+		It("should schedule valid pods when a pod with an invalid pvc is encountered (volume name)", func() {
+			invalidVolumeName := "invalid-volume-name"
+			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{VolumeName: invalidVolumeName})
+			ExpectApplied(ctx, env.Client, test.Provisioner(), persistentVolumeClaim)
+			invalidPod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+			})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, invalidPod)
+			pod := test.UnschedulablePod()
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, invalidPod)
+			ExpectScheduled(ctx, env.Client, pod)
+		})
+		It("should schedule to storage class zones if volume does not exist", func() {
+			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{StorageClassName: &storageClass.Name})
+			ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, persistentVolumeClaim)
+			pod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+				NodeRequirements: []v1.NodeSelectorRequirement{{
+					Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-3"},
+				}},
+			})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
-			Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-2"))
+			Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
 		})
-		It("should tolerate PreferNoSchedule taint only after trying to relax Affinity terms", func() {
-			pod := test.UnschedulablePod()
-			pod.Spec.Affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []v1.PreferredSchedulingTerm{
-				{
-					Weight: 1, Preference: v1.NodeSelectorTerm{MatchExpressions: []v1.NodeSelectorRequirement{
+		It("should schedule to storage class zones if volume does not exist (ephemeral volume)", func() {
+			pod := test.UnschedulablePod(test.PodOptions{
+				EphemeralVolumeTemplates: []test.EphemeralVolumeTemplateOptions{
+					{
+						StorageClassName: &storageClass.Name,
+					},
+				},
+				NodeRequirements: []v1.NodeSelectorRequirement{{
+					Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-3"},
+				}},
+			})
+			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: fmt.Sprintf("%s-%s", pod.Name, pod.Spec.Volumes[0].Name),
+				},
+				StorageClassName: &storageClass.Name,
+			})
+			ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, persistentVolumeClaim)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+			Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
+		})
+		It("should not schedule if storage class zones are incompatible", func() {
+			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{StorageClassName: &storageClass.Name})
+			ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, persistentVolumeClaim)
+			pod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+				NodeRequirements: []v1.NodeSelectorRequirement{{
+					Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"},
+				}},
+			})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
+		})
+		It("should not schedule if storage class zones are incompatible (ephemeral volume)", func() {
+			pod := test.UnschedulablePod(test.PodOptions{
+				EphemeralVolumeTemplates: []test.EphemeralVolumeTemplateOptions{
+					{
+						StorageClassName: &storageClass.Name,
+					},
+				},
+				NodeRequirements: []v1.NodeSelectorRequirement{{
+					Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"},
+				}},
+			})
+			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: fmt.Sprintf("%s-%s", pod.Name, pod.Spec.Volumes[0].Name),
+				},
+				StorageClassName: &storageClass.Name,
+			})
+			ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, persistentVolumeClaim)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
+		})
+		It("should schedule to volume zones if volume already bound", func() {
+			persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{Zones: []string{"test-zone-3"}})
+			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{VolumeName: persistentVolume.Name, StorageClassName: &storageClass.Name})
+			ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, persistentVolumeClaim, persistentVolume)
+			pod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+			})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+			Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
+		})
+		It("should schedule to volume zones if volume already bound (ephemeral volume)", func() {
+			pod := test.UnschedulablePod(test.PodOptions{
+				EphemeralVolumeTemplates: []test.EphemeralVolumeTemplateOptions{
+					{
+						StorageClassName: &storageClass.Name,
+					},
+				},
+			})
+			persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{Zones: []string{"test-zone-3"}})
+			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: fmt.Sprintf("%s-%s", pod.Name, pod.Spec.Volumes[0].Name),
+				},
+				VolumeName:       persistentVolume.Name,
+				StorageClassName: &storageClass.Name,
+			})
+			ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, pod, persistentVolumeClaim, persistentVolume)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+			Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
+		})
+		It("should not schedule if volume zones are incompatible", func() {
+			persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{Zones: []string{"test-zone-3"}})
+			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{VolumeName: persistentVolume.Name, StorageClassName: &storageClass.Name})
+			ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, persistentVolumeClaim, persistentVolume)
+			pod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+				NodeRequirements: []v1.NodeSelectorRequirement{{
+					Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"},
+				}},
+			})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
+		})
+		It("should not schedule if volume zones are incompatible (ephemeral volume)", func() {
+			pod := test.UnschedulablePod(test.PodOptions{
+				EphemeralVolumeTemplates: []test.EphemeralVolumeTemplateOptions{
+					{
+						StorageClassName: &storageClass.Name,
+					},
+				},
+				NodeRequirements: []v1.NodeSelectorRequirement{{
+					Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"},
+				}},
+			})
+			persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{Zones: []string{"test-zone-3"}})
+			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: fmt.Sprintf("%s-%s", pod.Name, pod.Spec.Volumes[0].Name),
+				},
+				VolumeName:       persistentVolume.Name,
+				StorageClassName: &storageClass.Name,
+			})
+			ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, pod, persistentVolumeClaim, persistentVolume)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
+		})
+		It("should not relax an added volume topology zone node-selector away", func() {
+			persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{Zones: []string{"test-zone-3"}})
+			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{VolumeName: persistentVolume.Name, StorageClassName: &storageClass.Name})
+			ExpectApplied(ctx, env.Client, test.Provisioner(), storageClass, persistentVolumeClaim, persistentVolume)
+
+			pod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+				NodeRequirements: []v1.NodeSelectorRequirement{
+					{
+						Key:      "example.com/label",
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{"unsupported"},
+					},
+				},
+			})
+
+			// Add the second capacity type that is OR'd with the first. Previously we only added the volume topology requirement
+			// to a single node selector term which would sometimes get relaxed away.  Now we add it to all of them to AND
+			// it with each existing term.
+			pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = append(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms,
+				v1.NodeSelectorTerm{
+					MatchExpressions: []v1.NodeSelectorRequirement{
+						{
+							Key:      v1alpha5.LabelCapacityType,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{v1alpha5.CapacityTypeOnDemand},
+						},
+					},
+				})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+			Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
+		})
+	})
+	Context("Preferential Fallback", func() {
+		Context("Required", func() {
+			It("should not relax the final term", func() {
+				pod := test.UnschedulablePod()
+				pod.Spec.Affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &v1.NodeSelector{NodeSelectorTerms: []v1.NodeSelectorTerm{
+					{MatchExpressions: []v1.NodeSelectorRequirement{
+						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"invalid"}}, // Should not be relaxed
+					}},
+				}}}}
+				// Don't relax
+				ExpectApplied(ctx, env.Client, test.Provisioner(test.ProvisionerOptions{Requirements: []v1.NodeSelectorRequirement{{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}}))
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				ExpectNotScheduled(ctx, env.Client, pod)
+			})
+			It("should relax multiple terms", func() {
+				pod := test.UnschedulablePod()
+				pod.Spec.Affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &v1.NodeSelector{NodeSelectorTerms: []v1.NodeSelectorTerm{
+					{MatchExpressions: []v1.NodeSelectorRequirement{
 						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"invalid"}},
 					}},
-				},
-				{
-					Weight: 1, Preference: v1.NodeSelectorTerm{MatchExpressions: []v1.NodeSelectorRequirement{
-						{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"invalid"}},
+					{MatchExpressions: []v1.NodeSelectorRequirement{
+						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"invalid"}},
 					}},
-				},
-			}}}
-			// Success
-			ExpectApplied(ctx, env.Client, test.Provisioner(test.ProvisionerOptions{Taints: []v1.Taint{{Key: "foo", Value: "bar", Effect: v1.TaintEffectPreferNoSchedule}}}))
-			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-			node := ExpectScheduled(ctx, env.Client, pod)
-			Expect(node.Spec.Taints).To(ContainElement(v1.Taint{Key: "foo", Value: "bar", Effect: v1.TaintEffectPreferNoSchedule}))
-		})
-	})
-})
-
-var _ = Describe("Multiple Provisioners", func() {
-	It("should schedule to an explicitly selected provisioner", func() {
-		provisioner := test.Provisioner()
-		ExpectApplied(ctx, env.Client, provisioner, test.Provisioner())
-		pod := test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name}})
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-		node := ExpectScheduled(ctx, env.Client, pod)
-		Expect(node.Labels[v1alpha5.ProvisionerNameLabelKey]).To(Equal(provisioner.Name))
-	})
-	It("should schedule to a provisioner by labels", func() {
-		provisioner := test.Provisioner(test.ProvisionerOptions{Labels: map[string]string{"foo": "bar"}})
-		ExpectApplied(ctx, env.Client, provisioner, test.Provisioner())
-		pod := test.UnschedulablePod(test.PodOptions{NodeSelector: provisioner.Spec.Labels})
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-		node := ExpectScheduled(ctx, env.Client, pod)
-		Expect(node.Labels[v1alpha5.ProvisionerNameLabelKey]).To(Equal(provisioner.Name))
-	})
-	It("should not match provisioner with PreferNoSchedule taint when other provisioner match", func() {
-		provisioner := test.Provisioner(test.ProvisionerOptions{Taints: []v1.Taint{{Key: "foo", Value: "bar", Effect: v1.TaintEffectPreferNoSchedule}}})
-		ExpectApplied(ctx, env.Client, provisioner, test.Provisioner())
-		pod := test.UnschedulablePod()
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-		node := ExpectScheduled(ctx, env.Client, pod)
-		Expect(node.Labels[v1alpha5.ProvisionerNameLabelKey]).ToNot(Equal(provisioner.Name))
-	})
-	Context("Weighted Provisioners", func() {
-		It("should schedule to the provisioner with the highest priority always", func() {
-			provisioners := []client.Object{
-				test.Provisioner(),
-				test.Provisioner(test.ProvisionerOptions{Weight: ptr.Int32(20)}),
-				test.Provisioner(test.ProvisionerOptions{Weight: ptr.Int32(100)}),
-			}
-			ExpectApplied(ctx, env.Client, provisioners...)
-			pods := []*v1.Pod{
-				test.UnschedulablePod(), test.UnschedulablePod(), test.UnschedulablePod(),
-			}
-			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
-			for _, pod := range pods {
+					{MatchExpressions: []v1.NodeSelectorRequirement{
+						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}},
+					}},
+					{MatchExpressions: []v1.NodeSelectorRequirement{
+						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-2"}}, // OR operator, never get to this one
+					}},
+				}}}}
+				// Success
+				ExpectApplied(ctx, env.Client, test.Provisioner())
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels[v1alpha5.ProvisionerNameLabelKey]).To(Equal(provisioners[2].GetName()))
-			}
+				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-1"))
+			})
 		})
-		It("should schedule to explicitly selected provisioner even if other provisioners are higher priority", func() {
-			targetedProvisioner := test.Provisioner()
-			provisioners := []client.Object{
-				targetedProvisioner,
-				test.Provisioner(test.ProvisionerOptions{Weight: ptr.Int32(20)}),
-				test.Provisioner(test.ProvisionerOptions{Weight: ptr.Int32(100)}),
-			}
-			ExpectApplied(ctx, env.Client, provisioners...)
-			pod := test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1alpha5.ProvisionerNameLabelKey: targetedProvisioner.Name}})
+		Context("Preferences", func() {
+			It("should relax all node affinity terms", func() {
+				pod := test.UnschedulablePod()
+				pod.Spec.Affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []v1.PreferredSchedulingTerm{
+					{
+						Weight: 1, Preference: v1.NodeSelectorTerm{MatchExpressions: []v1.NodeSelectorRequirement{
+							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"invalid"}},
+						}},
+					},
+					{
+						Weight: 1, Preference: v1.NodeSelectorTerm{MatchExpressions: []v1.NodeSelectorRequirement{
+							{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"invalid"}},
+						}},
+					},
+				}}}
+				// Success
+				ExpectApplied(ctx, env.Client, test.Provisioner())
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				ExpectScheduled(ctx, env.Client, pod)
+			})
+			It("should relax to use lighter weights", func() {
+				pod := test.UnschedulablePod()
+				pod.Spec.Affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []v1.PreferredSchedulingTerm{
+					{
+						Weight: 100, Preference: v1.NodeSelectorTerm{MatchExpressions: []v1.NodeSelectorRequirement{
+							{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-3"}},
+						}},
+					},
+					{
+						Weight: 50, Preference: v1.NodeSelectorTerm{MatchExpressions: []v1.NodeSelectorRequirement{
+							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-2"}},
+						}},
+					},
+					{
+						Weight: 1, Preference: v1.NodeSelectorTerm{MatchExpressions: []v1.NodeSelectorRequirement{ // OR operator, never get to this one
+							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}},
+						}},
+					},
+				}}}
+				// Success
+				ExpectApplied(ctx, env.Client, test.Provisioner(test.ProvisionerOptions{Requirements: []v1.NodeSelectorRequirement{{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}}))
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				node := ExpectScheduled(ctx, env.Client, pod)
+				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-2"))
+			})
+			It("should tolerate PreferNoSchedule taint only after trying to relax Affinity terms", func() {
+				pod := test.UnschedulablePod()
+				pod.Spec.Affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []v1.PreferredSchedulingTerm{
+					{
+						Weight: 1, Preference: v1.NodeSelectorTerm{MatchExpressions: []v1.NodeSelectorRequirement{
+							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"invalid"}},
+						}},
+					},
+					{
+						Weight: 1, Preference: v1.NodeSelectorTerm{MatchExpressions: []v1.NodeSelectorRequirement{
+							{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"invalid"}},
+						}},
+					},
+				}}}
+				// Success
+				ExpectApplied(ctx, env.Client, test.Provisioner(test.ProvisionerOptions{Taints: []v1.Taint{{Key: "foo", Value: "bar", Effect: v1.TaintEffectPreferNoSchedule}}}))
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				node := ExpectScheduled(ctx, env.Client, pod)
+				Expect(node.Spec.Taints).To(ContainElement(v1.Taint{Key: "foo", Value: "bar", Effect: v1.TaintEffectPreferNoSchedule}))
+			})
+		})
+	})
+	Context("Multiple Provisioners", func() {
+		It("should schedule to an explicitly selected provisioner", func() {
+			provisioner := test.Provisioner()
+			ExpectApplied(ctx, env.Client, provisioner, test.Provisioner())
+			pod := test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1alpha5.ProvisionerNameLabelKey: provisioner.Name}})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
-			Expect(node.Labels[v1alpha5.ProvisionerNameLabelKey]).To(Equal(targetedProvisioner.Name))
+			Expect(node.Labels[v1alpha5.ProvisionerNameLabelKey]).To(Equal(provisioner.Name))
+		})
+		It("should schedule to a provisioner by labels", func() {
+			provisioner := test.Provisioner(test.ProvisionerOptions{Labels: map[string]string{"foo": "bar"}})
+			ExpectApplied(ctx, env.Client, provisioner, test.Provisioner())
+			pod := test.UnschedulablePod(test.PodOptions{NodeSelector: provisioner.Spec.Labels})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+			Expect(node.Labels[v1alpha5.ProvisionerNameLabelKey]).To(Equal(provisioner.Name))
+		})
+		It("should not match provisioner with PreferNoSchedule taint when other provisioner match", func() {
+			provisioner := test.Provisioner(test.ProvisionerOptions{Taints: []v1.Taint{{Key: "foo", Value: "bar", Effect: v1.TaintEffectPreferNoSchedule}}})
+			ExpectApplied(ctx, env.Client, provisioner, test.Provisioner())
+			pod := test.UnschedulablePod()
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+			Expect(node.Labels[v1alpha5.ProvisionerNameLabelKey]).ToNot(Equal(provisioner.Name))
+		})
+		Context("Weighted Provisioners", func() {
+			It("should schedule to the provisioner with the highest priority always", func() {
+				provisioners := []client.Object{
+					test.Provisioner(),
+					test.Provisioner(test.ProvisionerOptions{Weight: ptr.Int32(20)}),
+					test.Provisioner(test.ProvisionerOptions{Weight: ptr.Int32(100)}),
+				}
+				ExpectApplied(ctx, env.Client, provisioners...)
+				pods := []*v1.Pod{
+					test.UnschedulablePod(), test.UnschedulablePod(), test.UnschedulablePod(),
+				}
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+				for _, pod := range pods {
+					node := ExpectScheduled(ctx, env.Client, pod)
+					Expect(node.Labels[v1alpha5.ProvisionerNameLabelKey]).To(Equal(provisioners[2].GetName()))
+				}
+			})
+			It("should schedule to explicitly selected provisioner even if other provisioners are higher priority", func() {
+				targetedProvisioner := test.Provisioner()
+				provisioners := []client.Object{
+					targetedProvisioner,
+					test.Provisioner(test.ProvisionerOptions{Weight: ptr.Int32(20)}),
+					test.Provisioner(test.ProvisionerOptions{Weight: ptr.Int32(100)}),
+				}
+				ExpectApplied(ctx, env.Client, provisioners...)
+				pod := test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1alpha5.ProvisionerNameLabelKey: targetedProvisioner.Name}})
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				node := ExpectScheduled(ctx, env.Client, pod)
+				Expect(node.Labels[v1alpha5.ProvisionerNameLabelKey]).To(Equal(targetedProvisioner.Name))
+			})
 		})
 	})
 })

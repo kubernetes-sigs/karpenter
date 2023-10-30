@@ -37,6 +37,16 @@ func (in *NodePool) Validate(_ context.Context) (errs *apis.FieldError) {
 	)
 }
 
+// RuntimeValidate will be used to validate any part of the CRD that can not be validated at CRD creation
+func (in *NodePool) RuntimeValidate() (errs *apis.FieldError) {
+	return errs.Also(
+		in.Spec.Template.validateLabels().ViaField("spec.template.metadata"),
+		in.Spec.Template.Spec.validateTaints().ViaField("spec.template.spec"),
+		in.Spec.Template.Spec.validateRequirements().ViaField("spec.template.spec"),
+		in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist().ViaField("spec.template.spec"),
+	)
+}
+
 func (in *NodePoolSpec) validate() (errs *apis.FieldError) {
 	return errs.Also(
 		in.Template.validate().ViaField("template"),
@@ -50,6 +60,7 @@ func (in *NodeClaimTemplate) validate() (errs *apis.FieldError) {
 	}
 	return errs.Also(
 		in.validateLabels().ViaField("metadata"),
+		in.validateRequirementsNodePoolKeyDoesNotExist().ViaField("spec.requirements"),
 		in.Spec.validate().ViaField("spec"),
 	)
 }
@@ -72,15 +83,27 @@ func (in *NodeClaimTemplate) validateLabels() (errs *apis.FieldError) {
 	return errs
 }
 
+func (in *NodeClaimTemplate) validateRequirementsNodePoolKeyDoesNotExist() (errs *apis.FieldError) {
+	for i, requirement := range in.Spec.Requirements {
+		if requirement.Key == NodePoolLabelKey {
+			errs = errs.Also(apis.ErrInvalidArrayValue(fmt.Sprintf("%s is restricted", requirement.Key), "requirements", i))
+		}
+	}
+	return errs
+}
+
 func (in *Disruption) validate() (errs *apis.FieldError) {
 	if in.ExpireAfter.Duration != nil && *in.ExpireAfter.Duration < 0 {
 		return errs.Also(apis.ErrInvalidValue("cannot be negative", "expirationTTL"))
 	}
-	if in.ConsolidateAfter.Duration != nil && *in.ConsolidateAfter.Duration < 0 {
+	if in.ConsolidateAfter != nil && in.ConsolidateAfter.Duration != nil && *in.ConsolidateAfter.Duration < 0 {
 		return errs.Also(apis.ErrInvalidValue("cannot be negative", "consolidationTTL"))
 	}
-	if in.ConsolidateAfter.Duration != nil && in.ConsolidationPolicy == ConsolidationPolicyWhenUnderutilized {
-		return errs.Also(apis.ErrGeneric("consolidateAfter cannot be combined with consolidationPolicy"))
+	if in.ConsolidateAfter != nil && in.ConsolidateAfter.Duration != nil && in.ConsolidationPolicy == ConsolidationPolicyWhenUnderutilized {
+		return errs.Also(apis.ErrGeneric("consolidateAfter cannot be combined with consolidationPolicy=WhenUnderutilized"))
+	}
+	if in.ConsolidateAfter == nil && in.ConsolidationPolicy == ConsolidationPolicyWhenEmpty {
+		return errs.Also(apis.ErrGeneric("consolidateAfter must be specified with consolidationPolicy=WhenEmpty"))
 	}
 	return errs
 }

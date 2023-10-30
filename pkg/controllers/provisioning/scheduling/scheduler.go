@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
@@ -34,6 +35,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
+	"github.com/aws/karpenter-core/pkg/utils/pretty"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
 
@@ -136,6 +138,7 @@ func (r Results) NonPendingPodSchedulingErrors() string {
 
 func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) *Results {
 	defer metrics.Measure(schedulingSimulationDuration)()
+	schedulingStart := time.Now()
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
 	// issues including pods with affinity to another pod in the batch. We could topo-sort to solve this, but it wouldn't
 	// solve the problem of scheduling pods where a particular order is needed to prevent a max-skew violation. E.g. if we
@@ -169,7 +172,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) *Results {
 		m.FinalizeScheduling()
 	}
 	if !s.opts.SimulationMode {
-		s.recordSchedulingResults(ctx, pods, q.List(), errors)
+		s.recordSchedulingResults(ctx, pods, q.List(), errors, time.Since(schedulingStart))
 	}
 	// clear any nil errors so we can know that len(PodErrors) == 0 => all pods scheduled
 	for k, v := range errors {
@@ -184,7 +187,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) *Results {
 	}
 }
 
-func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod, failedToSchedule []*v1.Pod, errors map[*v1.Pod]error) {
+func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod, failedToSchedule []*v1.Pod, errors map[*v1.Pod]error, schedulingDuration time.Duration) {
 	// Report failures and nominations
 	for _, pod := range failedToSchedule {
 		logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(pod)).Errorf("Could not schedule pod, %s", errors[pod])
@@ -208,8 +211,16 @@ func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod,
 	if newCount == 0 {
 		return
 	}
-	logging.FromContext(ctx).With("pods", len(pods)).Infof("found provisionable pod(s)")
-	logging.FromContext(ctx).With("machines", len(s.newNodeClaims), "pods", newCount).Infof("computed new machine(s) to fit pod(s)")
+	var podNames []string
+	for _, p := range pods {
+		podNames = append(podNames, fmt.Sprintf("%s/%s", p.Namespace, p.Name))
+	}
+
+	logging.FromContext(ctx).With("pods", pretty.Slice(podNames, 5)).
+		With("duration", schedulingDuration).
+		Infof("found provisionable pod(s)")
+
+	logging.FromContext(ctx).With("nodeclaims", len(s.newNodeClaims), "pods", newCount).Infof("computed new nodeclaim(s) to fit pod(s)")
 	// Report in flight newNodes, or exit to avoid log spam
 	inflightCount := 0
 	existingCount := 0

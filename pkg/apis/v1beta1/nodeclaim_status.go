@@ -27,6 +27,9 @@ type NodeClaimStatus struct {
 	// ProviderID of the corresponding node object
 	// +optional
 	ProviderID string `json:"providerID,omitempty"`
+	// ImageID is an identifier for the image that runs on the node
+	// +optional
+	ImageID string `json:"imageID,omitempty"`
 	// Capacity is the estimated full capacity of the node
 	// +optional
 	Capacity v1.ResourceList `json:"capacity,omitempty"`
@@ -40,26 +43,25 @@ type NodeClaimStatus struct {
 
 func (in *NodeClaim) StatusConditions() apis.ConditionManager {
 	return apis.NewLivingConditionSet(
-		NodeLaunched,
-		NodeRegistered,
-		NodeInitialized,
+		Launched,
+		Registered,
+		Initialized,
 	).Manage(in)
 }
 
 var LivingConditions = []apis.ConditionType{
-	NodeLaunched,
-	NodeRegistered,
-	NodeInitialized,
+	Launched,
+	Registered,
+	Initialized,
 }
 
 var (
-	NodeLaunched      apis.ConditionType = "NodeLaunched"
-	NodeRegistered    apis.ConditionType = "NodeRegistered"
-	NodeInitialized   apis.ConditionType = "NodeInitialized"
-	NodeEmpty         apis.ConditionType = "NodeEmpty"
-	NodeDrifted       apis.ConditionType = "NodeDrifted"
-	NodeExpired       apis.ConditionType = "NodeExpired"
-	NodeUnderutilized apis.ConditionType = "NodeUnderutilized"
+	Launched    apis.ConditionType = "Launched"
+	Registered  apis.ConditionType = "Registered"
+	Initialized apis.ConditionType = "Initialized"
+	Empty       apis.ConditionType = "Empty"
+	Drifted     apis.ConditionType = "Drifted"
+	Expired     apis.ConditionType = "Expired"
 )
 
 func (in *NodeClaim) GetConditions() apis.Conditions {

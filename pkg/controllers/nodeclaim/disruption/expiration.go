@@ -38,12 +38,12 @@ type Expiration struct {
 
 //nolint:gocyclo
 func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	hasExpiredCondition := nodeClaim.StatusConditions().GetCondition(v1beta1.NodeExpired) != nil
+	hasExpiredCondition := nodeClaim.StatusConditions().GetCondition(v1beta1.Expired) != nil
 
 	// From here there are three scenarios to handle:
 	// 1. If ExpireAfter is not configured, remove the expired status condition
 	if nodePool.Spec.Disruption.ExpireAfter.Duration == nil {
-		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.NodeExpired)
+		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.Expired)
 		if hasExpiredCondition {
 			logging.FromContext(ctx).Debugf("removing expiration status condition, expiration has been disabled")
 		}
@@ -65,7 +65,7 @@ func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, 
 	}
 	// 2. If the NodeClaim isn't expired, remove the status condition.
 	if e.clock.Now().Before(expirationTime) {
-		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.NodeExpired)
+		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.Expired)
 		if hasExpiredCondition {
 			logging.FromContext(ctx).Debugf("removing expired status condition, not expired")
 		}
@@ -75,7 +75,7 @@ func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, 
 	}
 	// 3. Otherwise, if the NodeClaim is expired, but doesn't have the status condition, add it.
 	nodeClaim.StatusConditions().SetCondition(apis.Condition{
-		Type:     v1beta1.NodeExpired,
+		Type:     v1beta1.Expired,
 		Status:   v1.ConditionTrue,
 		Severity: apis.ConditionSeverityWarning,
 	})

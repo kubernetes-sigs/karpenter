@@ -1476,8 +1476,8 @@ var _ = Context("NodePool", func() {
 				}}
 
 			// Two large pods are all that will fit on the default-instance type (the largest instance type) which will create
-			// twenty nodes. This leaves just enough room on each of those newNodes for one additional small pod per node, so we
-			// should only end up with 20 newNodes total.
+			// twenty nodes. This leaves just enough room on each of those nodes for one additional small pod per node, so we
+			// should only end up with 20 nodes total.
 			provPods := append(test.Pods(40, largeOpts), test.Pods(20, smallOpts)...)
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, provPods...)
@@ -1489,7 +1489,7 @@ var _ = Context("NodePool", func() {
 			}
 			Expect(nodeNames).To(HaveLen(20))
 		})
-		It("should pack newNodes tightly", func() {
+		It("should pack nodes tightly", func() {
 			cloudProvider.InstanceTypes = fake.InstanceTypes(5)
 			var nodes []*v1.Node
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -1538,7 +1538,7 @@ var _ = Context("NodePool", func() {
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
-		It("should create new newNodes when a node is at capacity due to pod limits per node", func() {
+		It("should create new nodes when a node is at capacity due to pod limits per node", func() {
 			opts := test.PodOptions{
 				NodeSelector: map[string]string{v1.LabelArchStable: "amd64"},
 				Conditions:   []v1.PodCondition{{Type: v1.PodScheduled, Reason: v1.PodReasonUnschedulable, Status: v1.ConditionFalse}},
@@ -1800,7 +1800,7 @@ var _ = Context("NodePool", func() {
 			Expect(node1.Name).ToNot(Equal(node2.Name))
 		})
 		Context("Topology", func() {
-			It("should balance pods across zones with in-flight newNodes", func() {
+			It("should balance pods across zones with in-flight nodes", func() {
 				labels := map[string]string{"foo": "bar"}
 				topology := []v1.TopologySpreadConstraint{{
 					TopologyKey:       v1.LabelTopologyZone,
@@ -1814,7 +1814,7 @@ var _ = Context("NodePool", func() {
 				)
 				ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 2))
 
-				// reconcile our newNodes with the cluster state so they'll show up as in-flight
+				// reconcile our nodes with the cluster state so they'll show up as in-flight
 				var nodeList v1.NodeList
 				Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 				for _, node := range nodeList.Items {
@@ -1828,10 +1828,10 @@ var _ = Context("NodePool", func() {
 				ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(3, 3, 3))
 				Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 
-				// shouldn't create any new newNodes as the in-flight ones can support the pods
+				// shouldn't create any new nodes as the in-flight ones can support the pods
 				Expect(nodeList.Items).To(HaveLen(firstRoundNumNodes))
 			})
-			It("should balance pods across hostnames with in-flight newNodes", func() {
+			It("should balance pods across hostnames with in-flight nodes", func() {
 				labels := map[string]string{"foo": "bar"}
 				topology := []v1.TopologySpreadConstraint{{
 					TopologyKey:       v1.LabelHostname,
@@ -1845,7 +1845,7 @@ var _ = Context("NodePool", func() {
 				)
 				ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 1, 1))
 
-				// reconcile our newNodes with the cluster state so they'll show up as in-flight
+				// reconcile our nodes with the cluster state so they'll show up as in-flight
 				var nodeList v1.NodeList
 				Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 				for _, node := range nodeList.Items {
@@ -1854,7 +1854,7 @@ var _ = Context("NodePool", func() {
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
 					test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}, 5)...,
 				)
-				// we prefer to launch new newNodes to satisfy the topology spread even though we could technically schedule against existingNodes
+				// we prefer to launch new nodes to satisfy the topology spread even though we could technically schedule against existingNodes
 				ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 1, 1, 1, 1, 1, 1, 1))
 			})
 		})
@@ -1894,7 +1894,7 @@ var _ = Context("NodePool", func() {
 
 				nodeClaim1 := bindings.Get(initialPod).NodeClaim
 				node1 := bindings.Get(initialPod).Node
-				nodeClaim1.StatusConditions().MarkTrue(v1beta1.NodeInitialized)
+				nodeClaim1.StatusConditions().MarkTrue(v1beta1.Initialized)
 				node1.Labels = lo.Assign(node1.Labels, map[string]string{v1beta1.NodeInitializedLabelKey: "true"})
 
 				// delete the pod so that the node is empty
@@ -1962,7 +1962,7 @@ var _ = Context("NodePool", func() {
 
 				nodeClaim1 := bindings.Get(initialPod).NodeClaim
 				node1 := bindings.Get(initialPod).Node
-				nodeClaim1.StatusConditions().MarkTrue(v1beta1.NodeInitialized)
+				nodeClaim1.StatusConditions().MarkTrue(v1beta1.Initialized)
 				node1.Labels = lo.Assign(node1.Labels, map[string]string{v1beta1.NodeInitializedLabelKey: "true"})
 
 				node1.Spec.Taints = []v1.Taint{startupTaint}
@@ -2174,7 +2174,7 @@ var _ = Context("NodePool", func() {
 
 		})
 		// nolint:gosec
-		It("should pack in-flight newNodes before launching new newNodes", func() {
+		It("should pack in-flight nodes before launching new nodes", func() {
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				fake.NewInstanceType(fake.InstanceTypeOptions{
 					Name: "medium",
@@ -2203,7 +2203,7 @@ var _ = Context("NodePool", func() {
 				}
 			}
 
-			// due to the in-flight node support, we should pack existing newNodes before launching new node. The end result
+			// due to the in-flight node support, we should pack existing nodes before launching new node. The end result
 			// is that we should only have some spare capacity on our final node
 			nodesWithCPUFree := 0
 			cluster.ForEachNode(func(n *state.StateNode) bool {
@@ -2456,7 +2456,7 @@ var _ = Context("NodePool", func() {
 	})
 
 	Describe("No Pre-Binding", func() {
-		It("should not bind pods to newNodes", func() {
+		It("should not bind pods to nodes", func() {
 			opts := test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
 				Limits: map[v1.ResourceName]resource.Quantity{
 					v1.ResourceCPU: resource.MustParse("10m"),
@@ -2464,7 +2464,7 @@ var _ = Context("NodePool", func() {
 			}}
 
 			var nodeList v1.NodeList
-			// shouldn't have any newNodes
+			// shouldn't have any nodes
 			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 			Expect(nodeList.Items).To(HaveLen(0))
 
@@ -2496,7 +2496,7 @@ var _ = Context("NodePool", func() {
 			}}
 
 			var nodeList v1.NodeList
-			// shouldn't have any newNodes
+			// shouldn't have any nodes
 			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 			Expect(nodeList.Items).To(HaveLen(0))
 
@@ -2573,7 +2573,7 @@ var _ = Context("NodePool", func() {
 			}
 			nodePool.Spec.Limits = nil
 		})
-		It("should launch multiple newNodes if required due to volume limits", func() {
+		It("should launch multiple nodes if required due to volume limits", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 			initialPod := test.UnschedulablePod()
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)

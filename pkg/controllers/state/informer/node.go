@@ -45,7 +45,7 @@ func NewNodeController(kubeClient client.Client, cluster *state.Cluster) corecon
 }
 
 func (c *NodeController) Name() string {
-	return "node_state"
+	return "state.node"
 }
 
 func (c *NodeController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {

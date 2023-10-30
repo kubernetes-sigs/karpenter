@@ -35,7 +35,9 @@ type NodePoolSpec struct {
 	// +optional
 	Template NodeClaimTemplate `json:"template,omitempty"`
 	// Disruption contains the parameters that relate to Karpenter's disruption logic
-	// +kubebuilder:default={"consolidateAfter": "15s","consolidationPolicy": "WhenUnderutilized", "expireAfter": "720h"}
+	// +kubebuilder:default={"consolidationPolicy": "WhenUnderutilized", "expireAfter": "720h"}
+	// +kubebuilder:validation:XValidation:message="consolidateAfter cannot be combined with consolidationPolicy=WhenUnderutilized",rule="has(self.consolidateAfter) ? self.consolidationPolicy != 'WhenUnderutilized' || self.consolidateAfter == 'Never' : true"
+	// +kubebuilder:validation:XValidation:message="consolidateAfter must be specified with consolidationPolicy=WhenEmpty",rule="self.consolidationPolicy == 'WhenEmpty' ? has(self.consolidateAfter) : true"
 	// +optional
 	Disruption Disruption `json:"disruption"`
 	// Limits define a set of bounds for provisioning capacity.
@@ -55,12 +57,11 @@ type Disruption struct {
 	// ConsolidateAfter is the duration the controller will wait
 	// before attempting to terminate nodes that are underutilized.
 	// Refer to ConsolidationPolicy for how underutilization is considered.
-	// +kubebuilder:default:="15s"
 	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+)|(Never)$`
 	// +kubebuilder:validation:Type="string"
 	// +kubebuilder:validation:Schemaless
 	// +optional
-	ConsolidateAfter NillableDuration `json:"consolidateAfter,omitempty"`
+	ConsolidateAfter *NillableDuration `json:"consolidateAfter,omitempty"`
 	// ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation
 	// algorithm. This policy defaults to "WhenUnderutilized" if not specified
 	// +kubebuilder:default:="WhenUnderutilized"
@@ -76,7 +77,7 @@ type Disruption struct {
 	// +kubebuilder:validation:Type="string"
 	// +kubebuilder:validation:Schemaless
 	// +optional
-	ExpireAfter NillableDuration `json:"expireAfter,omitempty"`
+	ExpireAfter NillableDuration `json:"expireAfter"`
 }
 
 type ConsolidationPolicy string
@@ -103,14 +104,30 @@ func (l Limits) ExceededBy(resources v1.ResourceList) error {
 }
 
 type NodeClaimTemplate struct {
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Spec              NodeClaimSpec `json:"spec,omitempty"`
+	ObjectMeta `json:"metadata,omitempty"`
+	Spec       NodeClaimSpec `json:"spec,omitempty"`
 }
 
-// NodePool is the Schema for the Provisioners API
+type ObjectMeta struct {
+	// Map of string keys and values that can be used to organize and categorize
+	// (scope and select) objects. May match selectors of replication controllers
+	// and services.
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels
+	// +optional
+	Labels map[string]string `json:"labels,omitempty"`
+
+	// Annotations is an unstructured key value map stored with a resource that may be
+	// set by external tools to store and retrieve arbitrary metadata. They are not
+	// queryable and should be preserved when modifying objects.
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations
+	// +optional
+	Annotations map[string]string `json:"annotations,omitempty"`
+}
+
+// NodePool is the Schema for the NodePools API
 // +kubebuilder:object:root=true
-// +kubebuilder:resource:path=nodepools,scope=Cluster,categories=karpenter,shortName={np,nps}
-// +kubebuilder:printcolumn:name="NodeClass",type="string",JSONPath=".spec.template.spec.nodeClass.name",description=""
+// +kubebuilder:resource:path=nodepools,scope=Cluster,categories=karpenter
+// +kubebuilder:printcolumn:name="NodeClass",type="string",JSONPath=".spec.template.spec.nodeClassRef.name",description=""
 // +kubebuilder:printcolumn:name="Weight",type="string",JSONPath=".spec.weight",priority=1,description=""
 // +kubebuilder:subresource:status
 type NodePool struct {

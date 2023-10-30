@@ -127,4 +127,14 @@ var _ = Describe("Machine/Launch", func() {
 		ExpectFinalizersRemoved(ctx, env.Client, machine)
 		ExpectNotFound(ctx, env.Client, machine)
 	})
+	It("should requeue with no error if NodeClassNotReady is returned from the cloudprovider", func() {
+		cloudProvider.NextCreateErr = cloudprovider.NewNodeClassNotReadyError(fmt.Errorf("provider isn't ready"))
+		machine := test.Machine()
+		ExpectApplied(ctx, env.Client, machine)
+		res := ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
+		Expect(res.Requeue).To(BeTrue())
+
+		machine = ExpectExists(ctx, env.Client, machine)
+		Expect(ExpectStatusConditionExists(machine, v1alpha5.MachineLaunched).Status).To(Equal(v1.ConditionFalse))
+	})
 })

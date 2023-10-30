@@ -20,6 +20,8 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	"knative.dev/pkg/configmap"
+
+	"github.com/aws/karpenter-core/pkg/apis/settings"
 )
 
 type settingsKeyType struct{}
@@ -47,6 +49,10 @@ func (*Settings) Inject(ctx context.Context, cm *v1.ConfigMap) (context.Context,
 		return ctx, fmt.Errorf("parsing config data, %w", err)
 	}
 	return ToContext(ctx, s), nil
+}
+
+func (*Settings) FromContext(ctx context.Context) settings.Injectable {
+	return FromContext(ctx)
 }
 
 func ToContext(ctx context.Context, s *Settings) context.Context {

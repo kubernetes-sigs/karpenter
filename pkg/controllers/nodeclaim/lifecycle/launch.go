@@ -41,7 +41,7 @@ type Launch struct {
 }
 
 func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	if nodeClaim.StatusConditions().GetCondition(v1beta1.NodeLaunched).IsTrue() {
+	if nodeClaim.StatusConditions().GetCondition(v1beta1.Launched).IsTrue() {
 		return reconcile.Result{}, nil
 	}
 
@@ -64,11 +64,14 @@ func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (r
 	}
 	// Either the Node launch failed or the Node was deleted due to InsufficientCapacity/NotFound
 	if err != nil || created == nil {
+		if cloudprovider.IsNodeClassNotReadyError(err) {
+			return reconcile.Result{Requeue: true}, nil
+		}
 		return reconcile.Result{}, err
 	}
 	l.cache.SetDefault(string(nodeClaim.UID), created)
 	nodeClaim = PopulateNodeClaimDetails(nodeClaim, created)
-	nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeLaunched)
+	nodeClaim.StatusConditions().MarkTrue(v1beta1.Launched)
 	nodeclaimutil.LaunchedCounter(nodeClaim).Inc()
 
 	return reconcile.Result{}, nil
@@ -79,7 +82,7 @@ func (l *Launch) linkNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	created, err := l.cloudProvider.Get(ctx, nodeClaim.Annotations[v1alpha5.MachineLinkedAnnotationKey])
 	if err != nil {
 		if !cloudprovider.IsNodeClaimNotFoundError(err) {
-			nodeClaim.StatusConditions().MarkFalse(v1beta1.NodeLaunched, "LinkFailed", truncateMessage(err.Error()))
+			nodeClaim.StatusConditions().MarkFalse(v1beta1.Launched, "LinkFailed", truncateMessage(err.Error()))
 			return nil, fmt.Errorf("linking, %w", err)
 		}
 		if err = nodeclaimutil.Delete(ctx, l.kubeClient, nodeClaim); err != nil {
@@ -110,9 +113,13 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeCla
 			}
 			nodeclaimutil.TerminatedCounter(nodeClaim, "insufficient_capacity").Inc()
 			return nil, nil
+		case cloudprovider.IsNodeClassNotReadyError(err):
+			l.recorder.Publish(NodeClassNotReadyEvent(nodeClaim, err))
+			nodeClaim.StatusConditions().MarkFalse(v1beta1.Launched, "LaunchFailed", truncateMessage(err.Error()))
+			return nil, fmt.Errorf("launching %s, %w", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"), err)
 		default:
-			nodeClaim.StatusConditions().MarkFalse(v1beta1.NodeLaunched, "LaunchFailed", truncateMessage(err.Error()))
-			return nil, fmt.Errorf("creating %s, %w", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"), err)
+			nodeClaim.StatusConditions().MarkFalse(v1beta1.Launched, "LaunchFailed", truncateMessage(err.Error()))
+			return nil, fmt.Errorf("launching %s, %w", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"), err)
 		}
 	}
 	logging.FromContext(ctx).With(
@@ -134,6 +141,7 @@ func PopulateNodeClaimDetails(nodeClaim, retrieved *v1beta1.NodeClaim) *v1beta1.
 	)
 	nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, retrieved.Annotations)
 	nodeClaim.Status.ProviderID = retrieved.Status.ProviderID
+	nodeClaim.Status.ImageID = retrieved.Status.ImageID
 	nodeClaim.Status.Allocatable = retrieved.Status.Allocatable
 	nodeClaim.Status.Capacity = retrieved.Status.Capacity
 	return nodeClaim

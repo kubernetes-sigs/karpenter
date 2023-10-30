@@ -79,6 +79,15 @@ var _ = Describe("NodeClaimController", func() {
 						v1beta1.NodeInitializedLabelKey: "true",
 					},
 				},
+				Spec: v1beta1.NodeClaimSpec{
+					Resources: v1beta1.ResourceRequirements{
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("8"),
+							v1.ResourceMemory: resource.MustParse("64Gi"),
+							v1.ResourcePods:   resource.MustParse("5"),
+						},
+					},
+				},
 				Status: v1beta1.NodeClaimStatus{
 					ProviderID: test.RandomProviderID(),
 					Capacity: v1.ResourceList{

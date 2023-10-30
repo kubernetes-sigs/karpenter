@@ -93,11 +93,9 @@ func (c *Cluster) Synced(ctx context.Context) bool {
 		return false
 	}
 	nodeClaimList := &v1beta1.NodeClaimList{}
-	if nodeclaimutil.EnableNodeClaims {
-		if err := c.kubeClient.List(ctx, nodeClaimList); err != nil {
-			logging.FromContext(ctx).Errorf("checking cluster state sync, %v", err)
-			return false
-		}
+	if err := c.kubeClient.List(ctx, nodeClaimList); err != nil {
+		logging.FromContext(ctx).Errorf("checking cluster state sync, %v", err)
+		return false
 	}
 	nodeList := &v1.NodeList{}
 	if err := c.kubeClient.List(ctx, nodeList); err != nil {
@@ -213,6 +211,8 @@ func (c *Cluster) NominateNodeForPod(ctx context.Context, providerID string) {
 	}
 }
 
+// TODO remove this when v1alpha5 APIs are deprecated. With v1beta1 APIs Karpenter relies on the existence
+// of the karpenter.sh/disruption taint to know when a node is marked for deletion.
 // UnmarkForDeletion removes the marking on the node as a node the controller intends to delete
 func (c *Cluster) UnmarkForDeletion(providerIDs ...string) {
 	c.mu.Lock()
@@ -225,6 +225,8 @@ func (c *Cluster) UnmarkForDeletion(providerIDs ...string) {
 	}
 }
 
+// TODO remove this when v1alpha5 APIs are deprecated. With v1beta1 APIs Karpenter relies on the existence
+// of the karpenter.sh/disruption taint to know when a node is marked for deletion.
 // MarkForDeletion marks the node as pending deletion in the internal cluster state
 func (c *Cluster) MarkForDeletion(providerIDs ...string) {
 	c.mu.Lock()
@@ -260,12 +262,19 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	managed := node.Labels[v1alpha5.ProvisionerNameLabelKey] != "" || node.Labels[v1beta1.NodePoolLabelKey] != ""
+	initialized := node.Labels[v1beta1.NodeInitializedLabelKey] != ""
 	if node.Spec.ProviderID == "" {
 		// If we know that we own this node, we shouldn't allow the providerID to be empty
-		if node.Labels[v1alpha5.ProvisionerNameLabelKey] != "" || node.Labels[v1beta1.NodePoolLabelKey] != "" {
+		if managed {
 			return nil
 		}
 		node.Spec.ProviderID = node.Name
+	}
+	// If we have a managed node with no instance type label that hasn't been initialized,
+	// we need to wait until the instance type label gets propagated on it
+	if managed && node.Labels[v1.LabelInstanceTypeStable] == "" && !initialized {
+		return nil
 	}
 	n, err := c.newStateFromNode(ctx, node, c.nodes[node.Spec.ProviderID])
 	if err != nil {
@@ -505,6 +514,11 @@ func (c *Cluster) populateInflight(ctx context.Context, n *StateNode) error {
 	if n.inflightInitialized {
 		return nil
 	}
+	// If the node is already initialized, we don't need to populate its inflight capacity
+	// since its capacity is already represented by the node status
+	if n.Initialized() {
+		return nil
+	}
 
 	if nodeclaimutil.OwnerKey(n).Name == "" {
 		return nil
@@ -631,6 +645,11 @@ func (c *Cluster) updatePodAntiAffinities(pod *v1.Pod) {
 
 func (c *Cluster) triggerConsolidationOnChange(old, new *StateNode) {
 	if old == nil || new == nil {
+		c.MarkUnconsolidated()
+		return
+	}
+	// If either the old node or new node are mocked
+	if (old.Node == nil && old.NodeClaim == nil) || (new.Node == nil && new.NodeClaim == nil) {
 		c.MarkUnconsolidated()
 		return
 	}

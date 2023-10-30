@@ -78,6 +78,7 @@ var (
 		v1.LabelArchStable,
 		v1.LabelOSStable,
 		CapacityTypeLabelKey,
+		v1.LabelWindowsBuild,
 	)
 
 	// RestrictedLabels are labels that should not be used

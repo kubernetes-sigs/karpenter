@@ -17,6 +17,7 @@ package env
 import (
 	"os"
 	"strconv"
+	"time"
 )
 
 // WithDefaultInt returns the int value of the supplied environment variable or, if not present,
@@ -79,6 +80,20 @@ func WithDefaultBool(key string, def bool) bool {
 		return def
 	}
 	parsedVal, err := strconv.ParseBool(val)
+	if err != nil {
+		return def
+	}
+	return parsedVal
+}
+
+// WithDefaultDuration returns the duration value of the supplied environment variable or, if not present,
+// the supplied default value.
+func WithDefaultDuration(key string, def time.Duration) time.Duration {
+	val, ok := os.LookupEnv(key)
+	if !ok {
+		return def
+	}
+	parsedVal, err := time.ParseDuration(val)
 	if err != nil {
 		return def
 	}

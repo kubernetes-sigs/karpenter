@@ -49,7 +49,7 @@ func NewController(c clock.Clock, kubeClient client.Client, cloudProvider cloudp
 }
 
 func (c *Controller) Name() string {
-	return "machine.garbagecollection"
+	return "nodeclaim.garbagecollection"
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
@@ -68,9 +68,9 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		return nc.Status.ProviderID
 	})...)
 	nodeClaims := lo.Filter(lo.ToSlicePtr(nodeClaimList.Items), func(n *v1beta1.NodeClaim, _ int) bool {
-		return n.StatusConditions().GetCondition(v1beta1.NodeLaunched).IsTrue() &&
+		return n.StatusConditions().GetCondition(v1beta1.Launched).IsTrue() &&
 			n.DeletionTimestamp.IsZero() &&
-			c.clock.Since(n.StatusConditions().GetCondition(v1beta1.NodeLaunched).LastTransitionTime.Inner.Time) > time.Second*10 &&
+			c.clock.Since(n.StatusConditions().GetCondition(v1beta1.Launched).LastTransitionTime.Inner.Time) > time.Second*10 &&
 			!cloudProviderProviderIDs.Has(n.Status.ProviderID)
 	})
 
@@ -89,7 +89,10 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 			Debugf("garbage collecting %s with no cloudprovider representation", lo.Ternary(nodeClaims[i].IsMachine, "machine", "nodeclaim"))
 		nodeclaimutil.TerminatedCounter(nodeClaims[i], "garbage_collected").Inc()
 	})
-	return reconcile.Result{RequeueAfter: time.Minute * 2}, multierr.Combine(errs...)
+	if err = multierr.Combine(errs...); err != nil {
+		return reconcile.Result{}, err
+	}
+	return reconcile.Result{RequeueAfter: time.Minute * 2}, nil
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {

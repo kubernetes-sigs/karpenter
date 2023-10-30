@@ -30,7 +30,7 @@ var ContextKey = settingsKeyType{}
 
 var defaultSettings = &Settings{
 	BatchMaxDuration:  time.Second * 10,
-	BatchIdleDuration: time.Second * 1,
+	BatchIdleDuration: time.Second,
 	DriftEnabled:      false,
 }
 
@@ -49,6 +49,9 @@ func (*Settings) ConfigMap() string {
 // Inject creates a Settings from the supplied ConfigMap
 func (*Settings) Inject(ctx context.Context, cm *v1.ConfigMap) (context.Context, error) {
 	s := defaultSettings.DeepCopy()
+	if cm == nil {
+		return ToContext(ctx, s), nil
+	}
 
 	if err := configmap.Parse(cm.Data,
 		configmap.AsDuration("batchMaxDuration", &s.BatchMaxDuration),
@@ -80,8 +83,7 @@ func ToContext(ctx context.Context, s *Settings) context.Context {
 func FromContext(ctx context.Context) *Settings {
 	data := ctx.Value(ContextKey)
 	if data == nil {
-		// This is developer error if this happens, so we should panic
-		panic("settings doesn't exist in context")
+		panic("settings not in context")
 	}
 	return data.(*Settings)
 }

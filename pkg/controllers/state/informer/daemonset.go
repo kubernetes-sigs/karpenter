@@ -45,7 +45,7 @@ func NewDaemonSetController(kubeClient client.Client, cluster *state.Cluster) co
 }
 
 func (c *Controller) Name() string {
-	return "daemonset"
+	return "state.daemonset"
 }
 
 // Reconcile the resource
@@ -58,8 +58,10 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-
-	return reconcile.Result{RequeueAfter: time.Minute}, c.cluster.UpdateDaemonSet(ctx, &daemonSet)
+	if err := c.cluster.UpdateDaemonSet(ctx, &daemonSet); err != nil {
+		return reconcile.Result{}, err
+	}
+	return reconcile.Result{RequeueAfter: time.Minute}, nil
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {

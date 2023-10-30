@@ -72,7 +72,6 @@ func (i *NodeClaimTemplate) ToNodeClaim(nodePool *v1beta1.NodePool) *v1beta1.Nod
 			GenerateName: fmt.Sprintf("%s-", i.OwnerKey.Name),
 			Annotations:  lo.Assign(i.Annotations, map[string]string{v1beta1.NodePoolHashAnnotationKey: nodePool.Hash()}),
 			Labels:       i.Labels,
-			Finalizers:   i.Finalizers,
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion:         v1beta1.SchemeGroupVersion.String(),
@@ -120,28 +119,28 @@ func (i *NodeClaimTemplate) ToMachine(provisioner *v1alpha5.Provisioner) *v1alph
 			},
 		},
 	}
-	if i.NodeClaimTemplate.Spec.KubeletConfiguration != nil {
+	if i.NodeClaimTemplate.Spec.Kubelet != nil {
 		m.Spec.Kubelet = &v1alpha5.KubeletConfiguration{
-			ClusterDNS:                  i.NodeClaimTemplate.Spec.KubeletConfiguration.ClusterDNS,
-			ContainerRuntime:            i.NodeClaimTemplate.Spec.KubeletConfiguration.ContainerRuntime,
-			MaxPods:                     i.NodeClaimTemplate.Spec.KubeletConfiguration.MaxPods,
-			PodsPerCore:                 i.NodeClaimTemplate.Spec.KubeletConfiguration.PodsPerCore,
-			SystemReserved:              i.NodeClaimTemplate.Spec.KubeletConfiguration.SystemReserved,
-			KubeReserved:                i.NodeClaimTemplate.Spec.KubeletConfiguration.KubeReserved,
-			EvictionHard:                i.NodeClaimTemplate.Spec.KubeletConfiguration.EvictionHard,
-			EvictionSoft:                i.NodeClaimTemplate.Spec.KubeletConfiguration.EvictionSoft,
-			EvictionSoftGracePeriod:     i.NodeClaimTemplate.Spec.KubeletConfiguration.EvictionSoftGracePeriod,
-			EvictionMaxPodGracePeriod:   i.NodeClaimTemplate.Spec.KubeletConfiguration.EvictionMaxPodGracePeriod,
-			ImageGCHighThresholdPercent: i.NodeClaimTemplate.Spec.KubeletConfiguration.ImageGCHighThresholdPercent,
-			ImageGCLowThresholdPercent:  i.NodeClaimTemplate.Spec.KubeletConfiguration.ImageGCLowThresholdPercent,
-			CPUCFSQuota:                 i.NodeClaimTemplate.Spec.KubeletConfiguration.CPUCFSQuota,
+			ClusterDNS:                  i.NodeClaimTemplate.Spec.Kubelet.ClusterDNS,
+			ContainerRuntime:            i.NodeClaimTemplate.Spec.Kubelet.ContainerRuntime,
+			MaxPods:                     i.NodeClaimTemplate.Spec.Kubelet.MaxPods,
+			PodsPerCore:                 i.NodeClaimTemplate.Spec.Kubelet.PodsPerCore,
+			SystemReserved:              i.NodeClaimTemplate.Spec.Kubelet.SystemReserved,
+			KubeReserved:                i.NodeClaimTemplate.Spec.Kubelet.KubeReserved,
+			EvictionHard:                i.NodeClaimTemplate.Spec.Kubelet.EvictionHard,
+			EvictionSoft:                i.NodeClaimTemplate.Spec.Kubelet.EvictionSoft,
+			EvictionSoftGracePeriod:     i.NodeClaimTemplate.Spec.Kubelet.EvictionSoftGracePeriod,
+			EvictionMaxPodGracePeriod:   i.NodeClaimTemplate.Spec.Kubelet.EvictionMaxPodGracePeriod,
+			ImageGCHighThresholdPercent: i.NodeClaimTemplate.Spec.Kubelet.ImageGCHighThresholdPercent,
+			ImageGCLowThresholdPercent:  i.NodeClaimTemplate.Spec.Kubelet.ImageGCLowThresholdPercent,
+			CPUCFSQuota:                 i.NodeClaimTemplate.Spec.Kubelet.CPUCFSQuota,
 		}
 	}
-	if i.NodeClaimTemplate.Spec.NodeClass != nil {
+	if i.NodeClaimTemplate.Spec.NodeClassRef != nil {
 		m.Spec.MachineTemplateRef = &v1alpha5.MachineTemplateRef{
-			Kind:       i.NodeClaimTemplate.Spec.NodeClass.Kind,
-			Name:       i.NodeClaimTemplate.Spec.NodeClass.Name,
-			APIVersion: i.NodeClaimTemplate.Spec.NodeClass.APIVersion,
+			Kind:       i.NodeClaimTemplate.Spec.NodeClassRef.Kind,
+			Name:       i.NodeClaimTemplate.Spec.NodeClassRef.Name,
+			APIVersion: i.NodeClaimTemplate.Spec.NodeClassRef.APIVersion,
 		}
 	}
 	return m

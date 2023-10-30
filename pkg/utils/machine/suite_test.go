@@ -263,7 +263,7 @@ var _ = Describe("MachineUtils", func() {
 						v1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
 					},
 				},
-				KubeletConfiguration: &v1beta1.KubeletConfiguration{
+				Kubelet: &v1beta1.KubeletConfiguration{
 					ContainerRuntime: ptr.String("containerd"),
 					MaxPods:          ptr.Int32(110),
 					PodsPerCore:      ptr.Int32(10),
@@ -306,8 +306,8 @@ var _ = Describe("MachineUtils", func() {
 					ImageGCLowThresholdPercent:  ptr.Int32(10),
 					CPUCFSQuota:                 ptr.Bool(false),
 				},
-				NodeClass: &v1beta1.NodeClassReference{
-					Kind:       "NodeClass",
+				NodeClassRef: &v1beta1.NodeClassReference{
+					Kind:       "NodeClassRef",
 					APIVersion: "test.cloudprovider/v1",
 					Name:       "default",
 				},
@@ -319,9 +319,9 @@ var _ = Describe("MachineUtils", func() {
 				Allocatable: node.Status.Allocatable,
 			},
 		})
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeLaunched)
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeRegistered)
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeInitialized)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Launched)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Registered)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Initialized)
 	})
 	It("should convert a Node and a Provisioner to a Machine", func() {
 		machine := machineutil.New(node, provisioner)
@@ -396,23 +396,23 @@ var _ = Describe("MachineUtils", func() {
 		Expect(machine.Spec.Requirements).To(ContainElements(nodeClaim.Spec.Requirements))
 		Expect(machine.Spec.Resources.Requests).To(Equal(nodeClaim.Spec.Resources.Requests))
 
-		Expect(machine.Spec.Kubelet.ClusterDNS).To(Equal(nodeClaim.Spec.KubeletConfiguration.ClusterDNS))
-		Expect(machine.Spec.Kubelet.ContainerRuntime).To(Equal(nodeClaim.Spec.KubeletConfiguration.ContainerRuntime))
-		Expect(machine.Spec.Kubelet.MaxPods).To(Equal(nodeClaim.Spec.KubeletConfiguration.MaxPods))
-		Expect(machine.Spec.Kubelet.PodsPerCore).To(Equal(nodeClaim.Spec.KubeletConfiguration.PodsPerCore))
-		Expect(machine.Spec.Kubelet.SystemReserved).To(Equal(nodeClaim.Spec.KubeletConfiguration.SystemReserved))
-		Expect(machine.Spec.Kubelet.KubeReserved).To(Equal(nodeClaim.Spec.KubeletConfiguration.KubeReserved))
-		Expect(machine.Spec.Kubelet.EvictionHard).To(Equal(nodeClaim.Spec.KubeletConfiguration.EvictionHard))
-		Expect(machine.Spec.Kubelet.EvictionSoft).To(Equal(nodeClaim.Spec.KubeletConfiguration.EvictionSoft))
-		Expect(machine.Spec.Kubelet.EvictionSoftGracePeriod).To(Equal(nodeClaim.Spec.KubeletConfiguration.EvictionSoftGracePeriod))
-		Expect(machine.Spec.Kubelet.EvictionMaxPodGracePeriod).To(Equal(nodeClaim.Spec.KubeletConfiguration.EvictionMaxPodGracePeriod))
-		Expect(machine.Spec.Kubelet.ImageGCHighThresholdPercent).To(Equal(nodeClaim.Spec.KubeletConfiguration.ImageGCHighThresholdPercent))
-		Expect(machine.Spec.Kubelet.ImageGCLowThresholdPercent).To(Equal(nodeClaim.Spec.KubeletConfiguration.ImageGCLowThresholdPercent))
-		Expect(machine.Spec.Kubelet.CPUCFSQuota).To(Equal(nodeClaim.Spec.KubeletConfiguration.CPUCFSQuota))
+		Expect(machine.Spec.Kubelet.ClusterDNS).To(Equal(nodeClaim.Spec.Kubelet.ClusterDNS))
+		Expect(machine.Spec.Kubelet.ContainerRuntime).To(Equal(nodeClaim.Spec.Kubelet.ContainerRuntime))
+		Expect(machine.Spec.Kubelet.MaxPods).To(Equal(nodeClaim.Spec.Kubelet.MaxPods))
+		Expect(machine.Spec.Kubelet.PodsPerCore).To(Equal(nodeClaim.Spec.Kubelet.PodsPerCore))
+		Expect(machine.Spec.Kubelet.SystemReserved).To(Equal(nodeClaim.Spec.Kubelet.SystemReserved))
+		Expect(machine.Spec.Kubelet.KubeReserved).To(Equal(nodeClaim.Spec.Kubelet.KubeReserved))
+		Expect(machine.Spec.Kubelet.EvictionHard).To(Equal(nodeClaim.Spec.Kubelet.EvictionHard))
+		Expect(machine.Spec.Kubelet.EvictionSoft).To(Equal(nodeClaim.Spec.Kubelet.EvictionSoft))
+		Expect(machine.Spec.Kubelet.EvictionSoftGracePeriod).To(Equal(nodeClaim.Spec.Kubelet.EvictionSoftGracePeriod))
+		Expect(machine.Spec.Kubelet.EvictionMaxPodGracePeriod).To(Equal(nodeClaim.Spec.Kubelet.EvictionMaxPodGracePeriod))
+		Expect(machine.Spec.Kubelet.ImageGCHighThresholdPercent).To(Equal(nodeClaim.Spec.Kubelet.ImageGCHighThresholdPercent))
+		Expect(machine.Spec.Kubelet.ImageGCLowThresholdPercent).To(Equal(nodeClaim.Spec.Kubelet.ImageGCLowThresholdPercent))
+		Expect(machine.Spec.Kubelet.CPUCFSQuota).To(Equal(nodeClaim.Spec.Kubelet.CPUCFSQuota))
 
-		Expect(machine.Spec.MachineTemplateRef.Kind).To(Equal(nodeClaim.Spec.NodeClass.Kind))
-		Expect(machine.Spec.MachineTemplateRef.APIVersion).To(Equal(nodeClaim.Spec.NodeClass.APIVersion))
-		Expect(machine.Spec.MachineTemplateRef.Name).To(Equal(nodeClaim.Spec.NodeClass.Name))
+		Expect(machine.Spec.MachineTemplateRef.Kind).To(Equal(nodeClaim.Spec.NodeClassRef.Kind))
+		Expect(machine.Spec.MachineTemplateRef.APIVersion).To(Equal(nodeClaim.Spec.NodeClassRef.APIVersion))
+		Expect(machine.Spec.MachineTemplateRef.Name).To(Equal(nodeClaim.Spec.NodeClassRef.Name))
 
 		Expect(machine.Status.NodeName).To(Equal(nodeClaim.Status.NodeName))
 		Expect(machine.Status.ProviderID).To(Equal(nodeClaim.Status.ProviderID))

@@ -22,7 +22,6 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -37,7 +36,7 @@ var _ = Describe("NodePool Static Drift Hash", func() {
 		nodePool = test.NodePool(v1beta1.NodePool{
 			Spec: v1beta1.NodePoolSpec{
 				Template: v1beta1.NodeClaimTemplate{
-					ObjectMeta: metav1.ObjectMeta{
+					ObjectMeta: v1beta1.ObjectMeta{
 						Annotations: map[string]string{
 							"keyAnnotation":  "valueAnnotation",
 							"keyAnnotation2": "valueAnnotation2",
@@ -59,7 +58,7 @@ var _ = Describe("NodePool Static Drift Hash", func() {
 								Effect: v1.TaintEffectNoExecute,
 							},
 						},
-						KubeletConfiguration: &v1beta1.KubeletConfiguration{
+						Kubelet: &v1beta1.KubeletConfiguration{
 							MaxPods: ptr.Int32(10),
 						},
 					},
@@ -93,7 +92,7 @@ var _ = Describe("NodePool Static Drift Hash", func() {
 
 		nodePool.Spec.Limits = v1beta1.Limits(v1.ResourceList{"cpu": resource.MustParse("16")})
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
-		nodePool.Spec.Disruption.ConsolidateAfter.Duration = lo.ToPtr(30 * time.Second)
+		nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: lo.ToPtr(30 * time.Second)}
 		nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(30 * time.Second)
 		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
 			{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},

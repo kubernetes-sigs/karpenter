@@ -18,7 +18,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/aws/karpenter-core/pkg/apis/settings"
+	"github.com/aws/karpenter-core/pkg/operator/options"
 )
 
 // Batcher separates a stream of Trigger() calls into windowed slices. The
@@ -55,8 +55,8 @@ func (b *Batcher) Wait(ctx context.Context) bool {
 		// If no pods, bail to the outer controller framework to refresh the context
 		return false
 	}
-	timeout := time.NewTimer(settings.FromContext(ctx).BatchMaxDuration)
-	idle := time.NewTimer(settings.FromContext(ctx).BatchIdleDuration)
+	timeout := time.NewTimer(options.FromContext(ctx).BatchMaxDuration)
+	idle := time.NewTimer(options.FromContext(ctx).BatchIdleDuration)
 	for {
 		select {
 		case <-b.trigger:
@@ -64,7 +64,7 @@ func (b *Batcher) Wait(ctx context.Context) bool {
 			if !idle.Stop() {
 				<-idle.C
 			}
-			idle.Reset(settings.FromContext(ctx).BatchIdleDuration)
+			idle.Reset(options.FromContext(ctx).BatchIdleDuration)
 		case <-timeout.C:
 			return true
 		case <-idle.C:

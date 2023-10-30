@@ -38,10 +38,13 @@ func NodeClaim(overrides ...v1beta1.NodeClaim) *v1beta1.NodeClaim {
 	if override.Status.ProviderID == "" {
 		override.Status.ProviderID = RandomProviderID()
 	}
-	if override.Spec.NodeClass == nil {
-		override.Spec.NodeClass = &v1beta1.NodeClassReference{
+	if override.Spec.NodeClassRef == nil {
+		override.Spec.NodeClassRef = &v1beta1.NodeClassReference{
 			Name: "default",
 		}
+	}
+	if override.Spec.Requirements == nil {
+		override.Spec.Requirements = []v1.NodeSelectorRequirement{}
 	}
 	return &v1beta1.NodeClaim{
 		ObjectMeta: ObjectMeta(override.ObjectMeta),
@@ -53,4 +56,18 @@ func NodeClaim(overrides ...v1beta1.NodeClaim) *v1beta1.NodeClaim {
 func NodeClaimAndNode(overrides ...v1beta1.NodeClaim) (*v1beta1.NodeClaim, *v1.Node) {
 	nc := NodeClaim(overrides...)
 	return nc, NodeClaimLinkedNode(nc)
+}
+
+// NodeClaimsAndNodes creates homogeneous groups of NodeClaims and Nodes based on the passed in options, evenly divided by the total machines requested
+func NodeClaimsAndNodes(total int, options ...v1beta1.NodeClaim) ([]*v1beta1.NodeClaim, []*v1.Node) {
+	nodeClaims := make([]*v1beta1.NodeClaim, total)
+	nodes := make([]*v1.Node, total)
+	for _, opts := range options {
+		for i := 0; i < total/len(options); i++ {
+			nodeClaim, node := NodeClaimAndNode(opts)
+			nodeClaims[i] = nodeClaim
+			nodes[i] = node
+		}
+	}
+	return nodeClaims, nodes
 }

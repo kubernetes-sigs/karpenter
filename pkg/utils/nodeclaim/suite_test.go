@@ -254,32 +254,32 @@ var _ = Describe("NodeClaimUtils", func() {
 		Expect(nodeClaim.Spec.Requirements).To(ContainElements(machine.Spec.Requirements))
 		Expect(nodeClaim.Spec.Resources.Requests).To(Equal(machine.Spec.Resources.Requests))
 
-		Expect(nodeClaim.Spec.KubeletConfiguration.ClusterDNS).To(Equal(machine.Spec.Kubelet.ClusterDNS))
-		Expect(nodeClaim.Spec.KubeletConfiguration.ContainerRuntime).To(Equal(machine.Spec.Kubelet.ContainerRuntime))
-		Expect(nodeClaim.Spec.KubeletConfiguration.MaxPods).To(Equal(machine.Spec.Kubelet.MaxPods))
-		Expect(nodeClaim.Spec.KubeletConfiguration.PodsPerCore).To(Equal(machine.Spec.Kubelet.PodsPerCore))
-		Expect(nodeClaim.Spec.KubeletConfiguration.SystemReserved).To(Equal(machine.Spec.Kubelet.SystemReserved))
-		Expect(nodeClaim.Spec.KubeletConfiguration.KubeReserved).To(Equal(machine.Spec.Kubelet.KubeReserved))
-		Expect(nodeClaim.Spec.KubeletConfiguration.EvictionHard).To(Equal(machine.Spec.Kubelet.EvictionHard))
-		Expect(nodeClaim.Spec.KubeletConfiguration.EvictionSoft).To(Equal(machine.Spec.Kubelet.EvictionSoft))
-		Expect(nodeClaim.Spec.KubeletConfiguration.EvictionSoftGracePeriod).To(Equal(machine.Spec.Kubelet.EvictionSoftGracePeriod))
-		Expect(nodeClaim.Spec.KubeletConfiguration.EvictionMaxPodGracePeriod).To(Equal(machine.Spec.Kubelet.EvictionMaxPodGracePeriod))
-		Expect(nodeClaim.Spec.KubeletConfiguration.ImageGCHighThresholdPercent).To(Equal(machine.Spec.Kubelet.ImageGCHighThresholdPercent))
-		Expect(nodeClaim.Spec.KubeletConfiguration.ImageGCLowThresholdPercent).To(Equal(machine.Spec.Kubelet.ImageGCLowThresholdPercent))
-		Expect(nodeClaim.Spec.KubeletConfiguration.CPUCFSQuota).To(Equal(machine.Spec.Kubelet.CPUCFSQuota))
+		Expect(nodeClaim.Spec.Kubelet.ClusterDNS).To(Equal(machine.Spec.Kubelet.ClusterDNS))
+		Expect(nodeClaim.Spec.Kubelet.ContainerRuntime).To(Equal(machine.Spec.Kubelet.ContainerRuntime))
+		Expect(nodeClaim.Spec.Kubelet.MaxPods).To(Equal(machine.Spec.Kubelet.MaxPods))
+		Expect(nodeClaim.Spec.Kubelet.PodsPerCore).To(Equal(machine.Spec.Kubelet.PodsPerCore))
+		Expect(nodeClaim.Spec.Kubelet.SystemReserved).To(Equal(machine.Spec.Kubelet.SystemReserved))
+		Expect(nodeClaim.Spec.Kubelet.KubeReserved).To(Equal(machine.Spec.Kubelet.KubeReserved))
+		Expect(nodeClaim.Spec.Kubelet.EvictionHard).To(Equal(machine.Spec.Kubelet.EvictionHard))
+		Expect(nodeClaim.Spec.Kubelet.EvictionSoft).To(Equal(machine.Spec.Kubelet.EvictionSoft))
+		Expect(nodeClaim.Spec.Kubelet.EvictionSoftGracePeriod).To(Equal(machine.Spec.Kubelet.EvictionSoftGracePeriod))
+		Expect(nodeClaim.Spec.Kubelet.EvictionMaxPodGracePeriod).To(Equal(machine.Spec.Kubelet.EvictionMaxPodGracePeriod))
+		Expect(nodeClaim.Spec.Kubelet.ImageGCHighThresholdPercent).To(Equal(machine.Spec.Kubelet.ImageGCHighThresholdPercent))
+		Expect(nodeClaim.Spec.Kubelet.ImageGCLowThresholdPercent).To(Equal(machine.Spec.Kubelet.ImageGCLowThresholdPercent))
+		Expect(nodeClaim.Spec.Kubelet.CPUCFSQuota).To(Equal(machine.Spec.Kubelet.CPUCFSQuota))
 
-		Expect(nodeClaim.Spec.NodeClass.Kind).To(Equal(machine.Spec.MachineTemplateRef.Kind))
-		Expect(nodeClaim.Spec.NodeClass.APIVersion).To(Equal(machine.Spec.MachineTemplateRef.APIVersion))
-		Expect(nodeClaim.Spec.NodeClass.Name).To(Equal(machine.Spec.MachineTemplateRef.Name))
+		Expect(nodeClaim.Spec.NodeClassRef.Kind).To(Equal(machine.Spec.MachineTemplateRef.Kind))
+		Expect(nodeClaim.Spec.NodeClassRef.APIVersion).To(Equal(machine.Spec.MachineTemplateRef.APIVersion))
+		Expect(nodeClaim.Spec.NodeClassRef.Name).To(Equal(machine.Spec.MachineTemplateRef.Name))
 
 		Expect(nodeClaim.Status.NodeName).To(Equal(machine.Status.NodeName))
 		Expect(nodeClaim.Status.ProviderID).To(Equal(machine.Status.ProviderID))
 		Expect(nodeClaim.Status.Capacity).To(Equal(machine.Status.Capacity))
 		Expect(nodeClaim.Status.Allocatable).To(Equal(machine.Status.Allocatable))
 
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeLaunched).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeRegistered).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeInitialized).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Launched).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Registered).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized).IsTrue()).To(BeTrue())
 	})
 	It("should convert a Node to a NodeClaim", func() {
 		nodeClaim := nodeclaimutil.NewFromNode(node)
@@ -297,15 +297,15 @@ var _ = Describe("NodeClaimUtils", func() {
 		Expect(nodeClaim.Status.ProviderID).To(Equal(node.Spec.ProviderID))
 		Expect(nodeClaim.Status.Capacity).To(Equal(node.Status.Capacity))
 		Expect(nodeClaim.Status.Allocatable).To(Equal(node.Status.Allocatable))
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeLaunched).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeRegistered).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeInitialized).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Launched).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Registered).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized).IsTrue()).To(BeTrue())
 	})
 	It("should retrieve a NodeClaim with a get call", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			Spec: v1beta1.NodeClaimSpec{
-				NodeClass: &v1beta1.NodeClassReference{
-					Kind:       "NodeClass",
+				NodeClassRef: &v1beta1.NodeClassReference{
+					Kind:       "NodeClassRef",
 					APIVersion: "test.cloudprovider/v1",
 					Name:       "default",
 				},
@@ -334,8 +334,8 @@ var _ = Describe("NodeClaimUtils", func() {
 		for i := 0; i < numNodeClaims; i++ {
 			ExpectApplied(ctx, env.Client, test.NodeClaim(v1beta1.NodeClaim{
 				Spec: v1beta1.NodeClaimSpec{
-					NodeClass: &v1beta1.NodeClassReference{
-						Kind:       "NodeClass",
+					NodeClassRef: &v1beta1.NodeClassReference{
+						Kind:       "NodeClassRef",
 						APIVersion: "test.cloudprovider/v1",
 						Name:       "default",
 					},
@@ -353,8 +353,8 @@ var _ = Describe("NodeClaimUtils", func() {
 	It("should update the status on a NodeClaim", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			Spec: v1beta1.NodeClaimSpec{
-				NodeClass: &v1beta1.NodeClassReference{
-					Kind:       "NodeClass",
+				NodeClassRef: &v1beta1.NodeClassReference{
+					Kind:       "NodeClassRef",
 					APIVersion: "test.cloudprovider/v1",
 					Name:       "default",
 				},
@@ -386,8 +386,8 @@ var _ = Describe("NodeClaimUtils", func() {
 	It("should patch a NodeClaim", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			Spec: v1beta1.NodeClaimSpec{
-				NodeClass: &v1beta1.NodeClassReference{
-					Kind:       "NodeClass",
+				NodeClassRef: &v1beta1.NodeClassReference{
+					Kind:       "NodeClassRef",
 					APIVersion: "test.cloudprovider/v1",
 					Name:       "default",
 				},
@@ -423,8 +423,8 @@ var _ = Describe("NodeClaimUtils", func() {
 	It("should patch the status on a NodeClaim", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			Spec: v1beta1.NodeClaimSpec{
-				NodeClass: &v1beta1.NodeClassReference{
-					Kind:       "NodeClass",
+				NodeClassRef: &v1beta1.NodeClassReference{
+					Kind:       "NodeClassRef",
 					APIVersion: "test.cloudprovider/v1",
 					Name:       "default",
 				},
@@ -458,8 +458,8 @@ var _ = Describe("NodeClaimUtils", func() {
 	It("should delete a NodeClaim with a delete call", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			Spec: v1beta1.NodeClaimSpec{
-				NodeClass: &v1beta1.NodeClassReference{
-					Kind:       "NodeClass",
+				NodeClassRef: &v1beta1.NodeClassReference{
+					Kind:       "NodeClassRef",
 					APIVersion: "test.cloudprovider/v1",
 					Name:       "default",
 				},
@@ -492,8 +492,8 @@ var _ = Describe("NodeClaimUtils", func() {
 	It("should update the owner for a Node to a NodeClaim", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			Spec: v1beta1.NodeClaimSpec{
-				NodeClass: &v1beta1.NodeClassReference{
-					Kind:       "NodeClass",
+				NodeClassRef: &v1beta1.NodeClassReference{
+					Kind:       "NodeClassRef",
 					APIVersion: "test.cloudprovider/v1",
 					Name:       "default",
 				},
@@ -529,8 +529,8 @@ var _ = Describe("NodeClaimUtils", func() {
 			Spec: v1beta1.NodePoolSpec{
 				Template: v1beta1.NodeClaimTemplate{
 					Spec: v1beta1.NodeClaimSpec{
-						NodeClass: &v1beta1.NodeClassReference{
-							Kind:       "NodeClass",
+						NodeClassRef: &v1beta1.NodeClassReference{
+							Kind:       "NodeClassRef",
 							APIVersion: "test.cloudprovider/v1",
 							Name:       "default",
 						},
@@ -545,8 +545,8 @@ var _ = Describe("NodeClaimUtils", func() {
 				},
 			},
 			Spec: v1beta1.NodeClaimSpec{
-				NodeClass: &v1beta1.NodeClassReference{
-					Kind:       "NodeClass",
+				NodeClassRef: &v1beta1.NodeClassReference{
+					Kind:       "NodeClassRef",
 					APIVersion: "test.cloudprovider/v1",
 					Name:       "default",
 				},

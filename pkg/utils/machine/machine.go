@@ -36,8 +36,8 @@ import (
 
 // PodEventHandler is a watcher on v1.Pods that maps Pods to NodeClaim based on the node names
 // and enqueues reconcile.Requests for the Machines
-func PodEventHandler(ctx context.Context, c client.Client) handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(o client.Object) (requests []reconcile.Request) {
+func PodEventHandler(c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
 		if name := o.(*v1.Pod).Spec.NodeName; name != "" {
 			node := &v1.Node{}
 			if err := c.Get(ctx, types.NamespacedName{Name: name}, node); err != nil {
@@ -59,8 +59,8 @@ func PodEventHandler(ctx context.Context, c client.Client) handler.EventHandler 
 
 // NodeEventHandler is a watcher on v1.Node that maps Nodes to Machines based on provider ids
 // and enqueues reconcile.Requests for the Machines
-func NodeEventHandler(ctx context.Context, c client.Client) handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
+func NodeEventHandler(c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
 		node := o.(*v1.Node)
 		machineList := &v1alpha5.MachineList{}
 		if err := c.List(ctx, machineList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
@@ -76,8 +76,8 @@ func NodeEventHandler(ctx context.Context, c client.Client) handler.EventHandler
 
 // ProvisionerEventHandler is a watcher on v1alpha5.Machine that maps Provisioner to Machines based
 // on the v1alpha5.ProvsionerNameLabelKey and enqueues reconcile.Requests for the NodeClaim
-func ProvisionerEventHandler(ctx context.Context, c client.Client) handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(o client.Object) (requests []reconcile.Request) {
+func ProvisionerEventHandler(c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
 		machineList := &v1alpha5.MachineList{}
 		if err := c.List(ctx, machineList, client.MatchingLabels(map[string]string{v1alpha5.ProvisionerNameLabelKey: o.GetName()})); err != nil {
 			return requests
@@ -234,8 +234,8 @@ func NewFromNodeClaim(nodeClaim *v1beta1.NodeClaim) *v1alpha5.Machine {
 			Resources: v1alpha5.ResourceRequirements{
 				Requests: nodeClaim.Spec.Resources.Requests,
 			},
-			Kubelet:            NewKubeletConfiguration(nodeClaim.Spec.KubeletConfiguration),
-			MachineTemplateRef: NewMachineTemplateRef(nodeClaim.Spec.NodeClass),
+			Kubelet:            NewKubeletConfiguration(nodeClaim.Spec.Kubelet),
+			MachineTemplateRef: NewMachineTemplateRef(nodeClaim.Spec.NodeClassRef),
 		},
 		Status: v1alpha5.MachineStatus{
 			NodeName:    nodeClaim.Status.NodeName,
@@ -251,17 +251,17 @@ func NewConditions(conds apis.Conditions) apis.Conditions {
 	out := conds.DeepCopy()
 	for i := range out {
 		switch out[i].Type {
-		case v1beta1.NodeLaunched:
+		case v1beta1.Launched:
 			out[i].Type = v1alpha5.MachineLaunched
-		case v1beta1.NodeRegistered:
+		case v1beta1.Registered:
 			out[i].Type = v1alpha5.MachineRegistered
-		case v1beta1.NodeInitialized:
+		case v1beta1.Initialized:
 			out[i].Type = v1alpha5.MachineInitialized
-		case v1beta1.NodeEmpty:
+		case v1beta1.Empty:
 			out[i].Type = v1alpha5.MachineEmpty
-		case v1beta1.NodeExpired:
+		case v1beta1.Expired:
 			out[i].Type = v1alpha5.MachineExpired
-		case v1beta1.NodeDrifted:
+		case v1beta1.Drifted:
 			out[i].Type = v1alpha5.MachineDrifted
 		}
 	}

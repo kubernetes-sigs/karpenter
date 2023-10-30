@@ -24,8 +24,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	"github.com/aws/karpenter-core/pkg/operator/options"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 
 	"github.com/aws/karpenter-core/pkg/test"
@@ -47,7 +47,7 @@ var _ = Describe("NodeClaim/Disruption", func() {
 	It("should set multiple disruption conditions simultaneously", func() {
 		cp.Drifted = "drifted"
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
-		nodePool.Spec.Disruption.ConsolidateAfter.Duration = lo.ToPtr(time.Second * 30)
+		nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)}
 		nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 30)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
@@ -57,28 +57,28 @@ var _ = Describe("NodeClaim/Disruption", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeDrifted).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeEmpty).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeExpired).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Empty).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Expired).IsTrue()).To(BeTrue())
 	})
 	It("should remove multiple disruption conditions simultaneously", func() {
 		nodePool.Spec.Disruption.ExpireAfter.Duration = nil
-		nodePool.Spec.Disruption.ConsolidateAfter.Duration = nil
+		nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: nil}
 
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeDrifted)
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeEmpty)
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeExpired)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Drifted)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Empty)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Expired)
 
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 
 		// Drift, Expiration, and Emptiness are disabled through configuration
-		ctx = settings.ToContext(ctx, test.Settings(settings.Settings{DriftEnabled: false}))
+		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(false)}}))
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeDrifted)).To(BeNil())
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeEmpty)).To(BeNil())
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.NodeExpired)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Empty)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Expired)).To(BeNil())
 	})
 })

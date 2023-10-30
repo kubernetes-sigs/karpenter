@@ -40,11 +40,6 @@ import (
 	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 )
 
-// EnableNodeClaims is an internal feature flag to allow functions that could List NodeClaims to work
-// This flag is currently here to enable testing
-// TODO @joinnis: Remove this internal flag when the v1beta1 APIs are released
-var EnableNodeClaims = false
-
 type Key struct {
 	Name      string
 	IsMachine bool
@@ -52,8 +47,8 @@ type Key struct {
 
 // PodEventHandler is a watcher on v1.Pods that maps Pods to NodeClaim based on the node names
 // and enqueues reconcile.Requests for the NodeClaims
-func PodEventHandler(ctx context.Context, c client.Client) handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(o client.Object) (requests []reconcile.Request) {
+func PodEventHandler(c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
 		if name := o.(*v1.Pod).Spec.NodeName; name != "" {
 			node := &v1.Node{}
 			if err := c.Get(ctx, types.NamespacedName{Name: name}, node); err != nil {
@@ -75,8 +70,8 @@ func PodEventHandler(ctx context.Context, c client.Client) handler.EventHandler 
 
 // NodeEventHandler is a watcher on v1.Node that maps Nodes to NodeClaims based on provider ids
 // and enqueues reconcile.Requests for the NodeClaims
-func NodeEventHandler(ctx context.Context, c client.Client) handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
+func NodeEventHandler(c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
 		node := o.(*v1.Node)
 		nodeClaimList := &v1beta1.NodeClaimList{}
 		if err := c.List(ctx, nodeClaimList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
@@ -92,8 +87,8 @@ func NodeEventHandler(ctx context.Context, c client.Client) handler.EventHandler
 
 // NodePoolEventHandler is a watcher on v1beta1.NodeClaim that maps Provisioner to NodeClaims based
 // on the v1beta1.NodePoolLabelKey and enqueues reconcile.Requests for the NodeClaim
-func NodePoolEventHandler(ctx context.Context, c client.Client) handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(o client.Object) (requests []reconcile.Request) {
+func NodePoolEventHandler(c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
 		nodeClaimList := &v1beta1.NodeClaimList{}
 		if err := c.List(ctx, nodeClaimList, client.MatchingLabels(map[string]string{v1beta1.NodePoolLabelKey: o.GetName()})); err != nil {
 			return requests
@@ -197,8 +192,8 @@ func New(machine *v1alpha5.Machine) *v1beta1.NodeClaim {
 			Resources: v1beta1.ResourceRequirements{
 				Requests: machine.Spec.Resources.Requests,
 			},
-			KubeletConfiguration: NewKubeletConfiguration(machine.Spec.Kubelet),
-			NodeClass:            NewNodeClassReference(machine.Spec.MachineTemplateRef),
+			Kubelet:      NewKubeletConfiguration(machine.Spec.Kubelet),
+			NodeClassRef: NewNodeClassReference(machine.Spec.MachineTemplateRef),
 		},
 		Status: v1beta1.NodeClaimStatus{
 			NodeName:    machine.Status.NodeName,
@@ -216,17 +211,17 @@ func NewConditions(conds apis.Conditions) apis.Conditions {
 	for i := range out {
 		switch out[i].Type {
 		case v1alpha5.MachineLaunched:
-			out[i].Type = v1beta1.NodeLaunched
+			out[i].Type = v1beta1.Launched
 		case v1alpha5.MachineRegistered:
-			out[i].Type = v1beta1.NodeRegistered
+			out[i].Type = v1beta1.Registered
 		case v1alpha5.MachineInitialized:
-			out[i].Type = v1beta1.NodeInitialized
+			out[i].Type = v1beta1.Initialized
 		case v1alpha5.MachineEmpty:
-			out[i].Type = v1beta1.NodeEmpty
+			out[i].Type = v1beta1.Empty
 		case v1alpha5.MachineExpired:
-			out[i].Type = v1beta1.NodeExpired
+			out[i].Type = v1beta1.Expired
 		case v1alpha5.MachineDrifted:
-			out[i].Type = v1beta1.NodeDrifted
+			out[i].Type = v1beta1.Drifted
 		}
 	}
 	return out
@@ -289,10 +284,10 @@ func NewFromNode(node *v1.Node) *v1beta1.NodeClaim {
 		},
 	}
 	if _, ok := node.Labels[v1beta1.NodeInitializedLabelKey]; ok {
-		nc.StatusConditions().MarkTrue(v1beta1.NodeInitialized)
+		nc.StatusConditions().MarkTrue(v1beta1.Initialized)
 	}
-	nc.StatusConditions().MarkTrue(v1beta1.NodeLaunched)
-	nc.StatusConditions().MarkTrue(v1beta1.NodeRegistered)
+	nc.StatusConditions().MarkTrue(v1beta1.Launched)
+	nc.StatusConditions().MarkTrue(v1beta1.Registered)
 	return nc
 }
 
@@ -320,10 +315,8 @@ func List(ctx context.Context, c client.Client, opts ...client.ListOption) (*v1b
 		return *New(&m)
 	})
 	nodeClaimList := &v1beta1.NodeClaimList{}
-	if EnableNodeClaims {
-		if err := c.List(ctx, nodeClaimList, opts...); err != nil {
-			return nil, err
-		}
+	if err := c.List(ctx, nodeClaimList, opts...); err != nil {
+		return nil, err
 	}
 	nodeClaimList.Items = append(nodeClaimList.Items, convertedNodeClaims...)
 	return nodeClaimList, nil

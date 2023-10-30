@@ -16,49 +16,25 @@ package injection
 
 import (
 	"context"
+	"flag"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"knative.dev/pkg/system"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/operator/options"
 )
-
-type optionsKey struct{}
-
-func WithOptions(ctx context.Context, opts options.Options) context.Context {
-	return context.WithValue(ctx, optionsKey{}, opts)
-}
-
-func GetOptions(ctx context.Context) options.Options {
-	retval := ctx.Value(optionsKey{})
-	if retval == nil {
-		return options.Options{}
-	}
-	return retval.(options.Options)
-}
-
-type configKey struct{}
-
-func WithConfig(ctx context.Context, config *rest.Config) context.Context {
-	return context.WithValue(ctx, configKey{}, config)
-}
-
-func GetConfig(ctx context.Context) *rest.Config {
-	retval := ctx.Value(configKey{})
-	if retval == nil {
-		return nil
-	}
-	return retval.(*rest.Config)
-}
 
 type controllerNameKeyType struct{}
 
@@ -76,12 +52,28 @@ func GetControllerName(ctx context.Context) string {
 	return name.(string)
 }
 
+func WithOptionsOrDie(ctx context.Context, opts ...options.Injectable) context.Context {
+	fs := &options.FlagSet{
+		FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
+	}
+	for _, opt := range opts {
+		opt.AddFlags(fs)
+	}
+	for _, opt := range opts {
+		lo.Must0(opt.Parse(fs, os.Args[1:]...))
+	}
+	for _, opt := range opts {
+		ctx = opt.ToContext(ctx)
+	}
+	return ctx
+}
+
 // WithSettingsOrDie injects the settings into the context for all configMaps passed through the registrations
 // NOTE: Settings are resolved statically into the global context.Context at startup. This was changed from updating them
 // dynamically at runtime due to the necessity of having to build logic around re-queueing to ensure that settings are
 // properly reloaded for things like feature gates
 func WithSettingsOrDie(ctx context.Context, kubernetesInterface kubernetes.Interface, settings ...settings.Injectable) context.Context {
-	cancelCtx, cancel := context.WithCancel(ctx)
+	cancelCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	factory := informers.NewSharedInformerFactoryWithOptions(kubernetesInterface, time.Second*30, informers.WithNamespace(system.Namespace()))
@@ -89,22 +81,31 @@ func WithSettingsOrDie(ctx context.Context, kubernetesInterface kubernetes.Inter
 	factory.Start(cancelCtx.Done())
 
 	for _, setting := range settings {
-		cm := lo.Must(waitForConfigMap(ctx, setting.ConfigMap(), informer))
+		cm, err := WaitForConfigMap(ctx, setting.ConfigMap(), informer)
+		if client.IgnoreNotFound(err) != nil {
+			panic(fmt.Errorf("failed to get configmap %s, %w", setting.ConfigMap(), err))
+		}
 		ctx = lo.Must(setting.Inject(ctx, cm))
 	}
 	return ctx
 }
 
-// waitForConfigMap waits until all registered configMaps in the settingsStore are created
-func waitForConfigMap(ctx context.Context, name string, informer cache.SharedIndexInformer) (*v1.ConfigMap, error) {
+// WaitForConfigMap waits until all registered configMaps are created or the passed-through context is canceled
+func WaitForConfigMap(ctx context.Context, name string, informer cache.SharedIndexInformer) (*v1.ConfigMap, error) {
 	for {
+		var existed bool
 		configMap, exists, err := informer.GetStore().GetByKey(types.NamespacedName{Namespace: system.Namespace(), Name: name}.String())
 		if configMap != nil && exists && err == nil {
 			return configMap.(*v1.ConfigMap), nil
 		}
+		existed = existed || exists
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("context canceled")
+			if existed {
+				// return the last seen error
+				return nil, fmt.Errorf("context canceled, %w", err)
+			}
+			return nil, fmt.Errorf("context canceled, %w", errors.NewNotFound(schema.GroupResource{Resource: "configmaps"}, types.NamespacedName{Namespace: system.Namespace(), Name: name}.String()))
 		case <-time.After(time.Millisecond * 500):
 		}
 	}

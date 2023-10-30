@@ -69,7 +69,7 @@ func (in *NodeClaimSpec) validate() (errs *apis.FieldError) {
 	return errs.Also(
 		in.validateTaints(),
 		in.validateRequirements(),
-		in.KubeletConfiguration.validate().ViaField("kubeletConfiguration"),
+		in.Kubelet.validate().ViaField("kubeletConfiguration"),
 	)
 }
 
@@ -105,7 +105,7 @@ func (in *NodeClaimSpec) validateTaintsField(taints []v1.Taint, existing map[tai
 		switch taint.Effect {
 		case v1.TaintEffectNoSchedule, v1.TaintEffectPreferNoSchedule, v1.TaintEffectNoExecute, "":
 		default:
-			errs = errs.Also(apis.ErrInvalidArrayValue(taint.Effect, "effect", i))
+			errs = errs.Also(apis.ErrInvalidArrayValue(taint.Effect, fieldName, i))
 		}
 
 		// Check for duplicate OwnerKey/Effect pairs
@@ -124,17 +124,14 @@ func (in *NodeClaimSpec) validateTaintsField(taints []v1.Taint, existing map[tai
 // NodeClaim requirements only support well known labels.
 func (in *NodeClaimSpec) validateRequirements() (errs *apis.FieldError) {
 	for i, requirement := range in.Requirements {
-		if requirement.Key == NodePoolLabelKey {
-			errs = errs.Also(apis.ErrInvalidArrayValue(fmt.Sprintf("%s is restricted", requirement.Key), "requirements", i))
-		}
-		if err := in.validateRequirement(requirement); err != nil {
+		if err := ValidateRequirement(requirement); err != nil {
 			errs = errs.Also(apis.ErrInvalidArrayValue(err, "requirements", i))
 		}
 	}
 	return errs
 }
 
-func (in *NodeClaimSpec) validateRequirement(requirement v1.NodeSelectorRequirement) error { //nolint:gocyclo
+func ValidateRequirement(requirement v1.NodeSelectorRequirement) error { //nolint:gocyclo
 	var errs error
 	if normalized, ok := NormalizedLabels[requirement.Key]; ok {
 		requirement.Key = normalized

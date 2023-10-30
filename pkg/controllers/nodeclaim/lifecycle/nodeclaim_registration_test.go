@@ -50,7 +50,7 @@ var _ = Describe("NodeClaim/Registration", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.NodeRegistered).Status).To(Equal(v1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
 		Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
 	})
 	It("should add the owner reference to the Node when the Node comes online", func() {
@@ -98,9 +98,9 @@ var _ = Describe("NodeClaim/Registration", func() {
 				},
 			},
 		})
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeLaunched)
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeRegistered)
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.NodeInitialized)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Launched)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Registered)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Initialized)
 
 		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
 		ExpectApplied(ctx, env.Client, nodeClaim, node)

@@ -198,7 +198,7 @@ func (p *Provisioner) consolidationWarnings(ctx context.Context, po v1.Pod) {
 	}
 }
 
-var ErrProvisionersNotFound = errors.New("no provisioners found")
+var ErrNodePoolsNotFound = errors.New("no nodepools or provisioners found")
 
 //nolint:gocyclo
 func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNodes []*state.StateNode, opts scheduler.SchedulerOptions) (*scheduler.Scheduler, error) {
@@ -212,10 +212,14 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 		return nil, err
 	}
 	nodePoolList.Items = lo.Filter(nodePoolList.Items, func(n v1beta1.NodePool, _ int) bool {
+		if err := n.RuntimeValidate(); err != nil {
+			logging.FromContext(ctx).With("nodepool", n.Name).Errorf("nodepool failed validation, %s", err)
+			return false
+		}
 		return n.DeletionTimestamp.IsZero()
 	})
 	if len(nodePoolList.Items) == 0 {
-		return nil, ErrProvisionersNotFound
+		return nil, ErrNodePoolsNotFound
 	}
 
 	// nodeTemplates generated from NodePools are ordered by weight
@@ -230,7 +234,10 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 		// Get instance type options
 		instanceTypeOptions, err := p.cloudProvider.GetInstanceTypes(ctx, nodePool)
 		if err != nil {
-			return nil, fmt.Errorf("getting instance types, %w", err)
+			// we just log an error and skip the provisioner to prevent a single mis-configured provisioner from stopping
+			// all scheduling
+			logging.FromContext(ctx).With(lo.Ternary(nodePool.IsProvisioner, "provisioner", "nodepool"), nodePool.Name).Errorf("skipping, unable to resolve instance types, %s", err)
+			continue
 		}
 		if len(instanceTypeOptions) == 0 {
 			logging.FromContext(ctx).With(lo.Ternary(nodePool.IsProvisioner, "provisioner", "nodepool"), nodePool.Name).Info("skipping, no resolved instance types found")
@@ -243,13 +250,14 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 			// We need to intersect the instance type requirements with the current nodePool requirements.  This
 			// ensures that something like zones from an instance type don't expand the universe of valid domains.
 			requirements := scheduling.NewNodeSelectorRequirements(nodePool.Spec.Template.Spec.Requirements...)
+			requirements.Add(scheduling.NewLabelRequirements(nodePool.Spec.Template.Labels).Values()...)
 			requirements.Add(instanceType.Requirements.Values()...)
 
 			for key, requirement := range requirements {
-				//This code used to execute a Union between domains[key] and requirement.Values().
-				//The downside of this is that Union is immutable and takes a copy of the set it is executed upon.
-				//This resulted in a lot of memory pressure on the heap and poor performance
-				//https://github.com/aws/karpenter/issues/3565
+				// This code used to execute a Union between domains[key] and requirement.Values().
+				// The downside of this is that Union is immutable and takes a copy of the set it is executed upon.
+				// This resulted in a lot of memory pressure on the heap and poor performance
+				// https://github.com/aws/karpenter/issues/3565
 				if domains[key] == nil {
 					domains[key] = sets.New(requirement.Values()...)
 				} else {
@@ -258,7 +266,9 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 			}
 		}
 
-		for key, requirement := range scheduling.NewNodeSelectorRequirements(nodePool.Spec.Template.Spec.Requirements...) {
+		requirements := scheduling.NewNodeSelectorRequirements(nodePool.Spec.Template.Spec.Requirements...)
+		requirements.Add(scheduling.NewLabelRequirements(nodePool.Spec.Template.Labels).Values()...)
+		for key, requirement := range requirements {
 			if requirement.Operator() == v1.NodeSelectorOpIn {
 				//The following is a performance optimisation, for the explanation see the comment above
 				if domains[key] == nil {
@@ -319,8 +329,8 @@ func (p *Provisioner) Schedule(ctx context.Context) (*scheduler.Results, error) 
 	}
 	s, err := p.NewScheduler(ctx, pods, nodes.Active(), scheduler.SchedulerOptions{})
 	if err != nil {
-		if errors.Is(err, ErrProvisionersNotFound) {
-			logging.FromContext(ctx).Info(ErrProvisionersNotFound)
+		if errors.Is(err, ErrNodePoolsNotFound) {
+			logging.FromContext(ctx).Info(ErrNodePoolsNotFound)
 			return &scheduler.Results{}, nil
 		}
 		return nil, fmt.Errorf("creating scheduler, %w", err)
@@ -417,25 +427,45 @@ func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*v1.Pod, error) {
 		if pod == nil {
 			pod = &v1.Pod{Spec: d.Spec.Template.Spec}
 		}
+		// Replacing retrieved pod affinity with daemonset pod template required node affinity since this is overridden
+		// by the daemonset controller during pod creation
+		// https://github.com/kubernetes/kubernetes/blob/c5cf0ac1889f55ab51749798bec684aed876709d/pkg/controller/daemon/util/daemonset_util.go#L176
+		if d.Spec.Template.Spec.Affinity != nil && d.Spec.Template.Spec.Affinity.NodeAffinity != nil && d.Spec.Template.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+			if pod.Spec.Affinity == nil {
+				pod.Spec.Affinity = &v1.Affinity{}
+			}
+			if pod.Spec.Affinity.NodeAffinity == nil {
+				pod.Spec.Affinity.NodeAffinity = &v1.NodeAffinity{}
+			}
+			pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = d.Spec.Template.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+		}
 		return pod
 	}), nil
 }
 
 func (p *Provisioner) Validate(ctx context.Context, pod *v1.Pod) error {
 	return multierr.Combine(
-		validateProvisionerNameCanExist(pod),
+		validateKarpenterManagedLabelCanExist(pod),
+		validateNodeSelector(pod),
 		validateAffinity(pod),
 		p.volumeTopology.ValidatePersistentVolumeClaims(ctx, pod),
 	)
 }
 
-// validateProvisionerNameCanExist provides a more clear error message in the event of scheduling a pod that specifically doesn't
+// validateKarpenterManagedLabelCanExist provides a more clear error message in the event of scheduling a pod that specifically doesn't
 // want to run on a Karpenter node (e.g. a Karpenter controller replica).
-func validateProvisionerNameCanExist(p *v1.Pod) error {
+func validateKarpenterManagedLabelCanExist(p *v1.Pod) error {
+	hasProvisionerNameLabel, hasNodePoolLabel := false, false
 	for _, req := range scheduling.NewPodRequirements(p) {
 		if req.Key == v1alpha5.ProvisionerNameLabelKey && req.Operator() == v1.NodeSelectorOpDoesNotExist {
-			return fmt.Errorf("configured to not run on a Karpenter provisioned node via %s %s requirement",
-				v1alpha5.ProvisionerNameLabelKey, v1.NodeSelectorOpDoesNotExist)
+			hasProvisionerNameLabel = true
+		}
+		if req.Key == v1beta1.NodePoolLabelKey && req.Operator() == v1.NodeSelectorOpDoesNotExist {
+			hasNodePoolLabel = true
+		}
+		if hasProvisionerNameLabel && hasNodePoolLabel {
+			return fmt.Errorf("configured to not run on a Karpenter provisioned node via %s %s and %s %s requirements",
+				v1alpha5.ProvisionerNameLabelKey, v1.NodeSelectorOpDoesNotExist, v1beta1.NodePoolLabelKey, v1.NodeSelectorOpDoesNotExist)
 		}
 	}
 	return nil
@@ -451,6 +481,24 @@ func (p *Provisioner) injectTopology(ctx context.Context, pods []*v1.Pod) []*v1.
 		}
 	}
 	return schedulablePods
+}
+
+func validateNodeSelector(p *v1.Pod) (errs error) {
+	terms := lo.MapToSlice(p.Spec.NodeSelector, func(k string, v string) v1.NodeSelectorTerm {
+		return v1.NodeSelectorTerm{
+			MatchExpressions: []v1.NodeSelectorRequirement{
+				{
+					Key:      k,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{v},
+				},
+			},
+		}
+	})
+	for _, term := range terms {
+		errs = multierr.Append(errs, validateNodeSelectorTerm(term))
+	}
+	return errs
 }
 
 func validateAffinity(p *v1.Pod) (errs error) {
@@ -476,7 +524,11 @@ func validateNodeSelectorTerm(term v1.NodeSelectorTerm) (errs error) {
 	}
 	if term.MatchExpressions != nil {
 		for _, requirement := range term.MatchExpressions {
-			errs = multierr.Append(errs, v1alpha5.ValidateRequirement(requirement))
+			alphaErr := v1alpha5.ValidateRequirement(requirement)
+			betaErr := v1beta1.ValidateRequirement(requirement)
+			if alphaErr != nil && betaErr != nil {
+				errs = multierr.Append(errs, betaErr)
+			}
 		}
 	}
 	return errs

@@ -37,44 +37,54 @@ var _ = Describe("NodeClaim/Launch", func() {
 	BeforeEach(func() {
 		nodePool = test.NodePool()
 	})
-	It("should launch an instance when a new Machine is created", func() {
-		machine := test.NodeClaim(v1beta1.NodeClaim{
+	It("should launch an instance when a new NodeClaim is created", func() {
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, nodePool, machine)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(machine))
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
-		machine = ExpectExists(ctx, env.Client, machine)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		Expect(cloudProvider.CreateCalls).To(HaveLen(1))
 		Expect(cloudProvider.CreatedNodeClaims).To(HaveLen(1))
-		_, err := cloudProvider.Get(ctx, machine.Status.ProviderID)
+		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
 		Expect(err).ToNot(HaveOccurred())
 	})
-	It("should add the MachineLaunched status condition after creating the Machine", func() {
-		machine := test.NodeClaim(v1beta1.NodeClaim{
+	It("should add the MachineLaunched status condition after creating the NodeClaim", func() {
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1alpha5.ProvisionerNameLabelKey: nodePool.Name,
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, nodePool, machine)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(machine))
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
-		machine = ExpectExists(ctx, env.Client, machine)
-		Expect(ExpectStatusConditionExists(machine, v1beta1.NodeLaunched).Status).To(Equal(v1.ConditionTrue))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Launched).Status).To(Equal(v1.ConditionTrue))
 	})
 	It("should delete the machine if InsufficientCapacity is returned from the cloudprovider", func() {
 		cloudProvider.NextCreateErr = cloudprovider.NewInsufficientCapacityError(fmt.Errorf("all instance types were unavailable"))
-		machine := test.NodeClaim()
-		ExpectApplied(ctx, env.Client, machine)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(machine))
-		ExpectFinalizersRemoved(ctx, env.Client, machine)
-		ExpectNotFound(ctx, env.Client, machine)
+		nodeClaim := test.NodeClaim()
+		ExpectApplied(ctx, env.Client, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+		ExpectNotFound(ctx, env.Client, nodeClaim)
+	})
+	It("should requeue with no error if NodeClassNotReady is returned from the cloudprovider", func() {
+		cloudProvider.NextCreateErr = cloudprovider.NewNodeClassNotReadyError(fmt.Errorf("nodeClass isn't ready"))
+		nodeClaim := test.NodeClaim()
+		ExpectApplied(ctx, env.Client, nodeClaim)
+		res := ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		Expect(res.Requeue).To(BeTrue())
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Launched).Status).To(Equal(v1.ConditionFalse))
 	})
 })

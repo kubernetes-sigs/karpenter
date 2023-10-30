@@ -17,24 +17,24 @@ package operator
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
+	"net/http/pprof"
+	"runtime/debug"
 	"sync"
 	"time"
 
+	coordinationv1 "k8s.io/api/coordination/v1"
+
 	"github.com/go-logr/zapr"
 	"github.com/samber/lo"
-	coordinationv1 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/configmap/informer"
 	knativeinjection "knative.dev/pkg/injection"
-	"knative.dev/pkg/injection/sharedmain"
-	"knative.dev/pkg/logging"
+	knativelogging "knative.dev/pkg/logging"
 	"knative.dev/pkg/signals"
 	"knative.dev/pkg/system"
 	"knative.dev/pkg/webhook"
@@ -43,20 +43,28 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/events"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/operator/injection"
+	"github.com/aws/karpenter-core/pkg/operator/logging"
 	"github.com/aws/karpenter-core/pkg/operator/options"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
+	"github.com/aws/karpenter-core/pkg/webhooks"
 )
 
 const (
 	appName   = "karpenter"
 	component = "controller"
 )
+
+// Version is the karpenter app version injected during compilation
+// when using the Makefile
+var Version = "unspecified"
 
 type Operator struct {
 	manager.Manager
@@ -73,70 +81,98 @@ func NewOperator() (context.Context, *Operator) {
 	// Root Context
 	ctx := signals.NewContext()
 	ctx = knativeinjection.WithNamespaceScope(ctx, system.Namespace())
-	// TODO: This can be removed if we eventually decide that we need leader election. Having leader election has resulted in the webhook
-	// having issues described in https://github.com/aws/karpenter/issues/2562 so these issues need to be resolved if this line is removed
-	ctx = sharedmain.WithHADisabled(ctx) // Disable leader election for webhook
 
 	// Options
-	opts := options.New().MustParse()
-	ctx = injection.WithOptions(ctx, *opts)
+	ctx = injection.WithOptionsOrDie(ctx, options.Injectables...)
+
+	// Make the Karpenter binary aware of the container memory limit
+	// https://pkg.go.dev/runtime/debug#SetMemoryLimit
+	if options.FromContext(ctx).MemoryLimit > 0 {
+		newLimit := int64(float64(options.FromContext(ctx).MemoryLimit) * 0.9)
+		debug.SetMemoryLimit(newLimit)
+	}
 
 	// Webhook
 	ctx = webhook.WithOptions(ctx, webhook.Options{
-		Port:        opts.WebhookPort,
-		ServiceName: opts.ServiceName,
-		SecretName:  fmt.Sprintf("%s-cert", opts.ServiceName),
+		Port:        options.FromContext(ctx).WebhookPort,
+		ServiceName: options.FromContext(ctx).ServiceName,
+		SecretName:  fmt.Sprintf("%s-cert", options.FromContext(ctx).ServiceName),
 		GracePeriod: 5 * time.Second,
 	})
 
 	// Client Config
 	config := controllerruntime.GetConfigOrDie()
-	config.RateLimiter = flowcontrol.NewTokenBucketRateLimiter(float32(opts.KubeClientQPS), opts.KubeClientBurst)
-	config.UserAgent = appName
+	config.RateLimiter = flowcontrol.NewTokenBucketRateLimiter(float32(options.FromContext(ctx).KubeClientQPS), options.FromContext(ctx).KubeClientBurst)
+	config.UserAgent = fmt.Sprintf("%s/%s", appName, Version)
 
 	// Client
 	kubernetesInterface := kubernetes.NewForConfigOrDie(config)
-	configMapWatcher := informer.NewInformedWatcher(kubernetesInterface, system.Namespace())
-	lo.Must0(configMapWatcher.Start(ctx.Done()))
-
-	// Logging
-	logger := NewLogger(ctx, component, config, configMapWatcher)
-	ctx = logging.WithLogger(ctx, logger)
-	ConfigureGlobalLoggers(ctx)
 
 	// Inject settings from the ConfigMap(s) into the context
 	ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
 
+	// Temporarily merge settings into options until configmap is removed
+	// Note: injectables are pointer to those already in context
+	for _, o := range options.Injectables {
+		o.MergeSettings(ctx)
+	}
+
+	// Logging
+	logger := logging.NewLogger(ctx, component, kubernetesInterface)
+	ctx = knativelogging.WithLogger(ctx, logger)
+	logging.ConfigureGlobalLoggers(ctx)
+
+	knativelogging.FromContext(ctx).With("version", Version).Debugf("discovered karpenter version")
+
 	// Manager
-	mgr, err := controllerruntime.NewManager(config, controllerruntime.Options{
-		Logger:                     ignoreDebugEvents(zapr.NewLogger(logger.Desugar())),
-		LeaderElection:             opts.EnableLeaderElection,
+	mgrOpts := controllerruntime.Options{
+		Logger:                     logging.IgnoreDebugEvents(zapr.NewLogger(logger.Desugar())),
+		LeaderElection:             options.FromContext(ctx).EnableLeaderElection,
 		LeaderElectionID:           "karpenter-leader-election",
 		LeaderElectionResourceLock: resourcelock.LeasesResourceLock,
 		LeaderElectionNamespace:    system.Namespace(),
 		Scheme:                     scheme.Scheme,
-		MetricsBindAddress:         fmt.Sprintf(":%d", opts.MetricsPort),
-		HealthProbeBindAddress:     fmt.Sprintf(":%d", opts.HealthProbePort),
+		Metrics: server.Options{
+			BindAddress: fmt.Sprintf(":%d", options.FromContext(ctx).MetricsPort),
+		},
+		HealthProbeBindAddress: fmt.Sprintf(":%d", options.FromContext(ctx).HealthProbePort),
 		BaseContext: func() context.Context {
 			ctx := context.Background()
-			ctx = logging.WithLogger(ctx, logger)
+			ctx = knativelogging.WithLogger(ctx, logger)
 			ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
-			ctx = injection.WithConfig(ctx, config)
-			ctx = injection.WithOptions(ctx, *opts)
+			ctx = injection.WithOptionsOrDie(ctx, options.Injectables...)
+			for _, o := range options.Injectables {
+				o.MergeSettings(ctx)
+			}
 			return ctx
 		},
-		NewCache: cache.BuilderWithOptions(cache.Options{
-			SelectorsByObject: cache.SelectorsByObject{
+		Cache: cache.Options{
+			ByObject: map[client.Object]cache.ByObject{
 				&coordinationv1.Lease{}: {
 					Field: fields.SelectorFromSet(fields.Set{"metadata.namespace": "kube-node-lease"}),
 				},
 			},
-		}),
-	})
-	mgr = lo.Must(mgr, err, "failed to setup manager")
-	if opts.EnableProfiling {
-		registerPprof(mgr)
+		},
 	}
+	if options.FromContext(ctx).EnableProfiling {
+		// TODO @joinnis: Investigate the mgrOpts.PprofBindAddress that would allow native support for pprof
+		// On initial look, it seems like this native pprof doesn't support some of the routes that we have here
+		// like "/debug/pprof/heap" or "/debug/pprof/block"
+		mgrOpts.Metrics.ExtraHandlers = lo.Assign(mgrOpts.Metrics.ExtraHandlers, map[string]http.Handler{
+			"/debug/pprof/":             http.HandlerFunc(pprof.Index),
+			"/debug/pprof/cmdline":      http.HandlerFunc(pprof.Cmdline),
+			"/debug/pprof/profile":      http.HandlerFunc(pprof.Profile),
+			"/debug/pprof/symbol":       http.HandlerFunc(pprof.Symbol),
+			"/debug/pprof/trace":        http.HandlerFunc(pprof.Trace),
+			"/debug/pprof/allocs":       pprof.Handler("allocs"),
+			"/debug/pprof/heap":         pprof.Handler("heap"),
+			"/debug/pprof/block":        pprof.Handler("block"),
+			"/debug/pprof/goroutine":    pprof.Handler("goroutine"),
+			"/debug/pprof/threadcreate": pprof.Handler("threadcreate"),
+		})
+	}
+	mgr, err := controllerruntime.NewManager(config, mgrOpts)
+	mgr = lo.Must(mgr, err, "failed to setup manager")
 	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.Pod{}, "spec.nodeName", func(o client.Object) []string {
 		return []string{o.(*v1.Pod).Spec.NodeName}
 	}), "failed to setup pod indexer")
@@ -146,7 +182,9 @@ func NewOperator() (context.Context, *Operator) {
 	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1alpha5.Machine{}, "status.providerID", func(o client.Object) []string {
 		return []string{o.(*v1alpha5.Machine).Status.ProviderID}
 	}), "failed to setup machine provider id indexer")
-	// TODO @joinnis: Add field indexer for NodeClaim .status.providerID
+	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1beta1.NodeClaim{}, "status.providerID", func(o client.Object) []string {
+		return []string{o.(*v1beta1.NodeClaim).Status.ProviderID}
+	}), "failed to setup nodeclaim provider id indexer")
 
 	lo.Must0(mgr.AddReadyzCheck("manager", func(req *http.Request) error {
 		return lo.Ternary(mgr.GetCache().WaitForCacheSync(req.Context()), nil, fmt.Errorf("failed to sync caches"))
@@ -162,18 +200,18 @@ func NewOperator() (context.Context, *Operator) {
 	}
 }
 
-func (o *Operator) WithControllers(ctx context.Context, controllers ...corecontroller.Controller) *Operator {
+func (o *Operator) WithControllers(ctx context.Context, controllers ...controller.Controller) *Operator {
 	for _, c := range controllers {
 		lo.Must0(c.Builder(ctx, o.Manager).Complete(c))
 	}
 	return o
 }
 
-func (o *Operator) WithWebhooks(ctx context.Context, webhooks ...knativeinjection.ControllerConstructor) *Operator {
-	if !injection.GetOptions(ctx).DisableWebhook {
-		o.webhooks = append(o.webhooks, webhooks...)
-		lo.Must0(o.Manager.AddReadyzCheck("webhooks", webhookChecker(ctx)))
-		lo.Must0(o.Manager.AddHealthzCheck("webhooks", webhookChecker(ctx)))
+func (o *Operator) WithWebhooks(ctx context.Context, ctors ...knativeinjection.ControllerConstructor) *Operator {
+	if !options.FromContext(ctx).DisableWebhook {
+		o.webhooks = append(o.webhooks, ctors...)
+		lo.Must0(o.Manager.AddReadyzCheck("webhooks", webhooks.HealthProbe(ctx)))
+		lo.Must0(o.Manager.AddHealthzCheck("webhooks", webhooks.HealthProbe(ctx)))
 	}
 	return o
 }
@@ -185,37 +223,14 @@ func (o *Operator) Start(ctx context.Context) {
 		defer wg.Done()
 		lo.Must0(o.Manager.Start(ctx))
 	}()
-	if injection.GetOptions(ctx).DisableWebhook {
-		logging.FromContext(ctx).Infof("webhook disabled")
+	if options.FromContext(ctx).DisableWebhook {
+		knativelogging.FromContext(ctx).Infof("webhook disabled")
 	} else {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			sharedmain.MainWithConfig(sharedmain.WithHealthProbesDisabled(ctx), "webhook", o.GetConfig(), o.webhooks...)
+			webhooks.Start(ctx, o.GetConfig(), o.KubernetesInterface, o.webhooks...)
 		}()
 	}
 	wg.Wait()
-}
-
-func webhookChecker(ctx context.Context) healthz.Checker {
-	// TODO: Add knative health check port for webhooks when health port can be configured
-	// Issue: https://github.com/knative/pkg/issues/2765
-	return func(req *http.Request) (err error) {
-		res, err := http.Get(fmt.Sprintf("http://localhost:%d", injection.GetOptions(ctx).WebhookPort))
-		// If the webhook connection errors out, liveness/readiness should fail
-		if err != nil {
-			return err
-		}
-		// Close the body to avoid leaking file descriptors
-		// Always read the body so we can re-use the connection: https://stackoverflow.com/questions/17948827/reusing-http-connections-in-go
-		_, _ = io.ReadAll(res.Body)
-		res.Body.Close()
-
-		// If there is a server-side error or path not found,
-		// consider liveness to have failed
-		if res.StatusCode >= 500 || res.StatusCode == 404 {
-			return fmt.Errorf("webhook probe failed with status code %d", res.StatusCode)
-		}
-		return nil
-	}
 }

@@ -24,6 +24,8 @@ import (
 	"github.com/Pallinder/go-randomdata"
 	"github.com/imdario/mergo"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 )
 
 const DiscoveryLabel = "testing/cluster"
@@ -50,6 +52,12 @@ func NamespacedObjectMeta(overrides ...metav1.ObjectMeta) metav1.ObjectMeta {
 func ObjectMeta(overrides ...metav1.ObjectMeta) metav1.ObjectMeta {
 	return MustMerge(metav1.ObjectMeta{
 		Name:   RandomName(),
+		Labels: map[string]string{DiscoveryLabel: "unspecified"}, // For cleanup discovery
+	}, overrides...)
+}
+
+func TemplateObjectMeta(overrides ...v1beta1.ObjectMeta) v1beta1.ObjectMeta {
+	return MustMerge(v1beta1.ObjectMeta{
 		Labels: map[string]string{DiscoveryLabel: "unspecified"}, // For cleanup discovery
 	}, overrides...)
 }
