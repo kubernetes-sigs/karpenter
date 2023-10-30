@@ -474,7 +474,7 @@ func UpdateNodeOwnerReferences(nodeClaim *v1beta1.NodeClaim, node *v1.Node) *v1.
 }
 
 func Owner(ctx context.Context, c client.Client, obj interface{ GetLabels() map[string]string }) (*v1beta1.NodePool, error) {
-	if v, ok := obj.GetLabels()[v1beta1.NodePoolLabelKey]; ok {
+	if v, ok := obj.GetLabels()[v1beta1.NodePoolLabelKey]; ok && EnableNodeClaims {
 		nodePool := &v1beta1.NodePool{}
 		if err := c.Get(ctx, types.NamespacedName{Name: v}, nodePool); err != nil {
 			return nil, err
@@ -492,7 +492,7 @@ func Owner(ctx context.Context, c client.Client, obj interface{ GetLabels() map[
 }
 
 func OwnerKey(obj interface{ GetLabels() map[string]string }) nodepoolutil.Key {
-	if v, ok := obj.GetLabels()[v1beta1.NodePoolLabelKey]; ok {
+	if v, ok := obj.GetLabels()[v1beta1.NodePoolLabelKey]; ok && EnableNodeClaims {
 		return nodepoolutil.Key{Name: v, IsProvisioner: false}
 	}
 	if v, ok := obj.GetLabels()[v1alpha5.ProvisionerNameLabelKey]; ok {
