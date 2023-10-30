@@ -38,23 +38,30 @@ import (
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
-var _ = Describe("Machine/Drift", func() {
-	var provisioner *v1alpha5.Provisioner
-	var machine *v1alpha5.Machine
+var _ = Describe("Drift", func() {
+	var nodePool *v1beta1.NodePool
+	var nodeClaim *v1beta1.NodeClaim
 	var node *v1.Node
 
 	BeforeEach(func() {
-		provisioner = test.Provisioner()
-		machine, node = test.MachineAndNode(v1alpha5.Machine{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+		nodePool = test.NodePool(v1beta1.NodePool{
+			Spec: v1beta1.NodePoolSpec{
+				Disruption: v1beta1.Disruption{
+					ConsolidateAfter: &v1beta1.NillableDuration{Duration: nil},
+					ExpireAfter:      v1beta1.NillableDuration{Duration: nil},
 				},
 			},
-			Status: v1alpha5.MachineStatus{
+		})
+		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1beta1.NodeClaimStatus{
 				ProviderID: test.RandomProviderID(),
 				Allocatable: map[v1.ResourceName]resource.Quantity{
 					v1.ResourceCPU:  resource.MustParse("32"),
@@ -62,14 +69,14 @@ var _ = Describe("Machine/Drift", func() {
 				},
 			},
 		})
-		machine.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Drifted)
 	})
 	It("should ignore drifted nodes if the feature flag is disabled", func() {
 		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(false)}}))
-		ExpectApplied(ctx, env.Client, machine, node, provisioner)
+		ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -78,9 +85,9 @@ var _ = Describe("Machine/Drift", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
-		// Expect to not create or delete more machines
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
-		ExpectExists(ctx, env.Client, machine)
+		// Expect to not create or delete more nodeclaims
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+		ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("should continue to the next drifted node if the first cannot reschedule all pods", func() {
 		pod := test.Pod(test.PodOptions{
@@ -97,22 +104,22 @@ var _ = Describe("Machine/Drift", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, machine, node, provisioner, pod)
+		ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
-		machine2, node2 := test.MachineAndNode(v1alpha5.Machine{
+		nodeClaim2, node2 := test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
 				},
 			},
-			Status: v1alpha5.MachineStatus{
+			Status: v1beta1.NodeClaimStatus{
 				ProviderID: test.RandomProviderID(),
 				Allocatable: map[v1.ResourceName]resource.Quantity{
 					v1.ResourceCPU:  resource.MustParse("1"),
@@ -120,55 +127,55 @@ var _ = Describe("Machine/Drift", func() {
 				},
 			},
 		})
-		machine2.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
-		ExpectApplied(ctx, env.Client, machine2, node2, podToExpire)
+		nodeClaim2.StatusConditions().MarkTrue(v1beta1.Drifted)
+		ExpectApplied(ctx, env.Client, nodeClaim2, node2, podToExpire)
 		ExpectManualBinding(ctx, env.Client, podToExpire, node2)
 
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node2}, []*v1alpha5.Machine{machine2})
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node2}, []*v1beta1.NodeClaim{nodeClaim2})
 
 		// disruption won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
-		ExpectMachinesCascadeDeletion(ctx, env.Client, machine, machine2)
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)
 
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(2))
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
-		ExpectExists(ctx, env.Client, machine)
-		ExpectNotFound(ctx, env.Client, machine2)
+		ExpectExists(ctx, env.Client, nodeClaim)
+		ExpectNotFound(ctx, env.Client, nodeClaim2)
 	})
 	It("should ignore nodes without the drifted status condition", func() {
-		_ = machine.StatusConditions().ClearCondition(v1alpha5.MachineDrifted)
-		ExpectApplied(ctx, env.Client, machine, node, provisioner)
+		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.Drifted)
+		ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		fakeClock.Step(10 * time.Minute)
 
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
-		// Expect to not create or delete more machines
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
-		ExpectExists(ctx, env.Client, machine)
+		// Expect to not create or delete more nodeclaims
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+		ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("should ignore nodes with the karpenter.sh/do-not-disrupt annotation", func() {
 		node.Annotations = lo.Assign(node.Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
-		ExpectApplied(ctx, env.Client, machine, node, provisioner)
+		ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
-		// Expect to not create or delete more machines
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		// Expect to not create or delete more nodeclaims
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		ExpectExists(ctx, env.Client, machine)
+		ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("should ignore nodes that have pods with the karpenter.sh/do-not-evict annotation", func() {
 		pod := test.Pod(test.PodOptions{
@@ -178,18 +185,18 @@ var _ = Describe("Machine/Drift", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, machine, node, provisioner, pod)
+		ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
-		// Expect to not create or delete more machines
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		// Expect to not create or delete more nodeclaims
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		ExpectExists(ctx, env.Client, machine)
+		ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("should ignore nodes that have pods with the karpenter.sh/do-not-disrupt annotation", func() {
 		pod := test.Pod(test.PodOptions{
@@ -199,39 +206,39 @@ var _ = Describe("Machine/Drift", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, machine, node, provisioner, pod)
+		ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
-		// Expect to not create or delete more machines
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
+		// Expect to not create or delete more nodeclaims
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		ExpectExists(ctx, env.Client, machine)
+		ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("should ignore nodes with the drifted status condition set to false", func() {
-		machine.StatusConditions().MarkFalse(v1alpha5.MachineDrifted, "", "")
-		ExpectApplied(ctx, env.Client, machine, node, provisioner)
+		nodeClaim.StatusConditions().MarkFalse(v1beta1.Drifted, "", "")
+		ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		fakeClock.Step(10 * time.Minute)
 
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
-		// Expect to not create or delete more machines
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
-		ExpectExists(ctx, env.Client, machine)
+		// Expect to not create or delete more nodeclaims
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+		ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("can delete drifted nodes", func() {
-		ExpectApplied(ctx, env.Client, machine, node, provisioner)
+		ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		fakeClock.Step(10 * time.Minute)
 
@@ -240,54 +247,54 @@ var _ = Describe("Machine/Drift", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
-		// Cascade any deletion of the machine to the node
-		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+		// Cascade any deletion of the nodeClaim to the node
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
-		// We should delete the machine that has drifted
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
+		// We should delete the nodeClaim that has drifted
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		ExpectNotFound(ctx, env.Client, machine, node)
+		ExpectNotFound(ctx, env.Client, nodeClaim, node)
 	})
 	It("should disrupt all empty drifted nodes in parallel", func() {
-		machines, nodes := test.MachinesAndNodes(100, v1alpha5.Machine{
+		nodeClaims, nodes := test.NodeClaimsAndNodes(100, v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
 				},
 			},
-			Status: v1alpha5.MachineStatus{
+			Status: v1beta1.NodeClaimStatus{
 				Allocatable: map[v1.ResourceName]resource.Quantity{
 					v1.ResourceCPU:  resource.MustParse("32"),
 					v1.ResourcePods: resource.MustParse("100"),
 				},
 			},
 		})
-		for _, m := range machines {
-			m.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
+		for _, m := range nodeClaims {
+			m.StatusConditions().MarkTrue(v1beta1.Drifted)
 			ExpectApplied(ctx, env.Client, m)
 		}
 		for _, n := range nodes {
 			ExpectApplied(ctx, env.Client, n)
 		}
-		ExpectApplied(ctx, env.Client, provisioner)
+		ExpectApplied(ctx, env.Client, nodePool)
 
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, nodes, machines)
+		// inform cluster state about nodes and nodeClaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
-		// Cascade any deletion of the machine to the node
-		ExpectMachinesCascadeDeletion(ctx, env.Client, machines...)
+		// Cascade any deletion of the nodeClaim to the node
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims...)
 
-		// Expect that the expired machines are gone
+		// Expect that the expired nodeClaims are gone
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
 	})
 	It("can replace drifted nodes", func() {
 		labels := map[string]string{
@@ -311,34 +318,34 @@ var _ = Describe("Machine/Drift", func() {
 					},
 				}}})
 
-		ExpectApplied(ctx, env.Client, rs, pod, machine, node, provisioner)
+		ExpectApplied(ctx, env.Client, rs, pod, nodeClaim, node, nodePool)
 
 		// bind the pods to the node
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		fakeClock.Step(10 * time.Minute)
 
-		// disruption won't delete the old machine until the new machine is ready
+		// disruption won't delete the old nodeClaim until the new nodeClaim is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
-		// Cascade any deletion of the machine to the node
-		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+		// Cascade any deletion of the nodeClaim to the node
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
-		ExpectNotFound(ctx, env.Client, machine, node)
+		ExpectNotFound(ctx, env.Client, nodeClaim, node)
 
-		// Expect that the new machine was created and its different than the original
-		machines := ExpectMachines(ctx, env.Client)
+		// Expect that the new nodeClaim was created and its different than the original
+		nodeclaims := ExpectNodeClaims(ctx, env.Client)
 		nodes := ExpectNodes(ctx, env.Client)
-		Expect(machines).To(HaveLen(1))
+		Expect(nodeclaims).To(HaveLen(1))
 		Expect(nodes).To(HaveLen(1))
-		Expect(machines[0].Name).ToNot(Equal(machine.Name))
+		Expect(nodeclaims[0].Name).ToNot(Equal(nodeClaim.Name))
 		Expect(nodes[0].Name).ToNot(Equal(node.Name))
 	})
 	It("can replace drifted nodes with multiple nodes", func() {
@@ -346,7 +353,7 @@ var _ = Describe("Machine/Drift", func() {
 			Name: "current-on-demand",
 			Offerings: []cloudprovider.Offering{
 				{
-					CapacityType: v1alpha5.CapacityTypeOnDemand,
+					CapacityType: v1beta1.CapacityTypeOnDemand,
 					Zone:         "test-zone-1a",
 					Price:        0.5,
 					Available:    false,
@@ -357,7 +364,7 @@ var _ = Describe("Machine/Drift", func() {
 			Name: "replacement-on-demand",
 			Offerings: []cloudprovider.Offering{
 				{
-					CapacityType: v1alpha5.CapacityTypeOnDemand,
+					CapacityType: v1beta1.CapacityTypeOnDemand,
 					Zone:         "test-zone-1a",
 					Price:        0.3,
 					Available:    true,
@@ -396,44 +403,44 @@ var _ = Describe("Machine/Drift", func() {
 			},
 		})
 
-		machine.Labels = lo.Assign(machine.Labels, map[string]string{
-			v1.LabelInstanceTypeStable: currentInstance.Name,
-			v1alpha5.LabelCapacityType: currentInstance.Offerings[0].CapacityType,
-			v1.LabelTopologyZone:       currentInstance.Offerings[0].Zone,
+		nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
+			v1.LabelInstanceTypeStable:   currentInstance.Name,
+			v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
+			v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
 		})
-		machine.Status.Allocatable = map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("8")}
+		nodeClaim.Status.Allocatable = map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("8")}
 		node.Labels = lo.Assign(node.Labels, map[string]string{
-			v1.LabelInstanceTypeStable: currentInstance.Name,
-			v1alpha5.LabelCapacityType: currentInstance.Offerings[0].CapacityType,
-			v1.LabelTopologyZone:       currentInstance.Offerings[0].Zone,
+			v1.LabelInstanceTypeStable:   currentInstance.Name,
+			v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
+			v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
 		})
 		node.Status.Allocatable = map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("8")}
 
-		ExpectApplied(ctx, env.Client, rs, machine, node, provisioner, pods[0], pods[1], pods[2])
+		ExpectApplied(ctx, env.Client, rs, nodeClaim, node, nodePool, pods[0], pods[1], pods[2])
 
 		// bind the pods to the node
 		ExpectManualBinding(ctx, env.Client, pods[0], node)
 		ExpectManualBinding(ctx, env.Client, pods[1], node)
 		ExpectManualBinding(ctx, env.Client, pods[2], node)
 
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node}, []*v1alpha5.Machine{machine})
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		fakeClock.Step(10 * time.Minute)
 
 		// disruption won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 3)
+		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 3)
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 		wg.Wait()
 
-		// Cascade any deletion of the machine to the node
-		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
+		// Cascade any deletion of the nodeClaim to the node
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
 		// expect that drift provisioned three nodes, one for each pod
-		ExpectNotFound(ctx, env.Client, machine, node)
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(3))
+		ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(3))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(3))
 	})
 	It("should drift one non-empty node at a time, starting with the earliest drift", func() {
@@ -464,49 +471,49 @@ var _ = Describe("Machine/Drift", func() {
 			},
 		})
 
-		machine2, node2 := test.MachineAndNode(v1alpha5.Machine{
+		nodeClaim2, node2 := test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
 				},
 			},
-			Status: v1alpha5.MachineStatus{
+			Status: v1beta1.NodeClaimStatus{
 				ProviderID:  test.RandomProviderID(),
 				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
 			},
 		})
-		machine2.Status.Conditions = append(machine2.Status.Conditions, apis.Condition{
-			Type:               v1alpha5.MachineDrifted,
+		nodeClaim2.Status.Conditions = append(nodeClaim2.Status.Conditions, apis.Condition{
+			Type:               v1beta1.Drifted,
 			Status:             v1.ConditionTrue,
 			LastTransitionTime: apis.VolatileTime{Inner: metav1.Time{Time: time.Now().Add(-time.Hour)}},
 		})
 
-		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], machine, node, machine2, node2, provisioner)
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], nodeClaim, node, nodeClaim2, node2, nodePool)
 
 		// bind pods to node so that they're not empty and don't disrupt in parallel.
 		ExpectManualBinding(ctx, env.Client, pods[0], node)
 		ExpectManualBinding(ctx, env.Client, pods[1], node2)
 
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{node, node2}, []*v1alpha5.Machine{machine, machine2})
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
 
 		// disruption won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
-		// Cascade any deletion of the machine to the node
-		ExpectMachinesCascadeDeletion(ctx, env.Client, machine, machine2)
+		// Cascade any deletion of the nodeClaim to the node
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)
 
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(2))
-		ExpectNotFound(ctx, env.Client, machine2, node2)
-		ExpectExists(ctx, env.Client, machine)
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+		ExpectNotFound(ctx, env.Client, nodeClaim2, node2)
+		ExpectExists(ctx, env.Client, nodeClaim)
 		ExpectExists(ctx, env.Client, node)
 	})
 })
