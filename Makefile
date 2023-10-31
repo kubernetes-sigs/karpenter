@@ -47,6 +47,7 @@ verify: ## Verify code. Includes codegen, dependencies, linting, formatting, etc
 		if [ "${CI}" = true ]; then\
 			exit 1;\
 		fi;}
+	actionlint -oneline
 
 download: ## Recursively "go mod download" on all directories where go.mod exists
 	$(foreach dir,$(MOD_DIRS),cd $(dir) && go mod download $(newline))
