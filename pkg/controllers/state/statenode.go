@@ -166,8 +166,8 @@ func (in *StateNode) HostName() string {
 }
 
 func (in *StateNode) Annotations() map[string]string {
-	// If the machine exists and the state node isn't initialized
-	// use the machine representation of the annotations
+	// If the nodeclaim exists and the state node isn't initialized
+	// use the nodeclaim representation of the annotations
 	if in.Node == nil {
 		return in.NodeClaim.Annotations
 	}
@@ -188,8 +188,8 @@ func (in *StateNode) GetLabels() map[string]string {
 }
 
 func (in *StateNode) Labels() map[string]string {
-	// If the machine exists and the state node isn't registered
-	// use the machine representation of the labels
+	// If the nodeclaim exists and the state node isn't registered
+	// use the nodeclaim representation of the labels
 	if in.Node == nil {
 		return in.NodeClaim.Labels
 	}

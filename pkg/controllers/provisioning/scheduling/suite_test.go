@@ -66,7 +66,6 @@ var fakeClock *clock.FakeClock
 var cluster *state.Cluster
 var cloudProvider *fake.CloudProvider
 var nodeStateController controller.Controller
-var machineStateController controller.Controller
 var nodeClaimStateController controller.Controller
 var podStateController controller.Controller
 
@@ -87,9 +86,7 @@ var _ = BeforeSuite(func() {
 	cloudProvider.InstanceTypes = instanceTypes
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
-	machineStateController = informer.NewMachineController(env.Client, cluster)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
-	machineStateController = informer.NewMachineController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	podStateController = informer.NewPodController(env.Client, cluster)
 	prov = provisioning.NewProvisioner(env.Client, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster)
