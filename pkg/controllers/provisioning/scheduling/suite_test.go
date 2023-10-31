@@ -34,6 +34,7 @@ import (
 	cloudproviderapi "k8s.io/cloud-provider/api"
 	"k8s.io/csi-translation-lib/plugins"
 	clock "k8s.io/utils/clock/testing"
+	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis"
@@ -51,13 +52,11 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	pscheduling "github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/test"
+	. "github.com/aws/karpenter-core/pkg/test/expectations"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	. "knative.dev/pkg/logging/testing"
-	"knative.dev/pkg/ptr"
-
-	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
 var ctx context.Context
