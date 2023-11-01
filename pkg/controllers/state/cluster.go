@@ -80,18 +80,13 @@ func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudPro
 	}
 }
 
-// Synced validates that the Machines and the Nodes that are stored in the apiserver
+// Synced validates that the NodeClaims and the Nodes that are stored in the apiserver
 // have the same representation in the cluster state. This is to ensure that our view
 // of the cluster is as close to correct as it can be when we begin to perform operations
 // utilizing the cluster state as our source of truth
 //
 //nolint:gocyclo
 func (c *Cluster) Synced(ctx context.Context) bool {
-	machineList := &v1alpha5.MachineList{}
-	if err := c.kubeClient.List(ctx, machineList); err != nil {
-		logging.FromContext(ctx).Errorf("checking cluster state sync, %v", err)
-		return false
-	}
 	nodeClaimList := &v1beta1.NodeClaimList{}
 	if err := c.kubeClient.List(ctx, nodeClaimList); err != nil {
 		logging.FromContext(ctx).Errorf("checking cluster state sync, %v", err)
@@ -103,29 +98,16 @@ func (c *Cluster) Synced(ctx context.Context) bool {
 		return false
 	}
 	c.mu.RLock()
-	stateMachineNames := sets.New[string]()
 	stateNodeClaimNames := sets.New[string]()
 	for k := range c.nodeClaimKeyToProviderID {
-		if k.IsMachine {
-			stateMachineNames.Insert(k.Name)
-		} else {
-			stateNodeClaimNames.Insert(k.Name)
-		}
+		stateNodeClaimNames.Insert(k.Name)
 	}
 	stateNodeNames := sets.New(lo.Keys(c.nodeNameToProviderID)...)
 	c.mu.RUnlock()
 
-	machineNames := sets.New[string]()
-	for _, machine := range machineList.Items {
-		// If the machine hasn't resolved its provider id, then it hasn't resolved its status
-		if machine.Status.ProviderID == "" {
-			return false
-		}
-		machineNames.Insert(machine.Name)
-	}
 	nodeClaimNames := sets.New[string]()
 	for _, nodeClaim := range nodeClaimList.Items {
-		// If the machine hasn't resolved its provider id, then it hasn't resolved its status
+		// If the nodeClaim hasn't resolved its provider id, then it hasn't resolved its status
 		if nodeClaim.Status.ProviderID == "" {
 			return false
 		}
@@ -138,9 +120,8 @@ func (c *Cluster) Synced(ctx context.Context) bool {
 	// The names tracked in-memory should at least have all the data that is in the api-server
 	// This doesn't ensure that the two states are exactly aligned (we could still not be tracking a node
 	// that exists in the cluster state but not in the apiserver) but it ensures that we have a state
-	// representation for every node/machine that exists on the apiserver
-	return stateMachineNames.IsSuperset(machineNames) &&
-		stateNodeClaimNames.IsSuperset(nodeClaimNames) &&
+	// representation for every node/nodeClaim that exists on the apiserver
+	return stateNodeClaimNames.IsSuperset(nodeClaimNames) &&
 		stateNodeNames.IsSuperset(nodeNames)
 }
 
