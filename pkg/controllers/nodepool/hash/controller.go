@@ -26,7 +26,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
@@ -55,34 +54,6 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1beta1.NodePool) (recon
 		}
 	}
 	return reconcile.Result{}, nil
-}
-
-//nolint:revive
-type ProvisionerController struct {
-	*Controller
-}
-
-func NewProvisionerController(kubeClient client.Client) corecontroller.Controller {
-	return corecontroller.Typed[*v1alpha5.Provisioner](kubeClient, &ProvisionerController{
-		Controller: NewController(kubeClient),
-	})
-}
-
-func (c *ProvisionerController) Reconcile(ctx context.Context, p *v1alpha5.Provisioner) (reconcile.Result, error) {
-	return c.Controller.Reconcile(ctx, nodepoolutil.New(p))
-}
-
-func (c *ProvisionerController) Name() string {
-	return "provisioner.hash"
-}
-
-func (c *ProvisionerController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(controllerruntime.
-		NewControllerManagedBy(m).
-		WithEventFilter(predicate.GenerationChangedPredicate{}).
-		For(&v1alpha5.Provisioner{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
-	)
 }
 
 type NodePoolController struct {

@@ -83,7 +83,7 @@ var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 })
 
-var _ = Describe("NodeClaim/Disruption", func() {
+var _ = Describe("Disruption", func() {
 	var nodePool *v1beta1.NodePool
 	var nodeClaim *v1beta1.NodeClaim
 	var node *v1.Node
