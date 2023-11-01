@@ -57,7 +57,7 @@ var node, node2 *v1.Node
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "ProvisionerCounterController")
+	RunSpecs(t, "Counter")
 }
 
 var _ = BeforeSuite(func() {
@@ -80,7 +80,7 @@ var _ = AfterSuite(func() {
 var nodePool *v1beta1.NodePool
 var nodeClaim, nodeClaim2 *v1beta1.NodeClaim
 
-var _ = Describe("NodePool Counter", func() {
+var _ = Describe("Counter", func() {
 	BeforeEach(func() {
 		cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 		nodePool = test.NodePool()

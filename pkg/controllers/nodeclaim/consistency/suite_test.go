@@ -53,7 +53,7 @@ var recorder *test.EventRecorder
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Node")
+	RunSpecs(t, "Consistency")
 }
 
 var _ = BeforeSuite(func() {

@@ -56,7 +56,7 @@ var cloudProvider *fake.CloudProvider
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Machine")
+	RunSpecs(t, "GarbageCollection")
 }
 
 var _ = BeforeSuite(func() {
@@ -82,7 +82,7 @@ var _ = AfterEach(func() {
 	cloudProvider.Reset()
 })
 
-var _ = Describe("NodeClaim/GarbageCollection", func() {
+var _ = Describe("GarbageCollection", func() {
 	var nodePool *v1beta1.NodePool
 
 	BeforeEach(func() {
