@@ -21,7 +21,9 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
 	. "knative.dev/pkg/logging/testing"
@@ -29,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	nodeclaimlifecycle "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/lifecycle"
 	"github.com/aws/karpenter-core/pkg/events"
@@ -41,7 +44,6 @@ import (
 )
 
 var ctx context.Context
-var machineController controller.Controller
 var nodeClaimController controller.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
@@ -50,7 +52,7 @@ var cloudProvider *fake.CloudProvider
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Machine")
+	RunSpecs(t, "Lifecycle")
 }
 
 var _ = BeforeSuite(func() {
@@ -63,7 +65,6 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 
 	cloudProvider = fake.NewCloudProvider()
-	machineController = nodeclaimlifecycle.NewMachineController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
 	nodeClaimController = nodeclaimlifecycle.NewNodeClaimController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
 })
 
@@ -75,4 +76,29 @@ var _ = AfterEach(func() {
 	fakeClock.SetTime(time.Now())
 	ExpectCleanedUp(ctx, env.Client)
 	cloudProvider.Reset()
+})
+
+var _ = Describe("Finalizer", func() {
+	var nodePool *v1beta1.NodePool
+
+	BeforeEach(func() {
+		nodePool = test.NodePool()
+	})
+	It("should add the finalizer if it doesn't exist", func() {
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		_, ok := lo.Find(nodeClaim.Finalizers, func(f string) bool {
+			return f == v1beta1.TerminationFinalizer
+		})
+		Expect(ok).To(BeTrue())
+	})
 })

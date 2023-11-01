@@ -22,7 +22,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/test"
 
@@ -31,21 +31,21 @@ import (
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
-var _ = Describe("Machine/Liveness", func() {
-	var provisioner *v1alpha5.Provisioner
+var _ = Describe("Liveness", func() {
+	var nodePool *v1beta1.NodePool
 
 	BeforeEach(func() {
-		provisioner = test.Provisioner()
+		nodePool = test.NodePool()
 	})
-	It("shouldn't delete the Machine when the node has registered past the registration ttl", func() {
-		machine := test.Machine(v1alpha5.Machine{
+	It("shouldn't delete the nodeClaim when the node has registered past the registration ttl", func() {
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1alpha5.MachineSpec{
-				Resources: v1alpha5.ResourceRequirements{
+			Spec: v1beta1.NodeClaimSpec{
+				Resources: v1beta1.ResourceRequirements{
 					Requests: v1.ResourceList{
 						v1.ResourceCPU:          resource.MustParse("2"),
 						v1.ResourceMemory:       resource.MustParse("50Mi"),
@@ -55,27 +55,27 @@ var _ = Describe("Machine/Liveness", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
-		node := test.MachineLinkedNode(machine)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		node := test.NodeClaimLinkedNode(nodeClaim)
 		ExpectApplied(ctx, env.Client, node)
 
-		// Node and Machine should still exist
+		// Node and nodeClaim should still exist
 		fakeClock.Step(time.Minute * 20)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		ExpectExists(ctx, env.Client, machine)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectExists(ctx, env.Client, nodeClaim)
 		ExpectExists(ctx, env.Client, node)
 	})
-	It("should delete the Machine when the Node hasn't registered past the registration ttl", func() {
-		machine := test.Machine(v1alpha5.Machine{
+	It("should delete the nodeClaim when the Node hasn't registered past the registration ttl", func() {
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1alpha5.MachineSpec{
-				Resources: v1alpha5.ResourceRequirements{
+			Spec: v1beta1.NodeClaimSpec{
+				Resources: v1beta1.ResourceRequirements{
 					Requests: v1.ResourceList{
 						v1.ResourceCPU:          resource.MustParse("2"),
 						v1.ResourceMemory:       resource.MustParse("50Mi"),
@@ -85,25 +85,25 @@ var _ = Describe("Machine/Liveness", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		// If the node hasn't registered in the registration timeframe, then we deprovision the NodeClaim
 		fakeClock.Step(time.Minute * 20)
-		ExpectReconcileSucceeded(ctx, machineController, client.ObjectKeyFromObject(machine))
-		ExpectFinalizersRemoved(ctx, env.Client, machine)
-		ExpectNotFound(ctx, env.Client, machine)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
-	It("should delete the Machine when the Machine hasn't launched past the registration ttl", func() {
-		machine := test.Machine(v1alpha5.Machine{
+	It("should delete the NodeClaim when the NodeClaim hasn't launched past the registration ttl", func() {
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1alpha5.MachineSpec{
-				Resources: v1alpha5.ResourceRequirements{
+			Spec: v1beta1.NodeClaimSpec{
+				Resources: v1beta1.ResourceRequirements{
 					Requests: v1.ResourceList{
 						v1.ResourceCPU:          resource.MustParse("2"),
 						v1.ResourceMemory:       resource.MustParse("50Mi"),
@@ -114,14 +114,14 @@ var _ = Describe("Machine/Liveness", func() {
 			},
 		})
 		cloudProvider.AllowedCreateCalls = 0 // Don't allow Create() calls to succeed
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-		ExpectReconcileFailed(ctx, machineController, client.ObjectKeyFromObject(machine))
-		machine = ExpectExists(ctx, env.Client, machine)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileFailed(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
-		// If the node hasn't registered in the registration timeframe, then we deprovision the Machine
+		// If the node hasn't registered in the registration timeframe, then we deprovision the nodeClaim
 		fakeClock.Step(time.Minute * 20)
-		ExpectReconcileFailed(ctx, machineController, client.ObjectKeyFromObject(machine))
-		ExpectFinalizersRemoved(ctx, env.Client, machine)
-		ExpectNotFound(ctx, env.Client, machine)
+		ExpectReconcileFailed(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 })

@@ -39,7 +39,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
 
@@ -134,56 +133,6 @@ func (c *NodeClaimController) Builder(_ context.Context, m manager.Manager) core
 		Watches(
 			&v1.Node{},
 			nodeclaimutil.NodeEventHandler(c.kubeClient),
-			// Watch for node deletion events
-			builder.WithPredicates(predicate.Funcs{
-				CreateFunc: func(e event.CreateEvent) bool { return false },
-				UpdateFunc: func(e event.UpdateEvent) bool { return false },
-				DeleteFunc: func(e event.DeleteEvent) bool { return true },
-			}),
-		).
-		WithOptions(controller.Options{
-			RateLimiter: workqueue.NewMaxOfRateLimiter(
-				workqueue.NewItemExponentialFailureRateLimiter(time.Second, time.Minute),
-				// 10 qps, 100 bucket size
-				&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
-			),
-			MaxConcurrentReconciles: 100, // higher concurrency limit since we want fast reaction to termination
-		}))
-}
-
-var _ corecontroller.FinalizingTypedController[*v1alpha5.Machine] = (*MachineController)(nil)
-
-type MachineController struct {
-	*Controller
-}
-
-func NewMachineController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
-	return corecontroller.Typed[*v1alpha5.Machine](kubeClient, &MachineController{
-		Controller: NewController(kubeClient, cloudProvider),
-	})
-}
-
-func (*MachineController) Name() string {
-	return "machine.termination"
-}
-
-func (c *MachineController) Reconcile(_ context.Context, _ *v1alpha5.Machine) (reconcile.Result, error) {
-	return reconcile.Result{}, nil
-}
-
-func (c *MachineController) Finalize(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", machine.Labels[v1alpha5.ProvisionerNameLabelKey]))
-	return c.Controller.Finalize(ctx, nodeclaimutil.New(machine))
-}
-
-func (c *MachineController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(controllerruntime.
-		NewControllerManagedBy(m).
-		For(&v1alpha5.Machine{}).
-		WithEventFilter(predicate.GenerationChangedPredicate{}).
-		Watches(
-			&v1.Node{},
-			machineutil.NodeEventHandler(c.kubeClient),
 			// Watch for node deletion events
 			builder.WithPredicates(predicate.Funcs{
 				CreateFunc: func(e event.CreateEvent) bool { return false },
