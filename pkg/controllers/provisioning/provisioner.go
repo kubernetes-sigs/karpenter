@@ -339,38 +339,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (*scheduler.Results, error) 
 }
 
 func (p *Provisioner) Launch(ctx context.Context, n *scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) (nodeclaimutil.Key, error) {
-	if n.OwnerKey.IsProvisioner {
-		return p.launchMachine(ctx, n, opts...)
-	}
 	return p.launchNodeClaim(ctx, n, opts...)
-}
-
-func (p *Provisioner) launchMachine(ctx context.Context, n *scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) (nodeclaimutil.Key, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provisioner", n.OwnerKey.Name))
-	options := functional.ResolveOptions(opts...)
-	latest := &v1alpha5.Provisioner{}
-	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: n.OwnerKey.Name}, latest); err != nil {
-		return nodeclaimutil.Key{}, fmt.Errorf("getting current resource usage, %w", err)
-	}
-	if err := latest.Spec.Limits.ExceededBy(latest.Status.Resources); err != nil {
-		return nodeclaimutil.Key{}, err
-	}
-	machine := n.ToMachine(latest)
-	if err := p.kubeClient.Create(ctx, machine); err != nil {
-		return nodeclaimutil.Key{}, err
-	}
-	instanceTypeRequirement, _ := lo.Find(machine.Spec.Requirements, func(req v1.NodeSelectorRequirement) bool { return req.Key == v1.LabelInstanceTypeStable })
-	logging.FromContext(ctx).With("machine", machine.Name, "requests", machine.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).Infof("created machine")
-	metrics.MachinesCreatedCounter.With(prometheus.Labels{
-		metrics.ReasonLabel:      options.Reason,
-		metrics.ProvisionerLabel: machine.Labels[v1alpha5.ProvisionerNameLabelKey],
-	}).Inc()
-	if functional.ResolveOptions(opts...).RecordPodNomination {
-		for _, pod := range n.Pods {
-			p.recorder.Publish(scheduler.NominatePodEvent(pod, nil, nodeclaimutil.New(machine)))
-		}
-	}
-	return nodeclaimutil.Key{Name: machine.Name, IsMachine: true}, nil
 }
 
 func (p *Provisioner) launchNodeClaim(ctx context.Context, n *scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) (nodeclaimutil.Key, error) {

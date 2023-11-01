@@ -73,11 +73,8 @@ func (c *Controller) Reconcile(_ context.Context, _ *v1.Node) (reconcile.Result,
 
 //nolint:gocyclo
 func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Result, error) {
-	if !controllerutil.ContainsFinalizer(node, v1alpha5.TerminationFinalizer) {
+	if !controllerutil.ContainsFinalizer(node, v1beta1.TerminationFinalizer) {
 		return reconcile.Result{}, nil
-	}
-	if err := c.deleteAllMachines(ctx, node); err != nil {
-		return reconcile.Result{}, fmt.Errorf("deleting machines, %w", err)
 	}
 	if err := c.deleteAllNodeClaims(ctx, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("deleting nodeclaims, %w", err)
@@ -106,19 +103,6 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 		return reconcile.Result{}, err
 	}
 	return reconcile.Result{}, nil
-}
-
-func (c *Controller) deleteAllMachines(ctx context.Context, node *v1.Node) error {
-	machineList := &v1alpha5.MachineList{}
-	if err := c.kubeClient.List(ctx, machineList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
-		return err
-	}
-	for i := range machineList.Items {
-		if err := c.kubeClient.Delete(ctx, &machineList.Items[i]); err != nil {
-			return client.IgnoreNotFound(err)
-		}
-	}
-	return nil
 }
 
 func (c *Controller) deleteAllNodeClaims(ctx context.Context, node *v1.Node) error {
