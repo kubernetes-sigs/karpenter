@@ -962,31 +962,43 @@ var _ = Describe("Topology", func() {
 			ExpectSkew(ctx, env.Client, "default", &topology[1]).ToNot(ContainElements(BeNumerically(">", 3)))
 		})
 		It("should balance pods across NodePool requirements", func() {
-			spotProv := test.Provisioner(test.ProvisionerOptions{
-				Requirements: []v1.NodeSelectorRequirement{
-					{
-						Key:      v1beta1.CapacityTypeLabelKey,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{"spot"},
-					},
-					{
-						Key:      "capacity.spread.4-1",
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{"2", "3", "4", "5"},
+			spotNodePool := test.NodePool(v1beta1.NodePool{
+				Spec: v1beta1.NodePoolSpec{
+					Template: v1beta1.NodeClaimTemplate{
+						Spec: v1beta1.NodeClaimSpec{
+							Requirements: []v1.NodeSelectorRequirement{
+								{
+									Key:      v1beta1.CapacityTypeLabelKey,
+									Operator: v1.NodeSelectorOpIn,
+									Values:   []string{v1beta1.CapacityTypeSpot},
+								},
+								{
+									Key:      "capacity.spread.4-1",
+									Operator: v1.NodeSelectorOpIn,
+									Values:   []string{"2", "3", "4", "5"},
+								},
+							},
+						},
 					},
 				},
 			})
-			onDemandProv := test.Provisioner(test.ProvisionerOptions{
-				Requirements: []v1.NodeSelectorRequirement{
-					{
-						Key:      v1beta1.CapacityTypeLabelKey,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{"on-demand"},
-					},
-					{
-						Key:      "capacity.spread.4-1",
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{"1"},
+			onDemandNodePool := test.NodePool(v1beta1.NodePool{
+				Spec: v1beta1.NodePoolSpec{
+					Template: v1beta1.NodeClaimTemplate{
+						Spec: v1beta1.NodeClaimSpec{
+							Requirements: []v1.NodeSelectorRequirement{
+								{
+									Key:      v1beta1.CapacityTypeLabelKey,
+									Operator: v1.NodeSelectorOpIn,
+									Values:   []string{v1beta1.CapacityTypeOnDemand},
+								},
+								{
+									Key:      "capacity.spread.4-1",
+									Operator: v1.NodeSelectorOpIn,
+									Values:   []string{"1"},
+								},
+							},
+						},
 					},
 				},
 			})
@@ -997,7 +1009,7 @@ var _ = Describe("Topology", func() {
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:           1,
 			}}
-			ExpectApplied(ctx, env.Client, spotProv, onDemandProv)
+			ExpectApplied(ctx, env.Client, spotNodePool, onDemandNodePool)
 			pods := test.UnschedulablePods(test.PodOptions{
 				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
 				TopologySpreadConstraints: topology,
@@ -1008,7 +1020,7 @@ var _ = Describe("Topology", func() {
 			}
 
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(4, 4, 4, 4, 4))
-			// due to the spread across provisioners, we've forced a 4:1 spot to on-demand spread
+			// due to the spread across nodePools, we've forced a 4:1 spot to on-demand spread
 			ExpectSkew(ctx, env.Client, "default", &v1.TopologySpreadConstraint{
 				TopologyKey:       v1beta1.CapacityTypeLabelKey,
 				WhenUnsatisfiable: v1.DoNotSchedule,
@@ -2346,28 +2358,6 @@ var _ = Describe("Topology", func() {
 			n2 := ExpectScheduled(ctx, env.Client, affPod2)
 			// should be scheduled on the same node due to the empty namespace selector
 			Expect(n1.Name).To(Equal(n2.Name))
-		})
-		It("should count topology across multiple provisioners", func() {
-			ExpectApplied(ctx, env.Client,
-				test.Provisioner(test.ProvisionerOptions{
-					Requirements: []v1.NodeSelectorRequirement{{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}},
-				}),
-				test.Provisioner(test.ProvisionerOptions{
-					Requirements: []v1.NodeSelectorRequirement{{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-2", "test-zone-3"}}},
-				}),
-			)
-			labels := map[string]string{"foo": "bar"}
-			topology := v1.TopologySpreadConstraint{
-				TopologyKey:       v1.LabelTopologyZone,
-				MaxSkew:           1,
-				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
-				WhenUnsatisfiable: v1.DoNotSchedule,
-			}
-			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, test.Pods(10, test.UnscheduleablePodOptions(test.PodOptions{
-				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
-				TopologySpreadConstraints: []v1.TopologySpreadConstraint{topology},
-			}))...)
-			ExpectSkew(ctx, env.Client, "default", &topology).To(ConsistOf(3, 3, 4))
 		})
 	})
 })
