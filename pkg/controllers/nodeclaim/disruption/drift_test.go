@@ -36,7 +36,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = Describe("NodeClaim/Drift", func() {
+var _ = Describe("Drift", func() {
 	var nodePool *v1beta1.NodePool
 	var nodeClaim *v1beta1.NodeClaim
 	var node *v1.Node
