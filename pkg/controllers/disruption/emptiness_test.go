@@ -33,7 +33,7 @@ import (
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
 
-var _ = Describe("NodeClaim/Emptiness", func() {
+var _ = Describe("Emptiness", func() {
 	var nodePool *v1beta1.NodePool
 	var nodeClaim *v1beta1.NodeClaim
 	var node *v1.Node
