@@ -58,8 +58,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	pscheduling "github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter-core/pkg/test"
-	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
 
 const (
@@ -277,28 +275,14 @@ func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *s
 		if err != nil {
 			return bindings
 		}
-		if key.IsMachine {
-			machine := &v1alpha5.Machine{}
-			Expect(c.Get(ctx, types.NamespacedName{Name: key.Name}, machine)).To(Succeed())
-			machine, node := ExpectMachineDeployed(ctx, c, cluster, cloudProvider, machine)
-			if machine != nil && node != nil {
-				for _, pod := range m.Pods {
-					bindings[pod] = &Binding{
-						Machine: machine,
-						Node:    node,
-					}
-				}
-			}
-		} else {
-			nodeClaim := &v1beta1.NodeClaim{}
-			Expect(c.Get(ctx, types.NamespacedName{Name: key.Name}, nodeClaim)).To(Succeed())
-			nodeClaim, node := ExpectNodeClaimDeployed(ctx, c, cluster, cloudProvider, nodeClaim)
-			if nodeClaim != nil && node != nil {
-				for _, pod := range m.Pods {
-					bindings[pod] = &Binding{
-						NodeClaim: nodeClaim,
-						Node:      node,
-					}
+		nodeClaim := &v1beta1.NodeClaim{}
+		Expect(c.Get(ctx, types.NamespacedName{Name: key.Name}, nodeClaim)).To(Succeed())
+		nodeClaim, node := ExpectNodeClaimDeployed(ctx, c, cluster, cloudProvider, nodeClaim)
+		if nodeClaim != nil && node != nil {
+			for _, pod := range m.Pods {
+				bindings[pod] = &Binding{
+					NodeClaim: nodeClaim,
+					Node:      node,
 				}
 			}
 		}
@@ -309,49 +293,11 @@ func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *s
 				Node: node.Node,
 			}
 			if node.NodeClaim != nil {
-				if node.NodeClaim.IsMachine {
-					bindings[pod].Machine = machineutil.NewFromNodeClaim(node.NodeClaim)
-				} else {
-					bindings[pod].NodeClaim = node.NodeClaim
-				}
+				bindings[pod].NodeClaim = node.NodeClaim
 			}
 		}
 	}
 	return bindings
-}
-
-func ExpectMachineDeployedNoNode(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, m *v1alpha5.Machine) (*v1alpha5.Machine, error) {
-	GinkgoHelper()
-	resolved, err := cloudProvider.Create(ctx, nodeclaimutil.New(m))
-	// TODO @joinnis: Check this error rather than swallowing it. This is swallowed right now due to how we are doing some testing in the cloudprovider
-	if err != nil {
-		return m, err
-	}
-	Expect(err).To(Succeed())
-
-	// Make the machine ready in the status conditions
-	m = machineutil.NewFromNodeClaim(lifecycle.PopulateNodeClaimDetails(nodeclaimutil.New(m), resolved))
-	m.StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
-	ExpectApplied(ctx, c, m)
-	cluster.UpdateNodeClaim(nodeclaimutil.New(m))
-	return m, nil
-}
-
-func ExpectMachineDeployed(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, m *v1alpha5.Machine) (*v1alpha5.Machine, *v1.Node) {
-	GinkgoHelper()
-	m, err := ExpectMachineDeployedNoNode(ctx, c, cluster, cloudProvider, m)
-	if err != nil {
-		return m, nil
-	}
-	m.StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
-
-	// Mock the machine launch and node joining at the apiserver
-	node := test.MachineLinkedNode(m)
-	node.Labels = lo.Assign(node.Labels, map[string]string{v1alpha5.LabelNodeRegistered: "true"})
-	ExpectApplied(ctx, c, m, node)
-	Expect(cluster.UpdateNode(ctx, node)).To(Succeed())
-	cluster.UpdateNodeClaim(nodeclaimutil.New(m))
-	return m, node
 }
 
 func ExpectNodeClaimDeployedNoNode(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, nc *v1beta1.NodeClaim) (*v1beta1.NodeClaim, error) {
@@ -388,24 +334,6 @@ func ExpectNodeClaimDeployed(ctx context.Context, c client.Client, cluster *stat
 	return nc, node
 }
 
-func ExpectMachinesCascadeDeletion(ctx context.Context, c client.Client, machines ...*v1alpha5.Machine) {
-	GinkgoHelper()
-	nodes := ExpectNodes(ctx, c)
-	for _, machine := range machines {
-		err := c.Get(ctx, client.ObjectKeyFromObject(machine), &v1alpha5.Machine{})
-		if !errors.IsNotFound(err) {
-			continue
-		}
-		for _, node := range nodes {
-			if node.Spec.ProviderID == machine.Status.ProviderID {
-				Expect(c.Delete(ctx, node))
-				ExpectFinalizersRemoved(ctx, c, node)
-				ExpectNotFound(ctx, c, node)
-			}
-		}
-	}
-}
-
 func ExpectNodeClaimsCascadeDeletion(ctx context.Context, c client.Client, nodeClaims ...*v1beta1.NodeClaim) {
 	GinkgoHelper()
 	nodes := ExpectNodes(ctx, c)
@@ -432,17 +360,6 @@ func ExpectMakeNodeClaimsInitialized(ctx context.Context, c client.Client, nodeC
 		nodeClaims[i].StatusConditions().MarkTrue(v1beta1.Registered)
 		nodeClaims[i].StatusConditions().MarkTrue(v1beta1.Initialized)
 		ExpectApplied(ctx, c, nodeClaims[i])
-	}
-}
-
-func ExpectMakeMachinesInitialized(ctx context.Context, c client.Client, machines ...*v1alpha5.Machine) {
-	GinkgoHelper()
-	for i := range machines {
-		machines[i] = ExpectExists(ctx, c, machines[i])
-		machines[i].StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
-		machines[i].StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
-		machines[i].StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
-		ExpectApplied(ctx, c, machines[i])
 	}
 }
 
@@ -616,21 +533,6 @@ func ExpectNodeClaims(ctx context.Context, c client.Client) []*v1beta1.NodeClaim
 	nodeClaims := &v1beta1.NodeClaimList{}
 	Expect(c.List(ctx, nodeClaims)).To(Succeed())
 	return lo.ToSlicePtr(nodeClaims.Items)
-}
-
-func ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx context.Context, c client.Client, nodeStateController, machineStateController controller.Controller, nodes []*v1.Node, machines []*v1alpha5.Machine) {
-	GinkgoHelper()
-
-	ExpectMakeNodesInitialized(ctx, c, nodes...)
-	ExpectMakeMachinesInitialized(ctx, c, machines...)
-
-	// Inform cluster state about node and machine readiness
-	for _, n := range nodes {
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
-	}
-	for _, m := range machines {
-		ExpectReconcileSucceeded(ctx, machineStateController, client.ObjectKeyFromObject(m))
-	}
 }
 
 func ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx context.Context, c client.Client, nodeStateController, nodeClaimStateController controller.Controller, nodes []*v1.Node, nodeClaims []*v1beta1.NodeClaim) {
