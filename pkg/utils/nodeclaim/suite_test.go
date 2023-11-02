@@ -17,7 +17,6 @@ package nodeclaim_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -27,7 +26,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	. "knative.dev/pkg/logging/testing"
-	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
@@ -64,7 +62,6 @@ var _ = AfterEach(func() {
 })
 
 var _ = Describe("NodeClaimUtils", func() {
-	var machine *v1alpha5.Machine
 	var node *v1.Node
 	BeforeEach(func() {
 		node = test.Node(test.NodeOptions{
@@ -112,133 +109,6 @@ var _ = Describe("NodeClaimUtils", func() {
 				v1.ResourceEphemeralStorage: resource.MustParse("95Gi"),
 			},
 		})
-		machine = test.Machine(v1alpha5.Machine{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1.LabelTopologyZone:             "test-zone-1",
-					v1.LabelTopologyRegion:           "test-region",
-					"test-label-key":                 "test-label-value",
-					"test-label-key2":                "test-label-value2",
-					v1alpha5.LabelNodeRegistered:     "true",
-					v1alpha5.LabelNodeInitialized:    "true",
-					v1alpha5.ProvisionerNameLabelKey: "default",
-					v1alpha5.LabelCapacityType:       v1alpha5.CapacityTypeOnDemand,
-					v1.LabelOSStable:                 "linux",
-					v1.LabelInstanceTypeStable:       "test-instance-type",
-				},
-				Annotations: map[string]string{
-					"test-annotation-key":        "test-annotation-value",
-					"test-annotation-key2":       "test-annotation-value2",
-					"node-custom-annotation-key": "node-custom-annotation-value",
-				},
-			},
-			Spec: v1alpha5.MachineSpec{
-				Taints: []v1.Taint{
-					{
-						Key:    "test-taint-key",
-						Effect: v1.TaintEffectNoSchedule,
-						Value:  "test-taint-value",
-					},
-					{
-						Key:    "test-taint-key2",
-						Effect: v1.TaintEffectNoExecute,
-						Value:  "test-taint-value2",
-					},
-				},
-				StartupTaints: []v1.Taint{
-					{
-						Key:    "test-startup-taint-key",
-						Effect: v1.TaintEffectNoSchedule,
-						Value:  "test-startup-taint-value",
-					},
-					{
-						Key:    "test-startup-taint-key2",
-						Effect: v1.TaintEffectNoExecute,
-						Value:  "test-startup-taint-value2",
-					},
-				},
-				Requirements: []v1.NodeSelectorRequirement{
-					{
-						Key:      v1.LabelTopologyZone,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{"test-zone-1", "test-zone-2"},
-					},
-					{
-						Key:      v1alpha5.LabelCapacityType,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{v1alpha5.CapacityTypeOnDemand},
-					},
-					{
-						Key:      v1.LabelHostname,
-						Operator: v1.NodeSelectorOpExists,
-					},
-				},
-				Resources: v1alpha5.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:              resource.MustParse("5"),
-						v1.ResourceMemory:           resource.MustParse("5Mi"),
-						v1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
-					},
-				},
-				Kubelet: &v1alpha5.KubeletConfiguration{
-					ContainerRuntime: ptr.String("containerd"),
-					MaxPods:          ptr.Int32(110),
-					PodsPerCore:      ptr.Int32(10),
-					SystemReserved: v1.ResourceList{
-						v1.ResourceCPU:              resource.MustParse("200m"),
-						v1.ResourceMemory:           resource.MustParse("200Mi"),
-						v1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
-					},
-					KubeReserved: v1.ResourceList{
-						v1.ResourceCPU:              resource.MustParse("200m"),
-						v1.ResourceMemory:           resource.MustParse("200Mi"),
-						v1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
-					},
-					EvictionHard: map[string]string{
-						"memory.available":   "5%",
-						"nodefs.available":   "5%",
-						"nodefs.inodesFree":  "5%",
-						"imagefs.available":  "5%",
-						"imagefs.inodesFree": "5%",
-						"pid.available":      "3%",
-					},
-					EvictionSoft: map[string]string{
-						"memory.available":   "10%",
-						"nodefs.available":   "10%",
-						"nodefs.inodesFree":  "10%",
-						"imagefs.available":  "10%",
-						"imagefs.inodesFree": "10%",
-						"pid.available":      "6%",
-					},
-					EvictionSoftGracePeriod: map[string]metav1.Duration{
-						"memory.available":   {Duration: time.Minute * 2},
-						"nodefs.available":   {Duration: time.Minute * 2},
-						"nodefs.inodesFree":  {Duration: time.Minute * 2},
-						"imagefs.available":  {Duration: time.Minute * 2},
-						"imagefs.inodesFree": {Duration: time.Minute * 2},
-						"pid.available":      {Duration: time.Minute * 2},
-					},
-					EvictionMaxPodGracePeriod:   ptr.Int32(120),
-					ImageGCHighThresholdPercent: ptr.Int32(50),
-					ImageGCLowThresholdPercent:  ptr.Int32(10),
-					CPUCFSQuota:                 ptr.Bool(false),
-				},
-				MachineTemplateRef: &v1alpha5.MachineTemplateRef{
-					Kind:       "MachineTemplate",
-					APIVersion: "test.cloudprovider/v1",
-					Name:       "default",
-				},
-			},
-			Status: v1alpha5.MachineStatus{
-				NodeName:    node.Name,
-				ProviderID:  node.Spec.ProviderID,
-				Capacity:    node.Status.Capacity,
-				Allocatable: node.Status.Allocatable,
-			},
-		})
-		machine.StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
-		machine.StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
-		machine.StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
 	})
 	It("should convert a Node to a NodeClaim", func() {
 		nodeClaim := nodeclaimutil.NewFromNode(node)
@@ -275,39 +145,6 @@ var _ = Describe("NodeClaimUtils", func() {
 		retrieved, err := nodeclaimutil.Get(ctx, env.Client, nodeclaimutil.Key{Name: nodeClaim.Name, IsMachine: false})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(retrieved.Name).To(Equal(nodeClaim.Name))
-	})
-	It("should retrieve a Machine with a get call", func() {
-		machine := test.Machine()
-		ExpectApplied(ctx, env.Client, machine)
-
-		retrieved, err := nodeclaimutil.Get(ctx, env.Client, nodeclaimutil.Key{Name: machine.Name, IsMachine: true})
-		Expect(err).ToNot(HaveOccurred())
-		Expect(retrieved.Name).To(Equal(machine.Name))
-	})
-	It("should retrieve both NodeClaims and Machines on a list call", func() {
-		Skip("Re-enable this test when NodeClaims are enabled and v1beta1 is released")
-
-		numNodeClaims := 3
-		numMachines := 5
-
-		for i := 0; i < numNodeClaims; i++ {
-			ExpectApplied(ctx, env.Client, test.NodeClaim(v1beta1.NodeClaim{
-				Spec: v1beta1.NodeClaimSpec{
-					NodeClassRef: &v1beta1.NodeClassReference{
-						Kind:       "NodeClassRef",
-						APIVersion: "test.cloudprovider/v1",
-						Name:       "default",
-					},
-				},
-			}))
-		}
-		for i := 0; i < numMachines; i++ {
-			ExpectApplied(ctx, env.Client, test.Machine())
-		}
-
-		retrieved, err := nodeclaimutil.List(ctx, env.Client)
-		Expect(err).ToNot(HaveOccurred())
-		Expect(retrieved.Items).To(HaveLen(8))
 	})
 	It("should update the status on a NodeClaim", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
@@ -450,24 +287,5 @@ var _ = Describe("NodeClaimUtils", func() {
 		owner, err := nodeclaimutil.Owner(ctx, env.Client, nodeClaim)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(owner.Name).To(Equal(nodePool.Name))
-	})
-	It("should retrieve the owner for a Machine", func() {
-		provisioner := test.Provisioner()
-		machine := test.Machine(v1alpha5.Machine{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-
-		ownerKey := nodeclaimutil.OwnerKey(machine)
-		Expect(ownerKey.Name).To(Equal(provisioner.Name))
-		Expect(ownerKey.IsProvisioner).To(BeTrue())
-
-		owner, err := nodeclaimutil.Owner(ctx, env.Client, machine)
-		Expect(err).ToNot(HaveOccurred())
-		Expect(owner.Name).To(Equal(provisioner.Name))
 	})
 })
