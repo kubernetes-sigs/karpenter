@@ -32,8 +32,8 @@ import (
 type NodePoolSpec struct {
 	// Template contains the template of possibilities for the provisioning logic to launch a NodeClaim with.
 	// NodeClaims launched from this NodePool will often be further constrained than the template specifies.
-	// +optional
-	Template NodeClaimTemplate `json:"template,omitempty"`
+	// +required
+	Template NodeClaimTemplate `json:"template"`
 	// Disruption contains the parameters that relate to Karpenter's disruption logic
 	// +kubebuilder:default={"consolidationPolicy": "WhenUnderutilized", "expireAfter": "720h"}
 	// +kubebuilder:validation:XValidation:message="consolidateAfter cannot be combined with consolidationPolicy=WhenUnderutilized",rule="has(self.consolidateAfter) ? self.consolidationPolicy != 'WhenUnderutilized' || self.consolidateAfter == 'Never' : true"
@@ -105,7 +105,8 @@ func (l Limits) ExceededBy(resources v1.ResourceList) error {
 
 type NodeClaimTemplate struct {
 	ObjectMeta `json:"metadata,omitempty"`
-	Spec       NodeClaimSpec `json:"spec,omitempty"`
+	// +required
+	Spec NodeClaimSpec `json:"spec"`
 }
 
 type ObjectMeta struct {
