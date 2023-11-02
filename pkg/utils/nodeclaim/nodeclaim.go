@@ -26,7 +26,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -36,7 +35,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
-	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 )
 
@@ -181,52 +179,6 @@ func AllNodesForNodeClaim(ctx context.Context, c client.Client, nodeClaim *v1bet
 	return lo.ToSlicePtr(nodeList.Items), nil
 }
 
-func New(machine *v1alpha5.Machine) *v1beta1.NodeClaim {
-	return &v1beta1.NodeClaim{
-		TypeMeta:   machine.TypeMeta,
-		ObjectMeta: machine.ObjectMeta,
-		Spec: v1beta1.NodeClaimSpec{
-			Taints:        machine.Spec.Taints,
-			StartupTaints: machine.Spec.StartupTaints,
-			Requirements:  machine.Spec.Requirements,
-			Resources: v1beta1.ResourceRequirements{
-				Requests: machine.Spec.Resources.Requests,
-			},
-			Kubelet:      NewKubeletConfiguration(machine.Spec.Kubelet),
-			NodeClassRef: NewNodeClassReference(machine.Spec.MachineTemplateRef),
-		},
-		Status: v1beta1.NodeClaimStatus{
-			NodeName:    machine.Status.NodeName,
-			ProviderID:  machine.Status.ProviderID,
-			Capacity:    machine.Status.Capacity,
-			Allocatable: machine.Status.Allocatable,
-			Conditions:  NewConditions(machine.Status.Conditions),
-		},
-		IsMachine: true,
-	}
-}
-
-func NewConditions(conds apis.Conditions) apis.Conditions {
-	out := conds.DeepCopy()
-	for i := range out {
-		switch out[i].Type {
-		case v1alpha5.MachineLaunched:
-			out[i].Type = v1beta1.Launched
-		case v1alpha5.MachineRegistered:
-			out[i].Type = v1beta1.Registered
-		case v1alpha5.MachineInitialized:
-			out[i].Type = v1beta1.Initialized
-		case v1alpha5.MachineEmpty:
-			out[i].Type = v1beta1.Empty
-		case v1alpha5.MachineExpired:
-			out[i].Type = v1beta1.Expired
-		case v1alpha5.MachineDrifted:
-			out[i].Type = v1beta1.Drifted
-		}
-	}
-	return out
-}
-
 func NewKubeletConfiguration(kc *v1alpha5.KubeletConfiguration) *v1beta1.KubeletConfiguration {
 	if kc == nil {
 		return nil
@@ -245,17 +197,6 @@ func NewKubeletConfiguration(kc *v1alpha5.KubeletConfiguration) *v1beta1.Kubelet
 		ImageGCHighThresholdPercent: kc.ImageGCHighThresholdPercent,
 		ImageGCLowThresholdPercent:  kc.ImageGCLowThresholdPercent,
 		CPUCFSQuota:                 kc.CPUCFSQuota,
-	}
-}
-
-func NewNodeClassReference(mtr *v1alpha5.MachineTemplateRef) *v1beta1.NodeClassReference {
-	if mtr == nil {
-		return nil
-	}
-	return &v1beta1.NodeClassReference{
-		Kind:       mtr.Kind,
-		Name:       mtr.Name,
-		APIVersion: mtr.APIVersion,
 	}
 }
 
@@ -292,13 +233,6 @@ func NewFromNode(node *v1.Node) *v1beta1.NodeClaim {
 }
 
 func Get(ctx context.Context, c client.Client, key Key) (*v1beta1.NodeClaim, error) {
-	if key.IsMachine {
-		machine := &v1alpha5.Machine{}
-		if err := c.Get(ctx, types.NamespacedName{Name: key.Name}, machine); err != nil {
-			return nil, err
-		}
-		return New(machine), nil
-	}
 	nodeClaim := &v1beta1.NodeClaim{}
 	if err := c.Get(ctx, types.NamespacedName{Name: key.Name}, nodeClaim); err != nil {
 		return nil, err
@@ -307,62 +241,30 @@ func Get(ctx context.Context, c client.Client, key Key) (*v1beta1.NodeClaim, err
 }
 
 func List(ctx context.Context, c client.Client, opts ...client.ListOption) (*v1beta1.NodeClaimList, error) {
-	machineList := &v1alpha5.MachineList{}
-	if err := c.List(ctx, machineList, opts...); err != nil {
-		return nil, err
-	}
-	convertedNodeClaims := lo.Map(machineList.Items, func(m v1alpha5.Machine, _ int) v1beta1.NodeClaim {
-		return *New(&m)
-	})
 	nodeClaimList := &v1beta1.NodeClaimList{}
 	if err := c.List(ctx, nodeClaimList, opts...); err != nil {
 		return nil, err
 	}
-	nodeClaimList.Items = append(nodeClaimList.Items, convertedNodeClaims...)
 	return nodeClaimList, nil
 }
 
 func UpdateStatus(ctx context.Context, c client.Client, nodeClaim *v1beta1.NodeClaim) error {
-	if nodeClaim.IsMachine {
-		machine := machineutil.NewFromNodeClaim(nodeClaim)
-		return c.Status().Update(ctx, machine)
-	}
 	return c.Status().Update(ctx, nodeClaim)
 }
 
 func Patch(ctx context.Context, c client.Client, stored, nodeClaim *v1beta1.NodeClaim) error {
-	if nodeClaim.IsMachine {
-		storedMachine := machineutil.NewFromNodeClaim(stored)
-		machine := machineutil.NewFromNodeClaim(nodeClaim)
-		return c.Patch(ctx, machine, client.MergeFrom(storedMachine))
-	}
 	return c.Patch(ctx, nodeClaim, client.MergeFrom(stored))
 }
 
 func PatchStatus(ctx context.Context, c client.Client, stored, nodeClaim *v1beta1.NodeClaim) error {
-	if nodeClaim.IsMachine {
-		storedMachine := machineutil.NewFromNodeClaim(stored)
-		machine := machineutil.NewFromNodeClaim(nodeClaim)
-		return c.Status().Patch(ctx, machine, client.MergeFrom(storedMachine))
-	}
 	return c.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored))
 }
 
 func Delete(ctx context.Context, c client.Client, nodeClaim *v1beta1.NodeClaim) error {
-	if nodeClaim.IsMachine {
-		machine := machineutil.NewFromNodeClaim(nodeClaim)
-		return c.Delete(ctx, machine)
-	}
 	return c.Delete(ctx, nodeClaim)
 }
 
 func CreatedCounter(nodeClaim *v1beta1.NodeClaim, reason string) prometheus.Counter {
-	if nodeClaim.IsMachine {
-		return metrics.MachinesCreatedCounter.With(prometheus.Labels{
-			metrics.ReasonLabel:      reason,
-			metrics.ProvisionerLabel: nodeClaim.Labels[v1alpha5.ProvisionerNameLabelKey],
-		})
-	}
 	return metrics.NodeClaimsCreatedCounter.With(prometheus.Labels{
 		metrics.ReasonLabel:   reason,
 		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
@@ -370,45 +272,24 @@ func CreatedCounter(nodeClaim *v1beta1.NodeClaim, reason string) prometheus.Coun
 }
 
 func LaunchedCounter(nodeClaim *v1beta1.NodeClaim) prometheus.Counter {
-	if nodeClaim.IsMachine {
-		return metrics.MachinesLaunchedCounter.With(prometheus.Labels{
-			metrics.ProvisionerLabel: nodeClaim.Labels[v1alpha5.ProvisionerNameLabelKey],
-		})
-	}
 	return metrics.NodeClaimsLaunchedCounter.With(prometheus.Labels{
 		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
 	})
 }
 
 func RegisteredCounter(nodeClaim *v1beta1.NodeClaim) prometheus.Counter {
-	if nodeClaim.IsMachine {
-		return metrics.MachinesRegisteredCounter.With(prometheus.Labels{
-			metrics.ProvisionerLabel: nodeClaim.Labels[v1alpha5.ProvisionerNameLabelKey],
-		})
-	}
 	return metrics.NodeClaimsRegisteredCounter.With(prometheus.Labels{
 		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
 	})
 }
 
 func InitializedCounter(nodeClaim *v1beta1.NodeClaim) prometheus.Counter {
-	if nodeClaim.IsMachine {
-		return metrics.MachinesInitializedCounter.With(prometheus.Labels{
-			metrics.ProvisionerLabel: nodeClaim.Labels[v1alpha5.ProvisionerNameLabelKey],
-		})
-	}
 	return metrics.NodeClaimsInitializedCounter.With(prometheus.Labels{
 		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
 	})
 }
 
 func TerminatedCounter(nodeClaim *v1beta1.NodeClaim, reason string) prometheus.Counter {
-	if nodeClaim.IsMachine {
-		return metrics.MachinesTerminatedCounter.With(prometheus.Labels{
-			metrics.ReasonLabel:      reason,
-			metrics.ProvisionerLabel: nodeClaim.Labels[v1alpha5.ProvisionerNameLabelKey],
-		})
-	}
 	return metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
 		metrics.ReasonLabel:   reason,
 		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
@@ -416,12 +297,6 @@ func TerminatedCounter(nodeClaim *v1beta1.NodeClaim, reason string) prometheus.C
 }
 
 func DisruptedCounter(nodeClaim *v1beta1.NodeClaim, disruptionType string) prometheus.Counter {
-	if nodeClaim.IsMachine {
-		return metrics.MachinesDisruptedCounter.With(prometheus.Labels{
-			metrics.TypeLabel:        disruptionType,
-			metrics.ProvisionerLabel: nodeClaim.Labels[v1alpha5.ProvisionerNameLabelKey],
-		})
-	}
 	return metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
 		metrics.TypeLabel:     disruptionType,
 		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
@@ -429,12 +304,6 @@ func DisruptedCounter(nodeClaim *v1beta1.NodeClaim, disruptionType string) prome
 }
 
 func DriftedCounter(nodeClaim *v1beta1.NodeClaim, driftType string) prometheus.Counter {
-	if nodeClaim.IsMachine {
-		return metrics.MachinesDriftedCounter.With(prometheus.Labels{
-			metrics.TypeLabel:        driftType,
-			metrics.ProvisionerLabel: nodeClaim.Labels[v1alpha5.ProvisionerNameLabelKey],
-		})
-	}
 	return metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
 		metrics.TypeLabel:     driftType,
 		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
@@ -446,23 +315,13 @@ func UpdateNodeOwnerReferences(nodeClaim *v1beta1.NodeClaim, node *v1.Node) *v1.
 	node.OwnerReferences = lo.Reject(node.OwnerReferences, func(o metav1.OwnerReference, _ int) bool {
 		return o.Kind == "Provisioner"
 	})
-	if nodeClaim.IsMachine {
-		node.OwnerReferences = append(node.OwnerReferences, metav1.OwnerReference{
-			APIVersion:         v1alpha5.SchemeGroupVersion.String(),
-			Kind:               "Machine",
-			Name:               nodeClaim.Name,
-			UID:                nodeClaim.UID,
-			BlockOwnerDeletion: ptr.Bool(true),
-		})
-	} else {
-		node.OwnerReferences = append(node.OwnerReferences, metav1.OwnerReference{
-			APIVersion:         v1beta1.SchemeGroupVersion.String(),
-			Kind:               "NodeClaim",
-			Name:               nodeClaim.Name,
-			UID:                nodeClaim.UID,
-			BlockOwnerDeletion: ptr.Bool(true),
-		})
-	}
+	node.OwnerReferences = append(node.OwnerReferences, metav1.OwnerReference{
+		APIVersion:         v1beta1.SchemeGroupVersion.String(),
+		Kind:               "NodeClaim",
+		Name:               nodeClaim.Name,
+		UID:                nodeClaim.UID,
+		BlockOwnerDeletion: ptr.Bool(true),
+	})
 	return node
 }
 

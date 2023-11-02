@@ -17,7 +17,6 @@ package nodeclaim_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -27,7 +26,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	. "knative.dev/pkg/logging/testing"
-	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
@@ -64,7 +62,6 @@ var _ = AfterEach(func() {
 })
 
 var _ = Describe("NodeClaimUtils", func() {
-	var machine *v1alpha5.Machine
 	var node *v1.Node
 	BeforeEach(func() {
 		node = test.Node(test.NodeOptions{
@@ -112,174 +109,6 @@ var _ = Describe("NodeClaimUtils", func() {
 				v1.ResourceEphemeralStorage: resource.MustParse("95Gi"),
 			},
 		})
-		machine = test.Machine(v1alpha5.Machine{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1.LabelTopologyZone:             "test-zone-1",
-					v1.LabelTopologyRegion:           "test-region",
-					"test-label-key":                 "test-label-value",
-					"test-label-key2":                "test-label-value2",
-					v1alpha5.LabelNodeRegistered:     "true",
-					v1alpha5.LabelNodeInitialized:    "true",
-					v1alpha5.ProvisionerNameLabelKey: "default",
-					v1alpha5.LabelCapacityType:       v1alpha5.CapacityTypeOnDemand,
-					v1.LabelOSStable:                 "linux",
-					v1.LabelInstanceTypeStable:       "test-instance-type",
-				},
-				Annotations: map[string]string{
-					"test-annotation-key":        "test-annotation-value",
-					"test-annotation-key2":       "test-annotation-value2",
-					"node-custom-annotation-key": "node-custom-annotation-value",
-				},
-			},
-			Spec: v1alpha5.MachineSpec{
-				Taints: []v1.Taint{
-					{
-						Key:    "test-taint-key",
-						Effect: v1.TaintEffectNoSchedule,
-						Value:  "test-taint-value",
-					},
-					{
-						Key:    "test-taint-key2",
-						Effect: v1.TaintEffectNoExecute,
-						Value:  "test-taint-value2",
-					},
-				},
-				StartupTaints: []v1.Taint{
-					{
-						Key:    "test-startup-taint-key",
-						Effect: v1.TaintEffectNoSchedule,
-						Value:  "test-startup-taint-value",
-					},
-					{
-						Key:    "test-startup-taint-key2",
-						Effect: v1.TaintEffectNoExecute,
-						Value:  "test-startup-taint-value2",
-					},
-				},
-				Requirements: []v1.NodeSelectorRequirement{
-					{
-						Key:      v1.LabelTopologyZone,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{"test-zone-1", "test-zone-2"},
-					},
-					{
-						Key:      v1alpha5.LabelCapacityType,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{v1alpha5.CapacityTypeOnDemand},
-					},
-					{
-						Key:      v1.LabelHostname,
-						Operator: v1.NodeSelectorOpExists,
-					},
-				},
-				Resources: v1alpha5.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:              resource.MustParse("5"),
-						v1.ResourceMemory:           resource.MustParse("5Mi"),
-						v1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
-					},
-				},
-				Kubelet: &v1alpha5.KubeletConfiguration{
-					ContainerRuntime: ptr.String("containerd"),
-					MaxPods:          ptr.Int32(110),
-					PodsPerCore:      ptr.Int32(10),
-					SystemReserved: v1.ResourceList{
-						v1.ResourceCPU:              resource.MustParse("200m"),
-						v1.ResourceMemory:           resource.MustParse("200Mi"),
-						v1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
-					},
-					KubeReserved: v1.ResourceList{
-						v1.ResourceCPU:              resource.MustParse("200m"),
-						v1.ResourceMemory:           resource.MustParse("200Mi"),
-						v1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
-					},
-					EvictionHard: map[string]string{
-						"memory.available":   "5%",
-						"nodefs.available":   "5%",
-						"nodefs.inodesFree":  "5%",
-						"imagefs.available":  "5%",
-						"imagefs.inodesFree": "5%",
-						"pid.available":      "3%",
-					},
-					EvictionSoft: map[string]string{
-						"memory.available":   "10%",
-						"nodefs.available":   "10%",
-						"nodefs.inodesFree":  "10%",
-						"imagefs.available":  "10%",
-						"imagefs.inodesFree": "10%",
-						"pid.available":      "6%",
-					},
-					EvictionSoftGracePeriod: map[string]metav1.Duration{
-						"memory.available":   {Duration: time.Minute * 2},
-						"nodefs.available":   {Duration: time.Minute * 2},
-						"nodefs.inodesFree":  {Duration: time.Minute * 2},
-						"imagefs.available":  {Duration: time.Minute * 2},
-						"imagefs.inodesFree": {Duration: time.Minute * 2},
-						"pid.available":      {Duration: time.Minute * 2},
-					},
-					EvictionMaxPodGracePeriod:   ptr.Int32(120),
-					ImageGCHighThresholdPercent: ptr.Int32(50),
-					ImageGCLowThresholdPercent:  ptr.Int32(10),
-					CPUCFSQuota:                 ptr.Bool(false),
-				},
-				MachineTemplateRef: &v1alpha5.MachineTemplateRef{
-					Kind:       "MachineTemplate",
-					APIVersion: "test.cloudprovider/v1",
-					Name:       "default",
-				},
-			},
-			Status: v1alpha5.MachineStatus{
-				NodeName:    node.Name,
-				ProviderID:  node.Spec.ProviderID,
-				Capacity:    node.Status.Capacity,
-				Allocatable: node.Status.Allocatable,
-			},
-		})
-		machine.StatusConditions().MarkTrue(v1alpha5.MachineLaunched)
-		machine.StatusConditions().MarkTrue(v1alpha5.MachineRegistered)
-		machine.StatusConditions().MarkTrue(v1alpha5.MachineInitialized)
-	})
-	It("should convert a Machine to a NodeClaim", func() {
-		nodeClaim := nodeclaimutil.New(machine)
-
-		for k, v := range machine.Annotations {
-			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(k, v))
-		}
-		for k, v := range machine.Labels {
-			Expect(nodeClaim.Labels).To(HaveKeyWithValue(k, v))
-		}
-		Expect(nodeClaim.Spec.Taints).To(Equal(machine.Spec.Taints))
-		Expect(nodeClaim.Spec.StartupTaints).To(Equal(machine.Spec.StartupTaints))
-		Expect(nodeClaim.Spec.Requirements).To(ContainElements(machine.Spec.Requirements))
-		Expect(nodeClaim.Spec.Resources.Requests).To(Equal(machine.Spec.Resources.Requests))
-
-		Expect(nodeClaim.Spec.Kubelet.ClusterDNS).To(Equal(machine.Spec.Kubelet.ClusterDNS))
-		Expect(nodeClaim.Spec.Kubelet.ContainerRuntime).To(Equal(machine.Spec.Kubelet.ContainerRuntime))
-		Expect(nodeClaim.Spec.Kubelet.MaxPods).To(Equal(machine.Spec.Kubelet.MaxPods))
-		Expect(nodeClaim.Spec.Kubelet.PodsPerCore).To(Equal(machine.Spec.Kubelet.PodsPerCore))
-		Expect(nodeClaim.Spec.Kubelet.SystemReserved).To(Equal(machine.Spec.Kubelet.SystemReserved))
-		Expect(nodeClaim.Spec.Kubelet.KubeReserved).To(Equal(machine.Spec.Kubelet.KubeReserved))
-		Expect(nodeClaim.Spec.Kubelet.EvictionHard).To(Equal(machine.Spec.Kubelet.EvictionHard))
-		Expect(nodeClaim.Spec.Kubelet.EvictionSoft).To(Equal(machine.Spec.Kubelet.EvictionSoft))
-		Expect(nodeClaim.Spec.Kubelet.EvictionSoftGracePeriod).To(Equal(machine.Spec.Kubelet.EvictionSoftGracePeriod))
-		Expect(nodeClaim.Spec.Kubelet.EvictionMaxPodGracePeriod).To(Equal(machine.Spec.Kubelet.EvictionMaxPodGracePeriod))
-		Expect(nodeClaim.Spec.Kubelet.ImageGCHighThresholdPercent).To(Equal(machine.Spec.Kubelet.ImageGCHighThresholdPercent))
-		Expect(nodeClaim.Spec.Kubelet.ImageGCLowThresholdPercent).To(Equal(machine.Spec.Kubelet.ImageGCLowThresholdPercent))
-		Expect(nodeClaim.Spec.Kubelet.CPUCFSQuota).To(Equal(machine.Spec.Kubelet.CPUCFSQuota))
-
-		Expect(nodeClaim.Spec.NodeClassRef.Kind).To(Equal(machine.Spec.MachineTemplateRef.Kind))
-		Expect(nodeClaim.Spec.NodeClassRef.APIVersion).To(Equal(machine.Spec.MachineTemplateRef.APIVersion))
-		Expect(nodeClaim.Spec.NodeClassRef.Name).To(Equal(machine.Spec.MachineTemplateRef.Name))
-
-		Expect(nodeClaim.Status.NodeName).To(Equal(machine.Status.NodeName))
-		Expect(nodeClaim.Status.ProviderID).To(Equal(machine.Status.ProviderID))
-		Expect(nodeClaim.Status.Capacity).To(Equal(machine.Status.Capacity))
-		Expect(nodeClaim.Status.Allocatable).To(Equal(machine.Status.Allocatable))
-
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Launched).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Registered).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized).IsTrue()).To(BeTrue())
 	})
 	It("should convert a Node to a NodeClaim", func() {
 		nodeClaim := nodeclaimutil.NewFromNode(node)
@@ -317,39 +146,6 @@ var _ = Describe("NodeClaimUtils", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(retrieved.Name).To(Equal(nodeClaim.Name))
 	})
-	It("should retrieve a Machine with a get call", func() {
-		machine := test.Machine()
-		ExpectApplied(ctx, env.Client, machine)
-
-		retrieved, err := nodeclaimutil.Get(ctx, env.Client, nodeclaimutil.Key{Name: machine.Name, IsMachine: true})
-		Expect(err).ToNot(HaveOccurred())
-		Expect(retrieved.Name).To(Equal(machine.Name))
-	})
-	It("should retrieve both NodeClaims and Machines on a list call", func() {
-		Skip("Re-enable this test when NodeClaims are enabled and v1beta1 is released")
-
-		numNodeClaims := 3
-		numMachines := 5
-
-		for i := 0; i < numNodeClaims; i++ {
-			ExpectApplied(ctx, env.Client, test.NodeClaim(v1beta1.NodeClaim{
-				Spec: v1beta1.NodeClaimSpec{
-					NodeClassRef: &v1beta1.NodeClassReference{
-						Kind:       "NodeClassRef",
-						APIVersion: "test.cloudprovider/v1",
-						Name:       "default",
-					},
-				},
-			}))
-		}
-		for i := 0; i < numMachines; i++ {
-			ExpectApplied(ctx, env.Client, test.Machine())
-		}
-
-		retrieved, err := nodeclaimutil.List(ctx, env.Client)
-		Expect(err).ToNot(HaveOccurred())
-		Expect(retrieved.Items).To(HaveLen(8))
-	})
 	It("should update the status on a NodeClaim", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			Spec: v1beta1.NodeClaimSpec{
@@ -368,19 +164,6 @@ var _ = Describe("NodeClaimUtils", func() {
 
 		retrieved := &v1beta1.NodeClaim{}
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodeClaim), retrieved)).To(Succeed())
-		Expect(retrieved.Status.ProviderID).To(Equal(providerID))
-	})
-	It("should update the status on a Machine", func() {
-		machine := test.Machine()
-		ExpectApplied(ctx, env.Client, machine)
-
-		nodeClaim := nodeclaimutil.New(machine)
-		providerID := test.RandomProviderID()
-		nodeClaim.Status.ProviderID = providerID
-		Expect(nodeclaimutil.UpdateStatus(ctx, env.Client, nodeClaim)).To(Succeed())
-
-		retrieved := &v1alpha5.Machine{}
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(machine), retrieved)).To(Succeed())
 		Expect(retrieved.Status.ProviderID).To(Equal(providerID))
 	})
 	It("should patch a NodeClaim", func() {
@@ -405,21 +188,6 @@ var _ = Describe("NodeClaimUtils", func() {
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodeClaim), retrieved)).To(Succeed())
 		Expect(retrieved.Labels).To(HaveKeyWithValue("custom-key", "custom-value"))
 	})
-	It("should patch a Machine", func() {
-		machine := test.Machine()
-		ExpectApplied(ctx, env.Client, machine)
-
-		nodeClaim := nodeclaimutil.New(machine)
-		stored := nodeClaim.DeepCopy()
-		nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
-			"custom-key": "custom-value",
-		})
-		Expect(nodeclaimutil.Patch(ctx, env.Client, stored, nodeClaim)).To(Succeed())
-
-		retrieved := &v1alpha5.Machine{}
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(machine), retrieved)).To(Succeed())
-		Expect(retrieved.Labels).To(HaveKeyWithValue("custom-key", "custom-value"))
-	})
 	It("should patch the status on a NodeClaim", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			Spec: v1beta1.NodeClaimSpec{
@@ -439,20 +207,6 @@ var _ = Describe("NodeClaimUtils", func() {
 
 		retrieved := &v1beta1.NodeClaim{}
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodeClaim), retrieved)).To(Succeed())
-		Expect(retrieved.Status.ProviderID).To(Equal(providerID))
-	})
-	It("should patch the status on a Machine", func() {
-		machine := test.Machine()
-		ExpectApplied(ctx, env.Client, machine)
-
-		nodeClaim := nodeclaimutil.New(machine)
-		stored := nodeClaim.DeepCopy()
-		providerID := test.RandomProviderID()
-		nodeClaim.Status.ProviderID = providerID
-		Expect(nodeclaimutil.PatchStatus(ctx, env.Client, stored, nodeClaim)).To(Succeed())
-
-		retrieved := &v1alpha5.Machine{}
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(machine), retrieved)).To(Succeed())
 		Expect(retrieved.Status.ProviderID).To(Equal(providerID))
 	})
 	It("should delete a NodeClaim with a delete call", func() {
@@ -475,20 +229,6 @@ var _ = Describe("NodeClaimUtils", func() {
 		Expect(nodeClaimList.Items).To(HaveLen(0))
 		Expect(errors.IsNotFound(env.Client.Get(ctx, client.ObjectKeyFromObject(nodeClaim), &v1beta1.NodeClaim{}))).To(BeTrue())
 	})
-	It("should delete a Machine with a delete call", func() {
-		machine := test.Machine()
-		ExpectApplied(ctx, env.Client, machine)
-
-		nodeClaim := nodeclaimutil.New(machine)
-
-		err := nodeclaimutil.Delete(ctx, env.Client, nodeClaim)
-		Expect(err).ToNot(HaveOccurred())
-
-		machineList := &v1alpha5.MachineList{}
-		Expect(env.Client.List(ctx, machineList)).To(Succeed())
-		Expect(machineList.Items).To(HaveLen(0))
-		Expect(errors.IsNotFound(env.Client.Get(ctx, client.ObjectKeyFromObject(machine), &v1alpha5.Machine{}))).To(BeTrue())
-	})
 	It("should update the owner for a Node to a NodeClaim", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			Spec: v1beta1.NodeClaimSpec{
@@ -507,20 +247,6 @@ var _ = Describe("NodeClaimUtils", func() {
 			Kind:               lo.Must(apiutil.GVKForObject(nodeClaim, scheme.Scheme)).String(),
 			Name:               nodeClaim.Name,
 			UID:                nodeClaim.UID,
-			BlockOwnerDeletion: lo.ToPtr(true),
-		}))
-	})
-	It("should update the owner for a Node to a Machine", func() {
-		machine := test.Machine()
-		node = test.Node(test.NodeOptions{ProviderID: machine.Status.ProviderID})
-		nodeClaim := nodeclaimutil.New(machine)
-		node = nodeclaimutil.UpdateNodeOwnerReferences(nodeClaim, node)
-
-		Expect(lo.Contains(node.OwnerReferences, metav1.OwnerReference{
-			APIVersion:         lo.Must(apiutil.GVKForObject(machine, scheme.Scheme)).GroupVersion().String(),
-			Kind:               lo.Must(apiutil.GVKForObject(machine, scheme.Scheme)).String(),
-			Name:               machine.Name,
-			UID:                machine.UID,
 			BlockOwnerDeletion: lo.ToPtr(true),
 		}))
 	})
@@ -561,24 +287,5 @@ var _ = Describe("NodeClaimUtils", func() {
 		owner, err := nodeclaimutil.Owner(ctx, env.Client, nodeClaim)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(owner.Name).To(Equal(nodePool.Name))
-	})
-	It("should retrieve the owner for a Machine", func() {
-		provisioner := test.Provisioner()
-		machine := test.Machine(v1alpha5.Machine{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, provisioner, machine)
-
-		ownerKey := nodeclaimutil.OwnerKey(machine)
-		Expect(ownerKey.Name).To(Equal(provisioner.Name))
-		Expect(ownerKey.IsProvisioner).To(BeTrue())
-
-		owner, err := nodeclaimutil.Owner(ctx, env.Client, machine)
-		Expect(err).ToNot(HaveOccurred())
-		Expect(owner.Name).To(Equal(provisioner.Name))
 	})
 })
