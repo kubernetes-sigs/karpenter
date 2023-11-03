@@ -104,7 +104,7 @@ func (s *ProvisionerSpec) validateTTLSecondsAfterEmpty() (errs *apis.FieldError)
 }
 
 // Validate the constraints
-func (s *ProvisionerSpec) Validate(ctx context.Context) (errs *apis.FieldError) {
+func (s *ProvisionerSpec) Validate(_ context.Context) (errs *apis.FieldError) {
 	return errs.Also(
 		s.validateProvider(),
 		s.validateLabels(),
