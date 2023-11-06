@@ -37,7 +37,7 @@ type Drift struct {
 	cloudProvider cloudprovider.CloudProvider
 }
 
-func (d *Drift) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner, node *v1.Node) (reconcile.Result, error) {
+func (d *Drift) Reconcile(ctx context.Context, _ *v1alpha5.Provisioner, node *v1.Node) (reconcile.Result, error) {
 	// If the node is marked as voluntarily disrupted by another controller, do nothing.
 	val, hasAnnotation := node.Annotations[v1alpha5.VoluntaryDisruptionAnnotationKey]
 	if hasAnnotation && val != v1alpha5.VoluntaryDisruptionDriftedAnnotationValue {
