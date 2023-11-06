@@ -340,7 +340,9 @@ func (c *Controller) requireNoScheduleTaint(ctx context.Context, addTaint bool, 
 		_, hasTaint := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
 			return v1beta1.IsDisruptingTaint(taint)
 		})
-		// node is being deleted, so no need to remove taint as the node will be gone soon
+		// Node is being deleted, so no need to remove taint as the node will be gone soon
+		// This ensures that the disruption controller doesn't modify taints that the Termination
+		// controller is also modifying
 		if hasTaint && !node.DeletionTimestamp.IsZero() {
 			continue
 		}
