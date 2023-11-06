@@ -327,6 +327,8 @@ func (c *Controller) waitForDeletion(ctx context.Context, nodeClaim *v1beta1.Nod
 func (c *Controller) requireNoScheduleTaint(ctx context.Context, addTaint bool, nodes ...*state.StateNode) error {
 	var multiErr error
 	for _, n := range nodes {
+		// If the StateNode is Karpenter owned and only has a nodeclaim, or is not owned by
+		// Karpenter, thus having no nodeclaim, don't touch the node.
 		if n.Node == nil || n.NodeClaim == nil {
 			continue
 		}
@@ -350,6 +352,10 @@ func (c *Controller) requireNoScheduleTaint(ctx context.Context, addTaint bool, 
 			})
 			// otherwise, add it.
 		} else if addTaint && !hasTaint {
+			// If the taint key is present (but with a different value or effect), remove it.
+			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t v1.Taint, _ int) bool {
+				return t.Key == v1beta1.DisruptionTaintKey
+			})
 			node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
 		}
 		if !equality.Semantic.DeepEqual(stored, node) {
