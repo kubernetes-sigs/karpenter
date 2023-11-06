@@ -45,13 +45,14 @@ func NewTerminator(clk clock.Clock, kubeClient client.Client, eq *Queue) *Termin
 	}
 }
 
-// Taint adds the karpenter.sh/disruption taint to a node with a NodeClaim
+// Taint idempotently adds the karpenter.sh/disruption taint to a node with a NodeClaim
 func (t *Terminator) Taint(ctx context.Context, node *v1.Node) error {
 	stored := node.DeepCopy()
-	node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t v1.Taint, _ int) bool {
+	if _, ok := lo.Find(node.Spec.Taints, func(t v1.Taint) bool {
 		return v1beta1.IsDisruptingTaint(t)
-	})
-	node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
+	}); !ok {
+		node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
+	}
 	// Adding this label to the node ensures that the node is removed from the load-balancer target group
 	// while it is draining and before it is terminated. This prevents 500s coming prior to health check
 	// when the load balancer controller hasn't yet determined that the node and underlying connections are gone
