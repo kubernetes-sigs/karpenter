@@ -18,6 +18,7 @@ jobs:
     - name: Enable the actionlint matcher
       run: echo "::add-matcher::.github/actionlint-matcher.json"
     - run: K8S_VERSION=${{ matrix.k8sVersion }} make presubmit
-    - uses: shogo82148/actions-goveralls@v1
-      with:
-        path-to-profile: coverage.out
+    - name: Send coverage
+      env:
+        COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: goveralls -coverprofile=coverage.out -service=github
