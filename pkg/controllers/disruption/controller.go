@@ -327,7 +327,7 @@ func (c *Controller) waitForDeletion(ctx context.Context, nodeClaim *v1beta1.Nod
 func (c *Controller) requireNoScheduleTaint(ctx context.Context, addTaint bool, nodes ...*state.StateNode) error {
 	var multiErr error
 	for _, n := range nodes {
-		if n.Node == nil || n.NodeClaim != nil {
+		if n.Node == nil || n.NodeClaim == nil {
 			continue
 		}
 		node := &v1.Node{}
