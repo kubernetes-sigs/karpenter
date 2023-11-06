@@ -338,7 +338,7 @@ func (c *Controller) requireNoScheduleTaint(ctx context.Context, addTaint bool, 
 		}
 		// If the node already has the taint, continue to the next
 		_, hasTaint := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
-			return taint.Key == v1beta1.DisruptionTaintKey
+			return v1beta1.IsDisruptingTaint(taint)
 		})
 		// node is being deleted, so no need to remove taint as the node will be gone soon
 		if hasTaint && !node.DeletionTimestamp.IsZero() {
@@ -348,7 +348,7 @@ func (c *Controller) requireNoScheduleTaint(ctx context.Context, addTaint bool, 
 		// If the taint is present and we want to remove the taint, remove it.
 		if !addTaint {
 			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint v1.Taint, _ int) bool {
-				return v1beta1.IsDisruptingTaint(taint)
+				return taint.Key == v1beta1.DisruptionTaintKey
 			})
 			// otherwise, add it.
 		} else if addTaint && !hasTaint {
