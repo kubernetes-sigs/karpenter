@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -26,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	nodeutil "github.com/aws/karpenter-core/pkg/utils/node"
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
@@ -81,7 +83,9 @@ func (i *Initialization) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeC
 	}
 	logging.FromContext(ctx).Infof("initialized %s", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"))
 	nodeClaim.StatusConditions().MarkTrue(v1beta1.Initialized)
-	nodeclaimutil.InitializedCounter(nodeClaim).Inc()
+	metrics.NodeClaimsInitializedCounter.With(prometheus.Labels{
+		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+	}).Inc()
 	return reconcile.Result{}, nil
 }
 

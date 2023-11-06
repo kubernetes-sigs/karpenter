@@ -83,7 +83,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	stored := nodeClaim.DeepCopy()
 	controllerutil.AddFinalizer(nodeClaim, v1beta1.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(nodeClaim, stored) {
-		if err := nodeclaimutil.Patch(ctx, c.kubeClient, stored, nodeClaim); err != nil {
+		if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 	}
@@ -103,10 +103,10 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	}
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
 		statusCopy := nodeClaim.DeepCopy()
-		if err := nodeclaimutil.Patch(ctx, c.kubeClient, stored, nodeClaim); err != nil {
+		if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(multierr.Append(errs, err))
 		}
-		if err := nodeclaimutil.PatchStatus(ctx, c.kubeClient, stored, statusCopy); err != nil {
+		if err := c.kubeClient.Status().Patch(ctx, statusCopy, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(multierr.Append(errs, err))
 		}
 		// We sleep here after a patch operation since we want to ensure that we are able to read our own writes

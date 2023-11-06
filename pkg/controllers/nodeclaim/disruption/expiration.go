@@ -25,6 +25,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
@@ -81,7 +83,10 @@ func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, 
 	})
 	if !hasExpiredCondition {
 		logging.FromContext(ctx).Debugf("marking expired")
-		nodeclaimutil.DisruptedCounter(nodeClaim, metrics.ExpirationReason).Inc()
+		metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
+			metrics.TypeLabel:     metrics.ExpirationReason,
+			metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+		}).Inc()
 	}
 	return reconcile.Result{}, nil
 }

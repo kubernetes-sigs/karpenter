@@ -27,7 +27,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
@@ -160,7 +159,7 @@ var _ = Describe("NodeClaimUtils", func() {
 
 		providerID := test.RandomProviderID()
 		nodeClaim.Status.ProviderID = providerID
-		Expect(nodeclaimutil.UpdateStatus(ctx, env.Client, nodeClaim)).To(Succeed())
+		Expect(env.Client.Status().Update(ctx, nodeClaim)).To(Succeed())
 
 		retrieved := &v1beta1.NodeClaim{}
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodeClaim), retrieved)).To(Succeed())
@@ -182,7 +181,7 @@ var _ = Describe("NodeClaimUtils", func() {
 		nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
 			"custom-key": "custom-value",
 		})
-		Expect(nodeclaimutil.Patch(ctx, env.Client, stored, nodeClaim)).To(Succeed())
+		Expect(env.Client.Patch(ctx, nodeClaim, client.MergeFrom(stored))).To(Succeed())
 
 		retrieved := &v1beta1.NodeClaim{}
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodeClaim), retrieved)).To(Succeed())
@@ -203,7 +202,7 @@ var _ = Describe("NodeClaimUtils", func() {
 		stored := nodeClaim.DeepCopy()
 		providerID := test.RandomProviderID()
 		nodeClaim.Status.ProviderID = providerID
-		Expect(nodeclaimutil.PatchStatus(ctx, env.Client, stored, nodeClaim)).To(Succeed())
+		Expect(env.Client.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored))).To(Succeed())
 
 		retrieved := &v1beta1.NodeClaim{}
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodeClaim), retrieved)).To(Succeed())
@@ -221,34 +220,13 @@ var _ = Describe("NodeClaimUtils", func() {
 		})
 		ExpectApplied(ctx, env.Client, nodeClaim)
 
-		err := nodeclaimutil.Delete(ctx, env.Client, nodeClaim)
+		err := env.Client.Delete(ctx, nodeClaim)
 		Expect(err).ToNot(HaveOccurred())
 
 		nodeClaimList := &v1beta1.NodeClaimList{}
 		Expect(env.Client.List(ctx, nodeClaimList)).To(Succeed())
 		Expect(nodeClaimList.Items).To(HaveLen(0))
 		Expect(errors.IsNotFound(env.Client.Get(ctx, client.ObjectKeyFromObject(nodeClaim), &v1beta1.NodeClaim{}))).To(BeTrue())
-	})
-	It("should update the owner for a Node to a NodeClaim", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-			Spec: v1beta1.NodeClaimSpec{
-				NodeClassRef: &v1beta1.NodeClassReference{
-					Kind:       "NodeClassRef",
-					APIVersion: "test.cloudprovider/v1",
-					Name:       "default",
-				},
-			},
-		})
-		node = test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
-		node = nodeclaimutil.UpdateNodeOwnerReferences(nodeClaim, node)
-
-		Expect(lo.Contains(node.OwnerReferences, metav1.OwnerReference{
-			APIVersion:         lo.Must(apiutil.GVKForObject(nodeClaim, scheme.Scheme)).GroupVersion().String(),
-			Kind:               lo.Must(apiutil.GVKForObject(nodeClaim, scheme.Scheme)).String(),
-			Name:               nodeClaim.Name,
-			UID:                nodeClaim.UID,
-			BlockOwnerDeletion: lo.ToPtr(true),
-		}))
 	})
 	It("should retrieve the owner for a NodeClaim", func() {
 		nodePool := test.NodePool(v1beta1.NodePool{

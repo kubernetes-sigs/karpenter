@@ -87,7 +87,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 		results = append(results, res)
 	}
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
-		if err = nodeclaimutil.UpdateStatus(ctx, c.kubeClient, nodeClaim); err != nil {
+		if err = c.kubeClient.Status().Update(ctx, nodeClaim); err != nil {
 			if errors.IsConflict(err) {
 				return reconcile.Result{Requeue: true}, nil
 			}

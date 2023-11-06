@@ -23,8 +23,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
+	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
 type Liveness struct {
@@ -49,11 +51,14 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) 
 		return reconcile.Result{RequeueAfter: registrationTTL - l.clock.Since(registered.LastTransitionTime.Inner.Time)}, nil
 	}
 	// Delete the NodeClaim if we believe the NodeClaim won't register since we haven't seen the node
-	if err := nodeclaimutil.Delete(ctx, l.kubeClient, nodeClaim); err != nil {
+	if err := l.kubeClient.Delete(ctx, nodeClaim); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	logging.FromContext(ctx).With("ttl", registrationTTL).Debugf("terminating due to registration ttl")
-	nodeclaimutil.TerminatedCounter(nodeClaim, "liveness").Inc()
+	metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
+		metrics.ReasonLabel:   "liveness",
+		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+	}).Inc()
 
 	return reconcile.Result{}, nil
 }

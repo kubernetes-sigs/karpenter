@@ -22,7 +22,9 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/logging"
+	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -70,7 +72,9 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeCla
 	nodeClaim.StatusConditions().MarkTrue(v1beta1.Registered)
 	nodeClaim.Status.NodeName = node.Name
 
-	nodeclaimutil.RegisteredCounter(nodeClaim).Inc()
+	metrics.NodeClaimsRegisteredCounter.With(prometheus.Labels{
+		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+	}).Inc()
 	// If the NodeClaim is linked, then the node already existed, so we don't mark it as created
 	if _, ok := nodeClaim.Annotations[v1alpha5.MachineLinkedAnnotationKey]; !ok {
 		metrics.NodesCreatedCounter.With(prometheus.Labels{
@@ -85,7 +89,13 @@ func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1beta1.NodeClai
 	stored := node.DeepCopy()
 	controllerutil.AddFinalizer(node, v1beta1.TerminationFinalizer)
 
-	node = nodeclaimutil.UpdateNodeOwnerReferences(nodeClaim, node)
+	node.OwnerReferences = append(node.OwnerReferences, metav1.OwnerReference{
+		APIVersion:         v1beta1.SchemeGroupVersion.String(),
+		Kind:               "NodeClaim",
+		Name:               nodeClaim.Name,
+		UID:                nodeClaim.UID,
+		BlockOwnerDeletion: ptr.Bool(true),
+	})
 	// If the NodeClaim isn't registered as linked, then sync it
 	// This prevents us from messing with nodes that already exist and are scheduled
 	if _, ok := nodeClaim.Annotations[v1alpha5.MachineLinkedAnnotationKey]; !ok {

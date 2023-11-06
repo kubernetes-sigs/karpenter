@@ -18,6 +18,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	"github.com/aws/karpenter-core/pkg/metrics"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
@@ -76,7 +78,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 
 	errs := make([]error, len(nodeClaims))
 	workqueue.ParallelizeUntil(ctx, 20, len(nodeClaims), func(i int) {
-		if err := nodeclaimutil.Delete(ctx, c.kubeClient, nodeClaims[i]); err != nil {
+		if err := c.kubeClient.Delete(ctx, nodeClaims[i]); err != nil {
 			errs[i] = client.IgnoreNotFound(err)
 			return
 		}
@@ -87,7 +89,10 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 				lo.Ternary(nodeClaims[i].IsMachine, "provisioner", "nodepool"), nodeclaimutil.OwnerKey(nodeClaims[i]).Name,
 			).
 			Debugf("garbage collecting %s with no cloudprovider representation", lo.Ternary(nodeClaims[i].IsMachine, "machine", "nodeclaim"))
-		nodeclaimutil.TerminatedCounter(nodeClaims[i], "garbage_collected").Inc()
+		metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
+			metrics.ReasonLabel:   "garbage_collected",
+			metrics.NodePoolLabel: nodeClaims[i].Labels[v1beta1.NodePoolLabelKey],
+		}).Inc()
 	})
 	if err = multierr.Combine(errs...); err != nil {
 		return reconcile.Result{}, err

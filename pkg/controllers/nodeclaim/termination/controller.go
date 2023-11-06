@@ -92,7 +92,7 @@ func (c *Controller) Finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 	}
 	controllerutil.RemoveFinalizer(nodeClaim, v1beta1.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
-		if err = nodeclaimutil.Patch(ctx, c.kubeClient, stored, nodeClaim); err != nil {
+		if err = c.kubeClient.Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("removing termination finalizer, %w", err))
 		}
 		logging.FromContext(ctx).Infof("deleted %s", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"))

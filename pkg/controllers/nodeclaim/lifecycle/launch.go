@@ -19,6 +19,7 @@ import (
 	"fmt"
 
 	"github.com/patrickmn/go-cache"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"knative.dev/pkg/logging"
@@ -29,8 +30,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/events"
+	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
 
 type Launch struct {
@@ -72,7 +73,9 @@ func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (r
 	l.cache.SetDefault(string(nodeClaim.UID), created)
 	nodeClaim = PopulateNodeClaimDetails(nodeClaim, created)
 	nodeClaim.StatusConditions().MarkTrue(v1beta1.Launched)
-	nodeclaimutil.LaunchedCounter(nodeClaim).Inc()
+	metrics.NodeClaimsLaunchedCounter.With(prometheus.Labels{
+		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+	}).Inc()
 
 	return reconcile.Result{}, nil
 }
@@ -85,11 +88,14 @@ func (l *Launch) linkNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 			nodeClaim.StatusConditions().MarkFalse(v1beta1.Launched, "LinkFailed", truncateMessage(err.Error()))
 			return nil, fmt.Errorf("linking, %w", err)
 		}
-		if err = nodeclaimutil.Delete(ctx, l.kubeClient, nodeClaim); err != nil {
+		if err = l.kubeClient.Delete(ctx, nodeClaim); err != nil {
 			return nil, client.IgnoreNotFound(err)
 		}
 		logging.FromContext(ctx).Debugf("garbage collected with no cloudprovider representation")
-		nodeclaimutil.TerminatedCounter(nodeClaim, "garbage_collected").Inc()
+		metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
+			metrics.ReasonLabel:   "garbage_collected",
+			metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+		})
 		return nil, nil
 	}
 	logging.FromContext(ctx).With(
@@ -108,10 +114,13 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeCla
 		case cloudprovider.IsInsufficientCapacityError(err):
 			l.recorder.Publish(InsufficientCapacityErrorEvent(nodeClaim, err))
 			logging.FromContext(ctx).Error(err)
-			if err = nodeclaimutil.Delete(ctx, l.kubeClient, nodeClaim); err != nil {
+			if err = l.kubeClient.Delete(ctx, nodeClaim); err != nil {
 				return nil, client.IgnoreNotFound(err)
 			}
-			nodeclaimutil.TerminatedCounter(nodeClaim, "insufficient_capacity").Inc()
+			metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
+				metrics.ReasonLabel:   "insufficient_capacity",
+				metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+			})
 			return nil, nil
 		case cloudprovider.IsNodeClassNotReadyError(err):
 			l.recorder.Publish(NodeClassNotReadyEvent(nodeClaim, err))

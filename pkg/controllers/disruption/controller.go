@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/avast/retry-go"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
@@ -203,13 +204,16 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 	for _, candidate := range cmd.candidates {
 		c.recorder.Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, reason)...)
 
-		if err := nodeclaimutil.Delete(ctx, c.kubeClient, candidate.NodeClaim); err != nil {
+		if err := c.kubeClient.Delete(ctx, candidate.NodeClaim); err != nil {
 			if !errors.IsNotFound(err) {
 				logging.FromContext(ctx).Errorf("terminating, %s", err)
 			}
 			continue
 		}
-		nodeclaimutil.TerminatedCounter(candidate.NodeClaim, reason).Inc()
+		metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
+			metrics.ReasonLabel:   reason,
+			metrics.NodePoolLabel: candidate.NodeClaim.Labels[v1beta1.NodePoolLabelKey],
+		}).Inc()
 	}
 
 	// We wait for NodeClaims to delete to ensure we don't start another round of disruption
