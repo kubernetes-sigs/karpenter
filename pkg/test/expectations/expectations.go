@@ -535,6 +535,34 @@ func ExpectNodeClaims(ctx context.Context, c client.Client) []*v1beta1.NodeClaim
 	return lo.ToSlicePtr(nodeClaims.Items)
 }
 
+func ExpectStateNodeExists(cluster *state.Cluster, node *v1.Node) *state.StateNode {
+	GinkgoHelper()
+	var ret *state.StateNode
+	cluster.ForEachNode(func(n *state.StateNode) bool {
+		if n.Node.Name != node.Name {
+			return true
+		}
+		ret = n.DeepCopy()
+		return false
+	})
+	Expect(ret).ToNot(BeNil())
+	return ret
+}
+
+func ExpectStateNodeExistsForNodeClaim(cluster *state.Cluster, nodeClaim *v1beta1.NodeClaim) *state.StateNode {
+	GinkgoHelper()
+	var ret *state.StateNode
+	cluster.ForEachNode(func(n *state.StateNode) bool {
+		if n.NodeClaim.Status.ProviderID != nodeClaim.Status.ProviderID {
+			return true
+		}
+		ret = n.DeepCopy()
+		return false
+	})
+	Expect(ret).ToNot(BeNil())
+	return ret
+}
+
 func ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx context.Context, c client.Client, nodeStateController, nodeClaimStateController controller.Controller, nodes []*v1.Node, nodeClaims []*v1beta1.NodeClaim) {
 	GinkgoHelper()
 
