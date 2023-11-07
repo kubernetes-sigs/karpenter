@@ -21,6 +21,7 @@ Conceptually, this approach is straightforward to explain to customers and direc
 * 👍 Flexibility threshold is tunable, as best practices evolve. Cloud providers could choose to set it to 1 to disable this behavior.
 * 👎 Limits potential flexibility from status quo for both instance launch and replacement. Today, Karpenter can send unbounded flexibility to PCO (e.g. 100s of instance types). 
 * 👎 Fails to take advantage of opportunities to migrate to healthier pools due to limited instance type flexibility.
+* 👎 Fails to take advantage of opportunities to migrate to lower price pools due to limited instance type flexibility.
 
 ### 2. Price Improvement Factor
 
