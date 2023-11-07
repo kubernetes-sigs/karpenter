@@ -29,7 +29,6 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning/orchestration"
-	disruptionevents "github.com/aws/karpenter-core/pkg/controllers/disruption/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
@@ -45,7 +44,7 @@ type Controller struct {
 	recorder       events.Recorder
 	clock          clock.Clock
 	cloudProvider  cloudprovider.CloudProvider
-	deprovisioners []Deprovisioner
+	methods        []Method
 	mu             sync.Mutex
 	lastRun        map[string]time.Time
 }
@@ -109,16 +108,8 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	// Karpenter taints nodes with a karpenter.sh/disruption taint as part of the disruption process
 	// while it progresses in memory. If Karpenter restarts during a disruption action, some nodes can be left tainted.
 	// Idempotently remove this taint from candidates before continuing.
-<<<<<<< HEAD:pkg/controllers/disruption/controller.go
-	if err := c.requireNoScheduleTaint(ctx, false, c.cluster.Nodes()...); err != nil {
+	if err := c.Queue.RequireNoScheduleTaint(ctx, false, c.cluster.Nodes()...); err != nil {
 		return reconcile.Result{}, fmt.Errorf("removing taint from nodes, %w", err)
-=======
-	nodeClaimStateNodes := lo.Filter(c.cluster.Nodes(), func(s *state.StateNode, _ int) bool {
-		return s.NodeClaim != nil && !s.NodeClaim.IsMachine && c.Queue.CanAdd(s.ProviderID()) != nil
-	})
-	if err := c.Queue.RequireNoScheduleTaint(ctx, false, nodeClaimStateNodes...); err != nil {
-		return reconcile.Result{}, fmt.Errorf("removing disruption taint from nodes, %w", err)
->>>>>>> bb1060a2 (rebase):pkg/controllers/deprovisioning/controller.go
 	}
 
 	// Attempt different disruption methods. We'll only let one method perform an action
@@ -182,10 +173,11 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 	stateNodes := lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode {
 		return c.StateNode
 	})
+	reason := fmt.Sprintf("%s/%s", m.Type(), cmd.Action())
 	if err := c.Queue.Add(ctx, stateNodes, cmd.replacements, reason); err != nil {
 		return fmt.Errorf("adding command to queue, %w", err)
 	}
-	logging.FromContext(ctx).Infof("deprovisioning via %s %s", d, cmd)
+	logging.FromContext(ctx).Infof("deprovisioning via %s %s", m.Type(), cmd)
 	return nil
 }
 
