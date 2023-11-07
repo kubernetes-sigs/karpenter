@@ -50,7 +50,7 @@ Karpenter could optimistically launch new EC2 instances to probe PCO decision ma
 * 👎 May not make sense for all cloud providers
 * 👎 May consolidate to make marginal improvements, resulting in unnecessary disruption
 * 👎 Optimistic launches may confuse customers looking deeply at their bill or audit logs
-* 👎 Bugs with this mechanism are higher risk, since real instances are being launched.
+* 👎 Bugs with this mechanism are higher risk, and could impact cost/quotas, since real instances are being launched.
 
 ### 4. Minimum Node Lifetime
 
