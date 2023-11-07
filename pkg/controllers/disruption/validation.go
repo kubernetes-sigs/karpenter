@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package deprovisioning
+package disruption
 
 import (
 	"context"
@@ -27,6 +27,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	"github.com/aws/karpenter-core/pkg/controllers/disruption/orchestration"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
@@ -45,9 +46,11 @@ type Validation struct {
 	provisioner      *provisioning.Provisioner
 	once             sync.Once
 	recorder         events.Recorder
+	queue            *orchestration.Queue
 }
 
-func NewValidation(validationPeriod time.Duration, clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder) *Validation {
+func NewValidation(validationPeriod time.Duration, clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
+	cp cloudprovider.CloudProvider, recorder events.Recorder, queue *orchestration.Queue) *Validation {
 	return &Validation{
 		validationPeriod: validationPeriod,
 		clock:            clk,
@@ -56,6 +59,7 @@ func NewValidation(validationPeriod time.Duration, clk clock.Clock, cluster *sta
 		provisioner:      provisioner,
 		cloudProvider:    cp,
 		recorder:         recorder,
+		queue:            queue,
 	}
 }
 

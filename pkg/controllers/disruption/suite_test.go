@@ -41,6 +41,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/disruption"
+	"github.com/aws/karpenter-core/pkg/controllers/disruption/orchestration"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
@@ -62,6 +63,7 @@ var nodeStateController controller.Controller
 var nodeClaimStateController controller.Controller
 var fakeClock *clock.FakeClock
 var recorder *test.EventRecorder
+var queue *orchestration.Queue
 
 var onDemandInstances []*cloudprovider.InstanceType
 var leastExpensiveInstance, mostExpensiveInstance *cloudprovider.InstanceType
@@ -83,7 +85,8 @@ var _ = BeforeSuite(func() {
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, env.KubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
-	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster)
+	queue = orchestration.NewQueue(env.Client, recorder, cluster, fakeClock, prov)
+	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue)
 })
 
 var _ = AfterSuite(func() {

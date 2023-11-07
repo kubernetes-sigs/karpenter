@@ -23,14 +23,15 @@ import (
 	. "github.com/onsi/gomega"
 	. "knative.dev/pkg/logging/testing"
 
+	disruptionevents "github.com/aws/karpenter-core/pkg/controllers/disruption/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/aws/karpenter-core/pkg/apis"
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
-	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
-	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning/orchestration"
+	"github.com/aws/karpenter-core/pkg/controllers/disruption/orchestration"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
@@ -62,7 +63,7 @@ var ncKey nodeclaim.Key
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Deprovisioning/Orchestration")
+	RunSpecs(t, "Disruption/Orchestration")
 }
 
 var _ = BeforeSuite(func() {
@@ -156,7 +157,7 @@ var _ = Describe("Queue", func() {
 
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(cmd.ReplacementKeys[0].Initialized).To(BeFalse())
-			Expect(recorder.DetectedEvent(deprovisioningevents.WaitingOnReadiness(stateNode.NodeClaim).Message)).To(BeTrue())
+			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(stateNode.NodeClaim).Message)).To(BeTrue())
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{replacementNode}, []*v1beta1.NodeClaim{replacementNodeClaim})
 
@@ -188,7 +189,7 @@ var _ = Describe("Queue", func() {
 
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(cmd.ReplacementKeys[0].Initialized).To(BeFalse())
-			Expect(recorder.DetectedEvent(deprovisioningevents.WaitingOnReadiness(stateNode.NodeClaim).Message)).To(BeTrue())
+			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(stateNode.NodeClaim).Message)).To(BeTrue())
 			Expect(cmd.ReplacementKeys[1].Initialized).To(BeFalse())
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{replacementNode}, []*v1beta1.NodeClaim{replacementNodeClaim})
@@ -196,7 +197,7 @@ var _ = Describe("Queue", func() {
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(cmd.ReplacementKeys[0].Initialized).To(BeTrue())
 			Expect(cmd.ReplacementKeys[1].Initialized).To(BeFalse())
-			Expect(recorder.DetectedEvent(deprovisioningevents.WaitingOnReadiness(stateNode.NodeClaim).Message)).To(BeTrue())
+			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(stateNode.NodeClaim).Message)).To(BeTrue())
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{replacementNode2}, []*v1beta1.NodeClaim{replacementnodeClaim2})
 
@@ -233,8 +234,8 @@ var _ = Describe("Queue", func() {
 			ExpectApplied(ctx, env.Client, replacementNodeClaim, replacementNode)
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(cmd.ReplacementKeys[0].Initialized).To(BeFalse())
-			Expect(recorder.DetectedEvent(deprovisioningevents.Launching(stateNode.NodeClaim, "consolidation-test").Message)).To(BeTrue())
-			Expect(recorder.DetectedEvent(deprovisioningevents.WaitingOnReadiness(stateNode.NodeClaim).Message)).To(BeTrue())
+			Expect(recorder.DetectedEvent(disruptionevents.Launching(stateNode.NodeClaim, "consolidation-test").Message)).To(BeTrue())
+			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(stateNode.NodeClaim).Message)).To(BeTrue())
 		})
 		It("should emit termination events", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, replacementNodeClaim, replacementNode, nodePool)
@@ -244,7 +245,7 @@ var _ = Describe("Queue", func() {
 			addCommandToQueue(cmd, queue)
 
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
-			terminatingEvents := deprovisioningevents.Terminating(stateNode.Node, stateNode.NodeClaim, "consolidation-test")
+			terminatingEvents := disruptionevents.Terminating(stateNode.Node, stateNode.NodeClaim, "consolidation-test")
 			Expect(recorder.DetectedEvent(terminatingEvents[0].Message)).To(BeTrue())
 			Expect(recorder.DetectedEvent(terminatingEvents[1].Message)).To(BeTrue())
 

@@ -24,7 +24,7 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning/orchestration"
+	"github.com/aws/karpenter-core/pkg/controllers/disruption/orchestration"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
@@ -78,7 +78,7 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 		return Command{}, errors.New("interrupted")
 	case <-c.clock.After(consolidationTTL):
 	}
-	validationCandidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, c.ShouldDeprovision, c.queue)
+	validationCandidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, c.ShouldDisrupt, c.queue)
 	if err != nil {
 		logging.FromContext(ctx).Errorf("computing validation candidates %s", err)
 		return Command{}, err

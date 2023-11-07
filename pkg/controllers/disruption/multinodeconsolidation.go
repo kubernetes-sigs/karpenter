@@ -26,7 +26,7 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning/orchestration"
+	"github.com/aws/karpenter-core/pkg/controllers/disruption/orchestration"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
@@ -42,9 +42,8 @@ type MultiNodeConsolidation struct {
 	consolidation
 }
 
-func NewMultiNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client,
-	provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder,
-	queue *orchestration.Queue) *MultiNodeConsolidation {
+func NewMultiNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
+	cp cloudprovider.CloudProvider, recorder events.Recorder, queue *orchestration.Queue) *MultiNodeConsolidation {
 	return &MultiNodeConsolidation{makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)}
 }
 

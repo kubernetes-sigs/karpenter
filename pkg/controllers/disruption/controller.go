@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/controllers/deprovisioning/orchestration"
+	"github.com/aws/karpenter-core/pkg/controllers/disruption/orchestration"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
@@ -133,7 +133,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		methodLabel:            disruption.Type(),
 		consolidationTypeLabel: disruption.ConsolidationType(),
 	}))()
-	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt)
+	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, c.Queue)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}
@@ -177,7 +177,7 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 	if err := c.Queue.Add(ctx, stateNodes, cmd.replacements, reason); err != nil {
 		return fmt.Errorf("adding command to queue, %w", err)
 	}
-	logging.FromContext(ctx).Infof("deprovisioning via %s %s", m.Type(), cmd)
+	logging.FromContext(ctx).Infof("disrupting via %s %s", m.Type(), cmd)
 	return nil
 }
 

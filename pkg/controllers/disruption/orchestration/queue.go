@@ -36,7 +36,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	deprovisioningevents "github.com/aws/karpenter-core/pkg/controllers/deprovisioning/events"
+	disruptionevents "github.com/aws/karpenter-core/pkg/controllers/disruption/events"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/utils/nodeclaim"
@@ -247,10 +247,10 @@ func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) error {
 		}
 		// We emitted this event when Deprovisioning was blocked on launching/termination.
 		// This does not block other forms of deprovisioning, but we should still emit this.
-		q.recorder.Publish(deprovisioningevents.Launching(nodeClaim, cmd.Reason))
+		q.recorder.Publish(disruptionevents.Launching(nodeClaim, cmd.Reason))
 		initializedStatus := nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized)
 		if !initializedStatus.IsTrue() {
-			q.recorder.Publish(deprovisioningevents.WaitingOnReadiness(nodeClaim))
+			q.recorder.Publish(disruptionevents.WaitingOnReadiness(nodeClaim))
 			waitErrs[i] = fmt.Errorf("node claim not initialized")
 			continue
 		}
@@ -270,7 +270,7 @@ func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) error {
 	var multiErr error
 	for i := range cmd.Candidates {
 		candidate := cmd.Candidates[i]
-		q.recorder.Publish(deprovisioningevents.Terminating(candidate.Node, candidate.NodeClaim, cmd.Reason)...)
+		q.recorder.Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, cmd.Reason)...)
 		if err := nodeclaim.Delete(ctx, q.kubeClient, candidate.NodeClaim); err != nil {
 			if !apierrors.IsNotFound(err) {
 				multiErr = multierr.Append(multiErr, err)
