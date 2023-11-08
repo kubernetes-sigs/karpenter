@@ -102,13 +102,13 @@ type Queue struct {
 func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clock.Clock,
 	provisioner *provisioning.Provisioner) *Queue {
 	queue := &Queue{
-		RateLimitingInterface:        workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(queueBaseDelay, queueMaxDelay)),
-		ProviderIDToCommand: map[string]*Command{},
-		kubeClient:                   kubeClient,
-		recorder:                     recorder,
-		cluster:                      cluster,
-		clock:                        clock,
-		provisioner:                  provisioner,
+		RateLimitingInterface: workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(queueBaseDelay, queueMaxDelay)),
+		ProviderIDToCommand:   map[string]*Command{},
+		kubeClient:            kubeClient,
+		recorder:              recorder,
+		cluster:               cluster,
+		clock:                 clock,
+		provisioner:           provisioner,
 	}
 	return queue
 }
