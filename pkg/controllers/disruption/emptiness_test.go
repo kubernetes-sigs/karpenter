@@ -29,6 +29,7 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/test"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
@@ -87,6 +88,38 @@ var _ = Describe("Emptiness", func() {
 		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
 		ExpectNotFound(ctx, env.Client, nodeClaim, node)
+	})
+	It("should update metrics for empty nodes", func() {
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+		fakeClock.Step(10 * time.Minute)
+		wg := sync.WaitGroup{}
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		wg.Wait()
+
+		// Cascade any deletion of the nodeClaim to the node
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+		// we should delete the empty node
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+		ExpectNotFound(ctx, env.Client, nodeClaim, node)
+
+		m, found := FindMetricWithLabelValues("karpenter_deprovisioning_eligible_machines", map[string]string{
+			"deprovisioner": metrics.EmptinessReason,
+		})
+		Expect(found).To(BeTrue())
+		Expect(m.GetGauge().GetValue()).To(BeNumerically("~", 1))
+		m, found = FindMetricWithLabelValues("karpenter_disruption_eligible_nodes", map[string]string{
+			"method":             metrics.EmptinessReason,
+			"consolidation_type": "",
+		})
+		Expect(found).To(BeTrue())
+		Expect(m.GetGauge().GetValue()).To(BeNumerically("~", 1))
 	})
 	It("should ignore nodes without the empty status condition", func() {
 		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.Empty)

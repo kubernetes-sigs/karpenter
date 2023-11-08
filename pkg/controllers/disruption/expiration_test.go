@@ -33,6 +33,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
+	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/test"
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 )
@@ -236,6 +237,37 @@ var _ = Describe("Expiration", func() {
 		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
 		ExpectNotFound(ctx, env.Client, nodeClaim, node)
+	})
+	It("should update metrics for expired nodes", func() {
+		ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		wg.Wait()
+
+		// Cascade any deletion of the nodeClaim to the node
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+		// Expect that the expired nodeClaim is gone
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+		ExpectNotFound(ctx, env.Client, nodeClaim, node)
+
+		m, found := FindMetricWithLabelValues("karpenter_deprovisioning_eligible_machines", map[string]string{
+			"deprovisioner": metrics.ExpirationReason,
+		})
+		Expect(found).To(BeTrue())
+		Expect(m.GetGauge().GetValue()).To(BeNumerically("~", 1))
+		m, found = FindMetricWithLabelValues("karpenter_disruption_eligible_nodes", map[string]string{
+			"method":             metrics.ExpirationReason,
+			"consolidation_type": "",
+		})
+		Expect(found).To(BeTrue())
+		Expect(m.GetGauge().GetValue()).To(BeNumerically("~", 1))
 	})
 	It("should disrupt all empty expired nodes in parallel", func() {
 		nodeClaims, nodes := test.NodeClaimsAndNodes(100, v1beta1.NodeClaim{

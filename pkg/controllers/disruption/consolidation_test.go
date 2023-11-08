@@ -26,6 +26,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -3588,6 +3589,243 @@ var _ = Describe("Consolidation", func() {
 			result, err := disruptionController.Reconcile(ctx, reconcile.Request{})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+		})
+	})
+	Context("Metrics", func() {
+		var nodeClaims []*v1beta1.NodeClaim
+		var nodes []*v1.Node
+		var rs *appsv1.ReplicaSet
+		var numNodes int
+		var labels map[string]string
+
+		BeforeEach(func() {
+			numNodes = 25
+			labels = map[string]string{
+				"app": "test",
+			}
+			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey:     nodePool.Name,
+						v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
+						v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:         leastExpensiveOffering.Zone,
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				}},
+			)
+			// create our RS so we can link a pod to it
+			rs = test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+		})
+		It("should update metrics for empty-nodeclaim consolidation", func() {
+			ExpectApplied(ctx, env.Client, rs, nodePool)
+			for _, nodeClaim := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaim)
+			}
+			for _, node := range nodes {
+				ExpectApplied(ctx, env.Client, node)
+			}
+
+			// inform cluster state about nodes and nodeClaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var wg sync.WaitGroup
+			wg.Add(1)
+			finished := atomic.Bool{}
+			go func() {
+				defer GinkgoRecover()
+				defer wg.Done()
+				defer finished.Store(true)
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			}()
+
+			ExpectTriggerVerifyAction(&wg)
+
+			// controller should finish
+			Eventually(finished.Load, 10*time.Second).Should(BeTrue())
+			wg.Wait()
+
+			// should have no nodeClaims deleted from single nodeClaim consolidation
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+
+			m, found := FindMetricWithLabelValues("karpenter_deprovisioning_eligible_machines", map[string]string{
+				"deprovisioner": "consolidation",
+			})
+			Expect(found).To(BeTrue())
+			Expect(m.GetGauge().GetValue()).To(BeNumerically("~", numNodes))
+			m, found = FindMetricWithLabelValues("karpenter_disruption_eligible_nodes", map[string]string{
+				"method":             "consolidation",
+				"consolidation_type": "empty",
+			})
+			Expect(found).To(BeTrue())
+			Expect(m.GetGauge().GetValue()).To(BeNumerically("~", numNodes))
+
+		})
+		It("should update metrics for single-nodeclaim consolidation", func() {
+			pods := test.Pods(numNodes, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					}},
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						// Make the pods more than half of the allocatable so that only one nodeclaim can be done at any time
+						v1.ResourceCPU: resource.MustParse("20"),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, rs, nodePool)
+			for _, nodeClaim := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaim)
+			}
+			for _, node := range nodes {
+				ExpectApplied(ctx, env.Client, node)
+			}
+			for i, pod := range pods {
+				ExpectApplied(ctx, env.Client, pod)
+				ExpectManualBinding(ctx, env.Client, pod, nodes[i])
+			}
+
+			// inform cluster state about nodes and nodeClaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var wg sync.WaitGroup
+			wg.Add(1)
+			finished := atomic.Bool{}
+			go func() {
+				defer GinkgoRecover()
+				defer wg.Done()
+				defer finished.Store(true)
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			}()
+
+			// advance the clock so that the timeout expires for multi-nodeClaim
+			fakeClock.Step(disruption.MultiNodeConsolidationTimeoutDuration)
+			// advance the clock so that the timeout expires for single-nodeClaim
+			fakeClock.Step(disruption.SingleNodeConsolidationTimeoutDuration)
+
+			ExpectTriggerVerifyAction(&wg)
+
+			// controller should finish
+			Eventually(finished.Load, 10*time.Second).Should(BeTrue())
+			wg.Wait()
+
+			// should have no nodeClaims deleted from single nodeClaim consolidation
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(numNodes))
+
+			m, found := FindMetricWithLabelValues("karpenter_deprovisioning_eligible_machines", map[string]string{
+				"deprovisioner": "consolidation",
+			})
+			Expect(found).To(BeTrue())
+			Expect(m.GetGauge().GetValue()).To(BeNumerically("~", numNodes))
+			m, found = FindMetricWithLabelValues("karpenter_disruption_eligible_nodes", map[string]string{
+				"method":             "consolidation",
+				"consolidation_type": "single",
+			})
+			Expect(found).To(BeTrue())
+			Expect(m.GetGauge().GetValue()).To(BeNumerically("~", numNodes))
+
+			// TODO: need to add metrics tests:
+			// karpenter_deprovisioning_consolidation_timeouts
+			// karpenter_disruption_consolidation_timeouts_total
+		})
+		It("should update metrics for multi-nodeclaim consolidation", func() {
+			pods := test.Pods(numNodes, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					}},
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						// Make the pods more than half of the allocatable so that only one nodeclaim can be done at any time
+						v1.ResourceCPU: resource.MustParse("10m"),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, rs, nodePool)
+			for _, nodeClaim := range nodeClaims {
+				ExpectApplied(ctx, env.Client, nodeClaim)
+			}
+			for _, node := range nodes {
+				ExpectApplied(ctx, env.Client, node)
+			}
+			for i, pod := range pods {
+				ExpectApplied(ctx, env.Client, pod)
+				ExpectManualBinding(ctx, env.Client, pod, nodes[i])
+			}
+
+			// inform cluster state about nodes and nodeClaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var wg sync.WaitGroup
+			wg.Add(1)
+			finished := atomic.Bool{}
+			go func() {
+				defer GinkgoRecover()
+				defer wg.Done()
+				defer finished.Store(true)
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			}()
+
+			// advance the clock so that the timeout expires
+			fakeClock.Step(disruption.MultiNodeConsolidationTimeoutDuration)
+
+			// wait for the controller to block on the validation timeout
+			Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
+
+			ExpectTriggerVerifyAction(&wg)
+
+			// controller should be blocking during the timeout
+			Expect(finished.Load()).To(BeFalse())
+
+			// and the node should not be deleted yet
+			for i := range nodeClaims {
+				ExpectExists(ctx, env.Client, nodeClaims[i])
+			}
+
+			// controller should finish
+			Eventually(finished.Load, 10*time.Second).Should(BeTrue())
+			wg.Wait()
+
+			// should have at least two nodes deleted from multi nodeClaim consolidation
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(BeNumerically("<=", numNodes-2))
+
+			m, found := FindMetricWithLabelValues("karpenter_deprovisioning_eligible_machines", map[string]string{
+				"deprovisioner": "consolidation",
+			})
+			Expect(found).To(BeTrue())
+			Expect(m.GetGauge().GetValue()).To(BeNumerically("~", numNodes))
+			m, found = FindMetricWithLabelValues("karpenter_disruption_eligible_nodes", map[string]string{
+				"method":             "consolidation",
+				"consolidation_type": "multi",
+			})
+			Expect(found).To(BeTrue())
+			Expect(m.GetGauge().GetValue()).To(BeNumerically("~", numNodes))
+
+			// TODO: need to add metrics tests:
+			// karpenter_deprovisioning_consolidation_timeouts
+			// karpenter_disruption_consolidation_timeouts_total
+
 		})
 	})
 })
