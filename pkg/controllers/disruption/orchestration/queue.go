@@ -89,7 +89,7 @@ type Queue struct {
 	workqueue.RateLimitingInterface
 	// providerID -> command, maps a candidate to its command. Each command has a list of candidates that can be used
 	// to map to itself.
-	CandidateProviderIDToCommand map[string]*Command
+	ProviderIDToCommand map[string]*Command
 
 	kubeClient  client.Client
 	recorder    events.Recorder
@@ -103,7 +103,7 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 	provisioner *provisioning.Provisioner) *Queue {
 	queue := &Queue{
 		RateLimitingInterface:        workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(queueBaseDelay, queueMaxDelay)),
-		CandidateProviderIDToCommand: map[string]*Command{},
+		ProviderIDToCommand: map[string]*Command{},
 		kubeClient:                   kubeClient,
 		recorder:                     recorder,
 		cluster:                      cluster,
@@ -222,7 +222,7 @@ func (q *Queue) Add(ctx context.Context, candidates []*state.StateNode, replacem
 	cmd := NewCommand(nodeClaimKeys, candidates, reason, q.clock.Now().Add(delay))
 	q.RateLimitingInterface.AddAfter(cmd, delay)
 	for _, candidate := range candidates {
-		q.CandidateProviderIDToCommand[candidate.ProviderID()] = cmd
+		q.ProviderIDToCommand[candidate.ProviderID()] = cmd
 	}
 	return nil
 }
@@ -298,7 +298,7 @@ func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) error {
 func (q *Queue) CanAdd(ids ...string) error {
 	var err error
 	for _, id := range ids {
-		if _, ok := q.CandidateProviderIDToCommand[id]; ok {
+		if _, ok := q.ProviderIDToCommand[id]; ok {
 			err = multierr.Append(err, fmt.Errorf("candidate is being deprovisioned"))
 		}
 	}
@@ -309,7 +309,7 @@ func (q *Queue) CanAdd(ids ...string) error {
 func (q *Queue) Remove(cmd *Command) {
 	// Remove all candidates linked to the command
 	for _, candidate := range cmd.Candidates {
-		delete(q.CandidateProviderIDToCommand, candidate.ProviderID())
+		delete(q.ProviderIDToCommand, candidate.ProviderID())
 	}
 	q.RateLimitingInterface.Forget(cmd)
 	q.RateLimitingInterface.Done(cmd)
@@ -367,7 +367,7 @@ func (q *Queue) RequireNoScheduleTaint(ctx context.Context, addTaint bool, nodes
 // Reset is used for testing and clears all internal data structures
 func (q *Queue) Reset() {
 	q.RateLimitingInterface = workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(queueBaseDelay, queueMaxDelay))
-	q.CandidateProviderIDToCommand = map[string]*Command{}
+	q.ProviderIDToCommand = map[string]*Command{}
 }
 
 // launchReplacementNodeClaims will create replacement node claims

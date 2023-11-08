@@ -167,7 +167,7 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 		return c.StateNode
 	})
 	reason := fmt.Sprintf("%s/%s", m.Type(), cmd.Action())
-	if err := c.Queue.Add(ctx, stateNodes, cmd.replacements, reason, 5 * time.Second); err != nil {
+	if err := c.Queue.Add(ctx, stateNodes, cmd.replacements, reason, 5*time.Second); err != nil {
 		return fmt.Errorf("adding command to queue, %w", err)
 	}
 	disruptionActionsPerformedCounter.With(map[string]string{
