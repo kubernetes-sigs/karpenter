@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
@@ -49,11 +50,13 @@ const (
 )
 
 type Command struct {
-	ReplacementKeys []*NodeClaimKey
-	Candidates      []*state.StateNode
-	Reason          string    // reason is used for metrics
-	TimeAdded       time.Time // timeAdded is used to track timeouts
-	LastError       error
+	ReplacementKeys   []*NodeClaimKey
+	Candidates        []*state.StateNode
+	ConsolidationType string    // used for metrics
+	Method            string    // used for metrics
+	Reason            string    // used for metrics
+	TimeAdded         time.Time // timeAdded is used to track timeouts
+	LastError         error
 }
 
 // NodeClaimKey wraps a nodeclaim.Key with an initialized field to save on readiness checks and identify
@@ -123,7 +126,7 @@ func NewCommand(replacements []nodeclaim.Key, candidates []*state.StateNode, rea
 }
 
 func (q *Queue) Name() string {
-	return "deprovisioning-queue"
+	return "disruption-queue"
 }
 
 func (q *Queue) Builder(_ context.Context, m manager.Manager) controller.Builder {
@@ -140,7 +143,7 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 	// Get command from queue. This waits until queue is non-empty.
 	item, shutdown := q.RateLimitingInterface.Get()
 	if shutdown {
-		return reconcile.Result{}, fmt.Errorf("deprovisioning queue has shut down")
+		return reconcile.Result{}, fmt.Errorf("disruption queue has shut down")
 	}
 	cmd := item.(*Command)
 	defer q.RateLimitingInterface.Done(cmd)
@@ -158,7 +161,10 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 		failedLaunches := lo.Filter(cmd.ReplacementKeys, func(key *NodeClaimKey, _ int) bool {
 			return !key.Initialized
 		})
-		deprovisioningReplacementNodeLaunchFailedCounter.WithLabelValues(cmd.Reason).Add(float64(len(failedLaunches)))
+		disruptionReplacementNodeClaimFailedCounter.With(map[string]string{
+			methodLabel:            cmd.Method,
+			consolidationTypeLabel: cmd.ConsolidationType,
+		}).Add(float64(len(failedLaunches)))
 		q.cluster.UnmarkForDeletion(lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string { return s.ProviderID() })...)
 		err = multierr.Append(err, q.RequireNoScheduleTaint(ctx, false, cmd.Candidates...))
 		err = multierr.Append(err, cmd.LastError)
@@ -189,7 +195,8 @@ func (q *Queue) Process(ctx context.Context, cmd *Command) error {
 
 // Add will launch replacement nodeClaims and add the command to the queue
 // Each command added to the queue should already be validated and ready for execution.
-func (q *Queue) Add(ctx context.Context, candidates []*state.StateNode, replacements []*scheduling.NodeClaim, reason string) error {
+func (q *Queue) Add(ctx context.Context, candidates []*state.StateNode, replacements []*scheduling.NodeClaim, reason string,
+	delay time.Duration) error {
 	providerIDs := lo.Map(candidates, func(s *state.StateNode, _ int) string {
 		return s.ProviderID()
 	})
@@ -204,23 +211,23 @@ func (q *Queue) Add(ctx context.Context, candidates []*state.StateNode, replacem
 		if nodeClaimKeys, err = q.launchReplacementNodeClaims(ctx, replacements, reason); err != nil {
 			// If we failed to launch the replacement, don't deprovision.  If this is some permanent failure,
 			// we don't want to disrupt workloads with no way to provision new nodes for them.
-			return multierr.Append(fmt.Errorf("launching replacement machine, %w", err), q.RequireNoScheduleTaint(ctx, false, candidates...))
+			return multierr.Append(fmt.Errorf("launching replacement nodeclaim, %w", err), q.RequireNoScheduleTaint(ctx, false, candidates...))
 		}
 	}
 
-	// We have the new machines created at the API server so mark the old machines for deletion
+	// We have the new nodeclaims created at the API server so mark the old nodeclaims for deletion
 	q.cluster.MarkForDeletion(providerIDs...)
 	// Wait for a heuristic period of time to handle initial eventual consistency delay with node claim creation.
 	// This allows us to properly exit when we detect not found errors caused by ICE errors or the Node initializationTTL.
-	cmd := NewCommand(nodeClaimKeys, candidates, reason, q.clock.Now().Add(5*time.Second))
-	q.RateLimitingInterface.AddAfter(cmd, 5*time.Second)
+	cmd := NewCommand(nodeClaimKeys, candidates, reason, q.clock.Now().Add(delay))
+	q.RateLimitingInterface.AddAfter(cmd, delay)
 	for _, candidate := range candidates {
 		q.CandidateProviderIDToCommand[candidate.ProviderID()] = cmd
 	}
 	return nil
 }
 
-// WaitOrTerminate will wait until launched machines are ready.
+// WaitOrTerminate will wait until launched nodeclaims are ready.
 // Once the replacements are ready, it will terminate the candidates.
 // Will return true if the item in the queue should be re-queued. If a command has
 // timed out, this will return false.
@@ -257,7 +264,7 @@ func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) error {
 		key.Initialized = true
 		// Subtract the last initialization time from the time the command was added to get initialization duration.
 		initLength := initializedStatus.LastTransitionTime.Inner.Time.Sub(cmd.TimeAdded).Seconds()
-		deprovisioningReplacementNodeInitializedHistogram.Observe(initLength)
+		disruptionReplacementNodeClaimInitializedHistogram.Observe(initLength)
 	}
 	// If we have any errors, don't continue
 	if err := multierr.Combine(waitErrs...); err != nil {
@@ -308,52 +315,50 @@ func (q *Queue) Remove(cmd *Command) {
 	q.RateLimitingInterface.Done(cmd)
 }
 
+// RequireNoScheduleTaint will add/remove the karpenter.sh/disruption:NoSchedule taint from the candidates.
+// This is used to enforce no taints at the beginning of disruption, and
+// to add/remove taints while executing a disruption action.
+// nolint:gocyclo
 func (q *Queue) RequireNoScheduleTaint(ctx context.Context, addTaint bool, nodes ...*state.StateNode) error {
 	var multiErr error
 	for _, n := range nodes {
+		// If the StateNode is Karpenter owned and only has a nodeclaim, or is not owned by
+		// Karpenter, thus having no nodeclaim, don't touch the node.
+		if n.Node == nil || n.NodeClaim == nil {
+			continue
+		}
 		node := &v1.Node{}
 		if err := q.kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Name}, node); client.IgnoreNotFound(err) != nil {
 			multiErr = multierr.Append(multiErr, fmt.Errorf("getting node, %w", err))
 		}
-
 		// If the node already has the taint, continue to the next
 		_, hasTaint := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
 			return v1beta1.IsDisruptingTaint(taint)
 		})
-		// TODO remove when v1alpha5 APIs are removed
-		hasTaint = lo.Ternary(n.NodeClaim.IsMachine, node.Spec.Unschedulable, hasTaint)
-
-		// node is being deleted, so no need to remove taint as the node will be gone soon
+		// Node is being deleted, so no need to remove taint as the node will be gone soon.
+		// This ensures that the disruption controller doesn't modify taints that the Termination
+		// controller is also modifying
 		if hasTaint && !node.DeletionTimestamp.IsZero() {
-			continue
-		}
-		// If the taint is how we want it, do nothing
-		if hasTaint == addTaint {
 			continue
 		}
 		stored := node.DeepCopy()
 		// If the taint is present and we want to remove the taint, remove it.
-		if hasTaint && !addTaint {
-			// TODO remove when v1alpha5 APIs are removed
-			// If the underlying node claim is a machine, we won't remove any taints.
-			if n.NodeClaim.IsMachine {
-				node.Spec.Unschedulable = false
-			} else {
-				node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint v1.Taint, _ int) bool {
-					return v1beta1.IsDisruptingTaint(taint)
-				})
-			}
+		if !addTaint {
+			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint v1.Taint, _ int) bool {
+				return taint.Key == v1beta1.DisruptionTaintKey
+			})
 			// otherwise, add it.
-		} else {
-			// TODO remove when v1alpha5 APIs are removed
-			if n.NodeClaim.IsMachine {
-				node.Spec.Unschedulable = true
-			} else {
-				node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
-			}
+		} else if addTaint && !hasTaint {
+			// If the taint key is present (but with a different value or effect), remove it.
+			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t v1.Taint, _ int) bool {
+				return t.Key == v1beta1.DisruptionTaintKey
+			})
+			node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
 		}
-		if err := q.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
-			multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
+		if !equality.Semantic.DeepEqual(stored, node) {
+			if err := q.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+				multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
+			}
 		}
 	}
 	return multiErr

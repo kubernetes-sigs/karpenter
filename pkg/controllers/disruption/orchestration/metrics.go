@@ -22,30 +22,31 @@ import (
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(deprovisioningReplacementNodeInitializedHistogram, deprovisioningReplacementNodeLaunchFailedCounter)
+	crmetrics.Registry.MustRegister(disruptionReplacementNodeClaimInitializedHistogram, disruptionReplacementNodeClaimFailedCounter)
 }
 
 const (
-	deprovisioningSubsystem = "deprovisioning"
-	deprovisionerLabel      = "deprovisioner"
+	disruptionSubsystem    = "disruption"
+	methodLabel            = "method"
+	consolidationTypeLabel = "consolidation_type"
 )
 
 var (
-	deprovisioningReplacementNodeInitializedHistogram = prometheus.NewHistogram(
+	disruptionReplacementNodeClaimInitializedHistogram = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: metrics.Namespace,
-			Subsystem: deprovisioningSubsystem,
-			Name:      "replacement_machine_initialized_seconds",
-			Help:      "Amount of time required for a replacement machine to become initialized.",
+			Subsystem: disruptionSubsystem,
+			Name:      "replacement_nodeclaim_initialized_seconds",
+			Help:      "Amount of time required for a replacement nodeclaim to become initialized.",
 			Buckets:   metrics.DurationBuckets(),
 		})
-	deprovisioningReplacementNodeLaunchFailedCounter = prometheus.NewCounterVec(
+	disruptionReplacementNodeClaimFailedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metrics.Namespace,
-			Subsystem: deprovisioningSubsystem,
-			Name:      "replacement_machine_launch_failure_counter",
-			Help:      "The number of times that Karpenter failed to launch a replacement node for deprovisioning. Labeled by deprovisioner.",
+			Subsystem: disruptionSubsystem,
+			Name:      "replacement_nodeclaim_launch_failure_counter",
+			Help:      "The number of times that Karpenter failed to launch a replacement nodeclaim for disruption. Labeled by method.",
 		},
-		[]string{deprovisionerLabel},
+		[]string{methodLabel, consolidationTypeLabel},
 	)
 )

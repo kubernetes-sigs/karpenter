@@ -37,16 +37,16 @@ import (
 )
 
 type Controller struct {
-	Queue          *orchestration.Queue
-	kubeClient     client.Client
-	cluster        *state.Cluster
-	provisioner    *provisioning.Provisioner
-	recorder       events.Recorder
-	clock          clock.Clock
-	cloudProvider  cloudprovider.CloudProvider
-	methods        []Method
-	mu             sync.Mutex
-	lastRun        map[string]time.Time
+	Queue         *orchestration.Queue
+	kubeClient    client.Client
+	cluster       *state.Cluster
+	provisioner   *provisioning.Provisioner
+	recorder      events.Recorder
+	clock         clock.Clock
+	cloudProvider cloudprovider.CloudProvider
+	methods       []Method
+	mu            sync.Mutex
+	lastRun       map[string]time.Time
 }
 
 // pollingPeriod that we inspect cluster to look for opportunities to disrupt
@@ -163,20 +163,18 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 // 1. Candidates will be tainted
 // 2. Replacements will be launched
 func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) error {
+	stateNodes := lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode {
+		return c.StateNode
+	})
+	reason := fmt.Sprintf("%s/%s", m.Type(), cmd.Action())
+	if err := c.Queue.Add(ctx, stateNodes, cmd.replacements, reason, 5 * time.Second); err != nil {
+		return fmt.Errorf("adding command to queue, %w", err)
+	}
 	disruptionActionsPerformedCounter.With(map[string]string{
 		actionLabel:            string(cmd.Action()),
 		methodLabel:            m.Type(),
 		consolidationTypeLabel: m.ConsolidationType(),
 	}).Inc()
-	logging.FromContext(ctx).Infof("disrupting via %s %s", m.Type(), cmd)
-
-	stateNodes := lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode {
-		return c.StateNode
-	})
-	reason := fmt.Sprintf("%s/%s", m.Type(), cmd.Action())
-	if err := c.Queue.Add(ctx, stateNodes, cmd.replacements, reason); err != nil {
-		return fmt.Errorf("adding command to queue, %w", err)
-	}
 	logging.FromContext(ctx).Infof("disrupting via %s %s", m.Type(), cmd)
 	return nil
 }
