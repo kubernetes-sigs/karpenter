@@ -99,6 +99,11 @@ func ExpectNodeExists(ctx context.Context, c client.Client, name string) *v1.Nod
 	return ExpectExists(ctx, c, &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}})
 }
 
+func ExpectNodeClaimExists(ctx context.Context, c client.Client, name string) *v1beta1.NodeClaim {
+	GinkgoHelper()
+	return ExpectExists(ctx, c, &v1beta1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Name: name}})
+}
+
 func ExpectNotFound(ctx context.Context, c client.Client, objects ...client.Object) {
 	GinkgoHelper()
 	for _, object := range objects {

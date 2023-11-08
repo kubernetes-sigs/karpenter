@@ -185,7 +185,7 @@ func (q *Queue) Process(ctx context.Context, cmd *Command) error {
 	// If the time hasn't expired, either wait or terminate.
 	if err := q.WaitOrTerminate(ctx, cmd); err != nil {
 		// If there was an error, set this as the command's last error so that we can propagate it.
-		if !IsCommandExecutionError(err) {
+		if IsCommandExecutionError(err) {
 			return fmt.Errorf("got unrecoverable error, %w", err)
 		}
 		return err
@@ -252,7 +252,7 @@ func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) error {
 			waitErrs[i] = fmt.Errorf("getting node claim, %w", err)
 			continue
 		}
-		// We emitted this event when Deprovisioning was blocked on launching/termination.
+		// We emitted this event when disruption was blocked on launching/termination.
 		// This does not block other forms of deprovisioning, but we should still emit this.
 		q.recorder.Publish(disruptionevents.Launching(nodeClaim, cmd.Reason))
 		initializedStatus := nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized)
@@ -261,7 +261,7 @@ func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) error {
 			waitErrs[i] = fmt.Errorf("node claim not initialized")
 			continue
 		}
-		key.Initialized = true
+		cmd.ReplacementKeys[i].Initialized = true
 		// Subtract the last initialization time from the time the command was added to get initialization duration.
 		initLength := initializedStatus.LastTransitionTime.Inner.Time.Sub(cmd.TimeAdded).Seconds()
 		disruptionReplacementNodeClaimInitializedHistogram.Observe(initLength)
@@ -383,78 +383,3 @@ func (q *Queue) launchReplacementNodeClaims(ctx context.Context, replacements []
 	}
 	return nodeClaimKeys, nil
 }
-
-//// Pop returns a command and its hash and if the queue has shutdown.
-//func (q *Queue) Pop() (*Command, bool) {
-//	// Get command from queue. This waits until queue is non-empty.
-//	item, shutdown := q.RateLimitingInterface.Get()
-//	if shutdown {
-//		return &Command{}, true
-//	}
-//	cmd := item.(*Command)
-//	return cmd, false
-//}
-
-//// ProcessItem will process a command. It will either:
-//// 1. Remove all references of the command if the command completes due to timeout or success.
-//// 2. Check the command and requeue if it needs to be checked again later.
-//func (q *Queue) ProcessItem(ctx context.Context, cmd *Command) {
-//	requeue, err := q.Reconcile(ctx, cmd)
-//	if !requeue {
-//		// If the command timed out, log the last error.
-//		if err != nil {
-//			// If the command failed, bail on the action.
-//			// 1. Emit metrics for launch failures
-//			// 2. Ensure cluster state no longer thinks these nodes are deleting
-//			// 3. Remove it from the Queue's internal data structure
-//			deprovisioningReplacementNodeLaunchFailedCounter.WithLabelValues(cmd.Reason).Inc()
-//			q.cluster.UnmarkForDeletion(lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string { return s.ProviderID() })...)
-//			err = multierr.Append(err, q.setNodesUnschedulable(ctx, false, lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string { return s.Node.Name })...))
-//			logging.FromContext(ctx).Debugf("handling deprovisioning command, %w, for nodes %s", err,
-//				strings.Join(lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string {
-//					return s.Name()
-//				}), ","))
-//		}
-//		q.Remove(cmd)
-//		return
-//	}
-//	q.RateLimitingInterface.Done(cmd)
-//	// Requeue command if not complete
-//	q.RateLimitingInterface.AddRateLimited(cmd)
-//}
-
-//// Reconcile will check for timeouts, then execute a wait or termination.
-//func (q *Queue) Reconcile(ctx context.Context, cmd *Command) (bool, error) {
-//	if q.clock.Since(cmd.TimeAdded) > maxRetryDuration {
-//		return false, fmt.Errorf("abandoning command, reached timeout, %w", cmd.LastError)
-//	}
-//	// If the time hasn't expired, either wait or terminate.
-//	requeue, err := q.WaitOrTerminate(ctx, cmd)
-//	if err != nil {
-//		// If there was an error, set this as the command's last error so that we can propagate it.
-//		cmd.LastError = err
-//		if !retry.IsRecoverable(err) {
-//			return false, nil
-//		}
-//		return requeue, nil
-//	}
-//	return requeue, nil
-//}
-
-//// Start will kick off the queue. This runs asynchronously until Karpenter shuts down.
-//func (q *Queue) Start(ctx context.Context) {
-//Loop:
-//	for {
-//		select {
-//		case <-ctx.Done():
-//			break Loop
-//		default:
-//			cmd, shutdown := q.Pop()
-//			if shutdown {
-//				break Loop
-//			}
-//			q.ProcessItem(ctx, cmd)
-//		}
-//	}
-//	logging.FromContext(ctx).Errorf("deprovisioning queue is broken and has shutdown")
-//}

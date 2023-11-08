@@ -74,7 +74,6 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	}
 	// If the orchestration queue is already considering a candidate we want to deprovision, don't consider it a candidate.
 	if err := queue.CanAdd(node.Name()); err != nil {
-		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, "Already being deprovisioned")...)
 		return nil, fmt.Errorf("candidate is already being deprovisioned, %w", err)
 	}
 	if _, ok := node.Annotations()[v1beta1.DoNotDisruptAnnotationKey]; ok {
