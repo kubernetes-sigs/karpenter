@@ -318,29 +318,3 @@ var _ = Describe("Queue", func() {
 		})
 	})
 })
-
-// func ExpectQueueReconcileSucceeded(ctx context.Context, queue *Queue) {
-// 	ExpectQueueNotEmpty(ctx, queue)
-// 	ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
-// }
-
-// func ExpectQueueReconcileFailed(ctx context.Context, queue *Queue) {
-// 	ExpectQueueNotEmpty(ctx, queue)
-// 	ExpectReconcileFailed(ctx, queue, types.NamespacedName{})
-// }
-
-// func ExpectQueueNotEmpty(ctx context.Context, queue *Queue) {
-// 	ctx, cancel := context.WithTimeout(ctx, time.Second*10) // give up after 10s
-// 	defer GinkgoRecover()
-// 	defer cancel()
-// 	for {
-// 		select {
-// 		case <-time.After(50 * time.Millisecond):
-// 			if queue.Len() != 0 {
-// 				return
-// 			}
-// 		case <-ctx.Done():
-// 			Fail("waiting for command to be requeued")
-// 		}
-// 	}
-// }

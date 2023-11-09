@@ -93,8 +93,8 @@ func (c *consolidation) markConsolidated() {
 
 // ShouldDisrupt is a predicate used to filter candidates
 func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
-	if cn.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey] == "true" {
-		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s annotation exists", v1alpha5.DoNotConsolidateNodeAnnotationKey))...)
+	if cn.Annotations()[v1beta1.DoNotDisruptAnnotationKey] == "true" {
+		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s annotation exists", v1beta1.DoNotDisruptAnnotationKey))...)
 		return false
 	}
 	if cn.nodePool.Spec.Disruption.ConsolidationPolicy != v1beta1.ConsolidationPolicyWhenUnderutilized ||

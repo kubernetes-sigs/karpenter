@@ -1158,59 +1158,6 @@ var _ = Describe("Consolidation", func() {
 			// eviction
 			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
-		It("can delete nodes, considers karpneter.sh/do-not-consolidate on nodes", func() {
-			labels := map[string]string{
-				"app": "test",
-			}
-
-			// create our RS so we can link a pod to it
-			rs := test.ReplicaSet()
-			ExpectApplied(ctx, env.Client, rs)
-			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
-
-			pods := test.Pods(3, test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels,
-					OwnerReferences: []metav1.OwnerReference{
-						{
-							APIVersion:         "apps/v1",
-							Kind:               "ReplicaSet",
-							Name:               rs.Name,
-							UID:                rs.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
-						},
-					}}})
-			nodeClaim2.Annotations = lo.Assign(nodeClaim2.Annotations, map[string]string{v1alpha5.DoNotConsolidateNodeAnnotationKey: "true"})
-			node2.Annotations = lo.Assign(nodeClaim2.Annotations, map[string]string{v1alpha5.DoNotConsolidateNodeAnnotationKey: "true"})
-
-			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
-			ExpectApplied(ctx, env.Client, nodeClaim, node, nodeClaim2, node2)
-
-			// bind pods to node
-			ExpectManualBinding(ctx, env.Client, pods[0], node)
-			ExpectManualBinding(ctx, env.Client, pods[1], node)
-			ExpectManualBinding(ctx, env.Client, pods[2], node2)
-
-			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
-
-			fakeClock.Step(10 * time.Minute)
-
-			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
-			wg.Wait()
-
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
-
-			// Cascade any deletion of the machine to the node
-			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
-
-			// we should delete the non-annotated node
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-			ExpectNotFound(ctx, env.Client, nodeClaim, node)
-		})
 		It("can delete nodes, considers karpenter.sh/do-not-disrupt on nodes", func() {
 			labels := map[string]string{
 				"app": "test",
@@ -1257,60 +1204,6 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			// Cascade any deletion of the machine to the node
-			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
-
-			// we should delete the non-annotated node
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-			ExpectNotFound(ctx, env.Client, nodeClaim, node)
-		})
-		It("can delete nodes, considers karpenter.sh/do-not-evict on pods", func() {
-			labels := map[string]string{
-				"app": "test",
-			}
-
-			// create our RS so we can link a pod to it
-			rs := test.ReplicaSet()
-			ExpectApplied(ctx, env.Client, rs)
-			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
-
-			pods := test.Pods(3, test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels,
-					OwnerReferences: []metav1.OwnerReference{
-						{
-							APIVersion:         "apps/v1",
-							Kind:               "ReplicaSet",
-							Name:               rs.Name,
-							UID:                rs.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
-						},
-					}}})
-			// Block this pod from being disrupted with karpenter.sh/do-not-evict
-			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"})
-
-			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
-			ExpectApplied(ctx, env.Client, nodeClaim, node, nodeClaim2, node2)
-
-			// bind pods to node
-			ExpectManualBinding(ctx, env.Client, pods[0], node)
-			ExpectManualBinding(ctx, env.Client, pods[1], node)
-			ExpectManualBinding(ctx, env.Client, pods[2], node2)
-
-			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
-
-			fakeClock.Step(10 * time.Minute)
-
-			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
-			wg.Wait()
-
-			// Process the item so that the nodes can be deleted.
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
-
-			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
 			// we should delete the non-annotated node
@@ -2056,7 +1949,7 @@ var _ = Describe("Consolidation", func() {
 		It("should not consolidate if the action becomes invalid during the node TTL wait", func() {
 			pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{
 				Annotations: map[string]string{
-					v1alpha5.DoNotEvictPodAnnotationKey: "true",
+					v1beta1.DoNotDisruptAnnotationKey: "true",
 				},
 			}})
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool, pod)
@@ -2095,54 +1988,6 @@ var _ = Describe("Consolidation", func() {
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaim1)
-		})
-		It("should not replace node if a pod schedules with karpenter.sh/do-not-evict during the TTL wait", func() {
-			pod := test.Pod()
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
-
-			// bind pods to node
-			ExpectManualBinding(ctx, env.Client, pod, node)
-
-			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
-
-			var wg sync.WaitGroup
-
-			// Trigger the reconcile loop to start but don't trigger the verify action
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
-			}()
-
-			// Iterate in a loop until we get to the validation action
-			// Then, apply the pods to the cluster and bind them to the nodes
-			for {
-				time.Sleep(100 * time.Millisecond)
-				if fakeClock.HasWaiters() {
-					break
-				}
-			}
-			doNotEvictPod := test.Pod(test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						v1alpha5.DoNotEvictPodAnnotationKey: "true",
-					},
-				},
-			})
-			ExpectApplied(ctx, env.Client, doNotEvictPod)
-			ExpectManualBinding(ctx, env.Client, doNotEvictPod, node)
-
-			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
-			ExpectTriggerVerifyAction(&wg)
-			wg.Wait()
-
-			// we would normally be able to replace a node, but we are blocked by the do-not-evict pods during validation
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-			ExpectExists(ctx, env.Client, node)
 		})
 		It("should not replace node if a pod schedules with karpenter.sh/do-not-disrupt during the TTL wait", func() {
 			pod := test.Pod()
@@ -2244,57 +2089,6 @@ var _ = Describe("Consolidation", func() {
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, node)
-		})
-		It("should not delete node if pods schedule with karpenter.sh/do-not-evict during the TTL wait", func() {
-			pods := test.Pods(2, test.PodOptions{})
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, nodeClaim2, node2, pods[0], pods[1])
-
-			// bind pods to node
-			ExpectManualBinding(ctx, env.Client, pods[0], node)
-			ExpectManualBinding(ctx, env.Client, pods[1], node2)
-
-			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
-
-			fakeClock.Step(10 * time.Minute)
-
-			var wg sync.WaitGroup
-
-			// Trigger the reconcile loop to start but don't trigger the verify action
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
-			}()
-
-			// Iterate in a loop until we get to the validation action
-			// Then, apply the pods to the cluster and bind them to the nodes
-			for {
-				time.Sleep(100 * time.Millisecond)
-				if fakeClock.HasWaiters() {
-					break
-				}
-			}
-			doNotEvictPods := test.Pods(2, test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						v1alpha5.DoNotEvictPodAnnotationKey: "true",
-					},
-				},
-			})
-			ExpectApplied(ctx, env.Client, doNotEvictPods[0], doNotEvictPods[1])
-			ExpectManualBinding(ctx, env.Client, doNotEvictPods[0], node)
-			ExpectManualBinding(ctx, env.Client, doNotEvictPods[1], node2)
-
-			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
-			ExpectTriggerVerifyAction(&wg)
-			wg.Wait()
-
-			// we would normally be able to consolidate down to a single node, but we are blocked by the do-not-evict pods during validation
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
-			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
-			ExpectExists(ctx, env.Client, node)
-			ExpectExists(ctx, env.Client, node2)
 		})
 		It("should not delete node if pods schedule with karpenter.sh/do-not-disrupt during the TTL wait", func() {
 			pods := test.Pods(2, test.PodOptions{})
@@ -3404,9 +3198,7 @@ var _ = Describe("Consolidation", func() {
 
 			// Mark the node for deletion and re-trigger reconciliation
 			oldNodeName := nodes[0].Name
-			nodes[0].Spec.Taints = append(nodes[0].Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
-			ExpectApplied(ctx, env.Client, nodes[0])
-			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[0]))
+			cluster.MarkForDeletion(nodes[0].Spec.ProviderID)
 			ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, lo.Map(pods, func(p *v1.Pod, _ int) *v1.Pod { return p.DeepCopy() })...)
 
 			// Make sure that the cluster state is aware of the current node state
