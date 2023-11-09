@@ -167,7 +167,8 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 		return c.StateNode
 	})
 	reason := fmt.Sprintf("%s/%s", m.Type(), cmd.Action())
-	if err := c.Queue.Add(ctx, stateNodes, cmd.replacements, reason, 5*time.Second); err != nil {
+	logging.FromContext(ctx).Infof("disrupting via %s %s", m.Type(), cmd)
+	if err := c.Queue.Add(ctx, stateNodes, cmd.replacements, reason); err != nil {
 		return fmt.Errorf("adding command to queue, %w", err)
 	}
 	disruptionActionsPerformedCounter.With(map[string]string{
@@ -175,7 +176,6 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 		methodLabel:            m.Type(),
 		consolidationTypeLabel: m.ConsolidationType(),
 	}).Inc()
-	logging.FromContext(ctx).Infof("disrupting via %s %s", m.Type(), cmd)
 	return nil
 }
 

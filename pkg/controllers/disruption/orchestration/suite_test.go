@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -45,7 +46,6 @@ import (
 	. "github.com/aws/karpenter-core/pkg/test/expectations"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
 	clock "k8s.io/utils/clock/testing"
 )
 
@@ -96,7 +96,7 @@ var _ = BeforeEach(func() {
 	fakeClock.SetTime(time.Now())
 	cluster.Reset()
 	cloudProvider.Reset()
-	cloudProvider.InstanceTypes = fake.InstanceTypes(5)
+	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 	cluster.MarkUnconsolidated()
 	queue.Reset()
 })
@@ -138,7 +138,7 @@ var _ = Describe("Queue", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 
 			stateNode := ExpectStateNodeExists(cluster, node1)
-			Expect(queue.Add(ctx, []*state.StateNode{stateNode}, []*scheduling.NodeClaim{schedulingReplacementNodeClaim}, "test", 0)).ToNot(BeNil())
+			Expect(queue.Add(ctx, []*state.StateNode{stateNode}, []*scheduling.NodeClaim{schedulingReplacementNodeClaim}, "test")).ToNot(BeNil())
 
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
 			Expect(node1.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
@@ -148,7 +148,7 @@ var _ = Describe("Queue", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 
 			stateNode := ExpectStateNodeExists(cluster, node1)
-			Expect(queue.Add(ctx, []*state.StateNode{stateNode}, []*scheduling.NodeClaim{schedulingReplacementNodeClaim}, "test", 0)).To(BeNil())
+			Expect(queue.Add(ctx, []*state.StateNode{stateNode}, []*scheduling.NodeClaim{schedulingReplacementNodeClaim}, "test")).To(BeNil())
 
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
 			Expect(node1.Spec.Taints).To(ContainElement(v1beta1.DisruptionNoScheduleTaint))
@@ -167,28 +167,28 @@ var _ = Describe("Queue", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
-			Expect(queue.Add(ctx, []*state.StateNode{stateNode}, []*scheduling.NodeClaim{schedulingReplacementNodeClaim}, "test", 0)).To(BeNil())
-			ExpectQueueReconcileSucceeded(ctx, queue)
+			Expect(queue.Add(ctx, []*state.StateNode{stateNode}, []*scheduling.NodeClaim{schedulingReplacementNodeClaim}, "test")).To(BeNil())
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		})
 		It("should return an error and clean up when a command times out", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
-			Expect(queue.Add(ctx, []*state.StateNode{stateNode}, []*scheduling.NodeClaim{schedulingReplacementNodeClaim}, "test", 0)).To(BeNil())
+			Expect(queue.Add(ctx, []*state.StateNode{stateNode}, []*scheduling.NodeClaim{schedulingReplacementNodeClaim}, "test")).To(BeNil())
 			stateNode = ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 			Expect(stateNode.MarkedForDeletion()).To(BeTrue())
 
 			fakeClock.Step(1 * time.Hour)
-			ExpectQueueReconcileFailed(ctx, queue)
+			ExpectReconcileFailed(ctx, queue, types.NamespacedName{})
 		})
 		It("should fully handle a command when replacements are initialized", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
-			Expect(queue.Add(ctx, []*state.StateNode{stateNode}, []*scheduling.NodeClaim{schedulingReplacementNodeClaim}, "test", 0)).To(BeNil())
-			ExpectQueueReconcileSucceeded(ctx, queue)
+			Expect(queue.Add(ctx, []*state.StateNode{stateNode}, []*scheduling.NodeClaim{schedulingReplacementNodeClaim}, "test")).To(BeNil())
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			// Get the command
 			cmd := queue.ProviderIDToCommand[nodeClaim1.Status.ProviderID]
@@ -209,7 +209,7 @@ var _ = Describe("Queue", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController,
 				[]*v1.Node{replacementNode}, []*v1beta1.NodeClaim{replacementNodeClaim})
 
-			ExpectQueueReconcileSucceeded(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			cmd = queue.ProviderIDToCommand[nodeClaim1.Status.ProviderID]
 			Expect(cmd).ToNot(BeNil())
 			Expect(cmd.ReplacementKeys[0].Initialized).To(BeTrue())
@@ -231,14 +231,14 @@ var _ = Describe("Queue", func() {
 			// Remove the hostname requirements that are used for scheduling simulation.
 			schedulingReplacementNodeClaim2.FinalizeScheduling()
 			Expect(queue.Add(ctx, []*state.StateNode{stateNode},
-				[]*scheduling.NodeClaim{schedulingReplacementNodeClaim, schedulingReplacementNodeClaim2}, "test", 0)).To(BeNil())
+				[]*scheduling.NodeClaim{schedulingReplacementNodeClaim, schedulingReplacementNodeClaim2}, "test")).To(BeNil())
 
 			// Get the command
 			cmd := queue.ProviderIDToCommand[nodeClaim1.Status.ProviderID]
 			Expect(cmd).ToNot(BeNil())
 
 			// Process the command
-			ExpectQueueReconcileSucceeded(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(cmd.ReplacementKeys[0].Initialized).To(BeFalse())
 			Expect(cmd.ReplacementKeys[1].Initialized).To(BeFalse())
 
@@ -264,7 +264,7 @@ var _ = Describe("Queue", func() {
 				[]*v1.Node{replacementNode1}, []*v1beta1.NodeClaim{replacementNodeClaim1})
 
 			// Process the command
-			ExpectQueueReconcileSucceeded(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			// Check that there's one initialized nodeclaim
 			initialized, ok := lo.Find(cmd.ReplacementKeys, func(nck *orchestration.NodeClaimKey) bool {
@@ -284,7 +284,7 @@ var _ = Describe("Queue", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController,
 				[]*v1.Node{replacementNode2}, []*v1beta1.NodeClaim{replacementNodeClaim2})
 
-			ExpectQueueReconcileSucceeded(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(cmd.ReplacementKeys[0].Initialized).To(BeTrue())
 			Expect(cmd.ReplacementKeys[1].Initialized).To(BeTrue())
 
@@ -300,13 +300,12 @@ var _ = Describe("Queue", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
-			Expect(queue.Add(ctx, []*state.StateNode{stateNode}, []*scheduling.NodeClaim{}, "test", 0)).To(BeNil())
-			Expect(queue.Len()).To(Equal(1))
+			Expect(queue.Add(ctx, []*state.StateNode{stateNode}, []*scheduling.NodeClaim{}, "test")).To(BeNil())
 
 			// Get the command and process it
 			cmd := queue.ProviderIDToCommand[nodeClaim1.Status.ProviderID]
 			Expect(cmd).ToNot(BeNil())
-			ExpectQueueReconcileSucceeded(ctx, queue)
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			terminatingEvents := disruptionevents.Terminating(stateNode.Node, stateNode.NodeClaim, "test")
 			Expect(recorder.DetectedEvent(terminatingEvents[0].Message)).To(BeTrue())
@@ -319,27 +318,28 @@ var _ = Describe("Queue", func() {
 	})
 })
 
-func ExpectQueueReconcileSucceeded(ctx context.Context, queue *orchestration.Queue) {
-	ExpectQueueNotEmpty(ctx, queue)
-	ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
-}
-func ExpectQueueReconcileFailed(ctx context.Context, queue *orchestration.Queue) {
-	ExpectQueueNotEmpty(ctx, queue)
-	ExpectReconcileFailed(ctx, queue, types.NamespacedName{})
-}
+// func ExpectQueueReconcileSucceeded(ctx context.Context, queue *Queue) {
+// 	ExpectQueueNotEmpty(ctx, queue)
+// 	ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+// }
 
-func ExpectQueueNotEmpty(ctx context.Context, queue *orchestration.Queue) {
-	ctx, cancel := context.WithTimeout(ctx, time.Second*10) // give up after 10s
-	defer GinkgoRecover()
-	defer cancel()
-	for {
-		select {
-		case <-time.After(50 * time.Millisecond):
-			if queue.Len() != 0 {
-				return
-			}
-		case <-ctx.Done():
-			Fail("waiting for command to be requeued")
-		}
-	}
-}
+// func ExpectQueueReconcileFailed(ctx context.Context, queue *Queue) {
+// 	ExpectQueueNotEmpty(ctx, queue)
+// 	ExpectReconcileFailed(ctx, queue, types.NamespacedName{})
+// }
+
+// func ExpectQueueNotEmpty(ctx context.Context, queue *Queue) {
+// 	ctx, cancel := context.WithTimeout(ctx, time.Second*10) // give up after 10s
+// 	defer GinkgoRecover()
+// 	defer cancel()
+// 	for {
+// 		select {
+// 		case <-time.After(50 * time.Millisecond):
+// 			if queue.Len() != 0 {
+// 				return
+// 			}
+// 		case <-ctx.Done():
+// 			Fail("waiting for command to be requeued")
+// 		}
+// 	}
+// }

@@ -105,6 +105,7 @@ var _ = BeforeEach(func() {
 	}
 	fakeClock.SetTime(time.Now())
 	cluster.Reset()
+	queue.Reset()
 	cluster.MarkUnconsolidated()
 
 	// Reset Feature Flags to test defaults

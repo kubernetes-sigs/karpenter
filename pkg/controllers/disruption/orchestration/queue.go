@@ -69,20 +69,20 @@ type NodeClaimKey struct {
 	Initialized bool
 }
 
-type CommandExecutionError struct {
+type UnrecoverableError struct {
 	error
 }
 
-func NewCommandExecutionError(err error) *CommandExecutionError {
-	return &CommandExecutionError{error: err}
+func NewUnrecoverableError(err error) *UnrecoverableError {
+	return &UnrecoverableError{error: err}
 }
 
-func IsCommandExecutionError(err error) bool {
+func IsUnrecoverableError(err error) bool {
 	if err == nil {
 		return false
 	}
-	var commandExecutionError *CommandExecutionError
-	return errors.As(err, &commandExecutionError)
+	var unrecoverableError *UnrecoverableError
+	return errors.As(err, &unrecoverableError)
 }
 
 type Queue struct {
@@ -98,7 +98,7 @@ type Queue struct {
 	provisioner *provisioning.Provisioner
 }
 
-// NewQueue creates a queue that will asynchronously orchestrate deprovisioning commands
+// NewQueue creates a queue that will asynchronously orchestrate disruption commands
 func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clock.Clock,
 	provisioner *provisioning.Provisioner) *Queue {
 	queue := &Queue{
@@ -137,8 +137,9 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 	// Check if the queue is empty. client-go recommends not using this function to gate the subsequent
 	// get call, but since we're popping items off the queue synchronously, there should be no synchonization
 	// issues.
-	if q.Len() == 0 {
-		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
+	for q.Len() == 0 {
+		time.Sleep(1 * time.Second)
+		// return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 	// Get command from queue. This waits until queue is non-empty.
 	item, shutdown := q.RateLimitingInterface.Get()
@@ -149,7 +150,8 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 	defer q.RateLimitingInterface.Done(cmd)
 
 	if err := q.Process(ctx, cmd); err != nil {
-		if !IsCommandExecutionError(err) {
+		// If recoverable, re-queue and try again.
+		if !IsUnrecoverableError(err) {
 			cmd.LastError = err
 			q.RateLimitingInterface.AddRateLimited(cmd)
 			return reconcile.Result{RequeueAfter: controller.Immediately}, nil
@@ -172,7 +174,7 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 			return s.Name()
 		}), ",")
 		q.Remove(cmd)
-		return reconcile.Result{RequeueAfter: controller.Immediately}, fmt.Errorf("failed to deprovision nodes %s, %w", nodeNames, err)
+		return reconcile.Result{RequeueAfter: controller.Immediately}, fmt.Errorf("failed to disrupt nodes %s, %w", nodeNames, err)
 	}
 	// Requeue command if not complete
 	return reconcile.Result{RequeueAfter: controller.Immediately}, nil
@@ -180,49 +182,15 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 
 func (q *Queue) Process(ctx context.Context, cmd *Command) error {
 	if q.clock.Since(cmd.TimeAdded) > maxRetryDuration {
-		return NewCommandExecutionError(fmt.Errorf("reached timeout"))
+		return NewUnrecoverableError(fmt.Errorf("command at %s reached timeout after %s", cmd.TimeAdded, q.clock.Since(cmd.TimeAdded)))
 	}
 	// If the time hasn't expired, either wait or terminate.
 	if err := q.WaitOrTerminate(ctx, cmd); err != nil {
 		// If there was an error, set this as the command's last error so that we can propagate it.
-		if IsCommandExecutionError(err) {
+		if IsUnrecoverableError(err) {
 			return fmt.Errorf("got unrecoverable error, %w", err)
 		}
 		return err
-	}
-	return nil
-}
-
-// Add will launch replacement nodeClaims and add the command to the queue
-// Each command added to the queue should already be validated and ready for execution.
-func (q *Queue) Add(ctx context.Context, candidates []*state.StateNode, replacements []*scheduling.NodeClaim, reason string,
-	delay time.Duration) error {
-	providerIDs := lo.Map(candidates, func(s *state.StateNode, _ int) string {
-		return s.ProviderID()
-	})
-	// Cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
-	if err := q.RequireNoScheduleTaint(ctx, true, candidates...); err != nil {
-		return multierr.Append(fmt.Errorf("cordoning nodes, %w", err), q.RequireNoScheduleTaint(ctx, false, candidates...))
-	}
-
-	var nodeClaimKeys []nodeclaim.Key
-	var err error
-	if len(replacements) > 0 {
-		if nodeClaimKeys, err = q.launchReplacementNodeClaims(ctx, replacements, reason); err != nil {
-			// If we failed to launch the replacement, don't deprovision.  If this is some permanent failure,
-			// we don't want to disrupt workloads with no way to provision new nodes for them.
-			return multierr.Append(fmt.Errorf("launching replacement nodeclaim, %w", err), q.RequireNoScheduleTaint(ctx, false, candidates...))
-		}
-	}
-
-	// We have the new nodeclaims created at the API server so mark the old nodeclaims for deletion
-	q.cluster.MarkForDeletion(providerIDs...)
-	// Wait for a heuristic period of time to handle initial eventual consistency delay with node claim creation.
-	// This allows us to properly exit when we detect not found errors caused by ICE errors or the Node initializationTTL.
-	cmd := NewCommand(nodeClaimKeys, candidates, reason, q.clock.Now().Add(delay))
-	q.RateLimitingInterface.AddAfter(cmd, delay)
-	for _, candidate := range candidates {
-		q.ProviderIDToCommand[candidate.ProviderID()] = cmd
 	}
 	return nil
 }
@@ -247,7 +215,7 @@ func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) error {
 			// This means that there was an ICE error or the Node initializationTTL expired
 			// In this case, the error is unrecoverable, so don't requeue.
 			if apierrors.IsNotFound(err) {
-				return NewCommandExecutionError(fmt.Errorf("nodeclaim not found, %w", err))
+				return NewUnrecoverableError(err)
 			}
 			waitErrs[i] = fmt.Errorf("getting node claim, %w", err)
 			continue
@@ -294,12 +262,45 @@ func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) error {
 	return nil
 }
 
-// CanAdd is a quick check to see if the candidate is already part of a deprovisioning action
+// Add will launch replacement nodeClaims and add the command to the queue
+// Each command added to the queue should already be validated and ready for execution.
+func (q *Queue) Add(ctx context.Context, candidates []*state.StateNode, replacements []*scheduling.NodeClaim, reason string) error {
+	providerIDs := lo.Map(candidates, func(s *state.StateNode, _ int) string {
+		return s.ProviderID()
+	})
+	// Cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
+	if err := q.RequireNoScheduleTaint(ctx, true, candidates...); err != nil {
+		return multierr.Append(fmt.Errorf("cordoning nodes, %w", err), q.RequireNoScheduleTaint(ctx, false, candidates...))
+	}
+
+	var nodeClaimKeys []nodeclaim.Key
+	var err error
+	if len(replacements) > 0 {
+		if nodeClaimKeys, err = q.launchReplacementNodeClaims(ctx, replacements, reason); err != nil {
+			// If we failed to launch the replacement, don't disrupt.  If this is some permanent failure,
+			// we don't want to disrupt workloads with no way to provision new nodes for them.
+			return multierr.Append(fmt.Errorf("launching replacement nodeclaim, %w", err), q.RequireNoScheduleTaint(ctx, false, candidates...))
+		}
+	}
+
+	// We have the new nodeclaims created at the API server so mark the old nodeclaims for deletion
+	q.cluster.MarkForDeletion(providerIDs...)
+	// Wait for a heuristic period of time to handle initial eventual consistency delay with node claim creation.
+	// This allows us to properly exit when we detect not found errors caused by ICE errors or the Node initializationTTL.
+	cmd := NewCommand(nodeClaimKeys, candidates, reason, q.clock.Now().Add(5*time.Second))
+	q.RateLimitingInterface.AddAfter(cmd, 5*time.Second)
+	for _, candidate := range candidates {
+		q.ProviderIDToCommand[candidate.ProviderID()] = cmd
+	}
+	return nil
+}
+
+// CanAdd is a quick check to see if the candidate is already part of a disruption action
 func (q *Queue) CanAdd(ids ...string) error {
 	var err error
 	for _, id := range ids {
 		if _, ok := q.ProviderIDToCommand[id]; ok {
-			err = multierr.Append(err, fmt.Errorf("candidate is being deprovisioned"))
+			err = multierr.Append(err, fmt.Errorf("candidate is being disrupted"))
 		}
 	}
 	return err
