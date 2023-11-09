@@ -2,6 +2,8 @@ module github.com/aws/karpenter-core
 
 go 1.21
 
+retract v0.27.7
+
 require (
 	github.com/Pallinder/go-randomdata v1.2.0
 	github.com/avast/retry-go v3.0.0+incompatible
