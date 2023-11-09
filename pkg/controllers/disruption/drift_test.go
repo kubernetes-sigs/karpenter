@@ -28,7 +28,6 @@ import (
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
@@ -393,10 +392,10 @@ var _ = Describe("Drift", func() {
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectNewNodeClaimsDeleted(ctx, env.Client, &wg, 1)
-		_, err := disruptionController.Reconcile(ctx, reconcile.Request{})
-		Expect(err).To(HaveOccurred())
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// We should have tried to create a new nodeClaim but failed to do so; therefore, we untainted the existing node
 		node = ExpectExists(ctx, env.Client, node)
 		Expect(node.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))

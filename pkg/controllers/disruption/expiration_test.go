@@ -28,7 +28,6 @@ import (
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
@@ -446,8 +445,7 @@ var _ = Describe("Expiration", func() {
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectNewNodeClaimsDeleted(ctx, env.Client, &wg, 1)
-		_, err := disruptionController.Reconcile(ctx, reconcile.Request{})
-		Expect(err).To(HaveOccurred())
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
 		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})

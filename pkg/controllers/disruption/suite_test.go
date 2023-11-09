@@ -244,7 +244,7 @@ var _ = Describe("Disruption Taints", func() {
 		go func() {
 			defer wg.Done()
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileFailed(ctx, disruptionController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 		}()
 
 		// Iterate in a loop until we get to the validation action

@@ -1051,69 +1051,6 @@ var _ = Describe("Consolidation", func() {
 			ExpectExists(ctx, env.Client, nodeClaim)
 			ExpectExists(ctx, env.Client, node)
 		})
-		It("waits for node deletion to finish", func() {
-			labels := map[string]string{
-				"app": "test",
-			}
-			// create our RS so we can link a pod to it
-			rs := test.ReplicaSet()
-			ExpectApplied(ctx, env.Client, rs)
-			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
-
-			pod := test.Pod(test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels,
-					OwnerReferences: []metav1.OwnerReference{
-						{
-							APIVersion:         "apps/v1",
-							Kind:               "ReplicaSet",
-							Name:               rs.Name,
-							UID:                rs.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
-						},
-					}}})
-			nodeClaim.Finalizers = []string{"unit-test.com/block-deletion"}
-			node.Finalizers = []string{"unit-test.com/block-deletion"}
-
-			ExpectApplied(ctx, env.Client, rs, pod, nodeClaim, node, nodePool)
-
-			// bind pods to node
-			ExpectManualBinding(ctx, env.Client, pod, node)
-
-			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
-
-			// consolidation won't delete the old node until the new node is ready
-			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
-			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-
-			go func() {
-				defer GinkgoRecover()
-				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
-			}()
-			wg.Wait()
-
-			// nodeclaim should still exist
-			ExpectExists(ctx, env.Client, nodeClaim)
-			ExpectExists(ctx, env.Client, node)
-
-			// fetch the latest nodeclaim object and remove the finalizer
-			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
-
-			// consolidation should complete now that the finalizer on the nodeclaim is gone and it can
-			// was actually deleted
-			wg.Wait()
-
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
-			// Cascade any deletion of the nodeclaim to the node
-			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
-
-			ExpectNotFound(ctx, env.Client, nodeClaim, node)
-		})
 	})
 	Context("Delete", func() {
 		var nodeClaim2 *v1beta1.NodeClaim
@@ -1474,12 +1411,11 @@ var _ = Describe("Consolidation", func() {
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
-			// we should delete the non-annotated node and replace with a cheaper node
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
-			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
-			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+			// we should delete the non-annotated node
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 		})
-		It("can replace nodes, considers karpenter.sh/do-not-evict on pods", func() {
+		It("can delete nodes, considers karpenter.sh/do-not-evict on pods", func() {
 			labels := map[string]string{
 				"app": "test",
 			}
@@ -1488,7 +1424,6 @@ var _ = Describe("Consolidation", func() {
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			pods := test.Pods(3, test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1503,30 +1438,7 @@ var _ = Describe("Consolidation", func() {
 							BlockOwnerDeletion: ptr.Bool(true),
 						},
 					},
-				},
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU: resource.MustParse("2"),
-					},
-				},
-			})
-			nodeClaim2, node2 = test.NodeClaimAndNode(v1beta1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1beta1.NodePoolLabelKey:     nodePool.Name,
-						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
-					},
-				},
-				Status: v1beta1.NodeClaimStatus{
-					ProviderID: test.RandomProviderID(),
-					Allocatable: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:  resource.MustParse("5"),
-						v1.ResourcePods: resource.MustParse("100"),
-					},
-				},
-			})
+				}})
 			// Block this pod from being disrupted with karpenter.sh/do-not-evict
 			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"})
 
@@ -1545,7 +1457,6 @@ var _ = Describe("Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 

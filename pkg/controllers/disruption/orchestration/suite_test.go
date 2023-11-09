@@ -249,7 +249,7 @@ var _ = Describe("Queue", func() {
 			Expect(cmd).ToNot(BeNil())
 			Expect(cmd.ReplacementKeys[0].Initialized).To(BeTrue())
 
-			terminatingEvents := disruptionevents.Terminating(stateNode.Node, stateNode.NodeClaim, "test")
+			terminatingEvents := disruptionevents.Terminating(stateNode.Node, stateNode.NodeClaim, "test-method/replace")
 			Expect(recorder.DetectedEvent(terminatingEvents[0].Message)).To(BeTrue())
 			Expect(recorder.DetectedEvent(terminatingEvents[1].Message)).To(BeTrue())
 
@@ -333,8 +333,8 @@ var _ = Describe("Queue", func() {
 		// 	Expect(len(replacementNodeClaims)).To(Equal(2))
 
 		// 	// Expect events to exist
-		// 	Expect(recorder.DetectedEvent(disruptionevents.Launching(replacementNodeClaims[0], "test").Message)).To(BeTrue())
-		// 	Expect(recorder.DetectedEvent(disruptionevents.Launching(replacementNodeClaims[1], "test").Message)).To(BeTrue())
+		// 	Expect(recorder.DetectedEvent(disruptionevents.Launching(replacementNodeClaims[0], "test-method/replace").Message)).To(BeTrue())
+		// 	Expect(recorder.DetectedEvent(disruptionevents.Launching(replacementNodeClaims[1], "test-method/replace").Message)).To(BeTrue())
 		// 	Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(replacementNodeClaims[0]).Message)).To(BeTrue())
 		// 	Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(replacementNodeClaims[1]).Message)).To(BeTrue())
 
@@ -390,7 +390,7 @@ var _ = Describe("Queue", func() {
 			Expect(cmd).ToNot(BeNil())
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
-			terminatingEvents := disruptionevents.Terminating(stateNode.Node, stateNode.NodeClaim, "test")
+			terminatingEvents := disruptionevents.Terminating(stateNode.Node, stateNode.NodeClaim, "test-method/replace")
 			Expect(recorder.DetectedEvent(terminatingEvents[0].Message)).To(BeTrue())
 			Expect(recorder.DetectedEvent(terminatingEvents[1].Message)).To(BeTrue())
 

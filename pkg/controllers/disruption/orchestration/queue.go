@@ -56,6 +56,11 @@ type Command struct {
 	LastError         error
 }
 
+func (c *Command) Reason() string {
+	return fmt.Sprintf("%s/%s", c.Method,
+		lo.Ternary(len(c.ReplacementKeys) > 0, "replace", "delete"))
+}
+
 // NodeClaimKey wraps a nodeclaim.Key with an initialized field to save on readiness checks and identify
 // when a nodeclaim is first initialized for metrics and events.
 type NodeClaimKey struct {
@@ -87,6 +92,8 @@ type Queue struct {
 	// providerID -> command, maps a candidate to its command. Each command has a list of candidates that can be used
 	// to map to itself.
 	ProviderIDToCommand map[string]*Command
+	// depth is managed directly to ensure we don't have to do computation on the providerID -> Command mapping
+	depth int
 
 	kubeClient  client.Client
 	recorder    events.Recorder
@@ -132,6 +139,10 @@ func (q *Queue) Builder(_ context.Context, m manager.Manager) controller.Builder
 }
 
 func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
+	// The queue depth is the number of commands currently being considered.
+	// This should not reference the RateLimitingInterface, as there can be items that
+	// haven't been requeued yet due to their per-item backoff.
+	disruptionQueueDepthGauge.Set(float64(q.depth))
 	// Check if the queue is empty. client-go recommends not using this function to gate the subsequent
 	// get call, but since we're popping items off the queue synchronously, there should be no synchonization
 	// issues.
@@ -141,15 +152,15 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 	// Get command from queue. This waits until queue is non-empty.
 	item, shutdown := q.RateLimitingInterface.Get()
 	if shutdown {
-		return reconcile.Result{}, fmt.Errorf("disruption queue has shut down")
+		panic("disruption queue has shut down")
 	}
 	cmd := item.(*Command)
 	defer q.RateLimitingInterface.Done(cmd)
 
-	if err := q.Process(ctx, cmd); err != nil {
+	if err := q.WaitOrTerminate(ctx, cmd); err != nil {
 		// If recoverable, re-queue and try again.
 		if !IsUnrecoverableError(err) {
-			// log the error that is causing us to fail so we can bubble it up later if this times out.
+			// store the error that is causing us to fail so we can bubble it up later if this times out.
 			cmd.LastError = err
 			q.RateLimitingInterface.AddRateLimited(cmd)
 			return reconcile.Result{RequeueAfter: controller.Immediately}, nil
@@ -180,27 +191,15 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 	return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 }
 
-func (q *Queue) Process(ctx context.Context, cmd *Command) error {
-	if q.clock.Since(cmd.TimeAdded) > maxRetryDuration {
-		return NewUnrecoverableError(fmt.Errorf("command at %s reached timeout after %s", cmd.TimeAdded, q.clock.Since(cmd.TimeAdded)))
-	}
-	// If the time hasn't expired, either wait or terminate.
-	if err := q.WaitOrTerminate(ctx, cmd); err != nil {
-		// If there was an error, set this as the command's last error so that we can propagate it.
-		if IsUnrecoverableError(err) {
-			return fmt.Errorf("got unrecoverable error, %w", err)
-		}
-		return err
-	}
-	return nil
-}
-
 // WaitOrTerminate will wait until launched nodeclaims are ready.
 // Once the replacements are ready, it will terminate the candidates.
 // Will return true if the item in the queue should be re-queued. If a command has
 // timed out, this will return false.
 // nolint:gocyclo
 func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) error {
+	if q.clock.Since(cmd.TimeAdded) > maxRetryDuration {
+		return NewUnrecoverableError(fmt.Errorf("command at %s reached timeout after %s", cmd.TimeAdded, q.clock.Since(cmd.TimeAdded)))
+	}
 	waitErrs := make([]error, len(cmd.ReplacementKeys))
 	for i := range cmd.ReplacementKeys {
 		key := cmd.ReplacementKeys[i]
@@ -215,15 +214,14 @@ func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) error {
 			// This means that there was an ICE error or the Node initializationTTL expired
 			// In this case, the error is unrecoverable, so don't requeue.
 			if apierrors.IsNotFound(err) && q.clock.Since(cmd.TimeAdded) > time.Second*5 {
-				return NewUnrecoverableError(err)
+				return NewUnrecoverableError(fmt.Errorf("replacement was deleted, %w", err))
 			}
 			waitErrs[i] = fmt.Errorf("getting node claim, %w", err)
 			continue
 		}
 		// We emitted this event when disruption was blocked on launching/termination.
 		// This does not block other forms of deprovisioning, but we should still emit this.
-		q.recorder.Publish(disruptionevents.Launching(nodeClaim, fmt.Sprintf("%s/%s", cmd.Method,
-			lo.Ternary(len(cmd.ReplacementKeys) > 0, "replace", "delete"))))
+		q.recorder.Publish(disruptionevents.Launching(nodeClaim, cmd.Reason()))
 		initializedStatus := nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized)
 		if !initializedStatus.IsTrue() {
 			q.recorder.Publish(disruptionevents.WaitingOnReadiness(nodeClaim))
@@ -246,8 +244,7 @@ func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) error {
 	var multiErr error
 	for i := range cmd.Candidates {
 		candidate := cmd.Candidates[i]
-		q.recorder.Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, fmt.Sprintf("%s/%s", cmd.Method,
-			lo.Ternary(len(cmd.ReplacementKeys) > 0, "replace", "delete")))...)
+		q.recorder.Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, cmd.Reason())...)
 		if err := nodeclaim.Delete(ctx, q.kubeClient, candidate.NodeClaim); err != nil {
 			multiErr = multierr.Append(multiErr, client.IgnoreNotFound(err))
 		} else {
@@ -276,8 +273,8 @@ func (q *Queue) Add(cmd *Command) error {
 		q.ProviderIDToCommand[candidate.ProviderID()] = cmd
 	}
 	// Idempotently mark for deletion
-	q.cluster.MarkForDeletion(providerIDs...)
 	q.RateLimitingInterface.Add(cmd)
+	q.depth++
 	return nil
 }
 
@@ -300,6 +297,7 @@ func (q *Queue) Remove(cmd *Command) {
 	}
 	q.RateLimitingInterface.Forget(cmd)
 	q.RateLimitingInterface.Done(cmd)
+	q.depth--
 }
 
 // Reset is used for testing and clears all internal data structures

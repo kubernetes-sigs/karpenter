@@ -180,30 +180,29 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, true, stateNodes...); err != nil {
 		return multierr.Append(fmt.Errorf("cordoning nodes, %w", err), state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...))
 	}
+	providerIDs := lo.Map(cmd.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
+	// We have the new NodeClaims created at the API server so mark the old NodeClaims for deletion
+	c.cluster.MarkForDeletion(providerIDs...)
+
 	var nodeClaimKeys []nodeclaim.Key
 	var err error
 	if len(cmd.replacements) > 0 {
-		if nodeClaimKeys, err = c.launchReplacementNodeClaims(ctx, m, cmd); err != nil {
+		if nodeClaimKeys, err = c.createReplacementNodeClaims(ctx, m, cmd); err != nil {
 			// If we failed to launch the replacement, don't disrupt.  If this is some permanent failure,
 			// we don't want to disrupt workloads with no way to provision new nodes for them.
 			return multierr.Append(fmt.Errorf("launching replacement nodeclaim, %w", err), state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...))
 		}
 	}
-	providerIDs := lo.Map(cmd.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
-	// We have the new NodeClaims created at the API server so mark the old NodeClaims for deletion
-	c.cluster.MarkForDeletion(providerIDs...)
-
 	if err := c.Queue.Add(orchestration.NewCommand(nodeClaimKeys,
 		lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode }), c.clock.Now(), m.Type(), m.ConsolidationType())); err != nil {
 		c.cluster.UnmarkForDeletion(providerIDs...)
-		return fmt.Errorf("adding command to queue, %w", err)
+		return fmt.Errorf("adding command to queue, %w", multierr.Append(err, state.RequireNoScheduleTaint(ctx, c.kubeClient, true, stateNodes...)))
 	}
 	return nil
 }
 
-// launchReplacementNodeClaims launches replacement NodeClaims
-// nolint:gocyclo
-func (c *Controller) launchReplacementNodeClaims(ctx context.Context, m Method, cmd Command) ([]nodeclaim.Key, error) {
+// createReplacementNodeClaims launches replacement NodeClaims
+func (c *Controller) createReplacementNodeClaims(ctx context.Context, m Method, cmd Command) ([]nodeclaim.Key, error) {
 	reason := fmt.Sprintf("%s/%s", m.Type(), cmd.Action())
 	nodeClaimKeys, err := c.provisioner.CreateNodeClaims(ctx, cmd.replacements, provisioning.WithReason(reason))
 	if err != nil {
