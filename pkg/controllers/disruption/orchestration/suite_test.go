@@ -29,6 +29,7 @@ import (
 	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	disruptionevents "github.com/aws/karpenter-core/pkg/controllers/disruption/events"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
@@ -126,7 +127,7 @@ var _ = Describe("Queue", func() {
 		)
 		fakeTopology = lo.Must(scheduling.NewTopology(ctx, env.Client, cluster, map[string]sets.Set[string]{}, []*v1.Pod{}))
 		schedulingReplacementNodeClaim = scheduling.NewNodeClaim(scheduling.NewNodeClaimTemplate(nodePool), fakeTopology,
-			nil, cloudProvider.InstanceTypes)
+			nil, []*cloudprovider.InstanceType{cloudProvider.InstanceTypes[0]})
 		schedulingReplacementNodeClaim.FinalizeScheduling()
 	})
 
@@ -227,7 +228,7 @@ var _ = Describe("Queue", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
-			schedulingReplacementNodeClaim2 := scheduling.NewNodeClaim(scheduling.NewNodeClaimTemplate(nodePool), fakeTopology, nil, cloudProvider.InstanceTypes)
+			schedulingReplacementNodeClaim2 := scheduling.NewNodeClaim(scheduling.NewNodeClaimTemplate(nodePool), fakeTopology, nil, []*cloudprovider.InstanceType{cloudProvider.InstanceTypes[1]})
 			// Remove the hostname requirements that are used for scheduling simulation.
 			schedulingReplacementNodeClaim2.FinalizeScheduling()
 			Expect(queue.Add(ctx, []*state.StateNode{stateNode},
