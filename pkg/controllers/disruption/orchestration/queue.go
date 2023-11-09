@@ -147,7 +147,8 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 	// get call, but since we're popping items off the queue synchronously, there should be no synchonization
 	// issues.
 	for q.Len() == 0 {
-		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
+		time.Sleep(1 * time.Second)
+		// return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 	// Get command from queue. This waits until queue is non-empty.
 	item, shutdown := q.RateLimitingInterface.Get()
@@ -176,14 +177,13 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 			methodLabel:            cmd.Method,
 			consolidationTypeLabel: cmd.ConsolidationType,
 		}).Add(float64(len(failedLaunches)))
+
 		q.cluster.UnmarkForDeletion(lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string { return s.ProviderID() })...)
 		multiErr := multierr.Combine(err, state.RequireNoScheduleTaint(ctx, q.kubeClient, false, cmd.Candidates...), cmd.LastError)
-
-		nodeNames := strings.Join(lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string {
-			return s.Name()
-		}), ",")
 		q.Remove(cmd)
-		logging.FromContext(ctx).With("nodeNames", nodeNames).Errorf("failed to disrupt nodes, %w", multiErr)
+		logging.FromContext(ctx).With("nodeNames", strings.Join(lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string {
+			return s.Name()
+		}), ",")).Errorf("failed to disrupt nodes, %s", multiErr)
 		return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 	}
 	// If command is complete, remove command from queue.
@@ -198,7 +198,7 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 // nolint:gocyclo
 func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) error {
 	if q.clock.Since(cmd.TimeAdded) > maxRetryDuration {
-		return NewUnrecoverableError(fmt.Errorf("command at %s reached timeout after %s", cmd.TimeAdded, q.clock.Since(cmd.TimeAdded)))
+		return NewUnrecoverableError(fmt.Errorf("command reached timeout after %s", q.clock.Since(cmd.TimeAdded)))
 	}
 	waitErrs := make([]error, len(cmd.ReplacementKeys))
 	for i := range cmd.ReplacementKeys {
