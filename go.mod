@@ -104,4 +104,7 @@ require (
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
 
-retract v0.100.101-test // accidentally published testing version
+retract (
+	v0.100.101-test // accidentally published testing version
+	v0.27.7 // accidentally published incomplete patch release
+)
