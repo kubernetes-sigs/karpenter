@@ -73,7 +73,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		return nil, fmt.Errorf("state node isn't initialized")
 	}
 	// If the orchestration queue is already considering a candidate we want to deprovision, don't consider it a candidate.
-	if err := queue.CanAdd(node.Name()); err != nil {
+	if err := queue.CanAdd(node.ProviderID()); err != nil {
 		return nil, fmt.Errorf("candidate is already being deprovisioned, %w", err)
 	}
 	if _, ok := node.Annotations()[v1beta1.DoNotDisruptAnnotationKey]; ok {

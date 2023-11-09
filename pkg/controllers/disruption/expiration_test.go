@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
@@ -87,6 +88,27 @@ var _ = Describe("Expiration", func() {
 	It("should ignore nodes with the karpenter.sh/do-not-disrupt annotation", func() {
 		node.Annotations = lo.Assign(node.Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
 		ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+
+		// Expect to not create or delete more nodeclaims
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		ExpectExists(ctx, env.Client, nodeClaim)
+	})
+	It("should ignore nodes that have pods with the karpenter.sh/do-not-evict annotation", func() {
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1alpha5.DoNotEvictPodAnnotationKey: "true",
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
@@ -385,7 +407,11 @@ var _ = Describe("Expiration", func() {
 		Expect(nodes[0].Name).ToNot(Equal(node.Name))
 	})
 	It("should untaint nodes when expiration replacement fails", func() {
+<<<<<<< HEAD
 		cloudProvider.AllowedCreateCalls = 0 // fail the replacement and expect it to untaint
+=======
+		cloudProvider.AllowedCreateCalls = 0 // fail the replacement and expect it to uncordon
+>>>>>>> 4127666b (revert queue)
 
 		labels := map[string]string{
 			"app": "test",
@@ -424,10 +450,7 @@ var _ = Describe("Expiration", func() {
 		Expect(err).To(HaveOccurred())
 		wg.Wait()
 
-		// Advance the clock to expire the item in the queue.
-		fakeClock.Step(20 * time.Minute)
 		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
-
 		// We should have tried to create a new nodeClaim but failed to do so; therefore, we uncordoned the existing node
 		node = ExpectExists(ctx, env.Client, node)
 		Expect(node.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))

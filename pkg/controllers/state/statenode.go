@@ -20,7 +20,9 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -399,4 +401,53 @@ func nominationWindow(ctx context.Context) time.Duration {
 		nominationPeriod = 10 * time.Second
 	}
 	return nominationPeriod
+}
+
+// RequireNoScheduleTaint will add/remove the karpenter.sh/disruption:NoSchedule taint from the candidates.
+// This is used to enforce no taints at the beginning of disruption, and
+// to add/remove taints while executing a disruption action.
+// nolint:gocyclo
+func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTaint bool, nodes ...*StateNode) error {
+	var multiErr error
+	for _, n := range nodes {
+		// If the StateNode is Karpenter owned and only has a nodeclaim, or is not owned by
+		// Karpenter, thus having no nodeclaim, don't touch the node.
+		if n.Node == nil || n.NodeClaim == nil {
+			continue
+		}
+		node := &v1.Node{}
+		if err := kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Name}, node); client.IgnoreNotFound(err) != nil {
+			multiErr = multierr.Append(multiErr, fmt.Errorf("getting node, %w", err))
+		}
+		// If the node already has the taint, continue to the next
+		_, hasTaint := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
+			return v1beta1.IsDisruptingTaint(taint)
+		})
+		// Node is being deleted, so no need to remove taint as the node will be gone soon.
+		// This ensures that the disruption controller doesn't modify taints that the Termination
+		// controller is also modifying
+		if hasTaint && !node.DeletionTimestamp.IsZero() {
+			continue
+		}
+		stored := node.DeepCopy()
+		// If the taint is present and we want to remove the taint, remove it.
+		if !addTaint {
+			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint v1.Taint, _ int) bool {
+				return taint.Key == v1beta1.DisruptionTaintKey
+			})
+			// otherwise, add it.
+		} else if addTaint && !hasTaint {
+			// If the taint key is present (but with a different value or effect), remove it.
+			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t v1.Taint, _ int) bool {
+				return t.Key == v1beta1.DisruptionTaintKey
+			})
+			node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
+		}
+		if !equality.Semantic.DeepEqual(stored, node) {
+			if err := kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+				multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
+			}
+		}
+	}
+	return multiErr
 }

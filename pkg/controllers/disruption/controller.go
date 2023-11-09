@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"go.uber.org/multierr"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -34,6 +35,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
+	"github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
 
 type Controller struct {
@@ -108,7 +110,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	// Karpenter taints nodes with a karpenter.sh/disruption taint as part of the disruption process
 	// while it progresses in memory. If Karpenter restarts during a disruption action, some nodes can be left tainted.
 	// Idempotently remove this taint from candidates before continuing.
-	if err := c.Queue.RequireNoScheduleTaint(ctx, false, c.cluster.Nodes()...); err != nil {
+	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, false, c.cluster.Nodes()...); err != nil {
 		return reconcile.Result{}, fmt.Errorf("removing taint from nodes, %w", err)
 	}
 
@@ -159,24 +161,60 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	return true, nil
 }
 
-// executeCommand will add the command to the orchestration queue where:
-// 1. Candidates will be tainted
-// 2. Replacements will be launched
+// executeCommand will do the following, untainting if the step fails.
+// 1. Taint candidate nodes
+// 2. Spin up replacement nodes
+// 3. Add Command to orchestration.Queue to wait to delete the candiates.
 func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) error {
-	stateNodes := lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode {
-		return c.StateNode
-	})
-	reason := fmt.Sprintf("%s/%s", m.Type(), cmd.Action())
-	logging.FromContext(ctx).Infof("disrupting via %s %s", m.Type(), cmd)
-	if err := c.Queue.Add(ctx, stateNodes, cmd.replacements, reason); err != nil {
-		return fmt.Errorf("adding command to queue, %w", err)
-	}
 	disruptionActionsPerformedCounter.With(map[string]string{
 		actionLabel:            string(cmd.Action()),
 		methodLabel:            m.Type(),
 		consolidationTypeLabel: m.ConsolidationType(),
 	}).Inc()
+	logging.FromContext(ctx).Infof("disrupting via %s %s", m.Type(), cmd)
+
+	stateNodes := lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode {
+		return c.StateNode
+	})
+	// Cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
+	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, true, stateNodes...); err != nil {
+		return multierr.Append(fmt.Errorf("cordoning nodes, %w", err), state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...))
+	}
+	var nodeClaimKeys []nodeclaim.Key
+	var err error
+	if len(cmd.replacements) > 0 {
+		if nodeClaimKeys, err = c.launchReplacementNodeClaims(ctx, m, cmd); err != nil {
+			// If we failed to launch the replacement, don't disrupt.  If this is some permanent failure,
+			// we don't want to disrupt workloads with no way to provision new nodes for them.
+			return multierr.Append(fmt.Errorf("launching replacement nodeclaim, %w", err), state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...))
+		}
+	}
+	providerIDs := lo.Map(cmd.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
+	// We have the new NodeClaims created at the API server so mark the old NodeClaims for deletion
+	c.cluster.MarkForDeletion(providerIDs...)
+
+	if err := c.Queue.Add(orchestration.NewCommand(nodeClaimKeys,
+		lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode }), c.clock.Now(), m.Type(), m.ConsolidationType())); err != nil {
+		c.cluster.UnmarkForDeletion(providerIDs...)
+		return fmt.Errorf("adding command to queue, %w", err)
+	}
 	return nil
+}
+
+// launchReplacementNodeClaims launches replacement NodeClaims
+// nolint:gocyclo
+func (c *Controller) launchReplacementNodeClaims(ctx context.Context, m Method, cmd Command) ([]nodeclaim.Key, error) {
+	reason := fmt.Sprintf("%s/%s", m.Type(), cmd.Action())
+	nodeClaimKeys, err := c.provisioner.CreateNodeClaims(ctx, cmd.replacements, provisioning.WithReason(reason))
+	if err != nil {
+		// untaint the nodes as the launch may fail (e.g. ICE)
+		return nil, err
+	}
+	if len(nodeClaimKeys) != len(cmd.replacements) {
+		// shouldn't ever occur since a partially failed CreateNodeClaims should return an error
+		return nil, fmt.Errorf("expected %d replacements, got %d", len(cmd.replacements), len(nodeClaimKeys))
+	}
+	return nodeClaimKeys, nil
 }
 
 func (c *Controller) recordRun(s string) {
