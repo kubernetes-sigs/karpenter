@@ -22,6 +22,7 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -56,6 +57,13 @@ var (
 		"pid.available",
 	)
 )
+
+func (in *NodeClaim) SupportedVerbs() []admissionregistrationv1.OperationType {
+	return []admissionregistrationv1.OperationType{
+		admissionregistrationv1.Create,
+		admissionregistrationv1.Update,
+	}
+}
 
 // Validate the NodeClaim
 func (in *NodeClaim) Validate(_ context.Context) (errs *apis.FieldError) {
