@@ -78,12 +78,12 @@ require (
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/automaxprocs v1.4.0 // indirect
 	golang.org/x/exp v0.0.0-20220303212507-bbda1eaf7a17 // indirect
-	golang.org/x/net v0.12.0 // indirect
+	golang.org/x/net v0.17.0 // indirect
 	golang.org/x/oauth2 v0.10.0 // indirect
 	golang.org/x/sync v0.3.0 // indirect
-	golang.org/x/sys v0.10.0 // indirect
-	golang.org/x/term v0.10.0 // indirect
-	golang.org/x/text v0.11.0 // indirect
+	golang.org/x/sys v0.13.0 // indirect
+	golang.org/x/term v0.13.0 // indirect
+	golang.org/x/text v0.13.0 // indirect
 	golang.org/x/tools v0.7.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.2.0 // indirect
 	google.golang.org/api v0.61.0 // indirect
@@ -102,4 +102,9 @@ require (
 	sigs.k8s.io/json v0.0.0-20220713155537-f223a00ba0e2 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.2.3 // indirect
 	sigs.k8s.io/yaml v1.3.0 // indirect
+)
+
+retract (
+	v0.100.101-test // accidentally published testing version
+	v0.27.7 // accidentally published incomplete patch release
 )
