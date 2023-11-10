@@ -267,6 +267,9 @@ var _ = Describe("Disruption Taints", func() {
 		ExpectNotFound(ctx, env.Client, createdNodeClaim[0])
 		wg.Wait()
 
+		// Step the clock one minute so that the nodeclaim deletion isn't caught by the
+		// eventual consistency delay.
+		fakeClock.Step(1 * time.Minute)
 		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
