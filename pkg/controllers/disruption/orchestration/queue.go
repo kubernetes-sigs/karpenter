@@ -35,6 +35,8 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllertest"
+
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	disruptionevents "github.com/aws/karpenter-core/pkg/controllers/disruption/events"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -116,6 +118,20 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 	return queue
 }
 
+func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clock.Clock,
+	provisioner *provisioning.Provisioner) *Queue {
+	queue := &Queue{
+		RateLimitingInterface: &controllertest.Queue{Interface: workqueue.New()},
+		ProviderIDToCommand:   map[string]*Command{},
+		kubeClient:            kubeClient,
+		recorder:              recorder,
+		cluster:               cluster,
+		clock:                 clock,
+		provisioner:           provisioner,
+	}
+	return queue
+}
+
 // NewCommand creates a command key and adds in initial data for the orchestration queue.
 func NewCommand(replacements []nodeclaim.Key, candidates []*state.StateNode, timeAdded time.Time, method string, consolidationType string) *Command {
 	return &Command{
@@ -138,30 +154,27 @@ func (q *Queue) Builder(_ context.Context, m manager.Manager) controller.Builder
 }
 
 func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
 	// The queue depth is the number of commands currently being considered.
-	// This should not reference the RateLimitingInterface, as there can be items that
-	// haven't been requeued yet due to their per-item backoff.
+	// This should not use the RateLimitingInterface.Len() method, as this does not include
+	// commands that haven't completed their requeue backoff.
 	disruptionQueueDepthGauge.Set(float64(len(lo.Uniq(lo.Values(q.ProviderIDToCommand)))))
+
 	// Check if the queue is empty. client-go recommends not using this function to gate the subsequent
-	// get call, but since we're popping items off the queue synchronously, there should be no synchonization
-	// issues.
-	for q.Len() == 0 {
-		// time.Sleep(1 * time.Second)
+	// get call, but since we're popping items off the queue synchronously retrying, there should be
+	// no synchonization issues.
+	if q.Len() == 0 {
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
+
 	// Get command from queue. This waits until queue is non-empty.
 	item, shutdown := q.RateLimitingInterface.Get()
 	if shutdown {
 		panic("unexpected failure, disruption queue has shut down")
 	}
 	cmd := item.(*Command)
-	defer q.RateLimitingInterface.Done(cmd)
 
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	if err := q.WaitOrTerminate(ctx, cmd); err != nil {
+	defer q.RateLimitingInterface.Done(cmd)
+	if err := q.waitOrTerminate(ctx, cmd); err != nil {
 		// If recoverable, re-queue and try again.
 		if !IsUnrecoverableError(err) {
 			// store the error that is causing us to fail so we can bubble it up later if this times out.
@@ -193,12 +206,12 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 	return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 }
 
-// WaitOrTerminate will wait until launched nodeclaims are ready.
+// waitOrTerminate will wait until launched nodeclaims are ready.
 // Once the replacements are ready, it will terminate the candidates.
 // Will return true if the item in the queue should be re-queued. If a command has
 // timed out, this will return false.
 // nolint:gocyclo
-func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) error {
+func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 	if q.clock.Since(cmd.TimeAdded) > maxRetryDuration {
 		return NewUnrecoverableError(fmt.Errorf("command reached timeout after %s", q.clock.Since(cmd.TimeAdded)))
 	}
@@ -264,8 +277,6 @@ func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) error {
 // Add adds commands to the Queue
 // Each command added to the queue should already be validated and ready for execution.
 func (q *Queue) Add(cmd *Command) error {
-	q.mu.Lock()
-	defer q.mu.Unlock()
 	providerIDs := lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string {
 		return s.ProviderID()
 	})
@@ -273,6 +284,8 @@ func (q *Queue) Add(cmd *Command) error {
 	if err := q.CanAdd(providerIDs...); err != nil {
 		return fmt.Errorf("adding command, %w", err)
 	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	for _, candidate := range cmd.Candidates {
 		q.ProviderIDToCommand[candidate.ProviderID()] = cmd
 	}
@@ -308,8 +321,6 @@ func (q *Queue) Remove(cmd *Command) {
 
 // Reset is used for testing and clears all internal data structures
 func (q *Queue) Reset() {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.RateLimitingInterface = workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(queueBaseDelay, queueMaxDelay))
+	q.RateLimitingInterface = &controllertest.Queue{Interface: workqueue.New()}
 	q.ProviderIDToCommand = map[string]*Command{}
 }
