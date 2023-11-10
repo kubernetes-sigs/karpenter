@@ -289,7 +289,6 @@ func (q *Queue) Add(cmd *Command) error {
 	for _, candidate := range cmd.Candidates {
 		q.ProviderIDToCommand[candidate.ProviderID()] = cmd
 	}
-	// Idempotently mark for deletion
 	q.RateLimitingInterface.Add(cmd)
 	return nil
 }

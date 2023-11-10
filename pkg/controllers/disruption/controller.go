@@ -192,6 +192,7 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 			return multierr.Append(fmt.Errorf("launching replacement nodeclaim, %w", err), state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...))
 		}
 	}
+
 	providerIDs := lo.Map(cmd.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
 	// We have the new NodeClaims created at the API server so mark the old NodeClaims for deletion
 	c.cluster.MarkForDeletion(providerIDs...)
