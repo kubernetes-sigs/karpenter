@@ -111,7 +111,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	// while it progresses in memory. If Karpenter restarts during a disruption action, some nodes can be left tainted.
 	// Idempotently remove this taint from candidates that are not in the orchestration queue before continuing.
 	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, false, lo.Filter(c.cluster.Nodes(), func(s *state.StateNode, _ int) bool {
-		return c.queue.CanAdd(s.ProviderID()) == nil
+		return !c.queue.HasAny(s.ProviderID())
 	})...); err != nil {
 		return reconcile.Result{}, fmt.Errorf("removing taint from nodes, %w", err)
 	}
@@ -180,7 +180,7 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 	})
 	// Cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
 	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, true, stateNodes...); err != nil {
-		return multierr.Append(fmt.Errorf("cordoning nodes, %w", err), state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...))
+		return multierr.Append(fmt.Errorf("tainting nodes, %w", err), state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...))
 	}
 
 	var nodeClaimKeys []nodeclaim.Key
@@ -205,12 +205,11 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 	return nil
 }
 
-// createReplacementNodeClaims launches replacement NodeClaims
+// createReplacementNodeClaims creates replacement NodeClaims
 func (c *Controller) createReplacementNodeClaims(ctx context.Context, m Method, cmd Command) ([]nodeclaim.Key, error) {
 	reason := fmt.Sprintf("%s/%s", m.Type(), cmd.Action())
 	nodeClaimKeys, err := c.provisioner.CreateNodeClaims(ctx, cmd.replacements, provisioning.WithReason(reason))
 	if err != nil {
-		// untaint the nodes as the launch may fail (e.g. ICE)
 		return nil, err
 	}
 	if len(nodeClaimKeys) != len(cmd.replacements) {

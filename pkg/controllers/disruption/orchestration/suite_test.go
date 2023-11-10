@@ -213,20 +213,17 @@ var _ = Describe("Queue", func() {
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
 			Expect(node1.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
-			_, ok := queue.ProviderIDToCommand[stateNode.ProviderID()]
-			Expect(ok).To(BeFalse())
 		})
 		It("should fully handle a command when replacements are initialized", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool, replacementNodeClaim, replacementNode)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
-			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, fakeClock.Now(), "test-method", "fake-type"))).To(BeNil())
+			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, fakeClock.Now(), "test-method", "fake-type")
+			Expect(queue.Add(cmd)).To(BeNil())
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			// Get the command
-			cmd := queue.ProviderIDToCommand[nodeClaim1.Status.ProviderID]
-			Expect(cmd).ToNot(BeNil())
 			Expect(cmd.ReplacementKeys[0].Initialized).To(BeFalse())
 
 			Expect(recorder.DetectedEvent(disruptionevents.Launching(replacementNodeClaim, cmd.Reason()).Message)).To(BeTrue())
@@ -291,11 +288,9 @@ var _ = Describe("Queue", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
-			Expect(queue.Add(orchestration.NewCommand([]nodeclaim.Key{}, []*state.StateNode{stateNode}, fakeClock.Now(), "test-method", "fake-type"))).To(BeNil())
+			cmd := orchestration.NewCommand([]nodeclaim.Key{}, []*state.StateNode{stateNode}, fakeClock.Now(), "test-method", "fake-type")
+			Expect(queue.Add(cmd)).To(BeNil())
 
-			// Get the command and process it
-			cmd := queue.ProviderIDToCommand[nodeClaim1.Status.ProviderID]
-			Expect(cmd).ToNot(BeNil())
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			terminatingEvents := disruptionevents.Terminating(node1, nodeClaim1, cmd.Reason())

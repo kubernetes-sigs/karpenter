@@ -94,7 +94,7 @@ type Queue struct {
 	workqueue.RateLimitingInterface
 	// providerID -> command, maps a candidate to its command. Each command has a list of candidates that can be used
 	// to map to itself.
-	ProviderIDToCommand map[string]*Command
+	providerIDToCommand map[string]*Command
 	mu                  sync.RWMutex
 	kubeClient          client.Client
 	recorder            events.Recorder
@@ -108,7 +108,7 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 	provisioner *provisioning.Provisioner) *Queue {
 	queue := &Queue{
 		RateLimitingInterface: workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(queueBaseDelay, queueMaxDelay)),
-		ProviderIDToCommand:   map[string]*Command{},
+		providerIDToCommand:   map[string]*Command{},
 		kubeClient:            kubeClient,
 		recorder:              recorder,
 		cluster:               cluster,
@@ -122,7 +122,7 @@ func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster
 	provisioner *provisioning.Provisioner) *Queue {
 	queue := &Queue{
 		RateLimitingInterface: &controllertest.Queue{Interface: workqueue.New()},
-		ProviderIDToCommand:   map[string]*Command{},
+		providerIDToCommand:   map[string]*Command{},
 		kubeClient:            kubeClient,
 		recorder:              recorder,
 		cluster:               cluster,
@@ -157,7 +157,7 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 	// The queue depth is the number of commands currently being considered.
 	// This should not use the RateLimitingInterface.Len() method, as this does not include
 	// commands that haven't completed their requeue backoff.
-	disruptionQueueDepthGauge.Set(float64(len(lo.Uniq(lo.Values(q.ProviderIDToCommand)))))
+	disruptionQueueDepthGauge.Set(float64(len(lo.Uniq(lo.Values(q.providerIDToCommand)))))
 
 	// Check if the queue is empty. client-go recommends not using this function to gate the subsequent
 	// get call, but since we're popping items off the queue synchronously retrying, there should be
@@ -172,13 +172,12 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 		panic("unexpected failure, disruption queue has shut down")
 	}
 	cmd := item.(*Command)
-
-	defer q.RateLimitingInterface.Done(cmd)
 	if err := q.waitOrTerminate(ctx, cmd); err != nil {
 		// If recoverable, re-queue and try again.
 		if !IsUnrecoverableError(err) {
 			// store the error that is causing us to fail so we can bubble it up later if this times out.
 			cmd.LastError = err
+			q.RateLimitingInterface.Done(cmd)
 			q.RateLimitingInterface.AddRateLimited(cmd)
 			return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 		}
@@ -281,41 +280,41 @@ func (q *Queue) Add(cmd *Command) error {
 		return s.ProviderID()
 	})
 	// First check if we can add the command.
-	if err := q.CanAdd(providerIDs...); err != nil {
-		return fmt.Errorf("adding command, %w", err)
+	if q.HasAny(providerIDs...) {
+		return fmt.Errorf("candidate is being disrupted")
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	for _, candidate := range cmd.Candidates {
-		q.ProviderIDToCommand[candidate.ProviderID()] = cmd
+		q.providerIDToCommand[candidate.ProviderID()] = cmd
 	}
 	q.RateLimitingInterface.Add(cmd)
 	return nil
 }
 
-// CanAdd is a quick check to see if the candidate is already part of a disruption action
-func (q *Queue) CanAdd(ids ...string) error {
+// HasAny checks to see if the candidate is part of an currently executing command.
+func (q *Queue) HasAny(ids ...string) bool {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
-	var err error
-	for _, id := range ids {
-		if _, ok := q.ProviderIDToCommand[id]; ok {
-			err = multierr.Append(err, fmt.Errorf("candidate is being disrupted"))
-		}
-	}
-	return err
+
+	// If the mapping has at least one of the candidates' providerIDs, return true.
+	_, ok := lo.Find(ids, func(id string) bool {
+		_, ok := q.providerIDToCommand[id]
+		return ok
+	})
+	return ok
 }
 
 // Remove fully clears the queue of all references of a hash/command
 func (q *Queue) Remove(cmd *Command) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	q.RateLimitingInterface.Done(cmd)
 	// Remove all candidates linked to the command
 	for _, candidate := range cmd.Candidates {
-		delete(q.ProviderIDToCommand, candidate.ProviderID())
+		delete(q.providerIDToCommand, candidate.ProviderID())
 	}
 	q.RateLimitingInterface.Forget(cmd)
-	q.RateLimitingInterface.Done(cmd)
 }
 
 // Reset is used for testing and clears all internal data structures
@@ -323,5 +322,5 @@ func (q *Queue) Reset() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.RateLimitingInterface = &controllertest.Queue{Interface: workqueue.New()}
-	q.ProviderIDToCommand = map[string]*Command{}
+	q.providerIDToCommand = map[string]*Command{}
 }

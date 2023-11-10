@@ -72,9 +72,9 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	if !node.Initialized() {
 		return nil, fmt.Errorf("state node isn't initialized")
 	}
-	// If the orchestration queue is already considering a candidate we want to deprovision, don't consider it a candidate.
-	if err := queue.CanAdd(node.ProviderID()); err != nil {
-		return nil, fmt.Errorf("candidate is already being deprovisioned, %w", err)
+	// If the orchestration queue is already considering a candidate we want to disrupt, don't consider it a candidate.
+	if queue.HasAny(node.ProviderID()) {
+		return nil, fmt.Errorf("candidate is already being deprovisioned")
 	}
 	if _, ok := node.Annotations()[v1beta1.DoNotDisruptAnnotationKey]; ok {
 		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Disruption is blocked with the %q annotation", v1beta1.DoNotDisruptAnnotationKey))...)
