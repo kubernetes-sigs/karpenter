@@ -291,7 +291,7 @@ var _ = Describe("Queue", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
-			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, fakeClock.Now(), "test-method", "fake-type"))).To(BeNil())
+			Expect(queue.Add(orchestration.NewCommand([]nodeclaim.Key{}, []*state.StateNode{stateNode}, fakeClock.Now(), "test-method", "fake-type"))).To(BeNil())
 
 			// Get the command and process it
 			cmd := queue.ProviderIDToCommand[nodeClaim1.Status.ProviderID]

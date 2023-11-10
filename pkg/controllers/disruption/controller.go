@@ -110,7 +110,9 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	// Karpenter taints nodes with a karpenter.sh/disruption taint as part of the disruption process
 	// while it progresses in memory. If Karpenter restarts during a disruption action, some nodes can be left tainted.
 	// Idempotently remove this taint from candidates before continuing.
-	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, false, c.cluster.Nodes()...); err != nil {
+	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, false, lo.Filter(c.cluster.Nodes(), func(s *state.StateNode, _ int) bool {
+		return c.Queue.CanAdd(s.ProviderID()) != nil
+	})...); err != nil {
 		return reconcile.Result{}, fmt.Errorf("removing taint from nodes, %w", err)
 	}
 
@@ -196,7 +198,7 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 	if err := c.Queue.Add(orchestration.NewCommand(nodeClaimKeys,
 		lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode }), c.clock.Now(), m.Type(), m.ConsolidationType())); err != nil {
 		c.cluster.UnmarkForDeletion(providerIDs...)
-		return fmt.Errorf("adding command to queue, %w", multierr.Append(err, state.RequireNoScheduleTaint(ctx, c.kubeClient, true, stateNodes...)))
+		return fmt.Errorf("adding command to queue, %w", multierr.Append(err, state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...)))
 	}
 	return nil
 }

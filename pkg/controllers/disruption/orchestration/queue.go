@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/samber/lo"
@@ -92,14 +93,12 @@ type Queue struct {
 	// providerID -> command, maps a candidate to its command. Each command has a list of candidates that can be used
 	// to map to itself.
 	ProviderIDToCommand map[string]*Command
-	// depth is managed directly to ensure we don't have to do computation on the providerID -> Command mapping
-	depth int
-
-	kubeClient  client.Client
-	recorder    events.Recorder
-	cluster     *state.Cluster
-	clock       clock.Clock
-	provisioner *provisioning.Provisioner
+	mu                  sync.RWMutex
+	kubeClient          client.Client
+	recorder            events.Recorder
+	cluster             *state.Cluster
+	clock               clock.Clock
+	provisioner         *provisioning.Provisioner
 }
 
 // NewQueue creates a queue that will asynchronously orchestrate disruption commands
@@ -118,13 +117,13 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 }
 
 // NewCommand creates a command key and adds in initial data for the orchestration queue.
-func NewCommand(replacements []nodeclaim.Key, candidates []*state.StateNode, timeAdded time.Time, reason string, consolidationType string) *Command {
+func NewCommand(replacements []nodeclaim.Key, candidates []*state.StateNode, timeAdded time.Time, method string, consolidationType string) *Command {
 	return &Command{
 		ReplacementKeys: lo.Map(replacements, func(key nodeclaim.Key, _ int) *NodeClaimKey {
 			return &NodeClaimKey{Key: key}
 		}),
 		Candidates:        candidates,
-		Method:            reason,
+		Method:            method,
 		ConsolidationType: consolidationType,
 		TimeAdded:         timeAdded,
 	}
@@ -139,25 +138,29 @@ func (q *Queue) Builder(_ context.Context, m manager.Manager) controller.Builder
 }
 
 func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
 	// The queue depth is the number of commands currently being considered.
 	// This should not reference the RateLimitingInterface, as there can be items that
 	// haven't been requeued yet due to their per-item backoff.
-	disruptionQueueDepthGauge.Set(float64(q.depth))
+	disruptionQueueDepthGauge.Set(float64(len(lo.Uniq(lo.Values(q.ProviderIDToCommand)))))
 	// Check if the queue is empty. client-go recommends not using this function to gate the subsequent
 	// get call, but since we're popping items off the queue synchronously, there should be no synchonization
 	// issues.
 	for q.Len() == 0 {
-		time.Sleep(1 * time.Second)
-		// return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
+		// time.Sleep(1 * time.Second)
+		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 	// Get command from queue. This waits until queue is non-empty.
 	item, shutdown := q.RateLimitingInterface.Get()
 	if shutdown {
-		panic("disruption queue has shut down")
+		panic("unexpected failure, disruption queue has shut down")
 	}
 	cmd := item.(*Command)
 	defer q.RateLimitingInterface.Done(cmd)
 
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	if err := q.WaitOrTerminate(ctx, cmd); err != nil {
 		// If recoverable, re-queue and try again.
 		if !IsUnrecoverableError(err) {
@@ -180,11 +183,10 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 
 		q.cluster.UnmarkForDeletion(lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string { return s.ProviderID() })...)
 		multiErr := multierr.Combine(err, state.RequireNoScheduleTaint(ctx, q.kubeClient, false, cmd.Candidates...), cmd.LastError)
-		q.Remove(cmd)
-		logging.FromContext(ctx).With("nodeNames", strings.Join(lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string {
+		// Log the error
+		logging.FromContext(ctx).With("nodes", strings.Join(lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string {
 			return s.Name()
 		}), ",")).Errorf("failed to disrupt nodes, %s", multiErr)
-		return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 	}
 	// If command is complete, remove command from queue.
 	q.Remove(cmd)
@@ -262,6 +264,8 @@ func (q *Queue) WaitOrTerminate(ctx context.Context, cmd *Command) error {
 // Add adds commands to the Queue
 // Each command added to the queue should already be validated and ready for execution.
 func (q *Queue) Add(cmd *Command) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	providerIDs := lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string {
 		return s.ProviderID()
 	})
@@ -274,12 +278,13 @@ func (q *Queue) Add(cmd *Command) error {
 	}
 	// Idempotently mark for deletion
 	q.RateLimitingInterface.Add(cmd)
-	q.depth++
 	return nil
 }
 
 // CanAdd is a quick check to see if the candidate is already part of a disruption action
 func (q *Queue) CanAdd(ids ...string) error {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
 	var err error
 	for _, id := range ids {
 		if _, ok := q.ProviderIDToCommand[id]; ok {
@@ -291,17 +296,20 @@ func (q *Queue) CanAdd(ids ...string) error {
 
 // Remove fully clears the queue of all references of a hash/command
 func (q *Queue) Remove(cmd *Command) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	// Remove all candidates linked to the command
 	for _, candidate := range cmd.Candidates {
 		delete(q.ProviderIDToCommand, candidate.ProviderID())
 	}
 	q.RateLimitingInterface.Forget(cmd)
 	q.RateLimitingInterface.Done(cmd)
-	q.depth--
 }
 
 // Reset is used for testing and clears all internal data structures
 func (q *Queue) Reset() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	q.RateLimitingInterface = workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(queueBaseDelay, queueMaxDelay))
 	q.ProviderIDToCommand = map[string]*Command{}
 }

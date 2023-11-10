@@ -601,6 +601,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -1356,6 +1357,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
