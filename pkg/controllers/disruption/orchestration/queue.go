@@ -321,6 +321,8 @@ func (q *Queue) Remove(cmd *Command) {
 
 // Reset is used for testing and clears all internal data structures
 func (q *Queue) Reset() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	q.RateLimitingInterface = &controllertest.Queue{Interface: workqueue.New()}
 	q.ProviderIDToCommand = map[string]*Command{}
 }

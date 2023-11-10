@@ -39,7 +39,7 @@ import (
 )
 
 type Controller struct {
-	Queue         *orchestration.Queue
+	queue         *orchestration.Queue
 	kubeClient    client.Client
 	cluster       *state.Cluster
 	provisioner   *provisioning.Provisioner
@@ -60,7 +60,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *orchestration.Queue) *Controller {
 
 	return &Controller{
-		Queue:         queue,
+		queue:         queue,
 		clock:         clk,
 		kubeClient:    kubeClient,
 		cluster:       cluster,
@@ -111,7 +111,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	// while it progresses in memory. If Karpenter restarts during a disruption action, some nodes can be left tainted.
 	// Idempotently remove this taint from candidates that are not in the orchestration queue before continuing.
 	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, false, lo.Filter(c.cluster.Nodes(), func(s *state.StateNode, _ int) bool {
-		return c.Queue.CanAdd(s.ProviderID()) == nil
+		return c.queue.CanAdd(s.ProviderID()) == nil
 	})...); err != nil {
 		return reconcile.Result{}, fmt.Errorf("removing taint from nodes, %w", err)
 	}
@@ -137,7 +137,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		methodLabel:            disruption.Type(),
 		consolidationTypeLabel: disruption.ConsolidationType(),
 	}))()
-	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, c.Queue)
+	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, c.queue)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}
@@ -182,9 +182,6 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, true, stateNodes...); err != nil {
 		return multierr.Append(fmt.Errorf("cordoning nodes, %w", err), state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...))
 	}
-	providerIDs := lo.Map(cmd.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
-	// We have the new NodeClaims created at the API server so mark the old NodeClaims for deletion
-	c.cluster.MarkForDeletion(providerIDs...)
 
 	var nodeClaimKeys []nodeclaim.Key
 	var err error
@@ -195,7 +192,11 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 			return multierr.Append(fmt.Errorf("launching replacement nodeclaim, %w", err), state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...))
 		}
 	}
-	if err := c.Queue.Add(orchestration.NewCommand(nodeClaimKeys,
+	providerIDs := lo.Map(cmd.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
+	// We have the new NodeClaims created at the API server so mark the old NodeClaims for deletion
+	c.cluster.MarkForDeletion(providerIDs...)
+
+	if err := c.queue.Add(orchestration.NewCommand(nodeClaimKeys,
 		lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode }), c.clock.Now(), m.Type(), m.ConsolidationType())); err != nil {
 		c.cluster.UnmarkForDeletion(providerIDs...)
 		return fmt.Errorf("adding command to queue, %w", multierr.Append(err, state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...)))
