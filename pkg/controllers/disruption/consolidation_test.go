@@ -1416,6 +1416,7 @@ var _ = Describe("Consolidation", func() {
 			// we should delete the non-annotated node
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
 		It("can delete nodes, considers karpenter.sh/do-not-evict on pods", func() {
 			labels := map[string]string{
