@@ -84,6 +84,7 @@ func HasDoNotDisrupt(pod *v1.Pod) bool {
 	if pod.Annotations == nil {
 		return false
 	}
+	// TODO Remove checking do-not-evict as part of v1
 	return pod.Annotations[v1alpha5.DoNotEvictPodAnnotationKey] == "true" ||
 		pod.Annotations[v1beta1.DoNotDisruptAnnotationKey] == "true"
 }

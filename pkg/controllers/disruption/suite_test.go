@@ -130,7 +130,7 @@ var _ = AfterEach(func() {
 var _ = Describe("Disruption Taints", func() {
 	var nodePool *v1beta1.NodePool
 	var nodeClaim *v1beta1.NodeClaim
-	var nodeClaimNode *v1.Node
+	var node *v1.Node
 	BeforeEach(func() {
 		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
 			Name: "current-on-demand",
@@ -167,7 +167,7 @@ var _ = Describe("Disruption Taints", func() {
 			},
 		})
 		nodePool = test.NodePool()
-		nodeClaim, nodeClaimNode = test.NodeClaimAndNode(v1beta1.NodeClaim{
+		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1.LabelInstanceTypeStable: currentInstance.Name,
@@ -199,12 +199,12 @@ var _ = Describe("Disruption Taints", func() {
 			},
 		})
 		nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: nil}
-		nodeClaimNode.Spec.Taints = append(nodeClaimNode.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, nodeClaimNode, pod)
-		ExpectManualBinding(ctx, env.Client, pod, nodeClaimNode)
+		node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and nodeClaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodeClaimNode}, []*v1beta1.NodeClaim{nodeClaim})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		// Trigger the reconcile loop to start but don't trigger the verify action
 		wg := sync.WaitGroup{}
@@ -215,8 +215,8 @@ var _ = Describe("Disruption Taints", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 		}()
 		wg.Wait()
-		nodeClaimNode = ExpectNodeExists(ctx, env.Client, nodeClaimNode.Name)
-		Expect(nodeClaimNode.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
+		node = ExpectNodeExists(ctx, env.Client, node.Name)
+		Expect(node.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 	})
 	It("should add and remove taints from NodeClaims that fail to disrupt", func() {
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
@@ -228,11 +228,11 @@ var _ = Describe("Disruption Taints", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, nodeClaimNode, pod)
-		ExpectManualBinding(ctx, env.Client, pod, nodeClaimNode)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and nodeClaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodeClaimNode}, []*v1beta1.NodeClaim{nodeClaim})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		// Trigger the reconcile loop to start but don't trigger the verify action
 		wg := sync.WaitGroup{}
@@ -251,8 +251,8 @@ var _ = Describe("Disruption Taints", func() {
 				break
 			}
 		}
-		nodeClaimNode = ExpectNodeExists(ctx, env.Client, nodeClaimNode.Name)
-		Expect(nodeClaimNode.Spec.Taints).To(ContainElement(v1beta1.DisruptionNoScheduleTaint))
+		node = ExpectNodeExists(ctx, env.Client, node.Name)
+		Expect(node.Spec.Taints).To(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 
 		createdNodeClaim := lo.Reject(ExpectNodeClaims(ctx, env.Client), func(nc *v1beta1.NodeClaim, _ int) bool {
 			return nc.Name == nodeClaim.Name
@@ -262,8 +262,8 @@ var _ = Describe("Disruption Taints", func() {
 		ExpectNotFound(ctx, env.Client, createdNodeClaim[0])
 
 		wg.Wait()
-		nodeClaimNode = ExpectNodeExists(ctx, env.Client, nodeClaimNode.Name)
-		Expect(nodeClaimNode.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
+		node = ExpectNodeExists(ctx, env.Client, node.Name)
+		Expect(node.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 	})
 })
 

@@ -39,11 +39,6 @@ const (
 )
 
 func init() {
-	v1alpha5.WellKnownLabels.Insert(
-		LabelInstanceSize,
-		ExoticInstanceLabelKey,
-		IntegerInstanceLabelKey,
-	)
 	v1beta1.WellKnownLabels.Insert(
 		LabelInstanceSize,
 		ExoticInstanceLabelKey,

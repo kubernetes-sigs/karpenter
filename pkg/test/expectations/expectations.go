@@ -368,8 +368,8 @@ func ExpectMakeNodesInitialized(ctx context.Context, c client.Client, nodes ...*
 	ExpectMakeNodesReady(ctx, c, nodes...)
 
 	for i := range nodes {
-		nodes[i].Labels[v1alpha5.LabelNodeRegistered] = "true"
-		nodes[i].Labels[v1alpha5.LabelNodeInitialized] = "true"
+		nodes[i].Labels[v1beta1.NodeRegisteredLabelKey] = "true"
+		nodes[i].Labels[v1beta1.NodeInitializedLabelKey] = "true"
 		ExpectApplied(ctx, c, nodes[i])
 	}
 }

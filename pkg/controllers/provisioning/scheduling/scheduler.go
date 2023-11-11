@@ -256,7 +256,7 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 	var errs error
 	for _, nodeClaimTemplate := range s.nodeClaimTemplates {
 		instanceTypes := s.instanceTypes[nodeClaimTemplate.OwnerKey]
-		// if limits have been applied to the provisioner, ensure we filter instance types to avoid violating those limits
+		// if limits have been applied to the nodepool, ensure we filter instance types to avoid violating those limits
 		if remaining, ok := s.remainingResources[nodeClaimTemplate.OwnerKey]; ok {
 			instanceTypes = filterByRemainingResources(s.instanceTypes[nodeClaimTemplate.OwnerKey], remaining)
 			if len(instanceTypes) == 0 {
@@ -330,7 +330,7 @@ func getDaemonOverhead(nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []
 			if err := scheduling.Taints(nodeClaimTemplate.Spec.Taints).Tolerates(p); err != nil {
 				continue
 			}
-			if err := nodeClaimTemplate.Requirements.Compatible(scheduling.NewPodRequirements(p), lo.Ternary(nodeClaimTemplate.OwnerKey.IsProvisioner, scheduling.AllowUndefinedWellKnownLabelsV1Alpha5, scheduling.AllowUndefinedWellKnownLabelsV1Beta1)); err != nil {
+			if err := nodeClaimTemplate.Requirements.Compatible(scheduling.NewPodRequirements(p), scheduling.AllowUndefinedWellKnownLabels); err != nil {
 				continue
 			}
 			daemons = append(daemons, p)
@@ -363,7 +363,7 @@ func subtractMax(remaining v1.ResourceList, instanceTypes []*cloudprovider.Insta
 	return result
 }
 
-// filterByRemainingResources is used to filter out instance types that if launched would exceed the provisioner limits
+// filterByRemainingResources is used to filter out instance types that if launched would exceed the nodepool limits
 func filterByRemainingResources(instanceTypes []*cloudprovider.InstanceType, remaining v1.ResourceList) []*cloudprovider.InstanceType {
 	var filtered []*cloudprovider.InstanceType
 	for _, it := range instanceTypes {

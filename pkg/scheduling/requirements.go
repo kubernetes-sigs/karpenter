@@ -153,15 +153,7 @@ type CompatabilityOptions struct {
 	AllowUndefined sets.Set[string]
 }
 
-// TODO @joinnis: Remove AllowUndefinedWellKnownLabelsV1Alpha5 and change AllowUndefinedWellKnownLabelsV1Beta1
-// when dropping v1alpha5 support from karpenter-core
-
-var AllowUndefinedWellKnownLabelsV1Alpha5 = func(options CompatabilityOptions) CompatabilityOptions {
-	options.AllowUndefined = v1alpha5.WellKnownLabels
-	return options
-}
-
-var AllowUndefinedWellKnownLabelsV1Beta1 = func(options CompatabilityOptions) CompatabilityOptions {
+var AllowUndefinedWellKnownLabels = func(options CompatabilityOptions) CompatabilityOptions {
 	options.AllowUndefined = v1beta1.WellKnownLabels
 	return options
 }
