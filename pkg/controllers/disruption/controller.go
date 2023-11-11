@@ -58,7 +58,7 @@ var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 
 func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
 	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *orchestration.Queue) *Controller {
-
+	c := makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)
 	return &Controller{
 		queue:         queue,
 		clock:         clk,
@@ -76,11 +76,11 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 			// Delete any remaining empty NodeClaims as there is zero cost in terms of disruption.  Emptiness and
 			// emptyNodeConsolidation are mutually exclusive, only one of these will operate
 			NewEmptiness(clk),
-			NewEmptyNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue),
+			NewEmptyNodeConsolidation(c),
 			// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
-			NewMultiNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue),
+			NewMultiNodeConsolidation(c),
 			// And finally fall back our single NodeClaim consolidation to further reduce cluster cost.
-			NewSingleNodeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue),
+			NewSingleNodeConsolidation(c),
 		},
 	}
 }
