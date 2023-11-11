@@ -104,6 +104,7 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 
 // ShouldDisrupt is a predicate used to filter candidates
 func (v *Validation) ShouldDisrupt(_ context.Context, c *Candidate) bool {
+	// TODO Remove checking do-not-consolidate as part of v1
 	if c.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey] == "true" {
 		return false
 	}

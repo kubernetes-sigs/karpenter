@@ -52,7 +52,6 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, candidates
 	if err != nil {
 		return Command{}, fmt.Errorf("sorting candidates, %w", err)
 	}
-	deprovisioningEligibleMachinesGauge.WithLabelValues(s.Type()).Set(float64(len(candidates)))
 	disruptionEligibleNodesGauge.With(map[string]string{
 		methodLabel:            s.Type(),
 		consolidationTypeLabel: s.ConsolidationType(),
@@ -65,8 +64,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, candidates
 	// binary search to find the maximum number of NodeClaims we can terminate
 	for i, candidate := range candidates {
 		if s.clock.Now().After(timeout) {
-			deprovisioningConsolidationTimeoutsCounter.WithLabelValues(singleMachineConsolidationLabelValue).Inc()
-			deprovisioningConsolidationTimeoutsCounter.WithLabelValues(s.ConsolidationType()).Inc()
+			disruptionConsolidationTimeoutTotalCounter.WithLabelValues(s.ConsolidationType()).Inc()
 			logging.FromContext(ctx).Debugf("abandoning single-node consolidation due to timeout after evaluating %d candidates", i)
 			return Command{}, nil
 		}

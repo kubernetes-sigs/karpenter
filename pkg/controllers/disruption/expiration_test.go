@@ -396,8 +396,8 @@ var _ = Describe("Expiration", func() {
 		Expect(nodeclaims[0].Name).ToNot(Equal(nodeClaim.Name))
 		Expect(nodes[0].Name).ToNot(Equal(node.Name))
 	})
-	It("should uncordon nodes when expiration replacement fails", func() {
-		cloudProvider.AllowedCreateCalls = 0 // fail the replacement and expect it to uncordon
+	It("should untaint nodes when expiration replacement fails", func() {
+		cloudProvider.AllowedCreateCalls = 0 // fail the replacement and expect it to untaint
 
 		labels := map[string]string{
 			"app": "test",
@@ -436,9 +436,9 @@ var _ = Describe("Expiration", func() {
 		Expect(err).To(HaveOccurred())
 		wg.Wait()
 
-		// We should have tried to create a new nodeClaim but failed to do so; therefore, we uncordoned the existing node
+		// We should have tried to create a new nodeClaim but failed to do so; therefore, we untainted the existing node
 		node = ExpectExists(ctx, env.Client, node)
-		Expect(node.Spec.Unschedulable).To(BeFalse())
+		Expect(node.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 	})
 	It("can replace node for expiration with multiple nodes", func() {
 		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{

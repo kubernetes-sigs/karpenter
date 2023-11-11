@@ -22,80 +22,15 @@ import (
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(deprovisioningDurationHistogram, deprovisioningReplacementNodeInitializedHistogram, deprovisioningActionsPerformedCounter,
-		deprovisioningEligibleMachinesGauge, deprovisioningReplacementNodeLaunchFailedCounter, deprovisioningConsolidationTimeoutsCounter,
-		disruptionEvaluationDurationHistogram, disruptionReplacementNodeClaimInitializedHistogram, disruptionReplacementNodeClaimFailedCounter,
+	crmetrics.Registry.MustRegister(disruptionEvaluationDurationHistogram, disruptionReplacementNodeClaimInitializedHistogram, disruptionReplacementNodeClaimFailedCounter,
 		disruptionActionsPerformedCounter, disruptionEligibleNodesGauge, disruptionConsolidationTimeoutTotalCounter)
 }
 
 const (
-	deprovisioningSubsystem = "deprovisioning"
-	deprovisionerLabel      = "deprovisioner"
-
 	disruptionSubsystem    = "disruption"
 	actionLabel            = "action"
 	methodLabel            = "method"
 	consolidationTypeLabel = "consolidation_type"
-
-	multiMachineConsolidationLabelValue  = "multi-machine"
-	singleMachineConsolidationLabelValue = "single-machine"
-)
-
-var (
-	deprovisioningDurationHistogram = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: deprovisioningSubsystem,
-			Name:      "evaluation_duration_seconds",
-			Help:      "Duration of the deprovisioning evaluation process in seconds.",
-			Buckets:   metrics.DurationBuckets(),
-		},
-		[]string{"method"},
-	)
-	deprovisioningReplacementNodeInitializedHistogram = prometheus.NewHistogram(
-		prometheus.HistogramOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: deprovisioningSubsystem,
-			Name:      "replacement_machine_initialized_seconds",
-			Help:      "Amount of time required for a replacement machine to become initialized.",
-			Buckets:   metrics.DurationBuckets(),
-		})
-	deprovisioningActionsPerformedCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: deprovisioningSubsystem,
-			Name:      "actions_performed",
-			Help:      "Number of deprovisioning actions performed. Labeled by deprovisioner.",
-		},
-		[]string{actionLabel, deprovisionerLabel},
-	)
-	deprovisioningEligibleMachinesGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: deprovisioningSubsystem,
-			Name:      "eligible_machines",
-			Help:      "Number of machines eligible for deprovisioning by Karpenter. Labeled by deprovisioner",
-		},
-		[]string{deprovisionerLabel},
-	)
-	deprovisioningConsolidationTimeoutsCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: deprovisioningSubsystem,
-			Name:      "consolidation_timeouts",
-			Help:      "Number of times the Consolidation algorithm has reached a timeout. Labeled by consolidation type.",
-		},
-		[]string{consolidationTypeLabel},
-	)
-	deprovisioningReplacementNodeLaunchFailedCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: deprovisioningSubsystem,
-			Name:      "replacement_machine_launch_failure_counter",
-			Help:      "The number of times that Karpenter failed to launch a replacement node for deprovisioning. Labeled by deprovisioner.",
-		},
-		[]string{deprovisionerLabel},
-	)
 )
 
 var (

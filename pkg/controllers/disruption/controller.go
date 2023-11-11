@@ -148,7 +148,6 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 }
 
 func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {
-	defer metrics.Measure(deprovisioningDurationHistogram.WithLabelValues(disruption.Type()))()
 	defer metrics.Measure(disruptionEvaluationDurationHistogram.With(map[string]string{
 		methodLabel:            disruption.Type(),
 		consolidationTypeLabel: disruption.ConsolidationType(),
@@ -180,10 +179,6 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 }
 
 func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) error {
-	deprovisioningActionsPerformedCounter.With(map[string]string{
-		actionLabel:        fmt.Sprintf("%s/%s", m.Type(), cmd.Action()),
-		deprovisionerLabel: m.Type(),
-	}).Inc()
 	disruptionActionsPerformedCounter.With(map[string]string{
 		actionLabel:            string(cmd.Action()),
 		methodLabel:            m.Type(),
@@ -224,7 +219,6 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 // nolint:gocyclo
 func (c *Controller) launchReplacementNodeClaims(ctx context.Context, m Method, cmd Command) error {
 	reason := fmt.Sprintf("%s/%s", m.Type(), cmd.Action())
-	defer metrics.Measure(deprovisioningReplacementNodeInitializedHistogram)()
 	defer metrics.Measure(disruptionReplacementNodeClaimInitializedHistogram)()
 
 	stateNodes := lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode })
@@ -254,7 +248,6 @@ func (c *Controller) launchReplacementNodeClaims(ctx context.Context, m Method, 
 		// NodeClaim never became ready or the NodeClaims that we tried to launch got Insufficient Capacity or some
 		// other transient error
 		if err := c.waitForReadiness(ctx, nodeClaimKeys[i], reason); err != nil {
-			deprovisioningReplacementNodeLaunchFailedCounter.WithLabelValues(reason).Inc()
 			disruptionReplacementNodeClaimFailedCounter.With(map[string]string{
 				methodLabel:            m.Type(),
 				consolidationTypeLabel: m.ConsolidationType(),

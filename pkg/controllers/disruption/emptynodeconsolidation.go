@@ -50,7 +50,6 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 	if err != nil {
 		return Command{}, fmt.Errorf("sorting candidates, %w", err)
 	}
-	deprovisioningEligibleMachinesGauge.WithLabelValues(c.Type()).Set(float64(len(candidates)))
 	disruptionEligibleNodesGauge.With(map[string]string{
 		methodLabel:            c.Type(),
 		consolidationTypeLabel: c.ConsolidationType(),

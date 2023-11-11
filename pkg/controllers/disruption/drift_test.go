@@ -28,6 +28,7 @@ import (
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
@@ -347,6 +348,50 @@ var _ = Describe("Drift", func() {
 		Expect(nodes).To(HaveLen(1))
 		Expect(nodeclaims[0].Name).ToNot(Equal(nodeClaim.Name))
 		Expect(nodes[0].Name).ToNot(Equal(node.Name))
+	})
+	It("should untaint nodes when drift replacement fails", func() {
+		cloudProvider.AllowedCreateCalls = 0 // fail the replacement and expect it to untaint
+
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, rs, nodeClaim, node, nodePool, pod)
+
+		// bind pods to node
+		ExpectManualBinding(ctx, env.Client, pod, node)
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectNewNodeClaimsDeleted(ctx, env.Client, &wg, 1)
+		_, err := disruptionController.Reconcile(ctx, reconcile.Request{})
+		Expect(err).To(HaveOccurred())
+		wg.Wait()
+
+		// We should have tried to create a new nodeClaim but failed to do so; therefore, we untainted the existing node
+		node = ExpectExists(ctx, env.Client, node)
+		Expect(node.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 	})
 	It("can replace drifted nodes with multiple nodes", func() {
 		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{

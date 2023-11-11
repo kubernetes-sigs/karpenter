@@ -795,7 +795,7 @@ var _ = Describe("Consolidation", func() {
 					},
 				},
 			})
-			// Block this pod from being disrupted with karpenter.sh/do-not-evict
+			// Block this pod from being disrupted with karpenter.sh/do-not-disrupt
 			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
 
 			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
@@ -2345,21 +2345,21 @@ var _ = Describe("Consolidation", func() {
 					break
 				}
 			}
-			doNotEvictPod := test.Pod(test.PodOptions{
+			doNotDisruptPod := test.Pod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
 						v1beta1.DoNotDisruptAnnotationKey: "true",
 					},
 				},
 			})
-			ExpectApplied(ctx, env.Client, doNotEvictPod)
-			ExpectManualBinding(ctx, env.Client, doNotEvictPod, node)
+			ExpectApplied(ctx, env.Client, doNotDisruptPod)
+			ExpectManualBinding(ctx, env.Client, doNotDisruptPod, node)
 
 			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
 			ExpectTriggerVerifyAction(&wg)
 			wg.Wait()
 
-			// we would normally be able to replace a node, but we are blocked by the do-not-evict pods during validation
+			// we would normally be able to replace a node, but we are blocked by the do-not-disrupt pods during validation
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, node)
@@ -2498,22 +2498,22 @@ var _ = Describe("Consolidation", func() {
 					break
 				}
 			}
-			doNotEvictPods := test.Pods(2, test.PodOptions{
+			doNotDisruptPods := test.Pods(2, test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
 						v1beta1.DoNotDisruptAnnotationKey: "true",
 					},
 				},
 			})
-			ExpectApplied(ctx, env.Client, doNotEvictPods[0], doNotEvictPods[1])
-			ExpectManualBinding(ctx, env.Client, doNotEvictPods[0], node)
-			ExpectManualBinding(ctx, env.Client, doNotEvictPods[1], node2)
+			ExpectApplied(ctx, env.Client, doNotDisruptPods[0], doNotDisruptPods[1])
+			ExpectManualBinding(ctx, env.Client, doNotDisruptPods[0], node)
+			ExpectManualBinding(ctx, env.Client, doNotDisruptPods[1], node2)
 
 			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
 			ExpectTriggerVerifyAction(&wg)
 			wg.Wait()
 
-			// we would normally be able to consolidate down to a single node, but we are blocked by the do-not-evict pods during validation
+			// we would normally be able to consolidate down to a single node, but we are blocked by the do-not-disrupt pods during validation
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
 			ExpectExists(ctx, env.Client, node)
