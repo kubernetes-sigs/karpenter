@@ -28,6 +28,7 @@ import (
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
@@ -349,7 +350,7 @@ var _ = Describe("Drift", func() {
 		Expect(nodes[0].Name).ToNot(Equal(node.Name))
 	})
 	It("should untaint nodes when drift replacement fails", func() {
-		cloudProvider.AllowedCreateCalls = 0 // fail the replacement and expect it to uncordon
+		cloudProvider.AllowedCreateCalls = 0 // fail the replacement and expect it to untaint
 
 		labels := map[string]string{
 			"app": "test",
@@ -384,10 +385,11 @@ var _ = Describe("Drift", func() {
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectNewNodeClaimsDeleted(ctx, env.Client, &wg, 1)
-		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		_, err := disruptionController.Reconcile(ctx, reconcile.Request{})
+		Expect(err).To(HaveOccurred())
 		wg.Wait()
 
-		// We should have tried to create a new nodeClaim but failed to do so; therefore, we uncordoned the existing node
+		// We should have tried to create a new nodeClaim but failed to do so; therefore, we untainted the existing node
 		node = ExpectExists(ctx, env.Client, node)
 		Expect(node.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 	})
