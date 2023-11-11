@@ -557,8 +557,8 @@ var _ = Describe("Requirements", func() {
 			Entry("Zone Label #1", "topology.kubernetesiozone", `label "topology.kubernetesiozone" does not have known values (typo of "topology.kubernetes.io/zone"?)`),
 			Entry("Region Label #1", "topology.kubernetes.io/regio", `label "topology.kubernetes.io/regio" does not have known values (typo of "topology.kubernetes.io/region"?)`),
 			Entry("Region Label #2", "node.kubernetes.io/region", `label "node.kubernetes.io/region" does not have known values (typo of "topology.kubernetes.io/region"?)`),
-			Entry("NodePool Name Label #1", "karpenternodepool", `label "karpenternodepool" does not have known values (typo of "karpenter.sh/nodepool"?)`),
-			Entry("NodePool Name Label #2", "karpenter/nodepool", `label "karpenter/nodepool" does not have known values (typo of "karpenter.sh/nodepool"?)`),
+			Entry("NodePool Label #1", "karpenter.shnodepool", `label "karpenter.shnodepool" does not have known values (typo of "karpenter.sh/nodepool"?)`),
+			Entry("NodePool Label #2", "karpenter/nodepool", `label "karpenter/nodepool" does not have known values (typo of "karpenter.sh/nodepool"?)`),
 		)
 		It("should display an error message for unknown labels", func() {
 			unconstrained := NewRequirements()
