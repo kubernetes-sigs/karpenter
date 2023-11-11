@@ -269,6 +269,10 @@ func hasDoNotDisruptPod(c *Candidate) (*v1.Pod, bool) {
 		if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
 			return false
 		}
-		return pod.HasDoNotDisrupt(p)
+		// return true only when it has do-not-evict annotation and pod is ready
+		if pod.HasDoNotDisrupt(p) && pod.IsPodReady(p) {
+			return true
+		}
+		return false
 	})
 }
