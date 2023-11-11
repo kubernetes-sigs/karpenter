@@ -198,7 +198,7 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 	c.cluster.MarkForDeletion(providerIDs...)
 
 	if err := c.queue.Add(orchestration.NewCommand(nodeClaimKeys,
-		lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode }), c.clock.Now(), m.Type(), m.ConsolidationType())); err != nil {
+		lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode }), m.Type(), m.ConsolidationType())); err != nil {
 		c.cluster.UnmarkForDeletion(providerIDs...)
 		return fmt.Errorf("adding command to queue, %w", multierr.Append(err, state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...)))
 	}

@@ -52,15 +52,15 @@ const (
 
 type Command struct {
 	ReplacementKeys   []*NodeClaimKey
-	Candidates        []*state.StateNode
-	Method            string    // used for metrics
-	ConsolidationType string    // used for metrics
-	TimeAdded         time.Time // timeAdded is used to track timeouts
-	LastError         error
+	candidates        []*state.StateNode
+	timeAdded         time.Time // timeAdded is used to track timeouts
+	method            string    // used for metrics
+	consolidationType string    // used for metrics
+	lastError         error
 }
 
 func (c *Command) Reason() string {
-	return fmt.Sprintf("%s/%s", c.Method,
+	return fmt.Sprintf("%s/%s", c.method,
 		lo.Ternary(len(c.ReplacementKeys) > 0, "replace", "delete"))
 }
 
@@ -92,15 +92,15 @@ func IsUnrecoverableError(err error) bool {
 
 type Queue struct {
 	workqueue.RateLimitingInterface
-	// providerID -> command, maps a candidate to its command. Each command has a list of candidates that can be used
-	// to map to itself.
-	providerIDToCommand map[string]*Command
+
 	mu                  sync.RWMutex
-	kubeClient          client.Client
-	recorder            events.Recorder
-	cluster             *state.Cluster
-	clock               clock.Clock
-	provisioner         *provisioning.Provisioner
+	providerIDToCommand map[string]*Command // providerID -> command, maps a candidate to its command
+
+	kubeClient  client.Client
+	recorder    events.Recorder
+	cluster     *state.Cluster
+	clock       clock.Clock
+	provisioner *provisioning.Provisioner
 }
 
 // NewQueue creates a queue that will asynchronously orchestrate disruption commands
@@ -118,6 +118,7 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 	return queue
 }
 
+// NewTestingQueue uses a test RateLimitingInterface that will immediately re-queue items.
 func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clock.Clock,
 	provisioner *provisioning.Provisioner) *Queue {
 	queue := &Queue{
@@ -133,15 +134,14 @@ func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster
 }
 
 // NewCommand creates a command key and adds in initial data for the orchestration queue.
-func NewCommand(replacements []nodeclaim.Key, candidates []*state.StateNode, timeAdded time.Time, method string, consolidationType string) *Command {
+func NewCommand(replacements []nodeclaim.Key, candidates []*state.StateNode, method string, consolidationType string) *Command {
 	return &Command{
 		ReplacementKeys: lo.Map(replacements, func(key nodeclaim.Key, _ int) *NodeClaimKey {
 			return &NodeClaimKey{Key: key}
 		}),
-		Candidates:        candidates,
-		Method:            method,
-		ConsolidationType: consolidationType,
-		TimeAdded:         timeAdded,
+		candidates:        candidates,
+		method:            method,
+		consolidationType: consolidationType,
 	}
 }
 
@@ -176,7 +176,8 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 		// If recoverable, re-queue and try again.
 		if !IsUnrecoverableError(err) {
 			// store the error that is causing us to fail so we can bubble it up later if this times out.
-			cmd.LastError = err
+			cmd.lastError = err
+			// mark this item as done processing. This is necessary so that the RLI is able to add the item back in.
 			q.RateLimitingInterface.Done(cmd)
 			q.RateLimitingInterface.AddRateLimited(cmd)
 			return reconcile.Result{RequeueAfter: controller.Immediately}, nil
@@ -189,14 +190,14 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 			return !key.Initialized
 		})
 		disruptionReplacementNodeClaimFailedCounter.With(map[string]string{
-			methodLabel:            cmd.Method,
-			consolidationTypeLabel: cmd.ConsolidationType,
+			methodLabel:            cmd.method,
+			consolidationTypeLabel: cmd.consolidationType,
 		}).Add(float64(len(failedLaunches)))
 
-		q.cluster.UnmarkForDeletion(lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string { return s.ProviderID() })...)
-		multiErr := multierr.Combine(err, state.RequireNoScheduleTaint(ctx, q.kubeClient, false, cmd.Candidates...), cmd.LastError)
+		q.cluster.UnmarkForDeletion(lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string { return s.ProviderID() })...)
+		multiErr := multierr.Combine(err, cmd.lastError, state.RequireNoScheduleTaint(ctx, q.kubeClient, false, cmd.candidates...))
 		// Log the error
-		logging.FromContext(ctx).With("nodes", strings.Join(lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string {
+		logging.FromContext(ctx).With("nodes", strings.Join(lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string {
 			return s.Name()
 		}), ",")).Errorf("failed to disrupt nodes, %s", multiErr)
 	}
@@ -211,8 +212,8 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 // timed out, this will return false.
 // nolint:gocyclo
 func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
-	if q.clock.Since(cmd.TimeAdded) > maxRetryDuration {
-		return NewUnrecoverableError(fmt.Errorf("command reached timeout after %s", q.clock.Since(cmd.TimeAdded)))
+	if q.clock.Since(cmd.timeAdded) > maxRetryDuration {
+		return NewUnrecoverableError(fmt.Errorf("command reached timeout after %s", q.clock.Since(cmd.timeAdded)))
 	}
 	waitErrs := make([]error, len(cmd.ReplacementKeys))
 	for i := range cmd.ReplacementKeys {
@@ -227,7 +228,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 			// The NodeClaim got deleted after an initial eventual consistency delay
 			// This means that there was an ICE error or the Node initializationTTL expired
 			// In this case, the error is unrecoverable, so don't requeue.
-			if apierrors.IsNotFound(err) && q.clock.Since(cmd.TimeAdded) > time.Second*5 {
+			if apierrors.IsNotFound(err) && q.clock.Since(cmd.timeAdded) > time.Second*5 {
 				return NewUnrecoverableError(fmt.Errorf("replacement was deleted, %w", err))
 			}
 			waitErrs[i] = fmt.Errorf("getting node claim, %w", err)
@@ -256,13 +257,13 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 	// All we need to do now is get a successful delete call for each node claim,
 	// then the termination controller will handle the eventual deletion of the nodes.
 	var multiErr error
-	for i := range cmd.Candidates {
-		candidate := cmd.Candidates[i]
+	for i := range cmd.candidates {
+		candidate := cmd.candidates[i]
 		q.recorder.Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, cmd.Reason())...)
 		if err := nodeclaim.Delete(ctx, q.kubeClient, candidate.NodeClaim); err != nil {
 			multiErr = multierr.Append(multiErr, client.IgnoreNotFound(err))
 		} else {
-			nodeclaim.TerminatedCounter(cmd.Candidates[i].NodeClaim, cmd.Method).Inc()
+			nodeclaim.TerminatedCounter(cmd.candidates[i].NodeClaim, cmd.method).Inc()
 		}
 	}
 	// If there were any deletion failures, we should requeue.
@@ -276,18 +277,20 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 // Add adds commands to the Queue
 // Each command added to the queue should already be validated and ready for execution.
 func (q *Queue) Add(cmd *Command) error {
-	providerIDs := lo.Map(cmd.Candidates, func(s *state.StateNode, _ int) string {
+	providerIDs := lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string {
 		return s.ProviderID()
 	})
 	// First check if we can add the command.
 	if q.HasAny(providerIDs...) {
 		return fmt.Errorf("candidate is being disrupted")
 	}
+
+	cmd.timeAdded = q.clock.Now()
 	q.mu.Lock()
-	defer q.mu.Unlock()
-	for _, candidate := range cmd.Candidates {
+	for _, candidate := range cmd.candidates {
 		q.providerIDToCommand[candidate.ProviderID()] = cmd
 	}
+	q.mu.Unlock()
 	q.RateLimitingInterface.Add(cmd)
 	return nil
 }
@@ -307,14 +310,15 @@ func (q *Queue) HasAny(ids ...string) bool {
 
 // Remove fully clears the queue of all references of a hash/command
 func (q *Queue) Remove(cmd *Command) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
+	// mark this item as done processing. This is necessary so that the RLI is able to add the item back in.
 	q.RateLimitingInterface.Done(cmd)
+	q.RateLimitingInterface.Forget(cmd)
 	// Remove all candidates linked to the command
-	for _, candidate := range cmd.Candidates {
+	q.mu.Lock()
+	for _, candidate := range cmd.candidates {
 		delete(q.providerIDToCommand, candidate.ProviderID())
 	}
-	q.RateLimitingInterface.Forget(cmd)
+	q.mu.Unlock()
 }
 
 // Reset is used for testing and clears all internal data structures

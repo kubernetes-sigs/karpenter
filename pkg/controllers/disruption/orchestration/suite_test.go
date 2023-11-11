@@ -171,7 +171,9 @@ var _ = Describe("Queue", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 
 			stateNode := ExpectStateNodeExists(cluster, node1)
-			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, fakeClock.Now().Add(-100*time.Minute), "test-method", "fake-type"))).To(BeNil())
+			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "test-method", "fake-type"))).To(BeNil())
+
+			fakeClock.Step(10 * time.Minute)
 
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
@@ -182,7 +184,7 @@ var _ = Describe("Queue", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 
 			stateNode := ExpectStateNodeExists(cluster, node1)
-			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, fakeClock.Now(), "test-method", "fake-type"))).To(BeNil())
+			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "test-method", "fake-type"))).To(BeNil())
 
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
 			Expect(node1.Spec.Taints).To(ContainElement(v1beta1.DisruptionNoScheduleTaint))
@@ -199,7 +201,7 @@ var _ = Describe("Queue", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
-			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, fakeClock.Now(), "test-method", "fake-type"))).To(BeNil())
+			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "test-method", "fake-type"))).To(BeNil())
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		})
 		It("should return an error and clean up when a command times out", func() {
@@ -207,7 +209,7 @@ var _ = Describe("Queue", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
-			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, fakeClock.Now(), "test-method", "fake-type"))).To(BeNil())
+			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "test-method", "fake-type"))).To(BeNil())
 
 			fakeClock.Step(1 * time.Hour)
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
@@ -219,7 +221,7 @@ var _ = Describe("Queue", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
-			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, fakeClock.Now(), "test-method", "fake-type")
+			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "test-method", "fake-type")
 			Expect(queue.Add(cmd)).To(BeNil())
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
@@ -259,7 +261,7 @@ var _ = Describe("Queue", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
-			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, fakeClock.Now(), "test-method", "fake-type")
+			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "test-method", "fake-type")
 			Expect(queue.Add(cmd)).To(BeNil())
 
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
@@ -288,7 +290,7 @@ var _ = Describe("Queue", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
-			cmd := orchestration.NewCommand([]nodeclaim.Key{}, []*state.StateNode{stateNode}, fakeClock.Now(), "test-method", "fake-type")
+			cmd := orchestration.NewCommand([]nodeclaim.Key{}, []*state.StateNode{stateNode}, "test-method", "fake-type")
 			Expect(queue.Add(cmd)).To(BeNil())
 
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
