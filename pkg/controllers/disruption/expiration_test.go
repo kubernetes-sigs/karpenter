@@ -406,11 +406,7 @@ var _ = Describe("Expiration", func() {
 		Expect(nodes[0].Name).ToNot(Equal(node.Name))
 	})
 	It("should untaint nodes when expiration replacement fails", func() {
-<<<<<<< HEAD
 		cloudProvider.AllowedCreateCalls = 0 // fail the replacement and expect it to untaint
-=======
-		cloudProvider.AllowedCreateCalls = 0 // fail the replacement and expect it to uncordon
->>>>>>> 4127666b (revert queue)
 
 		labels := map[string]string{
 			"app": "test",
