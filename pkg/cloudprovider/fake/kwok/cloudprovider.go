@@ -14,22 +14,16 @@ limitations under the License.
 package kwok
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"math/rand"
 	"strings"
 	"sync"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
-	awsclient "github.com/aws/aws-sdk-go/aws/client"
-	"github.com/aws/aws-sdk-go/aws/ec2metadata"
-	"github.com/aws/aws-sdk-go/aws/endpoints"
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
@@ -43,39 +37,19 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	"github.com/aws/karpenter/pkg/providers/pricing"
 	"github.com/aws/karpenter/pkg/utils/project"
 )
 
-//go:embed describe-instance-types.json
-var usEastInstanceTypes []byte
-var instanceTypesOutput ec2.DescribeInstanceTypesOutput
+var instanceTypes []*cloudprovider.InstanceType
 
 func init() {
-	dec := json.NewDecoder(bytes.NewReader(usEastInstanceTypes))
-	if err := dec.Decode(&instanceTypesOutput); err != nil {
-		log.Fatalf("deserializing instance types, %s", err)
-	}
+	instanceTypes = fake.InstanceTypesAssorted()
 }
 
 func NewCloudProvider(ctx context.Context, client kubernetes.Interface) *CloudProvider {
-	// Start session to get AWS pricing
-	sess := withUserAgent(session.Must(session.NewSession(
-		request.WithRetryer(
-			&aws.Config{STSRegionalEndpoint: endpoints.RegionalSTSEndpoint},
-			awsclient.DefaultRetryer{NumMaxRetries: awsclient.DefaultRetryerMaxNumRetries},
-		),
-	)))
-	if *sess.Config.Region == "" {
-		logging.FromContext(ctx).Debug("retrieving region from IMDS")
-		region, err := ec2metadata.New(sess).Region()
-		*sess.Config.Region = lo.Must(region, err, "failed to get region from metadata server")
-	}
-	ec2api := ec2.New(sess)
-	if err := checkEC2Connectivity(ctx, ec2api); err != nil {
-		logging.FromContext(ctx).Fatalf("Checking EC2 API connectivity, %s", err)
-	}
 	logging.FromContext(ctx).With("region", *sess.Config.Region).Debugf("discovered region")
 	p := pricing.NewProvider(ctx,
 		pricing.NewAPI(sess, *sess.Config.Region),
