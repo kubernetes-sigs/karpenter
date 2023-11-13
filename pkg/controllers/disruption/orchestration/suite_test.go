@@ -173,7 +173,8 @@ var _ = Describe("Queue", func() {
 			stateNode := ExpectStateNodeExists(cluster, node1)
 			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "test-method", "fake-type"))).To(BeNil())
 
-			fakeClock.Step(10 * time.Minute)
+			// Step the clock to trigger the command timeout.
+			fakeClock.Step(11 * time.Minute)
 
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
@@ -188,6 +189,8 @@ var _ = Describe("Queue", func() {
 
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
 			Expect(node1.Spec.Taints).To(ContainElement(v1beta1.DisruptionNoScheduleTaint))
+
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			// Update state
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
@@ -211,7 +214,9 @@ var _ = Describe("Queue", func() {
 
 			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "test-method", "fake-type"))).To(BeNil())
 
-			fakeClock.Step(1 * time.Hour)
+			// Step the clock to trigger the timeout.
+			fakeClock.Step(11 * time.Minute)
+
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
 			Expect(node1.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))

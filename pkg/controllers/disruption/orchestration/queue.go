@@ -193,8 +193,6 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 			methodLabel:            cmd.method,
 			consolidationTypeLabel: cmd.consolidationType,
 		}).Add(float64(len(failedLaunches)))
-
-		q.cluster.UnmarkForDeletion(lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string { return s.ProviderID() })...)
 		multiErr := multierr.Combine(err, cmd.lastError, state.RequireNoScheduleTaint(ctx, q.kubeClient, false, cmd.candidates...))
 		// Log the error
 		logging.FromContext(ctx).With("nodes", strings.Join(lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string {
@@ -313,6 +311,7 @@ func (q *Queue) Remove(cmd *Command) {
 	// mark this item as done processing. This is necessary so that the RLI is able to add the item back in.
 	q.RateLimitingInterface.Done(cmd)
 	q.RateLimitingInterface.Forget(cmd)
+	q.cluster.UnmarkForDeletion(lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string { return s.ProviderID() })...)
 	// Remove all candidates linked to the command
 	q.mu.Lock()
 	for _, candidate := range cmd.candidates {
