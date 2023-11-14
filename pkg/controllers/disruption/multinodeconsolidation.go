@@ -22,15 +22,10 @@ import (
 
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
@@ -40,9 +35,8 @@ type MultiNodeConsolidation struct {
 	consolidation
 }
 
-func NewMultiNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client,
-	provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder) *MultiNodeConsolidation {
-	return &MultiNodeConsolidation{makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
+func NewMultiNodeConsolidation(consolidation consolidation) *MultiNodeConsolidation {
+	return &MultiNodeConsolidation{consolidation: consolidation}
 }
 
 func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
@@ -73,7 +67,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 		return cmd, nil
 	}
 
-	v := NewValidation(consolidationTTL, m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder)
+	v := NewValidation(consolidationTTL, m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder, m.queue)
 	isValid, err := v.IsValid(ctx, cmd)
 	if err != nil {
 		return Command{}, fmt.Errorf("validating, %w", err)

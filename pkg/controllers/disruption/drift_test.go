@@ -28,7 +28,6 @@ import (
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
@@ -142,6 +141,8 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
+		// Process the item so that the nodes can be deleted.
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)
 
 		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
@@ -248,6 +249,8 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
+		// Process the item so that the nodes can be deleted.
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -290,6 +293,8 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
+		// Process the item so that the nodes can be deleted.
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims...)
 
@@ -336,6 +341,8 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
+		// Process the item so that the nodes can be deleted.
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -385,10 +392,10 @@ var _ = Describe("Drift", func() {
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectNewNodeClaimsDeleted(ctx, env.Client, &wg, 1)
-		_, err := disruptionController.Reconcile(ctx, reconcile.Request{})
-		Expect(err).To(HaveOccurred())
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// We should have tried to create a new nodeClaim but failed to do so; therefore, we untainted the existing node
 		node = ExpectExists(ctx, env.Client, node)
 		Expect(node.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
@@ -480,6 +487,8 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 		wg.Wait()
 
+		// Process the item so that the nodes can be deleted.
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -552,6 +561,8 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
+		// Process the item so that the nodes can be deleted.
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)
 

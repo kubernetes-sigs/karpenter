@@ -28,6 +28,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	disruptionevents "github.com/aws/karpenter-core/pkg/controllers/disruption/events"
+	"github.com/aws/karpenter-core/pkg/controllers/disruption/orchestration"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
@@ -58,7 +59,7 @@ type Candidate struct {
 
 //nolint:gocyclo
 func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode,
-	nodePoolMap map[nodepoolutil.Key]*v1beta1.NodePool, nodePoolToInstanceTypesMap map[nodepoolutil.Key]map[string]*cloudprovider.InstanceType) (*Candidate, error) {
+	nodePoolMap map[nodepoolutil.Key]*v1beta1.NodePool, nodePoolToInstanceTypesMap map[nodepoolutil.Key]map[string]*cloudprovider.InstanceType, queue *orchestration.Queue) (*Candidate, error) {
 
 	if node.Node == nil || node.NodeClaim == nil {
 		return nil, fmt.Errorf("state node doesn't contain both a node and a nodeclaim")
@@ -70,6 +71,10 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	// skip candidates that aren't initialized
 	if !node.Initialized() {
 		return nil, fmt.Errorf("state node isn't initialized")
+	}
+	// If the orchestration queue is already considering a candidate we want to disrupt, don't consider it a candidate.
+	if queue.HasAny(node.ProviderID()) {
+		return nil, fmt.Errorf("candidate is already being deprovisioned")
 	}
 	if _, ok := node.Annotations()[v1beta1.DoNotDisruptAnnotationKey]; ok {
 		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Disruption is blocked with the %q annotation", v1beta1.DoNotDisruptAnnotationKey))...)
@@ -112,6 +117,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		logging.FromContext(ctx).Errorf("Determining node pods, %s", err)
 		return nil, fmt.Errorf("getting pods from state node, %w", err)
 	}
+
 	cn := &Candidate{
 		StateNode:    node.DeepCopy(),
 		instanceType: instanceType,
@@ -120,6 +126,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		zone:         node.Labels()[v1.LabelTopologyZone],
 		pods:         pods,
 	}
+
 	cn.disruptionCost = disruptionCost(ctx, pods) * cn.lifetimeRemaining(clk)
 	return cn, nil
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	disruptionevents "github.com/aws/karpenter-core/pkg/controllers/disruption/events"
+	"github.com/aws/karpenter-core/pkg/controllers/disruption/orchestration"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
@@ -42,6 +43,8 @@ const consolidationTTL = 15 * time.Second
 // consolidation is the base consolidation controller that provides common functionality used across the different
 // consolidation methods.
 type consolidation struct {
+	// Consolidation needs to be aware of the queue for validation
+	queue                  *orchestration.Queue
 	clock                  clock.Clock
 	cluster                *state.Cluster
 	kubeClient             client.Client
@@ -52,8 +55,9 @@ type consolidation struct {
 }
 
 func makeConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) consolidation {
+	cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, queue *orchestration.Queue) consolidation {
 	return consolidation{
+		queue:         queue,
 		clock:         clock,
 		cluster:       cluster,
 		kubeClient:    kubeClient,
@@ -89,6 +93,7 @@ func (c *consolidation) markConsolidated() {
 
 // ShouldDisrupt is a predicate used to filter candidates
 func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
+	// TODO: Remove the check for do-not-consolidate at v1
 	if cn.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey] == "true" {
 		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s annotation exists", v1alpha5.DoNotConsolidateNodeAnnotationKey))...)
 		return false

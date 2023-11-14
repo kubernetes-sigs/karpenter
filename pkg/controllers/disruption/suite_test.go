@@ -28,6 +28,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clock "k8s.io/utils/clock/testing"
@@ -41,6 +42,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/disruption"
+	"github.com/aws/karpenter-core/pkg/controllers/disruption/orchestration"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
@@ -62,6 +64,7 @@ var nodeStateController controller.Controller
 var nodeClaimStateController controller.Controller
 var fakeClock *clock.FakeClock
 var recorder *test.EventRecorder
+var queue *orchestration.Queue
 
 var onDemandInstances []*cloudprovider.InstanceType
 var leastExpensiveInstance, mostExpensiveInstance *cloudprovider.InstanceType
@@ -83,7 +86,8 @@ var _ = BeforeSuite(func() {
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, env.KubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
-	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster)
+	queue = orchestration.NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov)
+	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue)
 })
 
 var _ = AfterSuite(func() {
@@ -102,6 +106,7 @@ var _ = BeforeEach(func() {
 	}
 	fakeClock.SetTime(time.Now())
 	cluster.Reset()
+	queue.Reset()
 	cluster.MarkUnconsolidated()
 
 	// Reset Feature Flags to test defaults
@@ -240,7 +245,7 @@ var _ = Describe("Disruption Taints", func() {
 		go func() {
 			defer wg.Done()
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileFailed(ctx, disruptionController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 		}()
 
 		// Iterate in a loop until we get to the validation action
@@ -260,8 +265,13 @@ var _ = Describe("Disruption Taints", func() {
 		ExpectDeleted(ctx, env.Client, createdNodeClaim[0])
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, createdNodeClaim[0])
 		ExpectNotFound(ctx, env.Client, createdNodeClaim[0])
-
 		wg.Wait()
+
+		// Increment the clock so that the nodeclaim deletion isn't caught by the
+		// eventual consistency delay.
+		fakeClock.Step(6 * time.Second)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
 		Expect(node.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 	})
