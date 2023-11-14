@@ -22,6 +22,7 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"knative.dev/pkg/ptr"
 )
 
@@ -78,6 +79,29 @@ type Disruption struct {
 	// +kubebuilder:validation:Schemaless
 	// +optional
 	ExpireAfter NillableDuration `json:"expireAfter"`
+    // Budgets is a list of Budgets.
+    // If there are multiple active budgets, Karpenter uses
+	// the most restrictive maxUnavailable. If left undefined,
+	// this will default to one budget with a maxUnavailable to 10%.
+    Budgets []Budget `json:"budgets,omitempty" hash:"ignore"`
+}
+
+// Budget specifies periods of times where Karpenter will restrict the
+// number of Node Claims that can be terminated at a time.
+// Unless specified, a budget is always active.
+type Budget struct {
+    // MaxUnavailable dictates how many NodeClaims owned by this NodePool
+    // can be terminating at once. It must be set.
+    // This only considers NodeClaims with the karpenter.sh/disruption taint.
+    MaxUnavailable intstr.IntOrString `json:"maxUnavailable" hash:"ignore"`
+    // Crontab specifies when a budget begins being active,
+    // using the upstream cronjob syntax.
+    // "Minute Hour DayOfMonth Month DayOfWeek"
+    // This is required if Duration is set.
+    Crontab *string `json:"crontab,omitempty" hash:"ignore"`
+    // Duration determines how long a Budget is active since each Crontab hit.
+    // This is required if Crontab is set.
+    Duration *metav1.Duration `json:"duration,omitempty" hash:"ignore"`
 }
 
 type ConsolidationPolicy string
