@@ -26,10 +26,10 @@ import (
 	"knative.dev/pkg/ptr"
 )
 
-// NodePoolSpec is the top level provisioner specification. Provisioners
-// launch nodes in response to pods that are unschedulable. A single provisioner
+// NodePoolSpec is the top level nodepool specification. Nodepools
+// launch nodes in response to pods that are unschedulable. A single nodepool
 // is capable of managing a diverse set of nodes. Node properties are determined
-// from a combination of provisioner and pod scheduling constraints.
+// from a combination of nodepool and pod scheduling constraints.
 type NodePoolSpec struct {
 	// Template contains the template of possibilities for the provisioning logic to launch a NodeClaim with.
 	// NodeClaims launched from this NodePool will often be further constrained than the template specifies.
@@ -44,10 +44,10 @@ type NodePoolSpec struct {
 	// Limits define a set of bounds for provisioning capacity.
 	// +optional
 	Limits Limits `json:"limits,omitempty"`
-	// Weight is the priority given to the provisioner during scheduling. A higher
-	// numerical weight indicates that this provisioner will be ordered
-	// ahead of other provisioners with lower weights. A provisioner with no weight
-	// will be treated as if it is a provisioner with a weight of 0.
+	// Weight is the priority given to the nodepool during scheduling. A higher
+	// numerical weight indicates that this nodepool will be ordered
+	// ahead of other nodepools with lower weights. A nodepool with no weight
+	// will be treated as if it is a nodepool with a weight of 0.
 	// +kubebuilder:validation:Minimum:=1
 	// +kubebuilder:validation:Maximum:=100
 	// +optional
@@ -79,29 +79,40 @@ type Disruption struct {
 	// +kubebuilder:validation:Schemaless
 	// +optional
 	ExpireAfter NillableDuration `json:"expireAfter"`
-    // Budgets is a list of Budgets.
-    // If there are multiple active budgets, Karpenter uses
+	// Budgets is a list of Budgets.
+	// If there are multiple active budgets, Karpenter uses
 	// the most restrictive maxUnavailable. If left undefined,
 	// this will default to one budget with a maxUnavailable to 10%.
-    Budgets []Budget `json:"budgets,omitempty" hash:"ignore"`
+	// +kubebuilder:validation:XValidation:message="'crontab' must be set with 'duration'",rule="!self.all(x, (has(x.crontab) && !has(x.duration)) || (!has(x.crontab) && has(x.duration)))"
+	// +kubebuilder:default:={{maxUnavailable: "10%"}}
+	// +kubebuilder:validation:MaxItems=50
+	// +optional
+	Budgets []Budget `json:"budgets,omitempty" hash:"ignore"`
 }
 
-// Budget specifies periods of times where Karpenter will restrict the
-// number of Node Claims that can be terminated at a time.
-// Unless specified, a budget is always active.
+// Budget defines when Karpenter will restrict the
+// number of Node Claims that can be terminating simultaneously.
 type Budget struct {
-    // MaxUnavailable dictates how many NodeClaims owned by this NodePool
-    // can be terminating at once. It must be set.
-    // This only considers NodeClaims with the karpenter.sh/disruption taint.
-    MaxUnavailable intstr.IntOrString `json:"maxUnavailable" hash:"ignore"`
-    // Crontab specifies when a budget begins being active,
-    // using the upstream cronjob syntax.
-    // "Minute Hour DayOfMonth Month DayOfWeek"
-    // This is required if Duration is set.
-    Crontab *string `json:"crontab,omitempty" hash:"ignore"`
-    // Duration determines how long a Budget is active since each Crontab hit.
-    // This is required if Crontab is set.
-    Duration *metav1.Duration `json:"duration,omitempty" hash:"ignore"`
+	// MaxUnavailable dictates how many NodeClaims owned by this NodePool
+	// can be terminating at once. It must be set.
+	// This only considers NodeClaims with the karpenter.sh/disruption taint.
+	// +kubebuilder:validation:XIntOrString
+	// +kubebuilder:default:="10%"
+	MaxUnavailable intstr.IntOrString `json:"maxUnavailable" hash:"ignore"`
+	// Crontab specifies when a budget begins being active,
+	// using the upstream cronjob syntax. If omitted, the budget is always active.
+	// Currently timezones are not supported.
+	// This is required if Duration is set.
+	// +kubebuilder:validation:Pattern:=`^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.*)\s(.*)\s(.*)\s(.*)\s(.*))$`
+	// +optional
+	Crontab *string `json:"crontab,omitempty" hash:"ignore"`
+	// Duration determines how long a Budget is active since each Crontab hit.
+	// If omitted, the budget is always active.
+	// This is required if Crontab is set.
+	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+)|(Never)$`
+	// +kubebuilder:validation:Type="string"
+	// +optional
+	Duration *metav1.Duration `json:"duration,omitempty" hash:"ignore"`
 }
 
 type ConsolidationPolicy string
@@ -184,7 +195,7 @@ type NodePoolList struct {
 	Items           []NodePool `json:"items"`
 }
 
-// OrderByWeight orders the provisioners in the NodePoolList
+// OrderByWeight orders the nodepools in the NodePoolList
 // by their priority weight in-place
 func (pl *NodePoolList) OrderByWeight() {
 	sort.Slice(pl.Items, func(a, b int) bool {
