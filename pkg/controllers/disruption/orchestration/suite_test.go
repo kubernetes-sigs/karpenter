@@ -341,6 +341,7 @@ var _ = Describe("Queue", func() {
 			// Make the second command's node initialized
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{replacementNode2}, []*v1beta1.NodeClaim{replacementnodeClaim2})
 
+			// Reconcile the second command and expect the replacement to be initialized
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(cmd.ReplacementKeys[0].Initialized).To(BeTrue())
 			Expect(cmd2.ReplacementKeys[0].Initialized).To(BeTrue())
