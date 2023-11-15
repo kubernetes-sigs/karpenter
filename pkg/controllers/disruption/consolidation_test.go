@@ -797,6 +797,9 @@ var _ = Describe("Consolidation", func() {
 			})
 			// Block this pod from being disrupted with karpenter.sh/do-not-evict
 			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
+			pods[2].Status.Conditions[0] = v1.PodCondition{
+				Type: v1.PodReady,
+			}
 
 			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodeClaim2, node2)
@@ -1533,6 +1536,9 @@ var _ = Describe("Consolidation", func() {
 					}}})
 			// Block this pod from being disrupted with karpenter.sh/do-not-disrupt
 			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
+			pods[2].Status.Conditions[0] = v1.PodCondition{
+				Type: v1.PodReady,
+			}
 
 			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodeClaim2, node2)
@@ -2351,6 +2357,11 @@ var _ = Describe("Consolidation", func() {
 						v1beta1.DoNotDisruptAnnotationKey: "true",
 					},
 				},
+				Conditions: []v1.PodCondition{
+					{
+						Type: v1.PodReady,
+					},
+				},
 			})
 			ExpectApplied(ctx, env.Client, doNotEvictPod)
 			ExpectManualBinding(ctx, env.Client, doNotEvictPod, node)
@@ -2502,6 +2513,11 @@ var _ = Describe("Consolidation", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
 						v1beta1.DoNotDisruptAnnotationKey: "true",
+					},
+				},
+				Conditions: []v1.PodCondition{
+					{
+						Type: v1.PodReady,
 					},
 				},
 			})
