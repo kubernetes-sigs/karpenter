@@ -17,14 +17,20 @@ limitations under the License.
 package v1beta1
 
 import (
+	"context"
 	"fmt"
+	"math"
 	"sort"
 
 	"github.com/mitchellh/hashstructure/v2"
+	"github.com/robfig/cron/v3"
 	"github.com/samber/lo"
+	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/util/workqueue"
+	"k8s.io/utils/clock"
 	"knative.dev/pkg/ptr"
 )
 
@@ -99,19 +105,21 @@ type Budget struct {
 	// can be terminating at once. It must be set.
 	// This only considers NodeClaims with the karpenter.sh/disruption taint.
 	// +kubebuilder:validation:XIntOrString
+	// +kubebuilder:validation:Pattern=`^(\d{1,3}%)|(\d+)$`
 	// +kubebuilder:default:="10%"
 	MaxUnavailable intstr.IntOrString `json:"maxUnavailable" hash:"ignore"`
 	// Crontab specifies when a budget begins being active,
 	// using the upstream cronjob syntax. If omitted, the budget is always active.
 	// Currently timezones are not supported.
 	// This is required if Duration is set.
-	// +kubebuilder:validation:Pattern:=`^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.*)\s(.*)\s(.*)\s(.*)\s(.*))$`
+	// +kubebuilder:validation:Pattern:=`^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$`
 	// +optional
 	Crontab *string `json:"crontab,omitempty" hash:"ignore"`
 	// Duration determines how long a Budget is active since each Crontab hit.
+	// Only minutes and hours are accepted, as cron does not work in seconds.
 	// If omitted, the budget is always active.
 	// This is required if Crontab is set.
-	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+)|(Never)$`
+	// +kubebuilder:validation:Pattern=`^(([0-9]+(m|h))+)|(Never)$`
 	// +kubebuilder:validation:Type="string"
 	// +optional
 	Duration *metav1.Duration `json:"duration,omitempty" hash:"ignore"`
@@ -198,4 +206,74 @@ func (pl *NodePoolList) OrderByWeight() {
 	sort.Slice(pl.Items, func(a, b int) bool {
 		return ptr.Int32Value(pl.Items[a].Spec.Weight) > ptr.Int32Value(pl.Items[b].Spec.Weight)
 	})
+}
+
+// GetAllowedDisruptions returns the minimum allowed disruptions across all disruption budgets for a given node pool.
+// This returns both values rather than one resolved value as the resolved value for a perecent depends on the number of
+// node claims.
+func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock) (intstr.IntOrString, intstr.IntOrString, error) {
+	vals := make([]intstr.IntOrString, len(in.Spec.Disruption.Budgets))
+	errs := make([]error, len(in.Spec.Disruption.Budgets))
+	workqueue.ParallelizeUntil(ctx, len(in.Spec.Disruption.Budgets), len(in.Spec.Disruption.Budgets), func(i int) {
+		val, err := in.Spec.Disruption.Budgets[i].GetAllowedDisruptions(c)
+		if err != nil {
+			errs[i] = fmt.Errorf("invalid budget %s, %w", lo.FromPtr(in.Spec.Disruption.Budgets[i].Crontab), err)
+		}
+		vals[i] = val
+	})
+	if err := multierr.Combine(errs...); err != nil {
+		return intstr.IntOrString{}, intstr.IntOrString{}, err
+	}
+	minIntVal, minPercentVal := math.MaxInt64, math.MaxInt64
+	for i := range vals {
+		val := vals[i]
+		// The crontab wasn't active
+		if val.IntVal == -1 {
+			continue
+		}
+		// This returns the percent value if it's a string, and the raw value if it's an int.
+		temp, err := intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(val), 100, false)
+		if err != nil {
+			// Should almost never happen since this is validated in the API spec
+			return intstr.IntOrString{}, intstr.IntOrString{}, fmt.Errorf("getting intstr scaled value, %w", err)
+		}
+		if val.Type == intstr.Int {
+			minIntVal = lo.Ternary(temp < minIntVal, temp, minIntVal)
+		} else {
+			minPercentVal = lo.Ternary(temp < minPercentVal, temp, minPercentVal)
+		}
+	}
+	// return the values, defaulting to -1 if the value is MaxInt64
+	return intstr.FromInt(lo.Ternary(minIntVal == math.MaxInt64, -1, minIntVal)), intstr.FromString(fmt.Sprintf("%d%%", lo.Ternary(minPercentVal == math.MaxInt64, -1, minPercentVal))), nil
+}
+
+// GetAllowedDisruptions returns an intstr.IntOrString that can be used a comparison
+// for calculating if a disruption action is allowed. It returns an error if the
+// crontab is invalid. This returns -1 if the value is unbounded.
+func (b *Budget) GetAllowedDisruptions(c clock.Clock) (intstr.IntOrString, error) {
+	active, err := b.IsActive(c)
+	if err != nil {
+		return intstr.IntOrString{}, err
+	}
+	return lo.Ternary(active, b.MaxUnavailable, intstr.FromInt(-1)), nil
+}
+
+// IsActive takes a clock as input and returns if a budget is active.
+// It walks back in time the time.Duration associated with the crontab,
+// and checks if the next time the schedule will hit is before the current time.
+// If the last crontab hit is exactly the duration in the past, this means the
+// schedule is active, as any more crontab hits in between would only extend this
+// window. This ensures that any previous crontab hits for a schedule are considered.
+func (b *Budget) IsActive(c clock.Clock) (bool, error) {
+	if b.Crontab == nil && b.Duration == nil {
+		return true, nil
+	}
+	schedule, err := cron.ParseStandard(lo.FromPtr(b.Crontab))
+	if err != nil {
+		return false, fmt.Errorf("parsing crontab, %w", err)
+	}
+	// Walk back in time for the duration associated with the crontab
+	checkPoint := c.Now().Add(-lo.FromPtr(b.Duration).Duration)
+	nextHit := schedule.Next(checkPoint)
+	return !nextHit.After(c.Now()), nil
 }
