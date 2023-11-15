@@ -51,7 +51,7 @@ const (
 )
 
 type Command struct {
-	ReplacementKeys   []*NodeClaimKey
+	Replacements      []Replacement
 	candidates        []*state.StateNode
 	timeAdded         time.Time // timeAdded is used to track timeouts
 	method            string    // used for metrics
@@ -59,19 +59,19 @@ type Command struct {
 	lastError         error
 }
 
-func (c *Command) Reason() string {
-	return fmt.Sprintf("%s/%s", c.method,
-		lo.Ternary(len(c.ReplacementKeys) > 0, "replace", "delete"))
-}
-
-// NodeClaimKey wraps a nodeclaim.Key with an initialized field to save on readiness checks and identify
-// when a nodeclaim is first initialized for metrics and events.
-type NodeClaimKey struct {
-	nodeclaim.Key
+// Replacement wraps a NodeClaim name with an initialized field to save on readiness checks and identify
+// when a NodeClaim is first initialized for metrics and events.
+type Replacement struct {
+	name string
 	// Use a bool track if a node has already been initialized so we can fire metrics for intialization once.
 	// This intentionally does not capture nodes that go initialized then go NotReady after as other pods can
 	// schedule to this node as well.
 	Initialized bool
+}
+
+func (c *Command) Reason() string {
+	return fmt.Sprintf("%s/%s", c.method,
+		lo.Ternary(len(c.Replacements) > 0, "replace", "delete"))
 }
 
 type UnrecoverableError struct {
@@ -134,10 +134,10 @@ func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster
 }
 
 // NewCommand creates a command key and adds in initial data for the orchestration queue.
-func NewCommand(replacements []nodeclaim.Key, candidates []*state.StateNode, method string, consolidationType string) *Command {
+func NewCommand(replacements []string, candidates []*state.StateNode, method string, consolidationType string) *Command {
 	return &Command{
-		ReplacementKeys: lo.Map(replacements, func(key nodeclaim.Key, _ int) *NodeClaimKey {
-			return &NodeClaimKey{Key: key}
+		Replacements: lo.Map(replacements, func(name string, _ int) Replacement {
+			return Replacement{name: name}
 		}),
 		candidates:        candidates,
 		method:            method,
@@ -186,8 +186,8 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 		// 1. Emit metrics for launch failures
 		// 2. Ensure cluster state no longer thinks these nodes are deleting
 		// 3. Remove it from the Queue's internal data structure
-		failedLaunches := lo.Filter(cmd.ReplacementKeys, func(key *NodeClaimKey, _ int) bool {
-			return !key.Initialized
+		failedLaunches := lo.Filter(cmd.Replacements, func(r Replacement, _ int) bool {
+			return !r.Initialized
 		})
 		disruptionReplacementNodeClaimFailedCounter.With(map[string]string{
 			methodLabel:            cmd.method,
@@ -213,15 +213,14 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 	if q.clock.Since(cmd.timeAdded) > maxRetryDuration {
 		return NewUnrecoverableError(fmt.Errorf("command reached timeout after %s", q.clock.Since(cmd.timeAdded)))
 	}
-	waitErrs := make([]error, len(cmd.ReplacementKeys))
-	for i := range cmd.ReplacementKeys {
-		key := cmd.ReplacementKeys[i]
-		// If we know the node claim is initialized, no need to check again.
-		if key.Initialized {
+	waitErrs := make([]error, len(cmd.Replacements))
+	for i := range cmd.Replacements {
+		// If we know the node claim is Initialized, no need to check again.
+		if cmd.Replacements[i].Initialized {
 			continue
 		}
 		// Get the nodeclaim
-		nodeClaim, err := nodeclaim.Get(ctx, q.kubeClient, key.Key)
+		nodeClaim, err := nodeclaim.Get(ctx, q.kubeClient, cmd.Replacements[i].name)
 		if err != nil {
 			// The NodeClaim got deleted after an initial eventual consistency delay
 			// This means that there was an ICE error or the Node initializationTTL expired
@@ -241,7 +240,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 			waitErrs[i] = fmt.Errorf("node claim not initialized")
 			continue
 		}
-		cmd.ReplacementKeys[i].Initialized = true
+		cmd.Replacements[i].Initialized = true
 		// Subtract the last initialization time from the time the command was added to get initialization duration.
 		initLength := initializedStatus.LastTransitionTime.Inner.Time.Sub(nodeClaim.CreationTimestamp.Time).Seconds()
 		disruptionReplacementNodeClaimInitializedHistogram.Observe(initLength)
