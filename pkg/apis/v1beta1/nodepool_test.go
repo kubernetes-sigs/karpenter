@@ -72,8 +72,8 @@ var _ = Describe("Budgets", func() {
 		It("should return the min allowedDisruptions", func() {
 			minInt, minPercent, err := nodePool.GetAllowedDisruptions(ctx, fakeClock)
 			Expect(err).To(Succeed())
-			Expect(minPercent.StrVal).To(Equal("10%"))
 			Expect(minInt.IntVal).To(BeNumerically("==", 10))
+			Expect(minPercent.StrVal).To(Equal("10%"))
 		})
 		It("should return the min allowedDisruptions, ignoring inactive crons", func() {
 			// Make the first and third budgets inactive
