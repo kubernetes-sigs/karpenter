@@ -209,8 +209,7 @@ func (pl *NodePoolList) OrderByWeight() {
 }
 
 // GetAllowedDisruptions returns the minimum allowed disruptions across all disruption budgets for a given node pool.
-// This returns both values rather than one resolved value as the resolved value for a perecent depends on the number of
-// node claims.
+// This returns two values as the resolved value for a percent depends on the number of current node claims.
 func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock) (intstr.IntOrString, intstr.IntOrString, error) {
 	vals := make([]intstr.IntOrString, len(in.Spec.Disruption.Budgets))
 	errs := make([]error, len(in.Spec.Disruption.Budgets))
@@ -234,7 +233,7 @@ func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock) (i
 		// This returns the percent value if it's a string, and the raw value if it's an int.
 		temp, err := intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(val), 100, false)
 		if err != nil {
-			// Should almost never happen since this is validated in the API spec
+			// Should almost never happen since this is validated when the nodepool is applied
 			return intstr.IntOrString{}, intstr.IntOrString{}, fmt.Errorf("getting intstr scaled value, %w", err)
 		}
 		if val.Type == intstr.Int {
