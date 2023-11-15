@@ -27,7 +27,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -93,9 +92,9 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 		return &v1beta1.NodeClaim{}, fmt.Errorf("erroring as number of AllowedCreateCalls has been exceeded")
 	}
 	reqs := scheduling.NewNodeSelectorRequirements(nodeClaim.Spec.Requirements...)
-	np := &v1beta1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: nodeClaim.Labels[lo.Ternary(nodeClaim.IsMachine, v1alpha5.ProvisionerNameLabelKey, v1beta1.NodePoolLabelKey)]}}
+	np := &v1beta1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: nodeClaim.Labels[v1beta1.NodePoolLabelKey]}}
 	instanceTypes := lo.Filter(lo.Must(c.GetInstanceTypes(ctx, np)), func(i *cloudprovider.InstanceType, _ int) bool {
-		return reqs.Compatible(i.Requirements, scheduling.AllowUndefinedWellKnownLabelsV1Alpha5) == nil &&
+		return reqs.Compatible(i.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil &&
 			len(i.Offerings.Requirements(reqs).Available()) > 0 &&
 			resources.Fits(nodeClaim.Spec.Resources.Requests, i.Allocatable())
 	})
@@ -118,7 +117,7 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 		if reqs.Compatible(scheduling.NewRequirements(
 			scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, o.Zone),
 			scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, o.CapacityType),
-		), scheduling.AllowUndefinedWellKnownLabelsV1Alpha5) == nil {
+		), scheduling.AllowUndefinedWellKnownLabels) == nil {
 			labels[v1.LabelTopologyZone] = o.Zone
 			labels[v1beta1.CapacityTypeLabelKey] = o.CapacityType
 			break

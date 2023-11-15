@@ -28,7 +28,6 @@ import (
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
@@ -193,6 +192,8 @@ var _ = Describe("Expiration", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
+		// Process the item so that the nodes can be deleted.
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)
 
 		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
@@ -226,6 +227,8 @@ var _ = Describe("Expiration", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
+		// Process the item so that the nodes can be deleted.
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -268,6 +271,8 @@ var _ = Describe("Expiration", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
+		// Process the item so that the nodes can be deleted.
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims...)
 
@@ -337,6 +342,8 @@ var _ = Describe("Expiration", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
+		// Process the item so that the nodes can be deleted.
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim2)
 
@@ -384,6 +391,8 @@ var _ = Describe("Expiration", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
+		// Process the item so that the nodes can be deleted.
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -396,8 +405,8 @@ var _ = Describe("Expiration", func() {
 		Expect(nodeclaims[0].Name).ToNot(Equal(nodeClaim.Name))
 		Expect(nodes[0].Name).ToNot(Equal(node.Name))
 	})
-	It("should uncordon nodes when expiration replacement fails", func() {
-		cloudProvider.AllowedCreateCalls = 0 // fail the replacement and expect it to uncordon
+	It("should untaint nodes when expiration replacement fails", func() {
+		cloudProvider.AllowedCreateCalls = 0 // fail the replacement and expect it to untaint
 
 		labels := map[string]string{
 			"app": "test",
@@ -432,13 +441,13 @@ var _ = Describe("Expiration", func() {
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectNewNodeClaimsDeleted(ctx, env.Client, &wg, 1)
-		_, err := disruptionController.Reconcile(ctx, reconcile.Request{})
-		Expect(err).To(HaveOccurred())
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// We should have tried to create a new nodeClaim but failed to do so; therefore, we uncordoned the existing node
 		node = ExpectExists(ctx, env.Client, node)
-		Expect(node.Spec.Unschedulable).To(BeFalse())
+		Expect(node.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 	})
 	It("can replace node for expiration with multiple nodes", func() {
 		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
@@ -524,6 +533,8 @@ var _ = Describe("Expiration", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
+		// Process the item so that the nodes can be deleted.
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 

@@ -3,13 +3,12 @@ help: ## Display help
 
 presubmit: verify test licenses vulncheck ## Run all steps required for code to be checked in
 
-## TODO @joinnis: Reduce the gingko timeout back to 10m once the v1alpha5 testing is removed
 test: ## Run tests
 	go test ./... \
 		-race \
-		-timeout 20m \
+		-timeout 10m \
 		--ginkgo.focus="${FOCUS}" \
-		--ginkgo.timeout=20m \
+		--ginkgo.timeout=10m \
 		--ginkgo.v \
 		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
 
@@ -17,7 +16,7 @@ deflake: ## Run randomized, racing tests until the test fails to catch flakes
 	ginkgo \
 		--race \
 		--focus="${FOCUS}" \
-		--timeout=20m \
+		--timeout=10m \
 		--randomize-all \
 		--until-it-fails \
 		-v \

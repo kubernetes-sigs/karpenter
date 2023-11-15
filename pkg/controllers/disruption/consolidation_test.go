@@ -110,6 +110,8 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -129,6 +131,8 @@ var _ = Describe("Consolidation", func() {
 			ExpectTriggerVerifyAction(&wg)
 			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 			wg.Wait()
+
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)
@@ -238,6 +242,9 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
+			// Process the item so that the nodes can be deleted.
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -295,6 +302,9 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
+
+			// Process the item so that the nodes can be deleted.
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
@@ -439,6 +449,9 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
+			// Process the item so that the nodes can be deleted.
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -506,6 +519,9 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
+
+			// Process the item so that the nodes can be deleted.
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
@@ -585,6 +601,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -663,6 +680,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -740,6 +758,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -795,7 +814,7 @@ var _ = Describe("Consolidation", func() {
 					},
 				},
 			})
-			// Block this pod from being disrupted with karpenter.sh/do-not-evict
+			// Block this pod from being disrupted with karpenter.sh/do-not-disrupt
 			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
 			pods[2].Status.Conditions[0] = v1.PodCondition{
 				Type: v1.PodReady,
@@ -820,7 +839,9 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
-			// Cascade any deletion of the nodeClaim to the node
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
+			// Cascade any deletion of the machine to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
 			// we should delete the non-annotated node and replace with a cheaper node
@@ -1034,81 +1055,6 @@ var _ = Describe("Consolidation", func() {
 			ExpectExists(ctx, env.Client, nodeClaim)
 			ExpectExists(ctx, env.Client, node)
 		})
-		It("waits for node deletion to finish", func() {
-			labels := map[string]string{
-				"app": "test",
-			}
-			// create our RS so we can link a pod to it
-			rs := test.ReplicaSet()
-			ExpectApplied(ctx, env.Client, rs)
-			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
-
-			pod := test.Pod(test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels,
-					OwnerReferences: []metav1.OwnerReference{
-						{
-							APIVersion:         "apps/v1",
-							Kind:               "ReplicaSet",
-							Name:               rs.Name,
-							UID:                rs.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
-						},
-					}}})
-			nodeClaim.Finalizers = []string{"unit-test.com/block-deletion"}
-			node.Finalizers = []string{"unit-test.com/block-deletion"}
-
-			ExpectApplied(ctx, env.Client, rs, pod, nodeClaim, node, nodePool)
-
-			// bind pods to node
-			ExpectManualBinding(ctx, env.Client, pod, node)
-
-			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
-
-			// consolidation won't delete the old node until the new node is ready
-			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
-			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-
-			var consolidationFinished atomic.Bool
-			go func() {
-				defer GinkgoRecover()
-				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
-				consolidationFinished.Store(true)
-			}()
-			wg.Wait()
-
-			// nodeclaim should still exist
-			ExpectExists(ctx, env.Client, nodeClaim)
-			ExpectExists(ctx, env.Client, node)
-			// and consolidation should still be running waiting on the nodeclaim's deletion
-			Expect(consolidationFinished.Load()).To(BeFalse())
-
-			// fetch the latest nodeclaim object and remove the finalizer
-			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
-
-			// consolidation should complete now that the finalizer on the nodeclaim is gone and it can
-			// was actually deleted
-			Eventually(consolidationFinished.Load, 10*time.Second).Should(BeTrue())
-			wg.Wait()
-
-			// Cascade any deletion of the nodeclaim to the node
-			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
-
-			ExpectNotFound(ctx, env.Client, nodeClaim, node)
-
-			// Expect that the new nodeclaim was created and its different than the original
-			nodeClaims := ExpectNodeClaims(ctx, env.Client)
-			nodes := ExpectNodes(ctx, env.Client)
-			Expect(nodeClaims).To(HaveLen(1))
-			Expect(nodes).To(HaveLen(1))
-			Expect(nodeClaims[0].Name).ToNot(Equal(nodeClaim.Name))
-			Expect(nodes[0].Name).ToNot(Equal(node.Name))
-		})
 	})
 	Context("Delete", func() {
 		var nodeClaim2 *v1beta1.NodeClaim
@@ -1186,6 +1132,9 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
+			// Process the item so that the nodes can be deleted.
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim2)
 
@@ -1232,6 +1181,9 @@ var _ = Describe("Consolidation", func() {
 			ExpectTriggerVerifyAction(&wg)
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
+
+			// Process the item so that the nodes can be deleted.
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim2)
@@ -1286,6 +1238,9 @@ var _ = Describe("Consolidation", func() {
 			ExpectTriggerVerifyAction(&wg)
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
+
+			// Process the item so that the nodes can be deleted.
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
@@ -1349,6 +1304,9 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
+			// Process the item so that the nodes can be deleted.
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -1402,6 +1360,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -1453,6 +1412,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -1472,7 +1432,8 @@ var _ = Describe("Consolidation", func() {
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
 
 			pods := test.Pods(3, test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
 					OwnerReferences: []metav1.OwnerReference{
 						{
 							APIVersion:         "apps/v1",
@@ -1482,7 +1443,8 @@ var _ = Describe("Consolidation", func() {
 							Controller:         ptr.Bool(true),
 							BlockOwnerDeletion: ptr.Bool(true),
 						},
-					}}})
+					},
+				}})
 			// Block this pod from being disrupted with karpenter.sh/do-not-evict
 			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"})
 
@@ -1504,7 +1466,8 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
-			// Cascade any deletion of the nodeclaim to the node
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
 			// we should delete the non-annotated node
@@ -1558,7 +1521,9 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
-			// Cascade any deletion of the nodeClaim to the node
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
+			// Cascade any deletion of the machine to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
 			// we should delete the non-annotated node
@@ -1604,6 +1569,9 @@ var _ = Describe("Consolidation", func() {
 			ExpectTriggerVerifyAction(&wg)
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
+
+			// Process the item so that the nodes can be deleted.
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim2)
@@ -1800,8 +1768,10 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
-			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, consolidatableNodeClaim)
+			// Process the item so that the nodes can be deleted.
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, consolidatableNodeClaim)
 			// Expect no events that state that the pods would schedule against a non-initialized node
 			evts := recorder.Events()
 			_, ok := lo.Find(evts, func(e events.Event) bool {
@@ -1856,6 +1826,9 @@ var _ = Describe("Consolidation", func() {
 			ExpectTriggerVerifyAction(&wg)
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
+
+			// Process the item so that the nodes can be deleted.
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim2)
@@ -1971,7 +1944,10 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
-			// Cascade any deletion of the nodeClaim to the node
+			// Process the item so that the nodes can be deleted.
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
+			// Cascade any deletion of the machine to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim2)
 
 			// we don't need a new node, but we should evict everything off one of node2 which only has a single pod
@@ -2049,6 +2025,9 @@ var _ = Describe("Consolidation", func() {
 			// controller should finish
 			Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 			wg.Wait()
+
+			// Process the item so that the nodes can be deleted.
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1)
@@ -2135,6 +2114,9 @@ var _ = Describe("Consolidation", func() {
 			// controller should finish
 			Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 			wg.Wait()
+
+			// Process the item so that the nodes can be deleted.
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim2)
@@ -2234,7 +2216,7 @@ var _ = Describe("Consolidation", func() {
 		It("should not consolidate if the action becomes invalid during the node TTL wait", func() {
 			pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{
 				Annotations: map[string]string{
-					v1alpha5.DoNotEvictPodAnnotationKey: "true",
+					v1beta1.DoNotDisruptAnnotationKey: "true",
 				},
 			}})
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool, pod)
@@ -2351,7 +2333,7 @@ var _ = Describe("Consolidation", func() {
 					break
 				}
 			}
-			doNotEvictPod := test.Pod(test.PodOptions{
+			doNotDisruptPod := test.Pod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
 						v1beta1.DoNotDisruptAnnotationKey: "true",
@@ -2363,14 +2345,14 @@ var _ = Describe("Consolidation", func() {
 					},
 				},
 			})
-			ExpectApplied(ctx, env.Client, doNotEvictPod)
-			ExpectManualBinding(ctx, env.Client, doNotEvictPod, node)
+			ExpectApplied(ctx, env.Client, doNotDisruptPod)
+			ExpectManualBinding(ctx, env.Client, doNotDisruptPod, node)
 
 			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
 			ExpectTriggerVerifyAction(&wg)
 			wg.Wait()
 
-			// we would normally be able to replace a node, but we are blocked by the do-not-evict pods during validation
+			// we would normally be able to replace a node, but we are blocked by the do-not-disrupt pods during validation
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, node)
@@ -2509,7 +2491,7 @@ var _ = Describe("Consolidation", func() {
 					break
 				}
 			}
-			doNotEvictPods := test.Pods(2, test.PodOptions{
+			doNotDisruptPods := test.Pods(2, test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
 						v1beta1.DoNotDisruptAnnotationKey: "true",
@@ -2521,15 +2503,15 @@ var _ = Describe("Consolidation", func() {
 					},
 				},
 			})
-			ExpectApplied(ctx, env.Client, doNotEvictPods[0], doNotEvictPods[1])
-			ExpectManualBinding(ctx, env.Client, doNotEvictPods[0], node)
-			ExpectManualBinding(ctx, env.Client, doNotEvictPods[1], node2)
+			ExpectApplied(ctx, env.Client, doNotDisruptPods[0], doNotDisruptPods[1])
+			ExpectManualBinding(ctx, env.Client, doNotDisruptPods[0], node)
+			ExpectManualBinding(ctx, env.Client, doNotDisruptPods[1], node2)
 
 			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
 			ExpectTriggerVerifyAction(&wg)
 			wg.Wait()
 
-			// we would normally be able to consolidate down to a single node, but we are blocked by the do-not-evict pods during validation
+			// we would normally be able to consolidate down to a single node, but we are blocked by the do-not-disrupt pods during validation
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
 			ExpectExists(ctx, env.Client, node)
@@ -2681,6 +2663,8 @@ var _ = Describe("Consolidation", func() {
 			// controller should finish
 			Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 			wg.Wait()
+
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			// should have at least two nodes deleted from multi nodeClaim consolidation
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(BeNumerically("<=", numNodes-2))
@@ -2865,6 +2849,9 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
+			// Process the item so that the nodes can be deleted.
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1, nodeClaim2, nodeClaim3)
 
@@ -2931,6 +2918,9 @@ var _ = Describe("Consolidation", func() {
 			ExpectTriggerVerifyAction(&wg)
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
+
+			// Process the item so that the nodes can be deleted.
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1)
@@ -3005,6 +2995,9 @@ var _ = Describe("Consolidation", func() {
 			Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 			wg.Wait()
 
+			// Process the item so that the nodes can be deleted.
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1, nodeClaim2)
 
@@ -3073,6 +3066,10 @@ var _ = Describe("Consolidation", func() {
 			fakeClock.Step(31 * time.Second)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 			Eventually(finished.Load, 10*time.Second).Should(BeTrue())
+			wg.Wait()
+
+			// Process the item so that the nodes can be deleted.
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1, nodeClaim2, nodeClaim3)
@@ -3162,6 +3159,9 @@ var _ = Describe("Consolidation", func() {
 			// controller should finish
 			Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 			wg.Wait()
+
+			// Process the item so that the nodes can be deleted.
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1, nodeClaim2, nodeClaim3)
@@ -3255,6 +3255,9 @@ var _ = Describe("Consolidation", func() {
 			ExpectTriggerVerifyAction(&wg)
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
+
+			// Process the item so that the nodes can be deleted.
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1)
@@ -3371,6 +3374,8 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
+			// Process the item so that the nodes can be deleted.
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, zone2NodeClaim)
 
@@ -3593,6 +3598,8 @@ var _ = Describe("Consolidation", func() {
 			// Trigger a reconciliation run which should take into account the deleting node
 			// consolidation shouldn't trigger additional actions
 			fakeClock.Step(10 * time.Minute)
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
 
 			result, err := disruptionController.Reconcile(ctx, reconcile.Request{})
 			Expect(err).ToNot(HaveOccurred())

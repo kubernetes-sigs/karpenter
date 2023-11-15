@@ -19,14 +19,8 @@ import (
 	"fmt"
 	"time"
 
-	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
@@ -37,9 +31,8 @@ type SingleNodeConsolidation struct {
 	consolidation
 }
 
-func NewSingleNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cp cloudprovider.CloudProvider, recorder events.Recorder) *SingleNodeConsolidation {
-	return &SingleNodeConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
+func NewSingleNodeConsolidation(consolidation consolidation) *SingleNodeConsolidation {
+	return &SingleNodeConsolidation{consolidation: consolidation}
 }
 
 // ComputeCommand generates a disruption command given candidates
@@ -52,21 +45,19 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, candidates
 	if err != nil {
 		return Command{}, fmt.Errorf("sorting candidates, %w", err)
 	}
-	deprovisioningEligibleMachinesGauge.WithLabelValues(s.Type()).Set(float64(len(candidates)))
 	disruptionEligibleNodesGauge.With(map[string]string{
 		methodLabel:            s.Type(),
 		consolidationTypeLabel: s.ConsolidationType(),
 	}).Set(float64(len(candidates)))
 
-	v := NewValidation(consolidationTTL, s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder)
+	v := NewValidation(consolidationTTL, s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder, s.queue)
 
 	// Set a timeout
 	timeout := s.clock.Now().Add(SingleNodeConsolidationTimeoutDuration)
 	// binary search to find the maximum number of NodeClaims we can terminate
 	for i, candidate := range candidates {
 		if s.clock.Now().After(timeout) {
-			deprovisioningConsolidationTimeoutsCounter.WithLabelValues(singleMachineConsolidationLabelValue).Inc()
-			deprovisioningConsolidationTimeoutsCounter.WithLabelValues(s.ConsolidationType()).Inc()
+			disruptionConsolidationTimeoutTotalCounter.WithLabelValues(s.ConsolidationType()).Inc()
 			logging.FromContext(ctx).Debugf("abandoning single-node consolidation due to timeout after evaluating %d candidates", i)
 			return Command{}, nil
 		}

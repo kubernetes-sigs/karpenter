@@ -80,7 +80,6 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...*Candidat
 	if err != nil {
 		return Command{}, fmt.Errorf("filtering candidates, %w", err)
 	}
-	deprovisioningEligibleMachinesGauge.WithLabelValues(e.Type()).Set(float64(len(candidates)))
 	disruptionEligibleNodesGauge.With(map[string]string{
 		methodLabel:            e.Type(),
 		consolidationTypeLabel: e.ConsolidationType(),
@@ -105,9 +104,8 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...*Candidat
 			}
 			return Command{}, err
 		}
-		// Log when all pods can't schedule, as the command will get executed immediately.
+		// Emit an event that we couldn't reschedule the pods on the node.
 		if !results.AllNonPendingPodsScheduled() {
-			logging.FromContext(ctx).With(lo.Ternary(candidate.NodeClaim.IsMachine, "machine", "nodeclaim"), candidate.NodeClaim.Name, "node", candidate.Node.Name).Debugf("cannot terminate since scheduling simulation failed to schedule all pods, %s", results.NonPendingPodSchedulingErrors())
 			e.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
 			continue
 		}

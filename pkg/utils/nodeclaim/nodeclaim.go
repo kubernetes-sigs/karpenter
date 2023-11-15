@@ -38,11 +38,6 @@ import (
 	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 )
 
-type Key struct {
-	Name      string
-	IsMachine bool
-}
-
 // PodEventHandler is a watcher on v1.Pods that maps Pods to NodeClaim based on the node names
 // and enqueues reconcile.Requests for the NodeClaims
 func PodEventHandler(c client.Client) handler.EventHandler {
@@ -232,9 +227,9 @@ func NewFromNode(node *v1.Node) *v1beta1.NodeClaim {
 	return nc
 }
 
-func Get(ctx context.Context, c client.Client, key Key) (*v1beta1.NodeClaim, error) {
+func Get(ctx context.Context, c client.Client, name string) (*v1beta1.NodeClaim, error) {
 	nodeClaim := &v1beta1.NodeClaim{}
-	if err := c.Get(ctx, types.NamespacedName{Name: key.Name}, nodeClaim); err != nil {
+	if err := c.Get(ctx, types.NamespacedName{Name: name}, nodeClaim); err != nil {
 		return nil, err
 	}
 	return nodeClaim, nil
@@ -332,13 +327,6 @@ func Owner(ctx context.Context, c client.Client, obj interface{ GetLabels() map[
 			return nil, err
 		}
 		return nodePool, nil
-	}
-	if v, ok := obj.GetLabels()[v1alpha5.ProvisionerNameLabelKey]; ok {
-		provisioner := &v1alpha5.Provisioner{}
-		if err := c.Get(ctx, types.NamespacedName{Name: v}, provisioner); err != nil {
-			return nil, err
-		}
-		return nodepoolutil.New(provisioner), nil
 	}
 	return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "NodePool"}, "")
 }

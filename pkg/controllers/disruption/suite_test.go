@@ -28,6 +28,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clock "k8s.io/utils/clock/testing"
@@ -41,6 +42,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/disruption"
+	"github.com/aws/karpenter-core/pkg/controllers/disruption/orchestration"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
@@ -62,6 +64,7 @@ var nodeStateController controller.Controller
 var nodeClaimStateController controller.Controller
 var fakeClock *clock.FakeClock
 var recorder *test.EventRecorder
+var queue *orchestration.Queue
 
 var onDemandInstances []*cloudprovider.InstanceType
 var leastExpensiveInstance, mostExpensiveInstance *cloudprovider.InstanceType
@@ -83,7 +86,8 @@ var _ = BeforeSuite(func() {
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, env.KubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
-	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster)
+	queue = orchestration.NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov)
+	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue)
 })
 
 var _ = AfterSuite(func() {
@@ -102,6 +106,7 @@ var _ = BeforeEach(func() {
 	}
 	fakeClock.SetTime(time.Now())
 	cluster.Reset()
+	queue.Reset()
 	cluster.MarkUnconsolidated()
 
 	// Reset Feature Flags to test defaults
@@ -130,7 +135,7 @@ var _ = AfterEach(func() {
 var _ = Describe("Disruption Taints", func() {
 	var nodePool *v1beta1.NodePool
 	var nodeClaim *v1beta1.NodeClaim
-	var nodeClaimNode *v1.Node
+	var node *v1.Node
 	BeforeEach(func() {
 		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
 			Name: "current-on-demand",
@@ -167,7 +172,7 @@ var _ = Describe("Disruption Taints", func() {
 			},
 		})
 		nodePool = test.NodePool()
-		nodeClaim, nodeClaimNode = test.NodeClaimAndNode(v1beta1.NodeClaim{
+		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1.LabelInstanceTypeStable: currentInstance.Name,
@@ -199,12 +204,12 @@ var _ = Describe("Disruption Taints", func() {
 			},
 		})
 		nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: nil}
-		nodeClaimNode.Spec.Taints = append(nodeClaimNode.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, nodeClaimNode, pod)
-		ExpectManualBinding(ctx, env.Client, pod, nodeClaimNode)
+		node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and nodeClaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodeClaimNode}, []*v1beta1.NodeClaim{nodeClaim})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		// Trigger the reconcile loop to start but don't trigger the verify action
 		wg := sync.WaitGroup{}
@@ -215,8 +220,8 @@ var _ = Describe("Disruption Taints", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 		}()
 		wg.Wait()
-		nodeClaimNode = ExpectNodeExists(ctx, env.Client, nodeClaimNode.Name)
-		Expect(nodeClaimNode.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
+		node = ExpectNodeExists(ctx, env.Client, node.Name)
+		Expect(node.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 	})
 	It("should add and remove taints from NodeClaims that fail to disrupt", func() {
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
@@ -228,11 +233,11 @@ var _ = Describe("Disruption Taints", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, nodeClaimNode, pod)
-		ExpectManualBinding(ctx, env.Client, pod, nodeClaimNode)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and nodeClaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodeClaimNode}, []*v1beta1.NodeClaim{nodeClaim})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		// Trigger the reconcile loop to start but don't trigger the verify action
 		wg := sync.WaitGroup{}
@@ -240,7 +245,7 @@ var _ = Describe("Disruption Taints", func() {
 		go func() {
 			defer wg.Done()
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileFailed(ctx, disruptionController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 		}()
 
 		// Iterate in a loop until we get to the validation action
@@ -251,8 +256,8 @@ var _ = Describe("Disruption Taints", func() {
 				break
 			}
 		}
-		nodeClaimNode = ExpectNodeExists(ctx, env.Client, nodeClaimNode.Name)
-		Expect(nodeClaimNode.Spec.Taints).To(ContainElement(v1beta1.DisruptionNoScheduleTaint))
+		node = ExpectNodeExists(ctx, env.Client, node.Name)
+		Expect(node.Spec.Taints).To(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 
 		createdNodeClaim := lo.Reject(ExpectNodeClaims(ctx, env.Client), func(nc *v1beta1.NodeClaim, _ int) bool {
 			return nc.Name == nodeClaim.Name
@@ -260,10 +265,15 @@ var _ = Describe("Disruption Taints", func() {
 		ExpectDeleted(ctx, env.Client, createdNodeClaim[0])
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, createdNodeClaim[0])
 		ExpectNotFound(ctx, env.Client, createdNodeClaim[0])
-
 		wg.Wait()
-		nodeClaimNode = ExpectNodeExists(ctx, env.Client, nodeClaimNode.Name)
-		Expect(nodeClaimNode.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
+
+		// Increment the clock so that the nodeclaim deletion isn't caught by the
+		// eventual consistency delay.
+		fakeClock.Step(6 * time.Second)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
+		node = ExpectNodeExists(ctx, env.Client, node.Name)
+		Expect(node.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 	})
 })
 

@@ -271,12 +271,12 @@ func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *s
 	}
 	for _, m := range results.NewNodeClaims {
 		// TODO: Check the error on the provisioner launch
-		key, err := provisioner.Launch(ctx, m, provisioning.WithReason(metrics.ProvisioningReason))
+		nodeClaimName, err := provisioner.Create(ctx, m, provisioning.WithReason(metrics.ProvisioningReason))
 		if err != nil {
 			return bindings
 		}
 		nodeClaim := &v1beta1.NodeClaim{}
-		Expect(c.Get(ctx, types.NamespacedName{Name: key.Name}, nodeClaim)).To(Succeed())
+		Expect(c.Get(ctx, types.NamespacedName{Name: nodeClaimName}, nodeClaim)).To(Succeed())
 		nodeClaim, node := ExpectNodeClaimDeployed(ctx, c, cluster, cloudProvider, nodeClaim)
 		if nodeClaim != nil && node != nil {
 			for _, pod := range m.Pods {
@@ -368,8 +368,8 @@ func ExpectMakeNodesInitialized(ctx context.Context, c client.Client, nodes ...*
 	ExpectMakeNodesReady(ctx, c, nodes...)
 
 	for i := range nodes {
-		nodes[i].Labels[v1alpha5.LabelNodeRegistered] = "true"
-		nodes[i].Labels[v1alpha5.LabelNodeInitialized] = "true"
+		nodes[i].Labels[v1beta1.NodeRegisteredLabelKey] = "true"
+		nodes[i].Labels[v1beta1.NodeInitializedLabelKey] = "true"
 		ExpectApplied(ctx, c, nodes[i])
 	}
 }
@@ -533,6 +533,34 @@ func ExpectNodeClaims(ctx context.Context, c client.Client) []*v1beta1.NodeClaim
 	nodeClaims := &v1beta1.NodeClaimList{}
 	Expect(c.List(ctx, nodeClaims)).To(Succeed())
 	return lo.ToSlicePtr(nodeClaims.Items)
+}
+
+func ExpectStateNodeExists(cluster *state.Cluster, node *v1.Node) *state.StateNode {
+	GinkgoHelper()
+	var ret *state.StateNode
+	cluster.ForEachNode(func(n *state.StateNode) bool {
+		if n.Node.Name != node.Name {
+			return true
+		}
+		ret = n.DeepCopy()
+		return false
+	})
+	Expect(ret).ToNot(BeNil())
+	return ret
+}
+
+func ExpectStateNodeExistsForNodeClaim(cluster *state.Cluster, nodeClaim *v1beta1.NodeClaim) *state.StateNode {
+	GinkgoHelper()
+	var ret *state.StateNode
+	cluster.ForEachNode(func(n *state.StateNode) bool {
+		if n.NodeClaim.Status.ProviderID != nodeClaim.Status.ProviderID {
+			return true
+		}
+		ret = n.DeepCopy()
+		return false
+	})
+	Expect(ret).ToNot(BeNil())
+	return ret
 }
 
 func ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx context.Context, c client.Client, nodeStateController, nodeClaimStateController controller.Controller, nodes []*v1.Node, nodeClaims []*v1beta1.NodeClaim) {

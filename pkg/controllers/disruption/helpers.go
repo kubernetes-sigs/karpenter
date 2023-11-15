@@ -31,6 +31,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	disruptionevents "github.com/aws/karpenter-core/pkg/controllers/disruption/events"
+	"github.com/aws/karpenter-core/pkg/controllers/disruption/orchestration"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -173,14 +174,15 @@ func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
 	return cost
 }
 
-// GetCandidates returns nodes that appear to be currently disruptable based off of their nodePool
-func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter) ([]*Candidate, error) {
+// GetCandidates returns nodes that appear to be currently deprovisionable based off of their nodePool
+func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock,
+	cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter, queue *orchestration.Queue) ([]*Candidate, error) {
 	nodePoolMap, nodePoolToInstanceTypesMap, err := buildNodePoolMap(ctx, kubeClient, cloudProvider)
 	if err != nil {
 		return nil, err
 	}
 	candidates := lo.FilterMap(cluster.Nodes(), func(n *state.StateNode, _ int) (*Candidate, bool) {
-		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, nodePoolMap, nodePoolToInstanceTypesMap)
+		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, nodePoolMap, nodePoolToInstanceTypesMap, queue)
 		return cn, e == nil
 	})
 	// Filter only the valid candidates that we should disrupt

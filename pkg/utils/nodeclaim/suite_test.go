@@ -142,7 +142,7 @@ var _ = Describe("NodeClaimUtils", func() {
 		})
 		ExpectApplied(ctx, env.Client, nodeClaim)
 
-		retrieved, err := nodeclaimutil.Get(ctx, env.Client, nodeclaimutil.Key{Name: nodeClaim.Name, IsMachine: false})
+		retrieved, err := nodeclaimutil.Get(ctx, env.Client, nodeClaim.Name)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(retrieved.Name).To(Equal(nodeClaim.Name))
 	})
