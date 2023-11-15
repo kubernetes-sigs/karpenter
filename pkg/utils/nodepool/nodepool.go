@@ -16,17 +16,94 @@ package nodepool
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	"github.com/samber/lo"
 )
 
 type Key struct {
 	Name          string
 	IsProvisioner bool
 }
+
+func New(provisioner *v1alpha5.Provisioner) *v1beta1.NodePool {
+	np := &v1beta1.NodePool{
+		ObjectMeta: provisioner.ObjectMeta,
+		Spec: v1beta1.NodePoolSpec{
+			Template: v1beta1.NodeClaimTemplate{
+				ObjectMeta: v1beta1.ObjectMeta{
+					Annotations: provisioner.Spec.Annotations,
+					Labels:      provisioner.Spec.Labels,
+				},
+				Spec: v1beta1.NodeClaimSpec{
+					Taints:        provisioner.Spec.Taints,
+					StartupTaints: provisioner.Spec.StartupTaints,
+					Requirements:  provisioner.Spec.Requirements,
+					Kubelet:       NewKubeletConfiguration(provisioner.Spec.KubeletConfiguration),
+					NodeClassRef:  NewNodeClassReference(provisioner.Spec.ProviderRef),
+					Provider:      provisioner.Spec.Provider,
+				},
+			},
+			Weight: provisioner.Spec.Weight,
+		},
+		Status: v1beta1.NodePoolStatus{
+			Resources: provisioner.Status.Resources,
+		},
+		IsProvisioner: true,
+	}
+	if provisioner.Spec.TTLSecondsUntilExpired != nil {
+		np.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(lo.Must(time.ParseDuration(fmt.Sprintf("%ds", lo.FromPtr[int64](provisioner.Spec.TTLSecondsUntilExpired)))))
+	}
+	if provisioner.Spec.Consolidation != nil && lo.FromPtr(provisioner.Spec.Consolidation.Enabled) {
+		np.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
+	} else if provisioner.Spec.TTLSecondsAfterEmpty != nil {
+		np.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
+		np.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: lo.ToPtr(lo.Must(time.ParseDuration(fmt.Sprintf("%ds", lo.FromPtr[int64](provisioner.Spec.TTLSecondsAfterEmpty)))))}
+	}
+	if provisioner.Spec.Limits != nil {
+		np.Spec.Limits = v1beta1.Limits(provisioner.Spec.Limits.Resources)
+	}
+	return np
+}
+
+func NewKubeletConfiguration(kc *v1alpha5.KubeletConfiguration) *v1beta1.KubeletConfiguration {
+	if kc == nil {
+		return nil
+	}
+	return &v1beta1.KubeletConfiguration{
+		ClusterDNS:                  kc.ClusterDNS,
+		ContainerRuntime:            kc.ContainerRuntime,
+		MaxPods:                     kc.MaxPods,
+		PodsPerCore:                 kc.PodsPerCore,
+		SystemReserved:              kc.SystemReserved,
+		KubeReserved:                kc.KubeReserved,
+		EvictionHard:                kc.EvictionHard,
+		EvictionSoft:                kc.EvictionSoft,
+		EvictionSoftGracePeriod:     kc.EvictionSoftGracePeriod,
+		EvictionMaxPodGracePeriod:   kc.EvictionMaxPodGracePeriod,
+		ImageGCHighThresholdPercent: kc.ImageGCHighThresholdPercent,
+		ImageGCLowThresholdPercent:  kc.ImageGCLowThresholdPercent,
+		CPUCFSQuota:                 kc.CPUCFSQuota,
+	}
+}
+
+func NewNodeClassReference(pr *v1alpha5.MachineTemplateRef) *v1beta1.NodeClassReference {
+	if pr == nil {
+		return nil
+	}
+	return &v1beta1.NodeClassReference{
+		Kind:       pr.Kind,
+		Name:       pr.Name,
+		APIVersion: pr.APIVersion,
+	}
+}
+
 
 func Get(ctx context.Context, c client.Client, key Key) (*v1beta1.NodePool, error) {
 	nodePool := &v1beta1.NodePool{}
