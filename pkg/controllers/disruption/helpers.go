@@ -73,7 +73,6 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	if err != nil {
 		return nil, fmt.Errorf("determining pending pods, %w", err)
 	}
-
 	for _, n := range candidates {
 		pods = append(pods, n.reschedulablePods...)
 	}

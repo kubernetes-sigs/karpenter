@@ -21,12 +21,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
+// GetPods grabs all pods that are currently bound to the passed nodes
 func GetPods(ctx context.Context, kubeClient client.Client, nodes ...*v1.Node) ([]*v1.Pod, error) {
 	var pods []*v1.Pod
 	for _, node := range nodes {
@@ -41,43 +43,30 @@ func GetPods(ctx context.Context, kubeClient client.Client, nodes ...*v1.Node) (
 	return pods, nil
 }
 
-// GetReschedulablePods gets the list of schedulable pods from a variadic list of nodes
-// It ignores pods that are owned by the node, a daemonset or are in a terminal
-// or terminating state
+// GetReschedulablePods grabs all pods from the passed nodes that satisfy the IsReschedulable criteria
 func GetReschedulablePods(ctx context.Context, kubeClient client.Client, nodes ...*v1.Node) ([]*v1.Pod, error) {
-	var pods []*v1.Pod
-	for _, node := range nodes {
-		var podList v1.PodList
-		if err := kubeClient.List(ctx, &podList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
-			return nil, fmt.Errorf("listing pods, %w", err)
-		}
-		for i := range podList.Items {
-			// these pods don't need to be rescheduled
-			if pod.IsReschedulable(&podList.Items[i]) {
-				pods = append(pods, &podList.Items[i])
-			}
-		}
+	pods, err := GetPods(ctx, kubeClient, nodes...)
+	if err != nil {
+		return nil, fmt.Errorf("listing pods, %w", err)
 	}
-	return pods, nil
+	return lo.Filter(pods, func(p *v1.Pod, _ int) bool {
+		return pod.IsReschedulable(p)
+	}), nil
 }
 
+// GetEvictablePods grabs all pods from the passed nodes that satisfy the IsEvictable criteria
 func GetEvictablePods(ctx context.Context, kubeClient client.Client, now time.Time, nodes ...*v1.Node) ([]*v1.Pod, error) {
-	var pods []*v1.Pod
-	for _, node := range nodes {
-		var podList v1.PodList
-		if err := kubeClient.List(ctx, &podList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
-			return nil, fmt.Errorf("listing pods, %w", err)
-		}
-		for i := range podList.Items {
-			// these pods don't need to be rescheduled
-			if pod.IsEvictable(&podList.Items[i], now) {
-				pods = append(pods, &podList.Items[i])
-			}
-		}
+	pods, err := GetPods(ctx, kubeClient, nodes...)
+	if err != nil {
+		return nil, fmt.Errorf("listing pods, %w", err)
 	}
-	return pods, nil
+	return lo.Filter(pods, func(p *v1.Pod, _ int) bool {
+		return pod.IsEvictable(p, now)
+	}), nil
 }
 
+// GetProvisionablePods grabs all the pods on the cluster that are not currently bound to nodes and
+// satisfy the IsProvisionable criteria
 func GetProvisionablePods(ctx context.Context, kubeClient client.Client) ([]*v1.Pod, error) {
 	var pods []*v1.Pod
 	var podList v1.PodList

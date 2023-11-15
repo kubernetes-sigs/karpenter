@@ -24,6 +24,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	podutil "github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
 // PDBLimits is used to evaluate if evicting a list of pods is possible.
@@ -56,8 +58,12 @@ func NewPDBLimits(ctx context.Context, kubeClient client.Client) (*PDBLimits, er
 
 // CanEvictPods returns true if every pod in the list is evictable. They may not all be evictable simultaneously, but
 // for every PDB that controls the pods at least one pod can be evicted.
+// nolint:gocyclo
 func (s *PDBLimits) CanEvictPods(pods []*v1.Pod) (client.ObjectKey, bool) {
 	for _, pod := range pods {
+		if !podutil.IsActive(pod) {
+			continue
+		}
 		for _, pdb := range s.pdbs {
 			if pdb.name.Namespace == pod.ObjectMeta.Namespace {
 				if pdb.selector.Matches(labels.Set(pod.Labels)) {

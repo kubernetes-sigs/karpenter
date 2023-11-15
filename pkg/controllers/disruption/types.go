@@ -121,6 +121,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		return nil, fmt.Errorf("getting pods from state node, %w", err)
 	}
 	for _, po := range pods {
+		// We only consider pods that are actively running for "karpenter.sh/do-not-disrupt"
 		if pod.IsActive(po) && pod.HasDoNotDisrupt(po) {
 			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf(`Pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(po)))...)
 			return nil, fmt.Errorf(`pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(po))
@@ -134,27 +135,26 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("PDB %q prevents pod evictions", pdb))...)
 		return nil, fmt.Errorf("pdb %q prevents pod evictions", pdb)
 	}
-	cn := &Candidate{
+	return &Candidate{
 		StateNode:         node.DeepCopy(),
 		instanceType:      instanceType,
 		nodePool:          nodePool,
 		capacityType:      node.Labels()[v1beta1.CapacityTypeLabelKey],
 		zone:              node.Labels()[v1.LabelTopologyZone],
 		reschedulablePods: lo.Filter(pods, func(p *v1.Pod, _ int) bool { return pod.IsReschedulable(p) }),
-	}
-	// We get the disruption cost from all pods in the candidate, not just the reschedulable pods
-	cn.disruptionCost = disruptionCost(ctx, pods) * cn.lifetimeRemaining(clk)
-	return cn, nil
+		// We get the disruption cost from all pods in the candidate, not just the reschedulable pods
+		disruptionCost: disruptionCost(ctx, pods) * lifetimeRemaining(clk, nodePool, node.Node),
+	}, nil
 }
 
 // lifetimeRemaining calculates the fraction of node lifetime remaining in the range [0.0, 1.0].  If the TTLSecondsUntilExpired
 // is non-zero, we use it to scale down the disruption costs of candidates that are going to expire.  Just after creation, the
 // disruption cost is highest, and it approaches zero as the node ages towards its expiration time.
-func (c *Candidate) lifetimeRemaining(clock clock.Clock) float64 {
+func lifetimeRemaining(clock clock.Clock, nodePool *v1beta1.NodePool, node *v1.Node) float64 {
 	remaining := 1.0
-	if c.nodePool.Spec.Disruption.ExpireAfter.Duration != nil {
-		ageInSeconds := clock.Since(c.Node.CreationTimestamp.Time).Seconds()
-		totalLifetimeSeconds := c.nodePool.Spec.Disruption.ExpireAfter.Duration.Seconds()
+	if nodePool.Spec.Disruption.ExpireAfter.Duration != nil {
+		ageInSeconds := clock.Since(node.CreationTimestamp.Time).Seconds()
+		totalLifetimeSeconds := nodePool.Spec.Disruption.ExpireAfter.Duration.Seconds()
 		lifetimeRemainingSeconds := totalLifetimeSeconds - ageInSeconds
 		remaining = clamp(0.0, lifetimeRemainingSeconds/totalLifetimeSeconds, 1.0)
 	}

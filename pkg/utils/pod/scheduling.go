@@ -27,30 +27,51 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
+// IsActive checks if Karpenter should consider this pod as running by ensuring that the pod:
+// - Isn't a terminal pod (Failed or Succeeded)
+// - Isn't actively terminating
 func IsActive(pod *v1.Pod) bool {
 	return !IsTerminal(pod) &&
 		!IsTerminating(pod)
 }
 
+// IsReschedulable checks if a Karpenter should consider this pod when re-scheduling to new capacity by ensuring that the pod:
+// - Isn't a terminal pod (Failed or Succeeded)
+// - Isn't actively terminating
+// - Isn't owned by a DaemonSet
+// - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
 func IsReschedulable(pod *v1.Pod) bool {
 	// these pods don't need to be rescheduled
-	return !IsOwnedByNode(pod) &&
+	return !IsTerminal(pod) &&
+		!IsTerminating(pod) &&
 		!IsOwnedByDaemonSet(pod) &&
-		!IsTerminal(pod) &&
-		!IsTerminating(pod)
+		!IsOwnedByNode(pod)
 }
 
+// IsEvictable checks if a pod is evictable by Karpenter by ensuring that the pod:
+// - Doesn't tolerate the "karepnter.sh/disruption=disrupting" taint
+// - Isn't a terminal pod (Failed or Succeeded)
+// - Isn't a pod that has been terminating past its terminationGracePeriodSeconds
+// - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
 func IsEvictable(pod *v1.Pod, now time.Time) bool {
 	return !ToleratesDisruptionNoScheduleTaint(pod) &&
 		!IsTerminal(pod) &&
 		!IsStuckTerminating(pod, now) &&
+		// Mirror pods cannot be deleted through the apiserver since they can't be controller
+		// https://kubernetes.io/docs/reference/generated/kubectl/kubectl-commands#drain
 		!IsOwnedByNode(pod)
 }
 
+// IsProvisionable checks if a pod needs to be scheduled to new capacity by Karpenter by ensuring that the pod:
+// - Has been marked as "Pending" by the kube-scheduler
+// - Has not been bound to a node
+// - Isn't currently preempting other pods on the cluster and about to schedule
+// - Isn't owned by a DaemonSet
+// - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
 func IsProvisionable(pod *v1.Pod) bool {
-	return !IsScheduled(pod) &&
+	return FailedToSchedule(pod) &&
+		!IsScheduled(pod) &&
 		!IsPreempting(pod) &&
-		FailedToSchedule(pod) &&
 		!IsOwnedByDaemonSet(pod) &&
 		!IsOwnedByNode(pod)
 }

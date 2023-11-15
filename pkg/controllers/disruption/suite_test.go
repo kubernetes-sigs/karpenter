@@ -486,6 +486,66 @@ var _ = Describe("Pod Eviction Cost", func() {
 	})
 })
 
+var _ = Describe("Candidate Filtering", func() {
+	It("should not consider candidates that have do-not-disrupt pods scheduled", func() {
+
+	})
+	It("should not consider candidates that have do-not-disrupt pods scheduled to mirror pods", func() {
+
+	})
+	It("should consider candidates that have do-not-disrupt pods on terminating pods", func() {
+
+	})
+	It("should consider candidates that have do-not-disrupt pods on terminal pods", func() {
+
+	})
+	It("should not consider candidates that have do-not-disrupt pods scheduled to DaemonSet pods", func() {
+
+	})
+	It("should not consider candidates that have do-not-disrupt on nodes", func() {
+
+	})
+	It("should not consider candidates that have fully blocking PDBs", func() {
+
+	})
+	It("should not consider candidates that have fully blocking PDBs on mirror pods", func() {
+
+	})
+	It("should not consider candidates that have fully blocking PDBs on daemonset pods", func() {
+
+	})
+	It("should not consider candidates that do not have both Node and NodeClaim representations", func() {
+
+	})
+	It("should not consider candidates that are nominated", func() {
+
+	})
+	It("should not consider candidates that are deleting", func() {
+
+	})
+	It("should not consider candidates that aren't yet initialized", func() {
+
+	})
+	It("should not consider candidates that are not owned by a NodePool", func() {
+
+	})
+	It("should not consider candidates that are have a non-existent NodePool", func() {
+
+	})
+	It("should not consider candidates that do not have the karpenter.sh/capacity-type label", func() {
+
+	})
+	It("should not consider candidates that do not have the topology.kubernetes.io/zone label", func() {
+
+	})
+	It("should not consider candidates that do not have the node.kubernetes.io/instance-type label", func() {
+
+	})
+	It("should not consider candidates who's instance type cannot be resolved", func() {
+
+	})
+})
+
 func leastExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
 	for _, elem := range onDemandInstances {
 		if len(elem.Offerings.Compatible(scheduling.NewRequirements(scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, zone)))) > 0 {
