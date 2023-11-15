@@ -58,7 +58,7 @@ spec:
                             pattern: ^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.*)\s(.*)\s(.*)\s(.*)\s(.*))$
                             type: string
                           duration:
-                            description: Duration determines how long a Budget is active since each Crontab hit. This is required if Crontab is set. If omitted, the budget is always active.
+                            description: Duration determines how long a Budget is active since each Crontab hit. If omitted, the budget is always active. This is required if Crontab is set.
                             pattern: ^(([0-9]+(s|m|h))+)|(Never)$
                             type: string
                           maxUnavailable:
