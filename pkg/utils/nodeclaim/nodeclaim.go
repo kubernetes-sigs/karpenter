@@ -333,13 +333,6 @@ func Owner(ctx context.Context, c client.Client, obj interface{ GetLabels() map[
 		}
 		return nodePool, nil
 	}
-	if v, ok := obj.GetLabels()[v1alpha5.ProvisionerNameLabelKey]; ok {
-		provisioner := &v1alpha5.Provisioner{}
-		if err := c.Get(ctx, types.NamespacedName{Name: v}, provisioner); err != nil {
-			return nil, err
-		}
-		return nodepoolutil.New(provisioner), nil
-	}
 	return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "NodePool"}, "")
 }
 
