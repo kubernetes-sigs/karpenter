@@ -37,6 +37,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	nodeutil "sigs.k8s.io/karpenter/pkg/utils/node"
+
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -48,7 +50,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
-	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
 // LaunchOptions are the set of options that can be used to trigger certain
@@ -154,45 +155,38 @@ func (p *Provisioner) CreateNodeClaims(ctx context.Context, nodeClaims []*schedu
 }
 
 func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*v1.Pod, error) {
-	var podList v1.PodList
-	if err := p.kubeClient.List(ctx, &podList, client.MatchingFields{"spec.nodeName": ""}); err != nil {
+	// filter for provisionable pods first, so we don't check for validity/PVCs on pods we won't provision anyway
+	// (e.g. those owned by daemonsets)
+	pods, err := nodeutil.GetProvisionablePods(ctx, p.kubeClient)
+	if err != nil {
 		return nil, fmt.Errorf("listing pods, %w", err)
 	}
-	var pods []*v1.Pod
-	for i := range podList.Items {
-		po := podList.Items[i]
-		// filter for provisionable pods first, so we don't check for validity/PVCs on pods we won't provision anyway
-		// (e.g. those owned by daemonsets)
-		if !pod.IsProvisionable(&po) {
-			continue
+	return lo.Reject(pods, func(po *v1.Pod, _ int) bool {
+		if err := p.Validate(ctx, po); err != nil {
+			logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(po)).Debugf("ignoring pod, %s", err)
+			return true
 		}
-		if err := p.Validate(ctx, &po); err != nil {
-			logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(&po)).Debugf("ignoring pod, %s", err)
-			continue
-		}
-
 		p.consolidationWarnings(ctx, po)
-		pods = append(pods, &po)
-	}
-	return pods, nil
+		return false
+	}), nil
 }
 
 // consolidationWarnings potentially writes logs warning about possible unexpected interactions between scheduling
 // constraints and consolidation
-func (p *Provisioner) consolidationWarnings(ctx context.Context, po v1.Pod) {
+func (p *Provisioner) consolidationWarnings(ctx context.Context, po *v1.Pod) {
 	// We have pending pods that have preferred anti-affinity or topology spread constraints.  These can interact
 	// unexpectedly with consolidation so we warn once per hour when we see these pods.
 	if po.Spec.Affinity != nil && po.Spec.Affinity.PodAntiAffinity != nil {
 		if len(po.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) != 0 {
 			if p.cm.HasChanged(string(po.UID), "pod-antiaffinity") {
-				logging.FromContext(ctx).Infof("pod %s has a preferred Anti-Affinity which can prevent consolidation", client.ObjectKeyFromObject(&po))
+				logging.FromContext(ctx).Infof("pod %s has a preferred Anti-Affinity which can prevent consolidation", client.ObjectKeyFromObject(po))
 			}
 		}
 	}
 	for _, tsc := range po.Spec.TopologySpreadConstraints {
 		if tsc.WhenUnsatisfiable == v1.ScheduleAnyway {
 			if p.cm.HasChanged(string(po.UID), "pod-topology-spread") {
-				logging.FromContext(ctx).Infof("pod %s has a preferred TopologySpreadConstraint which can prevent consolidation", client.ObjectKeyFromObject(&po))
+				logging.FromContext(ctx).Infof("pod %s has a preferred TopologySpreadConstraint which can prevent consolidation", client.ObjectKeyFromObject(po))
 			}
 		}
 	}
@@ -319,7 +313,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (*scheduler.Results, error) 
 	// We do this after getting the pending pods so that we undershoot if pods are
 	// actively migrating from a node that is being deleted
 	// NOTE: The assumption is that these nodes are cordoned and no additional pods will schedule to them
-	deletingNodePods, err := nodes.Deleting().Pods(ctx, p.kubeClient)
+	deletingNodePods, err := nodes.Deleting().ReschedulablePods(ctx, p.kubeClient)
 	if err != nil {
 		return nil, err
 	}

@@ -90,7 +90,7 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	}
 
 	// We get the pods that are on nodes that are deleting
-	deletingNodePods, err := deletingNodes.Pods(ctx, kubeClient)
+	deletingNodePods, err := deletingNodes.ReschedulablePods(ctx, kubeClient)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
 	}

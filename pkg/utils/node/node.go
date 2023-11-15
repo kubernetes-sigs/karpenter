@@ -26,10 +26,24 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
-// GetNodePods gets the list of schedulable pods from a variadic list of nodes
+func GetPods(ctx context.Context, kubeClient client.Client, nodes ...*v1.Node) ([]*v1.Pod, error) {
+	var pods []*v1.Pod
+	for _, node := range nodes {
+		var podList v1.PodList
+		if err := kubeClient.List(ctx, &podList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
+			return nil, fmt.Errorf("listing pods, %w", err)
+		}
+		for i := range podList.Items {
+			pods = append(pods, &podList.Items[i])
+		}
+	}
+	return pods, nil
+}
+
+// GetReschedulablePods gets the list of schedulable pods from a variadic list of nodes
 // It ignores pods that are owned by the node, a daemonset or are in a terminal
 // or terminating state
-func GetNodePods(ctx context.Context, kubeClient client.Client, nodes ...*v1.Node) ([]*v1.Pod, error) {
+func GetReschedulablePods(ctx context.Context, kubeClient client.Client, nodes ...*v1.Node) ([]*v1.Pod, error) {
 	var pods []*v1.Pod
 	for _, node := range nodes {
 		var podList v1.PodList
@@ -38,12 +52,57 @@ func GetNodePods(ctx context.Context, kubeClient client.Client, nodes ...*v1.Nod
 		}
 		for i := range podList.Items {
 			// these pods don't need to be rescheduled
-			if pod.IsOwnedByNode(&podList.Items[i]) ||
-				pod.IsOwnedByDaemonSet(&podList.Items[i]) ||
-				pod.IsTerminal(&podList.Items[i]) ||
-				pod.IsTerminating(&podList.Items[i]) {
-				continue
+			if pod.IsReschedulable(&podList.Items[i]) {
+				pods = append(pods, &podList.Items[i])
 			}
+		}
+	}
+	return pods, nil
+}
+
+func GetActivePods(ctx context.Context, kubeClient client.Client, nodes ...*v1.Node) ([]*v1.Pod, error) {
+	var pods []*v1.Pod
+	for _, node := range nodes {
+		var podList v1.PodList
+		if err := kubeClient.List(ctx, &podList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
+			return nil, fmt.Errorf("listing pods, %w", err)
+		}
+		for i := range podList.Items {
+			// these pods don't need to be rescheduled
+			if pod.IsActive(&podList.Items[i]) {
+				pods = append(pods, &podList.Items[i])
+			}
+		}
+	}
+	return pods, nil
+}
+
+func GetEvictablePods(ctx context.Context, kubeClient client.Client, nodes ...*v1.Node) ([]*v1.Pod, error) {
+	var pods []*v1.Pod
+	for _, node := range nodes {
+		var podList v1.PodList
+		if err := kubeClient.List(ctx, &podList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
+			return nil, fmt.Errorf("listing pods, %w", err)
+		}
+		for i := range podList.Items {
+			// these pods don't need to be rescheduled
+			if pod.IsEvictable(&podList.Items[i]) {
+				pods = append(pods, &podList.Items[i])
+			}
+		}
+	}
+	return pods, nil
+}
+
+func GetProvisionablePods(ctx context.Context, kubeClient client.Client) ([]*v1.Pod, error) {
+	var pods []*v1.Pod
+	var podList v1.PodList
+	if err := kubeClient.List(ctx, &podList, client.MatchingFields{"spec.nodeName": ""}); err != nil {
+		return nil, fmt.Errorf("listing pods, %w", err)
+	}
+	for i := range podList.Items {
+		// these pods don't need to be rescheduled
+		if pod.IsProvisionable(&podList.Items[i]) {
 			pods = append(pods, &podList.Items[i])
 		}
 	}

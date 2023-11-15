@@ -17,6 +17,8 @@ limitations under the License.
 package pod
 
 import (
+	"time"
+
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -24,6 +26,26 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
+
+func IsActive(pod *v1.Pod) bool {
+	return !IsTerminal(pod) &&
+		!IsTerminating(pod)
+}
+
+func IsReschedulable(pod *v1.Pod) bool {
+	// these pods don't need to be rescheduled
+	return !IsOwnedByNode(pod) &&
+		!IsOwnedByDaemonSet(pod) &&
+		!IsTerminal(pod) &&
+		!IsTerminating(pod)
+}
+
+func IsEvictable(pod *v1.Pod) bool {
+	return !ToleratesDisruptionNoScheduleTaint(pod) &&
+		!IsTerminal(pod) &&
+		!IsStuckTerminating(pod) &&
+		!IsOwnedByNode(pod)
+}
 
 func IsProvisionable(pod *v1.Pod) bool {
 	return !IsScheduled(pod) &&
@@ -56,6 +78,13 @@ func IsTerminal(pod *v1.Pod) bool {
 
 func IsTerminating(pod *v1.Pod) bool {
 	return pod.DeletionTimestamp != nil
+}
+
+func IsStuckTerminating(pod *v1.Pod) bool {
+	if pod.DeletionTimestamp.IsZero() {
+		return false
+	}
+	return time.Since(pod.DeletionTimestamp.Time) > time.Minute
 }
 
 func IsOwnedByDaemonSet(pod *v1.Pod) bool {

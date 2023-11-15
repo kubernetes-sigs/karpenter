@@ -116,7 +116,6 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		logging.FromContext(ctx).Errorf("Determining node pods, %s", err)
 		return nil, fmt.Errorf("getting pods from state node, %w", err)
 	}
-
 	cn := &Candidate{
 		StateNode:    node.DeepCopy(),
 		instanceType: instanceType,
@@ -125,7 +124,6 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		zone:         node.Labels()[v1.LabelTopologyZone],
 		pods:         pods,
 	}
-
 	cn.disruptionCost = disruptionCost(ctx, pods) * cn.lifetimeRemaining(clk)
 	return cn, nil
 }

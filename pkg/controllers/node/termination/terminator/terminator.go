@@ -19,7 +19,6 @@ package terminator
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -27,6 +26,8 @@ import (
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	nodeutil "sigs.k8s.io/karpenter/pkg/utils/node"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	podutil "sigs.k8s.io/karpenter/pkg/utils/pod"
@@ -79,32 +80,14 @@ func (t *Terminator) Taint(ctx context.Context, node *v1.Node) error {
 // Drain evicts pods from the node and returns true when all pods are evicted
 // https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
 func (t *Terminator) Drain(ctx context.Context, node *v1.Node) error {
-	// Get evictable pods
-	pods := &v1.PodList{}
-	if err := t.kubeClient.List(ctx, pods, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
+	pods, err := nodeutil.GetEvictablePods(ctx, t.kubeClient, node)
+	if err != nil {
 		return fmt.Errorf("listing pods on node, %w", err)
 	}
-
-	// Skip node due to pods that are not able to be evicted
-	podsToEvict := lo.FilterMap(pods.Items, func(po v1.Pod, _ int) (*v1.Pod, bool) {
-		p := lo.ToPtr(po)
-		// Ignore pods that tolerate the karpenter.sh/disruption taint.
-		if podutil.ToleratesDisruptionNoScheduleTaint(p) ||
-			// Ignore static mirror pods
-			podutil.IsOwnedByNode(p) ||
-			// Ignore if the pod is complete and doesn't need to be evicted
-			podutil.IsTerminal(p) ||
-			// Ignore if kubelet is partitioned and pods are beyond graceful termination window
-			t.isStuckTerminating(p) {
-			return nil, false
-		}
-		return p, true
-	})
 	// Enqueue for eviction
-	t.Evict(podsToEvict)
-
-	if len(podsToEvict) > 0 {
-		return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", len(podsToEvict)))
+	t.Evict(pods)
+	if len(pods) > 0 {
+		return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", len(pods)))
 	}
 	return nil
 }
@@ -144,11 +127,4 @@ func (t *Terminator) Evict(pods []*v1.Pod) {
 	} else if len(criticalDaemon) != 0 {
 		t.evictionQueue.Add(criticalDaemon...)
 	}
-}
-
-func (t *Terminator) isStuckTerminating(pod *v1.Pod) bool {
-	if pod.DeletionTimestamp == nil {
-		return false
-	}
-	return t.clock.Now().After(pod.DeletionTimestamp.Time.Add(1 * time.Minute))
 }
