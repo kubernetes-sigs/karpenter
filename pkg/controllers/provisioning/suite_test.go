@@ -111,11 +111,20 @@ var _ = Describe("Provisioning", func() {
 		nodePool := test.NodePool()
 		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectDeletionTimestampSet(ctx, env.Client, nodePool)
+
 		pod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-		nodes := &v1.NodeList{}
-		Expect(env.Client.List(ctx, nodes)).To(Succeed())
-		Expect(len(nodes.Items)).To(Equal(0))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+		ExpectNotScheduled(ctx, env.Client, pod)
+	})
+	It("should ignore NodePools that are NotReady", func() {
+		nodePool := test.NodePool()
+		ExpectApplied(ctx, env.Client, nodePool)
+		cloudProvider.Ready = fmt.Errorf("nodepool is not ready")
+
+		pod := test.UnschedulablePod()
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
 		ExpectNotScheduled(ctx, env.Client, pod)
 	})
 	It("should provision nodes for pods with supported node selectors", func() {

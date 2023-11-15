@@ -51,6 +51,7 @@ type CloudProvider struct {
 
 	CreatedNodeClaims map[string]*v1beta1.NodeClaim
 	Drifted           cloudprovider.DriftReason
+	Ready             error
 }
 
 func NewCloudProvider() *CloudProvider {
@@ -75,6 +76,7 @@ func (c *CloudProvider) Reset() {
 	c.NextCreateErr = nil
 	c.DeleteCalls = []*v1beta1.NodeClaim{}
 	c.Drifted = "drifted"
+	c.Ready = nil
 }
 
 func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (*v1beta1.NodeClaim, error) {
@@ -230,6 +232,13 @@ func (c *CloudProvider) IsDrifted(context.Context, *v1beta1.NodeClaim) (cloudpro
 	defer c.mu.RUnlock()
 
 	return c.Drifted, nil
+}
+
+func (c *CloudProvider) IsReady(context.Context, *v1beta1.NodePool) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.Ready
 }
 
 // Name returns the CloudProvider implementation name.

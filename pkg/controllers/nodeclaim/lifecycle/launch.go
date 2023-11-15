@@ -64,9 +64,6 @@ func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (r
 	}
 	// Either the Node launch failed or the Node was deleted due to InsufficientCapacity/NotFound
 	if err != nil || created == nil {
-		if cloudprovider.IsNodeClassNotReadyError(err) {
-			return reconcile.Result{Requeue: true}, nil
-		}
 		return reconcile.Result{}, err
 	}
 	l.cache.SetDefault(string(nodeClaim.UID), created)
@@ -113,10 +110,6 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeCla
 			}
 			nodeclaimutil.TerminatedCounter(nodeClaim, "insufficient_capacity").Inc()
 			return nil, nil
-		case cloudprovider.IsNodeClassNotReadyError(err):
-			l.recorder.Publish(NodeClassNotReadyEvent(nodeClaim, err))
-			nodeClaim.StatusConditions().MarkFalse(v1beta1.Launched, "LaunchFailed", truncateMessage(err.Error()))
-			return nil, fmt.Errorf("launching %s, %w", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"), err)
 		default:
 			nodeClaim.StatusConditions().MarkFalse(v1beta1.Launched, "LaunchFailed", truncateMessage(err.Error()))
 			return nil, fmt.Errorf("launching %s, %w", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"), err)

@@ -51,6 +51,10 @@ type CloudProvider interface {
 	// IsDrifted returns whether a NodeClaim has drifted from the provisioning requirements
 	// it is tied to.
 	IsDrifted(context.Context, *v1beta1.NodeClaim) (DriftReason, error)
+	// IsReady returns whether a NodePool is ready defined by the CloudProvider
+	// This function should eventually be modeled as NodePool and NodeClass status conditions; however,
+	// this is modeled as a CloudProvider interface method until we model this as status conditions
+	IsReady(context.Context, *v1beta1.NodePool) error
 	// Name returns the CloudProvider implementation name.
 	Name() string
 }
@@ -218,36 +222,6 @@ func IsInsufficientCapacityError(err error) bool {
 
 func IgnoreInsufficientCapacityError(err error) error {
 	if IsInsufficientCapacityError(err) {
-		return nil
-	}
-	return err
-}
-
-// NodeClassNotReadyError is an error type returned by CloudProviders when a NodeClass that is used by the launch process doesn't have all its resolved fields
-type NodeClassNotReadyError struct {
-	error
-}
-
-func NewNodeClassNotReadyError(err error) *NodeClassNotReadyError {
-	return &NodeClassNotReadyError{
-		error: err,
-	}
-}
-
-func (e *NodeClassNotReadyError) Error() string {
-	return fmt.Sprintf("NodeClassRef not ready, %s", e.error)
-}
-
-func IsNodeClassNotReadyError(err error) bool {
-	if err == nil {
-		return false
-	}
-	var nrError *NodeClassNotReadyError
-	return errors.As(err, &nrError)
-}
-
-func IgnoreNodeClassNotReadyError(err error) error {
-	if IsNodeClassNotReadyError(err) {
 		return nil
 	}
 	return err

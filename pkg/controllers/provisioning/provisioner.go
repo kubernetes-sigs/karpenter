@@ -211,17 +211,6 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	if err != nil {
 		return nil, err
 	}
-	nodePoolList.Items = lo.Filter(nodePoolList.Items, func(n v1beta1.NodePool, _ int) bool {
-		if err := n.RuntimeValidate(); err != nil {
-			logging.FromContext(ctx).With("nodepool", n.Name).Errorf("nodepool failed validation, %s", err)
-			return false
-		}
-		return n.DeletionTimestamp.IsZero()
-	})
-	if len(nodePoolList.Items) == 0 {
-		return nil, ErrNodePoolsNotFound
-	}
-
 	// nodeTemplates generated from NodePools are ordered by weight
 	// since they are stored within a slice and scheduling
 	// will always attempt to schedule on the first nodeTemplate
@@ -229,8 +218,14 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 
 	for i := range nodePoolList.Items {
 		nodePool := &nodePoolList.Items[i]
-		// Create node template
-		nodeClaimTemplates = append(nodeClaimTemplates, scheduler.NewNodeClaimTemplate(nodePool))
+
+		if !nodePool.DeletionTimestamp.IsZero() {
+			continue
+		}
+		if err := nodePool.RuntimeValidate(); err != nil {
+			logging.FromContext(ctx).With("nodepool", nodePool.Name).Errorf("nodepool failed validation, %s", err)
+			continue
+		}
 		// Get instance type options
 		instanceTypeOptions, err := p.cloudProvider.GetInstanceTypes(ctx, nodePool)
 		if err != nil {
@@ -243,6 +238,12 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 			logging.FromContext(ctx).With(lo.Ternary(nodePool.IsProvisioner, "provisioner", "nodepool"), nodePool.Name).Info("skipping, no resolved instance types found")
 			continue
 		}
+		if p.cloudProvider.IsReady(ctx, nodePool) != nil {
+			logging.FromContext(ctx).With(lo.Ternary(nodePool.IsProvisioner, "provisioner", "nodepool"), nodePool.Name).Info("skipping, nodepool is not ready")
+			continue
+		}
+		// Create node template
+		nodeClaimTemplates = append(nodeClaimTemplates, scheduler.NewNodeClaimTemplate(nodePool))
 		instanceTypes[nodepoolutil.Key{Name: nodePool.Name, IsProvisioner: nodePool.IsProvisioner}] = append(instanceTypes[nodepoolutil.Key{Name: nodePool.Name, IsProvisioner: nodePool.IsProvisioner}], instanceTypeOptions...)
 
 		// Construct Topology Domains
@@ -278,6 +279,9 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 				}
 			}
 		}
+	}
+	if len(nodeClaimTemplates) == 0 {
+		return nil, ErrNodePoolsNotFound
 	}
 
 	// inject topology constraints

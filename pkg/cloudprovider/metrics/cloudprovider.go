@@ -36,7 +36,6 @@ const (
 	MetricLabelErrorDefaultVal = ""
 	// Well-known metricLabelError values
 	NodeClaimNotFoundError    = "NodeClaimNotFoundError"
-	NodeClassNotReadyError    = "NodeClassNotReadyError"
 	InsufficientCapacityError = "InsufficientCapacityError"
 )
 
@@ -182,8 +181,6 @@ func GetErrorTypeLabelValue(err error) string {
 		return InsufficientCapacityError
 	case cloudprovider.IsNodeClaimNotFoundError(err):
 		return NodeClaimNotFoundError
-	case cloudprovider.IsNodeClassNotReadyError(err):
-		return NodeClassNotReadyError
 	default:
 		return MetricLabelErrorDefaultVal
 	}
