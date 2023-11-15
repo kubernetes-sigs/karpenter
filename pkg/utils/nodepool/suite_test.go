@@ -241,35 +241,6 @@ var _ = Describe("NodePoolUtils", func() {
 		nodePool := nodepoolutil.New(provisioner)
 		Expect(nodePool.Spec.Template.Spec.Provider).To(Equal(provisioner.Spec.Provider))
 	})
-	It("should retrieve both NodePools and Provisioners on a list call", func() {
-		Skip("Re-enable this test when NodePools are enabled and v1beta1 is released")
-
-		numNodePools := 3
-		numProvisioners := 5
-
-		for i := 0; i < numNodePools; i++ {
-			ExpectApplied(ctx, env.Client, test.NodePool(v1beta1.NodePool{
-				Spec: v1beta1.NodePoolSpec{
-					Template: v1beta1.NodeClaimTemplate{
-						Spec: v1beta1.NodeClaimSpec{
-							NodeClassRef: &v1beta1.NodeClassReference{
-								Kind:       "NodeClassRef",
-								APIVersion: "test.cloudprovider/v1",
-								Name:       "default",
-							},
-						},
-					},
-				},
-			}))
-		}
-		for i := 0; i < numProvisioners; i++ {
-			ExpectApplied(ctx, env.Client, test.Provisioner())
-		}
-
-		retrieved, err := nodepoolutil.List(ctx, env.Client)
-		Expect(err).ToNot(HaveOccurred())
-		Expect(retrieved.Items).To(HaveLen(8))
-	})
 	It("should patch the status on a NodePool", func() {
 		nodePool := test.NodePool(v1beta1.NodePool{
 			Spec: v1beta1.NodePoolSpec{
@@ -296,23 +267,6 @@ var _ = Describe("NodePoolUtils", func() {
 
 		retrieved := &v1beta1.NodePool{}
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodePool), retrieved)).To(Succeed())
-		ExpectResources(retrieved.Status.Resources, nodePool.Status.Resources)
-	})
-	It("should patch the status on a Provisioner", func() {
-		provisioner := test.Provisioner()
-		ExpectApplied(ctx, env.Client, provisioner)
-
-		nodePool := nodepoolutil.New(provisioner)
-		stored := nodePool.DeepCopy()
-		nodePool.Status.Resources = v1.ResourceList{
-			v1.ResourceCPU:              resource.MustParse("10"),
-			v1.ResourceMemory:           resource.MustParse("10Mi"),
-			v1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
-		}
-		Expect(nodepoolutil.PatchStatus(ctx, env.Client, stored, nodePool)).To(Succeed())
-
-		retrieved := &v1alpha5.Provisioner{}
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(provisioner), retrieved)).To(Succeed())
 		ExpectResources(retrieved.Status.Resources, nodePool.Status.Resources)
 	})
 })

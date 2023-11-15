@@ -19,13 +19,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/samber/lo"
+
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	provisionerutil "github.com/aws/karpenter-core/pkg/utils/provisioner"
 )
 
 type Key struct {
@@ -106,13 +106,6 @@ func NewNodeClassReference(pr *v1alpha5.MachineTemplateRef) *v1beta1.NodeClassRe
 }
 
 func Get(ctx context.Context, c client.Client, key Key) (*v1beta1.NodePool, error) {
-	if key.IsProvisioner {
-		provisioner := &v1alpha5.Provisioner{}
-		if err := c.Get(ctx, types.NamespacedName{Name: key.Name}, provisioner); err != nil {
-			return nil, err
-		}
-		return New(provisioner), nil
-	}
 	nodePool := &v1beta1.NodePool{}
 	if err := c.Get(ctx, types.NamespacedName{Name: key.Name}, nodePool); err != nil {
 		return nil, err
@@ -121,43 +114,21 @@ func Get(ctx context.Context, c client.Client, key Key) (*v1beta1.NodePool, erro
 }
 
 func List(ctx context.Context, c client.Client, opts ...client.ListOption) (*v1beta1.NodePoolList, error) {
-	provisionerList := &v1alpha5.ProvisionerList{}
-	if err := c.List(ctx, provisionerList, opts...); err != nil {
-		return nil, err
-	}
-	convertedNodePools := lo.Map(provisionerList.Items, func(p v1alpha5.Provisioner, _ int) v1beta1.NodePool {
-		return *New(&p)
-	})
 	nodePoolList := &v1beta1.NodePoolList{}
 	if err := c.List(ctx, nodePoolList, opts...); err != nil {
 		return nil, err
 	}
-	nodePoolList.Items = append(nodePoolList.Items, convertedNodePools...)
 	return nodePoolList, nil
 }
 
 func Patch(ctx context.Context, c client.Client, stored, nodePool *v1beta1.NodePool) error {
-	if nodePool.IsProvisioner {
-		storedProvisioner := provisionerutil.New(stored)
-		provisioner := provisionerutil.New(nodePool)
-		return c.Patch(ctx, provisioner, client.MergeFrom(storedProvisioner))
-	}
 	return c.Patch(ctx, nodePool, client.MergeFrom(stored))
 }
 
 func PatchStatus(ctx context.Context, c client.Client, stored, nodePool *v1beta1.NodePool) error {
-	if nodePool.IsProvisioner {
-		storedProvisioner := provisionerutil.New(stored)
-		provisioner := provisionerutil.New(nodePool)
-		return c.Status().Patch(ctx, provisioner, client.MergeFrom(storedProvisioner))
-	}
 	return c.Status().Patch(ctx, nodePool, client.MergeFrom(stored))
 }
 
 func HashAnnotation(nodePool *v1beta1.NodePool) map[string]string {
-	if nodePool.IsProvisioner {
-		provisioner := provisionerutil.New(nodePool)
-		return map[string]string{v1alpha5.ProvisionerHashAnnotationKey: provisioner.Hash()}
-	}
 	return map[string]string{v1beta1.NodePoolHashAnnotationKey: nodePool.Hash()}
 }
