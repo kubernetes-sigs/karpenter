@@ -19,7 +19,6 @@ package disruption
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sort"
 
 	"k8s.io/utils/clock"
@@ -61,25 +60,12 @@ func (e *Expiration) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 		c.NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).IsTrue()
 }
 
-// SortCandidates orders expired candidates by when they've expired
-func (e *Expiration) filterAndSortCandidates(ctx context.Context, candidates []*Candidate) ([]*Candidate, error) {
-	candidates, err := filterCandidates(ctx, e.kubeClient, e.recorder, candidates)
-	if err != nil {
-		return nil, fmt.Errorf("filtering candidates, %w", err)
-	}
+// ComputeCommand generates a disrpution command given candidates
+func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
 	sort.Slice(candidates, func(i int, j int) bool {
 		return candidates[i].NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).LastTransitionTime.Inner.Time.Before(
 			candidates[j].NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).LastTransitionTime.Inner.Time)
 	})
-	return candidates, nil
-}
-
-// ComputeCommand generates a disrpution command given candidates
-func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
-	candidates, err := e.filterAndSortCandidates(ctx, candidates)
-	if err != nil {
-		return Command{}, fmt.Errorf("filtering candidates, %w", err)
-	}
 	disruptionEligibleNodesGauge.With(map[string]string{
 		methodLabel:            e.Type(),
 		consolidationTypeLabel: e.ConsolidationType(),
@@ -90,7 +76,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping
 	// add it to the existing command.
 	empty := make([]*Candidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		if len(candidate.pods) > 0 {
+		if len(candidate.reschedulablePods) > 0 {
 			continue
 		}
 		// If there's disruptions allowed for the candidate's nodepool,

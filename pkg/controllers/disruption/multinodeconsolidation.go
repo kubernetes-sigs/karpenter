@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"time"
 
 	"github.com/samber/lo"
@@ -45,10 +46,9 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	if m.IsConsolidated() {
 		return Command{}, nil
 	}
-	candidates, err := m.sortAndFilterCandidates(ctx, candidates)
-	if err != nil {
-		return Command{}, fmt.Errorf("sorting candidates, %w", err)
-	}
+	sort.Slice(candidates, func(i int, j int) bool {
+		return candidates[i].disruptionCost < candidates[j].disruptionCost
+	})
 	disruptionEligibleNodesGauge.With(map[string]string{
 		methodLabel:            m.Type(),
 		consolidationTypeLabel: m.ConsolidationType(),

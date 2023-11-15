@@ -21,10 +21,13 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"sigs.k8s.io/karpenter/pkg/utils/pod"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -48,12 +51,12 @@ type CandidateFilter func(context.Context, *Candidate) bool
 // making that determination
 type Candidate struct {
 	*state.StateNode
-	instanceType   *cloudprovider.InstanceType
-	nodePool       *v1beta1.NodePool
-	zone           string
-	capacityType   string
-	disruptionCost float64
-	pods           []*v1.Pod
+	instanceType      *cloudprovider.InstanceType
+	nodePool          *v1beta1.NodePool
+	zone              string
+	capacityType      string
+	disruptionCost    float64
+	reschedulablePods []*v1.Pod
 }
 
 //nolint:gocyclo
@@ -65,6 +68,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	}
 	// skip any candidates that are already marked for deletion and being handled
 	if node.MarkedForDeletion() {
+		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, "Node in the process of deletion")...)
 		return nil, fmt.Errorf("state node is marked for deletion")
 	}
 	// skip candidates that aren't initialized
@@ -113,17 +117,32 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	}
 	pods, err := node.Pods(ctx, kubeClient)
 	if err != nil {
-		logging.FromContext(ctx).Errorf("Determining node pods, %s", err)
+		logging.FromContext(ctx).Errorf("determining node pods, %s", err)
 		return nil, fmt.Errorf("getting pods from state node, %w", err)
 	}
-	cn := &Candidate{
-		StateNode:    node.DeepCopy(),
-		instanceType: instanceType,
-		nodePool:     nodePool,
-		capacityType: node.Labels()[v1beta1.CapacityTypeLabelKey],
-		zone:         node.Labels()[v1.LabelTopologyZone],
-		pods:         pods,
+	for _, po := range pods {
+		if pod.IsActive(po) && pod.HasDoNotDisrupt(po) {
+			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf(`Pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(po)))...)
+			return nil, fmt.Errorf(`pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(po))
+		}
 	}
+	pdbs, err := NewPDBLimits(ctx, kubeClient)
+	if err != nil {
+		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
+	}
+	if pdb, ok := pdbs.CanEvictPods(pods); !ok {
+		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("PDB %q prevents pod evictions", pdb))...)
+		return nil, fmt.Errorf("pdb %q prevents pod evictions", pdb)
+	}
+	cn := &Candidate{
+		StateNode:         node.DeepCopy(),
+		instanceType:      instanceType,
+		nodePool:          nodePool,
+		capacityType:      node.Labels()[v1beta1.CapacityTypeLabelKey],
+		zone:              node.Labels()[v1.LabelTopologyZone],
+		reschedulablePods: lo.Filter(pods, func(p *v1.Pod, _ int) bool { return pod.IsReschedulable(p) }),
+	}
+	// We get the disruption cost from all pods in the candidate, not just the reschedulable pods
 	cn.disruptionCost = disruptionCost(ctx, pods) * cn.lifetimeRemaining(clk)
 	return cn, nil
 }

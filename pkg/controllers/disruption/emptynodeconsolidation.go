@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 
 	"knative.dev/pkg/logging"
 
@@ -42,10 +43,9 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	if c.IsConsolidated() {
 		return Command{}, nil
 	}
-	candidates, err := c.sortAndFilterCandidates(ctx, candidates)
-	if err != nil {
-		return Command{}, fmt.Errorf("sorting candidates, %w", err)
-	}
+	sort.Slice(candidates, func(i int, j int) bool {
+		return candidates[i].disruptionCost < candidates[j].disruptionCost
+	})
 	disruptionEligibleNodesGauge.With(map[string]string{
 		methodLabel:            c.Type(),
 		consolidationTypeLabel: c.ConsolidationType(),
@@ -54,7 +54,7 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	empty := make([]*Candidate, 0, len(candidates))
 	constrainedByBudgets := false
 	for _, candidate := range candidates {
-		if len(candidate.pods) > 0 {
+		if len(candidate.reschedulablePods) > 0 {
 			continue
 		}
 		if disruptionBudgetMapping[candidate.nodePool.Name] == 0 {
@@ -109,7 +109,7 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	// 2. The node isn't a target of a recent scheduling simulation
 	// 3. the number of candidates for a given nodepool can no longer be disrupted as it would violate the budget
 	for _, n := range candidatesToDelete {
-		if len(n.pods) != 0 || c.cluster.IsNodeNominated(n.ProviderID()) || postValidationMapping[n.nodePool.Name] == 0 {
+		if len(n.reschedulablePods) != 0 || c.cluster.IsNodeNominated(n.ProviderID()) || postValidationMapping[n.nodePool.Name] == 0 {
 			logging.FromContext(ctx).Debugf("abandoning empty node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
 			return Command{}, nil
 		}

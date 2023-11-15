@@ -40,10 +40,10 @@ func IsReschedulable(pod *v1.Pod) bool {
 		!IsTerminating(pod)
 }
 
-func IsEvictable(pod *v1.Pod) bool {
+func IsEvictable(pod *v1.Pod, now time.Time) bool {
 	return !ToleratesDisruptionNoScheduleTaint(pod) &&
 		!IsTerminal(pod) &&
-		!IsStuckTerminating(pod) &&
+		!IsStuckTerminating(pod, now) &&
 		!IsOwnedByNode(pod)
 }
 
@@ -80,11 +80,13 @@ func IsTerminating(pod *v1.Pod) bool {
 	return pod.DeletionTimestamp != nil
 }
 
-func IsStuckTerminating(pod *v1.Pod) bool {
+func IsStuckTerminating(pod *v1.Pod, now time.Time) bool {
 	if pod.DeletionTimestamp.IsZero() {
 		return false
 	}
-	return time.Since(pod.DeletionTimestamp.Time) > time.Minute
+	// The PodDeletion timestamp will be set to the time the pod was deleted plus its
+	// grace period in seconds. We give an additional minute as a buffer
+	return now.After(pod.DeletionTimestamp.Time.Add(time.Minute))
 }
 
 func IsOwnedByDaemonSet(pod *v1.Pod) bool {

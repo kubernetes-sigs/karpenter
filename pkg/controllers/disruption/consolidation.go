@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/samber/lo"
@@ -72,20 +71,6 @@ func MakeConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient cli
 		cloudProvider: cloudProvider,
 		recorder:      recorder,
 	}
-}
-
-// sortAndFilterCandidates orders candidates by the disruptionCost, removing any that we already know won't
-// be viable consolidation options.
-func (c *consolidation) sortAndFilterCandidates(ctx context.Context, candidates []*Candidate) ([]*Candidate, error) {
-	candidates, err := filterCandidates(ctx, c.kubeClient, c.recorder, candidates)
-	if err != nil {
-		return nil, fmt.Errorf("filtering candidates, %w", err)
-	}
-
-	sort.Slice(candidates, func(i int, j int) bool {
-		return candidates[i].disruptionCost < candidates[j].disruptionCost
-	})
-	return candidates, nil
 }
 
 // IsConsolidated returns true if nothing has changed since markConsolidated was called.

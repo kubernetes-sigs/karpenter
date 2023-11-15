@@ -19,6 +19,7 @@ package node
 import (
 	"context"
 	"fmt"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -60,7 +61,7 @@ func GetReschedulablePods(ctx context.Context, kubeClient client.Client, nodes .
 	return pods, nil
 }
 
-func GetActivePods(ctx context.Context, kubeClient client.Client, nodes ...*v1.Node) ([]*v1.Pod, error) {
+func GetEvictablePods(ctx context.Context, kubeClient client.Client, now time.Time, nodes ...*v1.Node) ([]*v1.Pod, error) {
 	var pods []*v1.Pod
 	for _, node := range nodes {
 		var podList v1.PodList
@@ -69,24 +70,7 @@ func GetActivePods(ctx context.Context, kubeClient client.Client, nodes ...*v1.N
 		}
 		for i := range podList.Items {
 			// these pods don't need to be rescheduled
-			if pod.IsActive(&podList.Items[i]) {
-				pods = append(pods, &podList.Items[i])
-			}
-		}
-	}
-	return pods, nil
-}
-
-func GetEvictablePods(ctx context.Context, kubeClient client.Client, nodes ...*v1.Node) ([]*v1.Pod, error) {
-	var pods []*v1.Pod
-	for _, node := range nodes {
-		var podList v1.PodList
-		if err := kubeClient.List(ctx, &podList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
-			return nil, fmt.Errorf("listing pods, %w", err)
-		}
-		for i := range podList.Items {
-			// these pods don't need to be rescheduled
-			if pod.IsEvictable(&podList.Items[i]) {
+			if pod.IsEvictable(&podList.Items[i], now) {
 				pods = append(pods, &podList.Items[i])
 			}
 		}

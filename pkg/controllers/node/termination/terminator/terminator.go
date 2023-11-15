@@ -80,7 +80,7 @@ func (t *Terminator) Taint(ctx context.Context, node *v1.Node) error {
 // Drain evicts pods from the node and returns true when all pods are evicted
 // https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
 func (t *Terminator) Drain(ctx context.Context, node *v1.Node) error {
-	pods, err := nodeutil.GetEvictablePods(ctx, t.kubeClient, node)
+	pods, err := nodeutil.GetEvictablePods(ctx, t.kubeClient, t.clock.Now(), node)
 	if err != nil {
 		return fmt.Errorf("listing pods on node, %w", err)
 	}

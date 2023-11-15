@@ -48,7 +48,7 @@ func (t *Termination) Check(ctx context.Context, node *v1.Node, nodeClaim *v1bet
 	if err != nil {
 		return nil, err
 	}
-	pods, err := nodeutils.GetReschedulablePods(ctx, t.kubeClient, node)
+	pods, err := nodeutils.GetPods(ctx, t.kubeClient, node)
 	if err != nil {
 		return nil, err
 	}
