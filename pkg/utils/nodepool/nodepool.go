@@ -22,9 +22,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/samber/lo"
+
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/samber/lo"
 )
 
 type Key struct {
@@ -103,7 +104,6 @@ func NewNodeClassReference(pr *v1alpha5.MachineTemplateRef) *v1beta1.NodeClassRe
 		APIVersion: pr.APIVersion,
 	}
 }
-
 
 func Get(ctx context.Context, c client.Client, key Key) (*v1beta1.NodePool, error) {
 	nodePool := &v1beta1.NodePool{}
