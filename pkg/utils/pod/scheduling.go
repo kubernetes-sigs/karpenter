@@ -71,11 +71,11 @@ func IsOwnedByNode(pod *v1.Pod) bool {
 
 func IsPodReady(pod *v1.Pod) bool {
 	for _, condition := range pod.Status.Conditions {
-		if condition.Type != v1.PodReady {
-			return false
+		if condition.Type == v1.PodReady {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 func IsOwnedBy(pod *v1.Pod, gvks []schema.GroupVersionKind) bool {
