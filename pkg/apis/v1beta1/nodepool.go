@@ -30,10 +30,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-<<<<<<< HEAD
-=======
-	"k8s.io/client-go/util/workqueue"
->>>>>>> d54ec79b (staging: add budgets helpers and more validations)
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/ptr"
 )
@@ -108,15 +104,10 @@ type Budget struct {
 	// MaxUnavailable dictates how many NodeClaims owned by this NodePool
 	// can be terminating at once. It must be set.
 	// This only considers NodeClaims with the karpenter.sh/disruption taint.
-<<<<<<< HEAD
 	// We can't use an intstr.IntOrString since kubebuilder doesn't support pattern
 	// checking for int values for IntOrString values.
 	// Ref: https://github.com/kubernetes-sigs/controller-tools/blob/55efe4be40394a288216dab63156b0a64fb82929/pkg/crd/markers/validation.go#L379-L388
 	// +kubebuilder:validation:Pattern:="^((100|[0-9]{1,2})%|[0-9]+)$"
-=======
-	// +kubebuilder:validation:XIntOrString
-	// +kubebuilder:validation:Pattern=`^(\d{1,3}%)|(\d+)$`
->>>>>>> d54ec79b (staging: add budgets helpers and more validations)
 	// +kubebuilder:default:="10%"
 	MaxUnavailable string `json:"maxUnavailable" hash:"ignore"`
 	// Crontab specifies when a budget begins being active,
@@ -130,13 +121,9 @@ type Budget struct {
 	// Only minutes and hours are accepted, as cron does not work in seconds.
 	// If omitted, the budget is always active.
 	// This is required if Crontab is set.
-<<<<<<< HEAD
 	// This regex has an optional 0s at the end since the duration.String() always adds
 	// a 0s at the end.
 	// +kubebuilder:validation:Pattern=`^([0-9]+(m|h)+(0s)?)$`
-=======
-	// +kubebuilder:validation:Pattern=`^(([0-9]+(m|h))+)|(Never)$`
->>>>>>> d54ec79b (staging: add budgets helpers and more validations)
 	// +kubebuilder:validation:Type="string"
 	// +optional
 	Duration *metav1.Duration `json:"duration,omitempty" hash:"ignore"`

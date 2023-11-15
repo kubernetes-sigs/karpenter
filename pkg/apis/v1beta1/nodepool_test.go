@@ -85,7 +85,6 @@ var _ = Describe("Budgets", func() {
 			Expect(minPercent.StrVal).To(Equal("100%"))
 		})
 		It("should return -1 if all crons are inactive", func() {
-			fakeClock.SetTime(time.Date(2000, time.June, 15, 12, 30, 30, 0, time.UTC))
 			budgets[0].Crontab = lo.ToPtr("@yearly")
 			budgets[1].Crontab = lo.ToPtr("@yearly")
 			budgets[2].Crontab = lo.ToPtr("@yearly")
