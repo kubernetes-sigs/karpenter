@@ -117,7 +117,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 
 	// Check if the queue is processing an item. If it is, retry again later.
 	// TODO this should be removed when disruption budgets are added in.
-	if c.queue.Len() != 0 {
+	if !c.queue.IsEmpty() {
 		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}
 
