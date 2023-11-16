@@ -65,21 +65,15 @@ func GetEvictablePods(ctx context.Context, kubeClient client.Client, now time.Ti
 	}), nil
 }
 
-// GetProvisionablePods grabs all the pods on the cluster that are not currently bound to nodes and
-// satisfy the IsProvisionable criteria
+// GetProvisionablePods grabs all the pods from the passed nodes that satisfy the IsProvisionable criteria
 func GetProvisionablePods(ctx context.Context, kubeClient client.Client) ([]*v1.Pod, error) {
-	var pods []*v1.Pod
 	var podList v1.PodList
 	if err := kubeClient.List(ctx, &podList, client.MatchingFields{"spec.nodeName": ""}); err != nil {
 		return nil, fmt.Errorf("listing pods, %w", err)
 	}
-	for i := range podList.Items {
-		// these pods don't need to be rescheduled
-		if pod.IsProvisionable(&podList.Items[i]) {
-			pods = append(pods, &podList.Items[i])
-		}
-	}
-	return pods, nil
+	return lo.FilterMap(podList.Items, func(p v1.Pod, _ int) (*v1.Pod, bool) {
+		return &p, pod.IsProvisionable(&p)
+	}), nil
 }
 
 func GetCondition(n *v1.Node, match v1.NodeConditionType) v1.NodeCondition {

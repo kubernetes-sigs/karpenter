@@ -60,7 +60,7 @@ type Candidate struct {
 }
 
 //nolint:gocyclo
-func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode,
+func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode, pdbs *PDBLimits,
 	nodePoolMap map[string]*v1beta1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *orchestration.Queue) (*Candidate, error) {
 
 	if node.Node == nil || node.NodeClaim == nil {
@@ -68,7 +68,6 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	}
 	// skip any candidates that are already marked for deletion and being handled
 	if node.MarkedForDeletion() {
-		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, "Node in the process of deletion")...)
 		return nil, fmt.Errorf("state node is marked for deletion")
 	}
 	// skip candidates that aren't initialized
@@ -108,7 +107,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	// skip any candidates that we can't determine the instance of
 	if instanceType == nil {
 		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Instance type %q not found", node.Labels()[v1.LabelInstanceTypeStable]))...)
-		return nil, fmt.Errorf("instance type '%s' can't be resolved", node.Labels()[v1.LabelInstanceTypeStable])
+		return nil, fmt.Errorf("instance type %q can't be resolved", node.Labels()[v1.LabelInstanceTypeStable])
 	}
 	// skip the node if it is nominated by a recent provisioning pass to be the target of a pending pod.
 	if node.Nominated() {
@@ -122,14 +121,11 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	}
 	for _, po := range pods {
 		// We only consider pods that are actively running for "karpenter.sh/do-not-disrupt"
+		// This means that we will allow Mirror Pods and DaemonSets to block disruption using this annotation
 		if pod.IsActive(po) && pod.HasDoNotDisrupt(po) {
 			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf(`Pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(po)))...)
 			return nil, fmt.Errorf(`pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(po))
 		}
-	}
-	pdbs, err := NewPDBLimits(ctx, kubeClient)
-	if err != nil {
-		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
 	if pdb, ok := pdbs.CanEvictPods(pods); !ok {
 		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("PDB %q prevents pod evictions", pdb))...)

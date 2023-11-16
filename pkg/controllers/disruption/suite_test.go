@@ -487,62 +487,696 @@ var _ = Describe("Pod Eviction Cost", func() {
 })
 
 var _ = Describe("Candidate Filtering", func() {
+	var nodePool *v1beta1.NodePool
+	var nodePoolMap map[string]*v1beta1.NodePool
+	var nodePoolInstanceTypeMap map[string]map[string]*cloudprovider.InstanceType
+	var pdbLimits *disruption.PDBLimits
+	BeforeEach(func() {
+		nodePool = test.NodePool()
+		nodePoolMap = map[string]*v1beta1.NodePool{
+			nodePool.Name: nodePool,
+		}
+		nodePoolInstanceTypeMap = map[string]map[string]*cloudprovider.InstanceType{
+			nodePool.Name: lo.SliceToMap(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType) (string, *cloudprovider.InstanceType) {
+				return i.Name, i
+			}),
+		}
+		var err error
+		pdbLimits, err = disruption.NewPDBLimits(ctx, env.Client)
+		Expect(err).ToNot(HaveOccurred())
+	})
 	It("should not consider candidates that have do-not-disrupt pods scheduled", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1beta1.DoNotDisruptAnnotationKey: "true",
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal(fmt.Sprintf(`pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(pod))))
+		Expect(recorder.DetectedEvent(fmt.Sprintf(`Cannot disrupt Node: Pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(pod)))).To(BeTrue())
 	})
 	It("should not consider candidates that have do-not-disrupt pods scheduled to mirror pods", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1beta1.DoNotDisruptAnnotationKey: "true",
+				},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion: "v1",
+						Kind:       "Node",
+						Name:       node.Name,
+						UID:        node.UID,
+						Controller: lo.ToPtr(true),
+					},
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
-	})
-	It("should consider candidates that have do-not-disrupt pods on terminating pods", func() {
-
-	})
-	It("should consider candidates that have do-not-disrupt pods on terminal pods", func() {
-
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal(fmt.Sprintf(`pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(pod))))
+		Expect(recorder.DetectedEvent(fmt.Sprintf(`Cannot disrupt Node: Pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(pod)))).To(BeTrue())
 	})
 	It("should not consider candidates that have do-not-disrupt pods scheduled to DaemonSet pods", func() {
+		daemonSet := test.DaemonSet()
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, daemonSet)
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1beta1.DoNotDisruptAnnotationKey: "true",
+				},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion: "apps/v1",
+						Kind:       "DaemonSet",
+						Name:       daemonSet.Name,
+						UID:        daemonSet.UID,
+						Controller: lo.ToPtr(true),
+					},
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal(fmt.Sprintf(`pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(pod))))
+		Expect(recorder.DetectedEvent(fmt.Sprintf(`Cannot disrupt Node: Pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(pod)))).To(BeTrue())
+	})
+	It("should consider candidates that have do-not-disrupt pods on terminating pods", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1beta1.DoNotDisruptAnnotationKey: "true",
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+		ExpectDeletionTimestampSet(ctx, env.Client, pod)
+
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		c, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(c.NodeClaim).ToNot(BeNil())
+		Expect(c.Node).ToNot(BeNil())
+	})
+	It("should consider candidates that have do-not-disrupt pods on terminal pods", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		podSucceeded := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1beta1.DoNotDisruptAnnotationKey: "true",
+				},
+			},
+			Phase: v1.PodSucceeded,
+		})
+		podFailed := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1beta1.DoNotDisruptAnnotationKey: "true",
+				},
+			},
+			Phase: v1.PodFailed,
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, podSucceeded, podFailed)
+		ExpectManualBinding(ctx, env.Client, podSucceeded, node)
+		ExpectManualBinding(ctx, env.Client, podFailed, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		c, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(c.NodeClaim).ToNot(BeNil())
+		Expect(c.Node).ToNot(BeNil())
 	})
 	It("should not consider candidates that have do-not-disrupt on nodes", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1beta1.DoNotDisruptAnnotationKey: "true",
+				},
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal(`disruption is blocked through the "karpenter.sh/do-not-disrupt" annotation`))
+		Expect(recorder.DetectedEvent(`Cannot disrupt Node: Disruption is blocked with the "karpenter.sh/do-not-disrupt" annotation`)).To(BeTrue())
 	})
 	It("should not consider candidates that have fully blocking PDBs", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		podLabels := map[string]string{"test": "value"}
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: podLabels,
+			},
+		})
+		pdb := test.PodDisruptionBudget(test.PDBOptions{
+			Labels:         podLabels,
+			MaxUnavailable: fromInt(0),
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod, pdb)
+		ExpectManualBinding(ctx, env.Client, pod, node)
 
-	})
-	It("should not consider candidates that have fully blocking PDBs on mirror pods", func() {
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
+		var err error
+		pdbLimits, err = disruption.NewPDBLimits(ctx, env.Client)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		_, err = disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal(fmt.Sprintf(`pdb %q prevents pod evictions`, client.ObjectKeyFromObject(pdb))))
+		Expect(recorder.DetectedEvent(fmt.Sprintf(`Cannot disrupt Node: PDB %q prevents pod evictions`, client.ObjectKeyFromObject(pdb)))).To(BeTrue())
 	})
 	It("should not consider candidates that have fully blocking PDBs on daemonset pods", func() {
+		daemonSet := test.DaemonSet()
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, daemonSet)
+		podLabels := map[string]string{"test": "value"}
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: podLabels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion: "apps/v1",
+						Kind:       "DaemonSet",
+						Name:       daemonSet.Name,
+						UID:        daemonSet.UID,
+						Controller: lo.ToPtr(true),
+					},
+				},
+			},
+		})
+		pdb := test.PodDisruptionBudget(test.PDBOptions{
+			Labels:         podLabels,
+			MaxUnavailable: fromInt(0),
+		})
+		ExpectApplied(ctx, env.Client, pod, pdb)
+		ExpectManualBinding(ctx, env.Client, pod, node)
 
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+		var err error
+		pdbLimits, err = disruption.NewPDBLimits(ctx, env.Client)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		_, err = disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal(fmt.Sprintf(`pdb %q prevents pod evictions`, client.ObjectKeyFromObject(pdb))))
+		Expect(recorder.DetectedEvent(fmt.Sprintf(`Cannot disrupt Node: PDB %q prevents pod evictions`, client.ObjectKeyFromObject(pdb)))).To(BeTrue())
 	})
-	It("should not consider candidates that do not have both Node and NodeClaim representations", func() {
+	It("should consider candidates that have fully blocking PDBs on mirror pods", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		podLabels := map[string]string{"test": "value"}
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: podLabels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion: "v1",
+						Kind:       "Node",
+						Name:       node.Name,
+						UID:        node.UID,
+						Controller: lo.ToPtr(true),
+					},
+				},
+			},
+		})
+		pdb := test.PodDisruptionBudget(test.PDBOptions{
+			Labels:         podLabels,
+			MaxUnavailable: fromInt(0),
+		})
+		ExpectApplied(ctx, env.Client, pod, pdb)
+		ExpectManualBinding(ctx, env.Client, pod, node)
 
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+		var err error
+		pdbLimits, err = disruption.NewPDBLimits(ctx, env.Client)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		c, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(c.NodeClaim).ToNot(BeNil())
+		Expect(c.Node).ToNot(BeNil())
+	})
+	It("should consider candidates that have fully blocking PDBs on terminal pods", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		podLabels := map[string]string{"test": "value"}
+		succeededPod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: podLabels,
+			},
+			Phase: v1.PodSucceeded,
+		})
+		failedPod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: podLabels,
+			},
+			Phase: v1.PodFailed,
+		})
+		pdb := test.PodDisruptionBudget(test.PDBOptions{
+			Labels:         podLabels,
+			MaxUnavailable: fromInt(0),
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, succeededPod, failedPod, pdb)
+		ExpectManualBinding(ctx, env.Client, succeededPod, node)
+		ExpectManualBinding(ctx, env.Client, failedPod, node)
+
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+		var err error
+		pdbLimits, err = disruption.NewPDBLimits(ctx, env.Client)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		c, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(c.NodeClaim).ToNot(BeNil())
+		Expect(c.Node).ToNot(BeNil())
+	})
+	It("should consider candidates that have fully blocking PDBs on terminating pods", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		podLabels := map[string]string{"test": "value"}
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: podLabels,
+			},
+		})
+		pdb := test.PodDisruptionBudget(test.PDBOptions{
+			Labels:         podLabels,
+			MaxUnavailable: fromInt(0),
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod, pdb)
+		ExpectManualBinding(ctx, env.Client, pod, node)
+
+		ExpectDeletionTimestampSet(ctx, env.Client, pod)
+
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+		var err error
+		pdbLimits, err = disruption.NewPDBLimits(ctx, env.Client)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		c, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(c.NodeClaim).ToNot(BeNil())
+		Expect(c.Node).ToNot(BeNil())
+	})
+	It("should not consider candidates that has just a Node representation", func() {
+		_, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, nil)
+
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal("state node doesn't contain both a node and a nodeclaim"))
+	})
+	It("should not consider candidate that has just a NodeClaim representation", func() {
+		nodeClaim, _ := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{}, []*v1beta1.NodeClaim{nodeClaim})
+
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal("state node doesn't contain both a node and a nodeclaim"))
 	})
 	It("should not consider candidates that are nominated", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+		cluster.NominateNodeForPod(ctx, node.Spec.ProviderID)
 
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal("state node is nominated for a pending pod"))
+		Expect(recorder.DetectedEvent("Cannot disrupt Node: Nominated for a pending pod")).To(BeTrue())
 	})
 	It("should not consider candidates that are deleting", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
+		ExpectDeletionTimestampSet(ctx, env.Client, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
+
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal("state node is marked for deletion"))
+	})
+	It("should not consider candidates that are MarkedForDeletion", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+		cluster.MarkForDeletion(node.Spec.ProviderID)
+
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal("state node is marked for deletion"))
 	})
 	It("should not consider candidates that aren't yet initialized", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
 
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal("state node isn't initialized"))
 	})
-	It("should not consider candidates that are not owned by a NodePool", func() {
+	It("should not consider candidates that are not owned by a NodePool (no karpenter.sh/nodepool label)", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal("state node doesn't have the Karpenter owner label"))
 	})
 	It("should not consider candidates that are have a non-existent NodePool", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		// Don't apply the NodePool
+		ExpectApplied(ctx, env.Client, nodeClaim, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
+		// Mock the NodePool not existing by removing it from the nodePool and nodePoolInstanceTypes maps
+		delete(nodePoolMap, nodePool.Name)
+		delete(nodePoolInstanceTypeMap, nodePool.Name)
+
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal(fmt.Sprintf("nodepool %q can't be resolved for state node", nodePool.Name)))
+		Expect(recorder.DetectedEvent(fmt.Sprintf("Cannot disrupt Node: Owning nodepool %q not found", nodePool.Name))).To(BeTrue())
 	})
 	It("should not consider candidates that do not have the karpenter.sh/capacity-type label", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:   nodePool.Name,
+					v1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+					v1.LabelTopologyZone:       mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal(`state node doesn't have required label "karpenter.sh/capacity-type"`))
+		Expect(recorder.DetectedEvent(`Cannot disrupt Node: Required label "karpenter.sh/capacity-type" doesn't exist`)).To(BeTrue())
 	})
 	It("should not consider candidates that do not have the topology.kubernetes.io/zone label", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal(`state node doesn't have required label "topology.kubernetes.io/zone"`))
+		Expect(recorder.DetectedEvent(`Cannot disrupt Node: Required label "topology.kubernetes.io/zone" doesn't exist`)).To(BeTrue())
 	})
 	It("should not consider candidates that do not have the node.kubernetes.io/instance-type label", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal(`instance type "" can't be resolved`))
+		Expect(recorder.DetectedEvent(`Cannot disrupt Node: Instance type "" not found`)).To(BeTrue())
 	})
 	It("should not consider candidates who's instance type cannot be resolved", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
+		// Mock the InstanceType not existing by removing it from the nodePoolInstanceTypes map
+		delete(nodePoolInstanceTypeMap[nodePool.Name], mostExpensiveInstance.Name)
+
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal(fmt.Sprintf("instance type %q can't be resolved", mostExpensiveInstance.Name)))
+		Expect(recorder.DetectedEvent(fmt.Sprintf("Cannot disrupt Node: Instance type %q not found", mostExpensiveInstance.Name))).To(BeTrue())
+	})
+	It("should not consider candidates who are actively being processed in the queue", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		Expect(queue.Add(orchestration.NewCommand([]string{}, []*state.StateNode{cluster.Nodes()[0]}, "", ""))).To(Succeed())
+
+		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal("candidate is already being deprovisioned"))
 	})
 })
 

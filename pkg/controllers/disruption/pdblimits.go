@@ -18,6 +18,7 @@ package disruption
 
 import (
 	"context"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -25,7 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	podutil "github.com/aws/karpenter-core/pkg/utils/pod"
+	podutil "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
 // PDBLimits is used to evaluate if evicting a list of pods is possible.
@@ -61,11 +62,13 @@ func NewPDBLimits(ctx context.Context, kubeClient client.Client) (*PDBLimits, er
 // nolint:gocyclo
 func (s *PDBLimits) CanEvictPods(pods []*v1.Pod) (client.ObjectKey, bool) {
 	for _, pod := range pods {
-		if !podutil.IsActive(pod) {
+		// If the pod isn't an "active" pod or isn't eligible for being evicted, then a fully blocking PDB doesn't matter
+		// This is due to the fact that we won't call the eviction API on these pods when we are disrupting the node
+		if !podutil.IsActive(pod) || !podutil.IsEvictable(pod, time.Now()) {
 			continue
 		}
 		for _, pdb := range s.pdbs {
-			if pdb.name.Namespace == pod.ObjectMeta.Namespace {
+			if pdb.key.Namespace == pod.ObjectMeta.Namespace {
 				if pdb.selector.Matches(labels.Set(pod.Labels)) {
 
 					// if the PDB policy is set to allow evicting unhealthy pods, then it won't stop us from
@@ -81,7 +84,7 @@ func (s *PDBLimits) CanEvictPods(pods []*v1.Pod) (client.ObjectKey, bool) {
 					}
 
 					if !ignorePod && pdb.disruptionsAllowed == 0 {
-						return pdb.name, false
+						return pdb.key, false
 					}
 				}
 			}
@@ -91,7 +94,7 @@ func (s *PDBLimits) CanEvictPods(pods []*v1.Pod) (client.ObjectKey, bool) {
 }
 
 type pdbItem struct {
-	name                        client.ObjectKey
+	key                         client.ObjectKey
 	selector                    labels.Selector
 	disruptionsAllowed          int32
 	canAlwaysEvictUnhealthyPods bool
@@ -108,7 +111,7 @@ func newPdb(pdb policyv1.PodDisruptionBudget) (*pdbItem, error) {
 		canAlwaysEvictUnhealthyPods = true
 	}
 	return &pdbItem{
-		name:                        client.ObjectKeyFromObject(&pdb),
+		key:                         client.ObjectKeyFromObject(&pdb),
 		selector:                    selector,
 		disruptionsAllowed:          pdb.Status.DisruptionsAllowed,
 		canAlwaysEvictUnhealthyPods: canAlwaysEvictUnhealthyPods,

@@ -105,7 +105,7 @@ func IsStuckTerminating(pod *v1.Pod, now time.Time) bool {
 	if pod.DeletionTimestamp.IsZero() {
 		return false
 	}
-	// The PodDeletion timestamp will be set to the time the pod was deleted plus its
+	// The pod DeletionTimestamp will be set to the time the pod was deleted plus its
 	// grace period in seconds. We give an additional minute as a buffer
 	return now.After(pod.DeletionTimestamp.Time.Add(time.Minute))
 }
@@ -141,11 +141,6 @@ func HasDoNotDisrupt(pod *v1.Pod) bool {
 	// TODO Remove checking do-not-evict as part of v1
 	return pod.Annotations[v1alpha5.DoNotEvictPodAnnotationKey] == "true" ||
 		pod.Annotations[v1beta1.DoNotDisruptAnnotationKey] == "true"
-}
-
-// ToleratesUnschedulableTaint returns true if the pod tolerates node.kubernetes.io/unschedulable taint
-func ToleratesUnschedulableTaint(pod *v1.Pod) bool {
-	return (scheduling.Taints{{Key: v1.TaintNodeUnschedulable, Effect: v1.TaintEffectNoSchedule}}).Tolerates(pod) == nil
 }
 
 // ToleratesDisruptionNoScheduleTaint returns true if the pod tolerates karpenter.sh/disruption:NoSchedule=Disrupting taint

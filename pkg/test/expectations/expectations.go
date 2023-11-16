@@ -178,7 +178,7 @@ func ExpectDeletionTimestampSet(ctx context.Context, c client.Client, objects ..
 		DeferCleanup(func(obj client.Object) {
 			mergeFrom := client.MergeFrom(obj.DeepCopyObject().(client.Object))
 			obj.SetFinalizers([]string{})
-			Expect(c.Patch(ctx, obj, mergeFrom)).To(Succeed())
+			Expect(client.IgnoreNotFound(c.Patch(ctx, obj, mergeFrom))).To(Succeed())
 		}, object)
 	}
 }
