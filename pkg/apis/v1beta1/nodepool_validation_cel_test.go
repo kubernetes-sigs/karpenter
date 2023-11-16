@@ -173,6 +173,7 @@ var _ = Describe("CEL/Validation", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: intstr.FromInt(-10),
 			}}
+			fmt.Printf("this is the maxUnavailable, %d", nodePool.Spec.Disruption.Budgets[0].MaxUnavailable.IntVal)
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
 		It("should fail when creating a budget with a negative maxUnavailable percent", func() {
