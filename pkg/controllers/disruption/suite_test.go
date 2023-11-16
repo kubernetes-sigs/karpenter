@@ -265,7 +265,7 @@ var _ = Describe("Queue Limits", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		ExpectNodeExists(ctx, env.Client, node.Name)
 		ExpectNodeExists(ctx, env.Client, node2.Name)
-                // Expect that the queue length has not increased
+		// Expect that the queue length has not increased
 		Expect(queue.Len()).To(BeNumerically("==", 1))
 	})
 })
