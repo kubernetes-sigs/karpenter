@@ -69,6 +69,9 @@ spec:
                             description: MaxUnavailable dictates how many NodeClaims owned by this NodePool can be terminating at once. It must be set. This only considers NodeClaims with the karpenter.sh/disruption taint.
                             pattern: ^((100|[0-9]{1,2})%|[0-9]+)$
                             x-kubernetes-int-or-string: true
+                            x-kubernetes-validations:
+                              - message: '''MaxUnavailable'' must be non-negative'
+                                rule: 'type(self) == int? int(self) > 0: true'
                         required:
                           - maxUnavailable
                         type: object

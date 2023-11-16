@@ -104,10 +104,13 @@ type Budget struct {
 	// MaxUnavailable dictates how many NodeClaims owned by this NodePool
 	// can be terminating at once. It must be set.
 	// This only considers NodeClaims with the karpenter.sh/disruption taint.
-	// +kubebuilder:validation:XIntOrString
-	// +kubebuilder:validation:Pattern="^((100|[0-9]{1,2})%|[0-9]+)$"
+	// We can't use an intstr.IntOrString since kubebuilder doesn't support pattern
+	// checking for int values for IntOrString values.
+	// Ref: https://github.com/kubernetes-sigs/controller-tools/blob/55efe4be40394a288216dab63156b0a64fb82929/pkg/crd/markers/validation.go#L379-L388
+	// +kubebuilder:validation:Type="string"
+	// +kubebuilder:validation:Pattern:="^((100|[0-9]{1,2})%|[0-9]+)$"
 	// +kubebuilder:default:="10%"
-	MaxUnavailable intstr.IntOrString `json:"maxUnavailable" hash:"ignore"`
+	MaxUnavailable string `json:"maxUnavailable" hash:"ignore"`
 	// Crontab specifies when a budget begins being active,
 	// using the upstream cronjob syntax. If omitted, the budget is always active.
 	// Currently timezones are not supported.
