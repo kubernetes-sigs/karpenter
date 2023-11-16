@@ -107,7 +107,7 @@ var _ = Describe("CEL/Validation", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: intstr.FromInt(10),
 				Crontab:        ptr.String("*"),
-				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("30s"))},
+				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
@@ -115,7 +115,7 @@ var _ = Describe("CEL/Validation", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: intstr.FromInt(10),
 				Crontab:        ptr.String("* * * * "),
-				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("30s"))},
+				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
@@ -123,7 +123,7 @@ var _ = Describe("CEL/Validation", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: intstr.FromInt(10),
 				Crontab:        ptr.String("* * * * *"),
-				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("-30s"))},
+				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("-20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
@@ -163,7 +163,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should fail when creating a budget with a duration but no cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: intstr.FromInt(10),
-				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("-30s"))},
+				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("-20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
@@ -171,7 +171,7 @@ var _ = Describe("CEL/Validation", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: intstr.FromInt(10),
 				Crontab:        ptr.String("* * * * *"),
-				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("30s"))},
+				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
@@ -185,7 +185,7 @@ var _ = Describe("CEL/Validation", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: intstr.FromInt(10),
 				Crontab:        ptr.String("@annually"),
-				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("30s"))},
+				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
@@ -193,12 +193,12 @@ var _ = Describe("CEL/Validation", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: intstr.FromInt(10),
 				Crontab:        ptr.String("@annually"),
-				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("30s"))},
+				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			},
 				{
 					MaxUnavailable: intstr.FromInt(10),
 					Crontab:        ptr.String("*"),
-					Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("30s"))},
+					Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
