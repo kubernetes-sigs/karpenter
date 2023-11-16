@@ -215,7 +215,7 @@ var _ = Describe("Queue Limits", func() {
 		nodeClaim.StatusConditions().MarkTrue(v1beta1.Drifted)
 		nodeClaim2.StatusConditions().MarkTrue(v1beta1.Drifted)
 	})
-	It("should be able to disrupt two nodes with replace, but only ever be disrupting one", func() {
+	It("should be able to disrupt two nodes with replace, but only ever be disrupting one at a time", func() {
 		labels := map[string]string{
 			"app": "test",
 		}
