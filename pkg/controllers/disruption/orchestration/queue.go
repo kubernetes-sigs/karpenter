@@ -329,6 +329,6 @@ func (q *Queue) Reset() {
 
 func (q *Queue) IsEmpty() bool {
 	q.mu.RLock()
-	defer q.mu.Unlock()
+	defer q.mu.RUnlock()
 	return len(q.providerIDToCommand) == 0
 }
