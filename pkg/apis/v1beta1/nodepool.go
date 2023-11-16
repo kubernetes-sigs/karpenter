@@ -105,7 +105,7 @@ type Budget struct {
 	// can be terminating at once. It must be set.
 	// This only considers NodeClaims with the karpenter.sh/disruption taint.
 	// +kubebuilder:validation:XIntOrString
-	// +kubebuilder:validation:Pattern=`^(\d{1,3}%)|(\d+)$`
+	// +kubebuilder:validation:Pattern="^((100|[0-9]{1,2})%|[0-9]+)$"
 	// +kubebuilder:default:="10%"
 	MaxUnavailable intstr.IntOrString `json:"maxUnavailable" hash:"ignore"`
 	// Crontab specifies when a budget begins being active,
