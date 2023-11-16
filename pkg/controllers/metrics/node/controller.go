@@ -28,19 +28,10 @@ import (
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
-)
-
-const (
-	resourceType    = "resource_type"
-	nodeName        = "node_name"
-	nodeProvisioner = "provisioner"
-	nodePhase       = "phase"
 )
 
 var (
@@ -98,16 +89,17 @@ var (
 		},
 		nodeLabelNames(),
 	)
-	wellKnownLabels = getWellKnownLabels()
+
+	wellKnownLabels = GetWellKnownLabels()
 )
 
 func nodeLabelNames() []string {
 	return append(
 		sets.New(lo.Values(wellKnownLabels)...).UnsortedList(),
-		resourceType,
-		nodeName,
-		nodeProvisioner,
-		nodePhase,
+		ResourceType,
+		metrics.NodeName,
+		metrics.ProvisionerLabel,
+		NodePhase,
 	)
 }
 
@@ -165,37 +157,9 @@ func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
 			res = append(res, &metrics.StoreMetric{
 				GaugeVec: gaugeVec,
 				Value:    lo.Ternary(resourceName == v1.ResourceCPU, float64(quantity.MilliValue())/float64(1000), float64(quantity.Value())),
-				Labels:   getNodeLabels(n.Node, strings.ReplaceAll(strings.ToLower(string(resourceName)), "-", "_")),
+				Labels:   GetNodeLabels(n.Node, strings.ReplaceAll(strings.ToLower(string(resourceName)), "-", "_")),
 			})
 		}
 	}
 	return res
-}
-
-func getNodeLabels(node *v1.Node, resourceTypeName string) prometheus.Labels {
-	metricLabels := prometheus.Labels{}
-	metricLabels[resourceType] = resourceTypeName
-	metricLabels[nodeName] = node.Name
-	metricLabels[nodeProvisioner] = node.Labels[v1alpha5.ProvisionerNameLabelKey]
-	metricLabels[nodePhase] = string(node.Status.Phase)
-
-	// Populate well known labels
-	for wellKnownLabel, label := range wellKnownLabels {
-		metricLabels[label] = node.Labels[wellKnownLabel]
-	}
-	return metricLabels
-}
-
-func getWellKnownLabels() map[string]string {
-	labels := make(map[string]string)
-	// TODO @joinnis: Remove v1alpha5 well-known labels in favor of only v1beta1 well-known labels after v1alpha5 is dropped
-	for wellKnownLabel := range v1alpha5.WellKnownLabels.Union(v1beta1.WellKnownLabels) {
-		if parts := strings.Split(wellKnownLabel, "/"); len(parts) == 2 {
-			label := parts[1]
-			// Reformat label names to be consistent with Prometheus naming conventions (snake_case)
-			label = strings.ReplaceAll(strings.ToLower(label), "-", "_")
-			labels[wellKnownLabel] = label
-		}
-	}
-	return labels
 }

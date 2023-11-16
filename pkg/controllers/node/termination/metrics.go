@@ -16,9 +16,13 @@ package termination
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/samber/lo"
+	"k8s.io/apimachinery/pkg/util/sets"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"github.com/aws/karpenter-core/pkg/metrics"
+
+	nodemetrics "github.com/aws/karpenter-core/pkg/controllers/metrics/node"
 )
 
 var (
@@ -32,7 +36,25 @@ var (
 		},
 		[]string{metrics.ProvisionerLabel, metrics.NodePoolLabel},
 	)
+	NodeDrainTime = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "karpenter",
+			Subsystem: "nodes",
+			Name:      "drain_time_seconds",
+			Help:      "The time taken to drain a node.",
+		},
+		nodeLabelNames(),
+	)
 )
+
+func nodeLabelNames() []string {
+	return append(
+		sets.New(lo.Values(nodemetrics.GetWellKnownLabels())...).UnsortedList(),
+		metrics.NodeName,
+		metrics.ProvisionerLabel,
+		nodemetrics.NodePhase,
+	)
+}
 
 func init() {
 	crmetrics.Registry.MustRegister(TerminationSummary)
