@@ -132,7 +132,6 @@ var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 })
 
-
 // TODO remove this when Budgets are added in
 var _ = Describe("Queue Limits", func() {
 	var nodePool *v1beta1.NodePool
@@ -177,10 +176,10 @@ var _ = Describe("Queue Limits", func() {
 		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1.LabelInstanceTypeStable: currentInstance.Name,
+					v1.LabelInstanceTypeStable:   currentInstance.Name,
 					v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
-					v1.LabelTopologyZone:       currentInstance.Offerings[0].Zone,
-					v1beta1.NodePoolLabelKey:   nodePool.Name,
+					v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
 				},
 			},
 			Status: v1beta1.NodeClaimStatus{
@@ -194,10 +193,10 @@ var _ = Describe("Queue Limits", func() {
 		nodeClaim2, node2 = test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1.LabelInstanceTypeStable: currentInstance.Name,
+					v1.LabelInstanceTypeStable:   currentInstance.Name,
 					v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
-					v1.LabelTopologyZone:       currentInstance.Offerings[0].Zone,
-					v1beta1.NodePoolLabelKey:   nodePool.Name,
+					v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
 				},
 			},
 			Status: v1beta1.NodeClaimStatus{
