@@ -212,9 +212,12 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 		return nil, err
 	}
 	nodePoolList.Items = lo.Filter(nodePoolList.Items, func(n v1beta1.NodePool, _ int) bool {
-		if err := n.RuntimeValidate(); err != nil {
-			logging.FromContext(ctx).With("nodepool", n.Name).Errorf("nodepool failed validation, %s", err)
-			return false
+		// We only runtime validate NodePools due to limitations around Common Expression Language (CEL)
+		if !n.IsProvisioner {
+			if err := n.RuntimeValidate(); err != nil {
+				logging.FromContext(ctx).With("nodepool", n.Name).Errorf("nodepool failed validation, %s", err)
+				return false
+			}
 		}
 		return n.DeletionTimestamp.IsZero()
 	})

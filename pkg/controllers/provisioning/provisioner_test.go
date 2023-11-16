@@ -23,6 +23,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -39,6 +40,15 @@ import (
 )
 
 var _ = Describe("Provisioner/Provisioning", func() {
+	var wellKnownLabelsV1Alpha5, wellKnownLabelsV1Beta1 sets.Set[string]
+	BeforeEach(func() {
+		wellKnownLabelsV1Alpha5 = v1alpha5.WellKnownLabels.Clone()
+		wellKnownLabelsV1Beta1 = v1beta1.WellKnownLabels.Clone()
+		DeferCleanup(func() {
+			v1alpha5.WellKnownLabels = wellKnownLabelsV1Alpha5
+			v1beta1.WellKnownLabels = wellKnownLabelsV1Beta1
+		})
+	})
 	It("should provision nodes", func() {
 		ExpectApplied(ctx, env.Client, test.Provisioner())
 		pod := test.UnschedulablePod()
@@ -227,6 +237,23 @@ var _ = Describe("Provisioner/Provisioning", func() {
 		for _, n := range bindings {
 			Expect(n.Node.Name).ToNot(Equal(node.Name))
 		}
+	})
+	It("should allow Provisioners to schedule pods that are using v1alpha5 labels but not v1beta1 labels", func() {
+		// Inject a custom well-known label into v1alpha5 that doesn't exist in v1beta1
+		v1alpha5.WellKnownLabels.Insert("karpenter.sh/custom-label")
+		ExpectApplied(ctx, env.Client, test.Provisioner(test.ProvisionerOptions{
+			Requirements: []v1.NodeSelectorRequirement{
+				{
+					Key:      "karpenter.sh/custom-label",
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{"custom-value"},
+				},
+			},
+		}))
+		pod := test.UnschedulablePod()
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		ExpectScheduled(ctx, env.Client, pod)
 	})
 	Context("Resource Limits", func() {
 		It("should not schedule when limits are exceeded", func() {
