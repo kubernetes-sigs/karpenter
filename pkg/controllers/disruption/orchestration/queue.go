@@ -326,3 +326,9 @@ func (q *Queue) Reset() {
 	q.RateLimitingInterface = &controllertest.Queue{Interface: workqueue.New()}
 	q.providerIDToCommand = map[string]*Command{}
 }
+
+func (q *Queue) IsEmpty() bool {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+	return len(q.providerIDToCommand) == 0
+}

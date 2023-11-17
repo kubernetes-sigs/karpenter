@@ -115,6 +115,12 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		return reconcile.Result{}, fmt.Errorf("removing taint from nodes, %w", err)
 	}
 
+	// Check if the queue is processing an item. If it is, retry again later.
+	// TODO this should be removed when disruption budgets are added in.
+	if !c.queue.IsEmpty() {
+		return reconcile.Result{RequeueAfter: time.Second}, nil
+	}
+
 	// Attempt different disruption methods. We'll only let one method perform an action
 	for _, m := range c.methods {
 		c.recordRun(fmt.Sprintf("%T", m))
