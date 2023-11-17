@@ -58,4 +58,5 @@ func nodeLabelNames() []string {
 
 func init() {
 	crmetrics.Registry.MustRegister(TerminationSummary)
+	crmetrics.Registry.MustRegister(NodeDrainTime)
 }
