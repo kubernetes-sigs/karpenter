@@ -26,6 +26,7 @@ const (
 
 	ProvisionerLabel = "provisioner"
 	NodePoolLabel    = "nodepool"
+	NodeName         = "node_name"
 	ReasonLabel      = "reason"
 	TypeLabel        = "type"
 
