@@ -6,6 +6,8 @@ on:
   workflow_dispatch:
 jobs:
   presubmit:
+    permissions:
+      issues: write
     runs-on: ubuntu-latest
     strategy:
         matrix:
