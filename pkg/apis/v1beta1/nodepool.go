@@ -25,10 +25,10 @@ import (
 	"knative.dev/pkg/ptr"
 )
 
-// NodePoolSpec is the top level provisioner specification. Provisioners
-// launch nodes in response to pods that are unschedulable. A single provisioner
+// NodePoolSpec is the top level nodepool specification. Nodepools
+// launch nodes in response to pods that are unschedulable. A single nodepool
 // is capable of managing a diverse set of nodes. Node properties are determined
-// from a combination of provisioner and pod scheduling constraints.
+// from a combination of nodepool and pod scheduling constraints.
 type NodePoolSpec struct {
 	// Template contains the template of possibilities for the provisioning logic to launch a NodeClaim with.
 	// NodeClaims launched from this NodePool will often be further constrained than the template specifies.
@@ -43,10 +43,10 @@ type NodePoolSpec struct {
 	// Limits define a set of bounds for provisioning capacity.
 	// +optional
 	Limits Limits `json:"limits,omitempty"`
-	// Weight is the priority given to the provisioner during scheduling. A higher
-	// numerical weight indicates that this provisioner will be ordered
-	// ahead of other provisioners with lower weights. A provisioner with no weight
-	// will be treated as if it is a provisioner with a weight of 0.
+	// Weight is the priority given to the nodepool during scheduling. A higher
+	// numerical weight indicates that this nodepool will be ordered
+	// ahead of other nodepools with lower weights. A nodepool with no weight
+	// will be treated as if it is a nodepool with a weight of 0.
 	// +kubebuilder:validation:Minimum:=1
 	// +kubebuilder:validation:Maximum:=100
 	// +optional
@@ -160,7 +160,7 @@ type NodePoolList struct {
 	Items           []NodePool `json:"items"`
 }
 
-// OrderByWeight orders the provisioners in the NodePoolList
+// OrderByWeight orders the nodepools in the NodePoolList
 // by their priority weight in-place
 func (pl *NodePoolList) OrderByWeight() {
 	sort.Slice(pl.Items, func(a, b int) bool {
