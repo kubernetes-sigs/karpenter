@@ -35,6 +35,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
+	nodemetrics "github.com/aws/karpenter-core/pkg/controllers/metrics/node"
 	"github.com/aws/karpenter-core/pkg/controllers/node/termination/terminator"
 	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/node/termination/terminator/events"
 	"github.com/aws/karpenter-core/pkg/events"
@@ -94,6 +95,7 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 			}
 			return reconcile.Result{}, fmt.Errorf("getting machine, %w", err)
 		}
+		NodeDrainTime.With(nodemetrics.GetNodeLabels(node, "")).Set(time.Since(node.DeletionTimestamp.Time).Seconds())
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 	if err := c.cloudProvider.Delete(ctx, nodeclaimutil.NewFromNode(node)); cloudprovider.IgnoreNodeClaimNotFoundError(err) != nil {
