@@ -1,0 +1,16 @@
+# See the OWNERS_ALIASES docs: https://git.k8s.io/community/contributors/guide/owners.md#owners_aliases
+
+aliases:
+  sig-autoscaling-leads:
+    - mwielgus
+    - maciekpytel
+    - gjtempleton
+  karpenter-maintainers:
+    - etarn
+    - jonathan-innis
+    - tzneal
+    - bwagner5
+    - njtran
+  karpenter-reviewers:
+    - jackfrancis
+    - tallaxes
