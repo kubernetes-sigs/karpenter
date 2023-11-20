@@ -810,6 +810,28 @@ var _ = Describe("Provisioning", func() {
 				Expect(node.Labels).To(HaveKeyWithValue(domain+"/test", "test-value"))
 			}
 		})
+		It("should label nodes with labels in the subdomain from LabelDomainExceptions list", func() {
+			for domain := range v1beta1.LabelDomainExceptions {
+				nodePool := test.NodePool(v1beta1.NodePool{
+					Spec: v1beta1.NodePoolSpec{
+						Template: v1beta1.NodeClaimTemplate{
+							ObjectMeta: v1beta1.ObjectMeta{
+								Labels: map[string]string{"subdomain." + domain + "/test": "test-value"},
+							},
+						},
+					},
+				})
+				ExpectApplied(ctx, env.Client, nodePool)
+				pod := test.UnschedulablePod(
+					test.PodOptions{
+						NodeRequirements: []v1.NodeSelectorRequirement{{Key: "subdomain." + domain + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}},
+					},
+				)
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				node := ExpectScheduled(ctx, env.Client, pod)
+				Expect(node.Labels).To(HaveKeyWithValue("subdomain."+domain+"/test", "test-value"))
+			}
+		})
 
 	})
 	Context("Taints", func() {

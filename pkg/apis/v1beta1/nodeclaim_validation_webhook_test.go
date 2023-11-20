@@ -124,6 +124,14 @@ var _ = Describe("Validation", func() {
 				Expect(nodeClaim.Validate(ctx)).To(Succeed())
 			}
 		})
+		It("should allow restricted subdomains exceptions", func() {
+			for label := range LabelDomainExceptions {
+				nodeClaim.Spec.Requirements = []v1.NodeSelectorRequirement{
+					{Key: "subdomain." + label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+				}
+				Expect(nodeClaim.Validate(ctx)).To(Succeed())
+			}
+		})
 		It("should allow well known label exceptions", func() {
 			for label := range WellKnownLabels.Difference(sets.New(NodePoolLabelKey)) {
 				nodeClaim.Spec.Requirements = []v1.NodeSelectorRequirement{

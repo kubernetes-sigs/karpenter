@@ -255,6 +255,14 @@ var _ = Describe("Webhook/Validation", func() {
 					Expect(nodePool.Validate(ctx)).To(Succeed())
 				}
 			})
+			It("should allow restricted subdomains exceptions", func() {
+				for label := range LabelDomainExceptions {
+					nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+						{Key: "subdomain." + label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+					}
+					Expect(nodePool.Validate(ctx)).To(Succeed())
+				}
+			})
 			It("should allow well known label exceptions", func() {
 				for label := range WellKnownLabels.Difference(sets.New(NodePoolLabelKey)) {
 					nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
