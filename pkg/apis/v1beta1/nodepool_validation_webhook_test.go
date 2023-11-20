@@ -149,6 +149,22 @@ var _ = Describe("Webhook/Validation", func() {
 					Expect(nodePool.Validate(ctx)).To(Succeed())
 				}
 			})
+			It("should allow subdomain labels in restricted domains exceptions list", func() {
+				for label := range LabelDomainExceptions {
+					nodePool.Spec.Template.Labels = map[string]string{
+						fmt.Sprintf("subdomain.%s", label): "test-value",
+					}
+					Expect(nodePool.Validate(ctx)).To(Succeed())
+				}
+			})
+			It("should allow subdomain labels prefixed with the restricted domain exceptions", func() {
+				for label := range LabelDomainExceptions {
+					nodePool.Spec.Template.Labels = map[string]string{
+						fmt.Sprintf("subdomain.%s/key", label): "test-value",
+					}
+					Expect(nodePool.Validate(ctx)).To(Succeed())
+				}
+			})
 		})
 		Context("Taints", func() {
 			It("should succeed for valid taints", func() {
