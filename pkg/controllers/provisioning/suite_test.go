@@ -266,7 +266,6 @@ var _ = Describe("Combined/Provisioning", func() {
 		It("should select a Provisioner if a NodePool is over its limit", func() {
 			nodePool.Spec.Limits = v1beta1.Limits(v1.ResourceList{v1.ResourceCPU: resource.MustParse("0")})
 			ExpectApplied(ctx, env.Client, provisioner, nodePool)
-
 			pod := test.UnschedulablePod()
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
