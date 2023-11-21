@@ -86,7 +86,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 				"provider-id", nodeClaims[i].Status.ProviderID,
 				"nodepool", nodeClaims[i].Labels[v1beta1.NodePoolLabelKey],
 			).
-			Debugf("garbage collecting %s with no cloudprovider representation", lo.Ternary(nodeClaims[i].IsMachine, "machine", "nodeclaim"))
+			Debugf("garbage collecting nodeclaim with no cloudprovider representation")
 		nodeclaimutil.TerminatedCounter(nodeClaims[i], "garbage_collected").Inc()
 	})
 	if err = multierr.Combine(errs...); err != nil {

@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -171,27 +170,6 @@ func AllNodesForNodeClaim(ctx context.Context, c client.Client, nodeClaim *v1bet
 	return lo.ToSlicePtr(nodeList.Items), nil
 }
 
-func NewKubeletConfiguration(kc *v1alpha5.KubeletConfiguration) *v1beta1.KubeletConfiguration {
-	if kc == nil {
-		return nil
-	}
-	return &v1beta1.KubeletConfiguration{
-		ClusterDNS:                  kc.ClusterDNS,
-		ContainerRuntime:            kc.ContainerRuntime,
-		MaxPods:                     kc.MaxPods,
-		PodsPerCore:                 kc.PodsPerCore,
-		SystemReserved:              kc.SystemReserved,
-		KubeReserved:                kc.KubeReserved,
-		EvictionHard:                kc.EvictionHard,
-		EvictionSoft:                kc.EvictionSoft,
-		EvictionSoftGracePeriod:     kc.EvictionSoftGracePeriod,
-		EvictionMaxPodGracePeriod:   kc.EvictionMaxPodGracePeriod,
-		ImageGCHighThresholdPercent: kc.ImageGCHighThresholdPercent,
-		ImageGCLowThresholdPercent:  kc.ImageGCLowThresholdPercent,
-		CPUCFSQuota:                 kc.CPUCFSQuota,
-	}
-}
-
 // NewFromNode converts a node into a pseudo-NodeClaim using known values from the node
 // Deprecated: This NodeClaim generator function can be removed when v1beta1 migration has completed.
 func NewFromNode(node *v1.Node) *v1beta1.NodeClaim {
@@ -200,7 +178,7 @@ func NewFromNode(node *v1.Node) *v1beta1.NodeClaim {
 			Name:        node.Name,
 			Annotations: node.Annotations,
 			Labels:      node.Labels,
-			Finalizers:  []string{v1alpha5.TerminationFinalizer},
+			Finalizers:  []string{v1beta1.TerminationFinalizer},
 		},
 		Spec: v1beta1.NodeClaimSpec{
 			Taints:       node.Spec.Taints,

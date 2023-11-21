@@ -37,7 +37,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	coreapis "github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
@@ -114,7 +113,7 @@ var _ = BeforeEach(func() {
 
 	onDemandInstances = lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
 		for _, o := range i.Offerings.Available() {
-			if o.CapacityType == v1alpha5.CapacityTypeOnDemand {
+			if o.CapacityType == v1beta1.CapacityTypeOnDemand {
 				return true
 			}
 		}
@@ -279,7 +278,7 @@ var _ = Describe("Disruption Taints", func() {
 			Name: "current-on-demand",
 			Offerings: []cloudprovider.Offering{
 				{
-					CapacityType: v1alpha5.CapacityTypeOnDemand,
+					CapacityType: v1beta1.CapacityTypeOnDemand,
 					Zone:         "test-zone-1a",
 					Price:        1.5,
 					Available:    false,
@@ -290,19 +289,19 @@ var _ = Describe("Disruption Taints", func() {
 			Name: "spot-replacement",
 			Offerings: []cloudprovider.Offering{
 				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
+					CapacityType: v1beta1.CapacityTypeSpot,
 					Zone:         "test-zone-1a",
 					Price:        1.0,
 					Available:    true,
 				},
 				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
+					CapacityType: v1beta1.CapacityTypeSpot,
 					Zone:         "test-zone-1b",
 					Price:        0.2,
 					Available:    true,
 				},
 				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
+					CapacityType: v1beta1.CapacityTypeSpot,
 					Zone:         "test-zone-1c",
 					Price:        0.4,
 					Available:    true,
@@ -313,10 +312,10 @@ var _ = Describe("Disruption Taints", func() {
 		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1.LabelInstanceTypeStable: currentInstance.Name,
-					v1alpha5.LabelCapacityType: currentInstance.Offerings[0].CapacityType,
-					v1.LabelTopologyZone:       currentInstance.Offerings[0].Zone,
-					v1beta1.NodePoolLabelKey:   nodePool.Name,
+					v1.LabelInstanceTypeStable:   currentInstance.Name,
+					v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
+					v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
 				},
 			},
 			Status: v1beta1.NodeClaimStatus{

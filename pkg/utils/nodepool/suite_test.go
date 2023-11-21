@@ -16,7 +16,6 @@ package nodepool_test
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -26,7 +25,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"knative.dev/pkg/apis"
 	. "knative.dev/pkg/logging/testing"
 	"knative.dev/pkg/ptr"
@@ -205,7 +203,6 @@ var _ = Describe("NodePoolUtils", func() {
 		Expect(nodePool.Spec.Template.Spec.Requirements).To(Equal(provisioner.Spec.Requirements))
 
 		Expect(nodePool.Spec.Template.Spec.Kubelet.ClusterDNS).To(Equal(provisioner.Spec.KubeletConfiguration.ClusterDNS))
-		Expect(nodePool.Spec.Template.Spec.Kubelet.ContainerRuntime).To(Equal(provisioner.Spec.KubeletConfiguration.ContainerRuntime))
 		Expect(nodePool.Spec.Template.Spec.Kubelet.MaxPods).To(Equal(provisioner.Spec.KubeletConfiguration.MaxPods))
 		Expect(nodePool.Spec.Template.Spec.Kubelet.PodsPerCore).To(Equal(provisioner.Spec.KubeletConfiguration.PodsPerCore))
 		Expect(nodePool.Spec.Template.Spec.Kubelet.SystemReserved).To(Equal(provisioner.Spec.KubeletConfiguration.SystemReserved))
@@ -230,16 +227,6 @@ var _ = Describe("NodePoolUtils", func() {
 		Expect(lo.FromPtr(nodePool.Spec.Weight)).To(BeNumerically("==", lo.FromPtr(provisioner.Spec.Weight)))
 
 		ExpectResources(nodePool.Status.Resources, provisioner.Status.Resources)
-	})
-	It("should convert a Provisioner to a NodePool (with Provider)", func() {
-		provisioner.Spec.Provider = &runtime.RawExtension{Raw: lo.Must(json.Marshal(map[string]string{
-			"test-key":  "test-value",
-			"test-key2": "test-value2",
-		}))}
-		provisioner.Spec.ProviderRef = nil
-
-		nodePool := nodepoolutil.New(provisioner)
-		Expect(nodePool.Spec.Template.Spec.Provider).To(Equal(provisioner.Spec.Provider))
 	})
 	It("should patch the status on a NodePool", func() {
 		nodePool := test.NodePool(v1beta1.NodePool{

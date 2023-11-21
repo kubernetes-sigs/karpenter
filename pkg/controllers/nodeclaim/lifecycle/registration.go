@@ -27,7 +27,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -40,9 +39,7 @@ type Registration struct {
 
 func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
 	if nodeClaim.StatusConditions().GetCondition(v1beta1.Registered).IsTrue() {
-		// TODO @joinnis: Remove the back-propagation of this label onto the Node once all Nodes are guaranteed to have this label
-		// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
-		return reconcile.Result{}, r.backPropagateRegistrationLabel(ctx, nodeClaim)
+		return reconcile.Result{}, nil
 	}
 	if !nodeClaim.StatusConditions().GetCondition(v1beta1.Launched).IsTrue() {
 		nodeClaim.StatusConditions().MarkFalse(v1beta1.Registered, "NotLaunched", "Node not launched")
@@ -66,18 +63,14 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeCla
 	if err = r.syncNode(ctx, nodeClaim, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("syncing node, %w", err)
 	}
-	logging.FromContext(ctx).Debugf("registered %s", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"))
+	logging.FromContext(ctx).Debugf("registered nodeclaim")
 	nodeClaim.StatusConditions().MarkTrue(v1beta1.Registered)
 	nodeClaim.Status.NodeName = node.Name
 
 	nodeclaimutil.RegisteredCounter(nodeClaim).Inc()
-	// If the NodeClaim is linked, then the node already existed, so we don't mark it as created
-	if _, ok := nodeClaim.Annotations[v1alpha5.MachineLinkedAnnotationKey]; !ok {
-		metrics.NodesCreatedCounter.With(prometheus.Labels{
-			metrics.NodePoolLabel:    nodeClaim.Labels[v1beta1.NodePoolLabelKey],
-			metrics.ProvisionerLabel: nodeClaim.Labels[v1alpha5.ProvisionerNameLabelKey],
-		}).Inc()
-	}
+	metrics.NodesCreatedCounter.With(prometheus.Labels{
+		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+	}).Inc()
 	return reconcile.Result{}, nil
 }
 
@@ -86,40 +79,17 @@ func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1beta1.NodeClai
 	controllerutil.AddFinalizer(node, v1beta1.TerminationFinalizer)
 
 	node = nodeclaimutil.UpdateNodeOwnerReferences(nodeClaim, node)
-	// If the NodeClaim isn't registered as linked, then sync it
-	// This prevents us from messing with nodes that already exist and are scheduled
-	if _, ok := nodeClaim.Annotations[v1alpha5.MachineLinkedAnnotationKey]; !ok {
-		node.Labels = lo.Assign(node.Labels, nodeClaim.Labels)
-		node.Annotations = lo.Assign(node.Annotations, nodeClaim.Annotations)
-		// Sync all taints inside NodeClaim into the Node taints
-		node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(nodeClaim.Spec.Taints)
-		node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(nodeClaim.Spec.StartupTaints)
-	}
+	node.Labels = lo.Assign(node.Labels, nodeClaim.Labels)
+	node.Annotations = lo.Assign(node.Annotations, nodeClaim.Annotations)
+	// Sync all taints inside NodeClaim into the Node taints
+	node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(nodeClaim.Spec.Taints)
+	node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(nodeClaim.Spec.StartupTaints)
 	node.Labels = lo.Assign(node.Labels, nodeClaim.Labels, map[string]string{
 		v1beta1.NodeRegisteredLabelKey: "true",
 	})
 	if !equality.Semantic.DeepEqual(stored, node) {
 		if err := r.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 			return fmt.Errorf("syncing node labels, %w", err)
-		}
-	}
-	return nil
-}
-
-// backPropagateRegistrationLabel ports the `karpenter.sh/registered` label onto nodes that are registered by the Machine
-// but don't have this label on the Node yet
-func (r *Registration) backPropagateRegistrationLabel(ctx context.Context, nodeClaim *v1beta1.NodeClaim) error {
-	node, err := nodeclaimutil.NodeForNodeClaim(ctx, r.kubeClient, nodeClaim)
-	stored := node.DeepCopy()
-	if err != nil {
-		return nodeclaimutil.IgnoreDuplicateNodeError(nodeclaimutil.IgnoreNodeNotFoundError(err))
-	}
-	node.Labels = lo.Assign(node.Labels, map[string]string{
-		v1alpha5.LabelNodeRegistered: "true",
-	})
-	if !equality.Semantic.DeepEqual(stored, node) {
-		if err := r.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
-			return fmt.Errorf("syncing node registration label, %w", err)
 		}
 	}
 	return nil

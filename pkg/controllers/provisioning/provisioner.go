@@ -35,7 +35,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -419,17 +418,10 @@ func (p *Provisioner) Validate(ctx context.Context, pod *v1.Pod) error {
 // validateKarpenterManagedLabelCanExist provides a more clear error message in the event of scheduling a pod that specifically doesn't
 // want to run on a Karpenter node (e.g. a Karpenter controller replica).
 func validateKarpenterManagedLabelCanExist(p *v1.Pod) error {
-	hasProvisionerNameLabel, hasNodePoolLabel := false, false
 	for _, req := range scheduling.NewPodRequirements(p) {
-		if req.Key == v1alpha5.ProvisionerNameLabelKey && req.Operator() == v1.NodeSelectorOpDoesNotExist {
-			hasProvisionerNameLabel = true
-		}
 		if req.Key == v1beta1.NodePoolLabelKey && req.Operator() == v1.NodeSelectorOpDoesNotExist {
-			hasNodePoolLabel = true
-		}
-		if hasProvisionerNameLabel && hasNodePoolLabel {
-			return fmt.Errorf("configured to not run on a Karpenter provisioned node via %s %s and %s %s requirements",
-				v1alpha5.ProvisionerNameLabelKey, v1.NodeSelectorOpDoesNotExist, v1beta1.NodePoolLabelKey, v1.NodeSelectorOpDoesNotExist)
+			return fmt.Errorf("configured to not run on a Karpenter provisioned node via the %s %s requirement",
+				v1beta1.NodePoolLabelKey, v1.NodeSelectorOpDoesNotExist)
 		}
 	}
 	return nil
@@ -488,11 +480,7 @@ func validateNodeSelectorTerm(term v1.NodeSelectorTerm) (errs error) {
 	}
 	if term.MatchExpressions != nil {
 		for _, requirement := range term.MatchExpressions {
-			alphaErr := v1alpha5.ValidateRequirement(requirement)
-			betaErr := v1beta1.ValidateRequirement(requirement)
-			if alphaErr != nil && betaErr != nil {
-				errs = multierr.Append(errs, betaErr)
-			}
+			errs = multierr.Append(errs, v1beta1.ValidateRequirement(requirement))
 		}
 	}
 	return errs
