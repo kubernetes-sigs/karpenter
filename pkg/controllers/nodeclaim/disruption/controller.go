@@ -21,6 +21,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -70,8 +71,12 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	}
 
 	stored := nodeClaim.DeepCopy()
-	nodePool, err := nodeclaimutil.Owner(ctx, c.kubeClient, nodeClaim)
-	if err != nil {
+	nodePoolName, ok := nodeClaim.Labels[v1beta1.NodePoolLabelKey]
+	if !ok {
+		return reconcile.Result{}, nil
+	}
+	nodePool := &v1beta1.NodePool{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	var results []reconcile.Result
@@ -87,7 +92,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 		results = append(results, res)
 	}
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
-		if err = nodeclaimutil.UpdateStatus(ctx, c.kubeClient, nodeClaim); err != nil {
+		if err := nodeclaimutil.UpdateStatus(ctx, c.kubeClient, nodeClaim); err != nil {
 			if errors.IsConflict(err) {
 				return reconcile.Result{Requeue: true}, nil
 			}

@@ -137,11 +137,6 @@ type NodePool struct {
 
 	Spec   NodePoolSpec   `json:"spec,omitempty"`
 	Status NodePoolStatus `json:"status,omitempty"`
-
-	// IsProvisioner tells Karpenter whether the in-memory representation of this object
-	// is actually referring to a Provisioner object. This value is not actually part of the v1beta1 public-facing API
-	// TODO @joinnis: Remove this field when v1alpha5 is unsupported in a future version of Karpenter
-	IsProvisioner bool `json:"-"`
 }
 
 func (in *NodePool) Hash() string {

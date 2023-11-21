@@ -19,7 +19,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
@@ -32,8 +31,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 )
 
 type Method interface {
@@ -59,7 +56,7 @@ type Candidate struct {
 
 //nolint:gocyclo
 func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode,
-	nodePoolMap map[nodepoolutil.Key]*v1beta1.NodePool, nodePoolToInstanceTypesMap map[nodepoolutil.Key]map[string]*cloudprovider.InstanceType, queue *orchestration.Queue) (*Candidate, error) {
+	nodePoolMap map[string]*v1beta1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *orchestration.Queue) (*Candidate, error) {
 
 	if node.Node == nil || node.NodeClaim == nil {
 		return nil, fmt.Errorf("state node doesn't contain both a node and a nodeclaim")
@@ -90,16 +87,16 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 			return nil, fmt.Errorf("state node doesn't have required label %q", label)
 		}
 	}
-	ownerKey := nodeclaimutil.OwnerKey(node)
-	if ownerKey.Name == "" {
+	nodePoolName, ok := node.Labels()[v1beta1.NodePoolLabelKey]
+	if !ok {
 		return nil, fmt.Errorf("state node doesn't have the Karpenter owner label")
 	}
-	nodePool := nodePoolMap[ownerKey]
-	instanceTypeMap := nodePoolToInstanceTypesMap[ownerKey]
+	nodePool := nodePoolMap[nodePoolName]
+	instanceTypeMap := nodePoolToInstanceTypesMap[nodePoolName]
 	// skip any candidates where we can't determine the nodePool
 	if nodePool == nil || instanceTypeMap == nil {
-		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Owning %s %q not found", lo.Ternary(ownerKey.IsProvisioner, "provisioner", "nodepool"), ownerKey.Name))...)
-		return nil, fmt.Errorf("%s %q can't be resolved for state node", lo.Ternary(ownerKey.IsProvisioner, "provisioner", "nodepool"), ownerKey.Name)
+		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Owning nodepool %q not found", nodePoolName))...)
+		return nil, fmt.Errorf("nodepool %q can't be resolved for state node", nodePoolName)
 	}
 	instanceType := instanceTypeMap[node.Labels()[v1.LabelInstanceTypeStable]]
 	// skip any candidates that we can't determine the instance of

@@ -28,11 +28,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 )
 
-type Key struct {
-	Name          string
-	IsProvisioner bool
-}
-
 func New(provisioner *v1alpha5.Provisioner) *v1beta1.NodePool {
 	np := &v1beta1.NodePool{
 		ObjectMeta: provisioner.ObjectMeta,
@@ -56,7 +51,6 @@ func New(provisioner *v1alpha5.Provisioner) *v1beta1.NodePool {
 		Status: v1beta1.NodePoolStatus{
 			Resources: provisioner.Status.Resources,
 		},
-		IsProvisioner: true,
 	}
 	if provisioner.Spec.TTLSecondsUntilExpired != nil {
 		np.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(lo.Must(time.ParseDuration(fmt.Sprintf("%ds", lo.FromPtr[int64](provisioner.Spec.TTLSecondsUntilExpired)))))
@@ -105,9 +99,9 @@ func NewNodeClassReference(pr *v1alpha5.MachineTemplateRef) *v1beta1.NodeClassRe
 	}
 }
 
-func Get(ctx context.Context, c client.Client, key Key) (*v1beta1.NodePool, error) {
+func Get(ctx context.Context, c client.Client, name string) (*v1beta1.NodePool, error) {
 	nodePool := &v1beta1.NodePool{}
-	if err := c.Get(ctx, types.NamespacedName{Name: key.Name}, nodePool); err != nil {
+	if err := c.Get(ctx, types.NamespacedName{Name: name}, nodePool); err != nil {
 		return nil, err
 	}
 	return nodePool, nil
