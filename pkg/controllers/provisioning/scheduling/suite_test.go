@@ -423,6 +423,20 @@ var _ = Context("NodePool", func() {
 					Expect(node.Labels).To(HaveKeyWithValue(domain+"/test", "test-value"))
 				}
 			})
+			It("should schedule pods that have node selectors with label in subdomain from restricted domains exceptions list", func() {
+				var requirements []v1.NodeSelectorRequirement
+				for domain := range v1beta1.LabelDomainExceptions {
+					requirements = append(requirements, v1.NodeSelectorRequirement{Key: "subdomain." + domain + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}})
+				}
+				nodePool.Spec.Template.Spec.Requirements = requirements
+				ExpectApplied(ctx, env.Client, nodePool)
+				for domain := range v1beta1.LabelDomainExceptions {
+					pod := test.UnschedulablePod()
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := ExpectScheduled(ctx, env.Client, pod)
+					Expect(node.Labels).To(HaveKeyWithValue("subdomain."+domain+"/test", "test-value"))
+				}
+			})
 			It("should schedule pods that have node selectors with label in wellknown label list", func() {
 				schedulable := []*v1.Pod{
 					// Constrained by zone
@@ -853,6 +867,20 @@ var _ = Context("NodePool", func() {
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					node := ExpectScheduled(ctx, env.Client, pod)
 					Expect(node.Labels).To(HaveKeyWithValue(domain+"/test", "test-value"))
+				}
+			})
+			It("should schedule pods that have node selectors with label in subdomain from restricted domains exceptions list", func() {
+				var requirements []v1.NodeSelectorRequirement
+				for domain := range v1beta1.LabelDomainExceptions {
+					requirements = append(requirements, v1.NodeSelectorRequirement{Key: "subdomain." + domain + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}})
+				}
+				nodePool.Spec.Template.Spec.Requirements = requirements
+				ExpectApplied(ctx, env.Client, nodePool)
+				for domain := range v1beta1.LabelDomainExceptions {
+					pod := test.UnschedulablePod()
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := ExpectScheduled(ctx, env.Client, pod)
+					Expect(node.Labels).To(HaveKeyWithValue("subdomain."+domain+"/test", "test-value"))
 				}
 			})
 			It("should schedule pods that have node selectors with label in wellknown label list", func() {

@@ -128,6 +128,17 @@ var _ = Describe("Validation", func() {
 				nodeClaim = oldNodeClaim.DeepCopy()
 			}
 		})
+		It("should allow restricted subdomains exceptions", func() {
+			oldNodeClaim := nodeClaim.DeepCopy()
+			for label := range LabelDomainExceptions {
+				nodeClaim.Spec.Requirements = []v1.NodeSelectorRequirement{
+					{Key: "subdomain." + label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+				}
+				Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
+				Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
+				nodeClaim = oldNodeClaim.DeepCopy()
+			}
+		})
 		It("should allow well known label exceptions", func() {
 			oldNodeClaim := nodeClaim.DeepCopy()
 			for label := range WellKnownLabels.Difference(sets.New(NodePoolLabelKey)) {

@@ -517,6 +517,18 @@ var _ = Describe("CEL/Validation", func() {
 				nodePool = oldNodePool.DeepCopy()
 			}
 		})
+		It("should allow restricted subdomains exceptions", func() {
+			oldNodePool := nodePool.DeepCopy()
+			for label := range LabelDomainExceptions {
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+					{Key: "subdomain." + label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+				}
+				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+				Expect(nodePool.RuntimeValidate()).To(Succeed())
+				Expect(env.Client.Delete(ctx, nodePool)).To(Succeed())
+				nodePool = oldNodePool.DeepCopy()
+			}
+		})
 		It("should allow well known label exceptions", func() {
 			oldNodePool := nodePool.DeepCopy()
 			for label := range WellKnownLabels.Difference(sets.New(NodePoolLabelKey)) {
@@ -625,6 +637,30 @@ var _ = Describe("CEL/Validation", func() {
 			for label := range LabelDomainExceptions {
 				nodePool.Spec.Template.Labels = map[string]string{
 					fmt.Sprintf("%s/key", label): "test-value",
+				}
+				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+				Expect(env.Client.Delete(ctx, nodePool)).To(Succeed())
+				Expect(nodePool.RuntimeValidate()).To(Succeed())
+				nodePool = oldNodePool.DeepCopy()
+			}
+		})
+		It("should allow subdomain labels in restricted domains exceptions list", func() {
+			oldNodePool := nodePool.DeepCopy()
+			for label := range LabelDomainExceptions {
+				nodePool.Spec.Template.Labels = map[string]string{
+					fmt.Sprintf("subdomain.%s", label): "test-value",
+				}
+				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+				Expect(env.Client.Delete(ctx, nodePool)).To(Succeed())
+				Expect(nodePool.RuntimeValidate()).To(Succeed())
+				nodePool = oldNodePool.DeepCopy()
+			}
+		})
+		It("should allow subdomain labels prefixed with the restricted domain exceptions", func() {
+			oldNodePool := nodePool.DeepCopy()
+			for label := range LabelDomainExceptions {
+				nodePool.Spec.Template.Labels = map[string]string{
+					fmt.Sprintf("subdomain.%s/key", label): "test-value",
 				}
 				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 				Expect(env.Client.Delete(ctx, nodePool)).To(Succeed())
