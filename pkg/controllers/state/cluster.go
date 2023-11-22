@@ -40,7 +40,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
@@ -474,15 +473,16 @@ func (c *Cluster) populateStartupTaints(ctx context.Context, n *StateNode) error
 		return nil
 	}
 
-	if nodeclaimutil.OwnerKey(n).Name == "" {
+	nodePoolName, ok := n.Labels()[v1beta1.NodePoolLabelKey]
+	if !ok {
 		return nil
 	}
-	owner, err := nodeclaimutil.Owner(ctx, c.kubeClient, n)
-	if err != nil {
+	nodePool := &v1beta1.NodePool{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
 		return client.IgnoreNotFound(err)
 	}
 	n.startupTaintsInitialized = true
-	n.startupTaints = owner.Spec.Template.Spec.StartupTaints
+	n.startupTaints = nodePool.Spec.Template.Spec.StartupTaints
 	return nil
 }
 
@@ -498,14 +498,15 @@ func (c *Cluster) populateInflight(ctx context.Context, n *StateNode) error {
 		return nil
 	}
 
-	if nodeclaimutil.OwnerKey(n).Name == "" {
+	nodePoolName, ok := n.Labels()[v1beta1.NodePoolLabelKey]
+	if !ok {
 		return nil
 	}
-	owner, err := nodeclaimutil.Owner(ctx, c.kubeClient, n)
-	if err != nil {
+	nodePool := &v1beta1.NodePool{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, owner)
+	instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, nodePool)
 	if err != nil {
 		return err
 	}

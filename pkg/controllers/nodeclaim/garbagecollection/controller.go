@@ -82,9 +82,9 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		}
 		logging.FromContext(ctx).
 			With(
-				lo.Ternary(nodeClaims[i].IsMachine, "machine", "nodeclaim"), nodeClaims[i].Name,
+				"nodeclaim", nodeClaims[i].Name,
 				"provider-id", nodeClaims[i].Status.ProviderID,
-				lo.Ternary(nodeClaims[i].IsMachine, "provisioner", "nodepool"), nodeclaimutil.OwnerKey(nodeClaims[i]).Name,
+				"nodepool", nodeClaims[i].Labels[v1beta1.NodePoolLabelKey],
 			).
 			Debugf("garbage collecting %s with no cloudprovider representation", lo.Ternary(nodeClaims[i].IsMachine, "machine", "nodeclaim"))
 		nodeclaimutil.TerminatedCounter(nodeClaims[i], "garbage_collected").Inc()

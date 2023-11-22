@@ -32,7 +32,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/options"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
@@ -115,16 +114,6 @@ func NewNode() *StateNode {
 		hostPortUsage:       scheduling.NewHostPortUsage(),
 		volumeUsage:         scheduling.NewVolumeUsage(),
 	}
-}
-
-func (in *StateNode) OwnerKey() nodepoolutil.Key {
-	if in.Labels()[v1beta1.NodePoolLabelKey] != "" {
-		return nodepoolutil.Key{Name: in.Labels()[v1beta1.NodePoolLabelKey], IsProvisioner: false}
-	}
-	if in.Labels()[v1alpha5.ProvisionerNameLabelKey] != "" {
-		return nodepoolutil.Key{Name: in.Labels()[v1alpha5.ProvisionerNameLabelKey], IsProvisioner: true}
-	}
-	return nodepoolutil.Key{}
 }
 
 func (in *StateNode) Name() string {
