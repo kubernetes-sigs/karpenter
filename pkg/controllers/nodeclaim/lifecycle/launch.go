@@ -148,8 +148,8 @@ func PopulateNodeClaimDetails(nodeClaim, retrieved *v1beta1.NodeClaim) *v1beta1.
 }
 
 func truncateMessage(msg string) string {
-	if len(msg) < 300 {
+	if len(msg) < 1000 {
 		return msg
 	}
-	return msg[:300] + "..."
+	return msg[:1000] + "..."
 }
