@@ -26,7 +26,6 @@ import (
 	"github.com/samber/lo"
 	cliflag "k8s.io/component-base/cli/flag"
 
-	"sigs.k8s.io/karpenter/pkg/apis/settings"
 	"sigs.k8s.io/karpenter/pkg/utils/env"
 )
 
@@ -133,19 +132,6 @@ func (o *Options) Parse(fs *FlagSet, args ...string) error {
 
 func (o *Options) ToContext(ctx context.Context) context.Context {
 	return ToContext(ctx, o)
-}
-
-func (o *Options) MergeSettings(ctx context.Context) {
-	s := settings.FromContext(ctx)
-	if !o.setFlags["batch-max-duration"] {
-		o.BatchMaxDuration = s.BatchMaxDuration
-	}
-	if !o.setFlags["batch-idle-duration"] {
-		o.BatchIdleDuration = s.BatchIdleDuration
-	}
-	if !o.setFlags["feature-gates"] {
-		o.FeatureGates.Drift = s.DriftEnabled
-	}
 }
 
 func ParseFeatureGates(gateStr string) (FeatureGates, error) {

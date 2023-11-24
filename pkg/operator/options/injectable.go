@@ -26,9 +26,4 @@ type Injectable interface {
 	Parse(*FlagSet, ...string) error
 	// ToContext injects the callee into the given context
 	ToContext(context.Context) context.Context
-	// MergeSettings extracts settings from the given context and merges them
-	// with the options in-place. Values that were previously set by CLI flags
-	// or environment variables take precedent over settings.
-	// TODO: Remove with karpenter-global-settings
-	MergeSettings(context.Context)
 }
