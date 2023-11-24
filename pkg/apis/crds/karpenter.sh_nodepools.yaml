@@ -365,6 +365,22 @@ spec:
             status:
               description: NodePoolStatus defines the observed state of NodePool
               properties:
+                conditions:
+                  description: Conditions represent the latest available observations of a NodePool's current state.
+                  items:
+                    description: NodePoolConditionType represents a NodePool condition value.
+                    properties:
+                      status:
+                        description: Status of the condition, one of True, False, Unknown.
+                        type: string
+                      type:
+                        description: Type of NodePool condition.
+                        type: string
+                    required:
+                      - status
+                      - type
+                    type: object
+                  type: array
                 resources:
                   additionalProperties:
                     anyOf:

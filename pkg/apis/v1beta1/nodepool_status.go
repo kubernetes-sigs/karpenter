@@ -23,4 +23,27 @@ type NodePoolStatus struct {
 	// Resources is the list of resources that have been provisioned.
 	// +optional
 	Resources v1.ResourceList `json:"resources,omitempty"`
+	// Conditions represent the latest available observations of a NodePool's current state.
+	// +optional
+	Conditions []NodePoolCondition `json:"conditions,omitempty"`
 }
+
+// NodePoolConditionType represents a NodePool condition value.
+type NodePoolCondition struct {
+	
+	// Type of NodePool condition.
+	Type NodePoolConditionType `json:"type"`
+	// Status of the condition, one of True, False, Unknown.
+	Status v1.ConditionStatus `json:"status"`
+
+}
+
+// NodePoolConditionType represents a NodePool condition value.
+type NodePoolConditionType string
+
+const (
+	// NodeClassConditionTypeReady represents a NodePool condition is in ready state.
+	NodeClassConditionTypeReady NodePoolConditionType = "Ready"
+	// NodePoolConditionTypeReady represents a NodePool condition is in initialized state.
+	NodePoolConditionTypeReady NodePoolConditionType = "Ready"
+)	

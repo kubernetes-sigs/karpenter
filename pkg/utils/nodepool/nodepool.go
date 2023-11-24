@@ -19,7 +19,10 @@ import (
 	"fmt"
 	"time"
 
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/types"
+	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/samber/lo"
@@ -131,4 +134,30 @@ func PatchStatus(ctx context.Context, c client.Client, stored, nodePool *v1beta1
 
 func HashAnnotation(nodePool *v1beta1.NodePool) map[string]string {
 	return map[string]string{v1beta1.NodePoolHashAnnotationKey: nodePool.Hash()}
+}
+
+func UpdateStatusCondition(ctx context.Context, c client.Client, np *v1beta1.NodePool, conditionType v1beta1.NodePoolConditionType, condition v1.ConditionStatus) {
+	var found bool
+	stored := np.DeepCopy()
+	for i := range np.Status.Conditions {
+		if np.Status.Conditions[i].Type == v1beta1.NodeClassConditionTypeReady {
+			np.Status.Conditions[i].Status = condition
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		np.Status.Conditions = append(np.Status.Conditions, v1beta1.NodePoolCondition{
+			Type:   conditionType,
+			Status: condition,
+		})
+	}
+
+	if !equality.Semantic.DeepEqual(stored, np) {
+		if err := PatchStatus(ctx, c, stored, np); err != nil {
+			logging.FromContext(ctx).With("nodepool", np.Name).Errorf("unable to update nodeclass readiness into nodepool, %s", err)
+		}
+	}
+	logging.FromContext(ctx).With("nodepool", np.Name).Info("updated nodeclass readiness into nodepool")
 }
