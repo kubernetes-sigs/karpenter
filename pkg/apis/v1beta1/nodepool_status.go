@@ -44,6 +44,4 @@ type NodePoolConditionType string
 const (
 	// NodeClassConditionTypeReady represents a NodePool condition is in ready state.
 	NodeClassConditionTypeReady NodePoolConditionType = "Ready"
-	// NodePoolConditionTypeReady represents a NodePool condition is in initialized state.
-	NodePoolConditionTypeReady NodePoolConditionType = "Ready"
 )	
