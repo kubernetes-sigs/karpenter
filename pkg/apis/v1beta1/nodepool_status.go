@@ -45,3 +45,13 @@ const (
 	// NodeClassConditionTypeReady represents a NodePool condition is in ready state.
 	NodeClassConditionTypeReady NodePoolConditionType = "Ready"
 )	
+
+
+func (np *NodePool) GetCondition(conditionType NodePoolConditionType) bool {
+	for _, c := range np.Status.Conditions {
+		if c.Type == conditionType {
+			return c.Status == v1.ConditionStatus(v1.ConditionTrue)
+		}
+	}
+	return false
+}

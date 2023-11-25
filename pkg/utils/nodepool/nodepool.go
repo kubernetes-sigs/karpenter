@@ -161,3 +161,12 @@ func UpdateStatusCondition(ctx context.Context, c client.Client, np *v1beta1.Nod
 	}
 	logging.FromContext(ctx).With("nodepool", np.Name).Info("updated nodeclass readiness into nodepool")
 }
+
+func GetCondition(n *v1beta1.NodePool, match v1beta1.NodePoolConditionType) v1beta1.NodePoolCondition {
+	for _, condition := range n.Status.Conditions {
+		if condition.Type == match {
+			return condition
+		}
+	}
+	return v1beta1.NodePoolCondition{}
+}
