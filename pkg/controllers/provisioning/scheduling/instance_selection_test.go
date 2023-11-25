@@ -526,12 +526,12 @@ var _ = Describe("Instance Type Selection", func() {
 			for _, mem := range []float64{0.1, 1.0, 2, 4, 8, 16, 32} {
 				cluster.Reset()
 				cloudProvider.CreateCalls = nil
-				opts := test.PodOptions{
+				containerOpts := test.PodOptions{
 					ResourceRequirements: v1.ResourceRequirements{Requests: map[v1.ResourceName]resource.Quantity{
 						v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%0.1f", cpu)),
 						v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%0.1fGi", mem)),
 					}}}
-				opts1 := test.PodOptions{
+				containerWithInitContainerOpts := test.PodOptions{
 
 					InitContainers: []v1.Container{{
 						Resources: v1.ResourceRequirements{
@@ -549,7 +549,7 @@ var _ = Describe("Instance Type Selection", func() {
 						v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%0.1f", cpu)),
 						v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%0.1fGi", mem)),
 					}}}
-				opts2 := test.PodOptions{
+				containerWithISidecarContainerOpts := test.PodOptions{
 
 					InitContainers: []v1.Container{{
 						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
@@ -569,7 +569,7 @@ var _ = Describe("Instance Type Selection", func() {
 						v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%0.1fGi", mem)),
 					}}}
 				pods := []*v1.Pod{
-					test.UnschedulablePod(opts), test.UnschedulablePod(opts1), test.UnschedulablePod(opts2),
+					test.UnschedulablePod(containerOpts), test.UnschedulablePod(containerWithInitContainerOpts), test.UnschedulablePod(containerWithISidecarContainerOpts),
 				}
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
 				nodeNames := sets.NewString()

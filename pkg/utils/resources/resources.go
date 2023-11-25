@@ -155,12 +155,7 @@ func podLimits(pod *v1.Pod) v1.ResourceList {
 	limits = MaxResources(limits, maxInitContainerLimits)
 
 	if pod.Spec.Overhead != nil {
-		for name, quantity := range pod.Spec.Overhead {
-			if value, ok := limits[name]; ok && !value.IsZero() {
-				value.Add(quantity)
-				limits[name] = value
-			}
-		}
+		MergeInto(limits, pod.Spec.Overhead)
 	}
 
 	return limits
@@ -171,7 +166,6 @@ func Ceiling(pod *v1.Pod) v1.ResourceRequirements {
 		Requests: podRequests(pod),
 		Limits:   podLimits(pod),
 	}
-
 }
 
 // MaxResources returns the maximum quantities for a given list of resources
