@@ -31,7 +31,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 )
 
 type Launch struct {
@@ -62,22 +61,7 @@ func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (r
 		created, err = l.linkNodeClaim(ctx, nodeClaim)
 	} else {
 		created, err = l.launchNodeClaim(ctx, nodeClaim)
-		npKey := nodepoolutil.Key{Name: nodeClaim.Labels[v1beta1.NodePoolLabelKey], IsProvisioner: nodeClaim.IsMachine}
-		if npKey.Name != "" {
-			np, npErr := nodepoolutil.Get(ctx, l.kubeClient, npKey)
-			if npErr != nil {
-				logging.FromContext(ctx).With("nodepool", np.Name).Errorf("unable to fetch the nodepool %s", err)
-				return reconcile.Result{Requeue: true}, nil
-			} else {
-				if err == nil {
-					nodepoolutil.UpdateStatusCondition(ctx, l.kubeClient, np, v1beta1.NodeClassConditionTypeReady, v1.ConditionTrue)
-				} else if cloudprovider.IsNodeClassNotReadyError(err) {
-					nodepoolutil.UpdateStatusCondition(ctx, l.kubeClient, np, v1beta1.NodeClassConditionTypeReady, v1.ConditionFalse)
-				}
-			}
-		}
 	}
-
 	// Either the Node launch failed or the Node was deleted due to InsufficientCapacity/NotFound
 	if err != nil || created == nil {
 		if cloudprovider.IsNodeClassNotReadyError(err) {

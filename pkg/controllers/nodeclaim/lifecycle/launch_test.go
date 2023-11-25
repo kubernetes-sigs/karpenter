@@ -87,49 +87,4 @@ var _ = Describe("Launch", func() {
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Launched).Status).To(Equal(v1.ConditionFalse))
 	})
-	It("should update NodePool status of type condition nodeclass to false if nodeclass not ready", func() {
-		cloudProvider.NextCreateErr = cloudprovider.NewNodeClassNotReadyError(fmt.Errorf("nodeClass isn't ready"))
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client,nodePool, nodeClaim)
-		res := ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-		Expect(res.Requeue).To(BeTrue())
-
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-
-		nodePool = ExpectExists(ctx, env.Client, nodePool)
-		Expect(nodePool.Status.Conditions).To(ContainElement(v1beta1.NodePoolCondition{
-			Type:   v1beta1.NodeClassConditionTypeReady,
-			Status: v1.ConditionFalse,
-		}))
-	})
-	It("should update NodePool status of type condition nodeclass to true if nodeclass ready", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-
-		Expect(cloudProvider.CreateCalls).To(HaveLen(1))
-		Expect(cloudProvider.CreatedNodeClaims).To(HaveLen(1))
-		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
-		Expect(err).ToNot(HaveOccurred())
-
-		nodePool = ExpectExists(ctx, env.Client, nodePool)
-		Expect(nodePool.Status.Conditions).To(ContainElement(v1beta1.NodePoolCondition{
-			Type:   v1beta1.NodeClassConditionTypeReady,
-			Status: v1.ConditionTrue,
-		}))
-	})
 })
