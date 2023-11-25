@@ -55,11 +55,6 @@ func (in *KubeletConfiguration) DeepCopyInto(out *KubeletConfiguration) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
-	if in.ContainerRuntime != nil {
-		in, out := &in.ContainerRuntime, &out.ContainerRuntime
-		*out = new(string)
-		**out = **in
-	}
 	if in.MaxPods != nil {
 		in, out := &in.MaxPods, &out.MaxPods
 		*out = new(int32)
@@ -271,11 +266,6 @@ func (in *NodeClaimSpec) DeepCopyInto(out *NodeClaimSpec) {
 		in, out := &in.NodeClassRef, &out.NodeClassRef
 		*out = new(NodeClassReference)
 		**out = **in
-	}
-	if in.Provider != nil {
-		in, out := &in.Provider, &out.Provider
-		*out = new(runtime.RawExtension)
-		(*in).DeepCopyInto(*out)
 	}
 }
 

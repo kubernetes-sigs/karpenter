@@ -37,7 +37,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
@@ -3300,7 +3299,7 @@ func ExpectMaxSkew(ctx context.Context, c client.Client, namespace string, const
 					skew[key]++
 				}
 			}
-			if constraint.TopologyKey == v1alpha5.LabelCapacityType {
+			if constraint.TopologyKey == v1beta1.CapacityTypeLabelKey {
 				if key, ok := node.Labels[constraint.TopologyKey]; ok {
 					skew[key]++
 				}

@@ -46,7 +46,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
@@ -179,9 +178,6 @@ func NewOperator() (context.Context, *Operator) {
 	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.Node{}, "spec.providerID", func(o client.Object) []string {
 		return []string{o.(*v1.Node).Spec.ProviderID}
 	}), "failed to setup node provider id indexer")
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1alpha5.Machine{}, "status.providerID", func(o client.Object) []string {
-		return []string{o.(*v1alpha5.Machine).Status.ProviderID}
-	}), "failed to setup machine provider id indexer")
 	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1beta1.NodeClaim{}, "status.providerID", func(o client.Object) []string {
 		return []string{o.(*v1beta1.NodeClaim).Status.ProviderID}
 	}), "failed to setup nodeclaim provider id indexer")

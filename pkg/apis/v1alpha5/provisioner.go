@@ -118,8 +118,6 @@ func ProviderAnnotation(p *Provider) map[string]string {
 	return map[string]string{ProviderCompatabilityAnnotationKey: string(raw)}
 }
 
-// TODO @joinnis: Mark this version as deprecated when v1beta1 APIs are formally released
-
 // Provisioner is the Schema for the Provisioners API
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=provisioners,scope=Cluster,categories=karpenter

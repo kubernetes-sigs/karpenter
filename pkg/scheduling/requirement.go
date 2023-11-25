@@ -24,7 +24,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 )
 
@@ -38,9 +37,6 @@ type Requirement struct {
 }
 
 func NewRequirement(key string, operator v1.NodeSelectorOperator, values ...string) *Requirement {
-	if normalized, ok := v1alpha5.NormalizedLabels[key]; ok {
-		key = normalized
-	}
 	if normalized, ok := v1beta1.NormalizedLabels[key]; ok {
 		key = normalized
 	}

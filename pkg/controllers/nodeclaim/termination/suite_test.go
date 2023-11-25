@@ -32,7 +32,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
@@ -92,10 +91,10 @@ var _ = Describe("Termination", func() {
 		nodeClaim = test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: nodePool.Name,
+					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 				Finalizers: []string{
-					v1alpha5.TerminationFinalizer,
+					v1beta1.TerminationFinalizer,
 				},
 			},
 			Spec: v1beta1.NodeClaimSpec{
@@ -158,22 +157,6 @@ var _ = Describe("Termination", func() {
 
 		// Expect the nodeClaim to be gone from the cloudprovider
 		_, err = cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
-		Expect(cloudprovider.IsNodeClaimNotFoundError(err)).To(BeTrue())
-	})
-	It("should delete the Instance if the NodeClaim is linked but doesn't have its providerID resolved yet", func() {
-		node := test.NodeClaimLinkedNode(nodeClaim)
-
-		nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1alpha5.MachineLinkedAnnotationKey: nodeClaim.Status.ProviderID})
-		nodeClaim.Status.ProviderID = ""
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-
-		// Expect the nodeClaim to be gone
-		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectReconcileSucceeded(ctx, nodeClaimTerminationController, client.ObjectKeyFromObject(nodeClaim)) // triggers the nodeClaim deletion
-		ExpectNotFound(ctx, env.Client, nodeClaim)
-
-		// Expect the nodeClaim to be gone from the cloudprovider
-		_, err := cloudProvider.Get(ctx, nodeClaim.Annotations[v1alpha5.MachineLinkedAnnotationKey])
 		Expect(cloudprovider.IsNodeClaimNotFoundError(err)).To(BeTrue())
 	})
 	It("should not delete the NodeClaim until all the Nodes are removed", func() {

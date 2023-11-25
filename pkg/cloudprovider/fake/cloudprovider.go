@@ -135,7 +135,6 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 			Capacity:    functional.FilterMap(instanceType.Capacity, func(_ v1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
 			Allocatable: functional.FilterMap(instanceType.Allocatable(), func(_ v1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
 		},
-		IsMachine: nodeClaim.IsMachine,
 	}
 	c.CreatedNodeClaims[created.Status.ProviderID] = created
 	return created, nil

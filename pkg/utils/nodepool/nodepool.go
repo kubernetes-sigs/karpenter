@@ -43,7 +43,6 @@ func New(provisioner *v1alpha5.Provisioner) *v1beta1.NodePool {
 					Requirements:  provisioner.Spec.Requirements,
 					Kubelet:       NewKubeletConfiguration(provisioner.Spec.KubeletConfiguration),
 					NodeClassRef:  NewNodeClassReference(provisioner.Spec.ProviderRef),
-					Provider:      provisioner.Spec.Provider,
 				},
 			},
 			Weight: provisioner.Spec.Weight,
@@ -73,7 +72,6 @@ func NewKubeletConfiguration(kc *v1alpha5.KubeletConfiguration) *v1beta1.Kubelet
 	}
 	return &v1beta1.KubeletConfiguration{
 		ClusterDNS:                  kc.ClusterDNS,
-		ContainerRuntime:            kc.ContainerRuntime,
 		MaxPods:                     kc.MaxPods,
 		PodsPerCore:                 kc.PodsPerCore,
 		SystemReserved:              kc.SystemReserved,
