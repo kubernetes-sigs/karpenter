@@ -131,7 +131,7 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 	if len(results.NewNodeClaims) == 0 {
 		return reconcile.Result{}, nil
 	}
-	np, err := nodepoolutil.Get(ctx, p.kubeClient, results.NewNodeClaims[0].OwnerKey)
+	np, err := nodepoolutil.Get(ctx, p.kubeClient, results.NewNodeClaims[0].NodePoolName)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
