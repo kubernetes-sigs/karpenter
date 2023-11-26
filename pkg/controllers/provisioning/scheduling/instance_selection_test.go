@@ -549,7 +549,7 @@ var _ = Describe("Instance Type Selection", func() {
 						v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%0.1f", cpu)),
 						v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%0.1fGi", mem)),
 					}}}
-				containerWithISidecarContainerOpts := test.PodOptions{
+				containerWithSidecarContainerOpts := test.PodOptions{
 
 					InitContainers: []v1.Container{{
 						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
@@ -569,7 +569,7 @@ var _ = Describe("Instance Type Selection", func() {
 						v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%0.1fGi", mem)),
 					}}}
 				pods := []*v1.Pod{
-					test.UnschedulablePod(containerOpts), test.UnschedulablePod(containerWithInitContainerOpts), test.UnschedulablePod(containerWithISidecarContainerOpts),
+					test.UnschedulablePod(containerOpts), test.UnschedulablePod(containerWithInitContainerOpts), test.UnschedulablePod(containerWithSidecarContainerOpts),
 				}
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
 				nodeNames := sets.NewString()

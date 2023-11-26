@@ -391,4 +391,19 @@ var _ = Describe("Resources Handling", func() {
 			Expect(podResources.Limits.Memory().Value()).To(BeNumerically("==", 10737418240))
 		})
 	})
+	Context("Resource Merging", func() {
+		It("should merge resource limits into requests if no request exists for the given resource", func() {
+			container := v1.Container{
+				Resources: v1.ResourceRequirements{
+					Limits: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("2"),
+						v1.ResourceMemory: resource.MustParse("1Gi"),
+					},
+				},
+			}
+			requests := MergeResourceLimitsIntoRequests(container)
+			Expect(requests.Cpu().Value()).To(BeNumerically("==", 2))
+			Expect(requests.Memory().Value()).To(BeNumerically("==", 1073741824))
+		})
+	})
 })
