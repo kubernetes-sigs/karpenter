@@ -15,6 +15,7 @@ limitations under the License.
 package controllers
 
 import (
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -35,6 +36,7 @@ import (
 	nodeclaimtermination "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/termination"
 	nodepoolcounter "github.com/aws/karpenter-core/pkg/controllers/nodepool/counter"
 	nodepoolhash "github.com/aws/karpenter-core/pkg/controllers/nodepool/hash"
+	nodepoollifecycle "github.com/aws/karpenter-core/pkg/controllers/nodepool/lifecycle"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
@@ -45,12 +47,12 @@ import (
 func NewControllers(
 	clock clock.Clock,
 	kubeClient client.Client,
+	dynamicClient dynamic.DynamicClient,
 	kubernetesInterface kubernetes.Interface,
 	cluster *state.Cluster,
 	recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider,
 ) []controller.Controller {
-
 	p := provisioning.NewProvisioner(kubeClient, kubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
 	evictionQueue := terminator.NewQueue(kubernetesInterface.CoreV1(), recorder)
 	disruptionQueue := orchestration.NewQueue(kubeClient, recorder, cluster, clock, p)
@@ -72,6 +74,7 @@ func NewControllers(
 		nodepoolcounter.NewNodePoolController(kubeClient, cluster),
 		nodeclaimconsistency.NewNodeClaimController(clock, kubeClient, recorder, cloudProvider),
 		nodeclaimlifecycle.NewNodeClaimController(clock, kubeClient, cloudProvider, recorder),
+		nodepoollifecycle.NewNodePoolController(kubeClient, dynamicClient),
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimtermination.NewNodeClaimController(kubeClient, cloudProvider),
 		nodeclaimdisruption.NewNodeClaimController(clock, kubeClient, cluster, cloudProvider),

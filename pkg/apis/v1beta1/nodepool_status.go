@@ -16,6 +16,7 @@ package v1beta1
 
 import (
 	v1 "k8s.io/api/core/v1"
+	"knative.dev/pkg/apis"
 )
 
 // NodePoolStatus defines the observed state of NodePool
@@ -25,33 +26,24 @@ type NodePoolStatus struct {
 	Resources v1.ResourceList `json:"resources,omitempty"`
 	// Conditions represent the latest available observations of a NodePool's current state.
 	// +optional
-	Conditions []NodePoolCondition `json:"conditions,omitempty"`
+	Conditions []apis.Condition `json:"conditions,omitempty"`
 }
 
-// NodePoolConditionType represents a NodePool condition value.
-type NodePoolCondition struct {
-	
-	// Type of NodePool condition.
-	Type NodePoolConditionType `json:"type"`
-	// Status of the condition, one of True, False, Unknown.
-	Status v1.ConditionStatus `json:"status"`
+var (
+	NodeClassReady apis.ConditionType = "NodeClassReady"
+)
 
+func (in *NodePool) StatusConditions() apis.ConditionManager {
+	return apis.NewLivingConditionSet(
+		NodeClassReady,
+	).Manage(in)
 }
 
-// NodePoolConditionType represents a NodePool condition value.
-type NodePoolConditionType string
-
-const (
-	// NodeClassConditionTypeReady represents a NodePool condition is in ready state.
-	NodeClassConditionTypeReady NodePoolConditionType = "Ready"
-)	
-
-
-func (np *NodePool) GetCondition(conditionType NodePoolConditionType) bool {
-	for _, c := range np.Status.Conditions {
-		if c.Type == conditionType {
-			return c.Status == v1.ConditionStatus(v1.ConditionTrue)
-		}
-	}
-	return false
+func (in *NodePool) GetConditions() apis.Conditions {
+	return in.Status.Conditions
 }
+
+func (in *NodePool) SetConditions(conditions apis.Conditions) {
+	in.Status.Conditions = conditions
+}
+

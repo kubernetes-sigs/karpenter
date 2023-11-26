@@ -83,7 +83,8 @@ type Provisioner struct {
 }
 
 func NewProvisioner(kubeClient client.Client, coreV1Client corev1.CoreV1Interface,
-	recorder events.Recorder, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Provisioner {
+	recorder events.Recorder, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster,
+) *Provisioner {
 	p := &Provisioner{
 		batcher:        NewBatcher(),
 		cloudProvider:  cloudProvider,
@@ -130,12 +131,11 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 	if len(results.NewNodeClaims) == 0 {
 		return reconcile.Result{}, nil
 	}
-	np , err := nodepoolutil.Get(ctx, p.kubeClient, results.NewNodeClaims[0].OwnerKey)
+	np, err := nodepoolutil.Get(ctx, p.kubeClient, results.NewNodeClaims[0].OwnerKey)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	if !np.GetCondition(v1beta1.NodeClassConditionTypeReady){
-		logging.FromContext(ctx).Debugf("waiting for nodeclass to become ready")
+	if !np.StatusConditions().GetCondition(v1beta1.NodeClassReady).IsTrue() {
 		return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 	_, err = p.CreateNodeClaims(ctx, results.NewNodeClaims, WithReason(metrics.ProvisioningReason), RecordPodNomination)
@@ -276,7 +276,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 		requirements.Add(scheduling.NewLabelRequirements(nodePool.Spec.Template.Labels).Values()...)
 		for key, requirement := range requirements {
 			if requirement.Operator() == v1.NodeSelectorOpIn {
-				//The following is a performance optimisation, for the explanation see the comment above
+				// The following is a performance optimisation, for the explanation see the comment above
 				if domains[key] == nil {
 					domains[key] = sets.New(requirement.Values()...)
 				} else {

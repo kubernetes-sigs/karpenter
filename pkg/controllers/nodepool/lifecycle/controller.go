@@ -40,11 +40,13 @@ import (
 // The hash is placed in the metadata for increased observability and should be found on each object.
 type Controller struct {
 	kubeClient client.Client
+    dynamicClient dynamic.DynamicClient
 }
 
-func NewController(kubeClient client.Client) *Controller {
+func NewController(kubeClient client.Client,dynamicClient dynamic.DynamicClient) *Controller {
 	return &Controller{
 		kubeClient: kubeClient,
+        dynamicClient: dynamicClient,
 	}
 }
 
@@ -54,12 +56,6 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1beta1.NodePool) (recon
     if nodeClassRef == nil {
         return reconcile.Result{}, fmt.Errorf("nodeClassRef is nil")
     }
-    // Fetch the resource dynamically using Unstructured
-    config := controllerruntime.GetConfigOrDie()
-    dynamicClient, err := dynamic.NewForConfig(config)
-    if err != nil {
-        return reconcile.Result{}, fmt.Errorf("failed to create dynamic client: %v", err)
-    }
 
     gvr := schema.GroupVersionResource{
         Group:    strings.Split(nodeClassRef.APIVersion,"/")[0],
@@ -67,16 +63,16 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1beta1.NodePool) (recon
         Resource: strings.ToLower(nodeClassRef.Kind) + "es", 
     }
 
-    nodeClassUnstructured, err := dynamicClient.Resource(gvr).Namespace(np.Namespace).Get(ctx, nodeClassRef.Name, metav1.GetOptions{})
+    nodeClassUnstructured, err := c.dynamicClient.Resource(gvr).Namespace(np.Namespace).Get(ctx, nodeClassRef.Name, metav1.GetOptions{})
     if err != nil {
         return reconcile.Result{}, fmt.Errorf("failed to get resource: %v", err)
     }
 
     // Check if the resource is ready (or perform your readiness checks here)
     if isResourceReady(nodeClassUnstructured) {
-        nodepoolutil.UpdateStatusCondition(ctx, c.kubeClient, np, v1beta1.NodeClassConditionTypeReady, v1.ConditionTrue)
+        nodepoolutil.UpdateStatusCondition(ctx, c.kubeClient, np, v1beta1.NodeClassReady, v1.ConditionTrue)
     } else {
-        nodepoolutil.UpdateStatusCondition(ctx, c.kubeClient, np, v1beta1.NodeClassConditionTypeReady, v1.ConditionFalse)
+        nodepoolutil.UpdateStatusCondition(ctx, c.kubeClient, np, v1beta1.NodeClassReady, v1.ConditionFalse)
     }
 
     return reconcile.Result{}, nil
@@ -117,9 +113,9 @@ type NodePoolController struct {
 	*Controller
 }
 
-func NewNodePoolController(kubeClient client.Client) corecontroller.Controller {
+func NewNodePoolController(kubeClient client.Client,dynamicClient dynamic.DynamicClient) corecontroller.Controller {
 	return corecontroller.Typed[*v1beta1.NodePool](kubeClient, &NodePoolController{
-		Controller: NewController(kubeClient),
+		Controller: NewController(kubeClient,dynamicClient),
 	})
 }
 
