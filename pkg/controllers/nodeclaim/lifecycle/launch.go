@@ -25,7 +25,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/events"
@@ -51,14 +50,10 @@ func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (r
 	// One of the following scenarios can happen with a NodeClaim that isn't marked as launched:
 	//  1. It was already launched by the CloudProvider but the client-go cache wasn't updated quickly enough or
 	//     patching failed on the status. In this case, we use the in-memory cached value for the created NodeClaim.
-	//  2. It is a "linked" NodeClaim, which implies that the CloudProvider NodeClaim already exists for the NodeClaim CR, but we
-	//     need to grab info from the CloudProvider to get details on the NodeClaim.
-	//  3. It is a standard NodeClaim launch where we should call CloudProvider Create() and fill in details of the launched
+	//  2. It is a standard NodeClaim launch where we should call CloudProvider Create() and fill in details of the launched
 	//     NodeClaim into the NodeClaim CR.
 	if ret, ok := l.cache.Get(string(nodeClaim.UID)); ok {
 		created = ret.(*v1beta1.NodeClaim)
-	} else if _, ok := nodeClaim.Annotations[v1alpha5.MachineLinkedAnnotationKey]; ok {
-		created, err = l.linkNodeClaim(ctx, nodeClaim)
 	} else {
 		created, err = l.launchNodeClaim(ctx, nodeClaim)
 	}
@@ -77,30 +72,6 @@ func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (r
 	return reconcile.Result{}, nil
 }
 
-func (l *Launch) linkNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (*v1beta1.NodeClaim, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", nodeClaim.Annotations[v1alpha5.MachineLinkedAnnotationKey]))
-	created, err := l.cloudProvider.Get(ctx, nodeClaim.Annotations[v1alpha5.MachineLinkedAnnotationKey])
-	if err != nil {
-		if !cloudprovider.IsNodeClaimNotFoundError(err) {
-			nodeClaim.StatusConditions().MarkFalse(v1beta1.Launched, "LinkFailed", truncateMessage(err.Error()))
-			return nil, fmt.Errorf("linking, %w", err)
-		}
-		if err = nodeclaimutil.Delete(ctx, l.kubeClient, nodeClaim); err != nil {
-			return nil, client.IgnoreNotFound(err)
-		}
-		logging.FromContext(ctx).Debugf("garbage collected with no cloudprovider representation")
-		nodeclaimutil.TerminatedCounter(nodeClaim, "garbage_collected").Inc()
-		return nil, nil
-	}
-	logging.FromContext(ctx).With(
-		"provider-id", created.Status.ProviderID,
-		"instance-type", created.Labels[v1.LabelInstanceTypeStable],
-		"zone", created.Labels[v1.LabelTopologyZone],
-		"capacity-type", created.Labels[v1alpha5.LabelCapacityType],
-		"allocatable", created.Status.Allocatable).Infof("linked %s", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"))
-	return created, nil
-}
-
 func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (*v1beta1.NodeClaim, error) {
 	created, err := l.cloudProvider.Create(ctx, nodeClaim)
 	if err != nil {
@@ -116,10 +87,10 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeCla
 		case cloudprovider.IsNodeClassNotReadyError(err):
 			l.recorder.Publish(NodeClassNotReadyEvent(nodeClaim, err))
 			nodeClaim.StatusConditions().MarkFalse(v1beta1.Launched, "LaunchFailed", truncateMessage(err.Error()))
-			return nil, fmt.Errorf("launching %s, %w", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"), err)
+			return nil, fmt.Errorf("launching nodeclaim, %w", err)
 		default:
 			nodeClaim.StatusConditions().MarkFalse(v1beta1.Launched, "LaunchFailed", truncateMessage(err.Error()))
-			return nil, fmt.Errorf("launching %s, %w", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"), err)
+			return nil, fmt.Errorf("launching nodeclaim, %w", err)
 		}
 	}
 	logging.FromContext(ctx).With(
@@ -127,7 +98,7 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeCla
 		"instance-type", created.Labels[v1.LabelInstanceTypeStable],
 		"zone", created.Labels[v1.LabelTopologyZone],
 		"capacity-type", created.Labels[v1beta1.CapacityTypeLabelKey],
-		"allocatable", created.Status.Allocatable).Infof("launched %s", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"))
+		"allocatable", created.Status.Allocatable).Infof("launched nodeclaim")
 	return created, nil
 }
 

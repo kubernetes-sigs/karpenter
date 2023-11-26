@@ -19,7 +19,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/flowcontrol"
 
@@ -33,7 +32,7 @@ var PodNominationRateLimiter = flowcontrol.NewTokenBucketRateLimiter(5, 10)
 func NominatePodEvent(pod *v1.Pod, node *v1.Node, nodeClaim *v1beta1.NodeClaim) events.Event {
 	var info []string
 	if nodeClaim != nil {
-		info = append(info, fmt.Sprintf("%s/%s", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"), nodeClaim.GetName()))
+		info = append(info, fmt.Sprintf("nodeclaim/%s", nodeClaim.GetName()))
 	}
 	if node != nil {
 		info = append(info, fmt.Sprintf("node/%s", node.Name))

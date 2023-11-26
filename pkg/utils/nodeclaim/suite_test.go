@@ -250,42 +250,4 @@ var _ = Describe("NodeClaimUtils", func() {
 			BlockOwnerDeletion: lo.ToPtr(true),
 		}))
 	})
-	It("should retrieve the owner for a NodeClaim", func() {
-		nodePool := test.NodePool(v1beta1.NodePool{
-			Spec: v1beta1.NodePoolSpec{
-				Template: v1beta1.NodeClaimTemplate{
-					Spec: v1beta1.NodeClaimSpec{
-						NodeClassRef: &v1beta1.NodeClassReference{
-							Kind:       "NodeClassRef",
-							APIVersion: "test.cloudprovider/v1",
-							Name:       "default",
-						},
-					},
-				},
-			},
-		})
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
-				},
-			},
-			Spec: v1beta1.NodeClaimSpec{
-				NodeClassRef: &v1beta1.NodeClassReference{
-					Kind:       "NodeClassRef",
-					APIVersion: "test.cloudprovider/v1",
-					Name:       "default",
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-
-		ownerKey := nodeclaimutil.OwnerKey(nodeClaim)
-		Expect(ownerKey.Name).To(Equal(nodePool.Name))
-		Expect(ownerKey.IsProvisioner).To(BeFalse())
-
-		owner, err := nodeclaimutil.Owner(ctx, env.Client, nodeClaim)
-		Expect(err).ToNot(HaveOccurred())
-		Expect(owner.Name).To(Equal(nodePool.Name))
-	})
 })

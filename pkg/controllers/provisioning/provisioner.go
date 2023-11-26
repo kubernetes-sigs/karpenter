@@ -35,7 +35,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
 	"github.com/aws/karpenter-core/pkg/scheduling"
@@ -211,7 +210,7 @@ var ErrNodePoolsNotFound = errors.New("no nodepools or provisioners found")
 func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNodes []*state.StateNode, opts scheduler.SchedulerOptions) (*scheduler.Scheduler, error) {
 	// Build node templates
 	var nodeClaimTemplates []*scheduler.NodeClaimTemplate
-	instanceTypes := map[nodepoolutil.Key][]*cloudprovider.InstanceType{}
+	instanceTypes := map[string][]*cloudprovider.InstanceType{}
 	domains := map[string]sets.Set[string]{}
 
 	nodePoolList, err := nodepoolutil.List(ctx, p.kubeClient)
@@ -243,14 +242,14 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 		if err != nil {
 			// we just log an error and skip the provisioner to prevent a single mis-configured provisioner from stopping
 			// all scheduling
-			logging.FromContext(ctx).With(lo.Ternary(nodePool.IsProvisioner, "provisioner", "nodepool"), nodePool.Name).Errorf("skipping, unable to resolve instance types, %s", err)
+			logging.FromContext(ctx).With("nodepool", nodePool.Name).Errorf("skipping, unable to resolve instance types, %s", err)
 			continue
 		}
 		if len(instanceTypeOptions) == 0 {
-			logging.FromContext(ctx).With(lo.Ternary(nodePool.IsProvisioner, "provisioner", "nodepool"), nodePool.Name).Info("skipping, no resolved instance types found")
+			logging.FromContext(ctx).With("nodepool", nodePool.Name).Info("skipping, no resolved instance types found")
 			continue
 		}
-		instanceTypes[nodepoolutil.Key{Name: nodePool.Name, IsProvisioner: nodePool.IsProvisioner}] = append(instanceTypes[nodepoolutil.Key{Name: nodePool.Name, IsProvisioner: nodePool.IsProvisioner}], instanceTypeOptions...)
+		instanceTypes[nodePool.Name] = append(instanceTypes[nodePool.Name], instanceTypeOptions...)
 
 		// Construct Topology Domains
 		for _, instanceType := range instanceTypeOptions {
@@ -346,10 +345,10 @@ func (p *Provisioner) Schedule(ctx context.Context) (*scheduler.Results, error) 
 }
 
 func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) (string, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("nodepool", n.OwnerKey.Name))
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("nodepool", n.NodePoolName))
 	options := functional.ResolveOptions(opts...)
 	latest := &v1beta1.NodePool{}
-	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: n.OwnerKey.Name}, latest); err != nil {
+	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: n.NodePoolName}, latest); err != nil {
 		return "", fmt.Errorf("getting current resource usage, %w", err)
 	}
 	if err := latest.Spec.Limits.ExceededBy(latest.Status.Resources); err != nil {
@@ -427,17 +426,10 @@ func (p *Provisioner) Validate(ctx context.Context, pod *v1.Pod) error {
 // validateKarpenterManagedLabelCanExist provides a more clear error message in the event of scheduling a pod that specifically doesn't
 // want to run on a Karpenter node (e.g. a Karpenter controller replica).
 func validateKarpenterManagedLabelCanExist(p *v1.Pod) error {
-	hasProvisionerNameLabel, hasNodePoolLabel := false, false
 	for _, req := range scheduling.NewPodRequirements(p) {
-		if req.Key == v1alpha5.ProvisionerNameLabelKey && req.Operator() == v1.NodeSelectorOpDoesNotExist {
-			hasProvisionerNameLabel = true
-		}
 		if req.Key == v1beta1.NodePoolLabelKey && req.Operator() == v1.NodeSelectorOpDoesNotExist {
-			hasNodePoolLabel = true
-		}
-		if hasProvisionerNameLabel && hasNodePoolLabel {
-			return fmt.Errorf("configured to not run on a Karpenter provisioned node via %s %s and %s %s requirements",
-				v1alpha5.ProvisionerNameLabelKey, v1.NodeSelectorOpDoesNotExist, v1beta1.NodePoolLabelKey, v1.NodeSelectorOpDoesNotExist)
+			return fmt.Errorf("configured to not run on a Karpenter provisioned node via the %s %s requirement",
+				v1beta1.NodePoolLabelKey, v1.NodeSelectorOpDoesNotExist)
 		}
 	}
 	return nil
@@ -496,11 +488,7 @@ func validateNodeSelectorTerm(term v1.NodeSelectorTerm) (errs error) {
 	}
 	if term.MatchExpressions != nil {
 		for _, requirement := range term.MatchExpressions {
-			alphaErr := v1alpha5.ValidateRequirement(requirement)
-			betaErr := v1beta1.ValidateRequirement(requirement)
-			if alphaErr != nil && betaErr != nil {
-				errs = multierr.Append(errs, betaErr)
-			}
+			errs = multierr.Append(errs, v1beta1.ValidateRequirement(requirement))
 		}
 	}
 	return errs

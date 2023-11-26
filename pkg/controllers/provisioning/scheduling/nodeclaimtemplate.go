@@ -25,7 +25,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 )
 
 // NodeClaimTemplate encapsulates the fields required to create a node and mirrors
@@ -34,7 +33,7 @@ import (
 type NodeClaimTemplate struct {
 	v1beta1.NodeClaimTemplate
 
-	OwnerKey            nodepoolutil.Key
+	NodePoolName        string
 	InstanceTypeOptions cloudprovider.InstanceTypes
 	Requirements        scheduling.Requirements
 }
@@ -42,17 +41,13 @@ type NodeClaimTemplate struct {
 func NewNodeClaimTemplate(nodePool *v1beta1.NodePool) *NodeClaimTemplate {
 	nct := &NodeClaimTemplate{
 		NodeClaimTemplate: nodePool.Spec.Template,
-		OwnerKey:          nodepoolutil.Key{Name: nodePool.Name, IsProvisioner: nodePool.IsProvisioner},
+		NodePoolName:      nodePool.Name,
 		Requirements:      scheduling.NewRequirements(),
 	}
 	nct.Labels = lo.Assign(nct.Labels, map[string]string{v1beta1.NodePoolLabelKey: nodePool.Name})
 	nct.Requirements.Add(scheduling.NewNodeSelectorRequirements(nct.Spec.Requirements...).Values()...)
 	nct.Requirements.Add(scheduling.NewLabelRequirements(nct.Labels).Values()...)
 	return nct
-}
-
-func (i *NodeClaimTemplate) OwnerKind() string {
-	return "nodepool"
 }
 
 func (i *NodeClaimTemplate) ToNodeClaim(nodePool *v1beta1.NodePool) *v1beta1.NodeClaim {
@@ -64,7 +59,7 @@ func (i *NodeClaimTemplate) ToNodeClaim(nodePool *v1beta1.NodePool) *v1beta1.Nod
 
 	nc := &v1beta1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: fmt.Sprintf("%s-", i.OwnerKey.Name),
+			GenerateName: fmt.Sprintf("%s-", i.NodePoolName),
 			Annotations:  lo.Assign(i.Annotations, map[string]string{v1beta1.NodePoolHashAnnotationKey: nodePool.Hash()}),
 			Labels:       i.Labels,
 			OwnerReferences: []metav1.OwnerReference{

@@ -806,7 +806,7 @@ var _ = Describe("Node Resource Level", func() {
 					v1beta1.NodePoolLabelKey:   nodePool.Name,
 					v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 				},
-				Finalizers: []string{v1alpha5.TerminationFinalizer},
+				Finalizers: []string{v1beta1.TerminationFinalizer},
 			},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
@@ -827,7 +827,7 @@ var _ = Describe("Node Resource Level", func() {
 	It("should mark node for deletion when nodeclaim is deleted", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
-				Finalizers: []string{v1alpha5.TerminationFinalizer},
+				Finalizers: []string{v1beta1.TerminationFinalizer},
 			},
 			Spec: v1beta1.NodeClaimSpec{
 				Requirements: []v1.NodeSelectorRequirement{
@@ -866,7 +866,7 @@ var _ = Describe("Node Resource Level", func() {
 					v1beta1.NodePoolLabelKey:   nodePool.Name,
 					v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 				},
-				Finalizers: []string{v1alpha5.TerminationFinalizer},
+				Finalizers: []string{v1beta1.TerminationFinalizer},
 			},
 			ProviderID: nodeClaim.Status.ProviderID,
 		})

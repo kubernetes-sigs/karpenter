@@ -27,12 +27,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/operator/options"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
@@ -117,16 +115,6 @@ func NewNode() *StateNode {
 	}
 }
 
-func (in *StateNode) OwnerKey() nodepoolutil.Key {
-	if in.Labels()[v1beta1.NodePoolLabelKey] != "" {
-		return nodepoolutil.Key{Name: in.Labels()[v1beta1.NodePoolLabelKey], IsProvisioner: false}
-	}
-	if in.Labels()[v1alpha5.ProvisionerNameLabelKey] != "" {
-		return nodepoolutil.Key{Name: in.Labels()[v1alpha5.ProvisionerNameLabelKey], IsProvisioner: true}
-	}
-	return nodepoolutil.Key{}
-}
-
 func (in *StateNode) Name() string {
 	if in.Node == nil {
 		return in.NodeClaim.Name
@@ -134,9 +122,7 @@ func (in *StateNode) Name() string {
 	if in.NodeClaim == nil {
 		return in.Node.Name
 	}
-	// TODO @joinnis: The !in.Initialized() check can be removed when we can assume that all nodes have the v1alpha5.NodeRegisteredLabel on them
-	// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
-	if !in.Registered() && !in.Initialized() {
+	if !in.Registered() {
 		return in.NodeClaim.Name
 	}
 	return in.Node.Name
@@ -176,9 +162,7 @@ func (in *StateNode) Annotations() map[string]string {
 	if in.NodeClaim == nil {
 		return in.Node.Annotations
 	}
-	// TODO @joinnis: The !in.Initialized() check can be removed when we can assume that all nodes have the v1alpha5.NodeRegisteredLabel on them
-	// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
-	if !in.Registered() && !in.Initialized() {
+	if !in.Registered() {
 		return in.NodeClaim.Annotations
 	}
 	return in.Node.Annotations
@@ -198,9 +182,7 @@ func (in *StateNode) Labels() map[string]string {
 	if in.NodeClaim == nil {
 		return in.Node.Labels
 	}
-	// TODO @joinnis: The !in.Initialized() check can be removed when we can assume that all nodes have the v1alpha5.NodeRegisteredLabel on them
-	// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
-	if !in.Registered() && !in.Initialized() {
+	if !in.Registered() {
 		return in.NodeClaim.Labels
 	}
 	return in.Node.Labels
@@ -220,9 +202,7 @@ func (in *StateNode) Taints() []v1.Taint {
 	}
 
 	var taints []v1.Taint
-	// TODO @joinnis: The !in.Initialized() check can be removed when we can assume that all nodes have the v1alpha5.NodeRegisteredLabel on them
-	// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
-	if (!in.Registered() && !in.Initialized() && in.NodeClaim != nil) || in.Node == nil {
+	if (!in.Registered() && in.NodeClaim != nil) || in.Node == nil {
 		taints = in.NodeClaim.Spec.Taints
 	} else {
 		taints = in.Node.Spec.Taints
@@ -347,7 +327,6 @@ func (in *StateNode) MarkedForDeletion() bool {
 	//  1. The Node has MarkedForDeletion set
 	//  2. The Node has a NodeClaim counterpart and is actively deleting
 	//  3. The Node has no NodeClaim counterpart and is actively deleting
-	// TODO remove check for machine after v1alpha5 APIs are dropped.
 	return in.markedForDeletion ||
 		(in.NodeClaim != nil && !in.NodeClaim.DeletionTimestamp.IsZero()) ||
 		(in.Node != nil && in.NodeClaim == nil && !in.Node.DeletionTimestamp.IsZero())
@@ -363,7 +342,6 @@ func (in *StateNode) Nominated() bool {
 
 func (in *StateNode) Managed() bool {
 	return in.NodeClaim != nil ||
-		(in.Node != nil && in.Node.Labels[v1alpha5.ProvisionerNameLabelKey] != "") ||
 		(in.Node != nil && in.Node.Labels[v1beta1.NodePoolLabelKey] != "")
 }
 

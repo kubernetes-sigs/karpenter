@@ -24,11 +24,9 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/controllers/metrics/node"
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
@@ -53,7 +51,6 @@ var cluster *state.Cluster
 var nodeController controller.Controller
 var metricsStateController controller.Controller
 var cloudProvider *fake.CloudProvider
-var provisioner *v1alpha5.Provisioner
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -69,10 +66,8 @@ var _ = BeforeSuite(func() {
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
-	provisioner = test.Provisioner(test.ProvisionerOptions{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	metricsStateController = node.NewController(cluster)
-	ExpectApplied(ctx, env.Client, provisioner)
 })
 
 var _ = AfterSuite(func() {
