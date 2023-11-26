@@ -78,6 +78,7 @@ var (
 		v1.LabelArchStable,
 		v1.LabelOSStable,
 		CapacityTypeLabelKey,
+		v1.LabelWindowsBuild,
 	)
 
 	// RestrictedLabels are labels that should not be used
@@ -115,9 +116,11 @@ func IsRestrictedNodeLabel(key string) bool {
 	if WellKnownLabels.Has(key) {
 		return true
 	}
-	labelDomain := getLabelDomain(key)
-	if LabelDomainExceptions.Has(labelDomain) {
-		return false
+	labelDomain := GetLabelDomain(key)
+	for exceptionLabelDomain := range LabelDomainExceptions {
+		if strings.HasSuffix(labelDomain, exceptionLabelDomain) {
+			return false
+		}
 	}
 	for restrictedLabelDomain := range RestrictedLabelDomains {
 		if strings.HasSuffix(labelDomain, restrictedLabelDomain) {
@@ -127,7 +130,7 @@ func IsRestrictedNodeLabel(key string) bool {
 	return RestrictedLabels.Has(key)
 }
 
-func getLabelDomain(key string) string {
+func GetLabelDomain(key string) string {
 	if parts := strings.SplitN(key, "/", 2); len(parts) == 2 {
 		return parts[0]
 	}

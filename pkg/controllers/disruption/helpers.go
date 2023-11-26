@@ -31,6 +31,7 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	disruptionevents "github.com/aws/karpenter-core/pkg/controllers/disruption/events"
+	"github.com/aws/karpenter-core/pkg/controllers/disruption/orchestration"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
@@ -173,14 +174,15 @@ func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
 	return cost
 }
 
-// GetCandidates returns nodes that appear to be currently disruptable based off of their nodePool
-func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter) ([]*Candidate, error) {
+// GetCandidates returns nodes that appear to be currently deprovisionable based off of their nodePool
+func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock,
+	cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter, queue *orchestration.Queue) ([]*Candidate, error) {
 	nodePoolMap, nodePoolToInstanceTypesMap, err := buildNodePoolMap(ctx, kubeClient, cloudProvider)
 	if err != nil {
 		return nil, err
 	}
 	candidates := lo.FilterMap(cluster.Nodes(), func(n *state.StateNode, _ int) (*Candidate, bool) {
-		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, nodePoolMap, nodePoolToInstanceTypesMap)
+		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, nodePoolMap, nodePoolToInstanceTypesMap, queue)
 		return cn, e == nil
 	})
 	// Filter only the valid candidates that we should disrupt
@@ -188,17 +190,16 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 }
 
 // buildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map
-func buildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[nodepoolutil.Key]*v1beta1.NodePool, map[nodepoolutil.Key]map[string]*cloudprovider.InstanceType, error) {
-	nodePoolMap := map[nodepoolutil.Key]*v1beta1.NodePool{}
+func buildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[string]*v1beta1.NodePool, map[string]map[string]*cloudprovider.InstanceType, error) {
+	nodePoolMap := map[string]*v1beta1.NodePool{}
 	nodePoolList, err := nodepoolutil.List(ctx, kubeClient)
 	if err != nil {
 		return nil, nil, fmt.Errorf("listing node pools, %w", err)
 	}
-	nodePoolToInstanceTypesMap := map[nodepoolutil.Key]map[string]*cloudprovider.InstanceType{}
+	nodePoolToInstanceTypesMap := map[string]map[string]*cloudprovider.InstanceType{}
 	for i := range nodePoolList.Items {
 		np := &nodePoolList.Items[i]
-		key := nodepoolutil.Key{Name: np.Name, IsProvisioner: np.IsProvisioner}
-		nodePoolMap[key] = np
+		nodePoolMap[np.Name] = np
 
 		nodePoolInstanceTypes, err := cloudProvider.GetInstanceTypes(ctx, np)
 		if err != nil {
@@ -210,9 +211,9 @@ func buildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 		if len(nodePoolInstanceTypes) == 0 {
 			continue
 		}
-		nodePoolToInstanceTypesMap[key] = map[string]*cloudprovider.InstanceType{}
+		nodePoolToInstanceTypesMap[np.Name] = map[string]*cloudprovider.InstanceType{}
 		for _, it := range nodePoolInstanceTypes {
-			nodePoolToInstanceTypesMap[key][it.Name] = it
+			nodePoolToInstanceTypesMap[np.Name][it.Name] = it
 		}
 	}
 	return nodePoolMap, nodePoolToInstanceTypesMap, nil

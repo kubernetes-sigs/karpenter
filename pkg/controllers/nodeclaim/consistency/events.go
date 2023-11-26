@@ -19,20 +19,9 @@ import (
 
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/events"
-	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 )
 
 func FailedConsistencyCheckEvent(nodeClaim *v1beta1.NodeClaim, message string) events.Event {
-	if nodeClaim.IsMachine {
-		machine := machineutil.NewFromNodeClaim(nodeClaim)
-		return events.Event{
-			InvolvedObject: machine,
-			Type:           v1.EventTypeWarning,
-			Reason:         "FailedConsistencyCheck",
-			Message:        message,
-			DedupeValues:   []string{string(machine.UID), message},
-		}
-	}
 	return events.Event{
 		InvolvedObject: nodeClaim,
 		Type:           v1.EventTypeWarning,

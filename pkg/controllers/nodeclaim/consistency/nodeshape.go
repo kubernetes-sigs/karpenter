@@ -36,28 +36,26 @@ func NewNodeShape(provider cloudprovider.CloudProvider) Check {
 }
 
 func (n *NodeShape) Check(_ context.Context, node *v1.Node, nodeClaim *v1beta1.NodeClaim) ([]Issue, error) {
-	// ignore machines that are deleting
+	// ignore NodeClaims that are deleting
 	if !nodeClaim.DeletionTimestamp.IsZero() {
 		return nil, nil
 	}
-	// and machines that haven't initialized yet
+	// and NodeClaims that haven't initialized yet
 	if !nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized).IsTrue() {
 		return nil, nil
 	}
 	var issues []Issue
-	for resourceName, expectedQuantity := range nodeClaim.Status.Capacity {
-		nodeQuantity, ok := node.Status.Capacity[resourceName]
-		if !ok && !expectedQuantity.IsZero() {
-			issues = append(issues, Issue(fmt.Sprintf("expected resource %q not found", resourceName)))
+	for resourceName, requested := range nodeClaim.Spec.Resources.Requests {
+		nodeQuantity := node.Status.Capacity[resourceName]
+		expectedQuantity := nodeClaim.Status.Capacity[resourceName]
+		if requested.IsZero() || expectedQuantity.IsZero() {
 			continue
 		}
-
 		pct := nodeQuantity.AsApproximateFloat64() / expectedQuantity.AsApproximateFloat64()
 		if pct < 0.90 {
 			issues = append(issues, Issue(fmt.Sprintf("expected %s of resource %s, but found %s (%0.1f%% of expected)", expectedQuantity.String(),
 				resourceName, nodeQuantity.String(), pct*100)))
 		}
-
 	}
 	return issues, nil
 }

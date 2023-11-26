@@ -20,14 +20,8 @@ import (
 	"fmt"
 
 	"github.com/samber/lo"
-	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
@@ -36,9 +30,8 @@ type EmptyNodeConsolidation struct {
 	consolidation
 }
 
-func NewEmptyNodeConsolidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client,
-	provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder) *EmptyNodeConsolidation {
-	return &EmptyNodeConsolidation{consolidation: makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder)}
+func NewEmptyNodeConsolidation(consolidation consolidation) *EmptyNodeConsolidation {
+	return &EmptyNodeConsolidation{consolidation: consolidation}
 }
 
 // ComputeCommand generates a disruption command given candidates
@@ -50,7 +43,6 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 	if err != nil {
 		return Command{}, fmt.Errorf("sorting candidates, %w", err)
 	}
-	deprovisioningEligibleMachinesGauge.WithLabelValues(c.Type()).Set(float64(len(candidates)))
 	disruptionEligibleNodesGauge.With(map[string]string{
 		methodLabel:            c.Type(),
 		consolidationTypeLabel: c.ConsolidationType(),
@@ -76,7 +68,7 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 		return Command{}, errors.New("interrupted")
 	case <-c.clock.After(consolidationTTL):
 	}
-	validationCandidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, c.ShouldDisrupt)
+	validationCandidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, c.ShouldDisrupt, c.queue)
 	if err != nil {
 		logging.FromContext(ctx).Errorf("computing validation candidates %s", err)
 		return Command{}, err

@@ -36,11 +36,9 @@ import (
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/scheduling"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
 )
 
@@ -50,12 +48,12 @@ type Cluster struct {
 	cloudProvider cloudprovider.CloudProvider
 	clock         clock.Clock
 
-	mu                       sync.RWMutex
-	nodes                    map[string]*StateNode           // provider id -> cached node
-	bindings                 map[types.NamespacedName]string // pod namespaced named -> node name
-	nodeNameToProviderID     map[string]string               // node name -> provider id
-	nodeClaimKeyToProviderID map[nodeclaimutil.Key]string    // node claim key -> provider id
-	daemonSetPods            sync.Map                        // daemonSet -> existing pod
+	mu                        sync.RWMutex
+	nodes                     map[string]*StateNode           // provider id -> cached node
+	bindings                  map[types.NamespacedName]string // pod namespaced named -> node name
+	nodeNameToProviderID      map[string]string               // node name -> provider id
+	nodeClaimNameToProviderID map[string]string               // node claim name -> provider id
+	daemonSetPods             sync.Map                        // daemonSet -> existing pod
 
 	clusterStateMu sync.RWMutex // Separate mutex as this is called in some places that mu is held
 	// A monotonically increasing timestamp representing the time state of the
@@ -69,29 +67,24 @@ type Cluster struct {
 
 func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudProvider) *Cluster {
 	return &Cluster{
-		clock:                    clk,
-		kubeClient:               client,
-		cloudProvider:            cp,
-		nodes:                    map[string]*StateNode{},
-		bindings:                 map[types.NamespacedName]string{},
-		daemonSetPods:            sync.Map{},
-		nodeNameToProviderID:     map[string]string{},
-		nodeClaimKeyToProviderID: map[nodeclaimutil.Key]string{},
+		clock:                     clk,
+		kubeClient:                client,
+		cloudProvider:             cp,
+		nodes:                     map[string]*StateNode{},
+		bindings:                  map[types.NamespacedName]string{},
+		daemonSetPods:             sync.Map{},
+		nodeNameToProviderID:      map[string]string{},
+		nodeClaimNameToProviderID: map[string]string{},
 	}
 }
 
-// Synced validates that the Machines and the Nodes that are stored in the apiserver
+// Synced validates that the NodeClaims and the Nodes that are stored in the apiserver
 // have the same representation in the cluster state. This is to ensure that our view
 // of the cluster is as close to correct as it can be when we begin to perform operations
 // utilizing the cluster state as our source of truth
 //
 //nolint:gocyclo
 func (c *Cluster) Synced(ctx context.Context) bool {
-	machineList := &v1alpha5.MachineList{}
-	if err := c.kubeClient.List(ctx, machineList); err != nil {
-		logging.FromContext(ctx).Errorf("checking cluster state sync, %v", err)
-		return false
-	}
 	nodeClaimList := &v1beta1.NodeClaimList{}
 	if err := c.kubeClient.List(ctx, nodeClaimList); err != nil {
 		logging.FromContext(ctx).Errorf("checking cluster state sync, %v", err)
@@ -103,29 +96,13 @@ func (c *Cluster) Synced(ctx context.Context) bool {
 		return false
 	}
 	c.mu.RLock()
-	stateMachineNames := sets.New[string]()
-	stateNodeClaimNames := sets.New[string]()
-	for k := range c.nodeClaimKeyToProviderID {
-		if k.IsMachine {
-			stateMachineNames.Insert(k.Name)
-		} else {
-			stateNodeClaimNames.Insert(k.Name)
-		}
-	}
+	stateNodeClaimNames := sets.New(lo.Keys(c.nodeClaimNameToProviderID)...)
 	stateNodeNames := sets.New(lo.Keys(c.nodeNameToProviderID)...)
 	c.mu.RUnlock()
 
-	machineNames := sets.New[string]()
-	for _, machine := range machineList.Items {
-		// If the machine hasn't resolved its provider id, then it hasn't resolved its status
-		if machine.Status.ProviderID == "" {
-			return false
-		}
-		machineNames.Insert(machine.Name)
-	}
 	nodeClaimNames := sets.New[string]()
 	for _, nodeClaim := range nodeClaimList.Items {
-		// If the machine hasn't resolved its provider id, then it hasn't resolved its status
+		// If the nodeClaim hasn't resolved its provider id, then it hasn't resolved its status
 		if nodeClaim.Status.ProviderID == "" {
 			return false
 		}
@@ -138,9 +115,8 @@ func (c *Cluster) Synced(ctx context.Context) bool {
 	// The names tracked in-memory should at least have all the data that is in the api-server
 	// This doesn't ensure that the two states are exactly aligned (we could still not be tracking a node
 	// that exists in the cluster state but not in the apiserver) but it ensures that we have a state
-	// representation for every node/machine that exists on the apiserver
-	return stateMachineNames.IsSuperset(machineNames) &&
-		stateNodeClaimNames.IsSuperset(nodeClaimNames) &&
+	// representation for every node/nodeClaim that exists on the apiserver
+	return stateNodeClaimNames.IsSuperset(nodeClaimNames) &&
 		stateNodeNames.IsSuperset(nodeNames)
 }
 
@@ -248,26 +224,33 @@ func (c *Cluster) UpdateNodeClaim(nodeClaim *v1beta1.NodeClaim) {
 	}
 	n := c.newStateFromNodeClaim(nodeClaim, c.nodes[nodeClaim.Status.ProviderID])
 	c.nodes[nodeClaim.Status.ProviderID] = n
-	c.nodeClaimKeyToProviderID[nodeclaimutil.Key{Name: nodeClaim.Name, IsMachine: nodeClaim.IsMachine}] = nodeClaim.Status.ProviderID
+	c.nodeClaimNameToProviderID[nodeClaim.Name] = nodeClaim.Status.ProviderID
 }
 
-func (c *Cluster) DeleteNodeClaim(key nodeclaimutil.Key) {
+func (c *Cluster) DeleteNodeClaim(name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.cleanupNodeClaim(key)
+	c.cleanupNodeClaim(name)
 }
 
 func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	managed := node.Labels[v1beta1.NodePoolLabelKey] != ""
+	initialized := node.Labels[v1beta1.NodeInitializedLabelKey] != ""
 	if node.Spec.ProviderID == "" {
 		// If we know that we own this node, we shouldn't allow the providerID to be empty
-		if node.Labels[v1alpha5.ProvisionerNameLabelKey] != "" || (node.Labels[v1beta1.NodePoolLabelKey] != "") {
+		if managed {
 			return nil
 		}
 		node.Spec.ProviderID = node.Name
+	}
+	// If we have a managed node with no instance type label that hasn't been initialized,
+	// we need to wait until the instance type label gets propagated on it
+	if managed && node.Labels[v1.LabelInstanceTypeStable] == "" && !initialized {
+		return nil
 	}
 	n, err := c.newStateFromNode(ctx, node, c.nodes[node.Spec.ProviderID])
 	if err != nil {
@@ -345,7 +328,7 @@ func (c *Cluster) Reset() {
 	defer c.mu.Unlock()
 	c.nodes = map[string]*StateNode{}
 	c.nodeNameToProviderID = map[string]string{}
-	c.nodeClaimKeyToProviderID = map[nodeclaimutil.Key]string{}
+	c.nodeClaimNameToProviderID = map[string]string{}
 	c.bindings = map[types.NamespacedName]string{}
 	c.antiAffinityPods = sync.Map{}
 	c.daemonSetPods = sync.Map{}
@@ -413,21 +396,21 @@ func (c *Cluster) newStateFromNodeClaim(nodeClaim *v1beta1.NodeClaim, oldNode *S
 	// Cleanup the old nodeClaim with its old providerID if its providerID changes
 	// This can happen since nodes don't get created with providerIDs. Rather, CCM picks up the
 	// created node and injects the providerID into the spec.providerID
-	if id, ok := c.nodeClaimKeyToProviderID[nodeclaimutil.Key{Name: nodeClaim.Name, IsMachine: nodeClaim.IsMachine}]; ok && id != nodeClaim.Status.ProviderID {
-		c.cleanupNodeClaim(nodeclaimutil.Key{Name: nodeClaim.Name, IsMachine: nodeClaim.IsMachine})
+	if id, ok := c.nodeClaimNameToProviderID[nodeClaim.Name]; ok && id != nodeClaim.Status.ProviderID {
+		c.cleanupNodeClaim(nodeClaim.Name)
 	}
 	c.triggerConsolidationOnChange(oldNode, n)
 	return n
 }
 
-func (c *Cluster) cleanupNodeClaim(key nodeclaimutil.Key) {
-	if id := c.nodeClaimKeyToProviderID[key]; id != "" {
+func (c *Cluster) cleanupNodeClaim(name string) {
+	if id := c.nodeClaimNameToProviderID[name]; id != "" {
 		if c.nodes[id].Node == nil {
 			delete(c.nodes, id)
 		} else {
 			c.nodes[id].NodeClaim = nil
 		}
-		delete(c.nodeClaimKeyToProviderID, key)
+		delete(c.nodeClaimNameToProviderID, name)
 		c.MarkUnconsolidated()
 	}
 }
@@ -489,15 +472,16 @@ func (c *Cluster) populateStartupTaints(ctx context.Context, n *StateNode) error
 		return nil
 	}
 
-	if nodeclaimutil.OwnerKey(n).Name == "" {
+	nodePoolName, ok := n.Labels()[v1beta1.NodePoolLabelKey]
+	if !ok {
 		return nil
 	}
-	owner, err := nodeclaimutil.Owner(ctx, c.kubeClient, n)
-	if err != nil {
+	nodePool := &v1beta1.NodePool{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
 		return client.IgnoreNotFound(err)
 	}
 	n.startupTaintsInitialized = true
-	n.startupTaints = owner.Spec.Template.Spec.StartupTaints
+	n.startupTaints = nodePool.Spec.Template.Spec.StartupTaints
 	return nil
 }
 
@@ -513,14 +497,15 @@ func (c *Cluster) populateInflight(ctx context.Context, n *StateNode) error {
 		return nil
 	}
 
-	if nodeclaimutil.OwnerKey(n).Name == "" {
+	nodePoolName, ok := n.Labels()[v1beta1.NodePoolLabelKey]
+	if !ok {
 		return nil
 	}
-	owner, err := nodeclaimutil.Owner(ctx, c.kubeClient, n)
-	if err != nil {
+	nodePool := &v1beta1.NodePool{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, owner)
+	instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, nodePool)
 	if err != nil {
 		return err
 	}

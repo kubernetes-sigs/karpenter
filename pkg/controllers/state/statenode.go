@@ -20,17 +20,17 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/operator/options"
 	"github.com/aws/karpenter-core/pkg/scheduling"
 	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
 )
@@ -115,16 +115,6 @@ func NewNode() *StateNode {
 	}
 }
 
-func (in *StateNode) OwnerKey() nodepoolutil.Key {
-	if in.Labels()[v1beta1.NodePoolLabelKey] != "" {
-		return nodepoolutil.Key{Name: in.Labels()[v1beta1.NodePoolLabelKey], IsProvisioner: false}
-	}
-	if in.Labels()[v1alpha5.ProvisionerNameLabelKey] != "" {
-		return nodepoolutil.Key{Name: in.Labels()[v1alpha5.ProvisionerNameLabelKey], IsProvisioner: true}
-	}
-	return nodepoolutil.Key{}
-}
-
 func (in *StateNode) Name() string {
 	if in.Node == nil {
 		return in.NodeClaim.Name
@@ -132,9 +122,7 @@ func (in *StateNode) Name() string {
 	if in.NodeClaim == nil {
 		return in.Node.Name
 	}
-	// TODO @joinnis: The !in.Initialized() check can be removed when we can assume that all nodes have the v1alpha5.NodeRegisteredLabel on them
-	// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
-	if !in.Registered() && !in.Initialized() {
+	if !in.Registered() {
 		return in.NodeClaim.Name
 	}
 	return in.Node.Name
@@ -174,9 +162,7 @@ func (in *StateNode) Annotations() map[string]string {
 	if in.NodeClaim == nil {
 		return in.Node.Annotations
 	}
-	// TODO @joinnis: The !in.Initialized() check can be removed when we can assume that all nodes have the v1alpha5.NodeRegisteredLabel on them
-	// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
-	if !in.Registered() && !in.Initialized() {
+	if !in.Registered() {
 		return in.NodeClaim.Annotations
 	}
 	return in.Node.Annotations
@@ -196,9 +182,7 @@ func (in *StateNode) Labels() map[string]string {
 	if in.NodeClaim == nil {
 		return in.Node.Labels
 	}
-	// TODO @joinnis: The !in.Initialized() check can be removed when we can assume that all nodes have the v1alpha5.NodeRegisteredLabel on them
-	// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
-	if !in.Registered() && !in.Initialized() {
+	if !in.Registered() {
 		return in.NodeClaim.Labels
 	}
 	return in.Node.Labels
@@ -218,9 +202,7 @@ func (in *StateNode) Taints() []v1.Taint {
 	}
 
 	var taints []v1.Taint
-	// TODO @joinnis: The !in.Initialized() check can be removed when we can assume that all nodes have the v1alpha5.NodeRegisteredLabel on them
-	// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
-	if (!in.Registered() && !in.Initialized() && in.NodeClaim != nil) || in.Node == nil {
+	if (!in.Registered() && in.NodeClaim != nil) || in.Node == nil {
 		taints = in.NodeClaim.Spec.Taints
 	} else {
 		taints = in.Node.Spec.Taints
@@ -345,7 +327,6 @@ func (in *StateNode) MarkedForDeletion() bool {
 	//  1. The Node has MarkedForDeletion set
 	//  2. The Node has a NodeClaim counterpart and is actively deleting
 	//  3. The Node has no NodeClaim counterpart and is actively deleting
-	// TODO remove check for machine after v1alpha5 APIs are dropped.
 	return in.markedForDeletion ||
 		(in.NodeClaim != nil && !in.NodeClaim.DeletionTimestamp.IsZero()) ||
 		(in.Node != nil && in.NodeClaim == nil && !in.Node.DeletionTimestamp.IsZero())
@@ -361,7 +342,6 @@ func (in *StateNode) Nominated() bool {
 
 func (in *StateNode) Managed() bool {
 	return in.NodeClaim != nil ||
-		(in.Node != nil && in.Node.Labels[v1alpha5.ProvisionerNameLabelKey] != "") ||
 		(in.Node != nil && in.Node.Labels[v1beta1.NodePoolLabelKey] != "")
 }
 
@@ -399,4 +379,53 @@ func nominationWindow(ctx context.Context) time.Duration {
 		nominationPeriod = 10 * time.Second
 	}
 	return nominationPeriod
+}
+
+// RequireNoScheduleTaint will add/remove the karpenter.sh/disruption:NoSchedule taint from the candidates.
+// This is used to enforce no taints at the beginning of disruption, and
+// to add/remove taints while executing a disruption action.
+// nolint:gocyclo
+func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTaint bool, nodes ...*StateNode) error {
+	var multiErr error
+	for _, n := range nodes {
+		// If the StateNode is Karpenter owned and only has a nodeclaim, or is not owned by
+		// Karpenter, thus having no nodeclaim, don't touch the node.
+		if n.Node == nil || n.NodeClaim == nil {
+			continue
+		}
+		node := &v1.Node{}
+		if err := kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Name}, node); client.IgnoreNotFound(err) != nil {
+			multiErr = multierr.Append(multiErr, fmt.Errorf("getting node, %w", err))
+		}
+		// If the node already has the taint, continue to the next
+		_, hasTaint := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
+			return v1beta1.IsDisruptingTaint(taint)
+		})
+		// Node is being deleted, so no need to remove taint as the node will be gone soon.
+		// This ensures that the disruption controller doesn't modify taints that the Termination
+		// controller is also modifying
+		if hasTaint && !node.DeletionTimestamp.IsZero() {
+			continue
+		}
+		stored := node.DeepCopy()
+		// If the taint is present and we want to remove the taint, remove it.
+		if !addTaint {
+			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint v1.Taint, _ int) bool {
+				return taint.Key == v1beta1.DisruptionTaintKey
+			})
+			// otherwise, add it.
+		} else if addTaint && !hasTaint {
+			// If the taint key is present (but with a different value or effect), remove it.
+			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t v1.Taint, _ int) bool {
+				return t.Key == v1beta1.DisruptionTaintKey
+			})
+			node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
+		}
+		if !equality.Semantic.DeepEqual(stored, node) {
+			if err := kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+				multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
+			}
+		}
+	}
+	return multiErr
 }

@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"sort"
 
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/samber/lo"
@@ -76,7 +75,6 @@ func (d *Drift) ComputeCommand(ctx context.Context, candidates ...*Candidate) (C
 	if err != nil {
 		return Command{}, err
 	}
-	deprovisioningEligibleMachinesGauge.WithLabelValues(d.Type()).Set(float64(len(candidates)))
 	disruptionEligibleNodesGauge.With(map[string]string{
 		methodLabel:            d.Type(),
 		consolidationTypeLabel: d.ConsolidationType(),
@@ -101,9 +99,8 @@ func (d *Drift) ComputeCommand(ctx context.Context, candidates ...*Candidate) (C
 			}
 			return Command{}, err
 		}
-		// Log when all pods can't schedule, as the command will get executed immediately.
+		// Emit an event that we couldn't reschedule the pods on the node.
 		if !results.AllNonPendingPodsScheduled() {
-			logging.FromContext(ctx).With(lo.Ternary(candidate.NodeClaim.IsMachine, "machine", "nodeclaim"), candidate.NodeClaim.Name, "node", candidate.Node.Name).Debugf("cannot terminate since scheduling simulation failed to schedule all pods %s", results.NonPendingPodSchedulingErrors())
 			d.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
 			continue
 		}

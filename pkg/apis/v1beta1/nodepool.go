@@ -25,15 +25,15 @@ import (
 	"knative.dev/pkg/ptr"
 )
 
-// NodePoolSpec is the top level provisioner specification. Provisioners
-// launch nodes in response to pods that are unschedulable. A single provisioner
+// NodePoolSpec is the top level nodepool specification. Nodepools
+// launch nodes in response to pods that are unschedulable. A single nodepool
 // is capable of managing a diverse set of nodes. Node properties are determined
-// from a combination of provisioner and pod scheduling constraints.
+// from a combination of nodepool and pod scheduling constraints.
 type NodePoolSpec struct {
 	// Template contains the template of possibilities for the provisioning logic to launch a NodeClaim with.
 	// NodeClaims launched from this NodePool will often be further constrained than the template specifies.
-	// +optional
-	Template NodeClaimTemplate `json:"template,omitempty"`
+	// +required
+	Template NodeClaimTemplate `json:"template"`
 	// Disruption contains the parameters that relate to Karpenter's disruption logic
 	// +kubebuilder:default={"consolidationPolicy": "WhenUnderutilized", "expireAfter": "720h"}
 	// +kubebuilder:validation:XValidation:message="consolidateAfter cannot be combined with consolidationPolicy=WhenUnderutilized",rule="has(self.consolidateAfter) ? self.consolidationPolicy != 'WhenUnderutilized' || self.consolidateAfter == 'Never' : true"
@@ -43,10 +43,10 @@ type NodePoolSpec struct {
 	// Limits define a set of bounds for provisioning capacity.
 	// +optional
 	Limits Limits `json:"limits,omitempty"`
-	// Weight is the priority given to the provisioner during scheduling. A higher
-	// numerical weight indicates that this provisioner will be ordered
-	// ahead of other provisioners with lower weights. A provisioner with no weight
-	// will be treated as if it is a provisioner with a weight of 0.
+	// Weight is the priority given to the nodepool during scheduling. A higher
+	// numerical weight indicates that this nodepool will be ordered
+	// ahead of other nodepools with lower weights. A nodepool with no weight
+	// will be treated as if it is a nodepool with a weight of 0.
 	// +kubebuilder:validation:Minimum:=1
 	// +kubebuilder:validation:Maximum:=100
 	// +optional
@@ -104,8 +104,25 @@ func (l Limits) ExceededBy(resources v1.ResourceList) error {
 }
 
 type NodeClaimTemplate struct {
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Spec              NodeClaimSpec `json:"spec,omitempty"`
+	ObjectMeta `json:"metadata,omitempty"`
+	// +required
+	Spec NodeClaimSpec `json:"spec"`
+}
+
+type ObjectMeta struct {
+	// Map of string keys and values that can be used to organize and categorize
+	// (scope and select) objects. May match selectors of replication controllers
+	// and services.
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels
+	// +optional
+	Labels map[string]string `json:"labels,omitempty"`
+
+	// Annotations is an unstructured key value map stored with a resource that may be
+	// set by external tools to store and retrieve arbitrary metadata. They are not
+	// queryable and should be preserved when modifying objects.
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations
+	// +optional
+	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
 // NodePool is the Schema for the NodePools API
@@ -120,11 +137,6 @@ type NodePool struct {
 
 	Spec   NodePoolSpec   `json:"spec,omitempty"`
 	Status NodePoolStatus `json:"status,omitempty"`
-
-	// IsProvisioner tells Karpenter whether the in-memory representation of this object
-	// is actually referring to a Provisioner object. This value is not actually part of the v1beta1 public-facing API
-	// TODO @joinnis: Remove this field when v1alpha5 is unsupported in a future version of Karpenter
-	IsProvisioner bool `json:"-"`
 }
 
 func (in *NodePool) Hash() string {
@@ -143,7 +155,7 @@ type NodePoolList struct {
 	Items           []NodePool `json:"items"`
 }
 
-// OrderByWeight orders the provisioners in the NodePoolList
+// OrderByWeight orders the nodepools in the NodePoolList
 // by their priority weight in-place
 func (pl *NodePoolList) OrderByWeight() {
 	sort.Slice(pl.Items, func(a, b int) bool {

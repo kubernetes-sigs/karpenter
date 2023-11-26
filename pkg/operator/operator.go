@@ -46,7 +46,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/operator/controller"
@@ -61,6 +60,10 @@ const (
 	appName   = "karpenter"
 	component = "controller"
 )
+
+// Version is the karpenter app version injected during compilation
+// when using the Makefile
+var Version = "unspecified"
 
 type Operator struct {
 	manager.Manager
@@ -99,7 +102,7 @@ func NewOperator() (context.Context, *Operator) {
 	// Client Config
 	config := controllerruntime.GetConfigOrDie()
 	config.RateLimiter = flowcontrol.NewTokenBucketRateLimiter(float32(options.FromContext(ctx).KubeClientQPS), options.FromContext(ctx).KubeClientBurst)
-	config.UserAgent = appName
+	config.UserAgent = fmt.Sprintf("%s/%s", appName, Version)
 
 	// Client
 	kubernetesInterface := kubernetes.NewForConfigOrDie(config)
@@ -117,6 +120,8 @@ func NewOperator() (context.Context, *Operator) {
 	logger := logging.NewLogger(ctx, component, kubernetesInterface)
 	ctx = knativelogging.WithLogger(ctx, logger)
 	logging.ConfigureGlobalLoggers(ctx)
+
+	knativelogging.FromContext(ctx).With("version", Version).Debugf("discovered karpenter version")
 
 	// Manager
 	mgrOpts := controllerruntime.Options{
@@ -173,9 +178,6 @@ func NewOperator() (context.Context, *Operator) {
 	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.Node{}, "spec.providerID", func(o client.Object) []string {
 		return []string{o.(*v1.Node).Spec.ProviderID}
 	}), "failed to setup node provider id indexer")
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1alpha5.Machine{}, "status.providerID", func(o client.Object) []string {
-		return []string{o.(*v1alpha5.Machine).Status.ProviderID}
-	}), "failed to setup machine provider id indexer")
 	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1beta1.NodeClaim{}, "status.providerID", func(o client.Object) []string {
 		return []string{o.(*v1beta1.NodeClaim).Status.ProviderID}
 	}), "failed to setup nodeclaim provider id indexer")

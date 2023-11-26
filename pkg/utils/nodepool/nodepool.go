@@ -19,27 +19,21 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/samber/lo"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/samber/lo"
+
 	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	provisionerutil "github.com/aws/karpenter-core/pkg/utils/provisioner"
 )
-
-type Key struct {
-	Name          string
-	IsProvisioner bool
-}
 
 func New(provisioner *v1alpha5.Provisioner) *v1beta1.NodePool {
 	np := &v1beta1.NodePool{
 		ObjectMeta: provisioner.ObjectMeta,
 		Spec: v1beta1.NodePoolSpec{
 			Template: v1beta1.NodeClaimTemplate{
-				ObjectMeta: metav1.ObjectMeta{
+				ObjectMeta: v1beta1.ObjectMeta{
 					Annotations: provisioner.Spec.Annotations,
 					Labels:      provisioner.Spec.Labels,
 				},
@@ -49,7 +43,6 @@ func New(provisioner *v1alpha5.Provisioner) *v1beta1.NodePool {
 					Requirements:  provisioner.Spec.Requirements,
 					Kubelet:       NewKubeletConfiguration(provisioner.Spec.KubeletConfiguration),
 					NodeClassRef:  NewNodeClassReference(provisioner.Spec.ProviderRef),
-					Provider:      provisioner.Spec.Provider,
 				},
 			},
 			Weight: provisioner.Spec.Weight,
@@ -57,7 +50,6 @@ func New(provisioner *v1alpha5.Provisioner) *v1beta1.NodePool {
 		Status: v1beta1.NodePoolStatus{
 			Resources: provisioner.Status.Resources,
 		},
-		IsProvisioner: true,
 	}
 	if provisioner.Spec.TTLSecondsUntilExpired != nil {
 		np.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(lo.Must(time.ParseDuration(fmt.Sprintf("%ds", lo.FromPtr[int64](provisioner.Spec.TTLSecondsUntilExpired)))))
@@ -80,7 +72,6 @@ func NewKubeletConfiguration(kc *v1alpha5.KubeletConfiguration) *v1beta1.Kubelet
 	}
 	return &v1beta1.KubeletConfiguration{
 		ClusterDNS:                  kc.ClusterDNS,
-		ContainerRuntime:            kc.ContainerRuntime,
 		MaxPods:                     kc.MaxPods,
 		PodsPerCore:                 kc.PodsPerCore,
 		SystemReserved:              kc.SystemReserved,
@@ -106,59 +97,30 @@ func NewNodeClassReference(pr *v1alpha5.MachineTemplateRef) *v1beta1.NodeClassRe
 	}
 }
 
-func Get(ctx context.Context, c client.Client, key Key) (*v1beta1.NodePool, error) {
-	if key.IsProvisioner {
-		provisioner := &v1alpha5.Provisioner{}
-		if err := c.Get(ctx, types.NamespacedName{Name: key.Name}, provisioner); err != nil {
-			return nil, err
-		}
-		return New(provisioner), nil
-	}
+func Get(ctx context.Context, c client.Client, name string) (*v1beta1.NodePool, error) {
 	nodePool := &v1beta1.NodePool{}
-	if err := c.Get(ctx, types.NamespacedName{Name: key.Name}, nodePool); err != nil {
+	if err := c.Get(ctx, types.NamespacedName{Name: name}, nodePool); err != nil {
 		return nil, err
 	}
 	return nodePool, nil
 }
 
 func List(ctx context.Context, c client.Client, opts ...client.ListOption) (*v1beta1.NodePoolList, error) {
-	provisionerList := &v1alpha5.ProvisionerList{}
-	if err := c.List(ctx, provisionerList, opts...); err != nil {
-		return nil, err
-	}
-	convertedNodePools := lo.Map(provisionerList.Items, func(p v1alpha5.Provisioner, _ int) v1beta1.NodePool {
-		return *New(&p)
-	})
 	nodePoolList := &v1beta1.NodePoolList{}
 	if err := c.List(ctx, nodePoolList, opts...); err != nil {
 		return nil, err
 	}
-	nodePoolList.Items = append(nodePoolList.Items, convertedNodePools...)
 	return nodePoolList, nil
 }
 
 func Patch(ctx context.Context, c client.Client, stored, nodePool *v1beta1.NodePool) error {
-	if nodePool.IsProvisioner {
-		storedProvisioner := provisionerutil.New(stored)
-		provisioner := provisionerutil.New(nodePool)
-		return c.Patch(ctx, provisioner, client.MergeFrom(storedProvisioner))
-	}
 	return c.Patch(ctx, nodePool, client.MergeFrom(stored))
 }
 
 func PatchStatus(ctx context.Context, c client.Client, stored, nodePool *v1beta1.NodePool) error {
-	if nodePool.IsProvisioner {
-		storedProvisioner := provisionerutil.New(stored)
-		provisioner := provisionerutil.New(nodePool)
-		return c.Status().Patch(ctx, provisioner, client.MergeFrom(storedProvisioner))
-	}
 	return c.Status().Patch(ctx, nodePool, client.MergeFrom(stored))
 }
 
 func HashAnnotation(nodePool *v1beta1.NodePool) map[string]string {
-	if nodePool.IsProvisioner {
-		provisioner := provisionerutil.New(nodePool)
-		return map[string]string{v1alpha5.ProvisionerHashAnnotationKey: provisioner.Hash()}
-	}
 	return map[string]string{v1beta1.NodePoolHashAnnotationKey: nodePool.Hash()}
 }

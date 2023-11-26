@@ -28,7 +28,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
 
 // NodeClaimController reconciles machine for the purpose of maintaining state.
@@ -55,7 +54,7 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, nodeClaim); err != nil {
 		if errors.IsNotFound(err) {
 			// notify cluster state of the node deletion
-			c.cluster.DeleteNodeClaim(nodeclaimutil.Key{Name: req.Name})
+			c.cluster.DeleteNodeClaim(req.Name)
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}

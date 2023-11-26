@@ -18,13 +18,11 @@ import (
 	"context"
 	"time"
 
-	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
@@ -65,7 +63,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) 
 	}
 	stored := nodePool.DeepCopy()
 	// Determine resource usage and update provisioner.status.resources
-	nodePool.Status.Resources = c.resourceCountsFor(lo.Ternary(nodePool.IsProvisioner, v1alpha5.ProvisionerNameLabelKey, v1beta1.NodePoolLabelKey), nodePool.Name)
+	nodePool.Status.Resources = c.resourceCountsFor(v1beta1.NodePoolLabelKey, nodePool.Name)
 	if !equality.Semantic.DeepEqual(stored, nodePool) {
 		if err := nodepoolutil.PatchStatus(ctx, c.kubeClient, stored, nodePool); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
@@ -124,49 +122,6 @@ func (c *NodePoolController) Builder(_ context.Context, m manager.Manager) corec
 			&v1.Node{},
 			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []reconcile.Request {
 				if name, ok := o.GetLabels()[v1beta1.NodePoolLabelKey]; ok {
-					return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: name}}}
-				}
-				return nil
-			}),
-		).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))
-}
-
-type ProvisionerController struct {
-	*Controller
-}
-
-func NewProvisionerController(kubeClient client.Client, cluster *state.Cluster) corecontroller.Controller {
-	return corecontroller.Typed[*v1alpha5.Provisioner](kubeClient, &ProvisionerController{
-		Controller: NewController(kubeClient, cluster),
-	})
-}
-
-func (c *ProvisionerController) Reconcile(ctx context.Context, provisioner *v1alpha5.Provisioner) (reconcile.Result, error) {
-	return c.Controller.Reconcile(ctx, nodepoolutil.New(provisioner))
-}
-
-func (c *ProvisionerController) Name() string {
-	return "counter"
-}
-
-func (c *ProvisionerController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(controllerruntime.
-		NewControllerManagedBy(m).
-		For(&v1alpha5.Provisioner{}).
-		Watches(
-			&v1alpha5.Machine{},
-			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []reconcile.Request {
-				if name, ok := o.GetLabels()[v1alpha5.ProvisionerNameLabelKey]; ok {
-					return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: name}}}
-				}
-				return nil
-			}),
-		).
-		Watches(
-			&v1.Node{},
-			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []reconcile.Request {
-				if name, ok := o.GetLabels()[v1alpha5.ProvisionerNameLabelKey]; ok {
 					return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: name}}}
 				}
 				return nil

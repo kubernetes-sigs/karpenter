@@ -37,11 +37,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	coreapis "github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/controllers/disruption"
+	"github.com/aws/karpenter-core/pkg/controllers/disruption/orchestration"
 	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
@@ -60,10 +60,10 @@ var disruptionController *disruption.Controller
 var prov *provisioning.Provisioner
 var cloudProvider *fake.CloudProvider
 var nodeStateController controller.Controller
-var machineStateController controller.Controller
 var nodeClaimStateController controller.Controller
 var fakeClock *clock.FakeClock
 var recorder *test.EventRecorder
+var queue *orchestration.Queue
 
 var onDemandInstances []*cloudprovider.InstanceType
 var leastExpensiveInstance, mostExpensiveInstance *cloudprovider.InstanceType
@@ -82,11 +82,11 @@ var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
-	machineStateController = informer.NewMachineController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, env.KubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
-	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster)
+	queue = orchestration.NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov)
+	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue)
 })
 
 var _ = AfterSuite(func() {
@@ -105,6 +105,7 @@ var _ = BeforeEach(func() {
 	}
 	fakeClock.SetTime(time.Now())
 	cluster.Reset()
+	queue.Reset()
 	cluster.MarkUnconsolidated()
 
 	// Reset Feature Flags to test defaults
@@ -112,7 +113,7 @@ var _ = BeforeEach(func() {
 
 	onDemandInstances = lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
 		for _, o := range i.Offerings.Available() {
-			if o.CapacityType == v1alpha5.CapacityTypeOnDemand {
+			if o.CapacityType == v1beta1.CapacityTypeOnDemand {
 				return true
 			}
 		}
@@ -130,18 +131,17 @@ var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 })
 
-var _ = Describe("Disruption Taints", func() {
-	var provisioner *v1alpha5.Provisioner
-	var machine *v1alpha5.Machine
+// TODO remove this when Budgets are added in
+var _ = Describe("Queue Limits", func() {
 	var nodePool *v1beta1.NodePool
-	var nodeClaim *v1beta1.NodeClaim
-	var machineNode, nodeClaimNode *v1.Node
+	var nodeClaim, nodeClaim2 *v1beta1.NodeClaim
+	var node, node2 *v1.Node
 	BeforeEach(func() {
 		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
 			Name: "current-on-demand",
 			Offerings: []cloudprovider.Offering{
 				{
-					CapacityType: v1alpha5.CapacityTypeOnDemand,
+					CapacityType: v1beta1.CapacityTypeOnDemand,
 					Zone:         "test-zone-1a",
 					Price:        1.5,
 					Available:    false,
@@ -152,51 +152,170 @@ var _ = Describe("Disruption Taints", func() {
 			Name: "spot-replacement",
 			Offerings: []cloudprovider.Offering{
 				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
+					CapacityType: v1beta1.CapacityTypeSpot,
 					Zone:         "test-zone-1a",
 					Price:        1.0,
 					Available:    true,
 				},
 				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
+					CapacityType: v1beta1.CapacityTypeSpot,
 					Zone:         "test-zone-1b",
 					Price:        0.2,
 					Available:    true,
 				},
 				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
+					CapacityType: v1beta1.CapacityTypeSpot,
 					Zone:         "test-zone-1c",
 					Price:        0.4,
 					Available:    true,
 				},
 			},
 		})
-		provisioner = test.Provisioner()
-		machine, machineNode = test.MachineAndNode(v1alpha5.Machine{
+		nodePool = test.NodePool()
+		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1.LabelInstanceTypeStable:       currentInstance.Name,
-					v1alpha5.LabelCapacityType:       currentInstance.Offerings[0].CapacityType,
-					v1.LabelTopologyZone:             currentInstance.Offerings[0].Zone,
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
+					v1.LabelInstanceTypeStable:   currentInstance.Name,
+					v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
+					v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
 				},
 			},
-			Status: v1alpha5.MachineStatus{
+			Status: v1beta1.NodeClaimStatus{
 				ProviderID: test.RandomProviderID(),
 				Allocatable: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourceCPU:  resource.MustParse("3"),
 					v1.ResourcePods: resource.MustParse("100"),
 				},
 			},
 		})
-		nodePool = test.NodePool()
-		nodeClaim, nodeClaimNode = test.NodeClaimAndNode(v1beta1.NodeClaim{
+		nodeClaim2, node2 = test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1.LabelInstanceTypeStable: currentInstance.Name,
-					v1alpha5.LabelCapacityType: currentInstance.Offerings[0].CapacityType,
-					v1.LabelTopologyZone:       currentInstance.Offerings[0].Zone,
-					v1beta1.NodePoolLabelKey:   nodePool.Name,
+					v1.LabelInstanceTypeStable:   currentInstance.Name,
+					v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
+					v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+				},
+			},
+			Status: v1beta1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("3"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			currentInstance,
+			replacementInstance,
+		}
+		// Mark the nodes as drifted so they'll be both be candidates
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Drifted)
+		nodeClaim2.StatusConditions().MarkTrue(v1beta1.Drifted)
+	})
+	It("should be able to disrupt two nodes with replace, but only ever be disrupting one at a time", func() {
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+		pods := test.Pods(2, test.PodOptions{
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: v1.ResourceList{
+					v1.ResourceCPU: resource.MustParse("2"),
+				},
+			},
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				}}})
+
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], nodeClaim, nodeClaim2, node, node2, nodePool)
+
+		// bind the pods to the nodes so that they're both non-empty
+		ExpectManualBinding(ctx, env.Client, pods[0], node)
+		ExpectManualBinding(ctx, env.Client, pods[1], node2)
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
+
+		// Do one reconcile to add one node to the queue
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+
+		Expect(queue.Len()).To(BeNumerically("==", 1))
+		// Process the item but still expect it to be in the queue, since it's replacements aren't created
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+		ExpectNodeExists(ctx, env.Client, node.Name)
+		ExpectNodeExists(ctx, env.Client, node2.Name)
+		Expect(queue.Len()).To(BeNumerically("==", 1))
+
+		// Do another reconcile to try to add another node to the queue.
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		ExpectNodeExists(ctx, env.Client, node.Name)
+		ExpectNodeExists(ctx, env.Client, node2.Name)
+		// Expect that the queue length has not increased
+		Expect(queue.Len()).To(BeNumerically("==", 1))
+	})
+})
+
+var _ = Describe("Disruption Taints", func() {
+	var nodePool *v1beta1.NodePool
+	var nodeClaim *v1beta1.NodeClaim
+	var node *v1.Node
+	BeforeEach(func() {
+		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "current-on-demand",
+			Offerings: []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeOnDemand,
+					Zone:         "test-zone-1a",
+					Price:        1.5,
+					Available:    false,
+				},
+			},
+		})
+		replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
+			Name: "spot-replacement",
+			Offerings: []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1a",
+					Price:        1.0,
+					Available:    true,
+				},
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1b",
+					Price:        0.2,
+					Available:    true,
+				},
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1c",
+					Price:        0.4,
+					Available:    true,
+				},
+			},
+		})
+		nodePool = test.NodePool()
+		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.LabelInstanceTypeStable:   currentInstance.Name,
+					v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
+					v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
 				},
 			},
 			Status: v1beta1.NodeClaimStatus{
@@ -222,12 +341,12 @@ var _ = Describe("Disruption Taints", func() {
 			},
 		})
 		nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: nil}
-		nodeClaimNode.Spec.Taints = append(nodeClaimNode.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, nodeClaimNode, pod)
-		ExpectManualBinding(ctx, env.Client, pod, nodeClaimNode)
+		node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
 
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodeClaimNode}, []*v1beta1.NodeClaim{nodeClaim})
+		// inform cluster state about nodes and nodeClaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		// Trigger the reconcile loop to start but don't trigger the verify action
 		wg := sync.WaitGroup{}
@@ -238,8 +357,8 @@ var _ = Describe("Disruption Taints", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 		}()
 		wg.Wait()
-		nodeClaimNode = ExpectNodeExists(ctx, env.Client, nodeClaimNode.Name)
-		Expect(nodeClaimNode.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
+		node = ExpectNodeExists(ctx, env.Client, node.Name)
+		Expect(node.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 	})
 	It("should add and remove taints from NodeClaims that fail to disrupt", func() {
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
@@ -251,11 +370,11 @@ var _ = Describe("Disruption Taints", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, nodeClaimNode, pod)
-		ExpectManualBinding(ctx, env.Client, pod, nodeClaimNode)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
 
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodeClaimNode}, []*v1beta1.NodeClaim{nodeClaim})
+		// inform cluster state about nodes and nodeClaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		// Trigger the reconcile loop to start but don't trigger the verify action
 		wg := sync.WaitGroup{}
@@ -263,7 +382,7 @@ var _ = Describe("Disruption Taints", func() {
 		go func() {
 			defer wg.Done()
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileFailed(ctx, disruptionController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 		}()
 
 		// Iterate in a loop until we get to the validation action
@@ -274,8 +393,8 @@ var _ = Describe("Disruption Taints", func() {
 				break
 			}
 		}
-		nodeClaimNode = ExpectNodeExists(ctx, env.Client, nodeClaimNode.Name)
-		Expect(nodeClaimNode.Spec.Taints).To(ContainElement(v1beta1.DisruptionNoScheduleTaint))
+		node = ExpectNodeExists(ctx, env.Client, node.Name)
+		Expect(node.Spec.Taints).To(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 
 		createdNodeClaim := lo.Reject(ExpectNodeClaims(ctx, env.Client), func(nc *v1beta1.NodeClaim, _ int) bool {
 			return nc.Name == nodeClaim.Name
@@ -283,962 +402,15 @@ var _ = Describe("Disruption Taints", func() {
 		ExpectDeleted(ctx, env.Client, createdNodeClaim[0])
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, createdNodeClaim[0])
 		ExpectNotFound(ctx, env.Client, createdNodeClaim[0])
-
-		wg.Wait()
-		nodeClaimNode = ExpectNodeExists(ctx, env.Client, nodeClaimNode.Name)
-		Expect(nodeClaimNode.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
-	})
-	It("should add and remove taints from Machines that fail to disrupt", func() {
-		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
-		pod := test.Pod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: v1.ResourceList{
-					v1.ResourceCPU:    resource.MustParse("100m"),
-					v1.ResourceMemory: resource.MustParse("100Mi"),
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, provisioner, machine, machineNode, pod)
-		ExpectManualBinding(ctx, env.Client, pod, machineNode)
-
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{machineNode}, []*v1alpha5.Machine{machine})
-
-		fakeClock.Step(10 * time.Minute)
-
-		// Trigger the reconcile loop to start but don't trigger the verify action
-		wg := sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileFailed(ctx, disruptionController, client.ObjectKey{})
-		}()
-
-		// Iterate in a loop until we get to the validation action
-		// Then, apply the pods to the cluster and bind them to the nodes
-		for {
-			time.Sleep(100 * time.Millisecond)
-			if len(ExpectMachines(ctx, env.Client)) == 2 {
-				break
-			}
-		}
-		machineNode = ExpectNodeExists(ctx, env.Client, machineNode.Name)
-		Expect(machineNode.Spec.Unschedulable).To(BeTrue())
-
-		createdMachine := lo.Reject(ExpectMachines(ctx, env.Client), func(m *v1alpha5.Machine, _ int) bool {
-			return m.Name == machine.Name
-		})
-		ExpectDeleted(ctx, env.Client, createdMachine[0])
-		ExpectMachinesCascadeDeletion(ctx, env.Client, createdMachine[0])
-		ExpectNotFound(ctx, env.Client, createdMachine[0])
-		wg.Wait()
-		machineNode = ExpectNodeExists(ctx, env.Client, machineNode.Name)
-		Expect(machineNode.Spec.Unschedulable).To(BeFalse())
-	})
-})
-
-var _ = Describe("Combined/Disruption", func() {
-	var provisioner *v1alpha5.Provisioner
-	var machine *v1alpha5.Machine
-	var nodePool *v1beta1.NodePool
-	var nodeClaim *v1beta1.NodeClaim
-	var machineNode, nodeClaimNode *v1.Node
-	BeforeEach(func() {
-		provisioner = test.Provisioner()
-		machine, machineNode = test.MachineAndNode(v1alpha5.Machine{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-					v1.LabelInstanceTypeStable:       mostExpensiveInstance.Name,
-					v1alpha5.LabelCapacityType:       mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:             mostExpensiveOffering.Zone,
-				},
-			},
-			Status: v1alpha5.MachineStatus{
-				ProviderID: test.RandomProviderID(),
-				Allocatable: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU:  resource.MustParse("32"),
-					v1.ResourcePods: resource.MustParse("100"),
-				},
-			},
-		})
-		nodePool = test.NodePool()
-		nodeClaim, nodeClaimNode = test.NodeClaimAndNode(v1beta1.NodeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey:     nodePool.Name,
-					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
-				},
-			},
-			Status: v1beta1.NodeClaimStatus{
-				ProviderID: test.RandomProviderID(),
-				Allocatable: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU:  resource.MustParse("32"),
-					v1.ResourcePods: resource.MustParse("100"),
-				},
-			},
-		})
-	})
-	It("should disrupt all empty Machine and NodeClaims in parallel (Emptiness)", func() {
-		provisioner.Spec.TTLSecondsAfterEmpty = lo.ToPtr[int64](30)
-		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
-		nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)}
-		machine.StatusConditions().MarkTrue(v1alpha5.MachineEmpty)
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.Empty)
-		ExpectApplied(ctx, env.Client, provisioner, nodePool, machine, nodeClaim, machineNode, nodeClaimNode)
-
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{machineNode}, []*v1alpha5.Machine{machine})
-		// inform cluster state about nodes and nodeclaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodeClaimNode}, []*v1beta1.NodeClaim{nodeClaim})
-
-		fakeClock.Step(10 * time.Minute)
-		wg := sync.WaitGroup{}
-		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
-		// Cascade any deletion of the machine to the node
-		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
-		// Cascade any deletion of the nodeclaim to the node
-		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+		// Increment the clock so that the nodeclaim deletion isn't caught by the
+		// eventual consistency delay.
+		fakeClock.Step(6 * time.Second)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
-		// Expect that the empty machine is gone
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
-		// Expect that the empty nodeclaim is gone
-		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
-
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		ExpectNotFound(ctx, env.Client, machine, nodeClaim, machineNode, nodeClaimNode)
-	})
-	It("should disrupt all empty Machine and NodeClaims in parallel (Expiration)", func() {
-		provisioner.Spec.TTLSecondsUntilExpired = lo.ToPtr[int64](30)
-		nodePool.Spec.Disruption.ExpireAfter = v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)}
-		machine.StatusConditions().MarkTrue(v1alpha5.MachineExpired)
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.Expired)
-		ExpectApplied(ctx, env.Client, provisioner, nodePool, machine, nodeClaim, machineNode, nodeClaimNode)
-
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{machineNode}, []*v1alpha5.Machine{machine})
-		// inform cluster state about nodes and nodeclaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodeClaimNode}, []*v1beta1.NodeClaim{nodeClaim})
-
-		fakeClock.Step(10 * time.Minute)
-		wg := sync.WaitGroup{}
-		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
-		wg.Wait()
-
-		// Cascade any deletion of the machine to the node
-		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
-		// Cascade any deletion of the nodeclaim to the node
-		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
-
-		// Expect that the expired machine is gone
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
-		// Expect that the expired nodeclaim is gone
-		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
-
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		ExpectNotFound(ctx, env.Client, machine, nodeClaim, machineNode, nodeClaimNode)
-	})
-	It("should disrupt all empty Machine and NodeClaims in parallel (Drift)", func() {
-		machine.StatusConditions().MarkTrue(v1alpha5.MachineDrifted)
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.Drifted)
-
-		ExpectApplied(ctx, env.Client, provisioner, nodePool, machine, nodeClaim, machineNode, nodeClaimNode)
-
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{machineNode}, []*v1alpha5.Machine{machine})
-		// inform cluster state about nodes and nodeclaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodeClaimNode}, []*v1beta1.NodeClaim{nodeClaim})
-
-		fakeClock.Step(10 * time.Minute)
-		wg := sync.WaitGroup{}
-		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
-		wg.Wait()
-
-		// Cascade any deletion of the machine to the node
-		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
-		// Cascade any deletion of the nodeclaim to the node
-		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
-
-		// Expect that the drifted machine is gone
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
-		// Expect that the drifted nodeclaim is gone
-		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
-
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		ExpectNotFound(ctx, env.Client, machine, nodeClaim, machineNode, nodeClaimNode)
-	})
-	It("should disrupt all empty Machine and NodeClaims in parallel (Consolidation)", func() {
-		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
-		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
-		ExpectApplied(ctx, env.Client, provisioner, nodePool, machine, nodeClaim, machineNode, nodeClaimNode)
-
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{machineNode}, []*v1alpha5.Machine{machine})
-		// inform cluster state about nodes and nodeclaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodeClaimNode}, []*v1beta1.NodeClaim{nodeClaim})
-
-		fakeClock.Step(10 * time.Minute)
-		wg := sync.WaitGroup{}
-		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
-		wg.Wait()
-
-		// Cascade any deletion of the machine to the node
-		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
-		// Cascade any deletion of the nodeclaim to the node
-		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
-
-		// Expect that the empty machine is gone due to consolidation
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
-		// Expect that the empty nodeclaim is gone due to consolidation
-		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
-
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		ExpectNotFound(ctx, env.Client, machine, nodeClaim, machineNode, nodeClaimNode)
-	})
-	It("should disrupt a Machine and replace with a cheaper NodeClaim", func() {
-		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
-		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
-		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-			Name: "current-on-demand",
-			Offerings: []cloudprovider.Offering{
-				{
-					CapacityType: v1alpha5.CapacityTypeOnDemand,
-					Zone:         "test-zone-1a",
-					Price:        1.5,
-					Available:    false,
-				},
-			},
-		})
-		replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-			Name: "spot-replacement",
-			Offerings: []cloudprovider.Offering{
-				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
-					Zone:         "test-zone-1a",
-					Price:        1.0,
-					Available:    true,
-				},
-				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
-					Zone:         "test-zone-1b",
-					Price:        0.2,
-					Available:    true,
-				},
-				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
-					Zone:         "test-zone-1c",
-					Price:        0.4,
-					Available:    true,
-				},
-			},
-		})
-		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-			currentInstance,
-			replacementInstance,
-		}
-		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
-			{
-				Key:      v1.LabelInstanceTypeStable,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{replacementInstance.Name},
-			},
-			{
-				Key:      v1alpha5.LabelCapacityType,
-				Operator: v1.NodeSelectorOpExists,
-			},
-		}
-		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
-			{
-				Key:      v1.LabelInstanceTypeStable,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{currentInstance.Name},
-			},
-		}
-		machine.Labels = lo.Assign(machine.Labels, map[string]string{
-			v1.LabelInstanceTypeStable: currentInstance.Name,
-			v1alpha5.LabelCapacityType: currentInstance.Offerings[0].CapacityType,
-			v1.LabelTopologyZone:       currentInstance.Offerings[0].Zone,
-		})
-		machineNode.Labels = lo.Assign(machineNode.Labels, map[string]string{
-			v1.LabelInstanceTypeStable: currentInstance.Name,
-			v1alpha5.LabelCapacityType: currentInstance.Offerings[0].CapacityType,
-			v1.LabelTopologyZone:       currentInstance.Offerings[0].Zone,
-		})
-		pod := test.Pod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: v1.ResourceList{
-					v1.ResourceCPU:    resource.MustParse("100m"),
-					v1.ResourceMemory: resource.MustParse("100Mi"),
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, provisioner, nodePool, machine, machineNode, pod)
-		ExpectManualBinding(ctx, env.Client, pod, machineNode)
-
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, []*v1.Node{machineNode}, []*v1alpha5.Machine{machine})
-
-		fakeClock.Step(10 * time.Minute)
-		wg := sync.WaitGroup{}
-		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
-		wg.Wait()
-
-		// Cascade any deletion of the machine to the node
-		ExpectMachinesCascadeDeletion(ctx, env.Client, machine)
-
-		// a machine should be replaced with a single nodeclaim
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
-		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		ExpectNotFound(ctx, env.Client, machine, machineNode)
-	})
-	It("should disrupt multiple Machines and replace with a single cheaper NodeClaim", func() {
-		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
-		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
-		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-			Name: "current-on-demand",
-			Offerings: []cloudprovider.Offering{
-				{
-					CapacityType: v1alpha5.CapacityTypeOnDemand,
-					Zone:         "test-zone-1a",
-					Price:        1.5,
-					Available:    false,
-				},
-			},
-		})
-		replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-			Name: "spot-replacement",
-			Offerings: []cloudprovider.Offering{
-				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
-					Zone:         "test-zone-1a",
-					Price:        1.0,
-					Available:    true,
-				},
-				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
-					Zone:         "test-zone-1b",
-					Price:        0.2,
-					Available:    true,
-				},
-				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
-					Zone:         "test-zone-1c",
-					Price:        0.4,
-					Available:    true,
-				},
-			},
-		})
-		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-			currentInstance,
-			replacementInstance,
-		}
-		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
-			{
-				Key:      v1.LabelInstanceTypeStable,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{replacementInstance.Name},
-			},
-		}
-		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
-			{
-				Key:      v1.LabelInstanceTypeStable,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{currentInstance.Name},
-			},
-			{
-				Key:      v1alpha5.LabelCapacityType,
-				Operator: v1.NodeSelectorOpExists,
-			},
-		}
-
-		ExpectApplied(ctx, env.Client, provisioner, nodePool)
-
-		var machines []*v1alpha5.Machine
-		var nodes []*v1.Node
-		for i := 0; i < 5; i++ {
-			m, n := test.MachineAndNode(v1alpha5.Machine{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-						v1.LabelInstanceTypeStable:       currentInstance.Name,
-						v1alpha5.LabelCapacityType:       currentInstance.Offerings[0].CapacityType,
-						v1.LabelTopologyZone:             currentInstance.Offerings[0].Zone,
-					},
-				},
-				Status: v1alpha5.MachineStatus{
-					ProviderID: test.RandomProviderID(),
-					Allocatable: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:  resource.MustParse("32"),
-						v1.ResourcePods: resource.MustParse("100"),
-					},
-				},
-			})
-			pod := test.Pod(test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("100m"),
-						v1.ResourceMemory: resource.MustParse("100Mi"),
-					},
-				},
-			})
-			machines = append(machines, m)
-			nodes = append(nodes, n)
-			ExpectApplied(ctx, env.Client, m, n, pod)
-			ExpectManualBinding(ctx, env.Client, pod, n)
-		}
-
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, nodes, machines)
-
-		fakeClock.Step(10 * time.Minute)
-		wg := sync.WaitGroup{}
-		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
-		wg.Wait()
-
-		// Cascade any deletion of the machines to the nodes
-		ExpectMachinesCascadeDeletion(ctx, env.Client, machines...)
-
-		// all machines should be replaced with a single nodeclaim
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
-		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-
-		ExpectNotFound(ctx, env.Client, lo.Map(machines, func(m *v1alpha5.Machine, _ int) client.Object { return m })...)
-		ExpectNotFound(ctx, env.Client, lo.Map(nodes, func(n *v1.Node, _ int) client.Object { return n })...)
-	})
-	It("should disrupt a NodeClaim and replace with a cheaper Machine", func() {
-		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
-		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
-		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-			Name: "current-on-demand",
-			Offerings: []cloudprovider.Offering{
-				{
-					CapacityType: v1alpha5.CapacityTypeOnDemand,
-					Zone:         "test-zone-1a",
-					Price:        1.5,
-					Available:    false,
-				},
-			},
-		})
-		replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-			Name: "spot-replacement",
-			Offerings: []cloudprovider.Offering{
-				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
-					Zone:         "test-zone-1a",
-					Price:        1.0,
-					Available:    true,
-				},
-				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
-					Zone:         "test-zone-1b",
-					Price:        0.2,
-					Available:    true,
-				},
-				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
-					Zone:         "test-zone-1c",
-					Price:        0.4,
-					Available:    true,
-				},
-			},
-		})
-		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-			currentInstance,
-			replacementInstance,
-		}
-		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
-			{
-				Key:      v1.LabelInstanceTypeStable,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{currentInstance.Name},
-			},
-		}
-		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
-			{
-				Key:      v1.LabelInstanceTypeStable,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{replacementInstance.Name},
-			},
-			{
-				Key:      v1alpha5.LabelCapacityType,
-				Operator: v1.NodeSelectorOpExists,
-			},
-		}
-		nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
-			v1.LabelInstanceTypeStable:   currentInstance.Name,
-			v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
-			v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
-		})
-		nodeClaimNode.Labels = lo.Assign(nodeClaimNode.Labels, map[string]string{
-			v1.LabelInstanceTypeStable:   currentInstance.Name,
-			v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
-			v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
-		})
-		pod := test.Pod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: v1.ResourceList{
-					v1.ResourceCPU:    resource.MustParse("100m"),
-					v1.ResourceMemory: resource.MustParse("100Mi"),
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, provisioner, nodePool, nodeClaim, nodeClaimNode, pod)
-		ExpectManualBinding(ctx, env.Client, pod, nodeClaimNode)
-
-		// inform cluster state about nodes and nodeclaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodeClaimNode}, []*v1beta1.NodeClaim{nodeClaim})
-
-		fakeClock.Step(10 * time.Minute)
-		wg := sync.WaitGroup{}
-		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
-		wg.Wait()
-
-		// Cascade any deletion of the nodeclaim to the node
-		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
-
-		// a nodeclaim should be replaced with a single machine
-		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		ExpectNotFound(ctx, env.Client, nodeClaim, nodeClaimNode)
-	})
-	It("should disrupt multiple NodeClaims and replace with a single cheaper Machine", func() {
-		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
-		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
-		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-			Name: "current-on-demand",
-			Offerings: []cloudprovider.Offering{
-				{
-					CapacityType: v1alpha5.CapacityTypeOnDemand,
-					Zone:         "test-zone-1a",
-					Price:        1.5,
-					Available:    false,
-				},
-			},
-		})
-		replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-			Name: "spot-replacement",
-			Offerings: []cloudprovider.Offering{
-				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
-					Zone:         "test-zone-1a",
-					Price:        1.0,
-					Available:    true,
-				},
-				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
-					Zone:         "test-zone-1b",
-					Price:        0.2,
-					Available:    true,
-				},
-				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
-					Zone:         "test-zone-1c",
-					Price:        0.4,
-					Available:    true,
-				},
-			},
-		})
-		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-			currentInstance,
-			replacementInstance,
-		}
-		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
-			{
-				Key:      v1.LabelInstanceTypeStable,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{currentInstance.Name},
-			},
-		}
-		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
-			{
-				Key:      v1.LabelInstanceTypeStable,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{replacementInstance.Name},
-			},
-			{
-				Key:      v1alpha5.LabelCapacityType,
-				Operator: v1.NodeSelectorOpExists,
-			},
-		}
-
-		ExpectApplied(ctx, env.Client, provisioner, nodePool)
-
-		var nodeClaims []*v1beta1.NodeClaim
-		var nodes []*v1.Node
-		for i := 0; i < 5; i++ {
-			nc, n := test.NodeClaimAndNode(v1beta1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1beta1.NodePoolLabelKey:     nodePool.Name,
-						v1.LabelInstanceTypeStable:   currentInstance.Name,
-						v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
-						v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
-					},
-				},
-				Status: v1beta1.NodeClaimStatus{
-					ProviderID: test.RandomProviderID(),
-					Allocatable: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:  resource.MustParse("32"),
-						v1.ResourcePods: resource.MustParse("100"),
-					},
-				},
-			})
-			pod := test.Pod(test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("100m"),
-						v1.ResourceMemory: resource.MustParse("100Mi"),
-					},
-				},
-			})
-			nodeClaims = append(nodeClaims, nc)
-			nodes = append(nodes, n)
-			ExpectApplied(ctx, env.Client, nc, n, pod)
-			ExpectManualBinding(ctx, env.Client, pod, n)
-		}
-
-		// inform cluster state about nodes and nodeclaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-		fakeClock.Step(10 * time.Minute)
-		wg := sync.WaitGroup{}
-		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
-		wg.Wait()
-
-		// Cascade any deletion of the nodeclaims to the nodes
-		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims...)
-
-		// all nodeClaims should be replaced with a single machine
-		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-
-		ExpectNotFound(ctx, env.Client, lo.Map(nodeClaims, func(nc *v1beta1.NodeClaim, _ int) client.Object { return nc })...)
-		ExpectNotFound(ctx, env.Client, lo.Map(nodes, func(n *v1.Node, _ int) client.Object { return n })...)
-	})
-	It("should disrupt Machines and NodeClaims to consolidate pods onto a single NodeClaim", func() {
-		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
-		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
-		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-			Name: "current-on-demand",
-			Offerings: []cloudprovider.Offering{
-				{
-					CapacityType: v1alpha5.CapacityTypeOnDemand,
-					Zone:         "test-zone-1a",
-					Price:        1.5,
-					Available:    false,
-				},
-			},
-		})
-		replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-			Name: "spot-replacement",
-			Offerings: []cloudprovider.Offering{
-				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
-					Zone:         "test-zone-1a",
-					Price:        1.0,
-					Available:    true,
-				},
-				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
-					Zone:         "test-zone-1b",
-					Price:        0.2,
-					Available:    true,
-				},
-				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
-					Zone:         "test-zone-1c",
-					Price:        0.4,
-					Available:    true,
-				},
-			},
-		})
-		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-			currentInstance,
-			replacementInstance,
-		}
-		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
-			{
-				Key:      v1.LabelInstanceTypeStable,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{replacementInstance.Name},
-			},
-		}
-		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
-			{
-				Key:      v1.LabelInstanceTypeStable,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{currentInstance.Name},
-			},
-			{
-				Key:      v1alpha5.LabelCapacityType,
-				Operator: v1.NodeSelectorOpExists,
-			},
-		}
-
-		ExpectApplied(ctx, env.Client, provisioner, nodePool)
-
-		var machines []*v1alpha5.Machine
-		var nodeClaims []*v1beta1.NodeClaim
-		var nodes []*v1.Node
-		for i := 0; i < 2; i++ {
-			m, n := test.MachineAndNode(v1alpha5.Machine{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-						v1.LabelInstanceTypeStable:       currentInstance.Name,
-						v1alpha5.LabelCapacityType:       currentInstance.Offerings[0].CapacityType,
-						v1.LabelTopologyZone:             currentInstance.Offerings[0].Zone,
-					},
-				},
-				Status: v1alpha5.MachineStatus{
-					ProviderID: test.RandomProviderID(),
-					Allocatable: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:  resource.MustParse("32"),
-						v1.ResourcePods: resource.MustParse("100"),
-					},
-				},
-			})
-			pod := test.Pod(test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("100m"),
-						v1.ResourceMemory: resource.MustParse("100Mi"),
-					},
-				},
-			})
-			machines = append(machines, m)
-			nodes = append(nodes, n)
-			ExpectApplied(ctx, env.Client, m, n, pod)
-			ExpectManualBinding(ctx, env.Client, pod, n)
-		}
-		for i := 0; i < 2; i++ {
-			nc, n := test.NodeClaimAndNode(v1beta1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1beta1.NodePoolLabelKey:     nodePool.Name,
-						v1.LabelInstanceTypeStable:   currentInstance.Name,
-						v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
-						v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
-					},
-				},
-				Status: v1beta1.NodeClaimStatus{
-					ProviderID: test.RandomProviderID(),
-					Allocatable: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:  resource.MustParse("32"),
-						v1.ResourcePods: resource.MustParse("100"),
-					},
-				},
-			})
-			pod := test.Pod(test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("100m"),
-						v1.ResourceMemory: resource.MustParse("100Mi"),
-					},
-				},
-			})
-			nodeClaims = append(nodeClaims, nc)
-			nodes = append(nodes, n)
-			ExpectApplied(ctx, env.Client, nc, n, pod)
-			ExpectManualBinding(ctx, env.Client, pod, n)
-		}
-
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, nodes, machines)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-		fakeClock.Step(10 * time.Minute)
-		wg := sync.WaitGroup{}
-		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
-		wg.Wait()
-
-		// Cascade any deletion of the machines to the nodes
-		ExpectMachinesCascadeDeletion(ctx, env.Client, machines...)
-		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims...)
-
-		// all machines and nodeclaims should be replaced with a single nodeclaim
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(0))
-		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-
-		ExpectNotFound(ctx, env.Client, lo.Map(machines, func(m *v1alpha5.Machine, _ int) client.Object { return m })...)
-		ExpectNotFound(ctx, env.Client, lo.Map(nodeClaims, func(nc *v1beta1.NodeClaim, _ int) client.Object { return nc })...)
-		ExpectNotFound(ctx, env.Client, lo.Map(nodes, func(n *v1.Node, _ int) client.Object { return n })...)
-	})
-	It("should disrupt Machines and NodeClaims to consolidate pods onto a single Machine", func() {
-		provisioner.Spec.Consolidation = &v1alpha5.Consolidation{Enabled: lo.ToPtr(true)}
-		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
-		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-			Name: "current-on-demand",
-			Offerings: []cloudprovider.Offering{
-				{
-					CapacityType: v1alpha5.CapacityTypeOnDemand,
-					Zone:         "test-zone-1a",
-					Price:        1.5,
-					Available:    false,
-				},
-			},
-		})
-		replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-			Name: "spot-replacement",
-			Offerings: []cloudprovider.Offering{
-				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
-					Zone:         "test-zone-1a",
-					Price:        1.0,
-					Available:    true,
-				},
-				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
-					Zone:         "test-zone-1b",
-					Price:        0.2,
-					Available:    true,
-				},
-				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
-					Zone:         "test-zone-1c",
-					Price:        0.4,
-					Available:    true,
-				},
-			},
-		})
-		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-			currentInstance,
-			replacementInstance,
-		}
-		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
-			{
-				Key:      v1.LabelInstanceTypeStable,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{currentInstance.Name},
-			},
-		}
-		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
-			{
-				Key:      v1.LabelInstanceTypeStable,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{replacementInstance.Name},
-			},
-			{
-				Key:      v1alpha5.LabelCapacityType,
-				Operator: v1.NodeSelectorOpExists,
-			},
-		}
-
-		ExpectApplied(ctx, env.Client, provisioner, nodePool)
-
-		var machines []*v1alpha5.Machine
-		var nodeClaims []*v1beta1.NodeClaim
-		var nodes []*v1.Node
-		for i := 0; i < 2; i++ {
-			m, n := test.MachineAndNode(v1alpha5.Machine{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1alpha5.ProvisionerNameLabelKey: provisioner.Name,
-						v1.LabelInstanceTypeStable:       currentInstance.Name,
-						v1alpha5.LabelCapacityType:       currentInstance.Offerings[0].CapacityType,
-						v1.LabelTopologyZone:             currentInstance.Offerings[0].Zone,
-					},
-				},
-				Status: v1alpha5.MachineStatus{
-					ProviderID: test.RandomProviderID(),
-					Allocatable: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:  resource.MustParse("32"),
-						v1.ResourcePods: resource.MustParse("100"),
-					},
-				},
-			})
-			pod := test.Pod(test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("100m"),
-						v1.ResourceMemory: resource.MustParse("100Mi"),
-					},
-				},
-			})
-			machines = append(machines, m)
-			nodes = append(nodes, n)
-			ExpectApplied(ctx, env.Client, m, n, pod)
-			ExpectManualBinding(ctx, env.Client, pod, n)
-		}
-		for i := 0; i < 2; i++ {
-			nc, n := test.NodeClaimAndNode(v1beta1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1beta1.NodePoolLabelKey:     nodePool.Name,
-						v1.LabelInstanceTypeStable:   currentInstance.Name,
-						v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
-						v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
-					},
-				},
-				Status: v1beta1.NodeClaimStatus{
-					ProviderID: test.RandomProviderID(),
-					Allocatable: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:  resource.MustParse("32"),
-						v1.ResourcePods: resource.MustParse("100"),
-					},
-				},
-			})
-			pod := test.Pod(test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("100m"),
-						v1.ResourceMemory: resource.MustParse("100Mi"),
-					},
-				},
-			})
-			nodeClaims = append(nodeClaims, nc)
-			nodes = append(nodes, n)
-			ExpectApplied(ctx, env.Client, nc, n, pod)
-			ExpectManualBinding(ctx, env.Client, pod, n)
-		}
-
-		// inform cluster state about nodes and machines
-		ExpectMakeNodesAndMachinesInitializedAndStateUpdated(ctx, env.Client, nodeStateController, machineStateController, nodes, machines)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-		fakeClock.Step(10 * time.Minute)
-		wg := sync.WaitGroup{}
-		ExpectTriggerVerifyAction(&wg)
-		ExpectMakeNewMachinesReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
-		wg.Wait()
-
-		// Cascade any deletion of the machines to the nodes
-		ExpectMachinesCascadeDeletion(ctx, env.Client, machines...)
-		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims...)
-
-		// all machines and nodeclaims should be replaced with a single nodeclaim
-		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
-		Expect(ExpectMachines(ctx, env.Client)).To(HaveLen(1))
-		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-
-		ExpectNotFound(ctx, env.Client, lo.Map(machines, func(m *v1alpha5.Machine, _ int) client.Object { return m })...)
-		ExpectNotFound(ctx, env.Client, lo.Map(nodeClaims, func(nc *v1beta1.NodeClaim, _ int) client.Object { return nc })...)
-		ExpectNotFound(ctx, env.Client, lo.Map(nodes, func(n *v1.Node, _ int) client.Object { return n })...)
+		node = ExpectNodeExists(ctx, env.Client, node.Name)
+		Expect(node.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 	})
 })
 
@@ -1336,96 +508,8 @@ func ExpectTriggerVerifyAction(wg *sync.WaitGroup) {
 	}()
 }
 
-// ExpectNewMachinesDeleted simulates the machines being created and then removed, similar to what would happen
-// during an ICE error on the created machine
-func ExpectNewMachinesDeleted(ctx context.Context, c client.Client, wg *sync.WaitGroup, numNewMachines int) {
-	GinkgoHelper()
-	existingMachines := ExpectMachines(ctx, c)
-	existingMachineNames := sets.NewString(lo.Map(existingMachines, func(m *v1alpha5.Machine, _ int) string {
-		return m.Name
-	})...)
-
-	wg.Add(1)
-	go func() {
-		GinkgoHelper()
-		machinesDeleted := 0
-		ctx, cancel := context.WithTimeout(ctx, time.Second*30) // give up after 30s
-		defer GinkgoRecover()
-		defer wg.Done()
-		defer cancel()
-		for {
-			select {
-			case <-time.After(50 * time.Millisecond):
-				machineList := &v1alpha5.MachineList{}
-				if err := c.List(ctx, machineList); err != nil {
-					continue
-				}
-				for i := range machineList.Items {
-					m := &machineList.Items[i]
-					if existingMachineNames.Has(m.Name) {
-						continue
-					}
-					Expect(client.IgnoreNotFound(c.Delete(ctx, m))).To(Succeed())
-					machinesDeleted++
-					if machinesDeleted == numNewMachines {
-						return
-					}
-				}
-			case <-ctx.Done():
-				Fail(fmt.Sprintf("waiting for machines to be deleted, %s", ctx.Err()))
-			}
-		}
-	}()
-}
-
-func ExpectMakeNewMachinesReady(ctx context.Context, c client.Client, wg *sync.WaitGroup, cluster *state.Cluster,
-	cloudProvider cloudprovider.CloudProvider, numNewMachines int) {
-	GinkgoHelper()
-
-	existingMachines := ExpectMachines(ctx, c)
-	existingMachineNames := sets.NewString(lo.Map(existingMachines, func(m *v1alpha5.Machine, _ int) string {
-		return m.Name
-	})...)
-
-	wg.Add(1)
-	go func() {
-		machinesMadeReady := 0
-		ctx, cancel := context.WithTimeout(ctx, time.Second*10) // give up after 10s
-		defer GinkgoRecover()
-		defer wg.Done()
-		defer cancel()
-		for {
-			select {
-			case <-time.After(50 * time.Millisecond):
-				machineList := &v1alpha5.MachineList{}
-				if err := c.List(ctx, machineList); err != nil {
-					continue
-				}
-				for i := range machineList.Items {
-					m := &machineList.Items[i]
-					if existingMachineNames.Has(m.Name) {
-						continue
-					}
-					m, n := ExpectMachineDeployed(ctx, c, cluster, cloudProvider, m)
-					ExpectMakeMachinesInitialized(ctx, c, m)
-					ExpectMakeNodesInitialized(ctx, c, n)
-
-					machinesMadeReady++
-					existingMachineNames.Insert(m.Name)
-					// did we make all the nodes ready that we expected?
-					if machinesMadeReady == numNewMachines {
-						return
-					}
-				}
-			case <-ctx.Done():
-				Fail(fmt.Sprintf("waiting for machines to be ready, %s", ctx.Err()))
-			}
-		}
-	}()
-}
-
-// ExpectNewMachinesDeleted simulates the machines being created and then removed, similar to what would happen
-// during an ICE error on the created machine
+// ExpectNewNodeClaimsDeleted simulates the nodeClaims being created and then removed, similar to what would happen
+// during an ICE error on the created nodeClaim
 func ExpectNewNodeClaimsDeleted(ctx context.Context, c client.Client, wg *sync.WaitGroup, numNewNodeClaims int) {
 	GinkgoHelper()
 	existingNodeClaims := ExpectNodeClaims(ctx, c)

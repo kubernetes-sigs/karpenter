@@ -31,12 +31,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/events"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	machineutil "github.com/aws/karpenter-core/pkg/utils/machine"
 	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
 )
 
@@ -136,38 +134,6 @@ func (c *NodeClaimController) Builder(_ context.Context, m manager.Manager) core
 		Watches(
 			&v1.Node{},
 			nodeclaimutil.NodeEventHandler(c.kubeClient),
-		).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
-	)
-}
-
-type MachineController struct {
-	*Controller
-}
-
-func NewMachineController(clk clock.Clock, kubeClient client.Client, recorder events.Recorder,
-	provider cloudprovider.CloudProvider) corecontroller.Controller {
-
-	return corecontroller.Typed[*v1alpha5.Machine](kubeClient, &MachineController{
-		Controller: NewController(clk, kubeClient, recorder, provider),
-	})
-}
-
-func (c *MachineController) Name() string {
-	return "consistency"
-}
-
-func (c *MachineController) Reconcile(ctx context.Context, machine *v1alpha5.Machine) (reconcile.Result, error) {
-	return c.Controller.Reconcile(ctx, nodeclaimutil.New(machine))
-}
-
-func (c *MachineController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(controllerruntime.
-		NewControllerManagedBy(m).
-		For(&v1alpha5.Machine{}).
-		Watches(
-			&v1.Node{},
-			machineutil.NodeEventHandler(c.kubeClient),
 		).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
 	)

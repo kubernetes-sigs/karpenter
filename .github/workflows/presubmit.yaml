@@ -6,16 +6,23 @@ on:
   workflow_dispatch:
 jobs:
   presubmit:
+    permissions:
+      issues: write
     runs-on: ubuntu-latest
     strategy:
         matrix:
           k8sVersion: ["1.23.x", "1.24.x", "1.25.x", "1.26.x", "1.27.x", "1.28.x"]
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
     - uses: ./.github/actions/install-deps
       with:
         k8sVersion: ${{ matrix.k8sVersion }}
+    - name: Enable the actionlint matcher
+      run: echo "::add-matcher::.github/actionlint-matcher.json"
     - run: K8S_VERSION=${{ matrix.k8sVersion }} make presubmit
-    - uses: shogo82148/actions-goveralls@v1
-      with:
-        path-to-profile: coverage.out
+    - name: Send coverage
+      # should only send converage once https://docs.coveralls.io/parallel-builds
+      if: matrix.k8sVersion == '1.28.x'
+      env:
+        COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: goveralls -coverprofile=coverage.out -service=github

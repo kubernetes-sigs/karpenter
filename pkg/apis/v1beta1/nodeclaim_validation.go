@@ -22,6 +22,7 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -56,6 +57,13 @@ var (
 		"pid.available",
 	)
 )
+
+func (in *NodeClaim) SupportedVerbs() []admissionregistrationv1.OperationType {
+	return []admissionregistrationv1.OperationType{
+		admissionregistrationv1.Create,
+		admissionregistrationv1.Update,
+	}
+}
 
 // Validate the NodeClaim
 func (in *NodeClaim) Validate(_ context.Context) (errs *apis.FieldError) {
@@ -105,7 +113,7 @@ func (in *NodeClaimSpec) validateTaintsField(taints []v1.Taint, existing map[tai
 		switch taint.Effect {
 		case v1.TaintEffectNoSchedule, v1.TaintEffectPreferNoSchedule, v1.TaintEffectNoExecute, "":
 		default:
-			errs = errs.Also(apis.ErrInvalidArrayValue(taint.Effect, "effect", i))
+			errs = errs.Also(apis.ErrInvalidArrayValue(taint.Effect, fieldName, i))
 		}
 
 		// Check for duplicate OwnerKey/Effect pairs
@@ -124,14 +132,14 @@ func (in *NodeClaimSpec) validateTaintsField(taints []v1.Taint, existing map[tai
 // NodeClaim requirements only support well known labels.
 func (in *NodeClaimSpec) validateRequirements() (errs *apis.FieldError) {
 	for i, requirement := range in.Requirements {
-		if err := in.validateRequirement(requirement); err != nil {
+		if err := ValidateRequirement(requirement); err != nil {
 			errs = errs.Also(apis.ErrInvalidArrayValue(err, "requirements", i))
 		}
 	}
 	return errs
 }
 
-func (in *NodeClaimSpec) validateRequirement(requirement v1.NodeSelectorRequirement) error { //nolint:gocyclo
+func ValidateRequirement(requirement v1.NodeSelectorRequirement) error { //nolint:gocyclo
 	var errs error
 	if normalized, ok := NormalizedLabels[requirement.Key]; ok {
 		requirement.Key = normalized
