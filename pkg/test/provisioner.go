@@ -25,7 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
 )
 
 // ProvisionerOptions customizes a Provisioner.

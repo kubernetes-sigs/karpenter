@@ -28,10 +28,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
+	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 type Controller struct {
@@ -40,7 +40,7 @@ type Controller struct {
 	cloudProvider cloudprovider.CloudProvider
 }
 
-func NewController(c clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
+func NewController(c clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) operatorcontroller.Controller {
 	return &Controller{
 		clock:         c,
 		kubeClient:    kubeClient,
@@ -95,6 +95,6 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	return reconcile.Result{RequeueAfter: time.Minute * 2}, nil
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.NewSingletonManagedBy(m)
+func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+	return operatorcontroller.NewSingletonManagedBy(m)
 }

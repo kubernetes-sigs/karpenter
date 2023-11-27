@@ -24,9 +24,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"knative.dev/pkg/logging"
 
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
-	"github.com/aws/karpenter-core/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
 const MultiNodeConsolidationTimeoutDuration = 1 * time.Minute

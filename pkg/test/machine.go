@@ -20,7 +20,7 @@ import (
 	"github.com/imdario/mergo"
 	v1 "k8s.io/api/core/v1"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
 )
 
 // Machine creates a test machine with defaults that can be overridden by MachineOptions.

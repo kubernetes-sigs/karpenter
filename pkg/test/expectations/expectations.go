@@ -46,17 +46,17 @@ import (
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/controllers/nodeclaim/lifecycle"
-	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
-	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/metrics"
-	"github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/operator/scheme"
-	pscheduling "github.com/aws/karpenter-core/pkg/scheduling"
-	"github.com/aws/karpenter-core/pkg/test"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/operator/scheme"
+	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/test"
 )
 
 const (

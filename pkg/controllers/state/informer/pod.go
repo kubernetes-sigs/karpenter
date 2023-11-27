@@ -27,8 +27,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 )
 
 var stateRetryPeriod = 1 * time.Minute
@@ -39,7 +39,7 @@ type PodController struct {
 	cluster    *state.Cluster
 }
 
-func NewPodController(kubeClient client.Client, cluster *state.Cluster) corecontroller.Controller {
+func NewPodController(kubeClient client.Client, cluster *state.Cluster) operatorcontroller.Controller {
 	return &PodController{
 		kubeClient: kubeClient,
 		cluster:    cluster,
@@ -70,8 +70,8 @@ func (c *PodController) Reconcile(ctx context.Context, req reconcile.Request) (r
 	return reconcile.Result{RequeueAfter: stateRetryPeriod}, nil
 }
 
-func (c *PodController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(controllerruntime.
+func (c *PodController) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+	return operatorcontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1.Pod{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))

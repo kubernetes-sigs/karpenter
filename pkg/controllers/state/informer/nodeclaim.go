@@ -25,9 +25,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 )
 
 // NodeClaimController reconciles machine for the purpose of maintaining state.
@@ -37,7 +37,7 @@ type NodeClaimController struct {
 }
 
 // NewNodeClaimController constructs a controller instance
-func NewNodeClaimController(kubeClient client.Client, cluster *state.Cluster) corecontroller.Controller {
+func NewNodeClaimController(kubeClient client.Client, cluster *state.Cluster) operatorcontroller.Controller {
 	return &NodeClaimController{
 		kubeClient: kubeClient,
 		cluster:    cluster,
@@ -63,8 +63,8 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 	return reconcile.Result{RequeueAfter: stateRetryPeriod}, nil
 }
 
-func (c *NodeClaimController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(controllerruntime.
+func (c *NodeClaimController) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+	return operatorcontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1beta1.NodeClaim{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))

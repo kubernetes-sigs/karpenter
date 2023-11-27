@@ -41,10 +41,10 @@ import (
 	"knative.dev/pkg/webhook/resourcesemantics/validation"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/operator/logging"
-	"github.com/aws/karpenter-core/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/operator/logging"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
 const component = "webhook"

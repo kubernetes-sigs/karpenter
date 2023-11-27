@@ -20,8 +20,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/cloudprovider/metrics"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/metrics"
 )
 
 var _ = Describe("Cloudprovider", func() {

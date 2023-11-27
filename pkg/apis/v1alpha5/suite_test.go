@@ -31,8 +31,8 @@ import (
 	. "knative.dev/pkg/logging/testing"
 	"knative.dev/pkg/ptr"
 
-	. "github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/test"
+	. "sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
+	"sigs.k8s.io/karpenter/pkg/test"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

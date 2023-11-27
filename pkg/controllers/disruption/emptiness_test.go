@@ -27,10 +27,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/test"
-	. "github.com/aws/karpenter-core/pkg/test/expectations"
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/test"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
 var _ = Describe("Emptiness", func() {

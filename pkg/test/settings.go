@@ -20,7 +20,7 @@ import (
 
 	"github.com/imdario/mergo"
 
-	"github.com/aws/karpenter-core/pkg/apis/settings"
+	"sigs.k8s.io/karpenter/pkg/apis/settings"
 )
 
 func Settings(overrides ...settings.Settings) *settings.Settings {

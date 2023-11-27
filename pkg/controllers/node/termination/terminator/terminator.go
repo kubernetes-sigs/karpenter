@@ -26,9 +26,9 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	podutil "github.com/aws/karpenter-core/pkg/utils/pod"
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	podutil "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
 type Terminator struct {

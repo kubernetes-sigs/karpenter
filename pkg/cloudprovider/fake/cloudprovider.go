@@ -27,12 +27,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/scheduling"
-	"github.com/aws/karpenter-core/pkg/test"
-	"github.com/aws/karpenter-core/pkg/utils/functional"
-	"github.com/aws/karpenter-core/pkg/utils/resources"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/test"
+	"sigs.k8s.io/karpenter/pkg/utils/functional"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)

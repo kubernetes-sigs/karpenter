@@ -22,8 +22,8 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/flowcontrol"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/events"
 )
 
 // PodNominationRateLimiter is a pointer so it rate-limits across events

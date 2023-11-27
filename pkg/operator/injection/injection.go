@@ -32,8 +32,8 @@ import (
 	"knative.dev/pkg/system"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/settings"
-	"github.com/aws/karpenter-core/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/apis/settings"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
 type controllerNameKeyType struct{}

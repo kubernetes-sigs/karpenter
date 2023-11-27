@@ -31,9 +31,9 @@ import (
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/metrics"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/metrics"
+	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 )
 
 const (
@@ -79,7 +79,7 @@ type Controller struct {
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client) corecontroller.Controller {
+func NewController(kubeClient client.Client) operatorcontroller.Controller {
 	return &Controller{
 		kubeClient:  kubeClient,
 		metricStore: metrics.NewStore(),
@@ -135,8 +135,8 @@ func makeLabels(nodePool *v1beta1.NodePool, resourceTypeName string) prometheus.
 	}
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(
+func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+	return operatorcontroller.Adapt(
 		controllerruntime.
 			NewControllerManagedBy(m).
 			For(&v1beta1.NodePool{}),

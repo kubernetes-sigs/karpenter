@@ -32,16 +32,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
-	"github.com/aws/karpenter-core/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	"sigs.k8s.io/karpenter/pkg/operator/controller"
 
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllertest"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	disruptionevents "github.com/aws/karpenter-core/pkg/controllers/disruption/events"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/events"
-	"github.com/aws/karpenter-core/pkg/utils/nodeclaim"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 const (

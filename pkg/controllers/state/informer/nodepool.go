@@ -25,12 +25,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 )
 
-var _ corecontroller.TypedController[*v1beta1.NodePool] = (*NodePoolController)(nil)
+var _ operatorcontroller.TypedController[*v1beta1.NodePool] = (*NodePoolController)(nil)
 
 // NodePoolController reconciles NodePools to re-trigger consolidation on change.
 type NodePoolController struct {
@@ -38,8 +38,8 @@ type NodePoolController struct {
 	cluster    *state.Cluster
 }
 
-func NewNodePoolController(kubeClient client.Client, cluster *state.Cluster) corecontroller.Controller {
-	return corecontroller.Typed[*v1beta1.NodePool](kubeClient, &NodePoolController{
+func NewNodePoolController(kubeClient client.Client, cluster *state.Cluster) operatorcontroller.Controller {
+	return operatorcontroller.Typed[*v1beta1.NodePool](kubeClient, &NodePoolController{
 		kubeClient: kubeClient,
 		cluster:    cluster,
 	})
@@ -55,8 +55,8 @@ func (c *NodePoolController) Reconcile(_ context.Context, _ *v1beta1.NodePool) (
 	return reconcile.Result{}, nil
 }
 
-func (c *NodePoolController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(controllerruntime.
+func (c *NodePoolController) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+	return operatorcontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1beta1.NodePool{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).

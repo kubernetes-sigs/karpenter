@@ -36,13 +36,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/logging"
 
-	"github.com/aws/karpenter-core/pkg/apis/settings"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
-	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/events"
-	"github.com/aws/karpenter-core/pkg/test"
+	"sigs.k8s.io/karpenter/pkg/apis/settings"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/test"
 
 	v1 "k8s.io/api/core/v1"
 )
