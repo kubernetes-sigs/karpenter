@@ -36,7 +36,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/logging"
 
-	"sigs.k8s.io/karpenter/pkg/apis/settings"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
@@ -115,7 +114,6 @@ func TestSchedulingProfile(t *testing.T) {
 func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	// disable logging
 	ctx = logging.WithLogger(context.Background(), zap.NewNop().Sugar())
-	ctx = settings.ToContext(ctx, test.Settings())
 	nodePool := test.NodePool()
 
 	instanceTypes := fake.InstanceTypes(instanceCount)

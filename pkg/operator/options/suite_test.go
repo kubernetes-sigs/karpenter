@@ -26,7 +26,6 @@ import (
 	"github.com/samber/lo"
 	. "knative.dev/pkg/logging/testing"
 
-	"sigs.k8s.io/karpenter/pkg/apis/settings"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
 )
@@ -107,7 +106,7 @@ var _ = Describe("Options", func() {
 			Expect(err).To(BeNil())
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
 				ServiceName:          lo.ToPtr(""),
-				DisableWebhook:       lo.ToPtr(false),
+				DisableWebhook:       lo.ToPtr(true),
 				WebhookPort:          lo.ToPtr(8443),
 				MetricsPort:          lo.ToPtr(8000),
 				WebhookMetricsPort:   lo.ToPtr(8001),
@@ -117,11 +116,11 @@ var _ = Describe("Options", func() {
 				EnableProfiling:      lo.ToPtr(false),
 				EnableLeaderElection: lo.ToPtr(true),
 				MemoryLimit:          lo.ToPtr[int64](-1),
-				LogLevel:             lo.ToPtr(""),
+				LogLevel:             lo.ToPtr("info"),
 				BatchMaxDuration:     lo.ToPtr(10 * time.Second),
 				BatchIdleDuration:    lo.ToPtr(time.Second),
 				FeatureGates: test.FeatureGates{
-					Drift: lo.ToPtr(false),
+					Drift: lo.ToPtr(true),
 				},
 			}))
 		})
@@ -265,43 +264,8 @@ var _ = Describe("Options", func() {
 			Entry("explicit true", "--disable-webhook=true", true),
 			Entry("explicit false", "--disable-webhook=false", false),
 			Entry("implicit true", "--disable-webhook", true),
-			Entry("implicit false", "", false),
+			Entry("implicit true", "", true),
 		)
-	})
-
-	Context("Merge", func() {
-		BeforeEach(func() {
-			ctx = settings.ToContext(ctx, &settings.Settings{
-				BatchMaxDuration:  50 * time.Second,
-				BatchIdleDuration: 50 * time.Second,
-				DriftEnabled:      true,
-			})
-		})
-
-		It("shouldn't overwrite BatchMaxDuration when specified by CLI", func() {
-			err := opts.Parse(fs, "--batch-max-duration", "1s")
-			Expect(err).To(BeNil())
-			opts.MergeSettings(ctx)
-			Expect(opts.BatchMaxDuration).To(Equal(time.Second))
-		})
-		It("shouldn't overwrite BatchIdleDuration when specified by CLI", func() {
-			err := opts.Parse(fs, "--batch-idle-duration", "1s")
-			Expect(err).To(BeNil())
-			opts.MergeSettings(ctx)
-			Expect(opts.BatchIdleDuration).To(Equal(time.Second))
-		})
-		It("shouldn't overwrite FeatureGates.Drift when specified by CLI", func() {
-			err := opts.Parse(fs, "--feature-gates", "Drift=false")
-			Expect(err).To(BeNil())
-			opts.MergeSettings(ctx)
-			Expect(opts.FeatureGates.Drift).To(BeFalse())
-		})
-		It("should use values from settings when not specified", func() {
-			err := opts.Parse(fs, "--batch-max-duration", "1s", "--feature-gates", "Drift=false")
-			Expect(err).To(BeNil())
-			opts.MergeSettings(ctx)
-			Expect(opts.BatchIdleDuration).To(Equal(50 * time.Second))
-		})
 	})
 
 	Context("Validation", func() {
