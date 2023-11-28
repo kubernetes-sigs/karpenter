@@ -26,6 +26,7 @@ import (
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -57,9 +58,15 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1beta1.NodePool) (recon
         return reconcile.Result{}, fmt.Errorf("nodeClassRef is nil")
     }
 
+    group,version,found:= strings.Cut(nodeClassRef.APIVersion, "/")
+
+    if !found {
+        return reconcile.Result{}, fmt.Errorf("failed to parse apiVersion: %v", nodeClassRef.APIVersion)
+    }
+
     gvr := schema.GroupVersionResource{
-        Group:    strings.Split(nodeClassRef.APIVersion,"/")[0],
-        Version:  strings.Split(nodeClassRef.APIVersion,"/")[1],
+        Group:    group,
+        Version:  version,
         Resource: strings.ToLower(nodeClassRef.Kind) + "es", 
     }
 
@@ -80,33 +87,33 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1beta1.NodePool) (recon
 
 func isResourceReady(nodeClassUnstructured *unstructured.Unstructured) bool {
 
-status, found, err := unstructured.NestedFieldCopy(nodeClassUnstructured.Object, "status")
-if err != nil || !found {
-    return false
-}
-
-conditions, found, err := unstructured.NestedSlice(status.(map[string]interface{}), "conditions")
-if err != nil || !found {
-    return false
-}
-
-for _, condition := range conditions {
-    conditionMap, ok := condition.(map[string]interface{})
-    if !ok {
-        continue
+    status, found, err := unstructured.NestedFieldCopy(nodeClassUnstructured.Object, "status")
+    if err != nil || !found {
+        return false
     }
 
-    conditionType, typeOk := conditionMap["type"].(string)
-    if !typeOk {
-        continue
+    conditions, found, err := unstructured.NestedSlice(status.(map[string]interface{}), "conditions")
+    if err != nil || !found {
+        return false
     }
-    conditionStatus, _ := conditionMap["status"].(string)
 
-    if conditionStatus == "True" && conditionType == "Ready" {
-        return true
+    for _, condition := range conditions {
+        conditionMap, ok := condition.(map[string]interface{})
+        if !ok {
+            continue
+        }
+
+        conditionType, typeOk := conditionMap["type"].(string)
+        if !typeOk {
+            continue
+        }
+        conditionStatus, _ := conditionMap["status"].(string)
+
+        if conditionStatus == "True" && conditionType == "Ready" {
+            return true
+        }
     }
-}
-    return false
+        return false
 }
 
 type NodePoolController struct {
@@ -126,7 +133,12 @@ func (c *NodePoolController) Name() string {
 func (c *NodePoolController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
-		WithEventFilter(predicate.GenerationChangedPredicate{}).
+		WithEventFilter(predicate.Funcs{
+            UpdateFunc: func(e event.UpdateEvent) bool { 
+                gvk := e.ObjectNew.GetObjectKind().GroupVersionKind()
+                return gvk.Kind == "EC2NodeClass"
+             },
+        }).
 		For(&v1beta1.NodePool{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
 	)

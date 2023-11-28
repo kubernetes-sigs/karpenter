@@ -131,13 +131,7 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 	if len(results.NewNodeClaims) == 0 {
 		return reconcile.Result{}, nil
 	}
-	np , err := nodepoolutil.Get(ctx, p.kubeClient, results.NewNodeClaims[0].NodePoolName)
-	if err != nil {
-		return reconcile.Result{}, err
-	}
-	if !np.StatusConditions().GetCondition(v1beta1.NodeClassReady).IsTrue() {
-		return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
-	}
+
 	_, err = p.CreateNodeClaims(ctx, results.NewNodeClaims, WithReason(metrics.ProvisioningReason), RecordPodNomination)
 	return reconcile.Result{}, err
 }
@@ -222,7 +216,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 			logging.FromContext(ctx).With("nodepool", n.Name).Errorf("nodepool failed validation, %s", err)
 			return false
 		}
-		return n.DeletionTimestamp.IsZero()
+		return n.DeletionTimestamp.IsZero() && n.StatusConditions().GetCondition(v1beta1.NodeClassReady).IsTrue()
 	})
 	if len(nodePoolList.Items) == 0 {
 		return nil, ErrNodePoolsNotFound
