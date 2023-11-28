@@ -26,9 +26,9 @@ import (
 	"github.com/samber/lo"
 	. "knative.dev/pkg/logging/testing"
 
-	"github.com/aws/karpenter-core/pkg/apis/settings"
-	"github.com/aws/karpenter-core/pkg/operator/options"
-	"github.com/aws/karpenter-core/pkg/test"
+	"sigs.k8s.io/karpenter/pkg/apis/settings"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/test"
 )
 
 var ctx context.Context

@@ -18,7 +18,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/aws/karpenter-core/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
 // Batcher separates a stream of Trigger() calls into windowed slices. The

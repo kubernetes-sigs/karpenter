@@ -52,7 +52,7 @@ linters-settings:
     locale: US
     ignore-words: []
   goimports:
-    local-prefixes: github.com/aws/karpenter-core
+    local-prefixes: sigs.k8s.io/karpenter
   goheader:
     template: |-
       Licensed under the Apache License, Version 2.0 (the "License");

@@ -31,9 +31,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	corecontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
+	nodepoolutil "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 

@@ -41,8 +41,8 @@ import (
 
 	ctrl "sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/aws/karpenter-core/pkg/operator/injection"
-	"github.com/aws/karpenter-core/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
 const (

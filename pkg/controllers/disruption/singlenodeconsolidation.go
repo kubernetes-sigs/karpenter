@@ -21,7 +21,7 @@ import (
 
 	"knative.dev/pkg/logging"
 
-	"github.com/aws/karpenter-core/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
 const SingleNodeConsolidationTimeoutDuration = 3 * time.Minute

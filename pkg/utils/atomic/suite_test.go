@@ -23,7 +23,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/aws/karpenter-core/pkg/utils/atomic"
+	"sigs.k8s.io/karpenter/pkg/utils/atomic"
 )
 
 func TestAtomic(t *testing.T) {

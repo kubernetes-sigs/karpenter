@@ -1,4 +1,4 @@
-module github.com/aws/karpenter-core
+module sigs.k8s.io/karpenter
 
 go 1.21
 

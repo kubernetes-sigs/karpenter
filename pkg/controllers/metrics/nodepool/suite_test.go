@@ -26,13 +26,13 @@ import (
 	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/controllers/metrics/nodepool"
-	"github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/operator/scheme"
-	"github.com/aws/karpenter-core/pkg/test"
-	. "github.com/aws/karpenter-core/pkg/test/expectations"
+	"sigs.k8s.io/karpenter/pkg/apis"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool"
+	"sigs.k8s.io/karpenter/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/operator/scheme"
+	"sigs.k8s.io/karpenter/pkg/test"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
 var nodePoolController controller.Controller

@@ -21,16 +21,16 @@ import (
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/controllers/nodeclaim/disruption"
-	controllerprov "github.com/aws/karpenter-core/pkg/controllers/nodepool/hash"
-	"github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/operator/options"
-	. "github.com/aws/karpenter-core/pkg/test/expectations"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
+	"sigs.k8s.io/karpenter/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/test"
+	"sigs.k8s.io/karpenter/pkg/test"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -365,7 +365,7 @@ var _ = Describe("Drift", func() {
 		var nodePoolController controller.Controller
 		BeforeEach(func() {
 			cp.Drifted = ""
-			nodePoolController = controllerprov.NewNodePoolController(env.Client)
+			nodePoolController = hash.NewNodePoolController(env.Client)
 			nodePoolOptions = v1beta1.NodePool{
 				ObjectMeta: nodePool.ObjectMeta,
 				Spec: v1beta1.NodePoolSpec{

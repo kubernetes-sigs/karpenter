@@ -21,7 +21,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/utils/pod"
+	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
 // GetNodePods gets the list of schedulable pods from a variadic list of nodes

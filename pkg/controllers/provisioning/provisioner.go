@@ -35,19 +35,19 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/scheduling"
-	"github.com/aws/karpenter-core/pkg/utils/functional"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
-	"github.com/aws/karpenter-core/pkg/utils/pretty"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/utils/functional"
+	nodepoolutil "sigs.k8s.io/karpenter/pkg/utils/nodepool"
+	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	scheduler "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/events"
-	"github.com/aws/karpenter-core/pkg/metrics"
-	"github.com/aws/karpenter-core/pkg/utils/pod"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
 // LaunchOptions are the set of options that can be used to trigger certain

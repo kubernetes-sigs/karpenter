@@ -31,13 +31,13 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	coreapis "github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/operator/scheme"
-	"github.com/aws/karpenter-core/pkg/test"
-	. "github.com/aws/karpenter-core/pkg/test/expectations"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
+	karpenterapis "sigs.k8s.io/karpenter/pkg/apis"
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/operator/scheme"
+	"sigs.k8s.io/karpenter/pkg/test"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	nodepoolutil "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
 var ctx context.Context
@@ -50,7 +50,7 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(coreapis.CRDs...))
+	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(karpenterapis.CRDs...))
 })
 
 var _ = AfterSuite(func() {

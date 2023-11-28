@@ -25,11 +25,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/scheduling"
-	nodeutil "github.com/aws/karpenter-core/pkg/utils/node"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
-	"github.com/aws/karpenter-core/pkg/utils/resources"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
+	nodeutil "sigs.k8s.io/karpenter/pkg/utils/node"
+	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 type Initialization struct {
