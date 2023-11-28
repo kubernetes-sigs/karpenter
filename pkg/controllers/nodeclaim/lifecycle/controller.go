@@ -25,7 +25,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -45,6 +44,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/result"
 )
 
+var _ operatorcontroller.TypedController[*v1beta1.NodeClaim] = (*Controller)(nil)
+
 type nodeClaimReconciler interface {
 	Reconcile(context.Context, *v1beta1.NodeClaim) (reconcile.Result, error)
 }
@@ -62,15 +63,15 @@ type Controller struct {
 	liveness       *Liveness
 }
 
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) *Controller {
-	return &Controller{
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) operatorcontroller.Controller {
+	return operatorcontroller.Typed[*v1beta1.NodeClaim](kubeClient, &Controller{
 		kubeClient: kubeClient,
 
 		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Minute, time.Second*10), recorder: recorder},
 		registration:   &Registration{kubeClient: kubeClient},
 		initialization: &Initialization{kubeClient: kubeClient},
 		liveness:       &Liveness{clock: clk, kubeClient: kubeClient},
-	}
+	})
 }
 
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
@@ -120,28 +121,11 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	return result.Min(results...), nil
 }
 
-var _ operatorcontroller.TypedController[*v1beta1.NodeClaim] = (*NodeClaimController)(nil)
-
-type NodeClaimController struct {
-	*Controller
-}
-
-func NewNodeClaimController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) operatorcontroller.Controller {
-	return operatorcontroller.Typed[*v1beta1.NodeClaim](kubeClient, &NodeClaimController{
-		Controller: NewController(clk, kubeClient, cloudProvider, recorder),
-	})
-}
-
-func (*NodeClaimController) Name() string {
+func (*Controller) Name() string {
 	return "nodeclaim.lifecycle"
 }
 
-func (c *NodeClaimController) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("nodepool", nodeClaim.Labels[v1beta1.NodePoolLabelKey]))
-	return c.Controller.Reconcile(ctx, nodeClaim)
-}
-
-func (c *NodeClaimController) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
 	return operatorcontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1beta1.NodeClaim{}, builder.WithPredicates(

@@ -66,7 +66,7 @@ var _ = BeforeSuite(func() {
 	nodeClaimController = informer.NewNodeClaimController(env.Client, cluster)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	nodePoolInformerController = informer.NewNodePoolController(env.Client, cluster)
-	nodePoolController = counter.NewNodePoolController(env.Client, cluster)
+	nodePoolController = counter.NewController(env.Client, cluster)
 })
 
 var _ = AfterSuite(func() {

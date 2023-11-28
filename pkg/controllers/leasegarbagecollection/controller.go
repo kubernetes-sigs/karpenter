@@ -29,6 +29,8 @@ import (
 	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 )
 
+var _ operatorcontroller.TypedController[*v1.Lease] = (*Controller)(nil)
+
 // Controller for the resource
 type Controller struct {
 	kubeClient client.Client
