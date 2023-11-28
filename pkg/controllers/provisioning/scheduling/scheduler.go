@@ -33,7 +33,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 	"github.com/aws/karpenter-core/pkg/utils/pod"
 	"github.com/aws/karpenter-core/pkg/utils/pretty"
 	"github.com/aws/karpenter-core/pkg/utils/resources"
@@ -47,7 +46,7 @@ type SchedulerOptions struct {
 
 func NewScheduler(ctx context.Context, kubeClient client.Client, nodeClaimTemplates []*NodeClaimTemplate,
 	nodePools []v1beta1.NodePool, cluster *state.Cluster, stateNodes []*state.StateNode, topology *Topology,
-	instanceTypes map[nodepoolutil.Key][]*cloudprovider.InstanceType, daemonSetPods []*v1.Pod,
+	instanceTypes map[string][]*cloudprovider.InstanceType, daemonSetPods []*v1.Pod,
 	recorder events.Recorder, opts SchedulerOptions) *Scheduler {
 
 	// if any of the nodePools add a taint with a prefer no schedule effect, we add a toleration for the taint
@@ -72,10 +71,10 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, nodeClaimTempla
 		recorder:           recorder,
 		opts:               opts,
 		preferences:        &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
-		remainingResources: map[nodepoolutil.Key]v1.ResourceList{},
+		remainingResources: map[string]v1.ResourceList{},
 	}
 	for _, nodePool := range nodePools {
-		s.remainingResources[nodepoolutil.Key{Name: nodePool.Name, IsProvisioner: nodePool.IsProvisioner}] = v1.ResourceList(nodePool.Spec.Limits)
+		s.remainingResources[nodePool.Name] = v1.ResourceList(nodePool.Spec.Limits)
 	}
 	s.calculateExistingNodeClaims(stateNodes, daemonSetPods)
 	return s
@@ -86,8 +85,8 @@ type Scheduler struct {
 	newNodeClaims      []*NodeClaim
 	existingNodes      []*ExistingNode
 	nodeClaimTemplates []*NodeClaimTemplate
-	remainingResources map[nodepoolutil.Key]v1.ResourceList               // (NodePool name, isProvisioner) -> remaining resources for that NodePool
-	instanceTypes      map[nodepoolutil.Key][]*cloudprovider.InstanceType // (NodePool name, isProvisioner) -> instance types for NodePool
+	remainingResources map[string]v1.ResourceList               // (NodePool name) -> remaining resources for that NodePool
+	instanceTypes      map[string][]*cloudprovider.InstanceType // (NodePool name) -> instance types for NodePool
 	daemonOverhead     map[*NodeClaimTemplate]v1.ResourceList
 	preferences        *Preferences
 	topology           *Topology
@@ -255,30 +254,29 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 	// Create new node
 	var errs error
 	for _, nodeClaimTemplate := range s.nodeClaimTemplates {
-		instanceTypes := s.instanceTypes[nodeClaimTemplate.OwnerKey]
+		instanceTypes := s.instanceTypes[nodeClaimTemplate.NodePoolName]
 		// if limits have been applied to the nodepool, ensure we filter instance types to avoid violating those limits
-		if remaining, ok := s.remainingResources[nodeClaimTemplate.OwnerKey]; ok {
-			instanceTypes = filterByRemainingResources(s.instanceTypes[nodeClaimTemplate.OwnerKey], remaining)
+		if remaining, ok := s.remainingResources[nodeClaimTemplate.NodePoolName]; ok {
+			instanceTypes = filterByRemainingResources(s.instanceTypes[nodeClaimTemplate.NodePoolName], remaining)
 			if len(instanceTypes) == 0 {
-				errs = multierr.Append(errs, fmt.Errorf("all available instance types exceed limits for %s: %q", nodeClaimTemplate.OwnerKind(), nodeClaimTemplate.OwnerKey.Name))
+				errs = multierr.Append(errs, fmt.Errorf("all available instance types exceed limits for nodepool: %q", nodeClaimTemplate.NodePoolName))
 				continue
-			} else if len(s.instanceTypes[nodeClaimTemplate.OwnerKey]) != len(instanceTypes) && !s.opts.SimulationMode {
-				logging.FromContext(ctx).With(nodeClaimTemplate.OwnerKind(), nodeClaimTemplate.OwnerKey.Name).Debugf("%d out of %d instance types were excluded because they would breach limits",
-					len(s.instanceTypes[nodeClaimTemplate.OwnerKey])-len(instanceTypes), len(s.instanceTypes[nodeClaimTemplate.OwnerKey]))
+			} else if len(s.instanceTypes[nodeClaimTemplate.NodePoolName]) != len(instanceTypes) && !s.opts.SimulationMode {
+				logging.FromContext(ctx).With("nodepool", nodeClaimTemplate.NodePoolName).Debugf("%d out of %d instance types were excluded because they would breach limits",
+					len(s.instanceTypes[nodeClaimTemplate.NodePoolName])-len(instanceTypes), len(s.instanceTypes[nodeClaimTemplate.NodePoolName]))
 			}
 		}
 		nodeClaim := NewNodeClaim(nodeClaimTemplate, s.topology, s.daemonOverhead[nodeClaimTemplate], instanceTypes)
 		if err := nodeClaim.Add(pod); err != nil {
-			errs = multierr.Append(errs, fmt.Errorf("incompatible with %s %q, daemonset overhead=%s, %w",
-				nodeClaimTemplate.OwnerKind(),
-				nodeClaimTemplate.OwnerKey.Name,
+			errs = multierr.Append(errs, fmt.Errorf("incompatible with nodepool %q, daemonset overhead=%s, %w",
+				nodeClaimTemplate.NodePoolName,
 				resources.String(s.daemonOverhead[nodeClaimTemplate]),
 				err))
 			continue
 		}
 		// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
 		s.newNodeClaims = append(s.newNodeClaims, nodeClaim)
-		s.remainingResources[nodeClaimTemplate.OwnerKey] = subtractMax(s.remainingResources[nodeClaimTemplate.OwnerKey], nodeClaim.InstanceTypeOptions)
+		s.remainingResources[nodeClaimTemplate.NodePoolName] = subtractMax(s.remainingResources[nodeClaimTemplate.NodePoolName], nodeClaim.InstanceTypeOptions)
 		return nil
 	}
 	return errs
@@ -303,8 +301,8 @@ func (s *Scheduler) calculateExistingNodeClaims(stateNodes []*state.StateNode, d
 		// We don't use the status field and instead recompute the remaining resources to ensure we have a consistent view
 		// of the cluster during scheduling.  Depending on how node creation falls out, this will also work for cases where
 		// we don't create NodeClaim resources.
-		if _, ok := s.remainingResources[node.OwnerKey()]; ok {
-			s.remainingResources[node.OwnerKey()] = resources.Subtract(s.remainingResources[node.OwnerKey()], node.Capacity())
+		if _, ok := s.remainingResources[node.Labels()[v1beta1.NodePoolLabelKey]]; ok {
+			s.remainingResources[node.Labels()[v1beta1.NodePoolLabelKey]] = resources.Subtract(s.remainingResources[node.Labels()[v1beta1.NodePoolLabelKey]], node.Capacity())
 		}
 	}
 	// Order the existing nodes for scheduling with initialized nodes first

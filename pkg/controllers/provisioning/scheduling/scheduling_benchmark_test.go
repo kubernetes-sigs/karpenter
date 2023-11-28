@@ -32,6 +32,10 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/clock"
 
+	"go.uber.org/zap"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"knative.dev/pkg/logging"
+
 	"github.com/aws/karpenter-core/pkg/apis/settings"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
@@ -39,11 +43,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	"github.com/aws/karpenter-core/pkg/events"
 	"github.com/aws/karpenter-core/pkg/test"
-	"github.com/aws/karpenter-core/pkg/utils/nodepool"
-
-	"go.uber.org/zap"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"knative.dev/pkg/logging"
 
 	v1 "k8s.io/api/core/v1"
 )
@@ -124,7 +123,7 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	cloudProvider.InstanceTypes = instanceTypes
 	scheduler := scheduling.NewScheduler(ctx, nil, []*scheduling.NodeClaimTemplate{scheduling.NewNodeClaimTemplate(nodePool)},
 		nil, state.NewCluster(&clock.RealClock{}, nil, cloudProvider), nil, &scheduling.Topology{},
-		map[nodepool.Key][]*cloudprovider.InstanceType{nodepool.Key{Name: nodePool.Name, IsProvisioner: false}: instanceTypes}, nil,
+		map[string][]*cloudprovider.InstanceType{nodePool.Name: instanceTypes}, nil,
 		events.NewRecorder(&record.FakeRecorder{}),
 		scheduling.SchedulerOptions{})
 

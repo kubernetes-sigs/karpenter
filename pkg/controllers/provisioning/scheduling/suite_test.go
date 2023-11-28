@@ -37,7 +37,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
@@ -421,6 +420,20 @@ var _ = Context("NodePool", func() {
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					node := ExpectScheduled(ctx, env.Client, pod)
 					Expect(node.Labels).To(HaveKeyWithValue(domain+"/test", "test-value"))
+				}
+			})
+			It("should schedule pods that have node selectors with label in subdomain from restricted domains exceptions list", func() {
+				var requirements []v1.NodeSelectorRequirement
+				for domain := range v1beta1.LabelDomainExceptions {
+					requirements = append(requirements, v1.NodeSelectorRequirement{Key: "subdomain." + domain + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}})
+				}
+				nodePool.Spec.Template.Spec.Requirements = requirements
+				ExpectApplied(ctx, env.Client, nodePool)
+				for domain := range v1beta1.LabelDomainExceptions {
+					pod := test.UnschedulablePod()
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := ExpectScheduled(ctx, env.Client, pod)
+					Expect(node.Labels).To(HaveKeyWithValue("subdomain."+domain+"/test", "test-value"))
 				}
 			})
 			It("should schedule pods that have node selectors with label in wellknown label list", func() {
@@ -853,6 +866,20 @@ var _ = Context("NodePool", func() {
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					node := ExpectScheduled(ctx, env.Client, pod)
 					Expect(node.Labels).To(HaveKeyWithValue(domain+"/test", "test-value"))
+				}
+			})
+			It("should schedule pods that have node selectors with label in subdomain from restricted domains exceptions list", func() {
+				var requirements []v1.NodeSelectorRequirement
+				for domain := range v1beta1.LabelDomainExceptions {
+					requirements = append(requirements, v1.NodeSelectorRequirement{Key: "subdomain." + domain + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}})
+				}
+				nodePool.Spec.Template.Spec.Requirements = requirements
+				ExpectApplied(ctx, env.Client, nodePool)
+				for domain := range v1beta1.LabelDomainExceptions {
+					pod := test.UnschedulablePod()
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := ExpectScheduled(ctx, env.Client, pod)
+					Expect(node.Labels).To(HaveKeyWithValue("subdomain."+domain+"/test", "test-value"))
 				}
 			})
 			It("should schedule pods that have node selectors with label in wellknown label list", func() {
@@ -3272,7 +3299,7 @@ func ExpectMaxSkew(ctx context.Context, c client.Client, namespace string, const
 					skew[key]++
 				}
 			}
-			if constraint.TopologyKey == v1alpha5.LabelCapacityType {
+			if constraint.TopologyKey == v1beta1.CapacityTypeLabelKey {
 				if key, ok := node.Labels[constraint.TopologyKey]; ok {
 					skew[key]++
 				}

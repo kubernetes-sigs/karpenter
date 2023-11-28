@@ -22,20 +22,16 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/metrics"
 	"github.com/aws/karpenter-core/pkg/scheduling"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
 )
 
 // PodEventHandler is a watcher on v1.Pods that maps Pods to NodeClaim based on the node names
@@ -174,27 +170,6 @@ func AllNodesForNodeClaim(ctx context.Context, c client.Client, nodeClaim *v1bet
 	return lo.ToSlicePtr(nodeList.Items), nil
 }
 
-func NewKubeletConfiguration(kc *v1alpha5.KubeletConfiguration) *v1beta1.KubeletConfiguration {
-	if kc == nil {
-		return nil
-	}
-	return &v1beta1.KubeletConfiguration{
-		ClusterDNS:                  kc.ClusterDNS,
-		ContainerRuntime:            kc.ContainerRuntime,
-		MaxPods:                     kc.MaxPods,
-		PodsPerCore:                 kc.PodsPerCore,
-		SystemReserved:              kc.SystemReserved,
-		KubeReserved:                kc.KubeReserved,
-		EvictionHard:                kc.EvictionHard,
-		EvictionSoft:                kc.EvictionSoft,
-		EvictionSoftGracePeriod:     kc.EvictionSoftGracePeriod,
-		EvictionMaxPodGracePeriod:   kc.EvictionMaxPodGracePeriod,
-		ImageGCHighThresholdPercent: kc.ImageGCHighThresholdPercent,
-		ImageGCLowThresholdPercent:  kc.ImageGCLowThresholdPercent,
-		CPUCFSQuota:                 kc.CPUCFSQuota,
-	}
-}
-
 // NewFromNode converts a node into a pseudo-NodeClaim using known values from the node
 // Deprecated: This NodeClaim generator function can be removed when v1beta1 migration has completed.
 func NewFromNode(node *v1.Node) *v1beta1.NodeClaim {
@@ -203,7 +178,7 @@ func NewFromNode(node *v1.Node) *v1beta1.NodeClaim {
 			Name:        node.Name,
 			Annotations: node.Annotations,
 			Labels:      node.Labels,
-			Finalizers:  []string{v1alpha5.TerminationFinalizer},
+			Finalizers:  []string{v1beta1.TerminationFinalizer},
 		},
 		Spec: v1beta1.NodeClaimSpec{
 			Taints:       node.Spec.Taints,
@@ -318,25 +293,4 @@ func UpdateNodeOwnerReferences(nodeClaim *v1beta1.NodeClaim, node *v1.Node) *v1.
 		BlockOwnerDeletion: ptr.Bool(true),
 	})
 	return node
-}
-
-func Owner(ctx context.Context, c client.Client, obj interface{ GetLabels() map[string]string }) (*v1beta1.NodePool, error) {
-	if v, ok := obj.GetLabels()[v1beta1.NodePoolLabelKey]; ok {
-		nodePool := &v1beta1.NodePool{}
-		if err := c.Get(ctx, types.NamespacedName{Name: v}, nodePool); err != nil {
-			return nil, err
-		}
-		return nodePool, nil
-	}
-	return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "NodePool"}, "")
-}
-
-func OwnerKey(obj interface{ GetLabels() map[string]string }) nodepoolutil.Key {
-	if v, ok := obj.GetLabels()[v1beta1.NodePoolLabelKey]; ok {
-		return nodepoolutil.Key{Name: v, IsProvisioner: false}
-	}
-	if v, ok := obj.GetLabels()[v1alpha5.ProvisionerNameLabelKey]; ok {
-		return nodepoolutil.Key{Name: v, IsProvisioner: true}
-	}
-	return nodepoolutil.Key{}
 }

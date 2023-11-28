@@ -26,7 +26,6 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/metrics"
@@ -112,24 +111,12 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 // Eligible fields for static drift are described in the docs
 // https://karpenter.sh/docs/concepts/deprovisioning/#drift
 func areStaticFieldsDrifted(nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) cloudprovider.DriftReason {
-	var ownerHashKey string
-	if nodeClaim.IsMachine {
-		ownerHashKey = v1alpha5.ProvisionerHashAnnotationKey
-	} else {
-		ownerHashKey = v1beta1.NodePoolHashAnnotationKey
-	}
-	nodePoolHash, foundHashNodePool := nodePool.Annotations[ownerHashKey]
-	nodeClaimHash, foundHashNodeClaim := nodeClaim.Annotations[ownerHashKey]
+	nodePoolHash, foundHashNodePool := nodePool.Annotations[v1beta1.NodePoolHashAnnotationKey]
+	nodeClaimHash, foundHashNodeClaim := nodeClaim.Annotations[v1beta1.NodePoolHashAnnotationKey]
 	if !foundHashNodePool || !foundHashNodeClaim {
 		return ""
 	}
-	if nodePoolHash != nodeClaimHash {
-		if nodeClaim.IsMachine {
-			return ProvisionerDrifted
-		}
-		return NodePoolDrifted
-	}
-	return ""
+	return lo.Ternary(nodePoolHash != nodeClaimHash, NodePoolDrifted, "")
 }
 
 func areRequirementsDrifted(nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) cloudprovider.DriftReason {

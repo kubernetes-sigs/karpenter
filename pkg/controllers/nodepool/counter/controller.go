@@ -18,13 +18,11 @@ import (
 	"context"
 	"time"
 
-	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/controllers/state"
 	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
@@ -65,7 +63,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) 
 	}
 	stored := nodePool.DeepCopy()
 	// Determine resource usage and update provisioner.status.resources
-	nodePool.Status.Resources = c.resourceCountsFor(lo.Ternary(nodePool.IsProvisioner, v1alpha5.ProvisionerNameLabelKey, v1beta1.NodePoolLabelKey), nodePool.Name)
+	nodePool.Status.Resources = c.resourceCountsFor(v1beta1.NodePoolLabelKey, nodePool.Name)
 	if !equality.Semantic.DeepEqual(stored, nodePool) {
 		if err := nodepoolutil.PatchStatus(ctx, c.kubeClient, stored, nodePool); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)

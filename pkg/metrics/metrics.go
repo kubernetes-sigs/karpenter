@@ -21,7 +21,6 @@ import (
 
 const (
 	NodeSubsystem      = "nodes"
-	machineSubsystem   = "machines"
 	nodeClaimSubsystem = "nodeclaims"
 )
 
@@ -116,7 +115,6 @@ var (
 		},
 		[]string{
 			NodePoolLabel,
-			ProvisionerLabel,
 		},
 	)
 	NodesTerminatedCounter = prometheus.NewCounterVec(
@@ -128,89 +126,6 @@ var (
 		},
 		[]string{
 			NodePoolLabel,
-			ProvisionerLabel,
-		},
-	)
-	// TODO @joinnis: Remove these metrics when dropping v1alpha5 and no longer supporting Machines
-	MachinesCreatedCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: Namespace,
-			Subsystem: machineSubsystem,
-			Name:      "created",
-			Help:      "Number of machines created in total by Karpenter. Labeled by reason the machine was created and the owning provisioner.",
-		},
-		[]string{
-			ReasonLabel,
-			ProvisionerLabel,
-		},
-	)
-	MachinesTerminatedCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: Namespace,
-			Subsystem: machineSubsystem,
-			Name:      "terminated",
-			Help:      "Number of machines terminated in total by Karpenter. Labeled by reason the machine was terminated and the owning provisioner.",
-		},
-		[]string{
-			ReasonLabel,
-			ProvisionerLabel,
-		},
-	)
-	MachinesLaunchedCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: Namespace,
-			Subsystem: machineSubsystem,
-			Name:      "launched",
-			Help:      "Number of machines launched in total by Karpenter. Labeled by the owning provisioner.",
-		},
-		[]string{
-			ProvisionerLabel,
-		},
-	)
-	MachinesRegisteredCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: Namespace,
-			Subsystem: machineSubsystem,
-			Name:      "registered",
-			Help:      "Number of machines registered in total by Karpenter. Labeled by the owning provisioner.",
-		},
-		[]string{
-			ProvisionerLabel,
-		},
-	)
-	MachinesInitializedCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: Namespace,
-			Subsystem: machineSubsystem,
-			Name:      "initialized",
-			Help:      "Number of machines initialized in total by Karpenter. Labeled by the owning provisioner.",
-		},
-		[]string{
-			ProvisionerLabel,
-		},
-	)
-	MachinesDisruptedCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: Namespace,
-			Subsystem: machineSubsystem,
-			Name:      "disrupted",
-			Help:      "Number of machines disrupted in total by Karpenter. Labeled by disruption type of the machine and the owning provisioner.",
-		},
-		[]string{
-			TypeLabel,
-			ProvisionerLabel,
-		},
-	)
-	MachinesDriftedCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: Namespace,
-			Subsystem: machineSubsystem,
-			Name:      "drifted",
-			Help:      "Number of machine drifted reasons in total by Karpenter. Labeled by drift type of the machine and the owning provisioner..",
-		},
-		[]string{
-			TypeLabel,
-			ProvisionerLabel,
 		},
 	)
 )
@@ -218,6 +133,5 @@ var (
 func init() {
 	crmetrics.Registry.MustRegister(NodeClaimsCreatedCounter, NodeClaimsTerminatedCounter, NodeClaimsLaunchedCounter,
 		NodeClaimsRegisteredCounter, NodeClaimsInitializedCounter, NodeClaimsDisruptedCounter, NodeClaimsDriftedCounter,
-		MachinesCreatedCounter, MachinesTerminatedCounter, MachinesLaunchedCounter, MachinesRegisteredCounter, MachinesInitializedCounter,
-		MachinesDisruptedCounter, MachinesDriftedCounter, NodesCreatedCounter, NodesTerminatedCounter)
+		NodesCreatedCounter, NodesTerminatedCounter)
 }

@@ -22,7 +22,6 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"knative.dev/pkg/ptr"
 )
 
@@ -79,40 +78,6 @@ type Disruption struct {
 	// +kubebuilder:validation:Schemaless
 	// +optional
 	ExpireAfter NillableDuration `json:"expireAfter"`
-	// Budgets is a list of Budgets.
-	// If there are multiple active budgets, Karpenter uses
-	// the most restrictive maxUnavailable. If left undefined,
-	// this will default to one budget with a maxUnavailable to 10%.
-	// +kubebuilder:validation:XValidation:message="'crontab' must be set with 'duration'",rule="!self.all(x, (has(x.crontab) && !has(x.duration)) || (!has(x.crontab) && has(x.duration)))"
-	// +kubebuilder:default:={{maxUnavailable: "10%"}}
-	// +kubebuilder:validation:MaxItems=50
-	// +optional
-	Budgets []Budget `json:"budgets,omitempty" hash:"ignore"`
-}
-
-// Budget defines when Karpenter will restrict the
-// number of Node Claims that can be terminating simultaneously.
-type Budget struct {
-	// MaxUnavailable dictates how many NodeClaims owned by this NodePool
-	// can be terminating at once. It must be set.
-	// This only considers NodeClaims with the karpenter.sh/disruption taint.
-	// +kubebuilder:validation:XIntOrString
-	// +kubebuilder:default:="10%"
-	MaxUnavailable intstr.IntOrString `json:"maxUnavailable" hash:"ignore"`
-	// Crontab specifies when a budget begins being active,
-	// using the upstream cronjob syntax. If omitted, the budget is always active.
-	// Currently timezones are not supported.
-	// This is required if Duration is set.
-	// +kubebuilder:validation:Pattern:=`^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.*)\s(.*)\s(.*)\s(.*)\s(.*))$`
-	// +optional
-	Crontab *string `json:"crontab,omitempty" hash:"ignore"`
-	// Duration determines how long a Budget is active since each Crontab hit.
-	// If omitted, the budget is always active.
-	// This is required if Crontab is set.
-	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+)|(Never)$`
-	// +kubebuilder:validation:Type="string"
-	// +optional
-	Duration *metav1.Duration `json:"duration,omitempty" hash:"ignore"`
 }
 
 type ConsolidationPolicy string
@@ -172,11 +137,6 @@ type NodePool struct {
 
 	Spec   NodePoolSpec   `json:"spec,omitempty"`
 	Status NodePoolStatus `json:"status,omitempty"`
-
-	// IsProvisioner tells Karpenter whether the in-memory representation of this object
-	// is actually referring to a Provisioner object. This value is not actually part of the v1beta1 public-facing API
-	// TODO @joinnis: Remove this field when v1alpha5 is unsupported in a future version of Karpenter
-	IsProvisioner bool `json:"-"`
 }
 
 func (in *NodePool) Hash() string {

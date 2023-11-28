@@ -46,7 +46,6 @@ import (
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/controllers/nodeclaim/lifecycle"
@@ -68,7 +67,6 @@ const (
 type Bindings map[*v1.Pod]*Binding
 
 type Binding struct {
-	Machine   *v1alpha5.Machine
 	NodeClaim *v1beta1.NodeClaim
 	Node      *v1.Node
 }
@@ -188,7 +186,7 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 	wg := sync.WaitGroup{}
 	namespaces := &v1.NamespaceList{}
 	Expect(c.List(ctx, namespaces)).To(Succeed())
-	ExpectFinalizersRemovedFromList(ctx, c, &v1.NodeList{}, &v1alpha5.MachineList{}, &v1beta1.NodeClaimList{}, &v1.PersistentVolumeClaimList{})
+	ExpectFinalizersRemovedFromList(ctx, c, &v1.NodeList{}, &v1beta1.NodeClaimList{}, &v1.PersistentVolumeClaimList{})
 	for _, object := range []client.Object{
 		&v1.Pod{},
 		&v1.Node{},
@@ -198,8 +196,6 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 		&v1.PersistentVolumeClaim{},
 		&v1.PersistentVolume{},
 		&storagev1.StorageClass{},
-		&v1alpha5.Provisioner{},
-		&v1alpha5.Machine{},
 		&v1beta1.NodePool{},
 		&v1beta1.NodeClaim{},
 	} {
@@ -309,7 +305,7 @@ func ExpectNodeClaimDeployedNoNode(ctx context.Context, c client.Client, cluster
 	}
 	Expect(err).To(Succeed())
 
-	// Make the machine ready in the status conditions
+	// Make the nodeclaim ready in the status conditions
 	nc = lifecycle.PopulateNodeClaimDetails(nc, resolved)
 	nc.StatusConditions().MarkTrue(v1beta1.Launched)
 	ExpectApplied(ctx, c, nc)
@@ -325,7 +321,7 @@ func ExpectNodeClaimDeployed(ctx context.Context, c client.Client, cluster *stat
 	}
 	nc.StatusConditions().MarkTrue(v1beta1.Registered)
 
-	// Mock the machine launch and node joining at the apiserver
+	// Mock the nodeclaim launch and node joining at the apiserver
 	node := test.NodeClaimLinkedNode(nc)
 	node.Labels = lo.Assign(node.Labels, map[string]string{v1beta1.NodeRegisteredLabelKey: "true"})
 	ExpectApplied(ctx, c, nc, node)
@@ -521,13 +517,6 @@ func ExpectNodes(ctx context.Context, c client.Client) []*v1.Node {
 	return lo.ToSlicePtr(nodeList.Items)
 }
 
-func ExpectMachines(ctx context.Context, c client.Client) []*v1alpha5.Machine {
-	GinkgoHelper()
-	machineList := &v1alpha5.MachineList{}
-	Expect(c.List(ctx, machineList)).To(Succeed())
-	return lo.ToSlicePtr(machineList.Items)
-}
-
 func ExpectNodeClaims(ctx context.Context, c client.Client) []*v1beta1.NodeClaim {
 	GinkgoHelper()
 	nodeClaims := &v1beta1.NodeClaimList{}
@@ -569,7 +558,7 @@ func ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx context.Context,
 	ExpectMakeNodesInitialized(ctx, c, nodes...)
 	ExpectMakeNodeClaimsInitialized(ctx, c, nodeClaims...)
 
-	// Inform cluster state about node and machine readiness
+	// Inform cluster state about node and nodeclaim readiness
 	for _, n := range nodes {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
 	}
