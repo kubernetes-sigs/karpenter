@@ -24,11 +24,11 @@ import (
 	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/controllers/metrics/pod"
-	"github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/operator/scheme"
-	"github.com/aws/karpenter-core/pkg/test"
-	. "github.com/aws/karpenter-core/pkg/test/expectations"
+	"sigs.k8s.io/karpenter/pkg/controllers/metrics/pod"
+	"sigs.k8s.io/karpenter/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/operator/scheme"
+	"sigs.k8s.io/karpenter/pkg/test"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
 var podController controller.Controller

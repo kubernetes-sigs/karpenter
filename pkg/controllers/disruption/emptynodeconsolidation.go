@@ -22,7 +22,7 @@ import (
 	"github.com/samber/lo"
 	"knative.dev/pkg/logging"
 
-	"github.com/aws/karpenter-core/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
 // EmptyNodeConsolidation is the consolidation controller that performs multi-nodeclaim consolidation of entirely empty nodes

@@ -23,8 +23,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 type Liveness struct {

@@ -20,7 +20,7 @@ import (
 	"github.com/imdario/mergo"
 	v1 "k8s.io/api/core/v1"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 )
 
 // NodeClaim creates a test NodeClaim with defaults that can be overridden by overrides.

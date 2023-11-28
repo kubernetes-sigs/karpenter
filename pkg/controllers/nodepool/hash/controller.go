@@ -26,9 +26,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
+	nodepoolutil "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
 // Controller is hash controller that constructs a hash based on the fields that are considered for static drift.
@@ -60,8 +60,8 @@ type NodePoolController struct {
 	*Controller
 }
 
-func NewNodePoolController(kubeClient client.Client) corecontroller.Controller {
-	return corecontroller.Typed[*v1beta1.NodePool](kubeClient, &NodePoolController{
+func NewNodePoolController(kubeClient client.Client) operatorcontroller.Controller {
+	return operatorcontroller.Typed[*v1beta1.NodePool](kubeClient, &NodePoolController{
 		Controller: NewController(kubeClient),
 	})
 }
@@ -70,8 +70,8 @@ func (c *NodePoolController) Name() string {
 	return "nodepool.hash"
 }
 
-func (c *NodePoolController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(controllerruntime.
+func (c *NodePoolController) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+	return operatorcontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		For(&v1beta1.NodePool{}).

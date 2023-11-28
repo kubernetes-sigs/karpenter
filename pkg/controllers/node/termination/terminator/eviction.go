@@ -33,10 +33,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/node/termination/terminator/events"
-	"github.com/aws/karpenter-core/pkg/operator/controller"
+	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
+	"sigs.k8s.io/karpenter/pkg/operator/controller"
 
-	"github.com/aws/karpenter-core/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/events"
 )
 
 const (

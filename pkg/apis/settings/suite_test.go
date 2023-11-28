@@ -24,7 +24,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	. "knative.dev/pkg/logging/testing"
 
-	"github.com/aws/karpenter-core/pkg/apis/settings"
+	"sigs.k8s.io/karpenter/pkg/apis/settings"
 )
 
 var ctx context.Context

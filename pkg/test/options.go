@@ -21,7 +21,7 @@ import (
 	"github.com/imdario/mergo"
 	"github.com/samber/lo"
 
-	"github.com/aws/karpenter-core/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
 type OptionsFields struct {

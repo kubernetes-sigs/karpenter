@@ -32,17 +32,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/controllers/node/termination/terminator"
-	terminatorevents "github.com/aws/karpenter-core/pkg/controllers/node/termination/terminator/events"
-	"github.com/aws/karpenter-core/pkg/events"
-	"github.com/aws/karpenter-core/pkg/metrics"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
+	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
+	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
+	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
+	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
-var _ corecontroller.FinalizingTypedController[*v1.Node] = (*Controller)(nil)
+var _ operatorcontroller.FinalizingTypedController[*v1.Node] = (*Controller)(nil)
 
 // Controller for the resource
 type Controller struct {
@@ -53,8 +53,8 @@ type Controller struct {
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, terminator *terminator.Terminator, recorder events.Recorder) corecontroller.Controller {
-	return corecontroller.Typed[*v1.Node](kubeClient, &Controller{
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, terminator *terminator.Terminator, recorder events.Recorder) operatorcontroller.Controller {
+	return operatorcontroller.Typed[*v1.Node](kubeClient, &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		terminator:    terminator,
@@ -136,8 +136,8 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *v1.Node) error {
 	return nil
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(controllerruntime.
+func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+	return operatorcontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1.Node{}).
 		WithOptions(

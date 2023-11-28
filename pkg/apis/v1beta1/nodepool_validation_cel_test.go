@@ -29,7 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"knative.dev/pkg/ptr"
 
-	. "github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	. "sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 )
 
 var _ = Describe("CEL/Validation", func() {

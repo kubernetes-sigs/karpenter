@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/ratelimiter"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
 const (

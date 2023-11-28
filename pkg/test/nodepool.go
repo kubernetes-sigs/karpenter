@@ -23,7 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 )
 
 // NodePool creates a test NodePool with defaults that can be overridden by overrides.

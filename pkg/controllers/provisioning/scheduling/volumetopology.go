@@ -26,7 +26,7 @@ import (
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 func NewVolumeTopology(kubeClient client.Client) *VolumeTopology {
