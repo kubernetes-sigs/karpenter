@@ -26,15 +26,15 @@ import (
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	corecontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 	nodepoolutil "sigs.k8s.io/karpenter/pkg/utils/nodepool"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // Controller is hash controller that constructs a hash based on the fields that are considered for static drift.
@@ -133,12 +133,16 @@ func (c *NodePoolController) Name() string {
 func (c *NodePoolController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
 	return corecontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
-		WithEventFilter(predicate.Funcs{
-            UpdateFunc: func(e event.UpdateEvent) bool { 
-                gvk := e.ObjectNew.GetObjectKind().GroupVersionKind()
-                return gvk.Kind == "EC2NodeClass"
-             },
-        }).
+		WithEventFilter(predicate.Funcs{}).
+          Watches(
+             &unstructured.Unstructured{
+                Object: map[string]interface{}{
+                    "apiVersion": "karpenter.k8s.aws/v1beta1",
+                    "kind":       "EC2NodeClass",
+                },
+            },
+            &handler.EnqueueRequestForObject{},
+        ).
 		For(&v1beta1.NodePool{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
 	)
