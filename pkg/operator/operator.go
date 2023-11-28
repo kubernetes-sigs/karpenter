@@ -30,6 +30,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/utils/clock"
@@ -106,6 +107,7 @@ func NewOperator() (context.Context, *Operator) {
 
 	// Client
 	kubernetesInterface := kubernetes.NewForConfigOrDie(config)
+	_= dynamic.NewForConfigOrDie(config)
 
 	// Inject settings from the ConfigMap(s) into the context
 	ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)

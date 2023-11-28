@@ -16,6 +16,7 @@ package v1beta1
 
 import (
 	v1 "k8s.io/api/core/v1"
+	"knative.dev/pkg/apis"
 )
 
 // NodePoolStatus defines the observed state of NodePool
@@ -23,4 +24,26 @@ type NodePoolStatus struct {
 	// Resources is the list of resources that have been provisioned.
 	// +optional
 	Resources v1.ResourceList `json:"resources,omitempty"`
+	// Conditions represent the latest available observations of a NodePool's current state.
+	// +optional
+	Conditions []apis.Condition `json:"conditions,omitempty"`
 }
+
+var (
+	NodeClassReady apis.ConditionType = "NodeClassReady"
+)
+
+func (in *NodePool) StatusConditions() apis.ConditionManager {
+	return apis.NewLivingConditionSet(
+		NodeClassReady,
+	).Manage(in)
+}
+
+func (in *NodePool) GetConditions() apis.Conditions {
+	return in.Status.Conditions
+}
+
+func (in *NodePool) SetConditions(conditions apis.Conditions) {
+	in.Status.Conditions = conditions
+}
+

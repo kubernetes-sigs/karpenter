@@ -15,9 +15,11 @@ limitations under the License.
 package controllers
 
 import (
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
@@ -32,6 +34,9 @@ import (
 	nodeclaimdisruption "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
 	nodeclaimgarbagecollection "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/garbagecollection"
 	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
+
+	nodepoollifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodepool/lifecycle"
+
 	nodeclaimtermination "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/termination"
 	nodepoolcounter "sigs.k8s.io/karpenter/pkg/controllers/nodepool/counter"
 	nodepoolhash "sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
@@ -45,12 +50,12 @@ import (
 func NewControllers(
 	clock clock.Clock,
 	kubeClient client.Client,
+	dynamicClient dynamic.DynamicClient,
 	kubernetesInterface kubernetes.Interface,
 	cluster *state.Cluster,
 	recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider,
 ) []controller.Controller {
-
 	p := provisioning.NewProvisioner(kubeClient, kubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
 	evictionQueue := terminator.NewQueue(kubernetesInterface.CoreV1(), recorder)
 	disruptionQueue := orchestration.NewQueue(kubeClient, recorder, cluster, clock, p)
@@ -72,6 +77,7 @@ func NewControllers(
 		nodepoolcounter.NewNodePoolController(kubeClient, cluster),
 		nodeclaimconsistency.NewNodeClaimController(clock, kubeClient, recorder, cloudProvider),
 		nodeclaimlifecycle.NewNodeClaimController(clock, kubeClient, cloudProvider, recorder),
+		nodepoollifecycle.NewNodePoolController(kubeClient, dynamicClient),
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimtermination.NewNodeClaimController(kubeClient, cloudProvider),
 		nodeclaimdisruption.NewNodeClaimController(clock, kubeClient, cluster, cloudProvider),

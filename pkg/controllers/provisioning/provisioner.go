@@ -83,7 +83,8 @@ type Provisioner struct {
 }
 
 func NewProvisioner(kubeClient client.Client, coreV1Client corev1.CoreV1Interface,
-	recorder events.Recorder, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Provisioner {
+	recorder events.Recorder, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster,
+) *Provisioner {
 	p := &Provisioner{
 		batcher:        NewBatcher(),
 		cloudProvider:  cloudProvider,
@@ -130,6 +131,7 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 	if len(results.NewNodeClaims) == 0 {
 		return reconcile.Result{}, nil
 	}
+
 	_, err = p.CreateNodeClaims(ctx, results.NewNodeClaims, WithReason(metrics.ProvisioningReason), RecordPodNomination)
 	return reconcile.Result{}, err
 }
@@ -214,7 +216,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 			logging.FromContext(ctx).With("nodepool", n.Name).Errorf("nodepool failed validation, %s", err)
 			return false
 		}
-		return n.DeletionTimestamp.IsZero()
+		return n.DeletionTimestamp.IsZero() && n.StatusConditions().GetCondition(v1beta1.NodeClassReady).IsTrue()
 	})
 	if len(nodePoolList.Items) == 0 {
 		return nil, ErrNodePoolsNotFound
@@ -268,7 +270,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 		requirements.Add(scheduling.NewLabelRequirements(nodePool.Spec.Template.Labels).Values()...)
 		for key, requirement := range requirements {
 			if requirement.Operator() == v1.NodeSelectorOpIn {
-				//The following is a performance optimisation, for the explanation see the comment above
+				// The following is a performance optimisation, for the explanation see the comment above
 				if domains[key] == nil {
 					domains[key] = sets.New(requirement.Values()...)
 				} else {
