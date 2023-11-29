@@ -39,6 +39,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
+var _ operatorcontroller.TypedController[*v1beta1.NodePool] = (*Controller)(nil)
+
 // Controller for the resource
 type Controller struct {
 	kubeClient client.Client
@@ -46,11 +48,11 @@ type Controller struct {
 }
 
 // NewController is a constructor
-func NewController(kubeClient client.Client, cluster *state.Cluster) *Controller {
-	return &Controller{
+func NewController(kubeClient client.Client, cluster *state.Cluster) operatorcontroller.Controller {
+	return operatorcontroller.Typed[*v1beta1.NodePool](kubeClient, &Controller{
 		kubeClient: kubeClient,
 		cluster:    cluster,
-	}
+	})
 }
 
 // Reconcile a control loop for the resource
@@ -91,21 +93,11 @@ func (c *Controller) resourceCountsFor(ownerLabel string, ownerName string) v1.R
 	return functional.FilterMap(res, func(_ v1.ResourceName, v resource.Quantity) bool { return !v.IsZero() })
 }
 
-type NodePoolController struct {
-	*Controller
-}
-
-func NewNodePoolController(kubeClient client.Client, cluster *state.Cluster) operatorcontroller.Controller {
-	return operatorcontroller.Typed[*v1beta1.NodePool](kubeClient, &NodePoolController{
-		Controller: NewController(kubeClient, cluster),
-	})
-}
-
-func (c *NodePoolController) Name() string {
+func (c *Controller) Name() string {
 	return "nodepool.counter"
 }
 
-func (c *NodePoolController) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
 	return operatorcontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1beta1.NodePool{}).

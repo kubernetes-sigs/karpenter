@@ -365,7 +365,7 @@ var _ = Describe("Drift", func() {
 		var nodePoolController controller.Controller
 		BeforeEach(func() {
 			cp.Drifted = ""
-			nodePoolController = hash.NewNodePoolController(env.Client)
+			nodePoolController = hash.NewController(env.Client)
 			nodePoolOptions = v1beta1.NodePool{
 				ObjectMeta: nodePool.ObjectMeta,
 				Spec: v1beta1.NodePoolSpec{

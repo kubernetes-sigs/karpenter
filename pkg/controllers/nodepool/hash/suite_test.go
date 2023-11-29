@@ -50,7 +50,7 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
-	nodePoolController = hash.NewNodePoolController(env.Client)
+	nodePoolController = hash.NewController(env.Client)
 })
 
 var _ = AfterSuite(func() {
