@@ -131,7 +131,11 @@ func HashAnnotation(nodePool *v1beta1.NodePool) map[string]string {
 
 func UpdateStatusCondition(ctx context.Context, c client.Client, np *v1beta1.NodePool, conditionType apis.ConditionType, condition v1.ConditionStatus) {
 	stored := np.DeepCopy()
-	np.StatusConditions().MarkTrue(conditionType)
+	np.StatusConditions().SetCondition(apis.Condition{
+		Type:   conditionType,
+		Status: condition,
+	})
+
 	if !equality.Semantic.DeepEqual(stored, np) {
 		if err := PatchStatus(ctx, c, stored, np); err != nil {
 			logging.FromContext(ctx).With("nodepool", np.Name).Errorf("unable to update nodeclass readiness into nodepool, %s", err)
@@ -139,4 +143,3 @@ func UpdateStatusCondition(ctx context.Context, c client.Client, np *v1beta1.Nod
 	}
 	logging.FromContext(ctx).With("nodepool", np.Name).Info("updated nodeclass readiness into nodepool")
 }
-

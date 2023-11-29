@@ -131,19 +131,38 @@ func (c *NodePoolController) Name() string {
 }
 
 func (c *NodePoolController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(controllerruntime.
-		NewControllerManagedBy(m).
-		WithEventFilter(predicate.Funcs{}).
-          Watches(
-             &unstructured.Unstructured{
+    return corecontroller.Adapt(controllerruntime.
+        NewControllerManagedBy(m).
+        WithEventFilter(predicate.Funcs{}).
+        For(&v1beta1.NodePool{}).
+        WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+        Watches(
+           &unstructured.Unstructured{
                 Object: map[string]interface{}{
                     "apiVersion": "karpenter.k8s.aws/v1beta1",
                     "kind":       "EC2NodeClass",
                 },
             },
-            &handler.EnqueueRequestForObject{},
-        ).
-		For(&v1beta1.NodePool{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
-	)
+            handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+                nodePoolList := &v1beta1.NodePoolList{}
+                if err := c.kubeClient.List(context.Background(), nodePoolList); err != nil {
+                    return []reconcile.Request{}
+                }
+                requests := []reconcile.Request{}
+                for _, nodePool := range nodePoolList.Items {
+                    if nodePool.Spec.Template.Spec.NodeClassRef.Name == o.GetName() {
+                        requests = append(requests, reconcile.Request{
+                        NamespacedName: client.ObjectKey{
+                            Name:      nodePool.Name,
+                            Namespace: nodePool.Namespace,
+                        },
+                    })
+                    }
+             
+                }
+                return requests
+            }),
+        ),
+    )
 }
+
