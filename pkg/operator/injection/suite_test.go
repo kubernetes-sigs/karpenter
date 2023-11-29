@@ -16,6 +16,7 @@ package injection_test
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,6 +38,7 @@ import (
 )
 
 var ctx context.Context
+var cancel context.CancelFunc
 var env *test.Environment
 var defaultConfigMap *v1.ConfigMap
 
@@ -48,13 +50,6 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme)
-	defaultConfigMap = &v1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "karpenter-global-settings",
-			Namespace: system.Namespace(),
-		},
-	}
-	ExpectApplied(ctx, env.Client, defaultConfigMap)
 })
 
 var _ = AfterSuite(func() {
@@ -68,11 +63,13 @@ var _ = BeforeEach(func() {
 			Namespace: system.Namespace(),
 		},
 	}
+	ctx, cancel = context.WithCancel(context.Background())
 	ExpectApplied(ctx, env.Client, defaultConfigMap)
 })
 
 var _ = AfterEach(func() {
 	ExpectDeleted(ctx, env.Client, defaultConfigMap.DeepCopy())
+	cancel()
 })
 
 var _ = Describe("Settings", func() {
@@ -105,6 +102,19 @@ var _ = Describe("Settings", func() {
 				g.Expect(s.BatchIdleDuration).To(Equal(2 * time.Second))
 				g.Expect(s.BatchMaxDuration).To(Equal(15 * time.Second))
 			}).Should(Succeed())
+		})
+		It("should timeout if the karpenter-global-settings doesn't exist", func() {
+			ExpectDeleted(ctx, env.Client, defaultConfigMap)
+
+			finished := atomic.Bool{}
+			go func() {
+				// This won't succeed to exit in time if the waiter isn't using the correct context
+				injection.WithSettingsOrDie(ctx, env.KubernetesInterface, &settings.Settings{})
+				finished.Store(true)
+			}()
+			Eventually(func() bool {
+				return finished.Load()
+			}, time.Second*10, time.Second).Should(BeTrue())
 		})
 	})
 	Context("Multiple Settings", func() {
