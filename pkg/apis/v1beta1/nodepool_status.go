@@ -26,7 +26,7 @@ type NodePoolStatus struct {
 	Resources v1.ResourceList `json:"resources,omitempty"`
 	// Conditions represent the latest available observations of a NodePool's current state.
 	// +optional
-	Conditions []apis.Condition `json:"conditions,omitempty"`
+	Conditions apis.Conditions `json:"conditions,omitempty"`
 }
 
 var (

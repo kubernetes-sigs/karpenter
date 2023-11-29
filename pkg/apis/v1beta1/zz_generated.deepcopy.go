@@ -447,7 +447,7 @@ func (in *NodePoolStatus) DeepCopyInto(out *NodePoolStatus) {
 	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
-		*out = make([]apis.Condition, len(*in))
+		*out = make(apis.Conditions, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}

@@ -19,10 +19,11 @@ import (
 	"fmt"
 	"strings"
 
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
+	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -75,11 +76,18 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1beta1.NodePool) (recon
         return reconcile.Result{}, fmt.Errorf("failed to get resource: %v", err)
     }
 
+    stored := np.DeepCopy()
     // Check if the resource is ready (or perform your readiness checks here)
     if isResourceReady(nodeClassUnstructured) {
-        nodepoolutil.UpdateStatusCondition(ctx, c.kubeClient, np, v1beta1.NodeClassReady, v1.ConditionTrue)
+        np.StatusConditions().MarkTrue(v1beta1.NodeClassReady)
     } else {
-        nodepoolutil.UpdateStatusCondition(ctx, c.kubeClient, np, v1beta1.NodeClassReady, v1.ConditionFalse)
+        np.StatusConditions().MarkFalse(v1beta1.NodeClassReady, "NodeClassNotReady", "NodeClass is not ready")
+    }
+
+    if !equality.Semantic.DeepEqual(stored, np) {
+        if err := nodepoolutil.PatchStatus(ctx, c.kubeClient, stored, np); err != nil {
+            logging.FromContext(ctx).With("nodepool", np.Name).Errorf("unable to update nodeclass readiness into nodepool, %s", err)
+        }
     }
 
     return reconcile.Result{}, nil
