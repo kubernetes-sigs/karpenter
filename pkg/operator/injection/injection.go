@@ -81,7 +81,7 @@ func WithSettingsOrDie(ctx context.Context, kubernetesInterface kubernetes.Inter
 	factory.Start(cancelCtx.Done())
 
 	for _, setting := range settings {
-		cm, err := WaitForConfigMap(ctx, setting.ConfigMap(), informer)
+		cm, err := WaitForConfigMap(cancelCtx, setting.ConfigMap(), informer)
 		if client.IgnoreNotFound(err) != nil {
 			panic(fmt.Errorf("failed to get configmap %s, %w", setting.ConfigMap(), err))
 		}
