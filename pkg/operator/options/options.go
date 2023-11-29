@@ -20,7 +20,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/samber/lo"
@@ -59,8 +58,6 @@ type Options struct {
 	BatchMaxDuration     time.Duration
 	BatchIdleDuration    time.Duration
 	FeatureGates         FeatureGates
-
-	setFlags map[string]bool
 }
 
 type FlagSet struct {
@@ -114,19 +111,6 @@ func (o *Options) Parse(fs *FlagSet, args ...string) error {
 		return fmt.Errorf("parsing feature gates, %w", err)
 	}
 	o.FeatureGates = gates
-
-	o.setFlags = map[string]bool{}
-	fs.VisitAll(func(f *flag.Flag) {
-		// NOTE: This assumes all CLI flags can be transformed into their corresponding environment variable. If a cli
-		// flag / env var pair does not follow this pattern, this will break.
-		envName := strings.ReplaceAll(strings.ToUpper(f.Name), "-", "_")
-		_, ok := os.LookupEnv(envName)
-		o.setFlags[f.Name] = ok
-	})
-	fs.Visit(func(f *flag.Flag) {
-		o.setFlags[f.Name] = true
-	})
-
 	return nil
 }
 
