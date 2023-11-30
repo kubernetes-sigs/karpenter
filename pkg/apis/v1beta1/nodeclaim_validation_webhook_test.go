@@ -25,7 +25,7 @@ import (
 	. "github.com/onsi/gomega"
 	"knative.dev/pkg/ptr"
 
-	. "github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	. "sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

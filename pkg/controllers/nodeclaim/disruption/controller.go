@@ -32,13 +32,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
-	"github.com/aws/karpenter-core/pkg/utils/result"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
+	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
+	"sigs.k8s.io/karpenter/pkg/utils/result"
 )
+
+var _ operatorcontroller.TypedController[*v1beta1.NodeClaim] = (*Controller)(nil)
 
 type nodeClaimReconciler interface {
 	Reconcile(context.Context, *v1beta1.NodePool, *v1beta1.NodeClaim) (reconcile.Result, error)
@@ -55,13 +57,13 @@ type Controller struct {
 }
 
 // NewController constructs a machine disruption controller
-func NewController(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider) *Controller {
-	return &Controller{
+func NewController(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider) operatorcontroller.Controller {
+	return operatorcontroller.Typed[*v1beta1.NodeClaim](kubeClient, &Controller{
 		kubeClient: kubeClient,
 		drift:      &Drift{cloudProvider: cloudProvider},
 		expiration: &Expiration{kubeClient: kubeClient, clock: clk},
 		emptiness:  &Emptiness{kubeClient: kubeClient, cluster: cluster, clock: clk},
-	}
+	})
 }
 
 // Reconcile executes a control loop for the resource
@@ -105,28 +107,12 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	return result.Min(results...), nil
 }
 
-var _ corecontroller.TypedController[*v1beta1.NodeClaim] = (*NodeClaimController)(nil)
-
-type NodeClaimController struct {
-	*Controller
-}
-
-func NewNodeClaimController(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
-	return corecontroller.Typed[*v1beta1.NodeClaim](kubeClient, &NodeClaimController{
-		Controller: NewController(clk, kubeClient, cluster, cloudProvider),
-	})
-}
-
-func (c *NodeClaimController) Name() string {
+func (c *Controller) Name() string {
 	return "nodeclaim.disruption"
 }
 
-func (c *NodeClaimController) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	return c.Controller.Reconcile(ctx, nodeClaim)
-}
-
-func (c *NodeClaimController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(controllerruntime.
+func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+	return operatorcontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1beta1.NodeClaim{}, builder.WithPredicates(
 			predicate.Or(

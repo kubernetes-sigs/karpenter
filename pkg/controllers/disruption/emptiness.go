@@ -20,8 +20,8 @@ import (
 	"github.com/samber/lo"
 	"k8s.io/utils/clock"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
 // Emptiness is a subreconciler that deletes empty candidates.

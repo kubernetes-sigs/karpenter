@@ -20,14 +20,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/samber/lo"
 	cliflag "k8s.io/component-base/cli/flag"
 
-	"github.com/aws/karpenter-core/pkg/apis/settings"
-	"github.com/aws/karpenter-core/pkg/utils/env"
+	"sigs.k8s.io/karpenter/pkg/utils/env"
 )
 
 var (
@@ -60,8 +58,6 @@ type Options struct {
 	BatchMaxDuration     time.Duration
 	BatchIdleDuration    time.Duration
 	FeatureGates         FeatureGates
-
-	setFlags map[string]bool
 }
 
 type FlagSet struct {
@@ -83,7 +79,7 @@ func (fs *FlagSet) BoolVarWithEnv(p *bool, name string, envVar string, val bool,
 
 func (o *Options) AddFlags(fs *FlagSet) {
 	fs.StringVar(&o.ServiceName, "karpenter-service", env.WithDefaultString("KARPENTER_SERVICE", ""), "The Karpenter Service name for the dynamic webhook certificate")
-	fs.BoolVarWithEnv(&o.DisableWebhook, "disable-webhook", "DISABLE_WEBHOOK", false, "Disable the admission and validation webhooks")
+	fs.BoolVarWithEnv(&o.DisableWebhook, "disable-webhook", "DISABLE_WEBHOOK", true, "Disable the admission and validation webhooks")
 	fs.IntVar(&o.WebhookPort, "webhook-port", env.WithDefaultInt("WEBHOOK_PORT", 8443), "The port the webhook endpoint binds to for validation and mutation of resources")
 	fs.IntVar(&o.MetricsPort, "metrics-port", env.WithDefaultInt("METRICS_PORT", 8000), "The port the metric endpoint binds to for operating metrics about the controller itself")
 	fs.IntVar(&o.WebhookMetricsPort, "webhook-metrics-port", env.WithDefaultInt("WEBHOOK_METRICS_PORT", 8001), "The port the webhook metric endpoing binds to for operating metrics about the webhook")
@@ -93,10 +89,10 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.BoolVarWithEnv(&o.EnableProfiling, "enable-profiling", "ENABLE_PROFILING", false, "Enable the profiling on the metric endpoint")
 	fs.BoolVarWithEnv(&o.EnableLeaderElection, "leader-elect", "LEADER_ELECT", true, "Start leader election client and gain leadership before executing the main loop. Enable this when running replicated components for high availability.")
 	fs.Int64Var(&o.MemoryLimit, "memory-limit", env.WithDefaultInt64("MEMORY_LIMIT", -1), "Memory limit on the container running the controller. The GC soft memory limit is set to 90% of this value.")
-	fs.StringVar(&o.LogLevel, "log-level", env.WithDefaultString("LOG_LEVEL", ""), "Log verbosity level. Can be one of 'debug', 'info', or 'error'")
+	fs.StringVar(&o.LogLevel, "log-level", env.WithDefaultString("LOG_LEVEL", "info"), "Log verbosity level. Can be one of 'debug', 'info', or 'error'")
 	fs.DurationVar(&o.BatchMaxDuration, "batch-max-duration", env.WithDefaultDuration("BATCH_MAX_DURATION", 10*time.Second), "The maximum length of a batch window. The longer this is, the more pods we can consider for provisioning at one time which usually results in fewer but larger nodes.")
 	fs.DurationVar(&o.BatchIdleDuration, "batch-idle-duration", env.WithDefaultDuration("BATCH_IDLE_DURATION", time.Second), "The maximum amount of time with no new pending pods that if exceeded ends the current batching window. If pods arrive faster than this time, the batching window will be extended up to the maxDuration. If they arrive slower, the pods will be batched separately.")
-	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "Drift=false"), "Optional features can be enabled / disabled using feature gates. Current options are: Drift")
+	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "Drift=true"), "Optional features can be enabled / disabled using feature gates. Current options are: Drift")
 }
 
 func (o *Options) Parse(fs *FlagSet, args ...string) error {
@@ -115,37 +111,11 @@ func (o *Options) Parse(fs *FlagSet, args ...string) error {
 		return fmt.Errorf("parsing feature gates, %w", err)
 	}
 	o.FeatureGates = gates
-
-	o.setFlags = map[string]bool{}
-	fs.VisitAll(func(f *flag.Flag) {
-		// NOTE: This assumes all CLI flags can be transformed into their corresponding environment variable. If a cli
-		// flag / env var pair does not follow this pattern, this will break.
-		envName := strings.ReplaceAll(strings.ToUpper(f.Name), "-", "_")
-		_, ok := os.LookupEnv(envName)
-		o.setFlags[f.Name] = ok
-	})
-	fs.Visit(func(f *flag.Flag) {
-		o.setFlags[f.Name] = true
-	})
-
 	return nil
 }
 
 func (o *Options) ToContext(ctx context.Context) context.Context {
 	return ToContext(ctx, o)
-}
-
-func (o *Options) MergeSettings(ctx context.Context) {
-	s := settings.FromContext(ctx)
-	if !o.setFlags["batch-max-duration"] {
-		o.BatchMaxDuration = s.BatchMaxDuration
-	}
-	if !o.setFlags["batch-idle-duration"] {
-		o.BatchIdleDuration = s.BatchIdleDuration
-	}
-	if !o.setFlags["feature-gates"] {
-		o.FeatureGates.Drift = s.DriftEnabled
-	}
 }
 
 func ParseFeatureGates(gateStr string) (FeatureGates, error) {

@@ -20,7 +20,7 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/aws/karpenter-core/pkg/utils/functional"
+	"sigs.k8s.io/karpenter/pkg/utils/functional"
 )
 
 type Options struct {

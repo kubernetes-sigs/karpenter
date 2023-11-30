@@ -26,10 +26,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
+	nodepoolutil "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
+
+var _ operatorcontroller.TypedController[*v1beta1.NodePool] = (*Controller)(nil)
 
 // Controller is hash controller that constructs a hash based on the fields that are considered for static drift.
 // The hash is placed in the metadata for increased observability and should be found on each object.
@@ -37,10 +39,10 @@ type Controller struct {
 	kubeClient client.Client
 }
 
-func NewController(kubeClient client.Client) *Controller {
-	return &Controller{
+func NewController(kubeClient client.Client) operatorcontroller.Controller {
+	return operatorcontroller.Typed[*v1beta1.NodePool](kubeClient, &Controller{
 		kubeClient: kubeClient,
-	}
+	})
 }
 
 // Reconcile the resource
@@ -56,22 +58,12 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1beta1.NodePool) (recon
 	return reconcile.Result{}, nil
 }
 
-type NodePoolController struct {
-	*Controller
-}
-
-func NewNodePoolController(kubeClient client.Client) corecontroller.Controller {
-	return corecontroller.Typed[*v1beta1.NodePool](kubeClient, &NodePoolController{
-		Controller: NewController(kubeClient),
-	})
-}
-
-func (c *NodePoolController) Name() string {
+func (c *Controller) Name() string {
 	return "nodepool.hash"
 }
 
-func (c *NodePoolController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(controllerruntime.
+func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+	return operatorcontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		For(&v1beta1.NodePool{}).

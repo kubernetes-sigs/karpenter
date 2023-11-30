@@ -30,8 +30,10 @@ tools() {
 }
 
 kubebuilder() {
-    sudo mkdir -p /usr/local/kubebuilder/bin
-    sudo chown "${USER}" /usr/local/kubebuilder/bin
+    if ! mkdir -p ${KUBEBUILDER_ASSETS}; then
+      sudo mkdir -p ${KUBEBUILDER_ASSETS}
+      sudo chown $(whoami) ${KUBEBUILDER_ASSETS}
+    fi
     arch=$(go env GOARCH)
     ln -sf $(setup-envtest use -p path "${K8S_VERSION}" --arch="${arch}" --bin-dir="${KUBEBUILDER_ASSETS}")/* ${KUBEBUILDER_ASSETS}
     find $KUBEBUILDER_ASSETS

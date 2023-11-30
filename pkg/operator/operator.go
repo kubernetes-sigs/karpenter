@@ -45,15 +45,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/events"
-	"github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/operator/injection"
-	"github.com/aws/karpenter-core/pkg/operator/logging"
-	"github.com/aws/karpenter-core/pkg/operator/options"
-	"github.com/aws/karpenter-core/pkg/operator/scheme"
-	"github.com/aws/karpenter-core/pkg/webhooks"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/operator/logging"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/operator/scheme"
+	"sigs.k8s.io/karpenter/pkg/webhooks"
 )
 
 const (
@@ -107,17 +106,8 @@ func NewOperator() (context.Context, *Operator) {
 	// Client
 	kubernetesInterface := kubernetes.NewForConfigOrDie(config)
 
-	// Inject settings from the ConfigMap(s) into the context
-	ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
-
-	// Temporarily merge settings into options until configmap is removed
-	// Note: injectables are pointer to those already in context
-	for _, o := range options.Injectables {
-		o.MergeSettings(ctx)
-	}
-
 	// Logging
-	logger := logging.NewLogger(ctx, component, kubernetesInterface)
+	logger := logging.NewLogger(ctx, component)
 	ctx = knativelogging.WithLogger(ctx, logger)
 	logging.ConfigureGlobalLoggers(ctx)
 
@@ -138,11 +128,7 @@ func NewOperator() (context.Context, *Operator) {
 		BaseContext: func() context.Context {
 			ctx := context.Background()
 			ctx = knativelogging.WithLogger(ctx, logger)
-			ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
 			ctx = injection.WithOptionsOrDie(ctx, options.Injectables...)
-			for _, o := range options.Injectables {
-				o.MergeSettings(ctx)
-			}
 			return ctx
 		},
 		Cache: cache.Options{
@@ -225,7 +211,7 @@ func (o *Operator) Start(ctx context.Context) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			webhooks.Start(ctx, o.GetConfig(), o.KubernetesInterface, o.webhooks...)
+			webhooks.Start(ctx, o.GetConfig(), o.webhooks...)
 		}()
 	}
 	wg.Wait()

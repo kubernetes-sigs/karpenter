@@ -23,11 +23,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/utils/functional"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/utils/functional"
+	nodepoolutil "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 
 	v1 "k8s.io/api/core/v1"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -36,8 +36,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/utils/resources"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
+
+var _ operatorcontroller.TypedController[*v1beta1.NodePool] = (*Controller)(nil)
 
 // Controller for the resource
 type Controller struct {
@@ -46,11 +48,11 @@ type Controller struct {
 }
 
 // NewController is a constructor
-func NewController(kubeClient client.Client, cluster *state.Cluster) *Controller {
-	return &Controller{
+func NewController(kubeClient client.Client, cluster *state.Cluster) operatorcontroller.Controller {
+	return operatorcontroller.Typed[*v1beta1.NodePool](kubeClient, &Controller{
 		kubeClient: kubeClient,
 		cluster:    cluster,
-	}
+	})
 }
 
 // Reconcile a control loop for the resource
@@ -91,22 +93,12 @@ func (c *Controller) resourceCountsFor(ownerLabel string, ownerName string) v1.R
 	return functional.FilterMap(res, func(_ v1.ResourceName, v resource.Quantity) bool { return !v.IsZero() })
 }
 
-type NodePoolController struct {
-	*Controller
-}
-
-func NewNodePoolController(kubeClient client.Client, cluster *state.Cluster) corecontroller.Controller {
-	return corecontroller.Typed[*v1beta1.NodePool](kubeClient, &NodePoolController{
-		Controller: NewController(kubeClient, cluster),
-	})
-}
-
-func (c *NodePoolController) Name() string {
+func (c *Controller) Name() string {
 	return "nodepool.counter"
 }
 
-func (c *NodePoolController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(controllerruntime.
+func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+	return operatorcontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1beta1.NodePool{}).
 		Watches(
