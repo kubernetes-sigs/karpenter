@@ -44,7 +44,7 @@ type CloudProvider interface {
 	// List retrieves all NodeClaims from the cloudprovider
 	List(context.Context) ([]*v1beta1.NodeClaim, error)
 	// GetInstanceTypes returns instance types supported by the cloudprovider.
-	// Availability of types or zone may vary by provisioner or over time.  Regardless of
+	// Availability of types or zone may vary by nodepool or over time.  Regardless of
 	// availability, the GetInstanceTypes method should always return all instance types,
 	// even those with no offerings available.
 	GetInstanceTypes(context.Context, *v1beta1.NodePool) ([]*InstanceType, error)

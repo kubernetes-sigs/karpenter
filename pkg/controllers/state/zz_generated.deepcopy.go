@@ -39,27 +39,6 @@ func (in *StateNode) DeepCopyInto(out *StateNode) {
 		*out = new(v1beta1.NodeClaim)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.inflightAllocatable != nil {
-		in, out := &in.inflightAllocatable, &out.inflightAllocatable
-		*out = make(v1.ResourceList, len(*in))
-		for key, val := range *in {
-			(*out)[key] = val.DeepCopy()
-		}
-	}
-	if in.inflightCapacity != nil {
-		in, out := &in.inflightCapacity, &out.inflightCapacity
-		*out = make(v1.ResourceList, len(*in))
-		for key, val := range *in {
-			(*out)[key] = val.DeepCopy()
-		}
-	}
-	if in.startupTaints != nil {
-		in, out := &in.startupTaints, &out.startupTaints
-		*out = make([]v1.Taint, len(*in))
-		for i := range *in {
-			(*in)[i].DeepCopyInto(&(*out)[i])
-		}
-	}
 	if in.daemonSetRequests != nil {
 		in, out := &in.daemonSetRequests, &out.daemonSetRequests
 		*out = make(map[types.NamespacedName]v1.ResourceList, len(*in))

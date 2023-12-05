@@ -30,7 +30,7 @@ import (
 	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 )
 
-// NodeClaimController reconciles machine for the purpose of maintaining state.
+// NodeClaimController reconciles nodeclaim for the purpose of maintaining state.
 type NodeClaimController struct {
 	kubeClient client.Client
 	cluster    *state.Cluster

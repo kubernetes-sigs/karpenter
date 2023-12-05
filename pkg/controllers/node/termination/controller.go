@@ -86,12 +86,12 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 			return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 		}
 		c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
-		// If the underlying machine no longer exists.
+		// If the underlying nodeclaim no longer exists.
 		if _, err := c.cloudProvider.Get(ctx, node.Spec.ProviderID); err != nil {
 			if cloudprovider.IsNodeClaimNotFoundError(err) {
 				return reconcile.Result{}, c.removeFinalizer(ctx, node)
 			}
-			return reconcile.Result{}, fmt.Errorf("getting machine, %w", err)
+			return reconcile.Result{}, fmt.Errorf("getting nodeclaim, %w", err)
 		}
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}

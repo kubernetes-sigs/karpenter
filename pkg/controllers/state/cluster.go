@@ -59,8 +59,8 @@ type Cluster struct {
 	// A monotonically increasing timestamp representing the time state of the
 	// cluster with respect to consolidation. This increases when something has
 	// changed about the cluster that might make consolidation possible. By recording
-	// the state, interested deprovisioners can check to see if this has changed to
-	// optimize and not try to deprovision if nothing about the cluster has changed.
+	// the state, interested disruption methods can check to see if this has changed to
+	// optimize and not try to disrupt if nothing about the cluster has changed.
 	clusterState     time.Time
 	antiAffinityPods sync.Map // pod namespaced name -> *v1.Pod of pods that have required anti affinities
 }
@@ -220,7 +220,7 @@ func (c *Cluster) UpdateNodeClaim(nodeClaim *v1beta1.NodeClaim) {
 	defer c.mu.Unlock()
 
 	if nodeClaim.Status.ProviderID == "" {
-		return // We can't reconcile machines that don't yet have provider ids
+		return // We can't reconcile nodeclaims that don't yet have provider ids
 	}
 	n := c.newStateFromNodeClaim(nodeClaim, c.nodes[nodeClaim.Status.ProviderID])
 	c.nodes[nodeClaim.Status.ProviderID] = n
@@ -377,21 +377,16 @@ func (c *Cluster) newStateFromNodeClaim(nodeClaim *v1beta1.NodeClaim, oldNode *S
 		oldNode = NewNode()
 	}
 	n := &StateNode{
-		Node:                     oldNode.Node,
-		NodeClaim:                nodeClaim,
-		inflightInitialized:      oldNode.inflightInitialized,
-		inflightAllocatable:      oldNode.inflightAllocatable,
-		inflightCapacity:         oldNode.inflightCapacity,
-		startupTaintsInitialized: oldNode.startupTaintsInitialized,
-		startupTaints:            oldNode.startupTaints,
-		daemonSetRequests:        oldNode.daemonSetRequests,
-		daemonSetLimits:          oldNode.daemonSetLimits,
-		podRequests:              oldNode.podRequests,
-		podLimits:                oldNode.podLimits,
-		hostPortUsage:            oldNode.hostPortUsage,
-		volumeUsage:              oldNode.volumeUsage,
-		markedForDeletion:        oldNode.markedForDeletion,
-		nominatedUntil:           oldNode.nominatedUntil,
+		Node:              oldNode.Node,
+		NodeClaim:         nodeClaim,
+		daemonSetRequests: oldNode.daemonSetRequests,
+		daemonSetLimits:   oldNode.daemonSetLimits,
+		podRequests:       oldNode.podRequests,
+		podLimits:         oldNode.podLimits,
+		hostPortUsage:     oldNode.hostPortUsage,
+		volumeUsage:       oldNode.volumeUsage,
+		markedForDeletion: oldNode.markedForDeletion,
+		nominatedUntil:    oldNode.nominatedUntil,
 	}
 	// Cleanup the old nodeClaim with its old providerID if its providerID changes
 	// This can happen since nodes don't get created with providerIDs. Rather, CCM picks up the
@@ -420,25 +415,18 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *
 		oldNode = NewNode()
 	}
 	n := &StateNode{
-		Node:                     node,
-		NodeClaim:                oldNode.NodeClaim,
-		inflightInitialized:      oldNode.inflightInitialized,
-		inflightAllocatable:      oldNode.inflightAllocatable,
-		inflightCapacity:         oldNode.inflightCapacity,
-		startupTaintsInitialized: oldNode.startupTaintsInitialized,
-		startupTaints:            oldNode.startupTaints,
-		daemonSetRequests:        map[types.NamespacedName]v1.ResourceList{},
-		daemonSetLimits:          map[types.NamespacedName]v1.ResourceList{},
-		podRequests:              map[types.NamespacedName]v1.ResourceList{},
-		podLimits:                map[types.NamespacedName]v1.ResourceList{},
-		hostPortUsage:            scheduling.NewHostPortUsage(),
-		volumeUsage:              scheduling.NewVolumeUsage(),
-		markedForDeletion:        oldNode.markedForDeletion,
-		nominatedUntil:           oldNode.nominatedUntil,
+		Node:              node,
+		NodeClaim:         oldNode.NodeClaim,
+		daemonSetRequests: map[types.NamespacedName]v1.ResourceList{},
+		daemonSetLimits:   map[types.NamespacedName]v1.ResourceList{},
+		podRequests:       map[types.NamespacedName]v1.ResourceList{},
+		podLimits:         map[types.NamespacedName]v1.ResourceList{},
+		hostPortUsage:     scheduling.NewHostPortUsage(),
+		volumeUsage:       scheduling.NewVolumeUsage(),
+		markedForDeletion: oldNode.markedForDeletion,
+		nominatedUntil:    oldNode.nominatedUntil,
 	}
 	if err := multierr.Combine(
-		c.populateStartupTaints(ctx, n),
-		c.populateInflight(ctx, n),
 		c.populateResourceRequests(ctx, n),
 		c.populateVolumeLimits(ctx, n),
 	); err != nil {
@@ -464,61 +452,6 @@ func (c *Cluster) cleanupNode(name string) {
 		delete(c.nodeNameToProviderID, name)
 		c.MarkUnconsolidated()
 	}
-}
-
-func (c *Cluster) populateStartupTaints(ctx context.Context, n *StateNode) error {
-	// We only need to populate the startup taints once
-	if n.startupTaintsInitialized {
-		return nil
-	}
-
-	nodePoolName, ok := n.Labels()[v1beta1.NodePoolLabelKey]
-	if !ok {
-		return nil
-	}
-	nodePool := &v1beta1.NodePool{}
-	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
-		return client.IgnoreNotFound(err)
-	}
-	n.startupTaintsInitialized = true
-	n.startupTaints = nodePool.Spec.Template.Spec.StartupTaints
-	return nil
-}
-
-func (c *Cluster) populateInflight(ctx context.Context, n *StateNode) error {
-	// We only need to set inflight details once. This prevents us from logging spurious errors when the cloud provider
-	// instance types change.
-	if n.inflightInitialized {
-		return nil
-	}
-	// If the node is already initialized, we don't need to populate its inflight capacity
-	// since its capacity is already represented by the node status
-	if n.Initialized() {
-		return nil
-	}
-
-	nodePoolName, ok := n.Labels()[v1beta1.NodePoolLabelKey]
-	if !ok {
-		return nil
-	}
-	nodePool := &v1beta1.NodePool{}
-	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
-		return client.IgnoreNotFound(err)
-	}
-	instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, nodePool)
-	if err != nil {
-		return err
-	}
-	instanceType, ok := lo.Find(instanceTypes, func(it *cloudprovider.InstanceType) bool {
-		return it.Name == n.Labels()[v1.LabelInstanceTypeStable]
-	})
-	if !ok {
-		return fmt.Errorf("instance type '%s' not found", n.Labels()[v1.LabelInstanceTypeStable])
-	}
-	n.inflightInitialized = true
-	n.inflightCapacity = instanceType.Capacity
-	n.inflightAllocatable = instanceType.Allocatable()
-	return nil
 }
 
 func (c *Cluster) populateVolumeLimits(ctx context.Context, n *StateNode) error {

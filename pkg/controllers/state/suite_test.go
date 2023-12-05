@@ -28,7 +28,6 @@ import (
 	"knative.dev/pkg/ptr"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
-	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
@@ -182,7 +181,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 			csiProvider: sets.New("test"),
 		})).ToNot(BeNil())
 
-		// Reconcile the machine one more time to ensure that we maintain our volume usage state
+		// Reconcile the nodeclaim one more time to ensure that we maintain our volume usage state
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
 		// Ensure that we still consider adding another volume to the node breaching our volume limits
@@ -889,7 +888,7 @@ var _ = Describe("Node Resource Level", func() {
 					v1beta1.NodePoolLabelKey:   nodePool.Name,
 					v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 				},
-				Finalizers: []string{v1alpha5.TerminationFinalizer},
+				Finalizers: []string{v1beta1.TerminationFinalizer},
 			},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),

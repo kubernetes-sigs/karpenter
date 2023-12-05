@@ -34,7 +34,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
@@ -82,7 +81,7 @@ func (c *Controller) Finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 	if len(nodes) > 0 {
 		return reconcile.Result{}, nil
 	}
-	if nodeClaim.Status.ProviderID != "" || nodeClaim.Annotations[v1alpha5.MachineLinkedAnnotationKey] != "" {
+	if nodeClaim.Status.ProviderID != "" {
 		if err = c.cloudProvider.Delete(ctx, nodeClaim); cloudprovider.IgnoreNodeClaimNotFoundError(err) != nil {
 			return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
 		}

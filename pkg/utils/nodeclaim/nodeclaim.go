@@ -281,10 +281,6 @@ func DriftedCounter(nodeClaim *v1beta1.NodeClaim, driftType string) prometheus.C
 }
 
 func UpdateNodeOwnerReferences(nodeClaim *v1beta1.NodeClaim, node *v1.Node) *v1.Node {
-	// Remove any provisioner owner references since we own them
-	node.OwnerReferences = lo.Reject(node.OwnerReferences, func(o metav1.OwnerReference, _ int) bool {
-		return o.Kind == "Provisioner"
-	})
 	node.OwnerReferences = append(node.OwnerReferences, metav1.OwnerReference{
 		APIVersion:         v1beta1.SchemeGroupVersion.String(),
 		Kind:               "NodeClaim",

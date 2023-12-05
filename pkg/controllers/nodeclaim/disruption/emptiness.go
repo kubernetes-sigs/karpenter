@@ -33,7 +33,7 @@ import (
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
-// Emptiness is a machine sub-controller that adds or removes status conditions on empty machines based on TTLSecondsAfterEmpty
+// Emptiness is a nodeclaim sub-controller that adds or removes status conditions on empty nodeclaims based on TTLSecondsAfterEmpty
 type Emptiness struct {
 	kubeClient client.Client
 	cluster    *state.Cluster
