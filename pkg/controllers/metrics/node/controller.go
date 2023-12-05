@@ -102,7 +102,7 @@ var (
 func nodeLabelNames() []string {
 	return append(
 		// WellKnownLabels includes the nodepool label, so we don't need to add it as its own item here.
-		// if we do, Prometheus will panic since there would be duplicate labels.
+		// If we do, prometheus will panic since there would be duplicate labels.
 		sets.New(lo.Values(wellKnownLabels)...).UnsortedList(),
 		resourceType,
 		nodeName,
@@ -175,7 +175,6 @@ func getNodeLabels(node *v1.Node, resourceTypeName string) prometheus.Labels {
 	metricLabels := prometheus.Labels{}
 	metricLabels[resourceType] = resourceTypeName
 	metricLabels[nodeName] = node.Name
-	metricLabels[v1beta1.NodePoolLabelKey] = node.Labels[v1beta1.NodePoolLabelKey]
 	metricLabels[nodePhase] = string(node.Status.Phase)
 
 	// Populate well known labels
