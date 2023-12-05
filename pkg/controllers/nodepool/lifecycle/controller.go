@@ -139,6 +139,20 @@ func (c *NodePoolController) Name() string {
 }
 
 func (c *NodePoolController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
+    var apiVersion string
+    var kind string
+
+    nodePoolList := &v1beta1.NodePoolList{}
+    if err := c.kubeClient.List(context.Background(), nodePoolList); err != nil {
+        return nil
+    }
+
+    for _, nodePool := range nodePoolList.Items {
+        apiVersion = nodePool.Spec.Template.Spec.NodeClassRef.APIVersion
+        kind = nodePool.Spec.Template.Spec.NodeClassRef.Kind
+        break
+    }
+
     return corecontroller.Adapt(controllerruntime.
         NewControllerManagedBy(m).
         WithEventFilter(predicate.Funcs{}).
@@ -147,15 +161,11 @@ func (c *NodePoolController) Builder(_ context.Context, m manager.Manager) corec
         Watches(
            &unstructured.Unstructured{
                 Object: map[string]interface{}{
-                    "apiVersion": "karpenter.k8s.aws/v1beta1",
-                    "kind":       "EC2NodeClass",
+                    "apiVersion": apiVersion,
+                    "kind":       kind,
                 },
             },
             handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
-                nodePoolList := &v1beta1.NodePoolList{}
-                if err := c.kubeClient.List(context.Background(), nodePoolList); err != nil {
-                    return []reconcile.Request{}
-                }
                 requests := []reconcile.Request{}
                 for _, nodePool := range nodePoolList.Items {
                     if nodePool.Spec.Template.Spec.NodeClassRef.Name == o.GetName() {
@@ -166,7 +176,6 @@ func (c *NodePoolController) Builder(_ context.Context, m manager.Manager) corec
                         },
                     })
                     }
-             
                 }
                 return requests
             }),
