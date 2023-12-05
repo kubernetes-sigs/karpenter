@@ -28,7 +28,6 @@ import (
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -37,10 +36,9 @@ import (
 )
 
 const (
-	resourceType    = "resource_type"
-	nodeName        = "node_name"
-	nodeProvisioner = "provisioner"
-	nodePhase       = "phase"
+	resourceType = "resource_type"
+	nodeName     = "node_name"
+	nodePhase    = "phase"
 )
 
 var (
@@ -103,10 +101,11 @@ var (
 
 func nodeLabelNames() []string {
 	return append(
+		// WellKnownLabels includes the nodepool label, so we don't need to add it as its own item here.
+		// If we do, prometheus will panic since there would be duplicate labels.
 		sets.New(lo.Values(wellKnownLabels)...).UnsortedList(),
 		resourceType,
 		nodeName,
-		nodeProvisioner,
 		nodePhase,
 	)
 }
@@ -176,7 +175,6 @@ func getNodeLabels(node *v1.Node, resourceTypeName string) prometheus.Labels {
 	metricLabels := prometheus.Labels{}
 	metricLabels[resourceType] = resourceTypeName
 	metricLabels[nodeName] = node.Name
-	metricLabels[nodeProvisioner] = node.Labels[v1alpha5.ProvisionerNameLabelKey]
 	metricLabels[nodePhase] = string(node.Status.Phase)
 
 	// Populate well known labels
@@ -188,8 +186,7 @@ func getNodeLabels(node *v1.Node, resourceTypeName string) prometheus.Labels {
 
 func getWellKnownLabels() map[string]string {
 	labels := make(map[string]string)
-	// TODO @joinnis: Remove v1alpha5 well-known labels in favor of only v1beta1 well-known labels after v1alpha5 is dropped
-	for wellKnownLabel := range v1alpha5.WellKnownLabels.Union(v1beta1.WellKnownLabels) {
+	for wellKnownLabel := range v1beta1.WellKnownLabels {
 		if parts := strings.Split(wellKnownLabel, "/"); len(parts) == 2 {
 			label := parts[1]
 			// Reformat label names to be consistent with Prometheus naming conventions (snake_case)

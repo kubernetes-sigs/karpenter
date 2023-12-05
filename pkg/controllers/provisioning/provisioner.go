@@ -196,7 +196,7 @@ func (p *Provisioner) consolidationWarnings(ctx context.Context, po v1.Pod) {
 	}
 }
 
-var ErrNodePoolsNotFound = errors.New("no nodepools or provisioners found")
+var ErrNodePoolsNotFound = errors.New("no nodepools found")
 
 //nolint:gocyclo
 func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNodes []*state.StateNode, opts scheduler.SchedulerOptions) (*scheduler.Scheduler, error) {

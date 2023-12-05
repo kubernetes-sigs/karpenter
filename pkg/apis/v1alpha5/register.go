@@ -14,37 +14,6 @@ limitations under the License.
 
 package v1alpha5
 
-import (
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"knative.dev/pkg/apis"
-)
-
 const (
-	Group              = "karpenter.sh"
-	ExtensionsGroup    = "extensions." + Group
-	CompatabilityGroup = "compatibility." + Group
-	TestingGroup       = "testing." + Group // Exclusively used for labeling/discovery in testing
-)
-
-var (
-	SchemeGroupVersion = schema.GroupVersion{Group: Group, Version: "v1alpha5"}
-	SchemeBuilder      = runtime.NewSchemeBuilder(func(scheme *runtime.Scheme) error {
-		scheme.AddKnownTypes(SchemeGroupVersion,
-			&Provisioner{},
-			&ProvisionerList{},
-			&Machine{},
-			&MachineList{},
-		)
-		metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
-		return nil
-	})
-)
-
-const (
-	// Active is a condition implemented by all resources. It indicates that the
-	// controller is able to take actions: it's correctly configured, can make
-	// necessary API calls, and isn't disabled.
-	Active apis.ConditionType = "Active"
+	Group = "karpenter.sh"
 )

@@ -111,7 +111,7 @@ var (
 			Namespace: Namespace,
 			Subsystem: NodeSubsystem,
 			Name:      "created",
-			Help:      "Number of nodes created in total by Karpenter. Labeled by owning provisioner.",
+			Help:      "Number of nodes created in total by Karpenter. Labeled by owning nodepool.",
 		},
 		[]string{
 			NodePoolLabel,
@@ -122,7 +122,7 @@ var (
 			Namespace: Namespace,
 			Subsystem: NodeSubsystem,
 			Name:      "terminated",
-			Help:      "Number of nodes terminated in total by Karpenter. Labeled by owning provisioner.",
+			Help:      "Number of nodes terminated in total by Karpenter. Labeled by owning nodepool.",
 		},
 		[]string{
 			NodePoolLabel,

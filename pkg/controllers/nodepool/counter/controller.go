@@ -58,13 +58,13 @@ func NewController(kubeClient client.Client, cluster *state.Cluster) operatorcon
 // Reconcile a control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) (reconcile.Result, error) {
 	// We need to ensure that our internal cluster state mechanism is synced before we proceed
-	// Otherwise, we have the potential to patch over the status with a lower value for the provisioner resource
+	// Otherwise, we have the potential to patch over the status with a lower value for the nodepool resource
 	// counts on startup
 	if !c.cluster.Synced(ctx) {
 		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}
 	stored := nodePool.DeepCopy()
-	// Determine resource usage and update provisioner.status.resources
+	// Determine resource usage and update nodepool.status.resources
 	nodePool.Status.Resources = c.resourceCountsFor(v1beta1.NodePoolLabelKey, nodePool.Name)
 	if !equality.Semantic.DeepEqual(stored, nodePool) {
 		if err := nodepoolutil.PatchStatus(ctx, c.kubeClient, stored, nodePool); err != nil {
@@ -76,8 +76,8 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) 
 
 func (c *Controller) resourceCountsFor(ownerLabel string, ownerName string) v1.ResourceList {
 	var res v1.ResourceList
-	// Record all resources provisioned by the provisioners, we look at the cluster state nodes as their capacity
-	// is accurately reported even for nodes that haven't fully started yet. This allows us to update our provisioner
+	// Record all resources provisioned by the nodepools, we look at the cluster state nodes as their capacity
+	// is accurately reported even for nodes that haven't fully started yet. This allows us to update our nodepool
 	// status immediately upon node creation instead of waiting for the node to become ready.
 	c.cluster.ForEachNode(func(n *state.StateNode) bool {
 		// Don't count nodes that we are planning to delete. This is to ensure that we are consistent throughout

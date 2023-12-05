@@ -69,7 +69,7 @@ var (
 
 	// WellKnownLabels are labels that belong to the RestrictedLabelDomains but allowed.
 	// Karpenter is aware of these labels, and they can be used to further narrow down
-	// the range of the corresponding values by either provisioner or pods.
+	// the range of the corresponding values by either nodepool or pods.
 	WellKnownLabels = sets.New(
 		NodePoolLabelKey,
 		v1.LabelTopologyZone,

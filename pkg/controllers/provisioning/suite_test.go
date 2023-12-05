@@ -394,7 +394,7 @@ var _ = Describe("Provisioning", func() {
 			// only available instance type has 2 GPUs which would exceed the limit
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
-		It("should not schedule to a provisioner after a scheduling round if limits would be exceeded", func() {
+		It("should not schedule to a nodepool after a scheduling round if limits would be exceeded", func() {
 			ExpectApplied(ctx, env.Client, test.NodePool(v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
 					Limits: v1beta1.Limits(v1.ResourceList{v1.ResourceCPU: resource.MustParse("2")}),
@@ -1552,8 +1552,8 @@ var _ = Describe("Provisioning", func() {
 			node := ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Labels[v1beta1.NodePoolLabelKey]).ToNot(Equal(nodePool.Name))
 		})
-		Context("Weighted nodePools", func() {
-			It("should schedule to the provisioner with the highest priority always", func() {
+		Context("Weighted NodePools", func() {
+			It("should schedule to the nodepool with the highest priority always", func() {
 				nodePools := []client.Object{
 					test.NodePool(),
 					test.NodePool(v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Weight: ptr.Int32(20)}}),
@@ -1569,7 +1569,7 @@ var _ = Describe("Provisioning", func() {
 					Expect(node.Labels[v1beta1.NodePoolLabelKey]).To(Equal(nodePools[2].GetName()))
 				}
 			})
-			It("should schedule to explicitly selected provisioner even if other nodePools are higher priority", func() {
+			It("should schedule to explicitly selected nodepool even if other nodePools are higher priority", func() {
 				targetedNodePool := test.NodePool()
 				nodePools := []client.Object{
 					targetedNodePool,

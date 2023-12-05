@@ -30,7 +30,7 @@ import (
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
-// Expiration is a machine sub-controller that adds or removes status conditions on expired machines based on TTLSecondsUntilExpired
+// Expiration is a nodeclaim sub-controller that adds or removes status conditions on expired nodeclaims based on TTLSecondsUntilExpired
 type Expiration struct {
 	kubeClient client.Client
 	clock      clock.Clock
@@ -53,12 +53,10 @@ func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, 
 	if nodeclaimutil.IgnoreNodeNotFoundError(nodeclaimutil.IgnoreDuplicateNodeError(err)) != nil {
 		return reconcile.Result{}, err
 	}
-	// We do the expiration check in this way since there is still a migration path for creating Machines from Nodes
+	// We do the expiration check in this way since there is still a migration path for creating nodeclaims from Nodes
 	// In this case, we need to make sure that we take the older of the two for expiration
-	// TODO @joinnis: This check that takes the minimum between the Node and Machine CreationTimestamps can be removed
-	// once machine migration is ripped out, which should happen when apis and Karpenter are promoted to v1
 	var expirationTime time.Time
-	if node == nil || nodeClaim.CreationTimestamp.Before(&node.CreationTimestamp) {
+	if node == nil {
 		expirationTime = nodeClaim.CreationTimestamp.Add(*nodePool.Spec.Disruption.ExpireAfter.Duration)
 	} else {
 		expirationTime = node.CreationTimestamp.Add(*nodePool.Spec.Disruption.ExpireAfter.Duration)

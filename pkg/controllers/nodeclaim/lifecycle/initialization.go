@@ -40,7 +40,7 @@ type Initialization struct {
 // a) its current status is set to Ready
 // b) all the startup taints have been removed from the node
 // c) all extended resources have been registered
-// This method handles both nil provisioners and nodes without extended resources gracefully.
+// This method handles both nil nodepools and nodes without extended resources gracefully.
 func (i *Initialization) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
 	if nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized).IsTrue() {
 		return reconcile.Result{}, nil
@@ -98,7 +98,7 @@ func KnownEphemeralTaintsRemoved(node *v1.Node) (*v1.Taint, bool) {
 	return nil, true
 }
 
-// StartupTaintsRemoved returns true if there are no startup taints registered for the provisioner, or if all startup
+// StartupTaintsRemoved returns true if there are no startup taints registered for the nodepool, or if all startup
 // taints have been removed from the node
 func StartupTaintsRemoved(node *v1.Node, nodeClaim *v1beta1.NodeClaim) (*v1.Taint, bool) {
 	if nodeClaim != nil {

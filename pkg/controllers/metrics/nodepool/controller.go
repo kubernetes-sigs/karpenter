@@ -48,7 +48,7 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: nodePoolSubsystem,
 			Name:      "limit",
-			Help:      "The nodepool limits are the limits specified on the provisioner that restrict the quantity of resources provisioned. Labeled by nodepool name and resource type.",
+			Help:      "The nodepool limits are the limits specified on the nodepool that restrict the quantity of resources provisioned. Labeled by nodepool name and resource type.",
 		},
 		[]string{
 			resourceTypeLabel,

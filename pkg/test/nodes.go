@@ -21,7 +21,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 )
 
@@ -78,22 +77,6 @@ func NodeClaimLinkedNode(nodeClaim *v1beta1.NodeClaim) *v1.Node {
 			Capacity:    nodeClaim.Status.Capacity,
 			Allocatable: nodeClaim.Status.Allocatable,
 			ProviderID:  nodeClaim.Status.ProviderID,
-		},
-	)
-}
-
-func MachineLinkedNode(machine *v1alpha5.Machine) *v1.Node {
-	return Node(
-		NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels:      machine.Labels,
-				Annotations: machine.Annotations,
-				Finalizers:  machine.Finalizers,
-			},
-			Taints:      append(machine.Spec.Taints, machine.Spec.StartupTaints...),
-			Capacity:    machine.Status.Capacity,
-			Allocatable: machine.Status.Allocatable,
-			ProviderID:  machine.Status.ProviderID,
 		},
 	)
 }
