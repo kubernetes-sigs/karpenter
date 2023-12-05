@@ -127,8 +127,8 @@ func (in *NodeClaimSpec) validateTaintsField(taints []v1.Taint, existing map[tai
 	return errs
 }
 
-// This function is used by the NodeClaim validation webhook to verify the provisioner requirements.
-// When this function is called, the provisioner's requirements do not include the requirements from labels.
+// This function is used by the NodeClaim validation webhook to verify the nodepool requirements.
+// When this function is called, the nodepool's requirements do not include the requirements from labels.
 // NodeClaim requirements only support well known labels.
 func (in *NodeClaimSpec) validateRequirements() (errs *apis.FieldError) {
 	for i, requirement := range in.Requirements {

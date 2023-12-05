@@ -77,13 +77,6 @@ type StateNode struct {
 	Node      *v1.Node
 	NodeClaim *v1beta1.NodeClaim
 
-	inflightInitialized bool            // TODO @joinnis: This can be removed when machine is added
-	inflightAllocatable v1.ResourceList // TODO @joinnis: This can be removed when machine is added
-	inflightCapacity    v1.ResourceList // TODO @joinnis: This can be removed when machine is added
-
-	startupTaintsInitialized bool       // TODO: @joinnis: This can be removed when machine is added
-	startupTaints            []v1.Taint // TODO: @joinnis: This can be removed when machine is added
-
 	// daemonSetRequests is the total amount of resources that have been requested by daemon sets. This allows users
 	// of the Node to identify the remaining resources that we expect future daemonsets to consume.
 	daemonSetRequests map[types.NamespacedName]v1.ResourceList
@@ -103,15 +96,12 @@ type StateNode struct {
 
 func NewNode() *StateNode {
 	return &StateNode{
-		inflightAllocatable: v1.ResourceList{},
-		inflightCapacity:    v1.ResourceList{},
-		startupTaints:       []v1.Taint{},
-		daemonSetRequests:   map[types.NamespacedName]v1.ResourceList{},
-		daemonSetLimits:     map[types.NamespacedName]v1.ResourceList{},
-		podRequests:         map[types.NamespacedName]v1.ResourceList{},
-		podLimits:           map[types.NamespacedName]v1.ResourceList{},
-		hostPortUsage:       scheduling.NewHostPortUsage(),
-		volumeUsage:         scheduling.NewVolumeUsage(),
+		daemonSetRequests: map[types.NamespacedName]v1.ResourceList{},
+		daemonSetLimits:   map[types.NamespacedName]v1.ResourceList{},
+		podRequests:       map[types.NamespacedName]v1.ResourceList{},
+		podLimits:         map[types.NamespacedName]v1.ResourceList{},
+		hostPortUsage:     scheduling.NewHostPortUsage(),
+		volumeUsage:       scheduling.NewVolumeUsage(),
 	}
 }
 
@@ -154,8 +144,8 @@ func (in *StateNode) HostName() string {
 }
 
 func (in *StateNode) Annotations() map[string]string {
-	// If the machine exists and the state node isn't initialized
-	// use the machine representation of the annotations
+	// If the nodeclaim exists and the state node isn't initialized
+	// use the nodeclaim representation of the annotations
 	if in.Node == nil {
 		return in.NodeClaim.Annotations
 	}
@@ -174,8 +164,8 @@ func (in *StateNode) GetLabels() map[string]string {
 }
 
 func (in *StateNode) Labels() map[string]string {
-	// If the machine exists and the state node isn't registered
-	// use the machine representation of the labels
+	// If the nodeclaim exists and the state node isn't registered
+	// use the nodeclaim representation of the labels
 	if in.Node == nil {
 		return in.NodeClaim.Labels
 	}
@@ -193,12 +183,8 @@ func (in *StateNode) Taints() []v1.Taint {
 	// re-appears on the node for a different reason (e.g. the node is cordoned) we will assume that pods can
 	// schedule against the node in the future incorrectly.
 	ephemeralTaints := scheduling.KnownEphemeralTaints
-	if !in.Initialized() && in.Managed() {
-		if in.NodeClaim != nil {
-			ephemeralTaints = append(ephemeralTaints, in.NodeClaim.Spec.StartupTaints...)
-		} else {
-			ephemeralTaints = append(ephemeralTaints, in.startupTaints...)
-		}
+	if !in.Initialized() && in.Managed() && in.NodeClaim != nil {
+		ephemeralTaints = append(ephemeralTaints, in.NodeClaim.Spec.StartupTaints...)
 	}
 
 	var taints []v1.Taint
@@ -247,17 +233,6 @@ func (in *StateNode) Capacity() v1.ResourceList {
 		}
 		return in.NodeClaim.Status.Capacity
 	}
-	// TODO @joinnis: Remove this when machine migration is complete
-	if !in.Initialized() && in.Managed() {
-		// Override any zero quantity values in the node status
-		ret := lo.Assign(in.Node.Status.Capacity)
-		for resourceName, quantity := range in.inflightCapacity {
-			if resources.IsZero(ret[resourceName]) {
-				ret[resourceName] = quantity
-			}
-		}
-		return ret
-	}
 	return in.Node.Status.Capacity
 }
 
@@ -274,17 +249,6 @@ func (in *StateNode) Allocatable() v1.ResourceList {
 			return ret
 		}
 		return in.NodeClaim.Status.Allocatable
-	}
-	// TODO @joinnis: Remove this when machine migration is complete
-	if !in.Initialized() && in.Managed() {
-		// Override any zero quantity values in the node status
-		ret := lo.Assign(in.Node.Status.Allocatable)
-		for resourceName, quantity := range in.inflightAllocatable {
-			if resources.IsZero(ret[resourceName]) {
-				ret[resourceName] = quantity
-			}
-		}
-		return ret
 	}
 	return in.Node.Status.Allocatable
 }

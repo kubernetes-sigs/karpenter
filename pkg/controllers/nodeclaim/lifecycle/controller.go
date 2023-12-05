@@ -52,7 +52,7 @@ type nodeClaimReconciler interface {
 
 // Controller is a NodeClaim Lifecycle controller that manages the lifecycle of the NodeClaim up until its termination
 // The controller is responsible for ensuring that new Nodes get launched, that they have properly registered with
-// the cluster as nodes and that they are properly initialized, ensuring that Machines that do not have matching nodes
+// the cluster as nodes and that they are properly initialized, ensuring that nodeclaims that do not have matching nodes
 // after some liveness TTL are removed
 type Controller struct {
 	kubeClient client.Client

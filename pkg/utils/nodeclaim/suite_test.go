@@ -33,7 +33,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -67,16 +66,16 @@ var _ = Describe("NodeClaimUtils", func() {
 		node = test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1.LabelTopologyZone:             "test-zone-1",
-					v1.LabelTopologyRegion:           "test-region",
-					"test-label-key":                 "test-label-value",
-					"test-label-key2":                "test-label-value2",
-					v1alpha5.LabelNodeRegistered:     "true",
-					v1alpha5.LabelNodeInitialized:    "true",
-					v1alpha5.ProvisionerNameLabelKey: "default",
-					v1alpha5.LabelCapacityType:       v1alpha5.CapacityTypeOnDemand,
-					v1.LabelOSStable:                 "linux",
-					v1.LabelInstanceTypeStable:       "test-instance-type",
+					v1.LabelTopologyZone:            "test-zone-1",
+					v1.LabelTopologyRegion:          "test-region",
+					"test-label-key":                "test-label-value",
+					"test-label-key2":               "test-label-value2",
+					v1beta1.NodeRegisteredLabelKey:  "true",
+					v1beta1.NodeInitializedLabelKey: "true",
+					v1beta1.NodePoolLabelKey:        "default",
+					v1beta1.CapacityTypeLabelKey:    v1beta1.CapacityTypeOnDemand,
+					v1.LabelOSStable:                "linux",
+					v1.LabelInstanceTypeStable:      "test-instance-type",
 				},
 				Annotations: map[string]string{
 					"test-annotation-key":        "test-annotation-value",

@@ -35,12 +35,11 @@ import (
 )
 
 const (
-	ProvisionerDrifted  cloudprovider.DriftReason = "ProvisionerDrifted"
 	NodePoolDrifted     cloudprovider.DriftReason = "NodePoolDrifted"
 	RequirementsDrifted cloudprovider.DriftReason = "RequirementsDrifted"
 )
 
-// Drift is a machine sub-controller that adds or removes status conditions on drifted machines
+// Drift is a nodeclaim sub-controller that adds or removes status conditions on drifted nodeclaims
 type Drift struct {
 	cloudProvider cloudprovider.CloudProvider
 }
@@ -120,11 +119,11 @@ func areStaticFieldsDrifted(nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeC
 }
 
 func areRequirementsDrifted(nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) cloudprovider.DriftReason {
-	provisionerReq := scheduling.NewNodeSelectorRequirements(nodePool.Spec.Template.Spec.Requirements...)
+	nodepoolReq := scheduling.NewNodeSelectorRequirements(nodePool.Spec.Template.Spec.Requirements...)
 	nodeClaimReq := scheduling.NewLabelRequirements(nodeClaim.Labels)
 
-	// Every provisioner requirement is compatible with the NodeClaim label set
-	if nodeClaimReq.Compatible(provisionerReq) != nil {
+	// Every nodepool requirement is compatible with the NodeClaim label set
+	if nodeClaimReq.Compatible(nodepoolReq) != nil {
 		return RequirementsDrifted
 	}
 

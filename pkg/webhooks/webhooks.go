@@ -40,7 +40,6 @@ import (
 	"knative.dev/pkg/webhook/resourcesemantics/validation"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
@@ -49,9 +48,8 @@ import (
 const component = "webhook"
 
 var Resources = map[schema.GroupVersionKind]resourcesemantics.GenericCRD{
-	v1alpha5.SchemeGroupVersion.WithKind("Provisioner"): &v1alpha5.Provisioner{},
-	v1beta1.SchemeGroupVersion.WithKind("NodePool"):     &v1beta1.NodePool{},
-	v1beta1.SchemeGroupVersion.WithKind("NodeClaim"):    &v1beta1.NodeClaim{},
+	v1beta1.SchemeGroupVersion.WithKind("NodePool"):  &v1beta1.NodePool{},
+	v1beta1.SchemeGroupVersion.WithKind("NodeClaim"): &v1beta1.NodeClaim{},
 }
 
 func NewWebhooks() []knativeinjection.ControllerConstructor {

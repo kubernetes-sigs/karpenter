@@ -157,9 +157,9 @@ var _ = Describe("Drift", func() {
 	})
 	Context("NodeRequirement Drift", func() {
 		DescribeTable("",
-			func(oldProvisionerReq []v1.NodeSelectorRequirement, newProvisionerReq []v1.NodeSelectorRequirement, labels map[string]string, drifted bool) {
+			func(oldNodePoolReq []v1.NodeSelectorRequirement, newNodePoolReq []v1.NodeSelectorRequirement, labels map[string]string, drifted bool) {
 				cp.Drifted = ""
-				nodePool.Spec.Template.Spec.Requirements = oldProvisionerReq
+				nodePool.Spec.Template.Spec.Requirements = oldNodePoolReq
 				nodeClaim.Labels = lo.Assign(nodeClaim.Labels, labels)
 
 				ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
@@ -167,7 +167,7 @@ var _ = Describe("Drift", func() {
 				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 				Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted)).To(BeNil())
 
-				nodePool.Spec.Template.Spec.Requirements = newProvisionerReq
+				nodePool.Spec.Template.Spec.Requirements = newNodePoolReq
 				ExpectApplied(ctx, env.Client, nodePool)
 				ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -360,7 +360,7 @@ var _ = Describe("Drift", func() {
 		})
 
 	})
-	Context("Provisioner Static Drift", func() {
+	Context("NodePool Static Drift", func() {
 		var nodePoolOptions v1beta1.NodePool
 		var nodePoolController controller.Controller
 		BeforeEach(func() {

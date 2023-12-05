@@ -515,10 +515,10 @@ var _ = Describe("Webhook/Validation", func() {
 })
 
 var _ = Describe("Limits", func() {
-	var provisioner *NodePool
+	var nodepool *NodePool
 
 	BeforeEach(func() {
-		provisioner = &NodePool{
+		nodepool = &NodePool{
 			ObjectMeta: metav1.ObjectMeta{Name: strings.ToLower(randomdata.SillyName())},
 			Spec: NodePoolSpec{
 				Limits: Limits(v1.ResourceList{
@@ -529,15 +529,15 @@ var _ = Describe("Limits", func() {
 	})
 
 	It("should work when usage is lower than limit", func() {
-		provisioner.Status.Resources = v1.ResourceList{"cpu": resource.MustParse("15")}
-		Expect(provisioner.Spec.Limits.ExceededBy(provisioner.Status.Resources)).To(Succeed())
+		nodepool.Status.Resources = v1.ResourceList{"cpu": resource.MustParse("15")}
+		Expect(nodepool.Spec.Limits.ExceededBy(nodepool.Status.Resources)).To(Succeed())
 	})
 	It("should work when usage is equal to limit", func() {
-		provisioner.Status.Resources = v1.ResourceList{"cpu": resource.MustParse("16")}
-		Expect(provisioner.Spec.Limits.ExceededBy(provisioner.Status.Resources)).To(Succeed())
+		nodepool.Status.Resources = v1.ResourceList{"cpu": resource.MustParse("16")}
+		Expect(nodepool.Spec.Limits.ExceededBy(nodepool.Status.Resources)).To(Succeed())
 	})
 	It("should fail when usage is higher than limit", func() {
-		provisioner.Status.Resources = v1.ResourceList{"cpu": resource.MustParse("17")}
-		Expect(provisioner.Spec.Limits.ExceededBy(provisioner.Status.Resources)).To(MatchError("cpu resource usage of 17 exceeds limit of 16"))
+		nodepool.Status.Resources = v1.ResourceList{"cpu": resource.MustParse("17")}
+		Expect(nodepool.Spec.Limits.ExceededBy(nodepool.Status.Resources)).To(MatchError("cpu resource usage of 17 exceeds limit of 16"))
 	})
 })

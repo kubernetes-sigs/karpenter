@@ -46,7 +46,7 @@ type nodeClaimReconciler interface {
 	Reconcile(context.Context, *v1beta1.NodePool, *v1beta1.NodeClaim) (reconcile.Result, error)
 }
 
-// Controller is a disruption controller that adds StatusConditions to Machines when they meet certain disruption conditions
+// Controller is a disruption controller that adds StatusConditions to nodeclaims when they meet certain disruption conditions
 // e.g. When the NodeClaim has surpassed its owning provisioner's expirationTTL, then it is marked as "Expired" in the StatusConditions
 type Controller struct {
 	kubeClient client.Client
@@ -56,7 +56,7 @@ type Controller struct {
 	emptiness  *Emptiness
 }
 
-// NewController constructs a machine disruption controller
+// NewController constructs a nodeclaim disruption controller
 func NewController(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider) operatorcontroller.Controller {
 	return operatorcontroller.Typed[*v1beta1.NodeClaim](kubeClient, &Controller{
 		kubeClient: kubeClient,

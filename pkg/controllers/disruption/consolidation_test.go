@@ -838,7 +838,7 @@ var _ = Describe("Consolidation", func() {
 
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
-			// Cascade any deletion of the machine to the node
+			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
 			// we should delete the non-annotated node and replace with a cheaper node
@@ -851,7 +851,7 @@ var _ = Describe("Consolidation", func() {
 				Name: "current-on-demand",
 				Offerings: []cloudprovider.Offering{
 					{
-						CapacityType: v1alpha5.CapacityTypeOnDemand,
+						CapacityType: v1beta1.CapacityTypeOnDemand,
 						Zone:         "test-zone-1a",
 						Price:        0.5,
 						Available:    false,
@@ -862,19 +862,19 @@ var _ = Describe("Consolidation", func() {
 				Name: "potential-spot-replacement",
 				Offerings: []cloudprovider.Offering{
 					{
-						CapacityType: v1alpha5.CapacityTypeSpot,
+						CapacityType: v1beta1.CapacityTypeSpot,
 						Zone:         "test-zone-1a",
 						Price:        1.0,
 						Available:    true,
 					},
 					{
-						CapacityType: v1alpha5.CapacityTypeSpot,
+						CapacityType: v1beta1.CapacityTypeSpot,
 						Zone:         "test-zone-1b",
 						Price:        0.2,
 						Available:    true,
 					},
 					{
-						CapacityType: v1alpha5.CapacityTypeSpot,
+						CapacityType: v1beta1.CapacityTypeSpot,
 						Zone:         "test-zone-1c",
 						Price:        0.4,
 						Available:    true,
@@ -946,7 +946,7 @@ var _ = Describe("Consolidation", func() {
 				Name: "current-on-demand",
 				Offerings: []cloudprovider.Offering{
 					{
-						CapacityType: v1alpha5.CapacityTypeOnDemand,
+						CapacityType: v1beta1.CapacityTypeOnDemand,
 						Zone:         "test-zone-1a",
 						Price:        0.5,
 						Available:    false,
@@ -957,25 +957,25 @@ var _ = Describe("Consolidation", func() {
 				Name: "on-demand-replacement",
 				Offerings: []cloudprovider.Offering{
 					{
-						CapacityType: v1alpha5.CapacityTypeOnDemand,
+						CapacityType: v1beta1.CapacityTypeOnDemand,
 						Zone:         "test-zone-1a",
 						Price:        0.6,
 						Available:    true,
 					},
 					{
-						CapacityType: v1alpha5.CapacityTypeOnDemand,
+						CapacityType: v1beta1.CapacityTypeOnDemand,
 						Zone:         "test-zone-1b",
 						Price:        0.6,
 						Available:    true,
 					},
 					{
-						CapacityType: v1alpha5.CapacityTypeSpot,
+						CapacityType: v1beta1.CapacityTypeSpot,
 						Zone:         "test-zone-1b",
 						Price:        0.2,
 						Available:    true,
 					},
 					{
-						CapacityType: v1alpha5.CapacityTypeSpot,
+						CapacityType: v1beta1.CapacityTypeSpot,
 						Zone:         "test-zone-1c",
 						Price:        0.3,
 						Available:    true,
@@ -1014,7 +1014,7 @@ var _ = Describe("Consolidation", func() {
 				{
 					Key:      v1beta1.CapacityTypeLabelKey,
 					Operator: v1.NodeSelectorOpIn,
-					Values:   []string{v1alpha5.CapacityTypeOnDemand},
+					Values:   []string{v1beta1.CapacityTypeOnDemand},
 				},
 			}
 			nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
@@ -1160,8 +1160,8 @@ var _ = Describe("Consolidation", func() {
 							BlockOwnerDeletion: ptr.Bool(true),
 						},
 					}}})
-			nodeTemplateProvisioner := test.Provisioner()
-			nodeTemplateProvisioner.Spec.Provider = nil
+			nodeClassNodePool := test.NodePool()
+			nodeClassNodePool.Spec.Template.Spec.NodeClassRef = nil
 			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaim, node, nodeClaim2, node2, nodePool)
 
 			// bind pods to node
@@ -1517,7 +1517,7 @@ var _ = Describe("Consolidation", func() {
 
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
-			// Cascade any deletion of the machine to the node
+			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
 			// we should delete the non-annotated node
@@ -1941,7 +1941,7 @@ var _ = Describe("Consolidation", func() {
 			// Process the item so that the nodes can be deleted.
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
-			// Cascade any deletion of the machine to the node
+			// Cascade any deletion of the nodeclaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim2)
 
 			// we don't need a new node, but we should evict everything off one of node2 which only has a single pod

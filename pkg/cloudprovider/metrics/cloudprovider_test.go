@@ -30,7 +30,7 @@ var _ = Describe("Cloudprovider", func() {
 	var nodeClassNotReadyErr = cloudprovider.NewNodeClassNotReadyError(errors.New("not ready"))
 	var unknownErr = errors.New("this is an error we don't know about")
 
-	Describe("CloudProvider machine errors via GetErrorTypeLabelValue()", func() {
+	Describe("CloudProvider nodeclaim errors via GetErrorTypeLabelValue()", func() {
 		Context("when the error is known", func() {
 			It("nodeclaim not found should be recognized", func() {
 				Expect(metrics.GetErrorTypeLabelValue(nodeClaimNotFoundErr)).To(Equal(metrics.NodeClaimNotFoundError))

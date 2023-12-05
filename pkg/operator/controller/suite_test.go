@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
-	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -76,7 +76,7 @@ var _ = Describe("Typed", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: "default",
+					v1beta1.NodePoolLabelKey: "default",
 				},
 			},
 		})
@@ -85,7 +85,7 @@ var _ = Describe("Typed", func() {
 			ReconcileAssertions: []TypedReconcileAssertion[*v1.Node]{
 				func(ctx context.Context, n *v1.Node) {
 					Expect(n.Name).To(Equal(node.Name))
-					Expect(n.Labels).To(HaveKeyWithValue(v1alpha5.ProvisionerNameLabelKey, "default"))
+					Expect(n.Labels).To(HaveKeyWithValue(v1beta1.NodePoolLabelKey, "default"))
 				},
 			},
 		}
@@ -96,7 +96,7 @@ var _ = Describe("Typed", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: "default",
+					v1beta1.NodePoolLabelKey: "default",
 				},
 				Finalizers: []string{
 					"testing/finalizer",

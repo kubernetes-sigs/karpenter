@@ -58,7 +58,7 @@ func NodeClaimAndNode(overrides ...v1beta1.NodeClaim) (*v1beta1.NodeClaim, *v1.N
 	return nc, NodeClaimLinkedNode(nc)
 }
 
-// NodeClaimsAndNodes creates homogeneous groups of NodeClaims and Nodes based on the passed in options, evenly divided by the total machines requested
+// NodeClaimsAndNodes creates homogeneous groups of NodeClaims and Nodes based on the passed in options, evenly divided by the total nodeclaims requested
 func NodeClaimsAndNodes(total int, options ...v1beta1.NodeClaim) ([]*v1beta1.NodeClaim, []*v1.Node) {
 	nodeClaims := make([]*v1beta1.NodeClaim, total)
 	nodes := make([]*v1.Node, total)
