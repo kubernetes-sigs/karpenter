@@ -186,7 +186,6 @@ func getNodeLabels(node *v1.Node, resourceTypeName string) prometheus.Labels {
 
 func getWellKnownLabels() map[string]string {
 	labels := make(map[string]string)
-	// TODO @joinnis: Remove v1alpha5 well-known labels in favor of only v1beta1 well-known labels after v1alpha5 is dropped
 	for wellKnownLabel := range v1beta1.WellKnownLabels {
 		if parts := strings.Split(wellKnownLabel, "/"); len(parts) == 2 {
 			label := parts[1]
