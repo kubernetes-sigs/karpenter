@@ -54,7 +54,12 @@ linters-settings:
   goimports:
     local-prefixes: sigs.k8s.io/karpenter
   goheader:
+    values:
+      regexp:
+        COPYRIGHT_NOTICE: Copyright 20[2-4][0-9] The Kubernetes Authors\.
     template: |-
+      {{ COPYRIGHT_NOTICE }}
+      
       Licensed under the Apache License, Version 2.0 (the "License");
       you may not use this file except in compliance with the License.
       You may obtain a copy of the License at
