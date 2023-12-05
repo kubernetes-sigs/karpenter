@@ -26,6 +26,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"knative.dev/pkg/ptr"
 
@@ -99,6 +100,71 @@ var _ = Describe("CEL/Validation", func() {
 			nodePool.Spec.Disruption.ConsolidateAfter = &NillableDuration{Duration: nil}
 			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenUnderutilized
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+		})
+		It("should fail when creating a budget with an invalid cron", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{{
+				MaxUnavailable: intstr.FromInt(10),
+				Crontab:        ptr.String("*"),
+				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("30s"))},
+			}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+		})
+		It("should fail when creating a budget with a negative duration", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{{
+				MaxUnavailable: intstr.FromInt(10),
+				Crontab:        ptr.String("* * * * *"),
+				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("-30s"))},
+			}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+		})
+		It("should fail when creating a budget with a cron but no duration", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{{
+				MaxUnavailable: intstr.FromInt(10),
+				Crontab:        ptr.String("* * * * *"),
+			}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+		})
+		It("should fail when creating a budget with a duration but no cron", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{{
+				MaxUnavailable: intstr.FromInt(10),
+				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("-30s"))},
+			}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+		})
+		It("should succeed when creating a budget with both duration and cron", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{{
+				MaxUnavailable: intstr.FromInt(10),
+				Crontab:        ptr.String("* * * * *"),
+				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("30s"))},
+			}}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+		})
+		It("should succeed when creating a budget with neither duration nor cron", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{{
+				MaxUnavailable: intstr.FromInt(10),
+			}}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+		})
+		It("should succeed when creating a budget with special cased crons", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{{
+				MaxUnavailable: intstr.FromInt(10),
+				Crontab:        ptr.String("@annually"),
+				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("30s"))},
+			}}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+		})
+		It("should fail when creating two budgets where one is invalid", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{{
+				MaxUnavailable: intstr.FromInt(10),
+				Crontab:        ptr.String("@annually"),
+				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("30s"))},
+			},
+				{
+					MaxUnavailable: intstr.FromInt(10),
+					Crontab:        ptr.String("*"),
+					Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("30s"))},
+				}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
 	})
 	Context("KubeletConfiguration", func() {
