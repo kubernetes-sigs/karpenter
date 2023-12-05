@@ -41,8 +41,6 @@ import (
 	"github.com/aws/karpenter/pkg/utils/project"
 )
 
-var instanceTypes []*cloudprovider.InstanceType
-
 func init() {
 	instanceTypes = fake.InstanceTypesAssorted()
 	fake.AddFakeLabels()

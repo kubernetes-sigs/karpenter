@@ -23,6 +23,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
@@ -34,17 +35,21 @@ var (
 	instanceTypeScheme = regexp.MustCompile(`(^[a-z]+)(\-[0-9]+tb)?([0-9]+).*\.`)
 )
 
-func requirements(offerings cloudprovider.Offerings, it *cloudprovider.InstanceType) scheduling.Requirements {
+func init() {
+	fake.AddFakeLabels()
+}
+
+
+func requirements(info fake.InstanceTypeOptions, offerings cloudprovider.Offerings, options fake.InstanceTypeOptions) scheduling.Requirements {
 	return scheduling.NewRequirements(
-		scheduling.NewRequirement(v1.LabelInstanceTypeStable, v1.NodeSelectorOpIn, it.Name),
+		scheduling.NewRequirement(v1.LabelInstanceTypeStable, v1.NodeSelectorOpIn, options.Name),
 		scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, options.Architecture),
 		scheduling.NewRequirement(v1.LabelOSStable, v1.NodeSelectorOpIn, sets.List(options.OperatingSystems)...),
 		scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string { return o.Zone })...),
 		scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string { return o.CapacityType })...),
-		scheduling.NewRequirement(fake.LabelInstanceSize, v1.NodeSelectorOpIn, options.Size),
-		scheduling.NewRequirement(fake.IntegerInstanceLabelKey, v1.NodeSelectorOpIn, fmt.Sprint(options.Resources.Cpu().Value())),
-		// Add in
+		scheduling.NewRequirement(fake.LabelInstanceSize, v1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(fake.ExoticInstanceLabelKey, v1.NodeSelectorOpDoesNotExist),
+		scheduling.NewRequirement(fake.IntegerInstanceLabelKey, v1.NodeSelectorOpIn, fmt.Sprint(options.Resources.Cpu().Value())),
 	)
 }
 
@@ -72,10 +77,10 @@ func uniqueZones(available cloudprovider.Offerings) []string {
 	return keys
 }
 
-func computeCapacity(ctx context.Context, it *cloudprovider.InstanceType) v1.ResourceList {
+func computeCapacity(ctx context.Context, info fake.InstanceTypeOptions) v1.ResourceList {
 	resourceList := v1.ResourceList{
-		v1.ResourceCPU:               *it.Capacity.Cpu(),
-		v1.ResourceMemory:            *it.Capacity.Memory(),
+		v1.ResourceCPU:               *resources.Quantity(fmt.Sprint(info.Resources.Cpu())),
+		v1.ResourceMemory:            *info.Resources.Memory(),
 		v1.ResourceEphemeralStorage:  resource.MustParse("20G"),
 		v1.ResourcePods:              resource.MustParse("110"),
 	}
