@@ -33,13 +33,11 @@ import (
 	kubeErrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"knative.dev/pkg/logging"
 
 	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
 	"github.com/aws/karpenter-core/pkg/cloudprovider"
 	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
 	"github.com/aws/karpenter-core/pkg/scheduling"
-	"github.com/aws/karpenter/pkg/providers/pricing"
 	"github.com/aws/karpenter/pkg/utils/project"
 )
 
@@ -47,30 +45,23 @@ var instanceTypes []*cloudprovider.InstanceType
 
 func init() {
 	instanceTypes = fake.InstanceTypesAssorted()
+	fake.AddFakeLabels()
 }
 
 func NewCloudProvider(ctx context.Context, client kubernetes.Interface) *CloudProvider {
-	logging.FromContext(ctx).With("region", *sess.Config.Region).Debugf("discovered region")
-	p := pricing.NewProvider(ctx,
-		pricing.NewAPI(sess, *sess.Config.Region),
-		ec2api,
-		*sess.Config.Region,
-	)
 	return &CloudProvider{
-		Pricing:    p,
 		kubeClient: client,
 	}
 }
 
 type CloudProvider struct {
-	Pricing       *pricing.Provider
 	kubeClient    kubernetes.Interface
 	populateTypes sync.Once
 	instanceTypes []*cloudprovider.InstanceTypes
 }
 
 func (c CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (*v1beta1.NodeClaim, error) {
-	// Create the Node because KWOK nodes don't have a kubelet.
+	// Create the Node because KwoK nodes don't run kubelet, which is what Karpenter relies on to create the node.
 	node, err := c.toNode(nodeClaim)
 	if err != nil {
 		return nil, fmt.Errorf("translating nodeclaim to node, %w", err)
@@ -79,6 +70,7 @@ func (c CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 	if err != nil {
 		return nil, fmt.Errorf("creating node, %w", err)
 	}
+	// convert the node back into a node claim to get the chosen resolved requirement values.
 	return c.toNodeClaim(node)
 }
 
@@ -124,11 +116,11 @@ func (c CloudProvider) List(ctx context.Context) ([]*v1beta1.NodeClaim, error) {
 
 func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *v1beta1.NodePool) ([]*cloudprovider.InstanceType, error) {
 	var ret []*cloudprovider.InstanceType
-	for _, it := range instanceTypesOutput.InstanceTypes {
+	for _, it := range instanceTypes {
 		offerings := c.offerings(ctx, it)
 		ret = append(ret, &cloudprovider.InstanceType{
-			Name:         *it.InstanceType,
-			Requirements: requirements(it, offerings),
+			Name:         it.Name,
+			Requirements: requirements(offerings, it),
 			Offerings:    offerings,
 			Capacity:     computeCapacity(ctx, it),
 			Overhead: &cloudprovider.InstanceTypeOverhead{
@@ -141,18 +133,16 @@ func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *v1beta1.N
 	return ret, nil
 }
 
-func (c CloudProvider) offerings(ctx context.Context, it *ec2.InstanceTypeInfo) cloudprovider.Offerings {
+func (c CloudProvider) offerings(ctx context.Context, it *cloudprovider.InstanceType) cloudprovider.Offerings {
 	var ret cloudprovider.Offerings
 	for _, zone := range kwokZones {
-		if odPrice, ok := c.Pricing.OnDemandPrice(*it.InstanceType); ok {
-			ret = append(ret, cloudprovider.Offering{
-				CapacityType: v1beta1.CapacityTypeOnDemand,
-				Zone:         zone,
-				Price:        odPrice,
-				Available:    true,
-			})
-		}
-		if spotPrice, ok := c.Pricing.SpotPrice(*it.InstanceType, zone); ok {
+		ret = append(ret, cloudprovider.Offering{
+			CapacityType: v1beta1.CapacityTypeOnDemand,
+			Zone:         zone,
+			Price:        fake.PriceFromResources(it.Capacity),
+			Available:    true,
+		})
+	if spotPrice, ok := c.Pricing.SpotPrice(*it.InstanceType, zone); ok {
 			ret = append(ret, cloudprovider.Offering{
 				CapacityType: v1beta1.CapacityTypeSpot,
 				Zone:         zone,

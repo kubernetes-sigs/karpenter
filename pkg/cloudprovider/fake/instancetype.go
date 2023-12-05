@@ -31,22 +31,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
-const (
-	LabelInstanceSize                       = "size"
-	ExoticInstanceLabelKey                  = "special"
-	IntegerInstanceLabelKey                 = "integer"
-	ResourceGPUVendorA      v1.ResourceName = "fake.com/vendor-a"
-	ResourceGPUVendorB      v1.ResourceName = "fake.com/vendor-b"
-)
-
-func init() {
-	v1beta1.WellKnownLabels.Insert(
-		LabelInstanceSize,
-		ExoticInstanceLabelKey,
-		IntegerInstanceLabelKey,
-	)
-}
-
 func NewInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 	if options.Resources == nil {
 		options.Resources = map[v1.ResourceName]resource.Quantity{}
@@ -62,11 +46,11 @@ func NewInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 	}
 	if len(options.Offerings) == 0 {
 		options.Offerings = []cloudprovider.Offering{
-			{CapacityType: "spot", Zone: "test-zone-1", Price: priceFromResources(options.Resources), Available: true},
-			{CapacityType: "spot", Zone: "test-zone-2", Price: priceFromResources(options.Resources), Available: true},
-			{CapacityType: "on-demand", Zone: "test-zone-1", Price: priceFromResources(options.Resources), Available: true},
-			{CapacityType: "on-demand", Zone: "test-zone-2", Price: priceFromResources(options.Resources), Available: true},
-			{CapacityType: "on-demand", Zone: "test-zone-3", Price: priceFromResources(options.Resources), Available: true},
+			{CapacityType: "spot", Zone: "test-zone-1", Price: PriceFromResources(options.Resources), Available: true},
+			{CapacityType: "spot", Zone: "test-zone-2", Price: PriceFromResources(options.Resources), Available: true},
+			{CapacityType: "on-demand", Zone: "test-zone-1", Price: PriceFromResources(options.Resources), Available: true},
+			{CapacityType: "on-demand", Zone: "test-zone-2", Price: PriceFromResources(options.Resources), Available: true},
+			{CapacityType: "on-demand", Zone: "test-zone-3", Price: PriceFromResources(options.Resources), Available: true},
 		}
 	}
 	if len(options.Architecture) == 0 {
@@ -84,6 +68,8 @@ func NewInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 		scheduling.NewRequirement(LabelInstanceSize, v1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(ExoticInstanceLabelKey, v1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(IntegerInstanceLabelKey, v1.NodeSelectorOpIn, fmt.Sprint(options.Resources.Cpu().Value())),
+		// Add in exotic instance type labels
+		scheduling.NewRequirement(ExoticInstanceLabelKey, v1.NodeSelectorOpExists),
 	)
 	if options.Resources.Cpu().Cmp(resource.MustParse("4")) > 0 &&
 		options.Resources.Memory().Cmp(resource.MustParse("8Gi")) > 0 {
@@ -107,6 +93,10 @@ func NewInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 	}
 }
 
+func getInstanceSizeLabelValue(options InstanceTypeOptions) string {
+	options.Resources.Cpu().Value()
+}
+
 // InstanceTypesAssorted create many unique instance types with varying CPU/memory/architecture/OS/zone/capacity type.
 func InstanceTypesAssorted() []*cloudprovider.InstanceType {
 	var instanceTypes []*cloudprovider.InstanceType
@@ -125,7 +115,7 @@ func InstanceTypesAssorted() []*cloudprovider.InstanceType {
 									v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", mem)),
 								},
 							}
-							price := priceFromResources(opts.Resources)
+							price := PriceFromResources(opts.Resources)
 							opts.Offerings = []cloudprovider.Offering{
 								{
 									CapacityType: ct,
@@ -134,6 +124,7 @@ func InstanceTypesAssorted() []*cloudprovider.InstanceType {
 									Available:    true,
 								},
 							}
+							opts.Size = fmt.Sprintf("%dx", cpu)
 							instanceTypes = append(instanceTypes, NewInstanceType(opts))
 						}
 					}
@@ -167,13 +158,14 @@ func InstanceTypes(total int) []*cloudprovider.InstanceType {
 
 type InstanceTypeOptions struct {
 	Name             string
+	Size             string
 	Offerings        cloudprovider.Offerings
 	Architecture     string
 	OperatingSystems sets.Set[string]
 	Resources        v1.ResourceList
 }
 
-func priceFromResources(resources v1.ResourceList) float64 {
+func PriceFromResources(resources v1.ResourceList) float64 {
 	price := 0.0
 	for k, v := range resources {
 		switch k {

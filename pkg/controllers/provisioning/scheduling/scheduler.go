@@ -330,7 +330,11 @@ func getDaemonOverhead(nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []
 			if err := scheduling.Taints(nodeClaimTemplate.Spec.Taints).Tolerates(p); err != nil {
 				continue
 			}
+<<<<<<< Updated upstream
 			if err := nodeClaimTemplate.Requirements.Compatible(scheduling.NewPodRequirements(p), scheduling.AllowUndefinedWellKnownLabels); err != nil {
+=======
+			if err := nodeClaimTemplate.Requirements.Compatible(scheduling.NewPodRequirements(p), lo.Ternary(nodeClaimTemplate.OwnerKey.IsProvisioner, scheduling.AllowUndefinedWellKnownLabelsV1Alpha5, scheduling.AllowUndefinedWellKnownLabels)); err != nil {
+>>>>>>> Stashed changes
 				continue
 			}
 			daemons = append(daemons, p)
