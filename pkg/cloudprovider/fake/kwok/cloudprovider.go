@@ -16,17 +16,11 @@ package kwok
 import (
 	"context"
 	_ "embed"
-	"errors"
 	"fmt"
 	"math/rand"
 	"strings"
 	"sync"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/aws/request"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/docker/docker/pkg/namesgenerator"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -34,11 +28,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
-	"github.com/aws/karpenter-core/pkg/scheduling"
-	"github.com/aws/karpenter/pkg/utils/project"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 func init() {
@@ -134,20 +127,19 @@ func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *v1beta1.N
 func (c CloudProvider) offerings(ctx context.Context, it *cloudprovider.InstanceType) cloudprovider.Offerings {
 	var ret cloudprovider.Offerings
 	for _, zone := range kwokZones {
+		odPrice := fake.PriceFromResources(it.Capacity)
 		ret = append(ret, cloudprovider.Offering{
 			CapacityType: v1beta1.CapacityTypeOnDemand,
 			Zone:         zone,
-			Price:        fake.PriceFromResources(it.Capacity),
+			Price:        odPrice,
 			Available:    true,
 		})
-	if spotPrice, ok := c.Pricing.SpotPrice(*it.InstanceType, zone); ok {
-			ret = append(ret, cloudprovider.Offering{
-				CapacityType: v1beta1.CapacityTypeSpot,
-				Zone:         zone,
-				Price:        spotPrice,
-				Available:    true,
-			})
-		}
+		ret = append(ret, cloudprovider.Offering{
+			CapacityType: v1beta1.CapacityTypeSpot,
+			Zone:         zone,
+			Price:        odPrice * .7,
+			Available:    true,
+		})
 	}
 	return ret
 }
@@ -313,23 +305,4 @@ func (c CloudProvider) toNodeClaim(node *v1.Node) (*v1beta1.NodeClaim, error) {
 			Allocatable: node.Status.Allocatable,
 		},
 	}, nil
-}
-
-
-// withUserAgent adds a karpenter specific user-agent string to AWS session
-func withUserAgent(sess *session.Session) *session.Session {
-	userAgent := fmt.Sprintf("karpenter.sh-%s", project.Version)
-	sess.Handlers.Build.PushBack(request.MakeAddToUserAgentFreeFormHandler(userAgent))
-	return sess
-}
-
-// checkEC2Connectivity makes a dry-run call to DescribeInstanceTypes.  If it fails, we provide an early indicator that we
-// are having issues connecting to the EC2 API.
-func checkEC2Connectivity(ctx context.Context, api *ec2.EC2) error {
-	_, err := api.DescribeInstanceTypesWithContext(ctx, &ec2.DescribeInstanceTypesInput{DryRun: aws.Bool(true)})
-	var aerr awserr.Error
-	if errors.As(err, &aerr) && aerr.Code() == "DryRunOperation" {
-		return nil
-	}
-	return err
 }

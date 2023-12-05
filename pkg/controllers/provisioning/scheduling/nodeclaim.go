@@ -78,11 +78,7 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 	podRequirements := scheduling.NewPodRequirements(pod)
 
 	// Check NodeClaim Affinity Requirements
-<<<<<<< Updated upstream
 	if err := nodeClaimRequirements.Compatible(podRequirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
-=======
-	if err := nodeClaimRequirements.Compatible(podRequirements, lo.Ternary(n.OwnerKey.IsProvisioner, scheduling.AllowUndefinedWellKnownLabelsV1Alpha5, scheduling.AllowUndefinedWellKnownLabels)); err != nil {
->>>>>>> Stashed changes
 		return fmt.Errorf("incompatible requirements, %w", err)
 	}
 	nodeClaimRequirements.Add(podRequirements.Values()...)
@@ -94,19 +90,11 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 		strictPodRequirements = scheduling.NewStrictPodRequirements(pod)
 	}
 	// Check Topology Requirements
-<<<<<<< Updated upstream
 	topologyRequirements, err := n.topology.AddRequirements(strictPodRequirements, nodeClaimRequirements, pod, scheduling.AllowUndefinedWellKnownLabels)
 	if err != nil {
 		return err
 	}
 	if err = nodeClaimRequirements.Compatible(topologyRequirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
-=======
-	topologyRequirements, err := n.topology.AddRequirements(strictPodRequirements, nodeClaimRequirements, pod, lo.Ternary(n.OwnerKey.IsProvisioner, scheduling.AllowUndefinedWellKnownLabelsV1Alpha5, scheduling.AllowUndefinedWellKnownLabels))
-	if err != nil {
-		return err
-	}
-	if err = nodeClaimRequirements.Compatible(topologyRequirements, lo.Ternary(n.OwnerKey.IsProvisioner, scheduling.AllowUndefinedWellKnownLabelsV1Alpha5, scheduling.AllowUndefinedWellKnownLabels)); err != nil {
->>>>>>> Stashed changes
 		return err
 	}
 	nodeClaimRequirements.Add(topologyRequirements.Values()...)
@@ -125,11 +113,7 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 	n.InstanceTypeOptions = filtered.remaining
 	n.Spec.Resources.Requests = requests
 	n.Requirements = nodeClaimRequirements
-<<<<<<< Updated upstream
 	n.topology.Record(pod, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
-=======
-	n.topology.Record(pod, nodeClaimRequirements, lo.Ternary(n.OwnerKey.IsProvisioner, scheduling.AllowUndefinedWellKnownLabelsV1Alpha5, scheduling.AllowUndefinedWellKnownLabels))
->>>>>>> Stashed changes
 	n.hostPortUsage.Add(pod, hostPorts)
 	return nil
 }
