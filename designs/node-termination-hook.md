@@ -19,7 +19,7 @@ spec: # This is not a complete NodePool Spec.
     consolidateAfter: 10m || Never # metav1.Duration
     expireAfter: 10m || Never # Equivalent to v1alpha5 TTLSecondsUntilExpired
     customFinalizerName: example.com/customNodeTermination || nil
-	terminationGracePeriodSeconds:  86400 || nil #https://github.com/kubernetes-sigs/karpenter/pull/834
+    terminationGracePeriodSeconds:  86400 || nil #https://github.com/kubernetes-sigs/karpenter/pull/834
 ```
 
 
