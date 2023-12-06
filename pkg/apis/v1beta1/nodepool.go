@@ -98,6 +98,9 @@ type Disruption struct {
 	Budgets []Budget `json:"budgets,omitempty" hash:"ignore"`
 }
 
+const MaxUnavailableRegex = "^((100|[0-9]{1,2})%|[0-9]+)$"
+const DurationRegex = "^(([0-9]+(m|h))+)|(Never)$"
+
 // Budget defines when Karpenter will restrict the
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
