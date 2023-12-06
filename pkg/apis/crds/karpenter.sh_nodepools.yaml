@@ -62,16 +62,10 @@ spec:
                             pattern: ^(([0-9]+(m|h))+)|(Never)$
                             type: string
                           maxUnavailable:
-                            anyOf:
-                              - type: integer
-                              - type: string
                             default: 10%
-                            description: MaxUnavailable dictates how many NodeClaims owned by this NodePool can be terminating at once. It must be set. This only considers NodeClaims with the karpenter.sh/disruption taint.
+                            description: 'MaxUnavailable dictates how many NodeClaims owned by this NodePool can be terminating at once. It must be set. This only considers NodeClaims with the karpenter.sh/disruption taint. We can''t use an intstr.IntOrString since kubebuilder doesn''t support pattern checking for int values for IntOrString values. Ref: https://github.com/kubernetes-sigs/controller-tools/blob/55efe4be40394a288216dab63156b0a64fb82929/pkg/crd/markers/validation.go#L379-L388'
                             pattern: ^((100|[0-9]{1,2})%|[0-9]+)$
-                            x-kubernetes-int-or-string: true
-                            x-kubernetes-validations:
-                              - message: '''MaxUnavailable'' must be non-negative'
-                                rule: 'type(self) == int? int(self) > 0: true'
+                            type: string
                         required:
                           - maxUnavailable
                         type: object

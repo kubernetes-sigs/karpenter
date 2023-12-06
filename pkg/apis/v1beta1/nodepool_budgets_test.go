@@ -23,10 +23,9 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	clock "k8s.io/utils/clock/testing"
 
-	. "github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	. "sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 )
 
 var _ = Describe("Budgets", func() {
@@ -39,22 +38,22 @@ var _ = Describe("Budgets", func() {
 		fakeClock = clock.NewFakeClock(time.Date(2000, time.June, 15, 12, 30, 30, 0, time.UTC))
 		budgets = []Budget{
 			{
-				MaxUnavailable: intstr.FromInt(10),
+				MaxUnavailable: "10",
 				Crontab:        lo.ToPtr("* * * * *"),
 				Duration:       lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 			},
 			{
-				MaxUnavailable: intstr.FromInt(100),
+				MaxUnavailable: "100",
 				Crontab:        lo.ToPtr("* * * * *"),
 				Duration:       lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 			},
 			{
-				MaxUnavailable: intstr.FromString("10%"),
+				MaxUnavailable: "10%",
 				Crontab:        lo.ToPtr("* * * * *"),
 				Duration:       lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 			},
 			{
-				MaxUnavailable: intstr.FromString("100%"),
+				MaxUnavailable: "100%",
 				Crontab:        lo.ToPtr("* * * * *"),
 				Duration:       lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 			},

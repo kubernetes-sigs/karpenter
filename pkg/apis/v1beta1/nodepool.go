@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/robfig/cron/v3"
@@ -29,7 +30,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/ptr"
 )
@@ -214,17 +214,17 @@ func (pl *NodePoolList) OrderByWeight() {
 // GetAllowedDisruptions returns the minimum allowed disruptions across all disruption budgets for a given node pool.
 // This returns two values as the resolved value for a percent depends on the number of current node claims.
 func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock) (intstr.IntOrString, intstr.IntOrString, error) {
+	var errs error
 	vals := make([]intstr.IntOrString, len(in.Spec.Disruption.Budgets))
-	errs := make([]error, len(in.Spec.Disruption.Budgets))
-	workqueue.ParallelizeUntil(ctx, len(in.Spec.Disruption.Budgets), len(in.Spec.Disruption.Budgets), func(i int) {
+	for i := range in.Spec.Disruption.Budgets {
 		val, err := in.Spec.Disruption.Budgets[i].GetAllowedDisruptions(c)
 		if err != nil {
-			errs[i] = fmt.Errorf("invalid budget %s, %w", lo.FromPtr(in.Spec.Disruption.Budgets[i].Crontab), err)
+			errs = multierr.Append(errs, err)
 		}
 		vals[i] = val
-	})
-	if err := multierr.Combine(errs...); err != nil {
-		return intstr.IntOrString{}, intstr.IntOrString{}, err
+	}
+	if errs != nil {
+		return intstr.IntOrString{}, intstr.IntOrString{}, fmt.Errorf("getting nodepool allowed disruptions, %w", errs)
 	}
 	minIntVal, minPercentVal := math.MaxInt64, math.MaxInt64
 	for i := range vals {
@@ -257,7 +257,14 @@ func (b *Budget) GetAllowedDisruptions(c clock.Clock) (intstr.IntOrString, error
 	if err != nil {
 		return intstr.IntOrString{}, err
 	}
-	return lo.Ternary(active, b.MaxUnavailable, intstr.FromInt(-1)), nil
+	if !active {
+		return intstr.FromInt(-1), nil
+	}
+	// If err is nil, we treat it as an int.
+	if intVal, err := strconv.Atoi(b.MaxUnavailable); err == nil {
+		return intstr.FromInt(intVal), nil
+	}
+	return intstr.FromString(b.MaxUnavailable), nil
 }
 
 // IsActive takes a clock as input and returns if a budget is active.
