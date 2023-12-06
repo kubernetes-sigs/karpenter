@@ -2,7 +2,7 @@
 
 ## Motivation
 Users are interested in customizing how node terminations occurs and although the existing finalizer is very useful its difficult introduce any custom termination
-logic for nodes [#743](https://github.com/kubernetes-sigs/karpenter/issues/743), [#622](https://github.com/kubernetes-sigs/karpenter/issues/622), [#740](https://github.com/kubernetes-sigs/karpenter/issues/740), [#690](https://github.com/kubernetes-sigs/karpenter/issues/690)
+logic for nodes [#743](https://github.com/kubernetes-sigs/karpenter/issues/743), [#622](https://github.com/kubernetes-sigs/karpenter/issues/622), [#740](https://github.com/kubernetes-sigs/karpenter/issues/740), [#690](https://github.com/kubernetes-sigs/karpenter/issues/690),
 [#5232](https://github.com/aws/karpenter/issues/5232)
 * Cluster admins may have unique methods for draining or terminating nodes outside of what Karpenter currently supports. It could be because it depends other signals,
 or more complicated termination process. We want to give cluster admins this flexibility
