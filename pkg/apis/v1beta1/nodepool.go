@@ -252,8 +252,8 @@ func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock) (i
 // GetAllowedDisruptions returns an intstr.IntOrString that can be used a comparison
 // for calculating if a disruption action is allowed. It returns an error if the
 // crontab is invalid. This returns -1 if the value is unbounded.
-func (b *Budget) GetAllowedDisruptions(c clock.Clock) (intstr.IntOrString, error) {
-	active, err := b.IsActive(c)
+func (in *Budget) GetAllowedDisruptions(c clock.Clock) (intstr.IntOrString, error) {
+	active, err := in.IsActive(c)
 	if err != nil {
 		return intstr.IntOrString{}, err
 	}
@@ -261,10 +261,10 @@ func (b *Budget) GetAllowedDisruptions(c clock.Clock) (intstr.IntOrString, error
 		return intstr.FromInt(-1), nil
 	}
 	// If err is nil, we treat it as an int.
-	if intVal, err := strconv.Atoi(b.MaxUnavailable); err == nil {
+	if intVal, err := strconv.Atoi(in.MaxUnavailable); err == nil {
 		return intstr.FromInt(intVal), nil
 	}
-	return intstr.FromString(b.MaxUnavailable), nil
+	return intstr.FromString(in.MaxUnavailable), nil
 }
 
 // IsActive takes a clock as input and returns if a budget is active.
@@ -273,16 +273,16 @@ func (b *Budget) GetAllowedDisruptions(c clock.Clock) (intstr.IntOrString, error
 // If the last crontab hit is exactly the duration in the past, this means the
 // schedule is active, as any more crontab hits in between would only extend this
 // window. This ensures that any previous crontab hits for a schedule are considered.
-func (b *Budget) IsActive(c clock.Clock) (bool, error) {
-	if b.Crontab == nil && b.Duration == nil {
+func (in *Budget) IsActive(c clock.Clock) (bool, error) {
+	if in.Crontab == nil && in.Duration == nil {
 		return true, nil
 	}
-	schedule, err := cron.ParseStandard(lo.FromPtr(b.Crontab))
+	schedule, err := cron.ParseStandard(lo.FromPtr(in.Crontab))
 	if err != nil {
 		return false, fmt.Errorf("parsing crontab, %w", err)
 	}
 	// Walk back in time for the duration associated with the crontab
-	checkPoint := c.Now().Add(-lo.FromPtr(b.Duration).Duration)
+	checkPoint := c.Now().Add(-lo.FromPtr(in.Duration).Duration)
 	nextHit := schedule.Next(checkPoint)
 	return !nextHit.After(c.Now()), nil
 }
