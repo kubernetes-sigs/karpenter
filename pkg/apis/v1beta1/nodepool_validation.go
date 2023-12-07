@@ -19,7 +19,6 @@ package v1beta1
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/robfig/cron/v3"
 	"github.com/samber/lo"
@@ -114,7 +113,6 @@ func (in *Disruption) validate() (errs *apis.FieldError) {
 	return errs
 }
 
-//nolint:gocyclo
 func (in *Budget) validate() (errs *apis.FieldError) {
 	if (in.Crontab != nil && in.Duration == nil) || (in.Crontab == nil && in.Duration != nil) {
 		return apis.ErrGeneric("crontab and duration must be specified together")
@@ -122,11 +120,6 @@ func (in *Budget) validate() (errs *apis.FieldError) {
 	if in.Crontab != nil {
 		if _, err := cron.ParseStandard(lo.FromPtr(in.Crontab)); err != nil {
 			return apis.ErrInvalidValue(in.Crontab, "crontab", fmt.Sprintf("invalid crontab %s", err))
-		}
-	}
-	if in.Duration != nil {
-		if newDuration := in.Duration.Truncate(time.Minute); newDuration != in.Duration.Duration {
-			return errs.Also(apis.ErrInvalidValue(in.Duration, "duration", "duration cannot have time denomination smaller than minutes"))
 		}
 	}
 	return errs

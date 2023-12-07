@@ -95,14 +95,6 @@ var _ = Describe("Webhook/Validation", func() {
 			}}
 			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 		})
-		It("should fail to validate a budget with a seconds duration", func() {
-			nodePool.Spec.Disruption.Budgets = []Budget{{
-				MaxUnavailable: "10",
-				Crontab:        ptr.String("* * * * *"),
-				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("30s"))},
-			}}
-			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
-		})
 		It("should fail to validate a budget with a cron but no duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: "10",
