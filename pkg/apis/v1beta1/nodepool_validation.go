@@ -129,7 +129,7 @@ func (in *Budget) validate() (errs *apis.FieldError) {
 	if (in.Crontab != nil && in.Duration == nil) || (in.Crontab == nil && in.Duration != nil) {
 		return apis.ErrGeneric("crontab and duration must be specified together")
 	}
-	if matched, err := regexp.MatchString(MaxUnavailableRegex, in.MaxUnavailable); err != nil || !matched {
+	if matched, err := regexp.MatchString("^((100|[0-9]{1,2})%|[0-9]+)$", in.MaxUnavailable); err != nil || !matched {
 		return apis.ErrInvalidValue(in.MaxUnavailable, "maxUnavailable", "must be a valid intorstring")
 	}
 	if in.Crontab != nil {
