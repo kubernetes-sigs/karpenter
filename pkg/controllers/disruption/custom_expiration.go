@@ -27,9 +27,9 @@ import (
 	"github.com/aws/karpenter-core/pkg/metrics"
 )
 
-// CustomExpiration is a subreconciler that deletes custom marked candidates, based on node annotations.
+// UserAnnotedExpiration is a subreconciler that deletes custom marked candidates, based on node annotations.
 // Expiration will respect TTLSecondsAfterEmpty
-type CustomExpiration struct {
+type UserAnnotedExpiration struct {
 	clock       clock.Clock
 	kubeClient  client.Client
 	cluster     *state.Cluster
@@ -48,27 +48,27 @@ func NewCustomExpiration(clk clock.Clock, kubeClient client.Client, cluster *sta
 }
 
 // ShouldDisrupt is a predicate used to filter candidates
-func (e *CustomExpiration) ShouldDisrupt(_ context.Context, c *Candidate) bool {
+func (e *UserAnnotedExpiration) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 	// TODO: tasdikrahman to implement this.
 	return true
 }
 
 // SortCandidates orders expired candidates by when they've expired
-func (e *CustomExpiration) filterAndSortCandidates(ctx context.Context, candidates []*Candidate) ([]*Candidate, error) {
+func (e *UserAnnotedExpiration) filterAndSortCandidates(ctx context.Context, candidates []*Candidate) ([]*Candidate, error) {
 	// TODO: tasdikrahman to implement this.
 	return candidates, nil
 }
 
 // ComputeCommand generates a disrpution command given candidates
-func (e *CustomExpiration) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
+func (e *UserAnnotedExpiration) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
 	// TODO: tasdikrahman to implement this.
 	return Command{}, nil
 }
 
-func (e *CustomExpiration) Type() string {
-	return metrics.CustomExpiration
+func (e *UserAnnotedExpiration) Type() string {
+	return metrics.UserAnnotedExpiration
 }
 
-func (e *CustomExpiration) ConsolidationType() string {
+func (e *UserAnnotedExpiration) ConsolidationType() string {
 	return ""
 }
