@@ -98,7 +98,7 @@ func ToleratesUnschedulableTaint(pod *v1.Pod) bool {
 
 // ToleratesDisruptionNoScheduleTaint returns true if the pod tolerates karpenter.sh/disruption:NoSchedule=Disrupting taint
 func ToleratesDisruptionNoScheduleTaint(pod *v1.Pod) bool {
-	return scheduling.Taints([]v1.Taint{v1beta1.DisruptionNoScheduleTaint}).Tolerates(pod) == nil
+	return scheduling.Taints([]v1.Taint{v1beta1.DisruptionNoScheduleTaint}).ToleratesPod(pod) == nil
 }
 
 // HasRequiredPodAntiAffinity returns true if a non-empty PodAntiAffinity/RequiredDuringSchedulingIgnoredDuringExecution
