@@ -14,6 +14,16 @@ jobs:
           k8sVersion: ["1.23.x", "1.24.x", "1.25.x", "1.26.x", "1.27.x", "1.28.x"]
     steps:
     - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+    - name: Rebase PR onto main
+      run: |
+          git fetch origin
+          echo "branch: $(git rev-parse --abbrev-ref HEAD)"
+          echo "head: $(git rev-parse origin/main)"
+          git rebase origin/main || true
+          cat .github/workflows/presubmit.yaml
+          exit 1
     - uses: ./.github/actions/install-deps
       with:
         k8sVersion: ${{ matrix.k8sVersion }}
