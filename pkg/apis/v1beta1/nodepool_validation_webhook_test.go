@@ -87,93 +87,93 @@ var _ = Describe("Webhook/Validation", func() {
 			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenUnderutilized
 			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 		})
-		It("should fail when creating a budget with an invalid cron", func() {
+		It("should fail to validate a budget with an invalid cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: "10",
 				Crontab:        ptr.String("*"),
 				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
-			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 		})
-		It("should fail when creating a crontab with less than 5 entries", func() {
+		It("should fail to validate a crontab with less than 5 entries", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: "10",
 				Crontab:        ptr.String("* * * * "),
 				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
-			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 		})
-		It("should fail when creating a budget with a negative duration", func() {
+		It("should fail to validate a budget with a negative duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: "10",
 				Crontab:        ptr.String("* * * * *"),
 				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("-20m"))},
 			}}
-			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 		})
-		It("should fail when creating a budget with a seconds duration", func() {
+		It("should fail to validate a budget with a seconds duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: "10",
 				Crontab:        ptr.String("* * * * *"),
 				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("30s"))},
 			}}
-			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 		})
-		It("should fail when creating a budget with a negative maxUnavailable int", func() {
+		It("should fail to validate a budget with a negative maxUnavailable int", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: "-10",
 			}}
-			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 		})
-		It("should fail when creating a budget with a negative maxUnavailable percent", func() {
+		It("should fail to validate a budget with a negative maxUnavailable percent", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: "-10%",
 			}}
-			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 		})
-		It("should fail when creating a budget with a maxUnavailable percent with more than 3 digits", func() {
+		It("should fail to validate a budget with a maxUnavailable percent with more than 3 digits", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: "1000%",
 			}}
-			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 		})
-		It("should fail when creating a budget with a cron but no duration", func() {
+		It("should fail to validate a budget with a cron but no duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: "10",
 				Crontab:        ptr.String("* * * * *"),
 			}}
-			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 		})
-		It("should fail when creating a budget with a duration but no cron", func() {
+		It("should fail to validate a budget with a duration but no cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: "10",
 				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("-20m"))},
 			}}
-			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 		})
-		It("should succeed when creating a budget with both duration and cron", func() {
+		It("should succeed to validate a budget with both duration and cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: "10",
 				Crontab:        ptr.String("* * * * *"),
 				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
-			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.Validate(ctx)).To(Succeed())
 		})
-		It("should succeed when creating a budget with neither duration nor cron", func() {
+		It("should succeed to validate a budget with neither duration nor cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: "10",
 			}}
-			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.Validate(ctx)).To(Succeed())
 		})
-		It("should succeed when creating a budget with special cased crons", func() {
+		It("should succeed to validate a budget with special cased crons", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: "10",
 				Crontab:        ptr.String("@annually"),
 				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
-			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.Validate(ctx)).To(Succeed())
 		})
-		It("should fail when creating two budgets where one is invalid", func() {
+		It("should fail to validate two budgets where one is invalid", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: "10",
 				Crontab:        ptr.String("@annually"),
@@ -184,7 +184,7 @@ var _ = Describe("Webhook/Validation", func() {
 					Crontab:        ptr.String("*"),
 					Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				}}
-			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 		})
 	})
 	Context("Limits", func() {
