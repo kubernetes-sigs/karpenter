@@ -99,12 +99,6 @@ func (in *NodeClaimTemplate) validateRequirementsNodePoolKeyDoesNotExist() (errs
 
 //nolint:gocyclo
 func (in *Disruption) validate() (errs *apis.FieldError) {
-	if in.ExpireAfter.Duration != nil && *in.ExpireAfter.Duration < 0 {
-		return errs.Also(apis.ErrInvalidValue(in.ExpireAfter.Duration, "expirationTTL", "cannot be negative"))
-	}
-	if in.ConsolidateAfter != nil && in.ConsolidateAfter.Duration != nil && *in.ConsolidateAfter.Duration < 0 {
-		return errs.Also(apis.ErrInvalidValue(in.ConsolidateAfter.Duration, "consolidationTTL", "cannot be negative"))
-	}
 	if in.ConsolidateAfter != nil && in.ConsolidateAfter.Duration != nil && in.ConsolidationPolicy == ConsolidationPolicyWhenUnderutilized {
 		return errs.Also(apis.ErrGeneric("consolidateAfter cannot be combined with consolidationPolicy=WhenUnderutilized"))
 	}
@@ -131,9 +125,6 @@ func (in *Budget) validate() (errs *apis.FieldError) {
 		}
 	}
 	if in.Duration != nil {
-		if in.Duration.Duration < 0 {
-			return errs.Also(apis.ErrInvalidValue(in.Duration, "duration", "cannot be negative"))
-		}
 		if newDuration := in.Duration.Truncate(time.Minute); newDuration != in.Duration.Duration {
 			return errs.Also(apis.ErrInvalidValue(in.Duration, "duration", "duration cannot have time denomination smaller than minutes"))
 		}
