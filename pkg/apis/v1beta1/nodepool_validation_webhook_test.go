@@ -119,24 +119,6 @@ var _ = Describe("Webhook/Validation", func() {
 			}}
 			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 		})
-		It("should fail to validate a budget with a negative maxUnavailable int", func() {
-			nodePool.Spec.Disruption.Budgets = []Budget{{
-				MaxUnavailable: "-10",
-			}}
-			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
-		})
-		It("should fail to validate a budget with a negative maxUnavailable percent", func() {
-			nodePool.Spec.Disruption.Budgets = []Budget{{
-				MaxUnavailable: "-10%",
-			}}
-			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
-		})
-		It("should fail to validate a budget with a maxUnavailable percent with more than 3 digits", func() {
-			nodePool.Spec.Disruption.Budgets = []Budget{{
-				MaxUnavailable: "1000%",
-			}}
-			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
-		})
 		It("should fail to validate a budget with a cron but no duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: "10",

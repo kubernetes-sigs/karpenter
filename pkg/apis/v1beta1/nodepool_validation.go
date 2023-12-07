@@ -19,7 +19,6 @@ package v1beta1
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -112,9 +111,6 @@ func (in *Disruption) validate() (errs *apis.FieldError) {
 	if in.ConsolidateAfter == nil && in.ConsolidationPolicy == ConsolidationPolicyWhenEmpty {
 		return errs.Also(apis.ErrGeneric("consolidateAfter must be specified with consolidationPolicy=WhenEmpty"))
 	}
-	if len(in.Budgets) > 50 {
-		return errs.Also(apis.ErrGeneric("budgets must have a length of at most 50"))
-	}
 	for i := range in.Budgets {
 		budget := in.Budgets[i]
 		if err := budget.validate(); err != nil {
@@ -128,9 +124,6 @@ func (in *Disruption) validate() (errs *apis.FieldError) {
 func (in *Budget) validate() (errs *apis.FieldError) {
 	if (in.Crontab != nil && in.Duration == nil) || (in.Crontab == nil && in.Duration != nil) {
 		return apis.ErrGeneric("crontab and duration must be specified together")
-	}
-	if matched, err := regexp.MatchString("^((100|[0-9]{1,2})%|[0-9]+)$", in.MaxUnavailable); err != nil || !matched {
-		return apis.ErrInvalidValue(in.MaxUnavailable, "maxUnavailable", "must be a valid intorstring")
 	}
 	if in.Crontab != nil {
 		if _, err := cron.ParseStandard(lo.FromPtr(in.Crontab)); err != nil {
