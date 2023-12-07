@@ -216,18 +216,18 @@ func (pl *NodePoolList) OrderByWeight() {
 // This returns two values as the resolved value for a percent depends on the number of current node claims.
 func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock, numNodes int) (int, error) {
 	var errs error
-	vals := make([]int, len(in.Spec.Disruption.Budgets))
+	minVal := math.MaxInt32
 	for i := range in.Spec.Disruption.Budgets {
 		val, err := in.Spec.Disruption.Budgets[i].GetAllowedDisruptions(c, numNodes)
 		if err != nil {
 			errs = multierr.Append(errs, err)
 		}
-		vals[i] = val
+		minVal = lo.Ternary(val < minVal, val, minVal)
 	}
 	if errs != nil {
 		return 0, fmt.Errorf("getting nodepool allowed disruptions, %w", errs)
 	}
-	return lo.Min(vals), nil
+	return minVal, nil
 }
 
 // GetAllowedDisruptions returns an intstr.IntOrString that can be used a comparison
@@ -248,12 +248,12 @@ func (in *Budget) GetAllowedDisruptions(c clock.Clock, numNodes int) (int, error
 	} else {
 		val = intstr.FromString(in.MaxUnavailable)
 	}
-	temp, err := intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(val), numNodes, false)
+	res, err := intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(val), numNodes, false)
 	if err != nil {
 		// Should almost never happen since this is validated when the nodepool is applied
 		return 0, fmt.Errorf("getting intstr scaled value, %w", err)
 	}
-	return temp, nil
+	return res, nil
 }
 
 // IsActive takes a clock as input and returns if a budget is active.
