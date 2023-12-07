@@ -69,11 +69,7 @@ type TopologyGroup struct {
 	emptyDomains sets.Set[string]       // domains for which we know that no pod exists
 }
 
-func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod, namespaces sets.Set[string], labelSelector *metav1.LabelSelector, maxSkew int32, minDomains *int32, taintPolicy *v1.NodeInclusionPolicy, affinityPolicy *v1.NodeInclusionPolicy, domains sets.Set[string]) *TopologyGroup {
-	domainCounts := map[string]int32{}
-	for domain := range domains {
-		domainCounts[domain] = 0
-	}
+func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod, namespaces sets.Set[string], labelSelector *metav1.LabelSelector, maxSkew int32, minDomains *int32, taintPolicy *v1.NodeInclusionPolicy, affinityPolicy *v1.NodeInclusionPolicy, domainGroup TopologyDomainGroup) *TopologyGroup {
 	// the nil *TopologyNodeFilter always passes which is what we need for affinity/anti-affinity
 	var nodeSelector TopologyNodeFilter
 	if topologyType == TopologyTypeSpread {
@@ -87,10 +83,28 @@ func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod
 		}
 		nodeSelector = MakeTopologyNodeFilter(pod, nodeTaintsPolicy, nodeAffinityPolicy)
 	}
+
 	selector, err := metav1.LabelSelectorAsSelector(labelSelector)
 	if err != nil {
 		selector = labels.Nothing()
 	}
+
+	domains := map[string]int32{}
+	if nodeSelector.TaintPolicy == v1.NodeInclusionPolicyHonor {
+		domainGroup.ForEachToleratedDomain(pod, func(domain string) {
+			domains[domain] = 0
+		})
+	} else {
+		domainGroup.ForEachDomain(func(domain string) {
+			domains[domain] = 0
+		})
+	}
+
+	emptyDomains := sets.New[string]()
+	domainGroup.ForEachDomain(func(domain string) {
+		emptyDomains.Insert(domain)
+	})
+
 	return &TopologyGroup{
 		Type:         topologyType,
 		Key:          topologyKey,
@@ -99,8 +113,8 @@ func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod
 		rawSelector:  labelSelector,
 		nodeFilter:   nodeSelector,
 		maxSkew:      maxSkew,
-		domains:      domainCounts,
-		emptyDomains: domains.Clone(),
+		domains:      domains,
+		emptyDomains: emptyDomains,
 		owners:       map[types.UID]struct{}{},
 		minDomains:   minDomains,
 	}
