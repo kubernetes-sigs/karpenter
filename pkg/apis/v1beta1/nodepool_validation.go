@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/robfig/cron/v3"
+	"github.com/samber/lo"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"knative.dev/pkg/apis"
@@ -94,18 +96,31 @@ func (in *NodeClaimTemplate) validateRequirementsNodePoolKeyDoesNotExist() (errs
 	return errs
 }
 
+//nolint:gocyclo
 func (in *Disruption) validate() (errs *apis.FieldError) {
-	if in.ExpireAfter.Duration != nil && *in.ExpireAfter.Duration < 0 {
-		return errs.Also(apis.ErrInvalidValue("cannot be negative", "expirationTTL"))
-	}
-	if in.ConsolidateAfter != nil && in.ConsolidateAfter.Duration != nil && *in.ConsolidateAfter.Duration < 0 {
-		return errs.Also(apis.ErrInvalidValue("cannot be negative", "consolidationTTL"))
-	}
 	if in.ConsolidateAfter != nil && in.ConsolidateAfter.Duration != nil && in.ConsolidationPolicy == ConsolidationPolicyWhenUnderutilized {
 		return errs.Also(apis.ErrGeneric("consolidateAfter cannot be combined with consolidationPolicy=WhenUnderutilized"))
 	}
 	if in.ConsolidateAfter == nil && in.ConsolidationPolicy == ConsolidationPolicyWhenEmpty {
 		return errs.Also(apis.ErrGeneric("consolidateAfter must be specified with consolidationPolicy=WhenEmpty"))
+	}
+	for i := range in.Budgets {
+		budget := in.Budgets[i]
+		if err := budget.validate(); err != nil {
+			errs = errs.Also(err.ViaIndex(i).ViaField("budget"))
+		}
+	}
+	return errs
+}
+
+func (in *Budget) validate() (errs *apis.FieldError) {
+	if (in.Crontab != nil && in.Duration == nil) || (in.Crontab == nil && in.Duration != nil) {
+		return apis.ErrGeneric("crontab and duration must be specified together")
+	}
+	if in.Crontab != nil {
+		if _, err := cron.ParseStandard(lo.FromPtr(in.Crontab)); err != nil {
+			return apis.ErrInvalidValue(in.Crontab, "crontab", fmt.Sprintf("invalid crontab %s", err))
+		}
 	}
 	return errs
 }
