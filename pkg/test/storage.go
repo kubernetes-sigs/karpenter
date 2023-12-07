@@ -68,7 +68,7 @@ func PersistentVolume(overrides ...PersistentVolumeOptions) *v1.PersistentVolume
 		}}}}}
 	}
 	return &v1.PersistentVolume{
-		ObjectMeta: NamespacedObjectMeta(metav1.ObjectMeta{}),
+		ObjectMeta: NamespacedObjectMeta(options.ObjectMeta),
 		Spec: v1.PersistentVolumeSpec{
 			PersistentVolumeSource: source,
 			StorageClassName:       options.StorageClassName,
