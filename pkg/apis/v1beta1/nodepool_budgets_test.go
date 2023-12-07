@@ -103,26 +103,26 @@ var _ = Describe("Budgets", func() {
 	Context("Budget/AllowedDisruptions", func() {
 		It("should fail and return zero values if a crontab is invalid", func() {
 			budgets[0].Crontab = lo.ToPtr("@wrongly")
-			val, err := budgets[0].GetAllowedDisruptions(fakeClock)
+			val, err := budgets[0].GetAllowedDisruptions(fakeClock, 100)
 			Expect(err).ToNot(Succeed())
-			Expect(val.IntVal).To(BeNumerically("==", 0))
+			Expect(val).To(BeNumerically("==", 0))
 		})
 		It("should return MaxInt32 when a budget is inactive", func() {
 			budgets[0].Crontab = lo.ToPtr("@yearly")
 			budgets[0].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))})
-			val, err := budgets[0].GetAllowedDisruptions(fakeClock)
+			val, err := budgets[0].GetAllowedDisruptions(fakeClock, 100)
 			Expect(err).To(Succeed())
-			Expect(val.IntVal).To(BeNumerically("==", math.MaxInt32))
+			Expect(val).To(BeNumerically("==", math.MaxInt32))
 		})
 		It("should return the int maxUnavailable when a budget is active", func() {
-			val, err := budgets[0].GetAllowedDisruptions(fakeClock)
+			val, err := budgets[0].GetAllowedDisruptions(fakeClock, 100)
 			Expect(err).To(Succeed())
-			Expect(val.IntVal).To(BeNumerically("==", 10))
+			Expect(val).To(BeNumerically("==", 10))
 		})
 		It("should return the string maxUnavailable when a budget is active", func() {
-			val, err := budgets[2].GetAllowedDisruptions(fakeClock)
+			val, err := budgets[2].GetAllowedDisruptions(fakeClock, 100)
 			Expect(err).To(Succeed())
-			Expect(val.StrVal).To(Equal("10%"))
+			Expect(val).To(BeNumerically("==", 10))
 		})
 	})
 	Context("IsActive", func() {

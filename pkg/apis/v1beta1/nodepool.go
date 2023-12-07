@@ -214,11 +214,11 @@ func (pl *NodePoolList) OrderByWeight() {
 
 // GetAllowedDisruptions returns the minimum allowed disruptions across all disruption budgets for a given node pool.
 // This returns two values as the resolved value for a percent depends on the number of current node claims.
-func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock, currentNumNodes int) (int, error) {
+func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock, numNodes int) (int, error) {
 	var errs error
-	vals := make([]intstr.IntOrString, len(in.Spec.Disruption.Budgets))
+	vals := make([]int, len(in.Spec.Disruption.Budgets))
 	for i := range in.Spec.Disruption.Budgets {
-		val, err := in.Spec.Disruption.Budgets[i].GetAllowedDisruptions(c)
+		val, err := in.Spec.Disruption.Budgets[i].GetAllowedDisruptions(c, numNodes)
 		if err != nil {
 			errs = multierr.Append(errs, err)
 		}
@@ -227,36 +227,33 @@ func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock, cu
 	if errs != nil {
 		return 0, fmt.Errorf("getting nodepool allowed disruptions, %w", errs)
 	}
-	minVal := math.MaxInt32
-	for i := range vals {
-		val := vals[i]
-		// This returns the percent value if it's a string, and the raw value if it's an int.
-		temp, err := intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(val), currentNumNodes, false)
-		if err != nil {
-			// Should almost never happen since this is validated when the nodepool is applied
-			return 0, fmt.Errorf("getting intstr scaled value, %w", err)
-		}
-		minVal = lo.Ternary(temp < minVal, temp, minVal)
-	}
-	return minVal, nil
+	return lo.Min(vals), nil
 }
 
 // GetAllowedDisruptions returns an intstr.IntOrString that can be used a comparison
 // for calculating if a disruption action is allowed. It returns an error if the
 // crontab is invalid. This returns MAXINT if the value is unbounded.
-func (in *Budget) GetAllowedDisruptions(c clock.Clock) (intstr.IntOrString, error) {
+func (in *Budget) GetAllowedDisruptions(c clock.Clock, numNodes int) (int, error) {
 	active, err := in.IsActive(c)
 	if err != nil {
-		return intstr.IntOrString{}, err
+		return 0, err
 	}
 	if !active {
-		return intstr.FromInt(math.MaxInt32), nil
+		return math.MaxInt32, nil
 	}
+	var val intstr.IntOrString
 	// If err is nil, we treat it as an int.
 	if intVal, err := strconv.Atoi(in.MaxUnavailable); err == nil {
-		return intstr.FromInt(intVal), nil
+		val = intstr.FromInt(intVal)
+	} else {
+		val = intstr.FromString(in.MaxUnavailable)
 	}
-	return intstr.FromString(in.MaxUnavailable), nil
+	temp, err := intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(val), numNodes, false)
+	if err != nil {
+		// Should almost never happen since this is validated when the nodepool is applied
+		return 0, fmt.Errorf("getting intstr scaled value, %w", err)
+	}
+	return temp, nil
 }
 
 // IsActive takes a clock as input and returns if a budget is active.
