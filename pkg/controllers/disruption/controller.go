@@ -144,7 +144,12 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		methodLabel:            disruption.Type(),
 		consolidationTypeLabel: disruption.ConsolidationType(),
 	}))()
-	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, c.queue)
+	nodePoolMap, nodePoolToInstanceTypesMap, err := buildNodePoolMap(ctx, c.kubeClient, c.cloudProvider)
+	if err != nil {
+		return false, err
+	}
+	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider,
+		disruption.ShouldDisrupt, nodePoolMap, nodePoolToInstanceTypesMap, c.queue)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}
