@@ -33,6 +33,7 @@ const (
 	ConsolidationReason = "consolidation"
 	ProvisioningReason  = "provisioning"
 	ExpirationReason    = "expiration"
+	CustomExpiration    = "custom-expiration"
 	EmptinessReason     = "emptiness"
 	DriftReason         = "drift"
 )
