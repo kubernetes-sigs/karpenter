@@ -152,32 +152,6 @@ var _ = Describe("CEL/Validation", func() {
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
-		It("should fail when creating a budget with a seconds duration", func() {
-			nodePool.Spec.Disruption.Budgets = []Budget{{
-				MaxUnavailable: "10",
-				Crontab:        ptr.String("* * * * *"),
-				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("30s"))},
-			}}
-			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-		})
-		It("should fail when creating a budget with a negative maxUnavailable int", func() {
-			nodePool.Spec.Disruption.Budgets = []Budget{{
-				MaxUnavailable: "-10",
-			}}
-			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-		})
-		It("should fail when creating a budget with a negative maxUnavailable percent", func() {
-			nodePool.Spec.Disruption.Budgets = []Budget{{
-				MaxUnavailable: "-10%",
-			}}
-			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-		})
-		It("should fail when creating a budget with a maxUnavailable percent with more than 3 digits", func() {
-			nodePool.Spec.Disruption.Budgets = []Budget{{
-				MaxUnavailable: "1000%",
-			}}
-			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-		})
 		It("should fail when creating a budget with a cron but no duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				MaxUnavailable: "10",

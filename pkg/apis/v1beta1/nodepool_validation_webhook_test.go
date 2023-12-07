@@ -174,11 +174,12 @@ var _ = Describe("Webhook/Validation", func() {
 			Expect(nodePool.Validate(ctx)).To(Succeed())
 		})
 		It("should fail to validate two budgets where one is invalid", func() {
-			nodePool.Spec.Disruption.Budgets = []Budget{{
-				MaxUnavailable: "10",
-				Crontab:        ptr.String("@annually"),
-				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
-			},
+			nodePool.Spec.Disruption.Budgets = []Budget{
+				{
+					MaxUnavailable: "10",
+					Crontab:        ptr.String("@annually"),
+					Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
+				},
 				{
 					MaxUnavailable: "10",
 					Crontab:        ptr.String("*"),
