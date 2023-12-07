@@ -189,11 +189,12 @@ var _ = Describe("CEL/Validation", func() {
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
 		It("should fail when creating two budgets where one is invalid", func() {
-			nodePool.Spec.Disruption.Budgets = []Budget{{
-				MaxUnavailable: "10",
-				Crontab:        ptr.String("@annually"),
-				Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
-			},
+			nodePool.Spec.Disruption.Budgets = []Budget{
+				{
+					MaxUnavailable: "10",
+					Crontab:        ptr.String("@annually"),
+					Duration:       &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
+				},
 				{
 					MaxUnavailable: "10",
 					Crontab:        ptr.String("*"),

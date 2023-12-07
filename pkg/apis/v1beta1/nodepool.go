@@ -107,7 +107,6 @@ type Budget struct {
 	// We can't use an intstr.IntOrString since kubebuilder doesn't support pattern
 	// checking for int values for IntOrString values.
 	// Ref: https://github.com/kubernetes-sigs/controller-tools/blob/55efe4be40394a288216dab63156b0a64fb82929/pkg/crd/markers/validation.go#L379-L388
-	// +kubebuilder:validation:Type="string"
 	// +kubebuilder:validation:Pattern:="^((100|[0-9]{1,2})%|[0-9]+)$"
 	// +kubebuilder:default:="10%"
 	MaxUnavailable string `json:"maxUnavailable" hash:"ignore"`
@@ -122,7 +121,9 @@ type Budget struct {
 	// Only minutes and hours are accepted, as cron does not work in seconds.
 	// If omitted, the budget is always active.
 	// This is required if Crontab is set.
-	// +kubebuilder:validation:Pattern=`^(([0-9]+(m|h))+)|(Never)$`
+	// This regex has an optional 0s at the end since the duration.String() always adds
+	// a 0s at the end.
+	// +kubebuilder:validation:Pattern=`^([0-9]+(m|h)+(0s)?)$`
 	// +kubebuilder:validation:Type="string"
 	// +optional
 	Duration *metav1.Duration `json:"duration,omitempty" hash:"ignore"`
@@ -213,7 +214,7 @@ func (pl *NodePoolList) OrderByWeight() {
 
 // GetAllowedDisruptions returns the minimum allowed disruptions across all disruption budgets for a given node pool.
 // This returns two values as the resolved value for a percent depends on the number of current node claims.
-func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock) (intstr.IntOrString, intstr.IntOrString, error) {
+func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock, currentNumNodes int) (int, error) {
 	var errs error
 	vals := make([]intstr.IntOrString, len(in.Spec.Disruption.Budgets))
 	for i := range in.Spec.Disruption.Budgets {
@@ -224,41 +225,32 @@ func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock) (i
 		vals[i] = val
 	}
 	if errs != nil {
-		return intstr.IntOrString{}, intstr.IntOrString{}, fmt.Errorf("getting nodepool allowed disruptions, %w", errs)
+		return 0, fmt.Errorf("getting nodepool allowed disruptions, %w", errs)
 	}
-	minIntVal, minPercentVal := math.MaxInt64, math.MaxInt64
+	minVal := math.MaxInt32
 	for i := range vals {
 		val := vals[i]
-		// The crontab wasn't active
-		if val.IntVal == -1 {
-			continue
-		}
 		// This returns the percent value if it's a string, and the raw value if it's an int.
-		temp, err := intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(val), 100, false)
+		temp, err := intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(val), currentNumNodes, false)
 		if err != nil {
 			// Should almost never happen since this is validated when the nodepool is applied
-			return intstr.IntOrString{}, intstr.IntOrString{}, fmt.Errorf("getting intstr scaled value, %w", err)
+			return 0, fmt.Errorf("getting intstr scaled value, %w", err)
 		}
-		if val.Type == intstr.Int {
-			minIntVal = lo.Ternary(temp < minIntVal, temp, minIntVal)
-		} else {
-			minPercentVal = lo.Ternary(temp < minPercentVal, temp, minPercentVal)
-		}
+		minVal = lo.Ternary(temp < minVal, temp, minVal)
 	}
-	// return the values, defaulting to -1 if the value is MaxInt64
-	return intstr.FromInt(lo.Ternary(minIntVal == math.MaxInt64, -1, minIntVal)), intstr.FromString(fmt.Sprintf("%d%%", lo.Ternary(minPercentVal == math.MaxInt64, -1, minPercentVal))), nil
+	return minVal, nil
 }
 
 // GetAllowedDisruptions returns an intstr.IntOrString that can be used a comparison
 // for calculating if a disruption action is allowed. It returns an error if the
-// crontab is invalid. This returns -1 if the value is unbounded.
+// crontab is invalid. This returns MAXINT if the value is unbounded.
 func (in *Budget) GetAllowedDisruptions(c clock.Clock) (intstr.IntOrString, error) {
 	active, err := in.IsActive(c)
 	if err != nil {
 		return intstr.IntOrString{}, err
 	}
 	if !active {
-		return intstr.FromInt(-1), nil
+		return intstr.FromInt(math.MaxInt32), nil
 	}
 	// If err is nil, we treat it as an int.
 	if intVal, err := strconv.Atoi(in.MaxUnavailable); err == nil {

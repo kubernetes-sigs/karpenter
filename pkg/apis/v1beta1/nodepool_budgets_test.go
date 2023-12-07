@@ -17,6 +17,7 @@ limitations under the License.
 package v1beta1_test
 
 import (
+	"math"
 	"strings"
 	"time"
 
@@ -71,36 +72,32 @@ var _ = Describe("Budgets", func() {
 	})
 	Context("NodePool/AllowedDisruptions", func() {
 		It("should return the min allowedDisruptions", func() {
-			minInt, minPercent, err := nodePool.GetAllowedDisruptions(ctx, fakeClock)
+			min, err := nodePool.GetAllowedDisruptions(ctx, fakeClock, 100)
 			Expect(err).To(Succeed())
-			Expect(minInt.IntVal).To(BeNumerically("==", 10))
-			Expect(minPercent.StrVal).To(Equal("10%"))
+			Expect(min).To(BeNumerically("==", 10))
 		})
 		It("should return the min allowedDisruptions, ignoring inactive crons", func() {
 			// Make the first and third budgets inactive
 			budgets[0].Crontab = lo.ToPtr("@yearly")
 			budgets[2].Crontab = lo.ToPtr("@yearly")
-			minInt, minPercent, err := nodePool.GetAllowedDisruptions(ctx, fakeClock)
+			min, err := nodePool.GetAllowedDisruptions(ctx, fakeClock, 100)
 			Expect(err).To(Succeed())
-			Expect(minInt.IntVal).To(BeNumerically("==", 100))
-			Expect(minPercent.StrVal).To(Equal("100%"))
+			Expect(min).To(BeNumerically("==", 100))
 		})
-		It("should return -1 if all crons are inactive", func() {
+		It("should return MaxInt32 if all crons are inactive", func() {
 			budgets[0].Crontab = lo.ToPtr("@yearly")
 			budgets[1].Crontab = lo.ToPtr("@yearly")
 			budgets[2].Crontab = lo.ToPtr("@yearly")
 			budgets[3].Crontab = lo.ToPtr("@yearly")
-			minInt, minPercent, err := nodePool.GetAllowedDisruptions(ctx, fakeClock)
+			min, err := nodePool.GetAllowedDisruptions(ctx, fakeClock, 100)
 			Expect(err).To(Succeed())
-			Expect(minInt.IntVal).To(BeNumerically("==", -1))
-			Expect(minPercent.StrVal).To(Equal("-1%"))
+			Expect(min).To(BeNumerically("==", math.MaxInt32))
 		})
 		It("should fail and return zero values if a crontab is invalid", func() {
 			budgets[0].Crontab = lo.ToPtr("@wrongly")
-			minInt, minPercent, err := nodePool.GetAllowedDisruptions(ctx, fakeClock)
+			min, err := nodePool.GetAllowedDisruptions(ctx, fakeClock, 100)
 			Expect(err).ToNot(Succeed())
-			Expect(minInt.IntVal).To(BeNumerically("==", 0))
-			Expect(minPercent.StrVal).To(Equal(""))
+			Expect(min).To(BeNumerically("==", 0))
 		})
 	})
 	Context("Budget/AllowedDisruptions", func() {
@@ -110,12 +107,12 @@ var _ = Describe("Budgets", func() {
 			Expect(err).ToNot(Succeed())
 			Expect(val.IntVal).To(BeNumerically("==", 0))
 		})
-		It("should return -1 when a budget is inactive", func() {
+		It("should return MaxInt32 when a budget is inactive", func() {
 			budgets[0].Crontab = lo.ToPtr("@yearly")
 			budgets[0].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))})
 			val, err := budgets[0].GetAllowedDisruptions(fakeClock)
 			Expect(err).To(Succeed())
-			Expect(val.IntVal).To(BeNumerically("==", -1))
+			Expect(val.IntVal).To(BeNumerically("==", math.MaxInt32))
 		})
 		It("should return the int maxUnavailable when a budget is active", func() {
 			val, err := budgets[0].GetAllowedDisruptions(fakeClock)

@@ -58,8 +58,8 @@ spec:
                             pattern: ^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$
                             type: string
                           duration:
-                            description: Duration determines how long a Budget is active since each Crontab hit. Only minutes and hours are accepted, as cron does not work in seconds. If omitted, the budget is always active. This is required if Crontab is set.
-                            pattern: ^(([0-9]+(m|h))+)|(Never)$
+                            description: Duration determines how long a Budget is active since each Crontab hit. Only minutes and hours are accepted, as cron does not work in seconds. If omitted, the budget is always active. This is required if Crontab is set. This regex has an optional 0s at the end since the duration.String() always adds a 0s at the end.
+                            pattern: ^([0-9]+(m|h)+(0s)?)$
                             type: string
                           maxUnavailable:
                             default: 10%
