@@ -92,7 +92,7 @@ type Disruption struct {
 	// the most restrictive value. If left undefined,
 	// this will default to one budget with a value to 10%.
 	// +kubebuilder:validation:XValidation:message="'schedule' must be set with 'duration'",rule="!self.all(x, (has(x.schedule) && !has(x.duration)) || (!has(x.schedule) && has(x.duration)))"
-	// +kubebuilder:default:={{value: "10%"}}
+	// +kubebuilder:default:={{nodes: "10%"}}
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
 	Budgets []Budget `json:"budgets,omitempty" hash:"ignore"`
@@ -101,15 +101,15 @@ type Disruption struct {
 // Budget defines when Karpenter will restrict the
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
-	// Value dictates how many NodeClaims owned by this NodePool
+	// Nodes dictates how many NodeClaims owned by this NodePool
 	// can be terminating at once. It must be set.
 	// This only considers NodeClaims with the karpenter.sh/disruption taint.
 	// We can't use an intstr.IntOrString since kubebuilder doesn't support pattern
-	// checking for int values for IntOrString values.
+	// checking for int nodes for IntOrString nodes.
 	// Ref: https://github.com/kubernetes-sigs/controller-tools/blob/55efe4be40394a288216dab63156b0a64fb82929/pkg/crd/markers/validation.go#L379-L388
 	// +kubebuilder:validation:Pattern:="^((100|[0-9]{1,2})%|[0-9]+)$"
 	// +kubebuilder:default:="10%"
-	Value string `json:"value" hash:"ignore"`
+	Nodes string `json:"nodes" hash:"ignore"`
 	// Schedule specifies when a budget begins being active,
 	// using the upstream cronjob syntax. If omitted, the budget is always active.
 	// Currently timezones are not supported.
@@ -243,10 +243,10 @@ func (in *Budget) GetAllowedDisruptions(c clock.Clock, numNodes int) (int, error
 	}
 	var val intstr.IntOrString
 	// If err is nil, we treat it as an int.
-	if intVal, err := strconv.Atoi(in.Value); err == nil {
+	if intVal, err := strconv.Atoi(in.Nodes); err == nil {
 		val = intstr.FromInt(intVal)
 	} else {
-		val = intstr.FromString(in.Value)
+		val = intstr.FromString(in.Nodes)
 	}
 	res, err := intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(val), numNodes, false)
 	if err != nil {

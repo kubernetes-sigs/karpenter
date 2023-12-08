@@ -81,7 +81,7 @@ var _ = Describe("Webhook/Validation", func() {
 		})
 		It("should fail to validate a budget with an invalid cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
-				Value:    "10",
+				Nodes:    "10",
 				Schedule: ptr.String("*"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
@@ -89,7 +89,7 @@ var _ = Describe("Webhook/Validation", func() {
 		})
 		It("should fail to validate a schedule with less than 5 entries", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
-				Value:    "10",
+				Nodes:    "10",
 				Schedule: ptr.String("* * * * "),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
@@ -97,21 +97,21 @@ var _ = Describe("Webhook/Validation", func() {
 		})
 		It("should fail to validate a budget with a cron but no duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
-				Value:    "10",
+				Nodes:    "10",
 				Schedule: ptr.String("* * * * *"),
 			}}
 			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 		})
 		It("should fail to validate a budget with a duration but no cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
-				Value:    "10",
+				Nodes:    "10",
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("-20m"))},
 			}}
 			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 		})
 		It("should succeed to validate a budget with both duration and cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
-				Value:    "10",
+				Nodes:    "10",
 				Schedule: ptr.String("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
@@ -119,13 +119,13 @@ var _ = Describe("Webhook/Validation", func() {
 		})
 		It("should succeed to validate a budget with neither duration nor cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
-				Value: "10",
+				Nodes: "10",
 			}}
 			Expect(nodePool.Validate(ctx)).To(Succeed())
 		})
 		It("should succeed to validate a budget with special cased crons", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
-				Value:    "10",
+				Nodes:    "10",
 				Schedule: ptr.String("@annually"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
@@ -134,12 +134,12 @@ var _ = Describe("Webhook/Validation", func() {
 		It("should fail to validate two budgets where one is invalid", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{
 				{
-					Value:    "10",
+					Nodes:    "10",
 					Schedule: ptr.String("@annually"),
 					Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				},
 				{
-					Value:    "10",
+					Nodes:    "10",
 					Schedule: ptr.String("*"),
 					Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				}}

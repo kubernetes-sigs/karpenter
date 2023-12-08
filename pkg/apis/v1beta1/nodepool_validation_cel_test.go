@@ -104,7 +104,7 @@ var _ = Describe("CEL/Validation", func() {
 		})
 		It("should fail when creating a budget with an invalid cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
-				Value:    "10",
+				Nodes:    "10",
 				Schedule: ptr.String("*"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
@@ -112,7 +112,7 @@ var _ = Describe("CEL/Validation", func() {
 		})
 		It("should fail when creating a schedule with less than 5 entries", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
-				Value:    "10",
+				Nodes:    "10",
 				Schedule: ptr.String("* * * * "),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
@@ -120,7 +120,7 @@ var _ = Describe("CEL/Validation", func() {
 		})
 		It("should fail when creating a budget with a negative duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
-				Value:    "10",
+				Nodes:    "10",
 				Schedule: ptr.String("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("-20m"))},
 			}}
@@ -128,7 +128,7 @@ var _ = Describe("CEL/Validation", func() {
 		})
 		It("should fail when creating a budget with a seconds duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
-				Value:    "10",
+				Nodes:    "10",
 				Schedule: ptr.String("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("30s"))},
 			}}
@@ -136,39 +136,39 @@ var _ = Describe("CEL/Validation", func() {
 		})
 		It("should fail when creating a budget with a negative value int", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
-				Value: "-10",
+				Nodes: "-10",
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
 		It("should fail when creating a budget with a negative value percent", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
-				Value: "-10%",
+				Nodes: "-10%",
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
 		It("should fail when creating a budget with a value percent with more than 3 digits", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
-				Value: "1000%",
+				Nodes: "1000%",
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
 		It("should fail when creating a budget with a cron but no duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
-				Value:    "10",
+				Nodes:    "10",
 				Schedule: ptr.String("* * * * *"),
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
 		It("should fail when creating a budget with a duration but no cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
-				Value:    "10",
+				Nodes:    "10",
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("-20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
 		It("should succeed when creating a budget with both duration and cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
-				Value:    "10",
+				Nodes:    "10",
 				Schedule: ptr.String("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
@@ -176,13 +176,13 @@ var _ = Describe("CEL/Validation", func() {
 		})
 		It("should succeed when creating a budget with neither duration nor cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
-				Value: "10",
+				Nodes: "10",
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
 		It("should succeed when creating a budget with special cased crons", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
-				Value:    "10",
+				Nodes:    "10",
 				Schedule: ptr.String("@annually"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
@@ -191,12 +191,12 @@ var _ = Describe("CEL/Validation", func() {
 		It("should fail when creating two budgets where one is invalid", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{
 				{
-					Value:    "10",
+					Nodes:    "10",
 					Schedule: ptr.String("@annually"),
 					Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				},
 				{
-					Value:    "10",
+					Nodes:    "10",
 					Schedule: ptr.String("*"),
 					Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				}}

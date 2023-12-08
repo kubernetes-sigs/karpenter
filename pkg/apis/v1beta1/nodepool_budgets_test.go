@@ -41,22 +41,22 @@ var _ = Describe("Budgets", func() {
 		fakeClock = clock.NewFakeClock(time.Date(2000, time.June, 15, 12, 30, 30, 0, time.UTC))
 		budgets = []Budget{
 			{
-				Value:    "10",
+				Nodes:    "10",
 				Schedule: lo.ToPtr("* * * * *"),
 				Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 			},
 			{
-				Value:    "100",
+				Nodes:    "100",
 				Schedule: lo.ToPtr("* * * * *"),
 				Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 			},
 			{
-				Value:    "10%",
+				Nodes:    "10%",
 				Schedule: lo.ToPtr("* * * * *"),
 				Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 			},
 			{
-				Value:    "100%",
+				Nodes:    "100%",
 				Schedule: lo.ToPtr("* * * * *"),
 				Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 			},
