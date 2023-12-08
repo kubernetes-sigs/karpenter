@@ -21,9 +21,9 @@ spec: # This is not a complete NodePool Spec.
     # On Weekdays during business hours, don't do any deprovisioning.
     - schedule: "0 9 * * mon-fri"
       duration: 8h
-      value: 0
+      nodes: 0
     # Every other time, only allow 10 nodes to be deprovisioned simultaneously
-    - value: 10
+    - nodes: 10
 ```
 
 ## Code Definition
@@ -50,10 +50,10 @@ type Disruption struct {
 // number of Node Claims that can be terminated at a time.
 // Unless specified, a budget is always active.
 type Budget struct {
-    // Value dictates how many NodeClaims owned by this NodePool
+    // Nodes dictates how many NodeClaims owned by this NodePool
     // can be terminating at once.
     // This only respects and considers NodeClaims with the karpenter.sh/disruption taint.
-    Value intstr.IntOrString `json:"value" hash:"ignore"`
+    Nodes intstr.IntOrString `json:"nodes" hash:"ignore"`
     // Schedule specifies when a budget begins being active.
     // Schedule uses the same syntax as a Cronjob.
     // And can support a TZ.
@@ -68,9 +68,9 @@ type Budget struct {
 
 ## Validation/Defaults
 
-For each `Budget`, `Value` is required, and must be non-negative. Users can disable scale down for a NodePool by setting this to `0`. Users must either omit both `Schedule` and `Duration` or set both of them, since `Schedule` and `Duration` are inherently linked. Omitting these two fields will be equivalent to an always active `Budget`. Users cannot define a seconds value in `Duration`, since the smallest denomination of time in upstream Schedules are minutes. Note that `Value` will only refer to nodes with the `karpenter.sh/disruption` taint set.
+For each `Budget`, `Nodes` is required, and must be non-negative. Users can disable scale down for a NodePool by setting this to `0`. Users must either omit both `Schedule` and `Duration` or set both of them, since `Schedule` and `Duration` are inherently linked. Omitting these two fields will be equivalent to an always active `Budget`. Users cannot define a seconds nodes in `Duration`, since the smallest denomination of time in upstream Schedules are minutes. Note that `Nodes` will only refer to nodes with the `karpenter.sh/disruption` taint set.
 
-- Omitting the field `Budgets` will cause the field to be defaulted to one `Budget` with `Value: 10%`.
+- Omitting the field `Budgets` will cause the field to be defaulted to one `Budget` with `Nodes: 10%`.
 - `ConsolidationPolicy` will be defaulted to `WhenUnderutilized`, with a `consolidateAfter` value of `15s`, which is the same value for Consolidation in v1alpha5.
 
 ```yaml
@@ -84,7 +84,7 @@ spec:
     consolidateAfter: 15s
     expireAfter: 30d
     budgets:
-    - value: 10%
+    - nodes: 10%
 ```
 Karpenter will not persist a default for the `Schedule` and `Duration` fields.
 
