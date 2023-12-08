@@ -225,7 +225,7 @@ func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock, nu
 		minVal = lo.Ternary(val < minVal, val, minVal)
 	}
 	if errs != nil {
-		return 0, fmt.Errorf("getting nodepool allowed disruptions, %w", errs)
+		return 0, errs
 	}
 	return minVal, nil
 }

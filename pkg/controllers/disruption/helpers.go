@@ -177,14 +177,57 @@ func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
 }
 
 // GetCandidates returns nodes that appear to be currently deprovisionable based off of their nodePool
-func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, shouldDeprovision CandidateFilter,
-	nodePoolMap map[string]*v1beta1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *orchestration.Queue) ([]*Candidate, error) {
+func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock,
+	cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter, queue *orchestration.Queue) ([]*Candidate, error) {
+	nodePoolMap, nodePoolToInstanceTypesMap, err := buildNodePoolMap(ctx, kubeClient, cloudProvider)
+	if err != nil {
+		return nil, err
+	}
 	candidates := lo.FilterMap(cluster.Nodes(), func(n *state.StateNode, _ int) (*Candidate, bool) {
 		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, nodePoolMap, nodePoolToInstanceTypesMap, queue)
 		return cn, e == nil
 	})
 	// Filter only the valid candidates that we should disrupt
 	return lo.Filter(candidates, func(c *Candidate, _ int) bool { return shouldDeprovision(ctx, c) }), nil
+}
+
+// buildDisruptionBudgets will return a map for nodePoolName -> numAllowedDisruptions and an error
+func buildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clock.Clock, kubeClient client.Client) (map[string]int, error) {
+	nodePoolList, err := nodepoolutil.List(ctx, kubeClient)
+	if err != nil {
+		return nil, fmt.Errorf("listing node pools, %w", err)
+	}
+	numNodes := map[string]int{}
+	deleting := map[string]int{}
+	disruptionBudgetMapping := map[string]int{}
+	// We need to get all the nodes in the cluster
+	// Get each current active number of nodes per nodePool
+	// Get the max disruptions for each nodePool
+	// Get the number of deleting nodes for each of those nodePools
+	// Find the difference to know how much left we can disrupt
+	nodes := cluster.Nodes()
+	for _, node := range nodes {
+		if !node.Managed() {
+			continue
+		}
+		nodePool := node.Labels()[v1beta1.NodePoolLabelKey]
+		if node.MarkedForDeletion() {
+			deleting[nodePool]++
+		}
+		numNodes[nodePool]++
+	}
+
+	for i := range nodePoolList.Items {
+		nodePool := nodePoolList.Items[i]
+		disruptions, err := nodePool.GetAllowedDisruptions(ctx, clk, numNodes[nodePool.Name])
+		if err != nil {
+			// Don't return here as we shouldn't block all disruption within the cluster on one misconfigured nodepool.
+			logging.FromContext(ctx).With("nodePool", nodePool.Name).Debugf("getting allowed disruptions, %w", err)
+		}
+		// Subtract the allowed number of disruptions from the number of already deleting nodes.
+		disruptionBudgetMapping[nodePool.Name] = disruptions - deleting[nodePool.Name]
+	}
+	return disruptionBudgetMapping, nil
 }
 
 // buildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map

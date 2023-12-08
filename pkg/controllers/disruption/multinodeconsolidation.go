@@ -41,7 +41,7 @@ func NewMultiNodeConsolidation(consolidation consolidation) *MultiNodeConsolidat
 	return &MultiNodeConsolidation{consolidation: consolidation}
 }
 
-func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
+func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
 	if m.isConsolidated() {
 		return Command{}, nil
 	}
@@ -53,6 +53,24 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 		methodLabel:            m.Type(),
 		consolidationTypeLabel: m.ConsolidationType(),
 	}).Set(float64(len(candidates)))
+
+	// In order, filter out all candidates that would violate the budget.
+	// Since multi-node consolidation relies on the ordering of
+	// these candidates, and does computation in batches of these nodes by
+	// simulateScheduling(nodes[0, n]), doing a binary search on n to find
+	// the optimal consolidation command, this pre-filters out nodes that
+	// would have violated the budget anyway, preserving the ordering
+	// and only considering a number of nodes that can be disrupted.
+	disruptableCandidates := make([]*Candidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		// If there's disruptions allowed for the candidate's nodepool,
+		// add it to the list of candidates, and decrement the budget.
+		if disruptionBudgetMapping[candidate.nodePool.Name] == 0 {
+			continue
+		}
+		disruptableCandidates = append(disruptableCandidates, candidate)
+		disruptionBudgetMapping[candidate.nodePool.Name]--
+	}
 
 	// Only consider a maximum batch of 100 NodeClaims to save on computation.
 	// This could be further configurable in the future.

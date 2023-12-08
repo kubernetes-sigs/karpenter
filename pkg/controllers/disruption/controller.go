@@ -144,12 +144,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		methodLabel:            disruption.Type(),
 		consolidationTypeLabel: disruption.ConsolidationType(),
 	}))()
-	nodePoolMap, nodePoolToInstanceTypesMap, err := buildNodePoolMap(ctx, c.kubeClient, c.cloudProvider)
-	if err != nil {
-		return false, err
-	}
-	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider,
-		disruption.ShouldDisrupt, nodePoolMap, nodePoolToInstanceTypesMap, c.queue)
+	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, c.queue)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}
@@ -157,9 +152,13 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	if len(candidates) == 0 {
 		return false, nil
 	}
+	disruptionBudgetMapping, err := buildDisruptionBudgets(ctx, c.cluster, c.clock, c.kubeClient)
+	if err != nil {
+		return false, fmt.Errorf("building disruption budgets, %w", err)
+	}
 
 	// Determine the disruption action
-	cmd, err := disruption.ComputeCommand(ctx, candidates...)
+	cmd, err := disruption.ComputeCommand(ctx, disruptionBudgetMapping, candidates...)
 	if err != nil {
 		return false, fmt.Errorf("computing disruption decision, %w", err)
 	}

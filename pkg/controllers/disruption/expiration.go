@@ -27,8 +27,6 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/samber/lo"
-
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
@@ -77,7 +75,7 @@ func (e *Expiration) filterAndSortCandidates(ctx context.Context, candidates []*
 }
 
 // ComputeCommand generates a disrpution command given candidates
-func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
+func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
 	candidates, err := e.filterAndSortCandidates(ctx, candidates)
 	if err != nil {
 		return Command{}, fmt.Errorf("filtering candidates, %w", err)
@@ -87,16 +85,35 @@ func (e *Expiration) ComputeCommand(ctx context.Context, candidates ...*Candidat
 		consolidationTypeLabel: e.ConsolidationType(),
 	}).Set(float64(len(candidates)))
 
+	// Do a quick check through the candidates to see if they're empty.
+	// For each candidate that is empty with a nodePool allowing its disruption
+	// add it to the existing command.
+	empty := make([]*Candidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if len(candidate.pods) > 0 {
+			continue
+		}
+		// If there's disruptions allowed for the candidate's nodepool,
+		// add it to the list of candidates, and decrement the budget.
+		if disruptionBudgetMapping[candidate.nodePool.Name] > 0 {
+			empty = append(empty, candidate)
+			disruptionBudgetMapping[candidate.nodePool.Name]--
+		}
+	}
 	// Disrupt all empty expired candidates, as they require no scheduling simulations.
-	if empty := lo.Filter(candidates, func(c *Candidate, _ int) bool {
-		return len(c.pods) == 0
-	}); len(empty) > 0 {
+	if len(empty) > 0 {
 		return Command{
 			candidates: empty,
 		}, nil
 	}
 
 	for _, candidate := range candidates {
+		// If the disruption budget doesn't allow this candidate to be disrupted,
+		// continue to the next candidate. We don't need to decrement any budget
+		// counter since expiration commands can only have one candidate.
+		if disruptionBudgetMapping[candidate.nodePool.Name] == 0 {
+			continue
+		}
 		// Check if we need to create any NodeClaims.
 		results, err := simulateScheduling(ctx, e.kubeClient, e.cluster, e.provisioner, candidate)
 		if err != nil {

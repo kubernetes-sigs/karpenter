@@ -94,12 +94,19 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 	if len(validationCandidates) != len(cmd.candidates) {
 		return false, nil
 	}
-	// a candidate we are about to delete is a target of a currently pending pod, wait for that to settle
+	// Rebuild the disruption budget mapping to see if any budgets have changed since validation.
+	postValidationMapping, err := buildDisruptionBudgets(ctx, v.cluster, v.clock, v.kubeClient)
+	if err != nil {
+		return false, fmt.Errorf("building disruption budgets, %w", err)
+	}
+	// 1. a candidate we are about to delete is a target of a currently pending pod, wait for that to settle
 	// before continuing consolidation
+	// 2. the number of candidates for a given nodepool can no longer be disrupted as it would violate the budget
 	for _, n := range validationCandidates {
-		if v.cluster.IsNodeNominated(n.ProviderID()) {
+		if v.cluster.IsNodeNominated(n.ProviderID()) || postValidationMapping[n.nodePool.Name] == 0 {
 			return false, nil
 		}
+		postValidationMapping[n.nodePool.Name]--
 	}
 	isValid, err := v.ValidateCommand(ctx, cmd, validationCandidates)
 	if err != nil {
