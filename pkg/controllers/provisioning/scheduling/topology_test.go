@@ -1115,11 +1115,69 @@ var _ = Describe("Topology", func() {
 		})
 	})
 
-	Context("NodeTaintsPolicy", func() {
-		It("should balance pods across a label (NodeTaintsPolicy=ignore)", func() {
-			if env.Version.Minor() < 26 {
-				Skip("NodeTaintsPolicy ony enabled by default for K8s >= 1.26.x")
+	Context("MatchLabelKeys", func() {
+		BeforeEach(func() {
+			if env.Version.Minor() < 27 {
+				Skip("MatchLabelKeys only enabled by default forK8S >= 1.27.x")
 			}
+		})
+
+		It("should support matchLabelKeys", func() {
+			matchedLabel := "test-label"
+			topology := []v1.TopologySpreadConstraint{{
+				TopologyKey:       v1.LabelHostname,
+				WhenUnsatisfiable: v1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MatchLabelKeys:    []string{matchedLabel},
+				MaxSkew:           1,
+			}}
+			count := 2
+			pods := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: lo.Assign(labels, map[string]string{matchedLabel: "value-a"}),
+				},
+				TopologySpreadConstraints: topology,
+			}, count)
+			pods = append(pods, test.UnschedulablePods(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: lo.Assign(labels, map[string]string{matchedLabel: "value-b"}),
+				},
+				TopologySpreadConstraints: topology,
+			}, count)...)
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 2))
+		})
+
+		It("should ignore unknown labels specified in matchLabelKeys", func() {
+			matchedLabel := "test-label"
+			topology := []v1.TopologySpreadConstraint{{
+				TopologyKey:       v1.LabelHostname,
+				WhenUnsatisfiable: v1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MatchLabelKeys:    []string{matchedLabel},
+				MaxSkew:           1,
+			}}
+			pods := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
+				TopologySpreadConstraints: topology,
+			}, 4)
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 1, 1))
+		})
+	})
+
+	Context("NodeTaintsPolicy", func() {
+		BeforeEach(func() {
+			if env.Version.Minor() < 26 {
+				Skip("NodeTaintsPolicy only enabled by default for K8s >= 1.26.x")
+			}
+		})
+
+		It("should balance pods across a label (NodeTaintsPolicy=ignore)", func() {
 
 			const spreadLabel = "fake-label"
 			nodePool.Spec.Template.Labels = map[string]string{
@@ -1192,9 +1250,6 @@ var _ = Describe("Topology", func() {
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1))
 		})
 		It("should balance pods across a label (NodeTaintsPolicy=honor)", func() {
-			if env.Version.Minor() < 26 {
-				Skip("NodeTaintsPolicy ony enabled by default for K8s >= 1.26.x")
-			}
 			const spreadLabel = "fake-label"
 			nodePool.Spec.Template.Labels = map[string]string{
 				spreadLabel: "baz",
@@ -1322,10 +1377,6 @@ var _ = Describe("Topology", func() {
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1))
 		})
 		It("should balance pods across a label when discovered from the provisioner (NodeTaintsPolicy=honor)", func() {
-			if env.Version.Minor() < 26 {
-				Skip("NodeTaintsPolicy ony enabled by default for K8s >= 1.26.x")
-			}
-
 			const spreadLabel = "fake-label"
 			const taintKey = "taint-key"
 			nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirement{
@@ -1431,9 +1482,9 @@ var _ = Describe("Topology", func() {
 					},
 					TopologySpreadConstraints: topology,
 					Tolerations: []v1.Toleration{{
-						Key: taintKey,
+						Key:    taintKey,
 						Effect: v1.TaintEffectNoSchedule,
-						Value: np.Spec.Template.Spec.Taints[0].Value,
+						Value:  np.Spec.Template.Spec.Taints[0].Value,
 					}},
 				}, 2)
 			}))
@@ -1447,10 +1498,12 @@ var _ = Describe("Topology", func() {
 	})
 
 	Context("NodeAffinityPolicy", func() {
-		It("should balance pods across a label (NodeAffinityPolicy=ignore)", func() {
+		BeforeEach(func() {
 			if env.Version.Minor() < 26 {
 				Skip("NodeAffinityPolicy ony enabled by default for K8s >= 1.26.x")
 			}
+		})
+		It("should balance pods across a label (NodeAffinityPolicy=ignore)", func() {
 			const spreadLabel = "fake-label"
 			const affinityLabel = "selector"
 			const affinityMismatch = "mismatch"
@@ -1519,9 +1572,6 @@ var _ = Describe("Topology", func() {
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1))
 		})
 		It("should balance pods across a label (NodeAffinityPolicy=honor)", func() {
-			if env.Version.Minor() < 26 {
-				Skip("NodeAffinityPolicy ony enabled by default for K8s >= 1.26.x")
-			}
 			const spreadLabel = "fake-label"
 			const affinityLabel = "selector"
 			const affinityMismatch = "mismatch"
