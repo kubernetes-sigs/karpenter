@@ -19,11 +19,11 @@ spec: # This is not a complete NodePool Spec.
     expireAfter: 10m || Never # Equivalent to v1alpha5 TTLSecondsUntilExpired
     budgets:
     # On Weekdays during business hours, don't do any deprovisioning.
-    - crontab: "0 9 * * mon-fri"
+    - schedule: "0 9 * * mon-fri"
       duration: 8h
-      maxUnavailable: 0
+      value: 0
     # Every other time, only allow 10 nodes to be deprovisioned simultaneously
-    - maxUnavailable: 10
+    - value: 10
 ```
 
 ## Code Definition
@@ -32,7 +32,7 @@ spec: # This is not a complete NodePool Spec.
 type Disruption struct {
     {...}
     // Budgets is a list of Budgets.
-    // If there are multiple active budgets, the most restrictive budget's maxUnavailable is respected.
+    // If there are multiple active budgets, the most restrictive budget's value is respected.
     Budgets []Budget `json:"budgets,omitempty" hash:"ignore"`
     // ConsolidateAfter is a nillable duration, parsed as a metav1.Duration.
     // Users can use "Never" to disable Consolidation.
@@ -50,27 +50,27 @@ type Disruption struct {
 // number of Node Claims that can be terminated at a time.
 // Unless specified, a budget is always active.
 type Budget struct {
-    // MaxUnavailable dictates how many NodeClaims owned by this NodePool
+    // Value dictates how many NodeClaims owned by this NodePool
     // can be terminating at once.
     // This only respects and considers NodeClaims with the karpenter.sh/disruption taint.
-    MaxUnavailable intstr.IntOrString `json:"maxUnavailable" hash:"ignore"`
-    // Crontab specifies when a budget begins being active.
-    // Crontab uses the same syntax as a Cronjob.
+    Value intstr.IntOrString `json:"value" hash:"ignore"`
+    // Schedule specifies when a budget begins being active.
+    // Schedule uses the same syntax as a Cronjob.
     // And can support a TZ.
     // "Minute Hour DayOfMonth Month DayOfWeek"
     // This is required if Duration is set.
-    Crontab *string `json:"crontab,omitempty" hash:"ignore"`
-    // Duration determines how long a Budget is active since each Crontab hit.
-    // This is required if Crontab is set.
+    Schedule *string `json:"schedule,omitempty" hash:"ignore"`
+    // Duration determines how long a Budget is active since each schedule hit.
+    // This is required if schedule is set.
     Duration *metav1.Duration `json:"duration,omitempty" hash:"ignore"`
 }
 ```
 
 ## Validation/Defaults
 
-For each `Budget`, `MaxUnavailable` is required, and must be non-negative. Users can disable scale down for a NodePool by setting this to `0`. Users must either omit both `Crontab` and `Duration` or set both of them, since `Crontab` and `Duration` are inherently linked. Omitting these two fields will be equivalent to an always active `Budget`. Users cannot define a seconds value in `Duration`, since the smallest denomination of time in upstream Crontabs are minutes. Note that `MaxUnavailable` will only refer to nodes with the `karpenter.sh/disruption` taint set.
+For each `Budget`, `Value` is required, and must be non-negative. Users can disable scale down for a NodePool by setting this to `0`. Users must either omit both `Schedule` and `Duration` or set both of them, since `Schedule` and `Duration` are inherently linked. Omitting these two fields will be equivalent to an always active `Budget`. Users cannot define a seconds value in `Duration`, since the smallest denomination of time in upstream Schedules are minutes. Note that `Value` will only refer to nodes with the `karpenter.sh/disruption` taint set.
 
-- Omitting the field `Budgets` will cause the field to be defaulted to one `Budget` with `MaxUnavailable: 10%`.
+- Omitting the field `Budgets` will cause the field to be defaulted to one `Budget` with `Value: 10%`.
 - `ConsolidationPolicy` will be defaulted to `WhenUnderutilized`, with a `consolidateAfter` value of `15s`, which is the same value for Consolidation in v1alpha5.
 
 ```yaml
@@ -84,9 +84,9 @@ spec:
     consolidateAfter: 15s
     expireAfter: 30d
     budgets:
-    - maxUnavailable: 10%
+    - value: 10%
 ```
-Karpenter will not persist a default for the `Crontab` and `Duration` fields.
+Karpenter will not persist a default for the `Schedule` and `Duration` fields.
 
 ## API Choices
 

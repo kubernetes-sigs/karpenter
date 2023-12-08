@@ -89,10 +89,10 @@ type Disruption struct {
 	ExpireAfter NillableDuration `json:"expireAfter"`
 	// Budgets is a list of Budgets.
 	// If there are multiple active budgets, Karpenter uses
-	// the most restrictive maxUnavailable. If left undefined,
-	// this will default to one budget with a maxUnavailable to 10%.
-	// +kubebuilder:validation:XValidation:message="'crontab' must be set with 'duration'",rule="!self.all(x, (has(x.crontab) && !has(x.duration)) || (!has(x.crontab) && has(x.duration)))"
-	// +kubebuilder:default:={{maxUnavailable: "10%"}}
+	// the most restrictive value. If left undefined,
+	// this will default to one budget with a value to 10%.
+	// +kubebuilder:validation:XValidation:message="'schedule' must be set with 'duration'",rule="!self.all(x, (has(x.schedule) && !has(x.duration)) || (!has(x.schedule) && has(x.duration)))"
+	// +kubebuilder:default:={{value: "10%"}}
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
 	Budgets []Budget `json:"budgets,omitempty" hash:"ignore"`
@@ -101,7 +101,7 @@ type Disruption struct {
 // Budget defines when Karpenter will restrict the
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
-	// MaxUnavailable dictates how many NodeClaims owned by this NodePool
+	// Value dictates how many NodeClaims owned by this NodePool
 	// can be terminating at once. It must be set.
 	// This only considers NodeClaims with the karpenter.sh/disruption taint.
 	// We can't use an intstr.IntOrString since kubebuilder doesn't support pattern
@@ -109,18 +109,18 @@ type Budget struct {
 	// Ref: https://github.com/kubernetes-sigs/controller-tools/blob/55efe4be40394a288216dab63156b0a64fb82929/pkg/crd/markers/validation.go#L379-L388
 	// +kubebuilder:validation:Pattern:="^((100|[0-9]{1,2})%|[0-9]+)$"
 	// +kubebuilder:default:="10%"
-	MaxUnavailable string `json:"maxUnavailable" hash:"ignore"`
-	// Crontab specifies when a budget begins being active,
+	Value string `json:"value" hash:"ignore"`
+	// Schedule specifies when a budget begins being active,
 	// using the upstream cronjob syntax. If omitted, the budget is always active.
 	// Currently timezones are not supported.
 	// This is required if Duration is set.
 	// +kubebuilder:validation:Pattern:=`^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$`
 	// +optional
-	Crontab *string `json:"crontab,omitempty" hash:"ignore"`
-	// Duration determines how long a Budget is active since each Crontab hit.
+	Schedule *string `json:"schedule,omitempty" hash:"ignore"`
+	// Duration determines how long a Budget is active since each Schedule hit.
 	// Only minutes and hours are accepted, as cron does not work in seconds.
 	// If omitted, the budget is always active.
-	// This is required if Crontab is set.
+	// This is required if Schedule is set.
 	// This regex has an optional 0s at the end since the duration.String() always adds
 	// a 0s at the end.
 	// +kubebuilder:validation:Pattern=`^([0-9]+(m|h)+(0s)?)$`
@@ -232,7 +232,7 @@ func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock, nu
 
 // GetAllowedDisruptions returns an intstr.IntOrString that can be used a comparison
 // for calculating if a disruption action is allowed. It returns an error if the
-// crontab is invalid. This returns MAXINT if the value is unbounded.
+// schedule is invalid. This returns MAXINT if the value is unbounded.
 func (in *Budget) GetAllowedDisruptions(c clock.Clock, numNodes int) (int, error) {
 	active, err := in.IsActive(c)
 	if err != nil {
@@ -243,10 +243,10 @@ func (in *Budget) GetAllowedDisruptions(c clock.Clock, numNodes int) (int, error
 	}
 	var val intstr.IntOrString
 	// If err is nil, we treat it as an int.
-	if intVal, err := strconv.Atoi(in.MaxUnavailable); err == nil {
+	if intVal, err := strconv.Atoi(in.Value); err == nil {
 		val = intstr.FromInt(intVal)
 	} else {
-		val = intstr.FromString(in.MaxUnavailable)
+		val = intstr.FromString(in.Value)
 	}
 	res, err := intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(val), numNodes, false)
 	if err != nil {
@@ -257,20 +257,20 @@ func (in *Budget) GetAllowedDisruptions(c clock.Clock, numNodes int) (int, error
 }
 
 // IsActive takes a clock as input and returns if a budget is active.
-// It walks back in time the time.Duration associated with the crontab,
+// It walks back in time the time.Duration associated with the schedule,
 // and checks if the next time the schedule will hit is before the current time.
-// If the last crontab hit is exactly the duration in the past, this means the
-// schedule is active, as any more crontab hits in between would only extend this
-// window. This ensures that any previous crontab hits for a schedule are considered.
+// If the last schedule hit is exactly the duration in the past, this means the
+// schedule is active, as any more schedule hits in between would only extend this
+// window. This ensures that any previous schedule hits for a schedule are considered.
 func (in *Budget) IsActive(c clock.Clock) (bool, error) {
-	if in.Crontab == nil && in.Duration == nil {
+	if in.Schedule == nil && in.Duration == nil {
 		return true, nil
 	}
-	schedule, err := cron.ParseStandard(lo.FromPtr(in.Crontab))
+	schedule, err := cron.ParseStandard(lo.FromPtr(in.Schedule))
 	if err != nil {
-		return false, fmt.Errorf("parsing crontab, %w", err)
+		return false, fmt.Errorf("parsing schedule, %w", err)
 	}
-	// Walk back in time for the duration associated with the crontab
+	// Walk back in time for the duration associated with the schedule
 	checkPoint := c.Now().Add(-lo.FromPtr(in.Duration).Duration)
 	nextHit := schedule.Next(checkPoint)
 	return !nextHit.After(c.Now()), nil

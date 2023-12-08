@@ -114,12 +114,12 @@ func (in *Disruption) validate() (errs *apis.FieldError) {
 }
 
 func (in *Budget) validate() (errs *apis.FieldError) {
-	if (in.Crontab != nil && in.Duration == nil) || (in.Crontab == nil && in.Duration != nil) {
-		return apis.ErrGeneric("crontab and duration must be specified together")
+	if (in.Schedule != nil && in.Duration == nil) || (in.Schedule == nil && in.Duration != nil) {
+		return apis.ErrGeneric("schedule and duration must be specified together")
 	}
-	if in.Crontab != nil {
-		if _, err := cron.ParseStandard(lo.FromPtr(in.Crontab)); err != nil {
-			return apis.ErrInvalidValue(in.Crontab, "crontab", fmt.Sprintf("invalid crontab %s", err))
+	if in.Schedule != nil {
+		if _, err := cron.ParseStandard(lo.FromPtr(in.Schedule)); err != nil {
+			return apis.ErrInvalidValue(in.Schedule, "schedule", fmt.Sprintf("invalid schedule %s", err))
 		}
 	}
 	return errs
