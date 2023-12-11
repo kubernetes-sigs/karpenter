@@ -28,6 +28,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -109,6 +110,179 @@ var _ = Describe("Consolidation", func() {
 			// We get six calls here because we have Nodes and NodeClaims that fired for this event
 			// and each of the consolidation mechanisms specifies that this event should be fired
 			Expect(recorder.Calls("Unconsolidatable")).To(Equal(6))
+		})
+	})
+	Context("Budgets", func() {
+		var numNodes = 100
+		var nodeClaims []*v1beta1.NodeClaim
+		var nodes []*v1.Node
+		var rs *appsv1.ReplicaSet
+		labels := map[string]string{
+			"app": "test",
+		}
+		BeforeEach(func() {
+			// create our RS so we can link a pod to it
+			rs = test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey:     nodePool.Name,
+						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "10%"}}
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < numNodes; i++ {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+		})
+		It("should only allow 10 empty nodes to be disrupted", func() {
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			// Execute command, thus deleting 10 nodes
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(90))
+		})
+		It("should only allow 10 nodes to be deleted in multi node consoldiation delete", func() {
+			// make a pod for each nodes, where they each all fit into one node.
+			// this should make the optimal multi node decision to delete 99.
+			// budgets will make it so we can only delete 10.
+			pods := test.Pods(numNodes, test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: map[v1.ResourceName]resource.Quantity{
+						// 100m * 100 = 10 vCPU. This should be less than the largest node capacity.
+						v1.ResourceCPU: resource.MustParse("100m"),
+					},
+				},
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					}}})
+			for i := 0; i < numNodes; i++ {
+				ExpectApplied(ctx, env.Client, pods[i])
+				ExpectManualBinding(ctx, env.Client, pods[i], nodes[i])
+			}
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			wg.Wait()
+
+			// Execute command, thus deleting 10 nodes
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(90))
+		})
+		It("should only allow 10 nodes to be deleted in single node consoldiation delete", func() {
+			// make a pod for each node, where only two pods can fit each node.
+			// this will skip over multi node consolidation and go to single
+			// node consolidation delete
+			pods := test.Pods(numNodes, test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: map[v1.ResourceName]resource.Quantity{
+						// 15 + 15 = 30 < 32
+						v1.ResourceCPU: resource.MustParse("15"),
+					},
+				},
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					}}})
+			for i := 0; i < numNodes; i++ {
+				ExpectApplied(ctx, env.Client, pods[i])
+				ExpectManualBinding(ctx, env.Client, pods[i], nodes[i])
+			}
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			// Reconcile 15 times, enqueuing 10 commands total.
+			for i := 0; i < 15; i++ {
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			}
+			wg.Wait()
+
+			// Execute all commands in the queue, only deleting 10 nodes
+			for i := 0; i < 15; i++ {
+				ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			}
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(90))
+		})
+		It("should allow 2 nodes from each nodePool to be deleted", func() {
+			// make a pod for each node, where only two pods can fit each node.
+			// this will skip over multi node consolidation and go to single
+			// node consolidation delete
+			pods := test.Pods(numNodes, test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: map[v1.ResourceName]resource.Quantity{
+						// 15 + 15 = 30 < 32
+						v1.ResourceCPU: resource.MustParse("15"),
+					},
+				},
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					}}})
+			for i := 0; i < numNodes; i++ {
+				ExpectApplied(ctx, env.Client, pods[i])
+				ExpectManualBinding(ctx, env.Client, pods[i], nodes[i])
+			}
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			// Reconcile 15 times, enqueuing 10 commands total.
+			for i := 0; i < 15; i++ {
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			}
+			wg.Wait()
+
+			// Execute all commands in the queue, only deleting 10 nodes
+			for i := 0; i < 15; i++ {
+				ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			}
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(90))
 		})
 	})
 	Context("Empty", func() {

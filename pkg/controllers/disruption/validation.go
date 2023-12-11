@@ -65,6 +65,7 @@ func NewValidation(validationPeriod time.Duration, clk clock.Clock, cluster *sta
 	}
 }
 
+//nolint:gocyclo
 func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 	var err error
 	v.once.Do(func() {

@@ -36,6 +36,8 @@ func NewEmptyNodeConsolidation(consolidation consolidation) *EmptyNodeConsolidat
 }
 
 // ComputeCommand generates a disruption command given candidates
+//
+//nolint:gocyclo
 func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
 	if c.isConsolidated() {
 		return Command{}, nil

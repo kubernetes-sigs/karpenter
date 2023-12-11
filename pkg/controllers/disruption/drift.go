@@ -70,6 +70,8 @@ func (d *Drift) filterAndSortCandidates(ctx context.Context, candidates []*Candi
 }
 
 // ComputeCommand generates a disruption command given candidates
+//
+//nolint:gocyclo
 func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
 	candidates, err := d.filterAndSortCandidates(ctx, candidates)
 	if err != nil {

@@ -296,6 +296,7 @@ func (in *StateNode) MarkedForDeletion() bool {
 	return in.markedForDeletion ||
 		(in.NodeClaim != nil && !in.NodeClaim.DeletionTimestamp.IsZero()) ||
 		(in.Node != nil && in.NodeClaim == nil && !in.Node.DeletionTimestamp.IsZero())
+	// || in.Taints().Has(RequireNoScheduleTaint())
 }
 
 func (in *StateNode) Nominate(ctx context.Context) {
