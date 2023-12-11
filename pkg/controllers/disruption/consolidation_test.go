@@ -72,7 +72,6 @@ var _ = Describe("Consolidation", func() {
 				},
 			},
 			Status: v1beta1.NodeClaimStatus{
-				ProviderID:  test.RandomProviderID(),
 				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
 			},
 		})
@@ -125,7 +124,8 @@ var _ = Describe("Consolidation", func() {
 			rs = test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
-
+		})
+		It("should only allow 10 empty nodes to be disrupted", func() {
 			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -148,8 +148,6 @@ var _ = Describe("Consolidation", func() {
 			for i := 0; i < numNodes; i++ {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
-		})
-		It("should only allow 10 empty nodes to be disrupted", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
@@ -157,7 +155,29 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(90))
 		})
-		It("should only allow 10 nodes to be deleted in multi node consoldiation delete", func() {
+		It("should only allow 10 nodes to be deleted in multi node consolidation delete", func() {
+			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey:     nodePool.Name,
+						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "10%"}}
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < numNodes; i++ {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
 			// make a pod for each nodes, where they each all fit into one node.
 			// this should make the optimal multi node decision to delete 99.
 			// budgets will make it so we can only delete 10.
@@ -196,7 +216,29 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(90))
 		})
-		It("should only allow 10 nodes to be deleted in single node consoldiation delete", func() {
+		It("should only allow 10 nodes to be deleted in single node consolidation delete", func() {
+			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey:     nodePool.Name,
+						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "10%"}}
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < numNodes; i++ {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
 			// make a pod for each node, where only two pods can fit each node.
 			// this will skip over multi node consolidation and go to single
 			// node consolidation delete
@@ -241,30 +283,47 @@ var _ = Describe("Consolidation", func() {
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(90))
 		})
 		It("should allow 2 nodes from each nodePool to be deleted", func() {
-			// make a pod for each node, where only two pods can fit each node.
-			// this will skip over multi node consolidation and go to single
-			// node consolidation delete
-			pods := test.Pods(numNodes, test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: map[v1.ResourceName]resource.Quantity{
-						// 15 + 15 = 30 < 32
-						v1.ResourceCPU: resource.MustParse("15"),
+			// Create 10 nodepools
+			nps := test.NodePools(10, v1beta1.NodePool{
+				Spec: v1beta1.NodePoolSpec{
+					Disruption: v1beta1.Disruption{
+						ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenUnderutilized,
+						Budgets: []v1beta1.Budget{{
+							Nodes: "20%",
+						}},
 					},
 				},
-				ObjectMeta: metav1.ObjectMeta{Labels: labels,
-					OwnerReferences: []metav1.OwnerReference{
-						{
-							APIVersion:         "apps/v1",
-							Kind:               "ReplicaSet",
-							Name:               rs.Name,
-							UID:                rs.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < len(nps); i++ {
+				ExpectApplied(ctx, env.Client, nps[i])
+			}
+			nodeClaims = make([]*v1beta1.NodeClaim, 0, 100)
+			nodes = make([]*v1.Node, 0, 100)
+			// Create 10 nodes for each nodePool
+			for _, np := range nps {
+				ncs, ns := test.NodeClaimsAndNodes(10, v1beta1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1beta1.NodePoolLabelKey:     np.Name,
+							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+							v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
 						},
-					}}})
-			for i := 0; i < numNodes; i++ {
-				ExpectApplied(ctx, env.Client, pods[i])
-				ExpectManualBinding(ctx, env.Client, pods[i], nodes[i])
+					},
+					Status: v1beta1.NodeClaimStatus{
+						Allocatable: map[v1.ResourceName]resource.Quantity{
+							v1.ResourceCPU:  resource.MustParse("32"),
+							v1.ResourcePods: resource.MustParse("100"),
+						},
+					},
+				})
+				nodeClaims = append(nodeClaims, ncs...)
+				nodes = append(nodes, ns...)
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < len(nodeClaims); i++ {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
 			// inform cluster state about nodes and nodeclaims
@@ -272,17 +331,12 @@ var _ = Describe("Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			// Reconcile 15 times, enqueuing 10 commands total.
-			for i := 0; i < 15; i++ {
-				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
-			}
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
-			// Execute all commands in the queue, only deleting 10 nodes
-			for i := 0; i < 15; i++ {
-				ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
-			}
-			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(90))
+			// Execute the command in the queue, only deleting 20 node claims
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(80))
 		})
 	})
 	Context("Empty", func() {

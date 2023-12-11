@@ -60,6 +60,19 @@ func NodePool(overrides ...v1beta1.NodePool) *v1beta1.NodePool {
 	return np
 }
 
+// NodePools creates homogeneous groups of NodePools
+// based on the passed in options, evenly divided by the total NodePools requested
+func NodePools(total int, options ...v1beta1.NodePool) []*v1beta1.NodePool {
+	nodePools := make([]*v1beta1.NodePool, total)
+	for _, opts := range options {
+		for i := 0; i < total/len(options); i++ {
+			nodePool := NodePool(opts)
+			nodePools[i] = nodePool
+		}
+	}
+	return nodePools
+}
+
 // ReplaceRequirements any current requirements on the passed through NodePool with the passed in requirements
 // If any of the keys match between the existing requirements and the new requirements, the new requirement with the same
 // key will replace the old requirement with that key
