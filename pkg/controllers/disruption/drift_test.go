@@ -52,6 +52,10 @@ var _ = Describe("Drift", func() {
 				Disruption: v1beta1.Disruption{
 					ConsolidateAfter: &v1beta1.NillableDuration{Duration: nil},
 					ExpireAfter:      v1beta1.NillableDuration{Duration: nil},
+					// Disrupt away!
+					Budgets: []v1beta1.Budget{{
+						Nodes: "100%",
+					}},
 				},
 			},
 		})

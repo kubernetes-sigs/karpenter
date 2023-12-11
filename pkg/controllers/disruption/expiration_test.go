@@ -50,6 +50,10 @@ var _ = Describe("Expiration", func() {
 				Disruption: v1beta1.Disruption{
 					ConsolidateAfter: &v1beta1.NillableDuration{Duration: nil},
 					ExpireAfter:      v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
+					// Disrupt away!
+					Budgets: []v1beta1.Budget{{
+						Nodes: "100%",
+					}},
 				},
 			},
 		})

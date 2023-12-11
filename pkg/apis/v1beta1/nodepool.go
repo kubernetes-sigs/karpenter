@@ -248,6 +248,10 @@ func (in *Budget) GetAllowedDisruptions(c clock.Clock, numNodes int) (int, error
 	} else {
 		val = intstr.FromString(in.Nodes)
 	}
+	// This will round down to the nearest whole number. For instance, if the intstr
+	// value is a percent and there is one active node, Karpenter will only be able to
+	// terminate that number if the disruption budget is changed to 100%, as each
+	// percent value below that would round down to 0.
 	res, err := intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(val), numNodes, false)
 	if err != nil {
 		// Should almost never happen since this is validated when the nodepool is applied

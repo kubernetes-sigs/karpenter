@@ -49,6 +49,10 @@ var _ = Describe("Emptiness", func() {
 					ConsolidateAfter:    &v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 0)},
 					ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenEmpty,
 					ExpireAfter:         v1beta1.NillableDuration{Duration: nil},
+					// Disrupt away!
+					Budgets: []v1beta1.Budget{{
+						Nodes: "100%",
+					}},
 				},
 			},
 		})

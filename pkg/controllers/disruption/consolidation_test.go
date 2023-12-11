@@ -59,6 +59,10 @@ var _ = Describe("Consolidation", func() {
 			Spec: v1beta1.NodePoolSpec{
 				Disruption: v1beta1.Disruption{
 					ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenUnderutilized,
+					// Disrupt away!
+					Budgets: []v1beta1.Budget{{
+						Nodes: "100%",
+					}},
 				},
 			},
 		})
