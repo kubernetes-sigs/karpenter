@@ -74,7 +74,7 @@ var BuildInfo = prometheus.NewGaugeVec(
 		Name:      "build_info",
 		Help:      "A metric with a constant '1' value labeled by version from which karpenter was built.",
 	},
-	[]string{"version", "goversion", "commit"},
+	[]string{"version", "goversion", "goarch", "commit"},
 )
 
 // Version is the karpenter app version injected during compilation
@@ -83,7 +83,7 @@ var Version = "unspecified"
 
 func init() {
 	crmetrics.Registry.MustRegister(BuildInfo)
-	BuildInfo.WithLabelValues(Version, runtime.Version(), changeset.Get()).Set(1)
+	BuildInfo.WithLabelValues(Version, runtime.Version(), runtime.GOARCH, changeset.Get()).Set(1)
 }
 
 type Operator struct {

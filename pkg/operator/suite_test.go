@@ -38,7 +38,7 @@ var _ = Describe("Operator", func() {
 		m, found := FindMetricWithLabelValues("karpenter_build_info", map[string]string{})
 		Expect(found).To(BeTrue())
 
-		for _, label := range []string{"version", "goversion", "commit"} {
+		for _, label := range []string{"version", "goversion", "goarch", "commit"} {
 			_, ok := lo.Find(m.GetLabel(), func(l *prometheusmodel.LabelPair) bool { return lo.FromPtr(l.Name) == label })
 			Expect(ok).To(BeTrue())
 		}
