@@ -26,9 +26,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"knative.dev/pkg/logging"
 
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	cscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 const MultiNodeConsolidationTimeoutDuration = 1 * time.Minute
@@ -54,32 +56,92 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 		consolidationTypeLabel: m.ConsolidationType(),
 	}).Set(float64(len(candidates)))
 
+	// group candidates by NodePool
+	candidatesByNodePoolName := lo.GroupBy(candidates, func(c *Candidate) string {
+		return c.nodePool.Name
+	})
+
+	// get all unique NodePools for the current candidates
+	nodePools := lo.UniqBy(
+		lo.Map(candidates, func(c *Candidate, _ int) *v1beta1.NodePool {
+			return c.nodePool
+		}),
+		func(p *v1beta1.NodePool) string {
+			return p.Name
+		},
+	)
+
+	// group NodePools into groups of compatible NodePools
+	// TODO: verify assumption, if A is compatible with B, and C is compatible with A, then C should
+	// also be compatible with B
+	nodePoolGroups := lo.Reduce(
+		nodePools,
+		func(agg [][]*v1beta1.NodePool, item *v1beta1.NodePool, _ int) [][]*v1beta1.NodePool {
+			addGroup := true
+
+			for _, group := range agg {
+				aReq := cscheduling.NewNodeSelectorRequirements(group[0].Spec.Template.Spec.Requirements...)
+				bReq := cscheduling.NewNodeSelectorRequirements(item.Spec.Template.Spec.Requirements...)
+
+				if aReq.Compatible(bReq) == nil {
+					group = append(group, item)
+					addGroup = false
+				}
+			}
+
+			if addGroup {
+				agg = append(agg, []*v1beta1.NodePool{item})
+			}
+
+			return agg
+		},
+		[][]*v1beta1.NodePool{},
+	)
+
+	// Shuffle the NodePool groups to avoid favoring any one paticular group each consolidation run
+	nodePoolGroups = lo.Shuffle(nodePoolGroups)
+
 	// Only consider a maximum batch of 100 NodeClaims to save on computation.
 	// This could be further configurable in the future.
 	maxParallel := lo.Clamp(len(candidates), 0, 100)
 
-	cmd, err := m.firstNConsolidationOption(ctx, candidates, maxParallel)
-	if err != nil {
-		return Command{}, err
-	}
+	// attempt to consolidate each group, taking the first one that returns a non-empty action
+	for _, nodePoolGroup := range nodePoolGroups {
+		groupCandidates := lo.FlatMap(
+			nodePoolGroup,
+			func(p *v1beta1.NodePool, _ int) []*Candidate {
+				return candidatesByNodePoolName[p.Name]
+			},
+		)
 
-	if cmd.Action() == NoOpAction {
-		// couldn't identify any candidates
-		m.markConsolidated()
+		cmd, err := m.firstNConsolidationOption(ctx, groupCandidates, maxParallel)
+		if err != nil {
+			return Command{}, err
+		}
+
+		if cmd.Action() == NoOpAction {
+			// try the next NodePool group
+			continue
+		}
+
+		v := NewValidation(consolidationTTL, m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder, m.queue)
+		isValid, err := v.IsValid(ctx, cmd)
+		if err != nil {
+			return Command{}, fmt.Errorf("validating, %w", err)
+		}
+
+		if !isValid {
+			logging.FromContext(ctx).Debugf("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+			return Command{}, nil
+		}
 		return cmd, nil
+
 	}
 
-	v := NewValidation(consolidationTTL, m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder, m.queue)
-	isValid, err := v.IsValid(ctx, cmd)
-	if err != nil {
-		return Command{}, fmt.Errorf("validating, %w", err)
-	}
-
-	if !isValid {
-		logging.FromContext(ctx).Debugf("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
-		return Command{}, nil
-	}
-	return cmd, nil
+	// couldn't identify any candidates for any NodePool group
+	// return a NoAction
+	m.markConsolidated()
+	return Command{}, nil
 }
 
 // firstNConsolidationOption looks at the first N NodeClaims to determine if they can all be consolidated at once.  The
