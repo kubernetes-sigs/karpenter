@@ -358,12 +358,18 @@ func fromInt(i int) *intstr.IntOrString {
 	return &v
 }
 
+// This continually polls the wait group to see if there
+// is a timer waiting, incrementing the clock if not.
+// If you're seeing goroutine timeouts on suite tests, it's possible
+// another timer was added, or the computation required for a loop is taking more than
+// 20 * 400 milliseconds = 8s to complete, potentially requiring an increase in the
+// duration of the polling period.
 func ExpectTriggerVerifyAction(wg *sync.WaitGroup) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 10; i++ {
-			time.Sleep(250 * time.Millisecond)
+		for i := 0; i < 20; i++ {
+			time.Sleep(400 * time.Millisecond)
 			if fakeClock.HasWaiters() {
 				break
 			}

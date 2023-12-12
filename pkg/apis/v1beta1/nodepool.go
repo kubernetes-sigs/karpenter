@@ -248,11 +248,12 @@ func (in *Budget) GetAllowedDisruptions(c clock.Clock, numNodes int) (int, error
 	} else {
 		val = intstr.FromString(in.Nodes)
 	}
-	// This will round down to the nearest whole number. For instance, if the intstr
-	// value is a percent and there is one active node, Karpenter will only be able to
-	// terminate that number if the disruption budget is changed to 100%, as each
-	// percent value below that would round down to 0.
-	res, err := intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(val), numNodes, false)
+	// This will round up to the nearest whole number. Therefore, a disruption can
+	// sometimes exceed the disruption budget. This is the same as how Kubernetes
+	// handles MaxUnavailable with PDBs. Take the case with 5% disruptions, but
+	// 10 nodes. Karpenter will opt to allow 1 node to be disrupted, rather than
+	// blocking all disruptions for this nodepool.
+	res, err := intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(val), numNodes, true)
 	if err != nil {
 		// Should almost never happen since this is validated when the nodepool is applied
 		return 0, fmt.Errorf("getting intstr scaled value, %w", err)
