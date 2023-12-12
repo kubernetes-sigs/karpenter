@@ -127,7 +127,8 @@ var _ = Describe("Expiration", func() {
 				Spec: v1beta1.NodePoolSpec{
 					Disruption: v1beta1.Disruption{
 						Budgets: []v1beta1.Budget{{
-							Nodes: "20%",
+							// 1/2 of 3 nodes == 1.5 nodes. This should round up to 2.
+							Nodes: "50%",
 						}},
 						ExpireAfter:      v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
 						ConsolidateAfter: &v1beta1.NillableDuration{Duration: nil},

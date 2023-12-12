@@ -134,7 +134,8 @@ var _ = Describe("Drift", func() {
 						ConsolidateAfter: &v1beta1.NillableDuration{Duration: nil},
 						ExpireAfter:      v1beta1.NillableDuration{Duration: nil},
 						Budgets: []v1beta1.Budget{{
-							Nodes: "70%",
+							// 1/2 of 3 nodes == 1.5 nodes. This should round up to 2.
+							Nodes: "50%",
 						}},
 					},
 				},

@@ -299,8 +299,8 @@ var _ = Describe("Consolidation", func() {
 					Disruption: v1beta1.Disruption{
 						ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenUnderutilized,
 						Budgets: []v1beta1.Budget{{
-							// 2/3 of 3 nodes == 66%. Use 70% so it rounds down to 2.
-							Nodes: "70%",
+							// 1/2 of 3 nodes == 1.5 nodes. This should round up to 2.
+							Nodes: "50%",
 						}},
 					},
 				},
@@ -311,7 +311,7 @@ var _ = Describe("Consolidation", func() {
 			}
 			nodeClaims = make([]*v1beta1.NodeClaim, 0, 30)
 			nodes = make([]*v1.Node, 0, 30)
-			// Create 10 nodes for each nodePool
+			// Create 3 nodes for each nodePool
 			for _, np := range nps {
 				ncs, ns := test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
 					ObjectMeta: metav1.ObjectMeta{

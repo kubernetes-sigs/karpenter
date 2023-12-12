@@ -166,7 +166,8 @@ var _ = Describe("Emptiness", func() {
 						ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenEmpty,
 						ExpireAfter:         v1beta1.NillableDuration{Duration: nil},
 						Budgets: []v1beta1.Budget{{
-							Nodes: "20%",
+							// 1/2 of 3 nodes == 1.5 nodes. This should round up to 2.
+							Nodes: "50%",
 						}},
 					},
 				},
