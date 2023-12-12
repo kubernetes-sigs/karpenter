@@ -278,6 +278,133 @@ var _ = Describe("Disruption Taints", func() {
 	})
 })
 
+/*
+	nodePoolList, err := nodepoolutil.List(ctx, kubeClient)
+	if err != nil {
+		return nil, fmt.Errorf("listing node pools, %w", err)
+	}
+	numNodes := map[string]int{}
+	deleting := map[string]int{}
+	disruptionBudgetMapping := map[string]int{}
+	// We need to get all the nodes in the cluster
+	// Get each current active number of nodes per nodePool
+	// Get the max disruptions for each nodePool
+	// Get the number of deleting nodes for each of those nodePools
+	// Find the difference to know how much left we can disrupt
+	nodes := cluster.Nodes()
+	for _, node := range nodes {
+		if !node.Managed() {
+			continue
+		}
+		nodePool := node.Labels()[v1beta1.NodePoolLabelKey]
+		if node.MarkedForDeletion() {
+			deleting[nodePool]++
+		}
+		numNodes[nodePool]++
+	}
+
+	for i := range nodePoolList.Items {
+		nodePool := nodePoolList.Items[i]
+		disruptions, err := nodePool.GetAllowedDisruptions(ctx, clk, numNodes[nodePool.Name])
+		if err != nil {
+			// Don't return here as we shouldn't block all disruption within the cluster on one misconfigured nodepool.
+			logging.FromContext(ctx).With("nodePool", nodePool.Name).Errorf("getting allowed disruptions, %w", err)
+		}
+		// Subtract the allowed number of disruptions from the number of already deleting nodes.
+		disruptionBudgetMapping[nodePool.Name] = lo.Clamp(disruptions-deleting[nodePool.Name], 0, math.MaxInt32)
+	}
+	return disruptionBudgetMapping, nil
+*/
+
+var _ = Describe("BuildDisruptionBudgetMapping", func() {
+	var nodePool *v1beta1.NodePool
+	var nodeClaims []*v1beta1.NodeClaim
+	var nodes []*v1.Node
+	var numNodes int
+	BeforeEach(func() {
+		numNodes = 10
+		nodePool = test.NodePool()
+		nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Finalizers: []string{"karpenter.sh/test-finalizer"},
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1beta1.NodeClaimStatus{
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		for i := 0; i < numNodes; i++ {
+			ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+		}
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+	})
+	It("should not consider nodes that are not managed as part of disruption count", func() {
+		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "100%"}}
+		ExpectApplied(ctx, env.Client, nodePool)
+		unmanaged := test.Node()
+		unmanaged.Labels[v1beta1.NodePoolLabelKey] = nodePool.Name
+		ExpectApplied(ctx, env.Client, unmanaged)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{}, []*v1beta1.NodeClaim{})
+		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client)
+		Expect(err).To(Succeed())
+		// This should not bring in the unmanaged node.
+		Expect(budgets[nodePool.Name]).To(Equal(10))
+	})
+	It("should not return a negative disruption value", func() {
+		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "10%"}}
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		// Mark all nodeclaims as marked for deletion
+		for _, i := range nodeClaims {
+			Expect(env.Client.Delete(ctx, i)).To(Succeed())
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(i))
+		}
+		// Mark all nodes as marked for deletion
+		for _, i := range nodes {
+			Expect(env.Client.Delete(ctx, i)).To(Succeed())
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
+		}
+
+		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client)
+		Expect(err).To(Succeed())
+		Expect(budgets[nodePool.Name]).To(Equal(0))
+	})
+	It("should consider nodes with a deletion timestamp set and MarkedForDeletion to the disruption count", func() {
+		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "100%"}}
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		// Delete one node and nodeclaim
+		Expect(env.Client.Delete(ctx, nodeClaims[0])).To(Succeed())
+		Expect(env.Client.Delete(ctx, nodes[0])).To(Succeed())
+		cluster.MarkForDeletion(nodeClaims[1].Status.ProviderID)
+
+		// Mark all nodeclaims as marked for deletion
+		for _, i := range nodeClaims {
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(i))
+		}
+		// Mark all nodes as marked for deletion
+		for _, i := range nodes {
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
+		}
+
+		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client)
+		Expect(err).To(Succeed())
+		Expect(budgets[nodePool.Name]).To(Equal(8))
+	})
+})
+
 var _ = Describe("Pod Eviction Cost", func() {
 	const standardPodCost = 1.0
 	It("should have a standard disruptionCost for a pod with no priority or disruptionCost specified", func() {

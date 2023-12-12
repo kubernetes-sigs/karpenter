@@ -83,11 +83,88 @@ var _ = Describe("Drift", func() {
 		var nodeClaims []*v1beta1.NodeClaim
 		var nodes []*v1.Node
 		var rs *appsv1.ReplicaSet
+		labels := map[string]string{
+			"app": "test",
+		}
 		BeforeEach(func() {
 			// create our RS so we can link a pod to it
 			rs = test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+		})
+		It("should allow all empty nodes to be disrupted", func() {
+			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey:     nodePool.Name,
+						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+
+			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "100%"}}
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < numNodes; i++ {
+				nodeClaims[i].StatusConditions().MarkTrue(v1beta1.Drifted)
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			wg.Wait()
+
+			// Execute command, thus deleting all nodes
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(0))
+		})
+		It("should allow no empty nodes to be disrupted", func() {
+			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey:     nodePool.Name,
+						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+
+			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "0%"}}
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < numNodes; i++ {
+				nodeClaims[i].StatusConditions().MarkTrue(v1beta1.Drifted)
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			wg.Wait()
+
+			// Execute command, thus deleting no nodes
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(numNodes))
 		})
 		It("should only allow 3 empty nodes to be disrupted", func() {
 			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
@@ -124,6 +201,81 @@ var _ = Describe("Drift", func() {
 
 			// Execute command, thus deleting 3 nodes
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(7))
+		})
+		It("should disrupt 3 nodes, taking into account commands in progress", func() {
+			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey:     nodePool.Name,
+						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "30%"}}
+
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// Mark the first five as drifted
+			for i := range lo.Range(5) {
+				nodeClaims[i].StatusConditions().MarkTrue(v1beta1.Drifted)
+			}
+
+			for i := 0; i < numNodes; i++ {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			// 3 pods to fit on 3 nodes that will be disrupted so that they're not empty
+			// and have to be in 3 different commands
+			pods := test.Pods(5, test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU: resource.MustParse("1"),
+					},
+				},
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					}}})
+			// Bind the pods to the first n nodes.
+			for i := 0; i < len(pods); i++ {
+				ExpectApplied(ctx, env.Client, pods[i])
+				ExpectManualBinding(ctx, env.Client, pods[i], nodes[i])
+			}
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			// Reconcile 5 times, enqueuing 3 commands total.
+			for i := 0; i < 5; i++ {
+				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			}
+			wg.Wait()
+
+			nodes = ExpectNodes(ctx, env.Client)
+			Expect(len(lo.Filter(nodes, func(nc *v1.Node, _ int) bool {
+				return lo.Contains(nc.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
+			}))).To(Equal(3))
+			// Execute all commands in the queue, only deleting 3 nodes
+			for i := 0; i < 5; i++ {
+				ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			}
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(7))
 		})
 		It("should allow 2 nodes from each nodePool to be deleted", func() {
@@ -184,6 +336,64 @@ var _ = Describe("Drift", func() {
 			// Execute the command in the queue, only deleting 20 nodes
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(10))
+		})
+		It("should allow all nodes from each nodePool to be deleted", func() {
+			// Create 10 nodepools
+			nps := test.NodePools(10, v1beta1.NodePool{
+				Spec: v1beta1.NodePoolSpec{
+					Disruption: v1beta1.Disruption{
+						ConsolidateAfter: &v1beta1.NillableDuration{Duration: nil},
+						ExpireAfter:      v1beta1.NillableDuration{Duration: nil},
+						Budgets: []v1beta1.Budget{{
+							Nodes: "100%",
+						}},
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < len(nps); i++ {
+				ExpectApplied(ctx, env.Client, nps[i])
+			}
+			nodeClaims = make([]*v1beta1.NodeClaim, 0, 30)
+			nodes = make([]*v1.Node, 0, 30)
+			// Create 3 nodes for each nodePool
+			for _, np := range nps {
+				ncs, ns := test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1beta1.NodePoolLabelKey:     np.Name,
+							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+							v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+						},
+					},
+					Status: v1beta1.NodeClaimStatus{
+						Allocatable: map[v1.ResourceName]resource.Quantity{
+							v1.ResourceCPU:  resource.MustParse("32"),
+							v1.ResourcePods: resource.MustParse("100"),
+						},
+					},
+				})
+				nodeClaims = append(nodeClaims, ncs...)
+				nodes = append(nodes, ns...)
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < len(nodeClaims); i++ {
+				nodeClaims[i].StatusConditions().MarkTrue(v1beta1.Drifted)
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			wg.Wait()
+
+			// Execute the command in the queue, deleting all nodes
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(0))
 		})
 	})
 

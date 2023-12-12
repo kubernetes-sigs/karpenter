@@ -165,6 +165,78 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(7))
 		})
+		It("should only allow all empty nodes to be disrupted", func() {
+			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey:     nodePool.Name,
+						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "100%"}}
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < numNodes; i++ {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			wg.Wait()
+
+			// Execute command, thus deleting all nodes
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(0))
+		})
+		It("should allow no empty nodes to be disrupted", func() {
+			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey:     nodePool.Name,
+						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					Allocatable: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceCPU:  resource.MustParse("32"),
+						v1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "0%"}}
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < numNodes; i++ {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			wg.Wait()
+
+			// Execute command, thus deleting all nodes
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(numNodes))
+		})
 		It("should only allow 3 nodes to be deleted in multi node consolidation delete", func() {
 			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
@@ -279,15 +351,15 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
 			// Reconcile 5 times, enqueuing 3 commands total.
-			for i := 0; i < 15; i++ {
+			for i := 0; i < 5; i++ {
+				ExpectTriggerVerifyAction(&wg)
 				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			}
 			wg.Wait()
 
 			// Execute all commands in the queue, only deleting 3 nodes
-			for i := 0; i < 15; i++ {
+			for i := 0; i < 5; i++ {
 				ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			}
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(7))
@@ -348,6 +420,62 @@ var _ = Describe("Consolidation", func() {
 			// Execute the command in the queue, only deleting 20 node claims
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(10))
+		})
+		It("should allow all nodes from each nodePool to be deleted", func() {
+			// Create 10 nodepools
+			nps := test.NodePools(10, v1beta1.NodePool{
+				Spec: v1beta1.NodePoolSpec{
+					Disruption: v1beta1.Disruption{
+						ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenUnderutilized,
+						Budgets: []v1beta1.Budget{{
+							Nodes: "100%",
+						}},
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < len(nps); i++ {
+				ExpectApplied(ctx, env.Client, nps[i])
+			}
+			nodeClaims = make([]*v1beta1.NodeClaim, 0, 30)
+			nodes = make([]*v1.Node, 0, 30)
+			// Create 3 nodes for each nodePool
+			for _, np := range nps {
+				ncs, ns := test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1beta1.NodePoolLabelKey:     np.Name,
+							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+							v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+						},
+					},
+					Status: v1beta1.NodeClaimStatus{
+						Allocatable: map[v1.ResourceName]resource.Quantity{
+							v1.ResourceCPU:  resource.MustParse("32"),
+							v1.ResourcePods: resource.MustParse("100"),
+						},
+					},
+				})
+				nodeClaims = append(nodeClaims, ncs...)
+				nodes = append(nodes, ns...)
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < len(nodeClaims); i++ {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			wg.Wait()
+
+			// Execute the command in the queue, deleting all node claims
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(0))
 		})
 	})
 	Context("Empty", func() {

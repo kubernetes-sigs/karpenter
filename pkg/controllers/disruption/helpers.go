@@ -191,8 +191,8 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 	return lo.Filter(candidates, func(c *Candidate, _ int) bool { return shouldDeprovision(ctx, c) }), nil
 }
 
-// buildDisruptionBudgets will return a map for nodePoolName -> numAllowedDisruptions and an error
-func buildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clock.Clock, kubeClient client.Client) (map[string]int, error) {
+// BuildDisruptionBudgets will return a map for nodePoolName -> numAllowedDisruptions and an error
+func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clock.Clock, kubeClient client.Client) (map[string]int, error) {
 	nodePoolList, err := nodepoolutil.List(ctx, kubeClient)
 	if err != nil {
 		return nil, fmt.Errorf("listing node pools, %w", err)
@@ -225,7 +225,7 @@ func buildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clo
 			logging.FromContext(ctx).With("nodePool", nodePool.Name).Errorf("getting allowed disruptions, %w", err)
 		}
 		// Subtract the allowed number of disruptions from the number of already deleting nodes.
-		disruptionBudgetMapping[nodePool.Name] = disruptions - deleting[nodePool.Name]
+		disruptionBudgetMapping[nodePool.Name] = lo.Clamp(disruptions-deleting[nodePool.Name], 0, math.MaxInt32)
 	}
 	return disruptionBudgetMapping, nil
 }
