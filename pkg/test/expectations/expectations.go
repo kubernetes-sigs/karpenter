@@ -561,12 +561,10 @@ func ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx context.Context,
 	ExpectMakeNodeClaimsInitialized(ctx, c, nodeClaims...)
 
 	// Inform cluster state about node and nodeclaim readiness
-	for i := range nodes {
-		n := nodes[i]
+	for _, n := range nodes {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
 	}
-	for i := range nodeClaims {
-		m := nodeClaims[i]
+	for _, m := range nodeClaims {
 		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(m))
 	}
 }

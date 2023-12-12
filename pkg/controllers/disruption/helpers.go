@@ -222,7 +222,7 @@ func buildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clo
 		disruptions, err := nodePool.GetAllowedDisruptions(ctx, clk, numNodes[nodePool.Name])
 		if err != nil {
 			// Don't return here as we shouldn't block all disruption within the cluster on one misconfigured nodepool.
-			logging.FromContext(ctx).With("nodePool", nodePool.Name).Debugf("getting allowed disruptions, %w", err)
+			logging.FromContext(ctx).With("nodePool", nodePool.Name).Errorf("getting allowed disruptions, %w", err)
 		}
 		// Subtract the allowed number of disruptions from the number of already deleting nodes.
 		disruptionBudgetMapping[nodePool.Name] = disruptions - deleting[nodePool.Name]
