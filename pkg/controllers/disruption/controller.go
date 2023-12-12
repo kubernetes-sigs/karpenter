@@ -17,13 +17,17 @@ limitations under the License.
 package disruption
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/robfig/cron/v3"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -37,6 +41,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
+	nodepoolutil "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
 type Controller struct {
@@ -99,6 +104,9 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	c.logAbnormalRuns(ctx)
 	defer c.logAbnormalRuns(ctx)
 	c.recordRun("disruption-loop")
+
+	// Log if there are any budgets that are misconfigured that weren't caught by validation.
+	c.logInvalidBudgets(ctx)
 
 	// We need to ensure that our internal cluster state mechanism is synced before we proceed
 	// with making any scheduling decision off of our state nodes. Otherwise, we have the potential to make
@@ -238,5 +246,38 @@ func (c *Controller) logAbnormalRuns(ctx context.Context) {
 		if timeSince := c.clock.Since(runTime); timeSince > AbnormalTimeLimit {
 			logging.FromContext(ctx).Debugf("abnormal time between runs of %s = %s", name, timeSince)
 		}
+	}
+}
+
+// logInvalidBudgets will log if there are any invalid schedules detected
+func (c *Controller) logInvalidBudgets(ctx context.Context) {
+	nodePoolList, err := nodepoolutil.List(ctx, c.kubeClient)
+	if err != nil {
+		logging.FromContext(ctx).Debugf("listing nodepools, %s", err)
+	}
+	var buf bytes.Buffer
+	for _, np := range nodePoolList.Items {
+		for _, budget := range np.Spec.Disruption.Budgets {
+			if budget.Schedule != nil {
+				_, err := cron.ParseStandard(lo.FromPtr(budget.Schedule))
+				if err != nil {
+					fmt.Fprintf(&buf, "invalid schedule %s in nodepool %s, ", *budget.Schedule, np.Name)
+				}
+			}
+			var val intstr.IntOrString
+			// If err is nil, we treat it as an int.
+			if intVal, err := strconv.Atoi(budget.Nodes); err == nil {
+				val = intstr.FromInt(intVal)
+			} else {
+				val = intstr.FromString(budget.Nodes)
+			}
+			_, err = intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(val), 100, true)
+			if err != nil {
+				fmt.Fprintf(&buf, "invalid nodes value %s in nodepool %s, ", budget.Nodes, np.Name)
+			}
+		}
+	}
+	if buf.Len() > 0 {
+		logging.FromContext(ctx).Errorf("detected disruption budget errors: ", buf.String())
 	}
 }

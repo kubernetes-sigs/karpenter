@@ -278,44 +278,6 @@ var _ = Describe("Disruption Taints", func() {
 	})
 })
 
-/*
-	nodePoolList, err := nodepoolutil.List(ctx, kubeClient)
-	if err != nil {
-		return nil, fmt.Errorf("listing node pools, %w", err)
-	}
-	numNodes := map[string]int{}
-	deleting := map[string]int{}
-	disruptionBudgetMapping := map[string]int{}
-	// We need to get all the nodes in the cluster
-	// Get each current active number of nodes per nodePool
-	// Get the max disruptions for each nodePool
-	// Get the number of deleting nodes for each of those nodePools
-	// Find the difference to know how much left we can disrupt
-	nodes := cluster.Nodes()
-	for _, node := range nodes {
-		if !node.Managed() {
-			continue
-		}
-		nodePool := node.Labels()[v1beta1.NodePoolLabelKey]
-		if node.MarkedForDeletion() {
-			deleting[nodePool]++
-		}
-		numNodes[nodePool]++
-	}
-
-	for i := range nodePoolList.Items {
-		nodePool := nodePoolList.Items[i]
-		disruptions, err := nodePool.GetAllowedDisruptions(ctx, clk, numNodes[nodePool.Name])
-		if err != nil {
-			// Don't return here as we shouldn't block all disruption within the cluster on one misconfigured nodepool.
-			logging.FromContext(ctx).With("nodePool", nodePool.Name).Errorf("getting allowed disruptions, %w", err)
-		}
-		// Subtract the allowed number of disruptions from the number of already deleting nodes.
-		disruptionBudgetMapping[nodePool.Name] = lo.Clamp(disruptions-deleting[nodePool.Name], 0, math.MaxInt32)
-	}
-	return disruptionBudgetMapping, nil
-*/
-
 var _ = Describe("BuildDisruptionBudgetMapping", func() {
 	var nodePool *v1beta1.NodePool
 	var nodeClaims []*v1beta1.NodeClaim

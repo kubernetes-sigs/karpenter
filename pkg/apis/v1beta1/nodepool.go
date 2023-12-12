@@ -26,7 +26,6 @@ import (
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/robfig/cron/v3"
 	"github.com/samber/lo"
-	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -214,32 +213,26 @@ func (pl *NodePoolList) OrderByWeight() {
 
 // GetAllowedDisruptions returns the minimum allowed disruptions across all disruption budgets for a given node pool.
 // This returns two values as the resolved value for a percent depends on the number of current node claims.
-func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock, numNodes int) (int, error) {
-	var errs error
+func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock, numNodes int) int {
 	minVal := math.MaxInt32
 	for i := range in.Spec.Disruption.Budgets {
-		val, err := in.Spec.Disruption.Budgets[i].GetAllowedDisruptions(c, numNodes)
-		if err != nil {
-			errs = multierr.Append(errs, err)
-		}
+		val := in.Spec.Disruption.Budgets[i].GetAllowedDisruptions(c, numNodes)
 		minVal = lo.Ternary(val < minVal, val, minVal)
 	}
-	if errs != nil {
-		return 0, errs
-	}
-	return minVal, nil
+	return minVal
 }
 
 // GetAllowedDisruptions returns an intstr.IntOrString that can be used a comparison
 // for calculating if a disruption action is allowed. It returns an error if the
 // schedule is invalid. This returns MAXINT if the value is unbounded.
-func (in *Budget) GetAllowedDisruptions(c clock.Clock, numNodes int) (int, error) {
+func (in *Budget) GetAllowedDisruptions(c clock.Clock, numNodes int) int {
 	active, err := in.IsActive(c)
+	// If the budget is misconfigured, fail closed.
 	if err != nil {
-		return 0, err
+		return 0
 	}
 	if !active {
-		return math.MaxInt32, nil
+		return math.MaxInt32
 	}
 	var val intstr.IntOrString
 	// If err is nil, we treat it as an int.
@@ -255,10 +248,12 @@ func (in *Budget) GetAllowedDisruptions(c clock.Clock, numNodes int) (int, error
 	// blocking all disruptions for this nodepool.
 	res, err := intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(val), numNodes, true)
 	if err != nil {
-		// Should almost never happen since this is validated when the nodepool is applied
-		return 0, fmt.Errorf("getting intstr scaled value, %w", err)
+		// Should never happen since this is validated when the nodepool is applied
+		// If this value is incorrectly formatted, fail close, since we don't know what
+		// they want here.
+		return 0
 	}
-	return res, nil
+	return res
 }
 
 // IsActive takes a clock as input and returns if a budget is active.
@@ -273,7 +268,9 @@ func (in *Budget) IsActive(c clock.Clock) (bool, error) {
 	}
 	schedule, err := cron.ParseStandard(lo.FromPtr(in.Schedule))
 	if err != nil {
-		return false, fmt.Errorf("parsing schedule, %w", err)
+		// Should rarely happen. Should only occur if there's a discrepancy
+		// with the validation regex and the cron package.
+		return false, fmt.Errorf("invariant violated, invalid cron %s", schedule)
 	}
 	// Walk back in time for the duration associated with the schedule
 	checkPoint := c.Now().Add(-lo.FromPtr(in.Duration).Duration)
