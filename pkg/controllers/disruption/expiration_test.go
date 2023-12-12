@@ -179,7 +179,7 @@ var _ = Describe("Expiration", func() {
 
 			// Execute the command in the queue, only deleting 20 nodes
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
-			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(70))
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(10))
 		})
 	})
 	Context("Expiration", func() {
