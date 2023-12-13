@@ -10,7 +10,7 @@ jobs:
       issues: write
       discussions: write
       pull-requests: write
-    if: github.repository == 'aws/karpenter-core'
+    if: github.repository == 'kubernetes-sigs/karpenter'
     name: Stale issue bot
     steps:
       - uses: actions/stale@28ca1036281a5e5922ead5184a1bbf96e5fc984e # v9.0.0
