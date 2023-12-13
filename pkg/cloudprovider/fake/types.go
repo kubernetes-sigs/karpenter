@@ -28,6 +28,10 @@ const (
 	ResourceGPUVendorB      v1.ResourceName = "fake.com/vendor-b"
 )
 
+var (
+	Zones = []string{"test-zone-1", "test-zone-2", "test-zone-3"}
+)
+
 func AddFakeLabels() {
 	v1beta1.WellKnownLabels.Insert(
 		LabelInstanceSize,

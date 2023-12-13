@@ -21,7 +21,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/docker/docker/pkg/namesgenerator"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	kubeErrors "k8s.io/apimachinery/pkg/api/errors"
@@ -34,25 +33,47 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
+var instanceTypes []*cloudprovider.InstanceType
+
 func init() {
-	instanceTypes = fake.InstanceTypesAssorted()
 	fake.AddFakeLabels()
+	instanceTypes = fake.InstanceTypeAssortedWithZones(kwokZones...)
+	ret := []*cloudProvider.
+	for _, it := range instanceTypes {
+		for _, zone := range kwokZones {
+			odPrice := fake.PriceFromResources(it.Capacity)
+			ret = append(ret, cloudprovider.Offering{
+				CapacityType: v1beta1.CapacityTypeOnDemand,
+				Zone:         zone,
+				Price:        odPrice,
+				Available:    true,
+			})
+			ret = append(ret, cloudprovider.Offering{
+				CapacityType: v1beta1.CapacityTypeSpot,
+				Zone:         zone,
+				Price:        odPrice * .7,
+				Available:    true,
+			})
+		}
+	}
+	
 }
 
 func NewCloudProvider(ctx context.Context, client kubernetes.Interface) *CloudProvider {
 	return &CloudProvider{
-		kubeClient: client,
+		kubeClient:    client,
+		instanceTypes: instanceTypes,
 	}
 }
 
 type CloudProvider struct {
 	kubeClient    kubernetes.Interface
 	populateTypes sync.Once
-	instanceTypes []*cloudprovider.InstanceTypes
+	instanceTypes []*cloudprovider.InstanceType
 }
 
 func (c CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (*v1beta1.NodeClaim, error) {
-	// Create the Node because KwoK nodes don't run kubelet, which is what Karpenter relies on to create the node.
+	// Create the Node because KwoK nodes don't have a kubelet, which is what Karpenter normally relies on to create the node.
 	node, err := c.toNode(nodeClaim)
 	if err != nil {
 		return nil, fmt.Errorf("translating nodeclaim to node, %w", err)
@@ -107,12 +128,27 @@ func (c CloudProvider) List(ctx context.Context) ([]*v1beta1.NodeClaim, error) {
 
 func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *v1beta1.NodePool) ([]*cloudprovider.InstanceType, error) {
 	var ret []*cloudprovider.InstanceType
-	for _, it := range instanceTypes {
+	for _, it := range c.instanceTypes {
 		offerings := c.offerings(ctx, it)
+		for _, zone := range kwokZones {
+			odPrice := fake.PriceFromResources(it.Capacity)
+			ret = append(ret, cloudprovider.Offering{
+				CapacityType: v1beta1.CapacityTypeOnDemand,
+				Zone:         zone,
+				Price:        odPrice,
+				Available:    true,
+			})
+			ret = append(ret, cloudprovider.Offering{
+				CapacityType: v1beta1.CapacityTypeSpot,
+				Zone:         zone,
+				Price:        odPrice * .7,
+				Available:    true,
+			})
+		}
 		ret = append(ret, &cloudprovider.InstanceType{
 			Name:         it.Name,
-			Requirements: requirements(offerings, it),
-			Offerings:    offerings,
+			Requirements: offerings.Requirements,
+			Offerings:    offerings(ctx, it),
 			Capacity:     computeCapacity(ctx, it),
 			Overhead: &cloudprovider.InstanceTypeOverhead{
 				KubeReserved:      nil,
@@ -291,12 +327,12 @@ func (c CloudProvider) toNodeClaim(node *v1.Node) (*v1beta1.NodeClaim, error) {
 			Annotations: addKwokAnnotation(node.Annotations),
 		},
 		Spec: v1beta1.NodeClaimSpec{
-			Taints:             nil,
-			StartupTaints:      nil,
-			Requirements:       nil,
-			Resources:          v1beta1.ResourceRequirements{},
-			Kubelet:            nil,
-			NodeClassRef: nil,
+			Taints:        nil,
+			StartupTaints: nil,
+			Requirements:  nil,
+			Resources:     v1beta1.ResourceRequirements{},
+			Kubelet:       nil,
+			NodeClassRef:  nil,
 		},
 		Status: v1beta1.NodeClaimStatus{
 			NodeName:    node.Name,
