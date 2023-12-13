@@ -165,7 +165,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(7))
 		})
-		It("should only allow all empty nodes to be disrupted", func() {
+		It("should allow all empty nodes to be disrupted", func() {
 			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{

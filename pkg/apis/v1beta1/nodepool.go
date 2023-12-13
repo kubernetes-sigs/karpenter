@@ -234,22 +234,15 @@ func (in *Budget) GetAllowedDisruptions(c clock.Clock, numNodes int) int {
 	if !active {
 		return math.MaxInt32
 	}
-	var val intstr.IntOrString
-	// If err is nil, we treat it as an int.
-	if intVal, err := strconv.Atoi(in.Nodes); err == nil {
-		val = intstr.FromInt(intVal)
-	} else {
-		val = intstr.FromString(in.Nodes)
-	}
 	// This will round up to the nearest whole number. Therefore, a disruption can
 	// sometimes exceed the disruption budget. This is the same as how Kubernetes
 	// handles MaxUnavailable with PDBs. Take the case with 5% disruptions, but
 	// 10 nodes. Karpenter will opt to allow 1 node to be disrupted, rather than
 	// blocking all disruptions for this nodepool.
-	res, err := intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(val), numNodes, true)
+	res, err := intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(GetIntStrFromValue(in.Nodes)), numNodes, true)
 	if err != nil {
 		// Should never happen since this is validated when the nodepool is applied
-		// If this value is incorrectly formatted, fail close, since we don't know what
+		// If this value is incorrectly formatted, fail closed, since we don't know what
 		// they want here.
 		return 0
 	}
@@ -268,7 +261,7 @@ func (in *Budget) IsActive(c clock.Clock) (bool, error) {
 	}
 	schedule, err := cron.ParseStandard(lo.FromPtr(in.Schedule))
 	if err != nil {
-		// Should rarely happen. Should only occur if there's a discrepancy
+		// Should only occur if there's a discrepancy
 		// with the validation regex and the cron package.
 		return false, fmt.Errorf("invariant violated, invalid cron %s", schedule)
 	}
@@ -276,4 +269,12 @@ func (in *Budget) IsActive(c clock.Clock) (bool, error) {
 	checkPoint := c.Now().Add(-lo.FromPtr(in.Duration).Duration)
 	nextHit := schedule.Next(checkPoint)
 	return !nextHit.After(c.Now()), nil
+}
+
+func GetIntStrFromValue(str string) intstr.IntOrString {
+	// If err is nil, we treat it as an int.
+	if intVal, err := strconv.Atoi(str); err == nil {
+		return intstr.FromInt(intVal)
+	}
+	return intstr.FromString(str)
 }

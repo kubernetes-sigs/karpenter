@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"strconv"
 	"sync"
 	"time"
 
@@ -34,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
@@ -264,14 +264,7 @@ func (c *Controller) logInvalidBudgets(ctx context.Context) {
 					fmt.Fprintf(&buf, "invalid schedule %s in nodepool %s, ", *budget.Schedule, np.Name)
 				}
 			}
-			var val intstr.IntOrString
-			// If err is nil, we treat it as an int.
-			if intVal, err := strconv.Atoi(budget.Nodes); err == nil {
-				val = intstr.FromInt(intVal)
-			} else {
-				val = intstr.FromString(budget.Nodes)
-			}
-			_, err = intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(val), 100, true)
+			_, err = intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(v1beta1.GetIntStrFromValue(budget.Nodes)), 100, true)
 			if err != nil {
 				fmt.Fprintf(&buf, "invalid nodes value %s in nodepool %s, ", budget.Nodes, np.Name)
 			}

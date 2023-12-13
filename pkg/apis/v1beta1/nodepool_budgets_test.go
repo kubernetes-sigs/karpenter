@@ -102,6 +102,11 @@ var _ = Describe("Budgets", func() {
 			val := budgets[0].GetAllowedDisruptions(fakeClock, 100)
 			Expect(val).To(BeNumerically("==", 0))
 		})
+		It("should return zero values if a nodes value is invalid", func() {
+			budgets[0].Nodes = "1000%"
+			val := budgets[0].GetAllowedDisruptions(fakeClock, 100)
+			Expect(val).To(BeNumerically("==", 0))
+		})
 		It("should return MaxInt32 when a budget is inactive", func() {
 			budgets[0].Schedule = lo.ToPtr("@yearly")
 			budgets[0].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))})
