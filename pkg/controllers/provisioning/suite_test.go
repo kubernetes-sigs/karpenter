@@ -253,6 +253,28 @@ var _ = Describe("Combined/Provisioning", func() {
 			Expect(node.Labels).To(HaveKeyWithValue(v1beta1.NodePoolLabelKey, highestWeightNodePool.Name))
 		}
 	})
+	It("should order the NodePools ahead of Provisioners when the Provisioner are equal weight", func() {
+		// Create Provisioners and NodePools that have weights from 1-10
+		for i := 1; i < 11; i++ {
+			p := test.Provisioner(test.ProvisionerOptions{
+				Weight: lo.ToPtr[int32](int32(i)),
+			})
+			ExpectApplied(ctx, env.Client, p)
+		}
+		for i := 1; i < 11; i++ {
+			np := test.NodePool(v1beta1.NodePool{
+				Spec: v1beta1.NodePoolSpec{
+					Weight: lo.ToPtr[int32](int32(i)),
+				},
+			})
+			ExpectApplied(ctx, env.Client, np)
+		}
+
+		pod := test.UnschedulablePod()
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		node := ExpectScheduled(ctx, env.Client, pod)
+		Expect(node.Labels).To(HaveKey(v1beta1.NodePoolLabelKey))
+	})
 	Context("Limits", func() {
 		It("should select a NodePool if a Provisioner is over its limit", func() {
 			provisioner.Spec.Limits = &v1alpha5.Limits{Resources: v1.ResourceList{v1.ResourceCPU: resource.MustParse("0")}}
