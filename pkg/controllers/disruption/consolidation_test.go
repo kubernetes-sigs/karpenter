@@ -76,6 +76,41 @@ var _ = Describe("Consolidation", func() {
 			},
 		})
 	})
+	Context("Events", func() {
+		It("should not fire an event for ConsolidationDisabled when the NodePool has consolidation set to WhenEmpty", func() {
+			pod := test.Pod()
+			nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
+			nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: lo.ToPtr(time.Minute)}
+			ExpectApplied(ctx, env.Client, pod, node, nodeClaim, nodePool)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			wg.Wait()
+
+			Expect(recorder.Calls("Unconsolidatable")).To(Equal(0))
+		})
+		It("should fire an event for ConsolidationDisabled when the NodePool has consolidateAfter set to 'Never'", func() {
+			pod := test.Pod()
+			nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{}
+			ExpectApplied(ctx, env.Client, pod, node, nodeClaim, nodePool)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			wg.Wait()
+
+			// We get six calls here because we have Nodes and NodeClaims that fired for this event
+			// and each of the consolidation mechanisms specifies that this event should be fired
+			Expect(recorder.Calls("Unconsolidatable")).To(Equal(6))
+		})
+	})
 	Context("Empty", func() {
 		var nodeClaim2 *v1beta1.NodeClaim
 		var node2 *v1.Node

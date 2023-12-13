@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -68,6 +69,37 @@ var _ = Describe("Emptiness", func() {
 			},
 		})
 		nodeClaim.StatusConditions().MarkTrue(v1beta1.Empty)
+	})
+	Context("Events", func() {
+		It("should not fire an event for ConsolidationDisabled when the NodePool has consolidation set to WhenUnderutilized", func() {
+			nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
+			nodePool.Spec.Disruption.ConsolidateAfter = nil
+			ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool)
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			wg.Wait()
+
+			Expect(recorder.Calls("Unconsolidatable")).To(Equal(0))
+		})
+		It("should fire an event for ConsolidationDisabled when the NodePool has consolidateAfter set to 'Never'", func() {
+			nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{}
+			ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool)
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			wg.Wait()
+
+			// We get six calls here because we have Nodes and NodeClaims that fired for this event
+			// and each of the consolidation mechanisms specifies that this event should be fired
+			Expect(recorder.Calls("Unconsolidatable")).To(Equal(2))
+		})
 	})
 	It("can delete empty nodes", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)

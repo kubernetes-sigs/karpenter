@@ -76,7 +76,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 			NewDrift(kubeClient, cluster, provisioner, recorder),
 			// Delete any remaining empty NodeClaims as there is zero cost in terms of disruption.  Emptiness and
 			// emptyNodeConsolidation are mutually exclusive, only one of these will operate
-			NewEmptiness(clk),
+			NewEmptiness(clk, recorder),
 			NewEmptyNodeConsolidation(c),
 			// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
 			NewMultiNodeConsolidation(c),
