@@ -103,7 +103,7 @@ var _ = Describe("Budgets", func() {
 			Expect(val).To(BeNumerically("==", 0))
 		})
 		It("should return zero values if a nodes value is invalid", func() {
-			budgets[0].Nodes = "1000%"
+			budgets[0].Nodes = "1000a%"
 			val := budgets[0].GetAllowedDisruptions(fakeClock, 100)
 			Expect(val).To(BeNumerically("==", 0))
 		})
