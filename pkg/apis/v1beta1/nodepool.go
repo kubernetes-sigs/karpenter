@@ -160,10 +160,28 @@ type NodePoolList struct {
 	Items           []NodePool `json:"items"`
 }
 
-// OrderByWeight orders the provisioners in the NodePoolList
-// by their priority weight in-place
+// OrderByWeight orders the NodePools in the NodePoolList by their priority weight in-place.
+// NodePools currently have an isProvisioner flag which defines whether the NodePool is actually a NodePool object
+// at the apiserver or whether it's just a NodePool representation in memory and is actually a Provisioner at
+// the apiserver. This conversion in memory follows an MVC model and helps the scheduler reason about options.
+// This priority evaluates the following things in precedence order:
+//  1. NodePools that have a larger weight are ordered first
+//  2. If two NodePools have the same weight, then the one that doesn't have the isProvisioner flag set will come first
+//  3. If two NodePools have the same weight and are both the same object representation, then
+//     the NodePool with the comparatively larger name will come first
 func (pl *NodePoolList) OrderByWeight() {
 	sort.Slice(pl.Items, func(a, b int) bool {
-		return ptr.Int32Value(pl.Items[a].Spec.Weight) > ptr.Int32Value(pl.Items[b].Spec.Weight)
+		weightA := ptr.Int32Value(pl.Items[a].Spec.Weight)
+		weightB := ptr.Int32Value(pl.Items[b].Spec.Weight)
+
+		if weightA == weightB {
+			// Order NodePools ahead of Provisioner when sorting equal weight
+			if pl.Items[a].IsProvisioner != pl.Items[b].IsProvisioner {
+				return !pl.Items[a].IsProvisioner
+			}
+			// Otherwise order by name for a consistent ordering
+			return pl.Items[a].Name > pl.Items[b].Name
+		}
+		return weightA > weightB
 	})
 }
