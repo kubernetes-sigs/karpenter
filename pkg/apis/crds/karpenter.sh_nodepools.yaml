@@ -63,7 +63,7 @@ spec:
                             pattern: ^((100|[0-9]{1,2})%|[0-9]+)$
                             type: string
                           schedule:
-                            description: Schedule specifies when a budget begins being active, following the upstream cronjob syntax. If omitted, the budget is always active. Like in upstream, timezones are not supported. This is required if Duration is set.
+                            description: Schedule specifies when a budget begins being active, following the upstream cronjob syntax. If omitted, the budget is always active. Timezones are not supported. This field is required if Duration is set.
                             pattern: ^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$
                             type: string
                         required:
