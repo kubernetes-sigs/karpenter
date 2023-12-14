@@ -21,11 +21,17 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/pprof"
+	"runtime"
 	"runtime/debug"
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	coordinationv1 "k8s.io/api/coordination/v1"
+	"knative.dev/pkg/changeset"
+	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
+
+	"sigs.k8s.io/karpenter/pkg/metrics"
 
 	"github.com/go-logr/zapr"
 	"github.com/samber/lo"
@@ -62,9 +68,23 @@ const (
 	component = "controller"
 )
 
+var BuildInfo = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Namespace: metrics.Namespace,
+		Name:      "build_info",
+		Help:      "A metric with a constant '1' value labeled by version from which karpenter was built.",
+	},
+	[]string{"version", "goversion", "goarch", "commit"},
+)
+
 // Version is the karpenter app version injected during compilation
 // when using the Makefile
 var Version = "unspecified"
+
+func init() {
+	crmetrics.Registry.MustRegister(BuildInfo)
+	BuildInfo.WithLabelValues(Version, runtime.Version(), runtime.GOARCH, changeset.Get()).Set(1)
+}
 
 type Operator struct {
 	manager.Manager

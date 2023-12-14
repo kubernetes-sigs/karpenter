@@ -1165,7 +1165,27 @@ var _ = Describe("Provisioning", func() {
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
-		It("should schedule with an empty storage class", func() {
+		It("should schedule with an empty storage class if the pvc is bound", func() {
+			storageClass := ""
+			volumeName := "test-volume"
+			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				StorageClassName: &storageClass,
+				VolumeName:       volumeName,
+			})
+			persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: volumeName,
+				},
+				StorageClassName: storageClass,
+			})
+			ExpectApplied(ctx, env.Client, test.NodePool(), persistentVolumeClaim, persistentVolume)
+			pod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+			})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectScheduled(ctx, env.Client, pod)
+		})
+		It("should not schedule with an empty storage class if the pvc is not bound", func() {
 			storageClass := ""
 			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{StorageClassName: &storageClass})
 			ExpectApplied(ctx, env.Client, test.NodePool(), persistentVolumeClaim)
@@ -1173,7 +1193,39 @@ var _ = Describe("Provisioning", func() {
 				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
 			})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
+		})
+		It("should schedule with a missing storage class if the pvc is bound", func() {
+			missingStorageClass := "missing-storage-class"
+			volumeName := "test-volume"
+			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				StorageClassName: &missingStorageClass,
+				VolumeName:       volumeName,
+			})
+			persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: volumeName,
+				},
+				StorageClassName: missingStorageClass,
+			})
+			ExpectApplied(ctx, env.Client, test.NodePool(), persistentVolumeClaim, persistentVolume)
+			pod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+			})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			ExpectScheduled(ctx, env.Client, pod)
+		})
+		It("should not schedule with a missing storage class if the pvc is not bound", func() {
+			missingStorageClass := "missing-storage-class"
+			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				StorageClassName: &missingStorageClass,
+			})
+			ExpectApplied(ctx, env.Client, test.NodePool(), persistentVolumeClaim)
+			pod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+			})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 		It("should schedule valid pods when a pod with an invalid pvc is encountered (pvc)", func() {
 			ExpectApplied(ctx, env.Client, test.NodePool())

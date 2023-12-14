@@ -17,6 +17,7 @@ limitations under the License.
 package disruption
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sync"
@@ -37,6 +38,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
+	nodepoolutil "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
 type Controller struct {
@@ -76,7 +78,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 			NewDrift(kubeClient, cluster, provisioner, recorder),
 			// Delete any remaining empty NodeClaims as there is zero cost in terms of disruption.  Emptiness and
 			// emptyNodeConsolidation are mutually exclusive, only one of these will operate
-			NewEmptiness(clk),
+			NewEmptiness(clk, recorder),
 			NewEmptyNodeConsolidation(c),
 			// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
 			NewMultiNodeConsolidation(c),
@@ -100,6 +102,9 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	defer c.logAbnormalRuns(ctx)
 	c.recordRun("disruption-loop")
 
+	// Log if there are any budgets that are misconfigured that weren't caught by validation.
+	c.logInvalidBudgets(ctx)
+
 	// We need to ensure that our internal cluster state mechanism is synced before we proceed
 	// with making any scheduling decision off of our state nodes. Otherwise, we have the potential to make
 	// a scheduling decision based on a smaller subset of nodes in our cluster state than actually exist.
@@ -115,12 +120,6 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		return !c.queue.HasAny(s.ProviderID())
 	})...); err != nil {
 		return reconcile.Result{}, fmt.Errorf("removing taint from nodes, %w", err)
-	}
-
-	// Check if the queue is processing an item. If it is, retry again later.
-	// TODO this should be removed when disruption budgets are added in.
-	if !c.queue.IsEmpty() {
-		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}
 
 	// Attempt different disruption methods. We'll only let one method perform an action
@@ -152,9 +151,13 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	if len(candidates) == 0 {
 		return false, nil
 	}
+	disruptionBudgetMapping, err := BuildDisruptionBudgets(ctx, c.cluster, c.clock, c.kubeClient)
+	if err != nil {
+		return false, fmt.Errorf("building disruption budgets, %w", err)
+	}
 
 	// Determine the disruption action
-	cmd, err := disruption.ComputeCommand(ctx, candidates...)
+	cmd, err := disruption.ComputeCommand(ctx, disruptionBudgetMapping, candidates...)
 	if err != nil {
 		return false, fmt.Errorf("computing disruption decision, %w", err)
 	}
@@ -240,5 +243,23 @@ func (c *Controller) logAbnormalRuns(ctx context.Context) {
 		if timeSince := c.clock.Since(runTime); timeSince > AbnormalTimeLimit {
 			logging.FromContext(ctx).Debugf("abnormal time between runs of %s = %s", name, timeSince)
 		}
+	}
+}
+
+// logInvalidBudgets will log if there are any invalid schedules detected
+func (c *Controller) logInvalidBudgets(ctx context.Context) {
+	nodePoolList, err := nodepoolutil.List(ctx, c.kubeClient)
+	if err != nil {
+		logging.FromContext(ctx).Debugf("listing nodepools, %s", err)
+	}
+	var buf bytes.Buffer
+	for _, np := range nodePoolList.Items {
+		// Use a dummy value of 100 since we only care if this errors.
+		if _, err := np.GetAllowedDisruptions(ctx, c.clock, 100); err != nil {
+			fmt.Fprintf(&buf, "invalid disruption budgets in nodepool %s, %s", np.Name, err)
+		}
+	}
+	if buf.Len() > 0 {
+		logging.FromContext(ctx).Errorf("detected disruption budget errors: ", buf.String())
 	}
 }
