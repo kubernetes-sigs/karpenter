@@ -113,8 +113,8 @@ type Budget struct {
 	Nodes string `json:"nodes" hash:"ignore"`
 	// Schedule specifies when a budget begins being active, following
 	// the upstream cronjob syntax. If omitted, the budget is always active.
-	// Like in upstream, timezones are not supported.
-	// This is required if Duration is set.
+	// Timezones are not supported.
+	// This field is required if Duration is set.
 	// +kubebuilder:validation:Pattern:=`^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$`
 	// +optional
 	Schedule *string `json:"schedule,omitempty" hash:"ignore"`

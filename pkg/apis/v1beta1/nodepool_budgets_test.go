@@ -70,7 +70,7 @@ var _ = Describe("Budgets", func() {
 			},
 		}
 	})
-	Context("NodePool/MustGetAllowedDisruptions", func() {
+	Context("MustGetAllowedDisruptions", func() {
 		It("should return the min allowedDisruptions", func() {
 			min := nodePool.MustGetAllowedDisruptions(ctx, fakeClock, 100)
 			Expect(min).To(BeNumerically("==", 10))
@@ -96,7 +96,7 @@ var _ = Describe("Budgets", func() {
 			Expect(min).To(BeNumerically("==", 0))
 		})
 	})
-	Context("Budget/AllowedDisruptions", func() {
+	Context("AllowedDisruptions", func() {
 		It("should return zero values if a schedule is invalid", func() {
 			budgets[0].Schedule = lo.ToPtr("@wrongly")
 			val, err := budgets[0].GetAllowedDisruptions(fakeClock, 100)

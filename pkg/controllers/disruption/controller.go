@@ -254,6 +254,7 @@ func (c *Controller) logInvalidBudgets(ctx context.Context) {
 	}
 	var buf bytes.Buffer
 	for _, np := range nodePoolList.Items {
+		// Use a dummy value of 100 since we only care if this errors.
 		if _, err := np.GetAllowedDisruptions(ctx, c.clock, 100); err != nil {
 			fmt.Fprintf(&buf, "invalid disruption budgets in nodepool %s, %s", np.Name, err)
 		}
