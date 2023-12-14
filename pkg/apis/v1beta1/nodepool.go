@@ -101,10 +101,10 @@ type Disruption struct {
 // Budget defines when Karpenter will restrict the
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
-	// Nodes dictates the maximum number of NodeClaims owned by this Node
+	// Nodes dictates the maximum number of NodeClaims owned by this NodePool
 	// that can be terminating at once. This is calculated by counting nodes that
-	// have a deletion timestamp set, or are marked for deletion in memory.
-	// This field is required.
+	// have a deletion timestamp set, or are actively being deleted by Karpenter.
+	// This field is required when specifying a budget.
 	// This cannot be of type intstr.IntOrString since kubebuilder doesn't support pattern
 	// checking for int nodes for IntOrString nodes.
 	// Ref: https://github.com/kubernetes-sigs/controller-tools/blob/55efe4be40394a288216dab63156b0a64fb82929/pkg/crd/markers/validation.go#L379-L388
