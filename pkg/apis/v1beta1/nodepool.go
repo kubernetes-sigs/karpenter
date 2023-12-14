@@ -101,19 +101,20 @@ type Disruption struct {
 // Budget defines when Karpenter will restrict the
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
-	// Nodes dictates how many NodeClaims owned by this NodePool
-	// can be terminating at once. It must be set.
-	// This only considers NodeClaims with the karpenter.sh/disruption taint.
-	// We can't use an intstr.IntOrString since kubebuilder doesn't support pattern
+	// Nodes dictates the maximum number of NodeClaims owned by this NodePool
+	// that can be terminating at once. This is calculated by counting nodes that
+	// have a deletion timestamp set, or are actively being deleted by Karpenter.
+	// This field is required when specifying a budget.
+	// This cannot be of type intstr.IntOrString since kubebuilder doesn't support pattern
 	// checking for int nodes for IntOrString nodes.
 	// Ref: https://github.com/kubernetes-sigs/controller-tools/blob/55efe4be40394a288216dab63156b0a64fb82929/pkg/crd/markers/validation.go#L379-L388
 	// +kubebuilder:validation:Pattern:="^((100|[0-9]{1,2})%|[0-9]+)$"
 	// +kubebuilder:default:="10%"
 	Nodes string `json:"nodes" hash:"ignore"`
-	// Schedule specifies when a budget begins being active,
-	// using the upstream cronjob syntax. If omitted, the budget is always active.
-	// Currently timezones are not supported.
-	// This is required if Duration is set.
+	// Schedule specifies when a budget begins being active, following
+	// the upstream cronjob syntax. If omitted, the budget is always active.
+	// Timezones are not supported.
+	// This field is required if Duration is set.
 	// +kubebuilder:validation:Pattern:=`^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$`
 	// +optional
 	Schedule *string `json:"schedule,omitempty" hash:"ignore"`
@@ -212,22 +213,30 @@ func (pl *NodePoolList) OrderByWeight() {
 	})
 }
 
+// MustGetAllowedDisruptions calls GetAllowedDisruptions and returns 0 if the error is not nil. This reduces the
+// amount of state that the disruption controller must reconcile, while allowing the GetAllowedDisruptions()
+// to bubble up any errors in validation.
+func (in *NodePool) MustGetAllowedDisruptions(ctx context.Context, c clock.Clock, numNodes int) int {
+	val, err := in.GetAllowedDisruptions(ctx, c, numNodes)
+	if err != nil {
+		return 0
+	}
+	return val
+}
+
 // GetAllowedDisruptions returns the minimum allowed disruptions across all disruption budgets for a given node pool.
-// This returns two values as the resolved value for a percent depends on the number of current node claims.
+// This will return an error if there is a configuration error with any budget's node or schedule values.
 func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock, numNodes int) (int, error) {
-	var errs error
 	minVal := math.MaxInt32
+	var multiErr error
 	for i := range in.Spec.Disruption.Budgets {
 		val, err := in.Spec.Disruption.Budgets[i].GetAllowedDisruptions(c, numNodes)
 		if err != nil {
-			errs = multierr.Append(errs, err)
+			multiErr = multierr.Append(multiErr, err)
 		}
 		minVal = lo.Ternary(val < minVal, val, minVal)
 	}
-	if errs != nil {
-		return 0, fmt.Errorf("getting nodepool allowed disruptions, %w", errs)
-	}
-	return minVal, nil
+	return minVal, multiErr
 }
 
 // GetAllowedDisruptions returns an intstr.IntOrString that can be used a comparison
@@ -235,23 +244,24 @@ func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock, nu
 // schedule is invalid. This returns MAXINT if the value is unbounded.
 func (in *Budget) GetAllowedDisruptions(c clock.Clock, numNodes int) (int, error) {
 	active, err := in.IsActive(c)
+	// If the budget is misconfigured, fail closed.
 	if err != nil {
 		return 0, err
 	}
 	if !active {
 		return math.MaxInt32, nil
 	}
-	var val intstr.IntOrString
-	// If err is nil, we treat it as an int.
-	if intVal, err := strconv.Atoi(in.Nodes); err == nil {
-		val = intstr.FromInt(intVal)
-	} else {
-		val = intstr.FromString(in.Nodes)
-	}
-	res, err := intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(val), numNodes, false)
+	// This will round up to the nearest whole number. Therefore, a disruption can
+	// sometimes exceed the disruption budget. This is the same as how Kubernetes
+	// handles MaxUnavailable with PDBs. Take the case with 5% disruptions, but
+	// 10 nodes. Karpenter will opt to allow 1 node to be disrupted, rather than
+	// blocking all disruptions for this nodepool.
+	res, err := intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(GetIntStrFromValue(in.Nodes)), numNodes, true)
 	if err != nil {
-		// Should almost never happen since this is validated when the nodepool is applied
-		return 0, fmt.Errorf("getting intstr scaled value, %w", err)
+		// Should never happen since this is validated when the nodepool is applied
+		// If this value is incorrectly formatted, fail closed, since we don't know what
+		// they want here.
+		return 0, err
 	}
 	return res, nil
 }
@@ -268,10 +278,20 @@ func (in *Budget) IsActive(c clock.Clock) (bool, error) {
 	}
 	schedule, err := cron.ParseStandard(lo.FromPtr(in.Schedule))
 	if err != nil {
-		return false, fmt.Errorf("parsing schedule, %w", err)
+		// Should only occur if there's a discrepancy
+		// with the validation regex and the cron package.
+		return false, fmt.Errorf("invariant violated, invalid cron %s", schedule)
 	}
 	// Walk back in time for the duration associated with the schedule
 	checkPoint := c.Now().Add(-lo.FromPtr(in.Duration).Duration)
 	nextHit := schedule.Next(checkPoint)
 	return !nextHit.After(c.Now()), nil
+}
+
+func GetIntStrFromValue(str string) intstr.IntOrString {
+	// If err is nil, we treat it as an int.
+	if intVal, err := strconv.Atoi(str); err == nil {
+		return intstr.FromInt(intVal)
+	}
+	return intstr.FromString(str)
 }

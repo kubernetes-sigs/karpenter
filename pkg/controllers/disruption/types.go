@@ -37,7 +37,7 @@ import (
 
 type Method interface {
 	ShouldDisrupt(context.Context, *Candidate) bool
-	ComputeCommand(context.Context, ...*Candidate) (Command, error)
+	ComputeCommand(context.Context, map[string]int, ...*Candidate) (Command, error)
 	Type() string
 	ConsolidationType() string
 }

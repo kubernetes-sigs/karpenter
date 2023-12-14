@@ -191,6 +191,44 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 	return lo.Filter(candidates, func(c *Candidate, _ int) bool { return shouldDeprovision(ctx, c) }), nil
 }
 
+// BuildDisruptionBudgets will return a map for nodePoolName -> numAllowedDisruptions and an error
+func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clock.Clock, kubeClient client.Client) (map[string]int, error) {
+	nodePoolList, err := nodepoolutil.List(ctx, kubeClient)
+	if err != nil {
+		return nil, fmt.Errorf("listing node pools, %w", err)
+	}
+	numNodes := map[string]int{}
+	deleting := map[string]int{}
+	disruptionBudgetMapping := map[string]int{}
+	// We need to get all the nodes in the cluster
+	// Get each current active number of nodes per nodePool
+	// Get the max disruptions for each nodePool
+	// Get the number of deleting nodes for each of those nodePools
+	// Find the difference to know how much left we can disrupt
+	nodes := cluster.Nodes()
+	for _, node := range nodes {
+		if !node.Managed() {
+			continue
+		}
+		nodePool := node.Labels()[v1beta1.NodePoolLabelKey]
+		if node.MarkedForDeletion() {
+			deleting[nodePool]++
+		}
+		numNodes[nodePool]++
+	}
+
+	for i := range nodePoolList.Items {
+		nodePool := nodePoolList.Items[i]
+		disruptions := nodePool.MustGetAllowedDisruptions(ctx, clk, numNodes[nodePool.Name])
+		// Subtract the allowed number of disruptions from the number of already deleting nodes.
+		// Floor the value since the number of deleting nodes can exceed the number of allowed disruptions.
+		// Allowing this value to be negative breaks assumptions in the code used to calculate how
+		// many nodes can be disrupted.
+		disruptionBudgetMapping[nodePool.Name] = lo.Clamp(disruptions-deleting[nodePool.Name], 0, math.MaxInt32)
+	}
+	return disruptionBudgetMapping, nil
+}
+
 // buildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map
 func buildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[string]*v1beta1.NodePool, map[string]map[string]*cloudprovider.InstanceType, error) {
 	nodePoolMap := map[string]*v1beta1.NodePool{}

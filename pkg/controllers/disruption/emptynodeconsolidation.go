@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/samber/lo"
 	"knative.dev/pkg/logging"
 
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -37,7 +36,9 @@ func NewEmptyNodeConsolidation(consolidation consolidation) *EmptyNodeConsolidat
 }
 
 // ComputeCommand generates a disruption command given candidates
-func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
+//
+//nolint:gocyclo
+func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
 	if c.isConsolidated() {
 		return Command{}, nil
 	}
@@ -50,16 +51,26 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 		consolidationTypeLabel: c.ConsolidationType(),
 	}).Set(float64(len(candidates)))
 
-	// select the entirely empty NodeClaims
-	emptyCandidates := lo.Filter(candidates, func(n *Candidate, _ int) bool { return len(n.pods) == 0 })
-	if len(emptyCandidates) == 0 {
+	empty := make([]*Candidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if len(candidate.pods) > 0 {
+			continue
+		}
+		// If there's disruptions allowed for the candidate's nodepool,
+		// add it to the list of candidates, and decrement the budget.
+		if disruptionBudgetMapping[candidate.nodePool.Name] > 0 {
+			empty = append(empty, candidate)
+			disruptionBudgetMapping[candidate.nodePool.Name]--
+		}
+	}
+	if len(empty) == 0 {
 		// none empty, so do nothing
 		c.markConsolidated()
 		return Command{}, nil
 	}
 
 	cmd := Command{
-		candidates: emptyCandidates,
+		candidates: empty,
 	}
 
 	// Empty Node Consolidation doesn't use Validation as we get to take advantage of cluster.IsNodeNominated.  This
@@ -79,14 +90,21 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, candidates 
 	// We do this so that we can re-validate that the candidates that were computed before we made the decision are the same
 	candidatesToDelete := mapCandidates(cmd.candidates, validationCandidates)
 
+	postValidationMapping, err := BuildDisruptionBudgets(ctx, c.cluster, c.clock, c.kubeClient)
+	if err != nil {
+		return Command{}, fmt.Errorf("building disruption budgets, %w", err)
+	}
+
 	// The deletion of empty NodeClaims is easy to validate, we just ensure that:
 	// 1. All the candidatesToDelete are still empty
 	// 2. The node isn't a target of a recent scheduling simulation
+	// 3. the number of candidates for a given nodepool can no longer be disrupted as it would violate the budget
 	for _, n := range candidatesToDelete {
-		if len(n.pods) != 0 || c.cluster.IsNodeNominated(n.ProviderID()) {
+		if len(n.pods) != 0 || c.cluster.IsNodeNominated(n.ProviderID()) || postValidationMapping[n.nodePool.Name] == 0 {
 			logging.FromContext(ctx).Debugf("abandoning empty node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
 			return Command{}, nil
 		}
+		postValidationMapping[n.nodePool.Name]--
 	}
 	return cmd, nil
 }
