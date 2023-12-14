@@ -23,17 +23,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/robfig/cron/v3"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
@@ -257,17 +254,8 @@ func (c *Controller) logInvalidBudgets(ctx context.Context) {
 	}
 	var buf bytes.Buffer
 	for _, np := range nodePoolList.Items {
-		for _, budget := range np.Spec.Disruption.Budgets {
-			if budget.Schedule != nil {
-				_, err := cron.ParseStandard(lo.FromPtr(budget.Schedule))
-				if err != nil {
-					fmt.Fprintf(&buf, "invalid schedule %s in nodepool %s, ", *budget.Schedule, np.Name)
-				}
-			}
-			_, err = intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(v1beta1.GetIntStrFromValue(budget.Nodes)), 100, true)
-			if err != nil {
-				fmt.Fprintf(&buf, "invalid nodes value %s in nodepool %s, ", budget.Nodes, np.Name)
-			}
+		if _, err := np.GetAllowedDisruptions(ctx, c.clock, 100); err != nil {
+			fmt.Fprintf(&buf, "invalid disruption budgets in nodepool %s, %s", np.Name, err)
 		}
 	}
 	if buf.Len() > 0 {

@@ -219,7 +219,7 @@ func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clo
 
 	for i := range nodePoolList.Items {
 		nodePool := nodePoolList.Items[i]
-		disruptions := nodePool.GetAllowedDisruptions(ctx, clk, numNodes[nodePool.Name])
+		disruptions := nodePool.MustGetAllowedDisruptions(ctx, clk, numNodes[nodePool.Name])
 		// Subtract the allowed number of disruptions from the number of already deleting nodes.
 		// Floor the value since the number of deleting nodes can exceed the number of allowed disruptions.
 		// Allowing this value to be negative breaks assumptions in the code used to calculate how

@@ -70,16 +70,16 @@ var _ = Describe("Budgets", func() {
 			},
 		}
 	})
-	Context("NodePool/AllowedDisruptions", func() {
+	Context("NodePool/MustGetAllowedDisruptions", func() {
 		It("should return the min allowedDisruptions", func() {
-			min := nodePool.GetAllowedDisruptions(ctx, fakeClock, 100)
+			min := nodePool.MustGetAllowedDisruptions(ctx, fakeClock, 100)
 			Expect(min).To(BeNumerically("==", 10))
 		})
 		It("should return the min allowedDisruptions, ignoring inactive crons", func() {
 			// Make the first and third budgets inactive
 			budgets[0].Schedule = lo.ToPtr("@yearly")
 			budgets[2].Schedule = lo.ToPtr("@yearly")
-			min := nodePool.GetAllowedDisruptions(ctx, fakeClock, 100)
+			min := nodePool.MustGetAllowedDisruptions(ctx, fakeClock, 100)
 			Expect(min).To(BeNumerically("==", 100))
 		})
 		It("should return MaxInt32 if all crons are inactive", func() {
@@ -87,38 +87,43 @@ var _ = Describe("Budgets", func() {
 			budgets[1].Schedule = lo.ToPtr("@yearly")
 			budgets[2].Schedule = lo.ToPtr("@yearly")
 			budgets[3].Schedule = lo.ToPtr("@yearly")
-			min := nodePool.GetAllowedDisruptions(ctx, fakeClock, 100)
+			min := nodePool.MustGetAllowedDisruptions(ctx, fakeClock, 100)
 			Expect(min).To(BeNumerically("==", math.MaxInt32))
 		})
 		It("should return zero values if a schedule is invalid", func() {
 			budgets[0].Schedule = lo.ToPtr("@wrongly")
-			min := nodePool.GetAllowedDisruptions(ctx, fakeClock, 100)
+			min := nodePool.MustGetAllowedDisruptions(ctx, fakeClock, 100)
 			Expect(min).To(BeNumerically("==", 0))
 		})
 	})
 	Context("Budget/AllowedDisruptions", func() {
 		It("should return zero values if a schedule is invalid", func() {
 			budgets[0].Schedule = lo.ToPtr("@wrongly")
-			val := budgets[0].GetAllowedDisruptions(fakeClock, 100)
+			val, err := budgets[0].GetAllowedDisruptions(fakeClock, 100)
+			Expect(err).ToNot(Succeed())
 			Expect(val).To(BeNumerically("==", 0))
 		})
 		It("should return zero values if a nodes value is invalid", func() {
 			budgets[0].Nodes = "1000a%"
-			val := budgets[0].GetAllowedDisruptions(fakeClock, 100)
+			val, err := budgets[0].GetAllowedDisruptions(fakeClock, 100)
+			Expect(err).ToNot(Succeed())
 			Expect(val).To(BeNumerically("==", 0))
 		})
 		It("should return MaxInt32 when a budget is inactive", func() {
 			budgets[0].Schedule = lo.ToPtr("@yearly")
 			budgets[0].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))})
-			val := budgets[0].GetAllowedDisruptions(fakeClock, 100)
+			val, err := budgets[0].GetAllowedDisruptions(fakeClock, 100)
+			Expect(err).To(Succeed())
 			Expect(val).To(BeNumerically("==", math.MaxInt32))
 		})
 		It("should return the int value when a budget is active", func() {
-			val := budgets[0].GetAllowedDisruptions(fakeClock, 100)
+			val, err := budgets[0].GetAllowedDisruptions(fakeClock, 100)
+			Expect(err).To(Succeed())
 			Expect(val).To(BeNumerically("==", 10))
 		})
 		It("should return the string value when a budget is active", func() {
-			val := budgets[2].GetAllowedDisruptions(fakeClock, 100)
+			val, err := budgets[2].GetAllowedDisruptions(fakeClock, 100)
+			Expect(err).To(Succeed())
 			Expect(val).To(BeNumerically("==", 10))
 		})
 	})

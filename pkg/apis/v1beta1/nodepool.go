@@ -26,6 +26,7 @@ import (
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/robfig/cron/v3"
 	"github.com/samber/lo"
+	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -100,18 +101,19 @@ type Disruption struct {
 // Budget defines when Karpenter will restrict the
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
-	// Nodes dictates how many NodeClaims owned by this NodePool
-	// can be terminating at once. It must be set.
-	// This only considers NodeClaims with the karpenter.sh/disruption taint.
-	// We can't use an intstr.IntOrString since kubebuilder doesn't support pattern
+	// Nodes dictates the maximum number of NodeClaims owned by this Node
+	// that can be terminating at once. This is calculated by counting nodes that
+	// have a deletion timestamp set, or are marked for deletion in memory.
+	// This field is required.
+	// This cannot be of type intstr.IntOrString since kubebuilder doesn't support pattern
 	// checking for int nodes for IntOrString nodes.
 	// Ref: https://github.com/kubernetes-sigs/controller-tools/blob/55efe4be40394a288216dab63156b0a64fb82929/pkg/crd/markers/validation.go#L379-L388
 	// +kubebuilder:validation:Pattern:="^((100|[0-9]{1,2})%|[0-9]+)$"
 	// +kubebuilder:default:="10%"
 	Nodes string `json:"nodes" hash:"ignore"`
-	// Schedule specifies when a budget begins being active,
-	// using the upstream cronjob syntax. If omitted, the budget is always active.
-	// Currently timezones are not supported.
+	// Schedule specifies when a budget begins being active, following
+	// the upstream cronjob syntax. If omitted, the budget is always active.
+	// Like in upstream, timezones are not supported.
 	// This is required if Duration is set.
 	// +kubebuilder:validation:Pattern:=`^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$`
 	// +optional
@@ -211,28 +213,43 @@ func (pl *NodePoolList) OrderByWeight() {
 	})
 }
 
+// MustGetAllowedDisruptions calls GetAllowedDisruptions and returns 0 if the error is not nil. This reduces the
+// amount of state that the disruption controller must reconcile, while allowing the GetAllowedDisruptions()
+// to bubble up any errors in validation.
+func (in *NodePool) MustGetAllowedDisruptions(ctx context.Context, c clock.Clock, numNodes int) int {
+	val, err := in.GetAllowedDisruptions(ctx, c, numNodes)
+	if err != nil {
+		return 0
+	}
+	return val
+}
+
 // GetAllowedDisruptions returns the minimum allowed disruptions across all disruption budgets for a given node pool.
-// This returns two values as the resolved value for a percent depends on the number of current node claims.
-func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock, numNodes int) int {
+// This will return an error if there is a configuration error with any budget's node or schedule values.
+func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock, numNodes int) (int, error) {
 	minVal := math.MaxInt32
+	var multiErr error
 	for i := range in.Spec.Disruption.Budgets {
-		val := in.Spec.Disruption.Budgets[i].GetAllowedDisruptions(c, numNodes)
+		val, err := in.Spec.Disruption.Budgets[i].GetAllowedDisruptions(c, numNodes)
+		if err != nil {
+			multiErr = multierr.Append(multiErr, err)
+		}
 		minVal = lo.Ternary(val < minVal, val, minVal)
 	}
-	return minVal
+	return minVal, multiErr
 }
 
 // GetAllowedDisruptions returns an intstr.IntOrString that can be used a comparison
 // for calculating if a disruption action is allowed. It returns an error if the
 // schedule is invalid. This returns MAXINT if the value is unbounded.
-func (in *Budget) GetAllowedDisruptions(c clock.Clock, numNodes int) int {
+func (in *Budget) GetAllowedDisruptions(c clock.Clock, numNodes int) (int, error) {
 	active, err := in.IsActive(c)
 	// If the budget is misconfigured, fail closed.
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	if !active {
-		return math.MaxInt32
+		return math.MaxInt32, nil
 	}
 	// This will round up to the nearest whole number. Therefore, a disruption can
 	// sometimes exceed the disruption budget. This is the same as how Kubernetes
@@ -244,9 +261,9 @@ func (in *Budget) GetAllowedDisruptions(c clock.Clock, numNodes int) int {
 		// Should never happen since this is validated when the nodepool is applied
 		// If this value is incorrectly formatted, fail closed, since we don't know what
 		// they want here.
-		return 0
+		return 0, err
 	}
-	return res
+	return res, nil
 }
 
 // IsActive takes a clock as input and returns if a budget is active.
