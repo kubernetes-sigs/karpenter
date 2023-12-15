@@ -25,7 +25,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -67,7 +66,6 @@ func (c *Controller) Name() string {
 func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
 	return operatorcontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
-		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		For(&v1beta1.NodePool{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
 	)

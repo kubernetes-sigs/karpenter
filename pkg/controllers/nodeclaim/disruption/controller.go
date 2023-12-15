@@ -26,12 +26,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -116,29 +113,7 @@ func (c *Controller) Name() string {
 func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
 	return operatorcontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
-		For(&v1beta1.NodeClaim{}, builder.WithPredicates(
-			predicate.Or(
-				predicate.GenerationChangedPredicate{},
-				predicate.Funcs{
-					UpdateFunc: func(e event.UpdateEvent) bool {
-						oldNodeClaim := e.ObjectOld.(*v1beta1.NodeClaim)
-						newNodeClaim := e.ObjectNew.(*v1beta1.NodeClaim)
-
-						// One of the status conditions that affects disruption has changed
-						// which means that we should re-consider this for disruption
-						for _, cond := range v1beta1.LivingConditions {
-							if !equality.Semantic.DeepEqual(
-								oldNodeClaim.StatusConditions().GetCondition(cond),
-								newNodeClaim.StatusConditions().GetCondition(cond),
-							) {
-								return true
-							}
-						}
-						return false
-					},
-				},
-			),
-		)).
+		For(&v1beta1.NodeClaim{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Watches(
 			&v1beta1.NodePool{},
