@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
+	"knative.dev/pkg/apis"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -127,6 +128,14 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontr
 						// One of the status conditions that affects disruption has changed
 						// which means that we should re-consider this for disruption
 						for _, cond := range v1beta1.LivingConditions {
+							if !equality.Semantic.DeepEqual(
+								oldNodeClaim.StatusConditions().GetCondition(cond),
+								newNodeClaim.StatusConditions().GetCondition(cond),
+							) {
+								return true
+							}
+						}
+						for _, cond := range []apis.ConditionType{v1beta1.Expired, v1beta1.Empty, v1beta1.Drifted} {
 							if !equality.Semantic.DeepEqual(
 								oldNodeClaim.StatusConditions().GetCondition(cond),
 								newNodeClaim.StatusConditions().GetCondition(cond),
