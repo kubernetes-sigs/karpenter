@@ -145,10 +145,6 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontr
 			nodeclaimutil.NodePoolEventHandler(c.kubeClient),
 		).
 		Watches(
-			&v1.Node{},
-			nodeclaimutil.NodeEventHandler(c.kubeClient),
-		).
-		Watches(
 			&v1.Pod{},
 			nodeclaimutil.PodEventHandler(c.kubeClient),
 		),

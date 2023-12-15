@@ -18,7 +18,6 @@ package disruption
 
 import (
 	"context"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
@@ -38,7 +37,6 @@ type Expiration struct {
 	clock      clock.Clock
 }
 
-//nolint:gocyclo
 func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
 	hasExpiredCondition := nodeClaim.StatusConditions().GetCondition(v1beta1.Expired) != nil
 
@@ -51,18 +49,7 @@ func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, 
 		}
 		return reconcile.Result{}, nil
 	}
-	node, err := nodeclaimutil.NodeForNodeClaim(ctx, e.kubeClient, nodeClaim)
-	if nodeclaimutil.IgnoreNodeNotFoundError(nodeclaimutil.IgnoreDuplicateNodeError(err)) != nil {
-		return reconcile.Result{}, err
-	}
-	// We do the expiration check in this way since there is still a migration path for creating nodeclaims from Nodes
-	// In this case, we need to make sure that we take the older of the two for expiration
-	var expirationTime time.Time
-	if node == nil {
-		expirationTime = nodeClaim.CreationTimestamp.Add(*nodePool.Spec.Disruption.ExpireAfter.Duration)
-	} else {
-		expirationTime = node.CreationTimestamp.Add(*nodePool.Spec.Disruption.ExpireAfter.Duration)
-	}
+	expirationTime := nodeClaim.CreationTimestamp.Add(*nodePool.Spec.Disruption.ExpireAfter.Duration)
 	// 2. If the NodeClaim isn't expired, remove the status condition.
 	if e.clock.Now().Before(expirationTime) {
 		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.Expired)
