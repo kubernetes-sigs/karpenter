@@ -1,52 +1,55 @@
 header:
   schema-version: 1.0.0
-  last-updated: '202'
-  last-reviewed: '2023-09-28'
-  expiration-date: '2024-09-28T01:00:00.000Z'
-  project-url: https://github.com/ossf/security-insights-spec
-  project-release: '1.0.0'
+  expiration-date: '2024-12-16'
+  project-url: 
 project-lifecycle:
-  stage: active
   bug-fixes-only: false
   core-maintainers:
-  - github:ellistarn
-  - github:jonathan-innis
-  - github:tzneal
-  - github:bwagner5
-  - github:njtran
+  - ellistarn
+  - jonathan-innis
+  - tzneal
+  - bwagner5
+  - njtran
+  status: active
 contribution-policy:
   accepts-pull-requests: true
   accepts-automated-pull-requests: true
-  code-of-conduct: https://openssf.org/community/code-of-conduct
-documentation:
-- https://github.com/ossf/security-insights-spec/blob/main/specification.md
+  automated-tools-list:
+    - automated-tool: dependabot
+      action: allowed
+      path:
+        - /
 distribution-points:
-- https://github.com/ossf/security-insights-spec
+  - https://github.com/kubernetes-sigs/karpenter/blob/main/RELEASE.md
 security-artifacts:
   threat-model:
     threat-model-created: true
     evidence-url:
-    - https://github.com/ossf/security-insights-spec/blob/main/docs/threat-model.md
+    - 
+  self-assessment:
+    self-assessment-created: true
+    evidence-url:
+    - 
+  other-artifacts:
+      evidence-url:
+        - 
 security-testing:
 - tool-type: sca
   tool-name: Dependabot
-  tool-version: latest
+  tool-version: "2"
+  tool-url: https://github.com/dependabot
   integration:
     ad-hoc: false
     ci: true
     before-release: true
-  comment: |
-    Dependabot is enabled for this repo.
+security-assessments:
+- auditor-name: 
+  auditor-url: 
+  report-year: 
 security-contacts:
 - type: email
-  value: security@openssf.org
+  value: security@kubernetes.io 
 vulnerability-reporting:
   accepts-vulnerability-reports: true
-  security-policy: https://github.com/ossf/security-insights-spec/security/policy
-  email-contact: security@openssf.org
-  comment: |
-    The first and best way to report a vulnerability is by using private security issues in GitHub.
-dependencies:
-  third-party-packages: true
-  dependencies-lists:
-  - https://github.com/ossf/security-insights-spec/blob/main/validators/python/requirements.txt
+  email-contact: security@kubernetes.io
+  security-policy: https://github.com/kubernetes/committee-security-response/blob/main/SECURITY.md
