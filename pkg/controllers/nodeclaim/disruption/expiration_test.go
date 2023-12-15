@@ -45,6 +45,8 @@ var _ = Describe("Expiration", func() {
 				Labels: map[string]string{v1beta1.NodePoolLabelKey: nodePool.Name},
 			},
 		})
+		// NodeClaims are required to be launched before they can be evaluated for expiration
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Launched)
 	})
 
 	It("should remove the status condition from the NodeClaims when expiration is disabled", func() {
