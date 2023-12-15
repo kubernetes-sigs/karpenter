@@ -251,6 +251,7 @@ func (c *Controller) logInvalidBudgets(ctx context.Context) {
 	nodePoolList, err := nodepoolutil.List(ctx, c.kubeClient)
 	if err != nil {
 		logging.FromContext(ctx).Debugf("listing nodepools, %s", err)
+		return
 	}
 	var buf bytes.Buffer
 	for _, np := range nodePoolList.Items {
