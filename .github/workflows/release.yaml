@@ -16,3 +16,9 @@ jobs:
         with:
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
           prerelease: false
+      - name: Install bom and test presence in path
+        uses: kubernetes-sigs/release-actions/setup-bom@main
+        with:
+          bom-release: '0.5.1'
+      - name: Check install!
+        run: bom version
