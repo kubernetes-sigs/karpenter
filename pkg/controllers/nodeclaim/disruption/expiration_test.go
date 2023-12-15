@@ -22,7 +22,6 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"knative.dev/pkg/apis"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -45,8 +44,6 @@ var _ = Describe("Expiration", func() {
 				Labels: map[string]string{v1beta1.NodePoolLabelKey: nodePool.Name},
 			},
 		})
-		// NodeClaims are required to be launched before they can be evaluated for expiration
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.Launched)
 	})
 
 	It("should remove the status condition from the NodeClaims when expiration is disabled", func() {
@@ -100,18 +97,5 @@ var _ = Describe("Expiration", func() {
 
 		result := ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 		Expect(result.RequeueAfter).To(BeNumerically("~", time.Second*100, time.Second))
-	})
-	It("should remove the status condition from the nodeClaim when the nodeClaim launch condition doesn't exist", func() {
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.Expired)
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		nodeClaim.Status.Conditions = lo.Reject(nodeClaim.Status.Conditions, func(s apis.Condition, _ int) bool {
-			return s.Type == v1beta1.Launched
-		})
-		ExpectApplied(ctx, env.Client, nodeClaim)
-
-		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
-
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Expired)).To(BeNil())
 	})
 })
