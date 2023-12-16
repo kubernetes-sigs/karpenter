@@ -435,7 +435,7 @@ func DriftedCounter(nodeClaim *v1beta1.NodeClaim, driftType string) prometheus.C
 			metrics.ProvisionerLabel: nodeClaim.Labels[v1alpha5.ProvisionerNameLabelKey],
 		})
 	}
-	return metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
+	return metrics.NodeClaimsDriftedCounter.With(prometheus.Labels{
 		metrics.TypeLabel:     driftType,
 		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
 	})
