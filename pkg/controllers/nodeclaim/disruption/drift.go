@@ -84,7 +84,7 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 		Reason:   string(driftedReason),
 	})
 	if !hasDriftedCondition {
-		logging.FromContext(ctx).Debugf("marking drifted")
+		logging.FromContext(ctx).With("reason", string(driftedReason)).Debugf("marking drifted")
 		nodeclaimutil.DisruptedCounter(nodeClaim, metrics.DriftReason).Inc()
 		nodeclaimutil.DriftedCounter(nodeClaim, string(driftedReason)).Inc()
 	}
