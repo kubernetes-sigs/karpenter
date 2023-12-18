@@ -43,7 +43,26 @@ var _ = Describe("Expiration", func() {
 			},
 		})
 	})
+	Context("Metrics", func() {
+		It("should fire a karpenter_nodeclaims_disrupted metric when expired", func() {
+			nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 30)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
+			// step forward to make the node expired
+			fakeClock.Step(60 * time.Second)
+			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Expired).IsTrue()).To(BeTrue())
+
+			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_disrupted", map[string]string{
+				"type":     "expiration",
+				"nodepool": nodePool.Name,
+			})
+			Expect(found).To(BeTrue())
+			Expect(metric.GetCounter().GetValue()).To(BeNumerically("==", 1))
+		})
+	})
 	It("should remove the status condition from the NodeClaims when expiration is disabled", func() {
 		nodePool.Spec.Disruption.ExpireAfter.Duration = nil
 		nodeClaim.StatusConditions().MarkTrue(v1beta1.Expired)
