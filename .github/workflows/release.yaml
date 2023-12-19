@@ -22,10 +22,11 @@ jobs:
         uses: kubernetes-sigs/release-actions/setup-tejolote@dd08496c83441d6477114cc0555b96d404dacff7 # v0.1.2
 
       - run: |
-          tejolote attest --artifacts github://kubernetes-sigs/karpenter/${{ steps.tag.outputs.tag_name }} github://kubernetes-sigs/karpenter/"${GITHUB_RUN_ID}" --output karpenter.intoto.json --sign
+          tejolote attest --artifacts github://kubernetes-sigs/karpenter/${{ github.ref_name }} github://kubernetes-sigs/karpenter/"${{ github.run_id }}" --output karpenter.intoto.json --sign
 
       - name: Create Github Release
         uses: marvinpinto/action-automatic-releases@919008cf3f741b179569b7a6fb4d8860689ab7f0 # v1.2.1
         with:
+          files: karpenter.intoto.json
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
           prerelease: false
