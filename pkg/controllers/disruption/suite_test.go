@@ -68,8 +68,11 @@ var recorder *test.EventRecorder
 var queue *orchestration.Queue
 
 var onDemandInstances []*cloudprovider.InstanceType
+var spotInstances []*cloudprovider.InstanceType
 var leastExpensiveInstance, mostExpensiveInstance *cloudprovider.InstanceType
 var leastExpensiveOffering, mostExpensiveOffering cloudprovider.Offering
+var leastExpensiveSpotInstance, mostExpensiveSpotInstance *cloudprovider.InstanceType
+var leastExpensiveSpotOffering, mostExpensiveSpotOffering cloudprovider.Offering
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -121,12 +124,26 @@ var _ = BeforeEach(func() {
 		}
 		return false
 	})
-	// Sort the instances by pricing from low to high
+	// Sort the on-demand instances by pricing from low to high
 	sort.Slice(onDemandInstances, func(i, j int) bool {
 		return onDemandInstances[i].Offerings.Cheapest().Price < onDemandInstances[j].Offerings.Cheapest().Price
 	})
 	leastExpensiveInstance, mostExpensiveInstance = onDemandInstances[0], onDemandInstances[len(onDemandInstances)-1]
 	leastExpensiveOffering, mostExpensiveOffering = leastExpensiveInstance.Offerings[0], mostExpensiveInstance.Offerings[0]
+	spotInstances = lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
+		for _, o := range i.Offerings.Available() {
+			if o.CapacityType == v1beta1.CapacityTypeSpot {
+				return true
+			}
+		}
+		return false
+	})
+	// Sort the spot instances by pricing from low to high
+	sort.Slice(spotInstances, func(i, j int) bool {
+		return spotInstances[i].Offerings.Cheapest().Price < spotInstances[j].Offerings.Cheapest().Price
+	})
+	leastExpensiveSpotInstance, mostExpensiveSpotInstance = spotInstances[0], spotInstances[len(spotInstances)-1]
+	leastExpensiveSpotOffering, mostExpensiveSpotOffering = leastExpensiveSpotInstance.Offerings[0], mostExpensiveSpotInstance.Offerings[0]
 })
 
 var _ = AfterEach(func() {
@@ -452,7 +469,7 @@ var _ = Describe("Pod Eviction Cost", func() {
 
 func leastExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
 	for _, elem := range onDemandInstances {
-		if len(elem.Offerings.Requirements(scheduling.NewRequirements(scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, zone)))) > 0 {
+		if len(elem.Offerings.Compatible(scheduling.NewRequirements(scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, zone)))) > 0 {
 			return elem
 		}
 	}
@@ -462,7 +479,7 @@ func leastExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
 func mostExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
 	for i := len(onDemandInstances) - 1; i >= 0; i-- {
 		elem := onDemandInstances[i]
-		if len(elem.Offerings.Requirements(scheduling.NewRequirements(scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, zone)))) > 0 {
+		if len(elem.Offerings.Compatible(scheduling.NewRequirements(scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, zone)))) > 0 {
 			return elem
 		}
 	}
