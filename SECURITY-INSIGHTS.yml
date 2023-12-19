@@ -5,7 +5,8 @@ header:
   license: 'https://github.com/kubernetes-sigs/karpenter/blob/main/LICENSE'
 project-lifecycle:
   bug-fixes-only: false
-  core-maintainers: 'https://github.com/kubernetes-sigs/karpenter/blob/main/OWNERS'
+  core-maintainers:
+    - https://github.com/kubernetes-sigs/karpenter/blob/main/OWNERS
   status: active
   release-process: 'https://github.com/kubernetes-sigs/karpenter/blob/main/RELEASE.md'
 contribution-policy:
