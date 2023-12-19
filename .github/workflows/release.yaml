@@ -11,7 +11,7 @@ jobs:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
         with:
           fetch-depth: 0
-          
+
       - name: Set tag output
         id: tag
         run: echo "tag_name=${GITHUB_REF#refs/*/}" >> "$GITHUB_OUTPUT"
@@ -20,7 +20,7 @@ jobs:
         uses: kubernetes-sigs/release-actions/setup-tejolote@dd08496c83441d6477114cc0555b96d404dacff7 # v0.1.2
 
       - run: |
-          tejolote attest --artifacts github://kubernetes-sigs/karpenter/${{ steps.tag.outputs.tag_name }} github://kubernetes-sigs/karpenter/"${GITHUB_RUN_ID}" --output karpenter.intoto.json --sign
+          tejolote attest --artifacts github://coder12git/karpenter/${{ steps.tag.outputs.tag_name }} github://coder12git/karpenter/"${GITHUB_RUN_ID}" --output karpenter.intoto.json --sign
 
       - name: Create Github Release
         uses: marvinpinto/action-automatic-releases@919008cf3f741b179569b7a6fb4d8860689ab7f0 # v1.2.1
