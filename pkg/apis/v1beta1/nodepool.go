@@ -205,11 +205,20 @@ type NodePoolList struct {
 	Items           []NodePool `json:"items"`
 }
 
-// OrderByWeight orders the nodepools in the NodePoolList
-// by their priority weight in-place
-func (pl *NodePoolList) OrderByWeight() {
-	sort.Slice(pl.Items, func(a, b int) bool {
-		return ptr.Int32Value(pl.Items[a].Spec.Weight) > ptr.Int32Value(pl.Items[b].Spec.Weight)
+// OrderByWeight orders the NodePools in the NodePoolList by their priority weight in-place.
+// This priority evaluates the following things in precedence order:
+//  1. NodePools that have a larger weight are ordered first
+//  2. If two NodePools have the same weight, then the NodePool with the name later in the alphabet will come first
+func (nl *NodePoolList) OrderByWeight() {
+	sort.Slice(nl.Items, func(a, b int) bool {
+		weightA := ptr.Int32Value(nl.Items[a].Spec.Weight)
+		weightB := ptr.Int32Value(nl.Items[b].Spec.Weight)
+
+		if weightA == weightB {
+			// Order NodePools by name for a consistent ordering when sorting equal weight
+			return nl.Items[a].Name > nl.Items[b].Name
+		}
+		return weightA > weightB
 	})
 }
 

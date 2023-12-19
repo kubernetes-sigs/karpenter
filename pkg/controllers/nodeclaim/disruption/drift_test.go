@@ -58,6 +58,59 @@ var _ = Describe("Drift", func() {
 		// NodeClaims are required to be launched before they can be evaluated for drift
 		nodeClaim.StatusConditions().MarkTrue(v1beta1.Launched)
 	})
+	Context("Metrics", func() {
+		It("should fire a karpenter_nodeclaims_drifted metric when drifted", func() {
+			cp.Drifted = "CloudProviderDrifted"
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).IsTrue()).To(BeTrue())
+			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_drifted", map[string]string{
+				"type":     "CloudProviderDrifted",
+				"nodepool": nodePool.Name,
+			})
+			Expect(found).To(BeTrue())
+			Expect(metric.GetCounter().GetValue()).To(BeNumerically("==", 1))
+		})
+		It("should pass-through the correct drifted type value through the karpenter_nodeclaims_drifted metric", func() {
+			cp.Drifted = "drifted"
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+				{
+					Key:      v1.LabelInstanceTypeStable,
+					Operator: v1.NodeSelectorOpDoesNotExist,
+				},
+			}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).IsTrue()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).Reason).To(Equal(string(disruption.RequirementsDrifted)))
+
+			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_drifted", map[string]string{
+				"type":     "RequirementsDrifted",
+				"nodepool": nodePool.Name,
+			})
+			Expect(found).To(BeTrue())
+			Expect(metric.GetCounter().GetValue()).To(BeNumerically("==", 1))
+		})
+		It("should fire a karpenter_nodeclaims_disrupted metric when drifted", func() {
+			cp.Drifted = "drifted"
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).IsTrue()).To(BeTrue())
+
+			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_disrupted", map[string]string{
+				"type":     "drift",
+				"nodepool": nodePool.Name,
+			})
+			Expect(found).To(BeTrue())
+			Expect(metric.GetCounter().GetValue()).To(BeNumerically("==", 1))
+		})
+	})
 	It("should detect drift", func() {
 		cp.Drifted = "drifted"
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
