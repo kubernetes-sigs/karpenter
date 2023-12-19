@@ -307,8 +307,7 @@ func (in *StateNode) Nominated() bool {
 }
 
 func (in *StateNode) Managed() bool {
-	return in.NodeClaim != nil ||
-		(in.Node != nil && in.Node.Labels[v1beta1.NodePoolLabelKey] != "")
+	return in.NodeClaim != nil
 }
 
 func (in *StateNode) updateForPod(ctx context.Context, kubeClient client.Client, pod *v1.Pod) error {
