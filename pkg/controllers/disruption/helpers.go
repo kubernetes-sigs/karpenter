@@ -39,7 +39,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
-	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
@@ -111,11 +110,12 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	}
 
 	results := scheduler.Solve(ctx, pods)
-	// check if the scheduling relied on an existing node that isn't ready yet, if so we fail
-	// to schedule since we want to assume that we can delete a node and its pods will immediately
-	// move to an existing node which won't occur if that node isn't ready.
 	for _, n := range results.ExistingNodes {
-		if !n.Initialized() || nodeutils.GetCondition(n.Node, v1.NodeReady).Status != v1.ConditionTrue {
+		// We consider existing nodes for scheduling. When these nodes are unmanaged, their taint logic should
+		// tell us if we can schedule to them or not; however, if these nodes are managed, we will still schedule to them
+		// even if they are still in the middle of their initialization loop. In the case of disruption, we don't want
+		// to proceed disrupting if our scheduling decision relies on nodes that haven't entered a terminal state.
+		if !n.Initialized() {
 			for _, p := range n.Pods {
 				results.PodErrors[p] = fmt.Errorf("would schedule against a non-initialized node %s", n.Name())
 			}

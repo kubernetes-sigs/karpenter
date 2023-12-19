@@ -160,11 +160,6 @@ func (in *StateNode) Annotations() map[string]string {
 	return in.Node.Annotations
 }
 
-// GetLabels exists to conform to the GetLabels() function on the metav1.Object interface
-func (in *StateNode) GetLabels() map[string]string {
-	return in.Labels()
-}
-
 func (in *StateNode) Labels() map[string]string {
 	// If the nodeclaim exists and the state node isn't registered
 	// use the nodeclaim representation of the labels
@@ -181,26 +176,33 @@ func (in *StateNode) Labels() map[string]string {
 }
 
 func (in *StateNode) Taints() []v1.Taint {
-	// Only consider startup taints until the node is initialized. Without this, if the startup taint is generic and
-	// re-appears on the node for a different reason (e.g. the node is cordoned) we will assume that pods can
-	// schedule against the node in the future incorrectly.
-	ephemeralTaints := scheduling.KnownEphemeralTaints
-	if !in.Initialized() && in.Managed() && in.NodeClaim != nil {
-		ephemeralTaints = append(ephemeralTaints, in.NodeClaim.Spec.StartupTaints...)
-	}
-
 	var taints []v1.Taint
-	if (!in.Registered() && in.NodeClaim != nil) || in.Node == nil {
+	if (!in.Registered() && in.Managed()) || in.Node == nil {
 		taints = in.NodeClaim.Spec.Taints
 	} else {
 		taints = in.Node.Spec.Taints
 	}
-	return lo.Reject(taints, func(taint v1.Taint, _ int) bool {
-		_, found := lo.Find(ephemeralTaints, func(t v1.Taint) bool {
-			return t.MatchTaint(&taint)
+	if !in.Initialized() && in.Managed() {
+		// We reject any well-known ephemeral taints and startup taints attached to this node until
+		// the node is initialized. Without this, if the taint is generic and re-appears on the node for a
+		// different reason (e.g. the node is cordoned) we will assume that pods can schedule against the
+		// node in the future incorrectly.
+		return lo.Reject(taints, func(taint v1.Taint, _ int) bool {
+			if _, found := lo.Find(scheduling.KnownEphemeralTaints, func(t v1.Taint) bool {
+				return t.MatchTaint(&taint)
+			}); found {
+				return true
+			}
+			if _, found := lo.Find(in.NodeClaim.Spec.StartupTaints, func(t v1.Taint) bool {
+				return t.MatchTaint(&taint)
+			}); found {
+				return true
+			}
+			return false
 		})
-		return found
-	})
+	} else {
+		return taints
+	}
 }
 
 func (in *StateNode) Registered() bool {

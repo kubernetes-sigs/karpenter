@@ -25,6 +25,9 @@ import (
 	cloudproviderapi "k8s.io/cloud-provider/api"
 )
 
+// KnownEphemeralTaints are taints that are expected to be added to a node while it's initializing
+// If the node is a Karpenter-managed node, we don't consider these taints while the node is uninitialized
+// since we expect these taints to eventually be removed
 var KnownEphemeralTaints = []v1.Taint{
 	{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
 	{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},

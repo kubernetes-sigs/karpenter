@@ -26,6 +26,7 @@ import (
 
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	cloudproviderapi "k8s.io/cloud-provider/api"
 	clock "k8s.io/utils/clock/testing"
 	"knative.dev/pkg/ptr"
 
@@ -1496,6 +1497,141 @@ var _ = Describe("Data Races", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim)
 			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		}
+	})
+})
+
+var _ = Describe("Taints", func() {
+	var nodeClaim *v1beta1.NodeClaim
+	var node *v1.Node
+	BeforeEach(func() {
+		instanceType := cloudProvider.InstanceTypes[0]
+		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.LabelInstanceTypeStable: instanceType.Name,
+			}},
+			Status: v1beta1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+			},
+		})
+	})
+	Context("Managed", func() {
+		It("should not consider ephemeral taints on a managed node that isn't initialized", func() {
+			node.Spec.Taints = []v1.Taint{
+				{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
+				{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
+				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+			}
+			ExpectApplied(ctx, env.Client, nodeClaim, node)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			stateNode := ExpectStateNodeExists(cluster, node)
+			Expect(stateNode.Taints()).To(HaveLen(0))
+		})
+		It("should consider ephemeral taints on a managed node after the node is initialized", func() {
+			ExpectApplied(ctx, env.Client, nodeClaim, node)
+			ExpectMakeNodesInitialized(ctx, env.Client, node)
+			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+
+			node = ExpectExists(ctx, env.Client, node)
+			node.Spec.Taints = []v1.Taint{
+				{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
+				{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
+				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+			}
+			ExpectApplied(ctx, env.Client, node)
+
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			stateNode := ExpectStateNodeExists(cluster, node)
+			Expect(stateNode.Taints()).To(HaveLen(3))
+			Expect(stateNode.Taints()).To(ContainElements(
+				v1.Taint{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
+				v1.Taint{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
+				v1.Taint{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+			))
+		})
+		It("should consider startup taints on a managed node that isn't initialized", func() {
+			nodeClaim.Spec.StartupTaints = []v1.Taint{
+				{Key: "taint-key", Value: "taint-value", Effect: v1.TaintEffectNoSchedule},
+				{Key: "taint-key2", Value: "taint-value2", Effect: v1.TaintEffectNoExecute},
+			}
+			node.Spec.Taints = []v1.Taint{
+				{Key: "taint-key", Value: "taint-value", Effect: v1.TaintEffectNoSchedule},
+				{Key: "taint-key2", Value: "taint-value2", Effect: v1.TaintEffectNoExecute},
+			}
+			ExpectApplied(ctx, env.Client, nodeClaim, node)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			stateNode := ExpectStateNodeExists(cluster, node)
+			Expect(stateNode.Taints()).To(HaveLen(0))
+		})
+		It("should consider startup taints on a managed node after the node is initialized", func() {
+			nodeClaim.Spec.StartupTaints = []v1.Taint{
+				{Key: "taint-key", Value: "taint-value", Effect: v1.TaintEffectNoSchedule},
+				{Key: "taint-key2", Value: "taint-value2", Effect: v1.TaintEffectNoExecute},
+			}
+			node.Spec.Taints = []v1.Taint{
+				{Key: "taint-key", Value: "taint-value", Effect: v1.TaintEffectNoSchedule},
+				{Key: "taint-key2", Value: "taint-value2", Effect: v1.TaintEffectNoExecute},
+			}
+			ExpectApplied(ctx, env.Client, nodeClaim, node)
+			ExpectMakeNodesInitialized(ctx, env.Client, node)
+			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			stateNode := ExpectStateNodeExists(cluster, node)
+			Expect(stateNode.Taints()).To(HaveLen(2))
+			Expect(stateNode.Taints()).To(ContainElements(
+				v1.Taint{Key: "taint-key", Value: "taint-value", Effect: v1.TaintEffectNoSchedule},
+				v1.Taint{Key: "taint-key2", Value: "taint-value2", Effect: v1.TaintEffectNoExecute},
+			))
+		})
+	})
+	Context("Unmanaged", func() {
+		It("should consider ephemeral taints on an unmanaged node that isn't initialized", func() {
+			node.Spec.Taints = []v1.Taint{
+				{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
+				{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
+				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+			}
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			stateNode := ExpectStateNodeExists(cluster, node)
+			Expect(stateNode.Taints()).To(HaveLen(3))
+			Expect(stateNode.Taints()).To(ContainElements(
+				v1.Taint{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
+				v1.Taint{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
+				v1.Taint{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+			))
+		})
+		It("should consider ephemeral taints on an unmanaged node after the node is initialized", func() {
+			ExpectApplied(ctx, env.Client, node)
+			ExpectMakeNodesInitialized(ctx, env.Client, node)
+
+			node = ExpectExists(ctx, env.Client, node)
+			node.Spec.Taints = []v1.Taint{
+				{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
+				{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
+				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+			}
+
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			stateNode := ExpectStateNodeExists(cluster, node)
+			Expect(stateNode.Taints()).To(HaveLen(3))
+			Expect(stateNode.Taints()).To(ContainElements(
+				v1.Taint{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
+				v1.Taint{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
+				v1.Taint{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+			))
+		})
 	})
 })
 
