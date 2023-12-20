@@ -97,7 +97,7 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 		}
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
-	if err := c.cloudProvider.Delete(ctx, nodeclaimutil.NewFromNode(node)); cloudprovider.IgnoreNodeClaimNotFoundError(err) != nil {
+	if err := c.cloudProvider.Delete(ctx, maNewFromNode(node)); cloudprovider.IgnoreNodeClaimNotFoundError(err) != nil {
 		return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
 	}
 	if err := c.removeFinalizer(ctx, node); err != nil {

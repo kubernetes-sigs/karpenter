@@ -49,6 +49,4 @@ func PatchStatus(ctx context.Context, c client.Client, stored, nodePool *v1beta1
 	return c.Status().Patch(ctx, nodePool, client.MergeFrom(stored))
 }
 
-func HashAnnotation(nodePool *v1beta1.NodePool) map[string]string {
-	return map[string]string{v1beta1.NodePoolHashAnnotationKey: nodePool.Hash()}
-}
+
