@@ -154,10 +154,6 @@ type CompatabilityOptions struct {
 	AllowUndefined sets.Set[string]
 }
 
-<<<<<<< Updated upstream
-=======
-
->>>>>>> Stashed changes
 var AllowUndefinedWellKnownLabels = func(options CompatabilityOptions) CompatabilityOptions {
 	options.AllowUndefined = v1beta1.WellKnownLabels
 	return options

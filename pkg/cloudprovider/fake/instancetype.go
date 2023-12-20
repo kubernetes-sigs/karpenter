@@ -18,6 +18,7 @@ package fake
 
 import (
 	"fmt"
+	"math/rand"
 	"strings"
 
 	"github.com/samber/lo"
@@ -134,7 +135,16 @@ func InstanceTypeAssortedWithZones(zones ...string) []*cloudprovider.InstanceTyp
 									v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", mem)),
 								},
 							}
+
 							price := PriceFromResources(opts.Resources)
+
+							if ct == v1beta1.CapacityTypeSpot {
+								// add no lint here as gosec fires a false positive here
+								//nolint
+								jitter := rand.Float64()*2 - .01
+								price = price * (.7 + jitter)
+							}
+
 							opts.Offerings = []cloudprovider.Offering{
 								{
 									CapacityType: ct,

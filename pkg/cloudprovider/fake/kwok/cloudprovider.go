@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"math/rand"
 	"strings"
-	"sync"
 
+	"github.com/docker/docker/pkg/namesgenerator"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	kubeErrors "k8s.io/apimachinery/pkg/api/errors"
@@ -29,37 +29,10 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
-var instanceTypes []*cloudprovider.InstanceType
-
-func init() {
-	fake.AddFakeLabels()
-	instanceTypes = fake.InstanceTypeAssortedWithZones(kwokZones...)
-	ret := []*cloudProvider.
-	for _, it := range instanceTypes {
-		for _, zone := range kwokZones {
-			odPrice := fake.PriceFromResources(it.Capacity)
-			ret = append(ret, cloudprovider.Offering{
-				CapacityType: v1beta1.CapacityTypeOnDemand,
-				Zone:         zone,
-				Price:        odPrice,
-				Available:    true,
-			})
-			ret = append(ret, cloudprovider.Offering{
-				CapacityType: v1beta1.CapacityTypeSpot,
-				Zone:         zone,
-				Price:        odPrice * .7,
-				Available:    true,
-			})
-		}
-	}
-	
-}
-
-func NewCloudProvider(ctx context.Context, client kubernetes.Interface) *CloudProvider {
+func NewCloudProvider(ctx context.Context, client kubernetes.Interface, instanceTypes []*cloudprovider.InstanceType) *CloudProvider {
 	return &CloudProvider{
 		kubeClient:    client,
 		instanceTypes: instanceTypes,
@@ -68,7 +41,6 @@ func NewCloudProvider(ctx context.Context, client kubernetes.Interface) *CloudPr
 
 type CloudProvider struct {
 	kubeClient    kubernetes.Interface
-	populateTypes sync.Once
 	instanceTypes []*cloudprovider.InstanceType
 }
 
@@ -127,59 +99,46 @@ func (c CloudProvider) List(ctx context.Context) ([]*v1beta1.NodeClaim, error) {
 }
 
 func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *v1beta1.NodePool) ([]*cloudprovider.InstanceType, error) {
-	var ret []*cloudprovider.InstanceType
-	for _, it := range c.instanceTypes {
-		offerings := c.offerings(ctx, it)
-		for _, zone := range kwokZones {
-			odPrice := fake.PriceFromResources(it.Capacity)
-			ret = append(ret, cloudprovider.Offering{
-				CapacityType: v1beta1.CapacityTypeOnDemand,
-				Zone:         zone,
-				Price:        odPrice,
-				Available:    true,
-			})
-			ret = append(ret, cloudprovider.Offering{
-				CapacityType: v1beta1.CapacityTypeSpot,
-				Zone:         zone,
-				Price:        odPrice * .7,
-				Available:    true,
-			})
-		}
-		ret = append(ret, &cloudprovider.InstanceType{
-			Name:         it.Name,
-			Requirements: offerings.Requirements,
-			Offerings:    offerings(ctx, it),
-			Capacity:     computeCapacity(ctx, it),
-			Overhead: &cloudprovider.InstanceTypeOverhead{
-				KubeReserved:      nil,
-				SystemReserved:    nil,
-				EvictionThreshold: nil,
-			},
-		})
-	}
-	return ret, nil
+	return c.instanceTypes, nil
+	// var ret []*cloudprovider.InstanceType
+	// for _, it := range c.instanceTypes {
+	// 	offerings := c.offerings(ctx, it)
+	// 	ret = append(ret, &cloudprovider.InstanceType{
+	// 		Name:         it.Name,
+	// 		Requirements: offerings.Requirements,
+	// 		Offerings:    offerings(ctx, it),
+	// 		Capacity:     computeCapacity(ctx, it),
+	// 		Overhead: &cloudprovider.InstanceTypeOverhead{
+	// 			KubeReserved:      nil,
+	// 			SystemReserved:    nil,
+	// 			EvictionThreshold: nil,
+	// 		},
+	// 	})
+	// }
+	// return ret, nil
 }
 
-func (c CloudProvider) offerings(ctx context.Context, it *cloudprovider.InstanceType) cloudprovider.Offerings {
-	var ret cloudprovider.Offerings
-	for _, zone := range kwokZones {
-		odPrice := fake.PriceFromResources(it.Capacity)
-		ret = append(ret, cloudprovider.Offering{
-			CapacityType: v1beta1.CapacityTypeOnDemand,
-			Zone:         zone,
-			Price:        odPrice,
-			Available:    true,
-		})
-		ret = append(ret, cloudprovider.Offering{
-			CapacityType: v1beta1.CapacityTypeSpot,
-			Zone:         zone,
-			Price:        odPrice * .7,
-			Available:    true,
-		})
-	}
-	return ret
-}
+// func (c CloudProvider) offerings(ctx context.Context, it *cloudprovider.InstanceType) cloudprovider.Offerings {
+// 	var ret cloudprovider.Offerings
+// 	for _, zone := range kwokZones {
+// 		odPrice := fake.PriceFromResources(it.Capacity)
+// 		ret = append(ret, cloudprovider.Offering{
+// 			CapacityType: v1beta1.CapacityTypeOnDemand,
+// 			Zone:         zone,
+// 			Price:        odPrice,
+// 			Available:    true,
+// 		})
+// 		ret = append(ret, cloudprovider.Offering{
+// 			CapacityType: v1beta1.CapacityTypeSpot,
+// 			Zone:         zone,
+// 			Price:        odPrice * .7,
+// 			Available:    true,
+// 		})
+// 	}
+// 	return ret
+// }
 
+// Return nothing since there's no cloud provider drift.
 func (c CloudProvider) IsDrifted(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (cloudprovider.DriftReason, error) {
 	return "", nil
 }
@@ -188,11 +147,20 @@ func (c CloudProvider) Name() string {
 	return "kwok-provider"
 }
 
+func (c CloudProvider) getInstanceType(instanceTypeName string) (*cloudprovider.InstanceType, error) {
+	it, found := lo.Find(c.instanceTypes, func(it *cloudprovider.InstanceType) bool {
+		return it.Name == instanceTypeName
+	})
+	if !found {
+		return nil, fmt.Errorf("unable to find instance type %q", instanceTypeName)
+	}
+	return it, nil
+}
+
 func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
 	newName := strings.Replace(namesgenerator.GetRandomName(0), "_", "-", -1)
 	newName = fmt.Sprintf("%s-%d", newName, rand.Uint32())
 
-	var instanceTypeName string
 	var instanceTypePrice float64
 	capacityType := v1beta1.CapacityTypeOnDemand
 	requirements := scheduling.NewNodeSelectorRequirements(nodeClaim.
@@ -200,50 +168,36 @@ func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
 	if requirements.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeSpot) {
 		capacityType = v1beta1.CapacityTypeSpot
 	}
-	zone := randomChoice(kwokZones)
 	req, found := lo.Find(nodeClaim.Spec.Requirements, func(req v1.NodeSelectorRequirement) bool {
 		return req.Key == v1.LabelInstanceTypeStable
 	})
-	if found {
-		for _, val := range req.Values {
-			// pick the cheapest OD instance type
-			instanceTypeName = val
-			if capacityType == "spot" {
-				instanceTypePrice, _ = c.Pricing.SpotPrice(instanceTypeName, zone)
-			} else {
-				// Default to OD
-				instanceTypePrice, _ = c.Pricing.OnDemandPrice(instanceTypeName)
-			}
-			for _, it := range req.Values {
-				var price float64
-				var ok bool
-				if capacityType == "spot" {
-					price, ok = c.Pricing.SpotPrice(it, zone)
-				} else {
-					price, ok = c.Pricing.OnDemandPrice(it)
-				}
-				if ok && price < instanceTypePrice {
-					instanceTypePrice = price
-					instanceTypeName = it
-				}
-			}
-		}
+	if !found {
+		return nil, fmt.Errorf("instance type requirement not found")
 	}
 
-	its, err := c.GetInstanceTypes(context.Background(), nil)
-	if err != nil {
-		return nil, fmt.Errorf("listing instance types, %w", err)
-	}
 	var instanceType *cloudprovider.InstanceType
-	for _, it := range its {
-		if it.Name == instanceTypeName {
-			instanceType = it
-			break
-		}
-	}
 
-	if instanceType == nil {
-		return nil, fmt.Errorf("unable to find instance type %q", instanceTypeName)
+	for _, val := range req.Values {
+		var price float64
+		var ok bool
+		it, _ := c.getInstanceType(val)
+
+		var offering cloudprovider.Offering
+		// Since we're constructing the instance types we know that each instance type with OD offerings will have spot
+		// offerings, where spot will always be cheapest.
+		if capacityType == v1beta1.CapacityTypeSpot {
+			offering = it.Offerings.Cheapest()
+		} else {
+			offering, ok = it.Offerings.Get(v1beta1.CapacityTypeOnDemand, randomChoice(kwokZones))
+			if !ok {
+				return nil, fmt.Errorf("no on-demand offering found")
+			}
+		}
+		price = offering.Price
+
+		if ok && price < instanceTypePrice {
+			instanceTypePrice = price
+		}
 	}
 
 	return &v1.Node{
@@ -320,7 +274,6 @@ func addKwokAnnotation(annotations map[string]string) map[string]string {
 
 func (c CloudProvider) toNodeClaim(node *v1.Node) (*v1beta1.NodeClaim, error) {
 	return &v1beta1.NodeClaim{
-		IsMachine: true,
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        node.Name,
 			Labels:      node.Labels,

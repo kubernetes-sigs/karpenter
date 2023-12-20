@@ -539,13 +539,8 @@ var _ = Describe("Requirements", func() {
 	Context("Error Messages", func() {
 		DescribeTable("should detect well known label truncations", func(badLabel, expectedError string) {
 			unconstrained := NewRequirements()
-<<<<<<< Updated upstream
 			req := NewRequirements(NewRequirement(badLabel, v1.NodeSelectorOpExists))
 			Expect(unconstrained.Compatible(req, AllowUndefinedWellKnownLabels).Error()).To(Equal(expectedError))
-=======
-			nodePoolRequirement := NewRequirements(NewRequirement(badLabel, v1.NodeSelectorOpExists))
-			Expect(unconstrained.Compatible(nodePoolRequirement, AllowUndefinedWellKnownLabels).Error()).To(Equal(expectedError))
->>>>>>> Stashed changes
 		},
 			Entry("Zone Label", "zone", `label "zone" does not have known values (typo of "topology.kubernetes.io/zone"?)`),
 			Entry("Region Label", "region", `label "region" does not have known values (typo of "topology.kubernetes.io/region"?)`),
@@ -556,13 +551,8 @@ var _ = Describe("Requirements", func() {
 		)
 		DescribeTable("should detect well known label typos", func(badLabel, expectedError string) {
 			unconstrained := NewRequirements()
-<<<<<<< Updated upstream
 			req := NewRequirements(NewRequirement(badLabel, v1.NodeSelectorOpExists))
 			Expect(unconstrained.Compatible(req, AllowUndefinedWellKnownLabels).Error()).To(Equal(expectedError))
-=======
-			nodePoolRequirement := NewRequirements(NewRequirement(badLabel, v1.NodeSelectorOpExists))
-			Expect(unconstrained.Compatible(nodePoolRequirement, AllowUndefinedWellKnownLabels).Error()).To(Equal(expectedError))
->>>>>>> Stashed changes
 		},
 			Entry("Zone Label #1", "topology.kubernetesio/zone", `label "topology.kubernetesio/zone" does not have known values (typo of "topology.kubernetes.io/zone"?)`),
 			Entry("Zone Label #1", "node.io/zone", `label "node.io/zone" does not have known values (typo of "topology.kubernetes.io/zone"?)`),
