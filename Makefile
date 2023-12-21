@@ -1,12 +1,18 @@
 # This is the format of an AWS ECR Public Repo as an example.
-export KO_DOCKER_REPO ?= ${ACCOUNT_ID}.dkr.ecr.${DEFAULT_REGION}.amazonaws.com/dev
+export KWOK_REPO ?= ${ACCOUNT_ID}.dkr.ecr.${DEFAULT_REGION}.amazonaws.com
+export SYSTEM_NAMESPACE=kube-system
+
+HELM_OPTS ?= --set settings.featureGates.drift=true \
+			--set logLevel=debug \
+			--set controller.resources.requests.cpu=1 \
+			--set controller.resources.requests.memory=1Gi \
+			--set controller.resources.limits.cpu=1 \
+			--set controller.resources.limits.memory=1Gi 
 
 help: ## Display help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 presubmit: verify test licenses vulncheck ## Run all steps required for code to be checked in
-
-generate-kwok:
 
 install-kwok: ## Install kwok provider
 	UNINSTALL_KWOK=false ./hack/install-kwok.sh
@@ -14,15 +20,19 @@ uninstall-kwok: ## Install kwok provider
 	UNINSTALL_KWOK=true ./hack/install-kwok.sh
 
 build: ## Build the Karpenter KWOK controller images using ko build
-	$(eval CONTROLLER_IMG=$(shell $(WITH_GOFLAGS) KO_DOCKER_REPO="$(KO_DOCKER_REPO)" ko build -B github.com/kubernetes-sigs/karpenter/pkg/cloudprovider/fake/kwok))
+	$(eval CONTROLLER_IMG=$(shell $(WITH_GOFLAGS) KO_DOCKER_REPO="$(KWOK_REPO)" ko build -B sigs.k8s.io/karpenter/pkg/cloudprovider/fake/controller-kwok))
 	$(eval IMG_REPOSITORY=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 1 | cut -d ":" -f 1))
 	$(eval IMG_TAG=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 1 | cut -d ":" -f 2 -s))
 	$(eval IMG_DIGEST=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 2))
 
+apply-crds:
+	kubectl apply -f pkg/apis/crds/karpenter.sh_nodeclaims.yaml
+	kubectl apply -f pkg/apis/crds/karpenter.sh_nodepools.yaml
+
 # Run make install-kwok to install the kwok controller in your cluster first
 # Webhooks are currently not supported in the kwok provider.
-apply: build ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
-	helm upgrade --install karpenter charts/karpenter --namespace ${SYSTEM_NAMESPACE} \
+apply: verify apply-crds build ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
+	helm upgrade --install karpenter charts/karpenter --namespace kube-system --skip-crds \
 		$(HELM_OPTS) \
 		--set controller.image.repository=$(IMG_REPOSITORY) \
 		--set controller.image.tag=$(IMG_TAG) \
@@ -30,10 +40,10 @@ apply: build ## Deploy the kwok controller from the current state of your git re
 		--set-string controller.env[0].name=ENABLE_PROFILING \
 		--set-string controller.env[0].value=true
 
-	kubectl delete validatingwebhookconfiguration validation.webhook.config.karpenter.sh
-	kubectl delete validatingwebhookconfiguration validation.webhook.karpenter.k8s.aws
-	kubectl delete validatingwebhookconfiguration validation.webhook.karpenter.sh
-	kubectl delete mutatingwebhookconfiguration defaulting.webhook.karpenter.k8s.aws
+# kubectl delete validatingwebhookconfiguration validation.webhook.config.karpenter.sh
+# kubectl delete validatingwebhookconfiguration validation.webhook.karpenter.k8s.aws
+# kubectl delete validatingwebhookconfiguration validation.webhook.karpenter.sh
+# kubectl delete mutatingwebhookconfiguration defaulting.webhook.karpenter.k8s.aws
 
 test: ## Run tests
 	go test ./... \
