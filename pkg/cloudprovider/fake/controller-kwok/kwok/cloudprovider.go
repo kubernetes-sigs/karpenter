@@ -110,24 +110,9 @@ func (c CloudProvider) List(ctx context.Context) ([]*v1beta1.NodeClaim, error) {
 	return nodeClaims, nil
 }
 
+// Return the hard-coded instance types.
 func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *v1beta1.NodePool) ([]*cloudprovider.InstanceType, error) {
 	return c.instanceTypes, nil
-	// var ret []*cloudprovider.InstanceType
-	// for _, it := range c.instanceTypes {
-	// 	offerings := c.offerings(ctx, it)
-	// 	ret = append(ret, &cloudprovider.InstanceType{
-	// 		Name:         it.Name,
-	// 		Requirements: offerings.Requirements,
-	// 		Offerings:    offerings(ctx, it),
-	// 		Capacity:     computeCapacity(ctx, it),
-	// 		Overhead: &cloudprovider.InstanceTypeOverhead{
-	// 			KubeReserved:      nil,
-	// 			SystemReserved:    nil,
-	// 			EvictionThreshold: nil,
-	// 		},
-	// 	})
-	// }
-	// return ret, nil
 }
 
 // Return nothing since there's no cloud provider drift.
@@ -233,7 +218,7 @@ func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.Ins
 			ret[r.Key] = r.Values()[0]
 		}
 	}
-	ret["instance-price"] = price
+	ret["eks-node-viewer/instance-price"] = price
 	// Kwok has some scalability limitations.
 	// Randomly add each new node to one of the pre-created kwokPartitions.
 	ret["kwok-partition"] = randomPartition(10)
