@@ -35,7 +35,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 
-	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	fake "sigs.k8s.io/karpenter/pkg/cloudprovider/fake/test"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/test"
 

@@ -27,17 +27,20 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/workqueue"
 	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllertest"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	fake "sigs.k8s.io/karpenter/pkg/cloudprovider/fake/test"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
@@ -45,8 +48,21 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	v1 "k8s.io/api/core/v1"
+	realclock "k8s.io/utils/clock"
 	clock "k8s.io/utils/clock/testing"
 )
+
+// NewTestingQueue uses a test RateLimitingInterface that will immediately re-queue items.
+func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock realclock.Clock,
+	provisioner *provisioning.Provisioner) *orchestration.Queue {
+	q := orchestration.NewQueue(kubeClient, recorder, cluster, clock, provisioner)
+	q.RateLimitingInterface = &controllertest.Queue{Interface: workqueue.New()}
+	return q
+}
+
+func ResetQueue(q *orchestration.Queue) {
+	q.RateLimitingInterface = &controllertest.Queue{Interface: workqueue.New()}
+}
 
 var ctx context.Context
 var env *test.Environment
@@ -82,7 +98,7 @@ var _ = BeforeSuite(func() {
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, env.KubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
-	queue = orchestration.NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov)
+	queue = NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov)
 })
 
 var _ = AfterSuite(func() {

@@ -1,4 +1,6 @@
 /*
+Copyright 2023 The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -12,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package kwok
+package main
 
 import (
 	"fmt"
@@ -20,15 +22,19 @@ import (
 	"net/http"
 	"time"
 
-	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake/controller-kwok/kwok"
 	"sigs.k8s.io/karpenter/pkg/controllers"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator"
 )
 
 func init() {
-	// apis.Settings = append(apis.Settings, apis.Settings...)
-	fake.AddFakeLabels()
+	v1beta1.WellKnownLabels.Insert(
+		kwok.InstanceSizeLabelKey,
+		kwok.InstanceFamilyLabelKey,
+		kwok.IntegerInstanceLabelKey,
+	)
 }
 
 func main() {
@@ -45,10 +51,7 @@ func main() {
 		log.Println(server.ListenAndServe())
 	}()
 
-	// Construct instance types to inject into cloud provider
-	instanceTypes := fake.InstanceTypeAssortedWithZones(kwokZones...)
-
-	cloudProvider := NewCloudProvider(ctx, op.KubernetesInterface, instanceTypes)
+	cloudProvider := kwok.NewCloudProvider(ctx, op.KubernetesInterface, kwok.ConstructInstanceTypes())
 	op.
 		WithControllers(ctx, controllers.NewControllers(
 			op.Clock,

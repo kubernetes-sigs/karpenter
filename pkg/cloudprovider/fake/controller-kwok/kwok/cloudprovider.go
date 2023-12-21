@@ -1,9 +1,11 @@
 /*
+Copyright 2023 The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -11,12 +13,14 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+
 package kwok
 
 import (
 	"context"
 	_ "embed"
 	"fmt"
+	"math"
 	"math/rand"
 	"strings"
 
@@ -30,6 +34,14 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+)
+
+const (
+	InstanceSizeLabelKey    = v1beta1.Group + "/instance-size"
+	InstanceFamilyLabelKey  = v1beta1.Group + "/instance-family"
+	IntegerInstanceLabelKey = v1beta1.Group + "/instance-integer"
+	// ResourceGPUVendorA      v1.ResourceName = "fake.com/vendor-a"
+	// ResourceGPUVendorB      v1.ResourceName = "fake.com/vendor-b"
 )
 
 func NewCloudProvider(ctx context.Context, client kubernetes.Interface, instanceTypes []*cloudprovider.InstanceType) *CloudProvider {
@@ -118,26 +130,6 @@ func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *v1beta1.N
 	// return ret, nil
 }
 
-// func (c CloudProvider) offerings(ctx context.Context, it *cloudprovider.InstanceType) cloudprovider.Offerings {
-// 	var ret cloudprovider.Offerings
-// 	for _, zone := range kwokZones {
-// 		odPrice := fake.PriceFromResources(it.Capacity)
-// 		ret = append(ret, cloudprovider.Offering{
-// 			CapacityType: v1beta1.CapacityTypeOnDemand,
-// 			Zone:         zone,
-// 			Price:        odPrice,
-// 			Available:    true,
-// 		})
-// 		ret = append(ret, cloudprovider.Offering{
-// 			CapacityType: v1beta1.CapacityTypeSpot,
-// 			Zone:         zone,
-// 			Price:        odPrice * .7,
-// 			Available:    true,
-// 		})
-// 	}
-// 	return ret
-// }
-
 // Return nothing since there's no cloud provider drift.
 func (c CloudProvider) IsDrifted(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (cloudprovider.DriftReason, error) {
 	return "", nil
@@ -159,9 +151,9 @@ func (c CloudProvider) getInstanceType(instanceTypeName string) (*cloudprovider.
 
 func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
 	newName := strings.Replace(namesgenerator.GetRandomName(0), "_", "-", -1)
+	//nolint
 	newName = fmt.Sprintf("%s-%d", newName, rand.Uint32())
 
-	var instanceTypePrice float64
 	capacityType := v1beta1.CapacityTypeOnDemand
 	requirements := scheduling.NewNodeSelectorRequirements(nodeClaim.
 		Spec.Requirements...)
@@ -175,12 +167,15 @@ func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
 		return nil, fmt.Errorf("instance type requirement not found")
 	}
 
+	minInstanceTypePrice := math.MaxFloat64
 	var instanceType *cloudprovider.InstanceType
-
 	for _, val := range req.Values {
 		var price float64
 		var ok bool
-		it, _ := c.getInstanceType(val)
+		it, err := c.getInstanceType(val)
+		if err != nil {
+			return nil, fmt.Errorf("instance type %s not found", val)
+		}
 
 		var offering cloudprovider.Offering
 		// Since we're constructing the instance types we know that each instance type with OD offerings will have spot
@@ -188,22 +183,22 @@ func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
 		if capacityType == v1beta1.CapacityTypeSpot {
 			offering = it.Offerings.Cheapest()
 		} else {
-			offering, ok = it.Offerings.Get(v1beta1.CapacityTypeOnDemand, randomChoice(kwokZones))
+			offering, ok = it.Offerings.Get(v1beta1.CapacityTypeOnDemand, randomChoice(KwokZones))
 			if !ok {
 				return nil, fmt.Errorf("no on-demand offering found")
 			}
 		}
 		price = offering.Price
-
-		if ok && price < instanceTypePrice {
-			instanceTypePrice = price
+		if price < minInstanceTypePrice {
+			minInstanceTypePrice = price
+			instanceType = it
 		}
 	}
 
 	return &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        newName,
-			Labels:      addInstanceLabels(nodeClaim.Labels, instanceType, nodeClaim, capacityType),
+			Labels:      addInstanceLabels(nodeClaim.Labels, instanceType, nodeClaim, capacityType, fmt.Sprintf("%f", minInstanceTypePrice)),
 			Annotations: addKwokAnnotation(nodeClaim.Annotations),
 		},
 		Spec: v1.NodeSpec{
@@ -217,7 +212,7 @@ func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
 	}, nil
 }
 
-func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.InstanceType, nodeClaim *v1beta1.NodeClaim, capacityType string) map[string]string {
+func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.InstanceType, nodeClaim *v1beta1.NodeClaim, capacityType, price string) map[string]string {
 	ret := make(map[string]string, len(labels))
 	// start with labels on the machine
 	for k, v := range labels {
@@ -231,20 +226,21 @@ func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.Ins
 		}
 	}
 
-	// ensure we have an instance type and then any instance type requiremnets
+	// ensure we have an instance type and then any instance type requirements
 	ret[v1.LabelInstanceTypeStable] = instanceType.Name
 	for _, r := range instanceType.Requirements {
 		if r.Len() == 1 && r.Operator() == v1.NodeSelectorOpIn {
 			ret[r.Key] = r.Values()[0]
 		}
 	}
+	ret["instance-price"] = price
 	// Kwok has some scalability limitations.
 	// Randomly add each new node to one of the pre-created kwokPartitions.
 	ret["kwok-partition"] = randomPartition(10)
 	ret[v1beta1.CapacityTypeLabelKey] = capacityType
 	// no zone set by requirements, so just pick one
 	if _, ok := ret[v1.LabelTopologyZone]; !ok {
-		ret[v1.LabelTopologyZone] = randomChoice(kwokZones)
+		ret[v1.LabelTopologyZone] = randomChoice(KwokZones)
 	}
 	ret[v1.LabelHostname] = nodeClaim.Name
 
@@ -252,13 +248,15 @@ func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.Ins
 	return ret
 }
 
-// pick one of the first n letters
+// pick one of the first n kwok partitions
 func randomPartition(n int) string {
-	i := rand.Intn(len(kwokPartitions))
-	return kwokPartitions[i]
+	//nolint
+	i := rand.Intn(n)
+	return KwokPartitions[i]
 }
 
 func randomChoice(zones []string) string {
+	//nolint
 	i := rand.Intn(len(zones))
 	return zones[i]
 }

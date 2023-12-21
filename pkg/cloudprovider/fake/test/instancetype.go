@@ -14,11 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package fake
+package test
 
 import (
 	"fmt"
-	"math/rand"
 	"strings"
 
 	"github.com/samber/lo"
@@ -31,6 +30,22 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
+
+const (
+	LabelInstanceSize                       = "size"
+	ExoticInstanceLabelKey                  = "special"
+	IntegerInstanceLabelKey                 = "integer"
+	ResourceGPUVendorA      v1.ResourceName = "fake.com/vendor-a"
+	ResourceGPUVendorB      v1.ResourceName = "fake.com/vendor-b"
+)
+
+func init() {
+	v1beta1.WellKnownLabels.Insert(
+		LabelInstanceSize,
+		ExoticInstanceLabelKey,
+		IntegerInstanceLabelKey,
+	)
+}
 
 func NewInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 	if options.Resources == nil {
@@ -47,11 +62,11 @@ func NewInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 	}
 	if len(options.Offerings) == 0 {
 		options.Offerings = []cloudprovider.Offering{
-			{CapacityType: v1beta1.CapacityTypeSpot, Zone: Zones[0], Price: PriceFromResources(options.Resources), Available: true},
-			{CapacityType: v1beta1.CapacityTypeSpot, Zone: Zones[1], Price: PriceFromResources(options.Resources), Available: true},
-			{CapacityType: v1beta1.CapacityTypeOnDemand, Zone: Zones[0], Price: PriceFromResources(options.Resources), Available: true},
-			{CapacityType: v1beta1.CapacityTypeOnDemand, Zone: Zones[1], Price: PriceFromResources(options.Resources), Available: true},
-			{CapacityType: v1beta1.CapacityTypeOnDemand, Zone: Zones[2], Price: PriceFromResources(options.Resources), Available: true},
+			{CapacityType: "spot", Zone: "test-zone-1", Price: priceFromResources(options.Resources), Available: true},
+			{CapacityType: "spot", Zone: "test-zone-2", Price: priceFromResources(options.Resources), Available: true},
+			{CapacityType: "on-demand", Zone: "test-zone-1", Price: priceFromResources(options.Resources), Available: true},
+			{CapacityType: "on-demand", Zone: "test-zone-2", Price: priceFromResources(options.Resources), Available: true},
+			{CapacityType: "on-demand", Zone: "test-zone-3", Price: priceFromResources(options.Resources), Available: true},
 		}
 	}
 	if len(options.Architecture) == 0 {
@@ -66,12 +81,16 @@ func NewInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 		scheduling.NewRequirement(v1.LabelOSStable, v1.NodeSelectorOpIn, sets.List(options.OperatingSystems)...),
 		scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string { return o.Zone })...),
 		scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string { return o.CapacityType })...),
-		scheduling.NewRequirement(LabelInstanceSize, v1.NodeSelectorOpIn, getInstanceSizeLabelValue(options)),
+		scheduling.NewRequirement(LabelInstanceSize, v1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(ExoticInstanceLabelKey, v1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(IntegerInstanceLabelKey, v1.NodeSelectorOpIn, fmt.Sprint(options.Resources.Cpu().Value())),
 	)
-	if options.Resources.Cpu().Cmp(resource.MustParse("256")) < 0 {
+	if options.Resources.Cpu().Cmp(resource.MustParse("4")) > 0 &&
+		options.Resources.Memory().Cmp(resource.MustParse("8Gi")) > 0 {
+		requirements.Get(LabelInstanceSize).Insert("large")
 		requirements.Get(ExoticInstanceLabelKey).Insert("optional")
+	} else {
+		requirements.Get(LabelInstanceSize).Insert("small")
 	}
 
 	return &cloudprovider.InstanceType{
@@ -88,41 +107,12 @@ func NewInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 	}
 }
 
-// GetInstanceSizeLabelValue returns a instance size label value based on the cpu.
-func getInstanceSizeLabelValue(options InstanceTypeOptions) string {
-	if options.Size != "" {
-		return options.Size
-	}
-	cpu := options.Resources.Cpu().Value()
-	if cpu <= 1 {
-		return "1x"
-	} else if cpu <= 2 {
-		return "2x"
-	} else if cpu <= 4 {
-		return "4x"
-	} else if cpu <= 8 {
-		return "8x"
-	} else if cpu <= 16 {
-		return "16x"
-	} else if cpu <= 32 {
-		return "32x"
-	} else if cpu <= 64 {
-		return "64x"
-	} else if cpu <= 128 {
-		return "128x"
-	} else if cpu <= 256 {
-		return "256x"
-	} else {
-		return "max"
-	}
-}
-
 // InstanceTypesAssorted create many unique instance types with varying CPU/memory/architecture/OS/zone/capacity type.
-func InstanceTypeAssortedWithZones(zones ...string) []*cloudprovider.InstanceType {
+func InstanceTypesAssorted() []*cloudprovider.InstanceType {
 	var instanceTypes []*cloudprovider.InstanceType
-	for _, cpu := range []int{1, 2, 4, 8, 16, 32, 64, 128, 256} {
+	for _, cpu := range []int{1, 2, 4, 8, 16, 32, 64} {
 		for _, mem := range []int{1, 2, 4, 8, 16, 32, 64, 128} {
-			for _, zone := range zones {
+			for _, zone := range []string{"test-zone-1", "test-zone-2", "test-zone-3"} {
 				for _, ct := range []string{v1beta1.CapacityTypeSpot, v1beta1.CapacityTypeOnDemand} {
 					for _, os := range []sets.Set[string]{sets.New(string(v1.Linux)), sets.New(string(v1.Windows))} {
 						for _, arch := range []string{v1beta1.ArchitectureAmd64, v1beta1.ArchitectureArm64} {
@@ -135,16 +125,7 @@ func InstanceTypeAssortedWithZones(zones ...string) []*cloudprovider.InstanceTyp
 									v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", mem)),
 								},
 							}
-
-							price := PriceFromResources(opts.Resources)
-
-							if ct == v1beta1.CapacityTypeSpot {
-								// add no lint here as gosec fires a false positive here
-								//nolint
-								jitter := rand.Float64()*2 - .01
-								price = price * (.7 + jitter)
-							}
-
+							price := priceFromResources(opts.Resources)
 							opts.Offerings = []cloudprovider.Offering{
 								{
 									CapacityType: ct,
@@ -153,7 +134,6 @@ func InstanceTypeAssortedWithZones(zones ...string) []*cloudprovider.InstanceTyp
 									Available:    true,
 								},
 							}
-							opts.Size = fmt.Sprintf("%dx", cpu)
 							instanceTypes = append(instanceTypes, NewInstanceType(opts))
 						}
 					}
@@ -164,18 +144,12 @@ func InstanceTypeAssortedWithZones(zones ...string) []*cloudprovider.InstanceTyp
 	return instanceTypes
 }
 
-// InstanceTypesAssorted create many unique instance types with varying CPU/memory/architecture/OS/zone/capacity type.
-func InstanceTypesAssorted() []*cloudprovider.InstanceType {
-	return InstanceTypeAssortedWithZones(Zones...)
-}
-
 // InstanceTypes creates instance types with incrementing resources
 // 2Gi of RAM and 10 pods for every 1vcpu
-// i.e.
-// 1vcpu, 2Gi mem, 10 pods
-// 2vcpu, 4Gi mem, 20 pods
-// 3vcpu, 6Gi mem, 30 pods
-// ...
+// i.e. 1vcpu, 2Gi mem, 10 pods
+//
+//	2vcpu, 4Gi mem, 20 pods
+//	3vcpu, 6Gi mem, 30 pods
 func InstanceTypes(total int) []*cloudprovider.InstanceType {
 	instanceTypes := []*cloudprovider.InstanceType{}
 	for i := 0; i < total; i++ {
@@ -193,14 +167,13 @@ func InstanceTypes(total int) []*cloudprovider.InstanceType {
 
 type InstanceTypeOptions struct {
 	Name             string
-	Size             string
 	Offerings        cloudprovider.Offerings
 	Architecture     string
 	OperatingSystems sets.Set[string]
 	Resources        v1.ResourceList
 }
 
-func PriceFromResources(resources v1.ResourceList) float64 {
+func priceFromResources(resources v1.ResourceList) float64 {
 	price := 0.0
 	for k, v := range resources {
 		switch k {

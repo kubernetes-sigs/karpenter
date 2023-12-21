@@ -1,4 +1,6 @@
 /*
+Copyright 2023 The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -19,7 +21,7 @@ const (
 )
 
 var (
-	kwokZones      = []string{"test-zone-a", "test-zone-b", "test-zone-c", "test-zone-d"}
-	kwokPartitions = []string{"partition-a", "partition-b", "partition-c", "partition-d", "partition-e",
+	KwokZones      = []string{"test-zone-a", "test-zone-b", "test-zone-c", "test-zone-d"}
+	KwokPartitions = []string{"partition-a", "partition-b", "partition-c", "partition-d", "partition-e",
 		"partition-f", "partition-g", "partition-h", "partition-i", "partition-j"}
 )
