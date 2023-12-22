@@ -22,6 +22,11 @@ deflake: ## Run randomized, racing tests until the test fails to catch flakes
 		-v \
 		./pkg/...
 
+install-kwok: ## Install kwok into cluster
+	UNINSTALL_KWOK=false ./hack/install-kwok.sh
+uninstall-kwok: ## Install kwok provider
+	UNINSTALL_KWOK=true ./hack/install-kwok.sh
+
 vulncheck: ## Verify code vulnerabilities
 	@govulncheck ./pkg/...
 
