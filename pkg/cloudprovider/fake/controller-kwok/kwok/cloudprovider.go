@@ -154,6 +154,7 @@ func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
 
 	minInstanceTypePrice := math.MaxFloat64
 	var instanceType *cloudprovider.InstanceType
+	// Loop through instance type values, as the node claim will only have the In operator.
 	for _, val := range req.Values {
 		var price float64
 		var ok bool
@@ -162,17 +163,14 @@ func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
 			return nil, fmt.Errorf("instance type %s not found", val)
 		}
 
-		var offering cloudprovider.Offering
 		// Since we're constructing the instance types we know that each instance type with OD offerings will have spot
 		// offerings, where spot will always be cheapest.
-		if capacityType == v1beta1.CapacityTypeSpot {
-			offering = it.Offerings.Cheapest()
-		} else {
-			offering, ok = it.Offerings.Get(v1beta1.CapacityTypeOnDemand, randomChoice(KwokZones))
-			if !ok {
-				return nil, fmt.Errorf("no on-demand offering found")
-			}
+		zone := randomChoice(KwokZones)
+		offering, ok := it.Offerings.Get(capacityType, zone)
+		if !ok {
+			return nil, fmt.Errorf("failed to find offering %s/%s/%s", capacityType, zone, val)
 		}
+		// All offerings of the same capacity type are the same price.
 		price = offering.Price
 		if price < minInstanceTypePrice {
 			minInstanceTypePrice = price
@@ -218,6 +216,7 @@ func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.Ins
 			ret[r.Key] = r.Values()[0]
 		}
 	}
+	// add in github.com/awslabs/eks-node-viewer label so that it shows up.
 	ret["eks-node-viewer/instance-price"] = price
 	// Kwok has some scalability limitations.
 	// Randomly add each new node to one of the pre-created kwokPartitions.

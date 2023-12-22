@@ -32,7 +32,7 @@ apply-crds:
 # Run make install-kwok to install the kwok controller in your cluster first
 # Webhooks are currently not supported in the kwok provider.
 apply: verify apply-crds build ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
-	helm upgrade --install karpenter charts/karpenter --namespace kube-system --skip-crds \
+	helm upgrade --install karpenter pkg/cloudprovider/fake/controller-kwok/charts --namespace kube-system --skip-crds \
 		$(HELM_OPTS) \
 		--set controller.image.repository=$(IMG_REPOSITORY) \
 		--set controller.image.tag=$(IMG_TAG) \
