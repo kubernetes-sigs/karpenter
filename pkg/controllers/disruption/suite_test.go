@@ -94,6 +94,7 @@ func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster
 
 func ResetQueue(q *orchestration.Queue) {
 	q.RateLimitingInterface = &controllertest.Queue{Interface: workqueue.New()}
+	q.Reset()
 }
 
 var _ = BeforeSuite(func() {
