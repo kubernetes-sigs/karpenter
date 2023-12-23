@@ -29,7 +29,6 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
-	nodepoolutil "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
 var _ operatorcontroller.TypedController[*v1beta1.NodePool] = (*Controller)(nil)
@@ -52,7 +51,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1beta1.NodePool) (recon
 	np.Annotations = lo.Assign(np.Annotations, map[string]string{v1beta1.NodePoolHashAnnotationKey: np.Hash()})
 
 	if !equality.Semantic.DeepEqual(stored, np) {
-		if err := nodepoolutil.Patch(ctx, c.kubeClient, stored, np); err != nil {
+		if err := c.kubeClient.Patch(ctx, np, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 	}

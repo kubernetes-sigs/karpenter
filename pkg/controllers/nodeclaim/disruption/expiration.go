@@ -19,6 +19,7 @@ package disruption
 import (
 	"context"
 
+	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/apis"
@@ -28,7 +29,6 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/metrics"
-	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 // Expiration is a nodeclaim sub-controller that adds or removes status conditions on expired nodeclaims based on TTLSecondsUntilExpired
@@ -68,7 +68,10 @@ func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, 
 	})
 	if !hasExpiredCondition {
 		logging.FromContext(ctx).Debugf("marking expired")
-		nodeclaimutil.DisruptedCounter(nodeClaim, metrics.ExpirationReason).Inc()
+		metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
+			metrics.TypeLabel:     metrics.ExpirationReason,
+			metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+		})
 	}
 	return reconcile.Result{}, nil
 }

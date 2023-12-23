@@ -26,6 +26,7 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -33,7 +34,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
-	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 const (
@@ -87,8 +87,14 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 	})
 	if !hasDriftedCondition {
 		logging.FromContext(ctx).With("reason", string(driftedReason)).Debugf("marking drifted")
-		nodeclaimutil.DisruptedCounter(nodeClaim, metrics.DriftReason).Inc()
-		nodeclaimutil.DriftedCounter(nodeClaim, string(driftedReason)).Inc()
+		metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
+			metrics.TypeLabel:     metrics.DriftReason,
+			metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+		}).Inc()
+		metrics.NodeClaimsDriftedCounter.With(prometheus.Labels{
+			metrics.TypeLabel:     string(driftedReason),
+			metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+		}).Inc()
 	}
 	// Requeue after 5 minutes for the cache TTL
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil

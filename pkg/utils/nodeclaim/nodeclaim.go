@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,7 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -218,63 +216,6 @@ func List(ctx context.Context, c client.Client, opts ...client.ListOption) (*v1b
 		return nil, err
 	}
 	return nodeClaimList, nil
-}
-
-func UpdateStatus(ctx context.Context, c client.Client, nodeClaim *v1beta1.NodeClaim) error {
-	return c.Status().Update(ctx, nodeClaim)
-}
-
-func Patch(ctx context.Context, c client.Client, stored, nodeClaim *v1beta1.NodeClaim) error {
-	return c.Patch(ctx, nodeClaim, client.MergeFrom(stored))
-}
-
-func PatchStatus(ctx context.Context, c client.Client, stored, nodeClaim *v1beta1.NodeClaim) error {
-	return c.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored))
-}
-
-func Delete(ctx context.Context, c client.Client, nodeClaim *v1beta1.NodeClaim) error {
-	return c.Delete(ctx, nodeClaim)
-}
-
-
-
-func LaunchedCounter(nodeClaim *v1beta1.NodeClaim) prometheus.Counter {
-	return metrics.NodeClaimsLaunchedCounter.With(prometheus.Labels{
-		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
-	})
-}
-
-func RegisteredCounter(nodeClaim *v1beta1.NodeClaim) prometheus.Counter {
-	return metrics.NodeClaimsRegisteredCounter.With(prometheus.Labels{
-		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
-	})
-}
-
-func InitializedCounter(nodeClaim *v1beta1.NodeClaim) prometheus.Counter {
-	return metrics.NodeClaimsInitializedCounter.With(prometheus.Labels{
-		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
-	})
-}
-
-func TerminatedCounter(nodeClaim *v1beta1.NodeClaim, reason string) prometheus.Counter {
-	return metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
-		metrics.ReasonLabel:   reason,
-		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
-	})
-}
-
-func DisruptedCounter(nodeClaim *v1beta1.NodeClaim, disruptionType string) prometheus.Counter {
-	return metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
-		metrics.TypeLabel:     disruptionType,
-		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
-	})
-}
-
-func DriftedCounter(nodeClaim *v1beta1.NodeClaim, driftType string) prometheus.Counter {
-	return metrics.NodeClaimsDriftedCounter.With(prometheus.Labels{
-		metrics.TypeLabel:     driftType,
-		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
-	})
 }
 
 func UpdateNodeOwnerReferences(nodeClaim *v1beta1.NodeClaim, node *v1.Node) *v1.Node {

@@ -41,8 +41,10 @@ import (
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
-var ctx context.Context
-var env *test.Environment
+var (
+	ctx context.Context
+	env *test.Environment
+)
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -161,7 +163,7 @@ var _ = Describe("NodeClaimUtils", func() {
 
 		providerID := test.RandomProviderID()
 		nodeClaim.Status.ProviderID = providerID
-		Expect(nodeclaimutil.UpdateStatus(ctx, env.Client, nodeClaim)).To(Succeed())
+		Expect(env.Client.Status().Update(ctx, nodeClaim)).To(Succeed())
 
 		retrieved := &v1beta1.NodeClaim{}
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodeClaim), retrieved)).To(Succeed())
@@ -183,7 +185,7 @@ var _ = Describe("NodeClaimUtils", func() {
 		nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
 			"custom-key": "custom-value",
 		})
-		Expect(nodeclaimutil.Patch(ctx, env.Client, stored, nodeClaim)).To(Succeed())
+		Expect(env.Client.Patch(ctx, nodeClaim, client.MergeFrom(stored))).To(Succeed())
 
 		retrieved := &v1beta1.NodeClaim{}
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodeClaim), retrieved)).To(Succeed())
@@ -204,7 +206,7 @@ var _ = Describe("NodeClaimUtils", func() {
 		stored := nodeClaim.DeepCopy()
 		providerID := test.RandomProviderID()
 		nodeClaim.Status.ProviderID = providerID
-		Expect(nodeclaimutil.PatchStatus(ctx, env.Client, stored, nodeClaim)).To(Succeed())
+		Expect(env.Client.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored))).To(Succeed())
 
 		retrieved := &v1beta1.NodeClaim{}
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodeClaim), retrieved)).To(Succeed())
@@ -222,7 +224,7 @@ var _ = Describe("NodeClaimUtils", func() {
 		})
 		ExpectApplied(ctx, env.Client, nodeClaim)
 
-		err := nodeclaimutil.Delete(ctx, env.Client, nodeClaim)
+		err := env.Client.Delete(ctx, nodeClaim)
 		Expect(err).ToNot(HaveOccurred())
 
 		nodeClaimList := &v1beta1.NodeClaimList{}

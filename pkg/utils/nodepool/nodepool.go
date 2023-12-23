@@ -40,13 +40,3 @@ func List(ctx context.Context, c client.Client, opts ...client.ListOption) (*v1b
 	}
 	return nodePoolList, nil
 }
-
-func Patch(ctx context.Context, c client.Client, stored, nodePool *v1beta1.NodePool) error {
-	return c.Patch(ctx, nodePool, client.MergeFrom(stored))
-}
-
-func PatchStatus(ctx context.Context, c client.Client, stored, nodePool *v1beta1.NodePool) error {
-	return c.Status().Patch(ctx, nodePool, client.MergeFrom(stored))
-}
-
-

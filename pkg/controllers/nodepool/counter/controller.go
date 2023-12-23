@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/utils/functional"
-	nodepoolutil "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 
 	v1 "k8s.io/api/core/v1"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -69,7 +68,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) 
 	// Determine resource usage and update nodepool.status.resources
 	nodePool.Status.Resources = c.resourceCountsFor(v1beta1.NodePoolLabelKey, nodePool.Name)
 	if !equality.Semantic.DeepEqual(stored, nodePool) {
-		if err := nodepoolutil.PatchStatus(ctx, c.kubeClient, stored, nodePool); err != nil {
+		if err := c.kubeClient.Status().Patch(ctx, nodePool, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 	}

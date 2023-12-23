@@ -33,11 +33,12 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
-	nodepoolutil "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
-var ctx context.Context
-var env *test.Environment
+var (
+	ctx context.Context
+	env *test.Environment
+)
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -80,7 +81,7 @@ var _ = Describe("NodePoolUtils", func() {
 			v1.ResourceMemory:           resource.MustParse("10Mi"),
 			v1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
 		}
-		Expect(nodepoolutil.PatchStatus(ctx, env.Client, stored, nodePool)).To(Succeed())
+		Expect(env.Client.Status().Patch(ctx, nodePool, client.MergeFrom(stored))).To(Succeed())
 
 		retrieved := &v1beta1.NodePool{}
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodePool), retrieved)).To(Succeed())

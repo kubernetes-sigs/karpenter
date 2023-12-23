@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/apis"
@@ -109,7 +110,10 @@ func (e *Emptiness) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, n
 	})
 	if !hasEmptyCondition {
 		logging.FromContext(ctx).Debugf("marking empty")
-		nodeclaimutil.DisruptedCounter(nodeClaim, metrics.EmptinessReason).Inc()
+		metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
+			metrics.TypeLabel:     metrics.EmptinessReason,
+			metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+		}).Inc()
 	}
 	return reconcile.Result{}, nil
 }
