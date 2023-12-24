@@ -236,7 +236,12 @@ func Delete(ctx context.Context, c client.Client, nodeClaim *v1beta1.NodeClaim) 
 	return c.Delete(ctx, nodeClaim)
 }
 
-
+func CreatedCounter(nodeClaim *v1beta1.NodeClaim, reason string) prometheus.Counter {
+	return metrics.NodeClaimsCreatedCounter.With(prometheus.Labels{
+		metrics.ReasonLabel:   reason,
+		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+	})
+}
 
 func LaunchedCounter(nodeClaim *v1beta1.NodeClaim) prometheus.Counter {
 	return metrics.NodeClaimsLaunchedCounter.With(prometheus.Labels{
