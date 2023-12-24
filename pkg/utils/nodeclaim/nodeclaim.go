@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -32,6 +33,29 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
+
+// PodEventHandler is a watcher on v1.Pods that maps Pods to NodeClaim based on the node names
+// and enqueues reconcile.Requests for the NodeClaims
+func PodEventHandler(c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
+		if name := o.(*v1.Pod).Spec.NodeName; name != "" {
+			node := &v1.Node{}
+			if err := c.Get(ctx, types.NamespacedName{Name: name}, node); err != nil {
+				return []reconcile.Request{}
+			}
+			nodeClaimList := &v1beta1.NodeClaimList{}
+			if err := c.List(ctx, nodeClaimList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
+				return []reconcile.Request{}
+			}
+			return lo.Map(nodeClaimList.Items, func(n v1beta1.NodeClaim, _ int) reconcile.Request {
+				return reconcile.Request{
+					NamespacedName: client.ObjectKeyFromObject(&n),
+				}
+			})
+		}
+		return requests
+	})
+}
 
 // NodeEventHandler is a watcher on v1.Node that maps Nodes to NodeClaims based on provider ids
 // and enqueues reconcile.Requests for the NodeClaims

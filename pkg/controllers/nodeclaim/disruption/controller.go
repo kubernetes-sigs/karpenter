@@ -37,6 +37,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
+	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/result"
 )
 
@@ -111,29 +112,6 @@ func (c *Controller) Name() string {
 	return "nodeclaim.disruption"
 }
 
-// PodEventHandler is a watcher on v1.Pods that maps Pods to NodeClaim based on the node names
-// and enqueues reconcile.Requests for the NodeClaims
-func PodEventHandler(c client.Client) handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
-		if name := o.(*v1.Pod).Spec.NodeName; name != "" {
-			node := &v1.Node{}
-			if err := c.Get(ctx, types.NamespacedName{Name: name}, node); err != nil {
-				return []reconcile.Request{}
-			}
-			nodeClaimList := &v1beta1.NodeClaimList{}
-			if err := c.List(ctx, nodeClaimList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
-				return []reconcile.Request{}
-			}
-			return lo.Map(nodeClaimList.Items, func(n v1beta1.NodeClaim, _ int) reconcile.Request {
-				return reconcile.Request{
-					NamespacedName: client.ObjectKeyFromObject(&n),
-				}
-			})
-		}
-		return requests
-	})
-}
-
 // NodePoolEventHandler is a watcher on v1beta1.NodeClaim that maps Provisioner to NodeClaims based
 // on the v1beta1.NodePoolLabelKey and enqueues reconcile.Requests for the NodeClaim
 func NodePoolEventHandler(c client.Client) handler.EventHandler {
@@ -161,7 +139,7 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontr
 		).
 		Watches(
 			&v1.Pod{},
-			PodEventHandler(c.kubeClient),
+			nodeclaimutil.PodEventHandler(c.kubeClient),
 		),
 	)
 }
