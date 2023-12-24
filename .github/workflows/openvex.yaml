@@ -14,4 +14,10 @@ jobs:
       - uses: openvex/generate-vex@31b415924ea0d72ed5f2640f1dee59dea6c2770b
         name: Run vexctl
         with:
-            product: pkg:generic/hello@${{ env.RELEASE_VERSION }}
+          product: pkg:generic/karpenter@${{ env.RELEASE_VERSION }}
+          file: /tmp/karpenter.vex.json
+      - name: Upload openvex data
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload $TAG /tmp/karpenter.vex.json
