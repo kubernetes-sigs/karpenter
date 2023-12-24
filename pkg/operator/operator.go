@@ -137,12 +137,13 @@ func NewOperator() (context.Context, *Operator) {
 
 	// Manager
 	mgrOpts := controllerruntime.Options{
-		Logger:                     logging.IgnoreDebugEvents(zapr.NewLogger(logger.Desugar())),
-		LeaderElection:             options.FromContext(ctx).EnableLeaderElection,
-		LeaderElectionID:           "karpenter-leader-election",
-		LeaderElectionResourceLock: resourcelock.LeasesResourceLock,
-		LeaderElectionNamespace:    system.Namespace(),
-		Scheme:                     scheme.Scheme,
+		Logger:                        logging.IgnoreDebugEvents(zapr.NewLogger(logger.Desugar())),
+		LeaderElection:                options.FromContext(ctx).EnableLeaderElection,
+		LeaderElectionID:              "karpenter-leader-election",
+		LeaderElectionResourceLock:    resourcelock.LeasesResourceLock,
+		LeaderElectionNamespace:       system.Namespace(),
+		LeaderElectionReleaseOnCancel: true,
+		Scheme:                        scheme.Scheme,
 		Metrics: server.Options{
 			BindAddress: fmt.Sprintf(":%d", options.FromContext(ctx).MetricsPort),
 		},
