@@ -24,11 +24,9 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	. "knative.dev/pkg/logging/testing"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
@@ -132,105 +130,6 @@ var _ = Describe("NodeClaimUtils", func() {
 		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Launched).IsTrue()).To(BeTrue())
 		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Registered).IsTrue()).To(BeTrue())
 		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized).IsTrue()).To(BeTrue())
-	})
-	It("should retrieve a NodeClaim with a get call", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-			Spec: v1beta1.NodeClaimSpec{
-				NodeClassRef: &v1beta1.NodeClassReference{
-					Kind:       "NodeClassRef",
-					APIVersion: "test.cloudprovider/v1",
-					Name:       "default",
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, nodeClaim)
-
-		retrieved, err := nodeclaimutil.Get(ctx, env.Client, nodeClaim.Name)
-		Expect(err).ToNot(HaveOccurred())
-		Expect(retrieved.Name).To(Equal(nodeClaim.Name))
-	})
-	It("should update the status on a NodeClaim", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-			Spec: v1beta1.NodeClaimSpec{
-				NodeClassRef: &v1beta1.NodeClassReference{
-					Kind:       "NodeClassRef",
-					APIVersion: "test.cloudprovider/v1",
-					Name:       "default",
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, nodeClaim)
-
-		providerID := test.RandomProviderID()
-		nodeClaim.Status.ProviderID = providerID
-		Expect(env.Client.Status().Update(ctx, nodeClaim)).To(Succeed())
-
-		retrieved := &v1beta1.NodeClaim{}
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodeClaim), retrieved)).To(Succeed())
-		Expect(retrieved.Status.ProviderID).To(Equal(providerID))
-	})
-	It("should patch a NodeClaim", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-			Spec: v1beta1.NodeClaimSpec{
-				NodeClassRef: &v1beta1.NodeClassReference{
-					Kind:       "NodeClassRef",
-					APIVersion: "test.cloudprovider/v1",
-					Name:       "default",
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, nodeClaim)
-
-		stored := nodeClaim.DeepCopy()
-		nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
-			"custom-key": "custom-value",
-		})
-		Expect(env.Client.Patch(ctx, nodeClaim, client.MergeFrom(stored))).To(Succeed())
-
-		retrieved := &v1beta1.NodeClaim{}
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodeClaim), retrieved)).To(Succeed())
-		Expect(retrieved.Labels).To(HaveKeyWithValue("custom-key", "custom-value"))
-	})
-	It("should patch the status on a NodeClaim", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-			Spec: v1beta1.NodeClaimSpec{
-				NodeClassRef: &v1beta1.NodeClassReference{
-					Kind:       "NodeClassRef",
-					APIVersion: "test.cloudprovider/v1",
-					Name:       "default",
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, nodeClaim)
-
-		stored := nodeClaim.DeepCopy()
-		providerID := test.RandomProviderID()
-		nodeClaim.Status.ProviderID = providerID
-		Expect(env.Client.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored))).To(Succeed())
-
-		retrieved := &v1beta1.NodeClaim{}
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodeClaim), retrieved)).To(Succeed())
-		Expect(retrieved.Status.ProviderID).To(Equal(providerID))
-	})
-	It("should delete a NodeClaim with a delete call", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-			Spec: v1beta1.NodeClaimSpec{
-				NodeClassRef: &v1beta1.NodeClassReference{
-					Kind:       "NodeClassRef",
-					APIVersion: "test.cloudprovider/v1",
-					Name:       "default",
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, nodeClaim)
-
-		err := env.Client.Delete(ctx, nodeClaim)
-		Expect(err).ToNot(HaveOccurred())
-
-		nodeClaimList := &v1beta1.NodeClaimList{}
-		Expect(env.Client.List(ctx, nodeClaimList)).To(Succeed())
-		Expect(nodeClaimList.Items).To(HaveLen(0))
-		Expect(errors.IsNotFound(env.Client.Get(ctx, client.ObjectKeyFromObject(nodeClaim), &v1beta1.NodeClaim{}))).To(BeTrue())
 	})
 	It("should update the owner for a Node to a NodeClaim", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{

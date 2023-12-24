@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
@@ -38,7 +39,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
-	nodepoolutil "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
 type Controller struct {
@@ -60,7 +60,8 @@ const pollingPeriod = 10 * time.Second
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 
 func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *orchestration.Queue) *Controller {
+	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *orchestration.Queue,
+) *Controller {
 	c := makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)
 	return &Controller{
 		queue:         queue,
@@ -248,8 +249,8 @@ func (c *Controller) logAbnormalRuns(ctx context.Context) {
 
 // logInvalidBudgets will log if there are any invalid schedules detected
 func (c *Controller) logInvalidBudgets(ctx context.Context) {
-	nodePoolList, err := nodepoolutil.List(ctx, c.kubeClient)
-	if err != nil {
+	nodePoolList := &v1beta1.NodePoolList{}
+	if err := c.kubeClient.List(ctx, nodePoolList); err != nil {
 		logging.FromContext(ctx).Errorf("listing nodepools, %s", err)
 		return
 	}

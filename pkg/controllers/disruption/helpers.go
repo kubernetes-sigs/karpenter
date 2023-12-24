@@ -40,7 +40,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
-	nodepoolutil "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
@@ -71,7 +70,8 @@ func filterCandidates(ctx context.Context, kubeClient client.Client, recorder ev
 
 //nolint:gocyclo
 func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
-	candidates ...*Candidate) (*pscheduling.Results, error) {
+	candidates ...*Candidate,
+) (*pscheduling.Results, error) {
 	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
 	nodes := cluster.Nodes()
 	deletingNodes := nodes.Deleting()
@@ -106,7 +106,6 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	scheduler, err := provisioner.NewScheduler(ctx, pods, stateNodes, pscheduling.SchedulerOptions{
 		SimulationMode: true,
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("creating scheduler, %w", err)
 	}
@@ -178,7 +177,8 @@ func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
 
 // GetCandidates returns nodes that appear to be currently deprovisionable based off of their nodePool
 func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock,
-	cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter, queue *orchestration.Queue) ([]*Candidate, error) {
+	cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter, queue *orchestration.Queue,
+) ([]*Candidate, error) {
 	nodePoolMap, nodePoolToInstanceTypesMap, err := buildNodePoolMap(ctx, kubeClient, cloudProvider)
 	if err != nil {
 		return nil, err
@@ -193,8 +193,8 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 
 // BuildDisruptionBudgets will return a map for nodePoolName -> numAllowedDisruptions and an error
 func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clock.Clock, kubeClient client.Client) (map[string]int, error) {
-	nodePoolList, err := nodepoolutil.List(ctx, kubeClient)
-	if err != nil {
+	nodePoolList := &v1beta1.NodePoolList{}
+	if err := kubeClient.List(ctx, nodePoolList); err != nil {
 		return nil, fmt.Errorf("listing node pools, %w", err)
 	}
 	numNodes := map[string]int{}
@@ -232,8 +232,8 @@ func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clo
 // buildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map
 func buildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[string]*v1beta1.NodePool, map[string]map[string]*cloudprovider.InstanceType, error) {
 	nodePoolMap := map[string]*v1beta1.NodePool{}
-	nodePoolList, err := nodepoolutil.List(ctx, kubeClient)
-	if err != nil {
+	nodePoolList := &v1beta1.NodePoolList{}
+	if err := kubeClient.List(ctx, nodePoolList); err != nil {
 		return nil, nil, fmt.Errorf("listing node pools, %w", err)
 	}
 	nodePoolToInstanceTypesMap := map[string]map[string]*cloudprovider.InstanceType{}

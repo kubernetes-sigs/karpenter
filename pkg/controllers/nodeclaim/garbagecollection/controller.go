@@ -35,7 +35,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
-	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 type Controller struct {
@@ -57,7 +56,8 @@ func (c *Controller) Name() string {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
-	nodeClaimList, err := nodeclaimutil.List(ctx, c.kubeClient)
+	nodeClaimList := &v1beta1.NodeClaimList{}
+	err := c.kubeClient.List(ctx, nodeClaimList)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
@@ -91,10 +91,10 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 				"nodepool", nodeClaims[i].Labels[v1beta1.NodePoolLabelKey],
 			).
 			Debugf("garbage collecting nodeclaim with no cloudprovider representation")
-			metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
-				metrics.ReasonLabel:   "garbage_collected",
-				metrics.NodePoolLabel: nodeClaims[i].Labels[v1beta1.NodePoolLabelKey],
-			}).Inc()
+		metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
+			metrics.ReasonLabel:   "garbage_collected",
+			metrics.NodePoolLabel: nodeClaims[i].Labels[v1beta1.NodePoolLabelKey],
+		}).Inc()
 	})
 	if err = multierr.Combine(errs...); err != nil {
 		return reconcile.Result{}, err

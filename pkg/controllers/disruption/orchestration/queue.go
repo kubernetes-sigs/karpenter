@@ -28,6 +28,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
@@ -45,7 +46,6 @@ import (
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
-	"sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 const (
@@ -226,7 +226,8 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 			continue
 		}
 		// Get the nodeclaim
-		nodeClaim, err := nodeclaim.Get(ctx, q.kubeClient, cmd.Replacements[i].name)
+		nodeClaim := &v1beta1.NodeClaim{}
+		err := q.kubeClient.Get(ctx, types.NamespacedName{Name: cmd.Replacements[i].name}, nodeClaim)
 		if err != nil {
 			// The NodeClaim got deleted after an initial eventual consistency delay
 			// This means that there was an ICE error or the Node initializationTTL expired

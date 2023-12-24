@@ -71,7 +71,7 @@ func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, 
 		metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
 			metrics.TypeLabel:     metrics.ExpirationReason,
 			metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
-		})
+		}).Inc()
 	}
 	return reconcile.Result{}, nil
 }
