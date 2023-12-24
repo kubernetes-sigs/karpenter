@@ -227,8 +227,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 		}
 		// Get the nodeclaim
 		nodeClaim := &v1beta1.NodeClaim{}
-		err := q.kubeClient.Get(ctx, types.NamespacedName{Name: cmd.Replacements[i].name}, nodeClaim)
-		if err != nil {
+		if err := q.kubeClient.Get(ctx, types.NamespacedName{Name: cmd.Replacements[i].name}, nodeClaim); err != nil {
 			// The NodeClaim got deleted after an initial eventual consistency delay
 			// This means that there was an ICE error or the Node initializationTTL expired
 			// In this case, the error is unrecoverable, so don't requeue.

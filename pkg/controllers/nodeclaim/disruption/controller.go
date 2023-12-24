@@ -19,7 +19,6 @@ package disruption
 import (
 	"context"
 
-	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -29,7 +28,6 @@ import (
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -112,22 +110,6 @@ func (c *Controller) Name() string {
 	return "nodeclaim.disruption"
 }
 
-// NodePoolEventHandler is a watcher on v1beta1.NodeClaim that maps Provisioner to NodeClaims based
-// on the v1beta1.NodePoolLabelKey and enqueues reconcile.Requests for the NodeClaim
-func NodePoolEventHandler(c client.Client) handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
-		nodeClaimList := &v1beta1.NodeClaimList{}
-		if err := c.List(ctx, nodeClaimList, client.MatchingLabels(map[string]string{v1beta1.NodePoolLabelKey: o.GetName()})); err != nil {
-			return requests
-		}
-		return lo.Map(nodeClaimList.Items, func(n v1beta1.NodeClaim, _ int) reconcile.Request {
-			return reconcile.Request{
-				NamespacedName: client.ObjectKeyFromObject(&n),
-			}
-		})
-	})
-}
-
 func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
 	return operatorcontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
@@ -135,7 +117,7 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontr
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Watches(
 			&v1beta1.NodePool{},
-			NodePoolEventHandler(c.kubeClient),
+			nodeclaimutil.NodePoolEventHandler(c.kubeClient),
 		).
 		Watches(
 			&v1.Pod{},

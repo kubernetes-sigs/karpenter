@@ -57,8 +57,7 @@ func (c *Controller) Name() string {
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
 	nodeClaimList := &v1beta1.NodeClaimList{}
-	err := c.kubeClient.List(ctx, nodeClaimList)
-	if err != nil {
+	if err := c.kubeClient.List(ctx, nodeClaimList); err != nil {
 		return reconcile.Result{}, err
 	}
 	cloudProviderNodeClaims, err := c.cloudProvider.List(ctx)
