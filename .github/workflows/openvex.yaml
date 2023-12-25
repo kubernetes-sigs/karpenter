@@ -14,7 +14,7 @@ jobs:
       - name: Set tag name
         shell: bash
         run: |
-          echo "TAG=${ github.ref_name }" >> "$GITHUB_ENV"
+          echo "TAG=${{ github.ref_name }}" >> "$GITHUB_ENV"
       - uses: openvex/generate-vex@31b415924ea0d72ed5f2640f1dee59dea6c2770b
         name: Run vexctl
         with:
