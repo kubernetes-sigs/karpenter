@@ -55,7 +55,7 @@ const (
 
 var (
 	// RestrictedLabelDomains are either prohibited by the kubelet or reserved by karpenter
-	RestrictedLabelDomains = sets.New(
+	RestrictedLabelDomains = sets.New[string](
 		"kubernetes.io",
 		"k8s.io",
 		Group,
@@ -63,7 +63,7 @@ var (
 
 	// LabelDomainExceptions are sub-domains of the RestrictedLabelDomains but allowed because
 	// they are not used in a context where they may be passed as argument to kubelet.
-	LabelDomainExceptions = sets.New(
+	LabelDomainExceptions = sets.New[string](
 		"kops.k8s.io",
 		v1.LabelNamespaceSuffixNode,
 		v1.LabelNamespaceNodeRestriction,
@@ -72,7 +72,7 @@ var (
 	// WellKnownLabels are labels that belong to the RestrictedLabelDomains but allowed.
 	// Karpenter is aware of these labels, and they can be used to further narrow down
 	// the range of the corresponding values by either nodepool or pods.
-	WellKnownLabels = sets.New(
+	WellKnownLabels = sets.New[string](
 		NodePoolLabelKey,
 		v1.LabelTopologyZone,
 		v1.LabelTopologyRegion,
