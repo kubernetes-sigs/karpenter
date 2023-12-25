@@ -69,7 +69,9 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeCla
 	nodeClaim.StatusConditions().MarkTrue(v1beta1.Registered)
 	nodeClaim.Status.NodeName = node.Name
 
-	nodeclaimutil.RegisteredCounter(nodeClaim).Inc()
+	metrics.NodeClaimsRegisteredCounter.With(prometheus.Labels{
+		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+	}).Inc()
 	metrics.NodesCreatedCounter.With(prometheus.Labels{
 		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
 	}).Inc()

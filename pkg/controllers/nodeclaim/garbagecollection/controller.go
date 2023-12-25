@@ -20,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -32,8 +33,8 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
-	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 type Controller struct {
@@ -55,8 +56,8 @@ func (c *Controller) Name() string {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
-	nodeClaimList, err := nodeclaimutil.List(ctx, c.kubeClient)
-	if err != nil {
+	nodeClaimList := &v1beta1.NodeClaimList{}
+	if err := c.kubeClient.List(ctx, nodeClaimList); err != nil {
 		return reconcile.Result{}, err
 	}
 	cloudProviderNodeClaims, err := c.cloudProvider.List(ctx)
@@ -78,7 +79,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 
 	errs := make([]error, len(nodeClaims))
 	workqueue.ParallelizeUntil(ctx, 20, len(nodeClaims), func(i int) {
-		if err := nodeclaimutil.Delete(ctx, c.kubeClient, nodeClaims[i]); err != nil {
+		if err := c.kubeClient.Delete(ctx, nodeClaims[i]); err != nil {
 			errs[i] = client.IgnoreNotFound(err)
 			return
 		}
@@ -89,7 +90,10 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 				"nodepool", nodeClaims[i].Labels[v1beta1.NodePoolLabelKey],
 			).
 			Debugf("garbage collecting nodeclaim with no cloudprovider representation")
-		nodeclaimutil.TerminatedCounter(nodeClaims[i], "garbage_collected").Inc()
+		metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
+			metrics.ReasonLabel:   "garbage_collected",
+			metrics.NodePoolLabel: nodeClaims[i].Labels[v1beta1.NodePoolLabelKey],
+		}).Inc()
 	})
 	if err = multierr.Combine(errs...); err != nil {
 		return reconcile.Result{}, err

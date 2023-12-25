@@ -24,9 +24,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
@@ -35,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
 
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllertest"
@@ -43,7 +46,6 @@ import (
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
-	"sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 const (
@@ -107,7 +109,8 @@ type Queue struct {
 
 // NewQueue creates a queue that will asynchronously orchestrate disruption commands
 func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clock.Clock,
-	provisioner *provisioning.Provisioner) *Queue {
+	provisioner *provisioning.Provisioner,
+) *Queue {
 	queue := &Queue{
 		RateLimitingInterface: workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(queueBaseDelay, queueMaxDelay)),
 		providerIDToCommand:   map[string]*Command{},
@@ -122,7 +125,8 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 
 // NewTestingQueue uses a test RateLimitingInterface that will immediately re-queue items.
 func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clock.Clock,
-	provisioner *provisioning.Provisioner) *Queue {
+	provisioner *provisioning.Provisioner,
+) *Queue {
 	queue := &Queue{
 		RateLimitingInterface: &controllertest.Queue{Interface: workqueue.New()},
 		providerIDToCommand:   map[string]*Command{},
@@ -222,8 +226,8 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 			continue
 		}
 		// Get the nodeclaim
-		nodeClaim, err := nodeclaim.Get(ctx, q.kubeClient, cmd.Replacements[i].name)
-		if err != nil {
+		nodeClaim := &v1beta1.NodeClaim{}
+		if err := q.kubeClient.Get(ctx, types.NamespacedName{Name: cmd.Replacements[i].name}, nodeClaim); err != nil {
 			// The NodeClaim got deleted after an initial eventual consistency delay
 			// This means that there was an ICE error or the Node initializationTTL expired
 			// In this case, the error is unrecoverable, so don't requeue.
@@ -259,10 +263,13 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 	for i := range cmd.candidates {
 		candidate := cmd.candidates[i]
 		q.recorder.Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, cmd.Reason())...)
-		if err := nodeclaim.Delete(ctx, q.kubeClient, candidate.NodeClaim); err != nil {
+		if err := q.kubeClient.Delete(ctx, candidate.NodeClaim); err != nil {
 			multiErr = multierr.Append(multiErr, client.IgnoreNotFound(err))
 		} else {
-			nodeclaim.TerminatedCounter(cmd.candidates[i].NodeClaim, cmd.method).Inc()
+			metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
+				metrics.ReasonLabel:   cmd.method,
+				metrics.NodePoolLabel: cmd.candidates[i].NodeClaim.Labels[v1beta1.NodePoolLabelKey],
+			}).Inc()
 		}
 	}
 	// If there were any deletion failures, we should requeue.

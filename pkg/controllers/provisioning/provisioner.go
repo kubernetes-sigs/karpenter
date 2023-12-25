@@ -41,7 +41,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/functional"
-	nodepoolutil "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -85,7 +84,8 @@ type Provisioner struct {
 }
 
 func NewProvisioner(kubeClient client.Client, coreV1Client corev1.CoreV1Interface,
-	recorder events.Recorder, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Provisioner {
+	recorder events.Recorder, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster,
+) *Provisioner {
 	p := &Provisioner{
 		batcher:        NewBatcher(),
 		cloudProvider:  cloudProvider,
@@ -207,9 +207,10 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	instanceTypes := map[string][]*cloudprovider.InstanceType{}
 	domains := map[string]sets.Set[string]{}
 
-	nodePoolList, err := nodepoolutil.List(ctx, p.kubeClient)
+	nodePoolList := &v1beta1.NodePoolList{}
+	err := p.kubeClient.List(ctx, nodePoolList)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("listing node pools, %w", err)
 	}
 	nodePoolList.Items = lo.Filter(nodePoolList.Items, func(n v1beta1.NodePool, _ int) bool {
 		if err := n.RuntimeValidate(); err != nil {
@@ -270,7 +271,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 		requirements.Add(scheduling.NewLabelRequirements(nodePool.Spec.Template.Labels).Values()...)
 		for key, requirement := range requirements {
 			if requirement.Operator() == v1.NodeSelectorOpIn {
-				//The following is a performance optimisation, for the explanation see the comment above
+				// The following is a performance optimisation, for the explanation see the comment above
 				if domains[key] == nil {
 					domains[key] = sets.New(requirement.Values()...)
 				} else {
