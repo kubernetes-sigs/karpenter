@@ -18,7 +18,6 @@ package kwok
 
 import (
 	"fmt"
-	"math/rand"
 	"strings"
 
 	"github.com/samber/lo"
@@ -85,16 +84,10 @@ func ConstructInstanceTypes() []*cloudprovider.InstanceType {
 					opts.Offerings = cloudprovider.Offerings{}
 					for _, zone := range KwokZones {
 						for _, ct := range []string{v1beta1.CapacityTypeSpot, v1beta1.CapacityTypeOnDemand} {
-							if ct == v1beta1.CapacityTypeSpot {
-								// add no lint here as gosec fires a false positive here
-								//nolint
-								jitter := rand.Float64()*2 - .01
-								price = price * (.7 + jitter)
-							}
 							opts.Offerings = append(opts.Offerings, cloudprovider.Offering{
 								CapacityType: ct,
 								Zone:         zone,
-								Price:        price,
+								Price:        lo.Ternary(ct == v1beta1.CapacityTypeSpot, price*.7, price),
 								Available:    true,
 							})
 						}
