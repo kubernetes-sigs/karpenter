@@ -8,13 +8,11 @@ on:
 jobs:
   vexctl:
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.ref_name }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
-      - name: Set tag name
-        shell: bash
-        run: |
-          echo "TAG=${{ github.ref_name }}" >> "$GITHUB_ENV"
       - uses: openvex/generate-vex@31b415924ea0d72ed5f2640f1dee59dea6c2770b
         name: Run vexctl
         with:
@@ -22,6 +20,7 @@ jobs:
           file: /tmp/karpenter.vex.json
       - name: Upload openvex data
         env:
+          # Secrets for the workflow can be added at https://github.com/kubernetes-sigs/karpenter/settings/secrets/actions
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload ${{ env.TAG }} /tmp/karpenter.vex.json
