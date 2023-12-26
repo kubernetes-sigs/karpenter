@@ -21,7 +21,7 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          tejolote attest --artifacts github://kubernetes-sigs/karpenter/${TAG} github://kubernetes-sigs/karpenter/"${{ github.run_id }}" --output karpenter.intoto.json --sign
+          tejolote attest --artifacts github://kubernetes-sigs/karpenter/"${TAG}" github://kubernetes-sigs/karpenter/"${{ github.run_id }}" --output karpenter.intoto.json --sign
 
       - name: Create Github Release
         uses: marvinpinto/action-automatic-releases@919008cf3f741b179569b7a6fb4d8860689ab7f0 # v1.2.1
