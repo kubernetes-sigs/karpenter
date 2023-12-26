@@ -6,26 +6,28 @@ permissions:
   contents: read
 jobs:
   release:
+    env:
+      TAG: ${{ github.ref_name }}
     permissions:
-      contents: write
+      contents: write # Needed for creating and editing releases
+      id-token: write # Needed for cosigning build attestation files with tejolote
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
         with:
           fetch-depth: 0
-
-      - name: Install tejolote
-        uses: kubernetes-sigs/release-actions/setup-tejolote@dd08496c83441d6477114cc0555b96d404dacff7 # v0.1.2
-
-      - name: Run tejolote 
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          tejolote attest --artifacts github://kubernetes-sigs/karpenter/"${TAG}" github://kubernetes-sigs/karpenter/"${{ github.run_id }}" --output karpenter.intoto.json --sign
-
       - name: Create Github Release
         uses: marvinpinto/action-automatic-releases@919008cf3f741b179569b7a6fb4d8860689ab7f0 # v1.2.1
         with:
-          files: karpenter.intoto.json
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
           prerelease: false
+      - name: Install tejolote
+        uses: kubernetes-sigs/release-actions/setup-tejolote@dd08496c83441d6477114cc0555b96d404dacff7 # v0.1.2
+      - name: Run tejolote
+        run: |
+          tejolote attest "github://kubernetes-sigs/karpenter/${{ github.run_id }}" --artifacts "github://kubernetes-sigs/karpenter/$TAG" --output karpenter.intoto.json --sign
+      - name: Add the tejolote provenance attestation to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$TAG" karpenter.intoto.json
