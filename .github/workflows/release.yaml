@@ -16,11 +16,21 @@ jobs:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
         with:
           fetch-depth: 0
+
+      - name: Run vexctl
+        uses: openvex/generate-vex@31b415924ea0d72ed5f2640f1dee59dea6c2770b
+        with:
+          product: pkg:generic/karpenter@${{ env.TAG }}
+          file: karpenter.vex.json
+
       - name: Create Github Release
         uses: marvinpinto/action-automatic-releases@919008cf3f741b179569b7a6fb4d8860689ab7f0 # v1.2.1
         with:
+          files: |
+            karpenter.vex.json
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
           prerelease: false
+
       - name: Install tejolote
         uses: kubernetes-sigs/release-actions/setup-tejolote@dd08496c83441d6477114cc0555b96d404dacff7 # v0.1.2
       - name: Run tejolote
