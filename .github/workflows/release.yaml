@@ -17,8 +17,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: openvex/generate-vex@31b415924ea0d72ed5f2640f1dee59dea6c2770b
-        name: Run vexctl
+      - name: Run vexctl
+        uses: openvex/generate-vex@31b415924ea0d72ed5f2640f1dee59dea6c2770b
         with:
           product: pkg:generic/karpenter@${{ env.TAG }}
           file: karpenter.vex.json
