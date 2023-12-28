@@ -40,11 +40,6 @@ apply: verify apply-crds build ## Deploy the kwok controller from the current st
 		--set-string controller.env[0].name=ENABLE_PROFILING \
 		--set-string controller.env[0].value=true
 
-# kubectl delete validatingwebhookconfiguration validation.webhook.config.karpenter.sh
-# kubectl delete validatingwebhookconfiguration validation.webhook.karpenter.k8s.aws
-# kubectl delete validatingwebhookconfiguration validation.webhook.karpenter.sh
-# kubectl delete mutatingwebhookconfiguration defaulting.webhook.karpenter.k8s.aws
-
 test: ## Run tests
 	go test ./... \
 		-race \
