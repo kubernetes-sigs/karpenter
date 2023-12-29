@@ -157,6 +157,13 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		return false, fmt.Errorf("building disruption budgets, %w", err)
 	}
 
+	// Emit metrics before we disrupt for allowed disruptions for each loop.
+	for nodePoolName, budget := range disruptionBudgetMapping {
+		disruptionBudgetsAllowedDisruptionsGauge.With(map[string]string{
+			metrics.NodePoolLabel: nodePoolName,
+		}).Set(float64(budget))
+	}
+
 	// Determine the disruption action
 	cmd, err := disruption.ComputeCommand(ctx, disruptionBudgetMapping, candidates...)
 	if err != nil {
