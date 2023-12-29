@@ -145,6 +145,12 @@ var _ = Describe("Emptiness", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
+			metric, found := FindMetricWithLabelValues("karpenter_disruption_budgets_allowed_disruptions", map[string]string{
+				"nodepool": nodePool.Name,
+			})
+			Expect(found).To(BeTrue())
+			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 10))
+
 			// Execute command, thus deleting 10 nodes
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(0))
@@ -185,6 +191,12 @@ var _ = Describe("Emptiness", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
+			metric, found := FindMetricWithLabelValues("karpenter_disruption_budgets_allowed_disruptions", map[string]string{
+				"nodepool": nodePool.Name,
+			})
+			Expect(found).To(BeTrue())
+			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 0))
+
 			// Execute command, thus deleting no nodes
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(numNodes))
@@ -224,6 +236,12 @@ var _ = Describe("Emptiness", func() {
 			ExpectTriggerVerifyAction(&wg)
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
+
+			metric, found := FindMetricWithLabelValues("karpenter_disruption_budgets_allowed_disruptions", map[string]string{
+				"nodepool": nodePool.Name,
+			})
+			Expect(found).To(BeTrue())
+			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 3))
 
 			// Execute command, thus deleting 3 nodes
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
@@ -288,6 +306,14 @@ var _ = Describe("Emptiness", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
+			for _, np := range nps {
+				metric, found := FindMetricWithLabelValues("karpenter_disruption_budgets_allowed_disruptions", map[string]string{
+					"nodepool": np.Name,
+				})
+				Expect(found).To(BeTrue())
+				Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 2))
+			}
+
 			// Execute the command in the queue, only deleting 20 nodes
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(10))
@@ -349,6 +375,14 @@ var _ = Describe("Emptiness", func() {
 			ExpectTriggerVerifyAction(&wg)
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
+
+			for _, np := range nps {
+				metric, found := FindMetricWithLabelValues("karpenter_disruption_budgets_allowed_disruptions", map[string]string{
+					"nodepool": np.Name,
+				})
+				Expect(found).To(BeTrue())
+				Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 3))
+			}
 
 			// Execute the command in the queue, deleting all nodes
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
