@@ -78,7 +78,7 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: disruptionSubsystem,
 			Name:      "budgets_allowed_disruptions",
-			Help:      "The number of nodes for a given NodePool that can be disrupted at a point in time. Labeled by NodePool. Note that disruption budgets this can change very rapidly, as new nodes may be created and others may be deleted at any point.",
+			Help:      "The number of nodes for a given NodePool that can be disrupted at a point in time. Labeled by NodePool. Note that allowed disruptions can change very rapidly, as new nodes may be created and others may be deleted at any point.",
 		},
 		[]string{metrics.NodePoolLabel},
 	)
