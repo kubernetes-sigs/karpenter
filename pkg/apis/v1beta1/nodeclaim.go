@@ -126,6 +126,14 @@ type KubeletConfiguration struct {
 	// +kubebuilder:validation:Maximum:=100
 	// +optional
 	ImageGCLowThresholdPercent *int32 `json:"imageGCLowThresholdPercent,omitempty"`
+	// Set the maximum size (e.g. 10Mi) of container log file before it is rotated.
+	// +kubebuilder:validation:Minimum:=0
+	// +optional
+	ContainerLogMaxSize string `json:"containerLogMaxSize,omitempty"`
+	// Set the maximum number of container log files that can be present for a container. The number must be >= 2. 
+	// +kubebuilder:validation:Minimum:=2
+	// +optional
+	ContainerLogMaxFiles *int32 `json:"containerLogMaxFiles,omitempty"`
 	// CPUCFSQuota enables CPU CFS quota enforcement for containers that specify CPU limits.
 	// +optional
 	CPUCFSQuota *bool `json:"cpuCFSQuota,omitempty"`
