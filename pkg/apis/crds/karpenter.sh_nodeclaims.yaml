@@ -113,6 +113,14 @@ spec:
                       maximum: 100
                       minimum: 0
                       type: integer
+                    containerLogMaxSize:
+                      description: ContainerLogMaxSize is a quantity defining the maximum size of the container log file before it is rotated.
+                      type: string
+                    containerLogMaxFiles:
+                      description: ContainerLogMaxFiles specifies the maximum number of container log files that can be present for a container.
+                      format: int32
+                      minimum: 2
+                      type: integer
                     kubeReserved:
                       additionalProperties:
                         anyOf:
