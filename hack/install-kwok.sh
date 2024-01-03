@@ -1,16 +1,23 @@
+# This script uses kustomize to generate the manifests of the latest 
+# version of kwok, and will then either apply/delete the resources 
+# depending on the UNINSTALL_KWOK environment variable. Set this to 
+# true if you want to delete the generated objects.
+
+# This will create 10 different partitions, so that Karpenter can scale 
+# to 10000 nodes, as each kwok controller can only reliably handle about
+# 1000 nodes.
 set -euo pipefail
 
 # get the latest version
 KWOK_REPO=kubernetes-sigs/kwok
 # KWOK_LATEST_RELEASE=$(curl "https://api.github.com/repos/${KWOK_REPO}/releases/latest" | jq -r '.tag_name')
-KWOK_LATEST_RELEASE="v0.3.0"
-
+KWOK_LATEST_RELEASE=v0.3.0
 # make a base directory for multi-base kustomization
 HOME_DIR=$(mktemp -d)
 BASE=${HOME_DIR}/base
 mkdir ${BASE}
 
-# allow it to tolerate everything, but not run on nodes that kwok launches
+# allow it to schedule to critical addons, but not schedule onto kwok nodes.
 cat <<EOF > "${BASE}/tolerate-all.yaml"
 apiVersion: apps/v1
 kind: Deployment
@@ -21,7 +28,9 @@ spec:
   template:
     spec:
       tolerations:
-      - operator: "Exists"
+      - operator: "Equals"
+        key: CriticalAddonsOnly 
+        effect: NoSchedule
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -31,6 +40,8 @@ spec:
                 operator: DoesNotExist
 EOF
 
+# TODO: Simplify the kustomize to only use one copy of the RBAC that all
+# controllers can use.  
 cat <<EOF > "${BASE}/kustomization.yaml"
   apiVersion: kustomize.config.k8s.io/v1beta1
   kind: Kustomization
