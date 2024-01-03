@@ -129,7 +129,7 @@ type KubeletConfiguration struct {
 	// Set the maximum size (e.g. 10Mi) of container log file before it is rotated.
 	// +kubebuilder:validation:Minimum:=0
 	// +optional
-	ContainerLogMaxSize *string `json:"containerLogMaxSize,omitempty"`
+	ContainerLogMaxSize string `json:"containerLogMaxSize,omitempty"`
 	// Set the maximum number of container log files that can be present for a container. The number must be >= 2. 
 	// +kubebuilder:validation:Minimum:=2
 	// +optional
