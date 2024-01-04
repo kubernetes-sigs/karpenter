@@ -1263,14 +1263,23 @@ var _ = Describe("Cluster State Sync", func() {
 		}
 		Expect(cluster.Synced(ctx)).To(BeFalse())
 	})
-	It("shouldn't consider the cluster state synced if a nodeclaim isn't launched", func() {
-		// Deploy 1000 nodeClaims and sync them all with the cluster
+	It("shouldn't consider the cluster state synced if a nodeclaim is added manually with UpdateNodeClaim", func() {
 		nodeClaim := test.NodeClaim()
 		nodeClaim.Status.ProviderID = ""
-		ExpectApplied(ctx, env.Client, nodeClaim)
 
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		cluster.UpdateNodeClaim(nodeClaim)
 		Expect(cluster.Synced(ctx)).To(BeFalse())
+	})
+	It("shouldn't consider the cluster state synced if a nodeclaim without a providerID is deleted", func() {
+		nodeClaim := test.NodeClaim()
+		nodeClaim.Status.ProviderID = ""
+
+		cluster.UpdateNodeClaim(nodeClaim)
+		Expect(cluster.Synced(ctx)).To(BeFalse())
+
+		// Reconcile it without actually creating it, essentially making it deleted.
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		Expect(cluster.Synced(ctx)).To(BeTrue())
 	})
 })
 
