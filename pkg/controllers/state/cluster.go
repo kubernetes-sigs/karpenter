@@ -409,13 +409,13 @@ func (c *Cluster) newStateFromNodeClaim(nodeClaim *v1beta1.NodeClaim, oldNode *S
 }
 
 func (c *Cluster) cleanupNodeClaim(name string) {
+	delete(c.nodeClaimNameToProviderID, name)
 	if id := c.nodeClaimNameToProviderID[name]; id != "" {
 		if c.nodes[id].Node == nil {
 			delete(c.nodes, id)
 		} else {
 			c.nodes[id].NodeClaim = nil
 		}
-		delete(c.nodeClaimNameToProviderID, name)
 		c.MarkUnconsolidated()
 	}
 }
