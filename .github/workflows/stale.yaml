@@ -19,7 +19,7 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           stale-issue-message: 'This issue has been inactive for 14 days. StaleBot will close this stale issue after 14 more days of inactivity.'
-          exempt-issue-labels: 'bug,chore,feature,documentation,testing,operational-excellence,automation,roadmap,kind/cleanup,kind/documentation,kind/regression,kind/flake,kind/bug,kind/deprecation,kind/support,kind/feature,kind/failing-test,kind/api-change'
+          exempt-issue-labels: 'kind/cleanup,kind/testing,kind/documentation,kind/regression,kind/flake,kind/bug,kind/deprecation,kind/feature,kind/failing-test,kind/api-change,kind/automation'
           stale-issue-label: 'lifecycle/stale'
           close-issue-label: 'lifecycle/closed'
           stale-pr-message: 'This PR has been inactive for 14 days. StaleBot will close this stale PR after 14 more days of inactivity.'
