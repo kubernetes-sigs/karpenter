@@ -28,7 +28,7 @@ spec:
   template:
     spec:
       tolerations:
-      - operator: "Equals"
+      - operator: "Equal"
         key: CriticalAddonsOnly 
         effect: NoSchedule
       affinity:
