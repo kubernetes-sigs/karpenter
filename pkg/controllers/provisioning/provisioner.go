@@ -359,6 +359,8 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 		metrics.ReasonLabel:   options.Reason,
 		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
 	}).Inc()
+	// Update the nodeclaim manually in state to avoid evenutal consistency delay races with our watcher
+	p.cluster.UpdateNodeClaim(nodeClaim)
 	if functional.ResolveOptions(opts...).RecordPodNomination {
 		for _, pod := range n.Pods {
 			p.recorder.Publish(scheduler.NominatePodEvent(pod, nil, nodeClaim))

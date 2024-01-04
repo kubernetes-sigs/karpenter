@@ -221,11 +221,10 @@ func (c *Cluster) UpdateNodeClaim(nodeClaim *v1beta1.NodeClaim) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if nodeClaim.Status.ProviderID == "" {
-		return // We can't reconcile nodeclaims that don't yet have provider ids
+	if nodeClaim.Status.ProviderID != "" {
+		n := c.newStateFromNodeClaim(nodeClaim, c.nodes[nodeClaim.Status.ProviderID])
+		c.nodes[nodeClaim.Status.ProviderID] = n
 	}
-	n := c.newStateFromNodeClaim(nodeClaim, c.nodes[nodeClaim.Status.ProviderID])
-	c.nodes[nodeClaim.Status.ProviderID] = n
 	c.nodeClaimNameToProviderID[nodeClaim.Name] = nodeClaim.Status.ProviderID
 }
 
