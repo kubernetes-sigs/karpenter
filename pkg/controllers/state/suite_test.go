@@ -909,15 +909,6 @@ var _ = Describe("Node Resource Level", func() {
 		time.Sleep(time.Second * 11) // past 20s, node should no longer be nominated
 		Expect(ExpectStateNodeExists(cluster, node).Nominated()).To(BeFalse())
 	})
-	It("should create a state node if the node claim has no provider ID", func() {
-		nodeClaim := test.NodeClaim()
-		nodeClaim.Status.ProviderID = ""
-		ExpectApplied(ctx, env.Client, nodeClaim)
-		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodeClaim))
-
-		ExpectStateNodeCount("==", 1)
-		ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim)
-	})
 	It("should handle a node changing from no providerID to registering a providerID", func() {
 		node := test.Node()
 		ExpectApplied(ctx, env.Client, node)
@@ -1270,6 +1261,15 @@ var _ = Describe("Cluster State Sync", func() {
 				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 			}
 		}
+		Expect(cluster.Synced(ctx)).To(BeFalse())
+	})
+	It("shouldn't consider the cluster state synced if a nodeclaim isn't launched", func() {
+		// Deploy 1000 nodeClaims and sync them all with the cluster
+		nodeClaim := test.NodeClaim()
+		nodeClaim.Status.ProviderID = ""
+		ExpectApplied(ctx, env.Client, nodeClaim)
+
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		Expect(cluster.Synced(ctx)).To(BeFalse())
 	})
 })

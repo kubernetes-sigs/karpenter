@@ -102,12 +102,16 @@ func (c *Cluster) Synced(ctx context.Context) bool {
 	stateNodeNames := sets.New(lo.Keys(c.nodeNameToProviderID)...)
 	c.mu.RUnlock()
 
-	nodeClaimNames := sets.New[string]()
-	for _, nodeClaim := range nodeClaimList.Items {
-		// If the nodeClaim hasn't resolved its provider id, then it hasn't resolved its status
-		if nodeClaim.Status.ProviderID == "" {
+	// Check to see if any node claim doesn't have a provider ID. If it doesn't, then the nodeclaim hasn't been
+	// launched, and we need to wait to see what the resolved values are before continuing.
+	for nc := range stateNodeClaimNames {
+		if c.nodeClaimNameToProviderID[nc] == "" {
 			return false
 		}
+	}
+
+	nodeClaimNames := sets.New[string]()
+	for _, nodeClaim := range nodeClaimList.Items {
 		nodeClaimNames.Insert(nodeClaim.Name)
 	}
 	nodeNames := sets.New[string]()
@@ -221,10 +225,15 @@ func (c *Cluster) UpdateNodeClaim(nodeClaim *v1beta1.NodeClaim) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// If the nodeclaim has a providerID, create a StateNode for it, and populate the data.
+	// We only need to do this for a nodeclaim with a providerID as nodeclaims without provider IDs haven't
+	// been launched yet.
 	if nodeClaim.Status.ProviderID != "" {
 		n := c.newStateFromNodeClaim(nodeClaim, c.nodes[nodeClaim.Status.ProviderID])
 		c.nodes[nodeClaim.Status.ProviderID] = n
 	}
+	// If the nodeclaim hasn't launched yet, we want to add it into cluster state to ensure
+	// that we're not racing with the internal cache for the cluster, assuming the node doesn't exist.
 	c.nodeClaimNameToProviderID[nodeClaim.Name] = nodeClaim.Status.ProviderID
 }
 
