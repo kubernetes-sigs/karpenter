@@ -1263,6 +1263,28 @@ var _ = Describe("Cluster State Sync", func() {
 		}
 		Expect(cluster.Synced(ctx)).To(BeFalse())
 	})
+	It("shouldn't consider the cluster state synced if a nodeclaim is added manually with UpdateNodeClaim", func() {
+		nodeClaim := test.NodeClaim()
+		nodeClaim.Status.ProviderID = ""
+
+		cluster.UpdateNodeClaim(nodeClaim)
+		Expect(cluster.Synced(ctx)).To(BeFalse())
+	})
+	It("shouldn't consider the cluster state synced if a nodeclaim without a providerID is deleted", func() {
+		nodeClaim := test.NodeClaim()
+		nodeClaim.Status.ProviderID = ""
+
+		cluster.UpdateNodeClaim(nodeClaim)
+		Expect(cluster.Synced(ctx)).To(BeFalse())
+
+		ExpectApplied(ctx, env.Client, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		Expect(cluster.Synced(ctx)).To(BeFalse())
+
+		ExpectDeleted(ctx, env.Client, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		Expect(cluster.Synced(ctx)).To(BeTrue())
+	})
 })
 
 var _ = Describe("DaemonSet Controller", func() {
