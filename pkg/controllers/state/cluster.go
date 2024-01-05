@@ -409,10 +409,6 @@ func (c *Cluster) newStateFromNodeClaim(nodeClaim *v1beta1.NodeClaim, oldNode *S
 }
 
 func (c *Cluster) cleanupNodeClaim(name string) {
-	// Delete the node claim from the nodeClaimNameToProviderID in the case that the provider ID hasn't resolved
-	// yet. This ensures that if a nodeClaim is created and then deleted before it was able to launch that
-	// this is cleaned up.
-	delete(c.nodeClaimNameToProviderID, name)
 	if id := c.nodeClaimNameToProviderID[name]; id != "" {
 		if c.nodes[id].Node == nil {
 			delete(c.nodes, id)
@@ -421,6 +417,10 @@ func (c *Cluster) cleanupNodeClaim(name string) {
 		}
 		c.MarkUnconsolidated()
 	}
+	// Delete the node claim from the nodeClaimNameToProviderID in the case that the provider ID hasn't resolved
+	// yet. This ensures that if a nodeClaim is created and then deleted before it was able to launch that
+	// this is cleaned up.
+	delete(c.nodeClaimNameToProviderID, name)
 }
 
 func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *StateNode) (*StateNode, error) {
