@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -219,6 +220,19 @@ func (in *StateNode) Initialized() bool {
 	}
 	// Nodes not managed by Karpenter are always considered Initialized
 	return true
+}
+
+// Disruptable returns if a node has been initialized long enough for Karpenter to disrupt it
+func (in *StateNode) Disruptable(clock clock.Clock) bool {
+	if !in.Initialized() {
+		return false
+	}
+	// A node is disruptable only if it's been initialized for 30 seconds.
+	// This is critical to ensure that nodes that are created as part of a replacement aren't
+	// chosen for disruption as soon as they're initialized. We only need a small time frame
+	// to get one pod nomination event, as that will block candidacy further.
+	cond := in.NodeClaim.StatusConditions().GetCondition(v1beta1.Initialized)
+	return cond.IsTrue() && clock.Since(cond.LastTransitionTime.Inner.Time) < (30*time.Second)
 }
 
 func (in *StateNode) Capacity() v1.ResourceList {

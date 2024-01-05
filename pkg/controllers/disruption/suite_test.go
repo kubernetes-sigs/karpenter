@@ -240,6 +240,8 @@ var _ = Describe("Disruption Taints", func() {
 		// inform cluster state about nodes and nodeClaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
+		// Advance the clock so that
+		fakeClock.Step(30 * time.Second)
 		// Trigger the reconcile loop to start but don't trigger the verify action
 		wg := sync.WaitGroup{}
 		wg.Add(1)

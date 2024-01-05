@@ -67,8 +67,8 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	if node.MarkedForDeletion() {
 		return nil, fmt.Errorf("state node is marked for deletion")
 	}
-	// skip candidates that aren't initialized
-	if !node.Initialized() {
+	// skip candidates that haven't been initialized for a period time
+	if !node.Disruptable(clk) {
 		return nil, fmt.Errorf("state node isn't initialized")
 	}
 	// If the orchestration queue is already considering a candidate we want to disrupt, don't consider it a candidate.
