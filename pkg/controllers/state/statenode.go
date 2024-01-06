@@ -232,7 +232,7 @@ func (in *StateNode) Disruptable(clock clock.Clock) bool {
 	// chosen for disruption as soon as they're initialized. We only need a small time frame
 	// to get one pod nomination event, as that will block candidacy further.
 	cond := in.NodeClaim.StatusConditions().GetCondition(v1beta1.Initialized)
-	return cond.IsTrue() && clock.Since(cond.LastTransitionTime.Inner.Time) < (30*time.Second)
+	return cond.IsTrue() && clock.Since(cond.LastTransitionTime.Inner.Time) >= (30*time.Second)
 }
 
 func (in *StateNode) Capacity() v1.ResourceList {

@@ -89,6 +89,8 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -104,6 +106,8 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -154,6 +158,8 @@ var _ = Describe("Consolidation", func() {
 			}
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -196,6 +202,8 @@ var _ = Describe("Consolidation", func() {
 			}
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -238,6 +246,8 @@ var _ = Describe("Consolidation", func() {
 			}
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -306,6 +316,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -367,6 +379,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			// Reconcile 5 times, enqueuing 3 commands total.
@@ -429,6 +443,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -493,6 +509,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -540,8 +558,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -563,8 +581,9 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
-			fakeClock.Step(10 * time.Minute)
 			wg := sync.WaitGroup{}
 			ExpectTriggerVerifyAction(&wg)
 			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
@@ -631,6 +650,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 
@@ -670,8 +691,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			// consolidation won't delete the old nodeclaim until the new nodeclaim is ready
 			var wg sync.WaitGroup
@@ -731,8 +752,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			// consolidation won't delete the old nodeclaim until the new nodeclaim is ready
 			var wg sync.WaitGroup
@@ -804,8 +825,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 
@@ -877,8 +898,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			// consolidation won't delete the old nodeclaim until the new nodeclaim is ready
 			var wg sync.WaitGroup
@@ -948,8 +969,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			// consolidation won't delete the old node until the new node is ready
 			var wg sync.WaitGroup
@@ -1030,8 +1051,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, annotatedNode}, []*v1beta1.NodeClaim{nodeClaim, annotatedNodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -1109,8 +1130,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, annotatedNode}, []*v1beta1.NodeClaim{nodeClaim, annotatedNodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -1187,8 +1208,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -1265,8 +1286,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -1366,8 +1387,9 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
-			fakeClock.Step(10 * time.Minute)
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
@@ -1477,8 +1499,9 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
-			fakeClock.Step(10 * time.Minute)
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
@@ -1559,8 +1582,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -1609,8 +1632,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -1666,8 +1689,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, unmanagedNode}, []*v1beta1.NodeClaim{nodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -1731,8 +1754,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -1787,8 +1810,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -1839,8 +1862,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -1893,8 +1916,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -1945,8 +1968,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -1994,8 +2017,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -2045,6 +2068,8 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node2}, []*v1beta1.NodeClaim{nodeClaim2})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -2147,6 +2172,8 @@ var _ = Describe("Consolidation", func() {
 					ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
 				}
 			}
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			// Create a pod and nodeclaim/node that will eventually be scheduled onto the initialized node
 			consolidatableNodeClaim, consolidatableNode := test.NodeClaimAndNode(v1beta1.NodeClaim{
@@ -2194,6 +2221,8 @@ var _ = Describe("Consolidation", func() {
 			ExpectApplied(ctx, env.Client, consolidatableNodeClaim, consolidatableNode, consolidatablePod)
 			ExpectManualBinding(ctx, env.Client, consolidatablePod, consolidatableNode)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{consolidatableNode}, []*v1beta1.NodeClaim{consolidatableNodeClaim})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -2251,8 +2280,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -2312,8 +2341,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 
@@ -2368,8 +2397,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -2434,6 +2463,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			wg.Add(1)
@@ -2453,7 +2484,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectExists(ctx, env.Client, nodeClaim1)
 
 			// advance the clock so that the timeout expires
-			fakeClock.Step(31 * time.Second)
+			fakeClock.Step(1 * time.Minute)
 			// controller should finish
 			Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 			wg.Wait()
@@ -2522,6 +2553,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1, node2}, []*v1beta1.NodeClaim{nodeClaim1, nodeClaim2})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			wg.Add(1)
@@ -2541,7 +2574,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectExists(ctx, env.Client, nodeClaim2)
 
 			// advance the clock so that the timeout expires
-			fakeClock.Step(31 * time.Second)
+			fakeClock.Step(1 * time.Minute)
 
 			// controller should finish
 			Eventually(finished.Load, 10*time.Second).Should(BeTrue())
@@ -2591,6 +2624,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			wg.Add(1)
@@ -2635,7 +2670,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
 			// advance the clock so that the timeout expires
-			fakeClock.Step(31 * time.Second)
+			fakeClock.Step(1 * time.Minute)
 			// controller should finish
 			Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 			wg.Wait()
@@ -2655,6 +2690,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			wg.Add(1)
@@ -2678,7 +2715,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
 			// advance the clock so that the timeout expires
-			fakeClock.Step(31 * time.Second)
+			fakeClock.Step(1 * time.Minute)
 			// controller should finish
 			Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 			wg.Wait()
@@ -2697,8 +2734,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 
@@ -2745,8 +2782,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 
@@ -2793,8 +2830,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 
@@ -2847,8 +2884,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 
@@ -2898,8 +2935,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 
@@ -2949,8 +2986,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 
@@ -3055,6 +3092,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			wg.Add(1)
@@ -3149,6 +3188,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			wg.Add(1)
@@ -3262,8 +3303,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1, node2, node3}, []*v1beta1.NodeClaim{nodeClaim1, nodeClaim2, nodeClaim3})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -3333,8 +3374,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1, node2}, []*v1beta1.NodeClaim{nodeClaim1, nodeClaim2})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -3389,6 +3430,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1, node2}, []*v1beta1.NodeClaim{nodeClaim1, nodeClaim2})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
@@ -3411,7 +3454,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectExists(ctx, env.Client, nodeClaim2)
 
 			// advance the clock so that the timeout expires
-			fakeClock.Step(31 * time.Second)
+			fakeClock.Step(1 * time.Minute)
 
 			// controller should finish
 			Eventually(finished.Load, 10*time.Second).Should(BeTrue())
@@ -3451,6 +3494,8 @@ var _ = Describe("Consolidation", func() {
 
 			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaim1, node1, nodeClaim2, node2, nodeClaim3, node3, nodePool)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1, node2, node3}, []*v1beta1.NodeClaim{nodeClaim1, nodeClaim2, nodeClaim3})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			wg.Add(1)
@@ -3481,11 +3526,11 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node3))
 			// advance the clock so that the timeout expires for emptiness
 			Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
-			fakeClock.Step(31 * time.Second)
+			fakeClock.Step(1 * time.Minute)
 
 			// Succeed on multi node consolidation
 			Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
-			fakeClock.Step(31 * time.Second)
+			fakeClock.Step(1 * time.Minute)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 			Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 			wg.Wait()
@@ -3531,6 +3576,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1, node2, node3}, []*v1beta1.NodeClaim{nodeClaim1, nodeClaim2, nodeClaim3})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			wg.Add(1)
@@ -3571,12 +3618,12 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
 
 			// advance the clock so that the timeout expires for multi-nodeclaim consolidation
-			fakeClock.Step(31 * time.Second)
+			fakeClock.Step(1 * time.Minute)
 
 			// wait for the controller to block on the validation timeout for single nodeclaim consolidation
 			Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
 			// advance the clock so that the timeout expires for single nodeclaim consolidation
-			fakeClock.Step(31 * time.Second)
+			fakeClock.Step(1 * time.Minute)
 
 			// controller should finish
 			Eventually(finished.Load, 10*time.Second).Should(BeTrue())
@@ -3670,8 +3717,11 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1, node2}, []*v1beta1.NodeClaim{nodeClaim1, nodeClaim2})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
-			fakeClock.SetTime(time.Now())
+			// TODO Check if this is right?
+			// fakeClock.SetTime(time.Now())
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -3784,6 +3834,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{zone1Node, zone2Node, zone3Node}, []*v1beta1.NodeClaim{zone1NodeClaim, zone2NodeClaim, zone3NodeClaim})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			ExpectSkew(ctx, env.Client, "default", &tsc).To(ConsistOf(1, 1, 1))
 
@@ -3875,8 +3927,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{zone1Node, zone2Node, zone3Node}, []*v1beta1.NodeClaim{zone1NodeClaim, zone2NodeClaim, zone3NodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -3927,8 +3979,8 @@ var _ = Describe("Consolidation", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			// Run the processing loop in parallel in the background with environment context
 			var wg sync.WaitGroup
@@ -4005,9 +4057,9 @@ var _ = Describe("Consolidation", func() {
 			newNode, _ := lo.Find(nodes, func(n *v1.Node) bool { return n.Name != oldNodeName })
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nil)
-
-			// Wait for the nomination cache to expire
-			time.Sleep(time.Second * 11)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			// Also wait for nomination cache to expire
+			fakeClock.Step(1 * time.Minute)
 
 			// Re-create the pods to re-bind them
 			for i := 0; i < 2; i++ {

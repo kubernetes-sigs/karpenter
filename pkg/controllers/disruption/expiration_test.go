@@ -120,6 +120,8 @@ var _ = Describe("Expiration", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -167,6 +169,8 @@ var _ = Describe("Expiration", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -214,6 +218,8 @@ var _ = Describe("Expiration", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -286,6 +292,8 @@ var _ = Describe("Expiration", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -353,6 +361,8 @@ var _ = Describe("Expiration", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -418,6 +428,8 @@ var _ = Describe("Expiration", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -445,6 +457,8 @@ var _ = Describe("Expiration", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
@@ -459,6 +473,8 @@ var _ = Describe("Expiration", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
@@ -480,6 +496,8 @@ var _ = Describe("Expiration", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
@@ -501,6 +519,8 @@ var _ = Describe("Expiration", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
@@ -529,6 +549,8 @@ var _ = Describe("Expiration", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			nodeClaim2, node2 := test.NodeClaimAndNode(v1beta1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
@@ -553,6 +575,8 @@ var _ = Describe("Expiration", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node2}, []*v1beta1.NodeClaim{nodeClaim2})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			// disruption won't delete the old node until the new node is ready
 			var wg sync.WaitGroup
@@ -576,8 +600,8 @@ var _ = Describe("Expiration", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 
@@ -590,6 +614,8 @@ var _ = Describe("Expiration", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -634,6 +660,8 @@ var _ = Describe("Expiration", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -703,6 +731,8 @@ var _ = Describe("Expiration", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			// disruption won't delete the old node until the new node is ready
 			var wg sync.WaitGroup
@@ -752,6 +782,8 @@ var _ = Describe("Expiration", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			// disruption won't delete the old node until the new node is ready
 			var wg sync.WaitGroup
@@ -806,6 +838,8 @@ var _ = Describe("Expiration", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -894,6 +928,8 @@ var _ = Describe("Expiration", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			// Advance the clock so the nodes can be initialized for long enough to be considered for candidacy.
+			fakeClock.Step(1 * time.Minute)
 
 			// disruption won't delete the old nodeClaim until the new nodeClaim is ready
 			var wg sync.WaitGroup
