@@ -316,12 +316,40 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "100%"}}
 		ExpectApplied(ctx, env.Client, nodePool)
 		unmanaged := test.Node()
-		unmanaged.Labels[v1beta1.NodePoolLabelKey] = nodePool.Name
 		ExpectApplied(ctx, env.Client, unmanaged)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{}, []*v1beta1.NodeClaim{})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{unmanaged}, []*v1beta1.NodeClaim{})
 		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client)
 		Expect(err).To(Succeed())
 		// This should not bring in the unmanaged node.
+		Expect(budgets[nodePool.Name]).To(Equal(10))
+	})
+	It("should not consider nodes that are not initialized as part of disruption count", func() {
+		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "100%"}}
+		ExpectApplied(ctx, env.Client, nodePool)
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Finalizers: []string{"karpenter.sh/test-finalizer"},
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1beta1.NodeClaimStatus{
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodeClaim, node)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
+
+		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client)
+		Expect(err).To(Succeed())
+		// This should not bring in the uninitialized node.
 		Expect(budgets[nodePool.Name]).To(Equal(10))
 	})
 	It("should not return a negative disruption value", func() {

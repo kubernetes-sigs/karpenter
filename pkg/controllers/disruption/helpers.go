@@ -207,7 +207,14 @@ func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clo
 	// Find the difference to know how much left we can disrupt
 	nodes := cluster.Nodes()
 	for _, node := range nodes {
-		if !node.Managed() {
+		// We only consider nodes that we own and are initialized towards the total.
+		// If a node is launched/registered, but not initialized, pods aren't scheduled
+		// to the node, and these are treated as unhealthy until they're cleaned up.
+		// This prevents odd roundup cases with percentages where replacement nodes that
+		// aren't initialized could be counted towards the total, resulting in more disruptions
+		// to active nodes than desired, where Karpenter should wait for these nodes to be
+		// healthy before continuing.
+		if !node.Managed() || !node.Initialized() {
 			continue
 		}
 		nodePool := node.Labels()[v1beta1.NodePoolLabelKey]
