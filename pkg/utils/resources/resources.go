@@ -17,6 +17,8 @@ limitations under the License.
 package resources
 
 import (
+	"fmt"
+
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -159,19 +161,20 @@ func Cmp(lhs resource.Quantity, rhs resource.Quantity) int {
 }
 
 // Fits returns true if the candidate set of resources is less than or equal to the total set of resources.
-func Fits(candidate, total v1.ResourceList) bool {
+func Fits(candidate, total v1.ResourceList) (bool, string) {
 	// If any of the total resource values are negative then the resource will never fit
 	for _, quantity := range total {
 		if Cmp(resource.MustParse("0"), quantity) > 0 {
-			return false
+			return false, ""
 		}
 	}
 	for resourceName, quantity := range candidate {
 		if Cmp(quantity, total[resourceName]) > 0 {
-			return false
+			return false, fmt.Sprintf("required resource %s (%s) is greater than total resource %s (%s)",
+				resourceName, quantity.String(), resourceName.String(), total[resourceName].Format)
 		}
 	}
-	return true
+	return true, ""
 }
 
 // String returns a string version of the resource list suitable for presenting in a log

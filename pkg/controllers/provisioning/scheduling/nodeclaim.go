@@ -22,7 +22,6 @@ import (
 	"sync/atomic"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -103,9 +102,7 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 	requests := resources.Merge(n.Spec.Resources.Requests, resources.RequestsForPods(pod))
 	filtered := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, requests)
 	if len(filtered.remaining) == 0 {
-		// log the total resources being requested (daemonset + the pod)
-		cumulativeResources := resources.Merge(n.daemonResources, resources.RequestsForPods(pod))
-		return fmt.Errorf("no instance type satisfied resources %s and requirements %s (%s)", resources.String(cumulativeResources), nodeClaimRequirements, filtered.FailureReason())
+		return fmt.Errorf(filtered.reason)
 	}
 
 	// Update node
@@ -156,79 +153,18 @@ type filterResults struct {
 	fitsAndOffering bool
 
 	requests v1.ResourceList
+	reason   string
 }
 
-// FailureReason returns a presentable string explaining why all instance types were filtered out
-//
-//nolint:gocyclo
-func (r filterResults) FailureReason() string {
-	if len(r.remaining) > 0 {
-		return ""
-	}
-
-	// no instance type met any of the three criteria, meaning each criteria was enough to completely prevent
-	// this pod from scheduling
-	if !r.requirementsMet && !r.fits && !r.hasOffering {
-		return "no instance type met the scheduling requirements or had enough resources or had a required offering"
-	}
-
-	// check the other pairwise criteria
-	if !r.requirementsMet && !r.fits {
-		return "no instance type met the scheduling requirements or had enough resources"
-	}
-
-	if !r.requirementsMet && !r.hasOffering {
-		return "no instance type met the scheduling requirements or had a required offering"
-	}
-
-	if !r.fits && !r.hasOffering {
-		return "no instance type had enough resources or had a required offering"
-	}
-
-	// and then each individual criteria. These are sort of the same as above in that each one indicates that no
-	// instance type matched that criteria at all, so it was enough to exclude all instance types.  I think it's
-	// helpful to have these separate, since we can report the multiple excluding criteria above.
-	if !r.requirementsMet {
-		return "no instance type met all requirements"
-	}
-
-	if !r.fits {
-		msg := "no instance type has enough resources"
-		// special case for a user typo I saw reported once
-		if r.requests.Cpu().Cmp(resource.MustParse("1M")) >= 0 {
-			msg += " (CPU request >= 1 Million, m vs M typo?)"
-		}
-		return msg
-	}
-
-	if !r.hasOffering {
-		return "no instance type has the required offering"
-	}
-
-	// see if any pair of criteria was enough to exclude all instances
-	if r.requirementsAndFits {
-		return "no instance type which met the scheduling requirements and had enough resources, had a required offering"
-	}
-	if r.fitsAndOffering {
-		return "no instance type which had enough resources and the required offering met the scheduling requirements"
-	}
-	if r.requirementsAndOffering {
-		return "no instance type which met the scheduling requirements and the required offering had the required resources"
-	}
-
-	// finally all instances were filtered out, but we had at least one instance that met each criteria, and met each
-	// pairwise set of criteria, so the only thing that remains is no instance which met all three criteria simultaneously
-	return "no instance type met the requirements/resources/offering tuple"
-}
 
 //nolint:gocyclo
 func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, requests v1.ResourceList) filterResults {
 	results := filterResults{
-		requests:        requests,
-		requirementsMet: false,
-		fits:            false,
-		hasOffering:     false,
-
+		requests:                requests,
+		requirementsMet:         false,
+		fits:                    false,
+		hasOffering:             false,
+		reason:                  "",
 		requirementsAndFits:     false,
 		requirementsAndOffering: false,
 		fitsAndOffering:         false,
@@ -237,8 +173,8 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 		// the tradeoff to not short circuiting on the filtering is that we can report much better error messages
 		// about why scheduling failed
 		itCompat := compatible(it, requirements)
-		itFits := fits(it, requests)
-		itHasOffering := hasOffering(it, requirements)
+		itFits, itUnfitReason := fits(it, requests)
+		itHasOffering, offeringReason := hasOffering(it, requirements)
 
 		// track if any single instance type met a single criteria
 		results.requirementsMet = results.requirementsMet || itCompat
@@ -254,6 +190,22 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 		// any errors.
 		if itCompat && itFits && itHasOffering {
 			results.remaining = append(results.remaining, it)
+		} else {
+			if !itFits && !itHasOffering && !results.requirementsMet {
+				results.reason = fmt.Sprintf("%s, %s, %s, %s", it.Name, itUnfitReason, offeringReason, it.Requirements.Intersects(requirements))
+			} else if !itFits && !itHasOffering {
+				results.reason = fmt.Sprintf("%s, %s, %s", it.Name, itUnfitReason, offeringReason)
+			} else if !itCompat && !itHasOffering {
+				results.reason = fmt.Sprintf("%s, %s, %s", it.Name, it.Requirements.Intersects(requirements), offeringReason)
+			} else if !itCompat && !itFits {
+				results.reason = fmt.Sprintf("%s, %s, %s", it.Name, it.Requirements.Intersects(requirements), itUnfitReason)
+			} else if !itCompat {
+				results.reason = fmt.Sprintf("%s, %s", it.Name, it.Requirements.Intersects(requirements))
+			} else if !itFits {
+				results.reason = fmt.Sprintf("%s, %s", it.Name, itUnfitReason)
+			} else if !itHasOffering {
+				results.reason = fmt.Sprintf("%s, %s", it.Name, offeringReason)
+			}
 		}
 	}
 	return results
@@ -263,16 +215,30 @@ func compatible(instanceType *cloudprovider.InstanceType, requirements schedulin
 	return instanceType.Requirements.Intersects(requirements) == nil
 }
 
-func fits(instanceType *cloudprovider.InstanceType, requests v1.ResourceList) bool {
+func fits(instanceType *cloudprovider.InstanceType, requests v1.ResourceList) (bool, string) {
 	return resources.Fits(requests, instanceType.Allocatable())
 }
 
-func hasOffering(instanceType *cloudprovider.InstanceType, requirements scheduling.Requirements) bool {
+func hasOffering(instanceType *cloudprovider.InstanceType, requirements scheduling.Requirements) (bool, string) {
+	var reason string
+
 	for _, offering := range instanceType.Offerings.Available() {
-		if (!requirements.Has(v1.LabelTopologyZone) || requirements.Get(v1.LabelTopologyZone).Has(offering.Zone)) &&
-			(!requirements.Has(v1beta1.CapacityTypeLabelKey) || requirements.Get(v1beta1.CapacityTypeLabelKey).Has(offering.CapacityType)) {
-			return true
+		if !requirements.Has(v1.LabelTopologyZone) || !requirements.Get(v1.LabelTopologyZone).Has(offering.Zone) {
+			reason += fmt.Sprintf("%s does not satisfy the requirement %s ", instanceType.Name, offering.Zone)
 		}
+		if !requirements.Has(v1beta1.CapacityTypeLabelKey) || !requirements.Get(v1beta1.CapacityTypeLabelKey).Has(offering.CapacityType) {
+			reason += fmt.Sprintf("%s does not satisfy the requirement %s ", instanceType.Name, offering.CapacityType)
+		}
+
+		if reason != "" {
+			// If any requirement is not met, return with the reason
+			return false, reason
+		}
+
+		// All requirements are satisfied
+		return true, ""
 	}
-	return false
+
+	// No offerings available
+	return false, "no offering available"
 }

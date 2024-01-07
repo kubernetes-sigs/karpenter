@@ -49,8 +49,8 @@ type SchedulerOptions struct {
 func NewScheduler(ctx context.Context, kubeClient client.Client, nodeClaimTemplates []*NodeClaimTemplate,
 	nodePools []v1beta1.NodePool, cluster *state.Cluster, stateNodes []*state.StateNode, topology *Topology,
 	instanceTypes map[string][]*cloudprovider.InstanceType, daemonSetPods []*v1.Pod,
-	recorder events.Recorder, opts SchedulerOptions) *Scheduler {
-
+	recorder events.Recorder, opts SchedulerOptions,
+) *Scheduler {
 	// if any of the nodePools add a taint with a prefer no schedule effect, we add a toleration for the taint
 	// during preference relaxation
 	toleratePreferNoSchedule := false
@@ -270,10 +270,7 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 		}
 		nodeClaim := NewNodeClaim(nodeClaimTemplate, s.topology, s.daemonOverhead[nodeClaimTemplate], instanceTypes)
 		if err := nodeClaim.Add(pod); err != nil {
-			errs = multierr.Append(errs, fmt.Errorf("incompatible with nodepool %q, daemonset overhead=%s, %w",
-				nodeClaimTemplate.NodePoolName,
-				resources.String(s.daemonOverhead[nodeClaimTemplate]),
-				err))
+			errs = multierr.Append(errs, fmt.Errorf("incompatible with nodepool %q, %s",nodeClaimTemplate.NodePoolName, err))
 			continue
 		}
 		// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
