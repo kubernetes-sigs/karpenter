@@ -170,8 +170,8 @@ func Fits(candidate, total v1.ResourceList) (bool, string) {
 	}
 	for resourceName, quantity := range candidate {
 		if Cmp(quantity, total[resourceName]) > 0 {
-			return false, fmt.Sprintf("required resource %s (%s) is greater than total resource %s (%s)",
-				resourceName, quantity.String(), resourceName.String(), total[resourceName].Format)
+			return false, fmt.Sprintf("required resource %s (%s) is greater than total resource %s (%v)",
+				resourceName, quantity.String(), resourceName.String(), total[resourceName])
 		}
 	}
 	return true, ""
