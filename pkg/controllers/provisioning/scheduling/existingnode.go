@@ -84,7 +84,7 @@ func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v
 	// node, which at this point can't be increased in size
 	requests := resources.Merge(n.requests, resources.RequestsForPods(pod))
 
-	fits,_ := resources.Fits(requests, n.Available())
+	fits, _ := resources.Fits(requests, n.Available())
 	if !fits {
 		return fmt.Errorf("exceeds node resources")
 	}

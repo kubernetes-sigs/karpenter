@@ -156,7 +156,6 @@ type filterResults struct {
 	reason   string
 }
 
-
 //nolint:gocyclo
 func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, requests v1.ResourceList) filterResults {
 	results := filterResults{
@@ -234,11 +233,8 @@ func hasOffering(instanceType *cloudprovider.InstanceType, requirements scheduli
 			// If any requirement is not met, return with the reason
 			return false, reason
 		}
-
-		// All requirements are satisfied
-		return true, ""
 	}
 
 	// No offerings available
-	return false, "no offering available"
+	return true, ""
 }

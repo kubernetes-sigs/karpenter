@@ -270,7 +270,7 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 		}
 		nodeClaim := NewNodeClaim(nodeClaimTemplate, s.topology, s.daemonOverhead[nodeClaimTemplate], instanceTypes)
 		if err := nodeClaim.Add(pod); err != nil {
-			errs = multierr.Append(errs, fmt.Errorf("incompatible with nodepool %q, %s",nodeClaimTemplate.NodePoolName, err))
+			errs = multierr.Append(errs, fmt.Errorf("incompatible with nodepool %q, %w", nodeClaimTemplate.NodePoolName, err))
 			continue
 		}
 		// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
