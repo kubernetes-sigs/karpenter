@@ -218,23 +218,13 @@ func fits(instanceType *cloudprovider.InstanceType, requests v1.ResourceList) (b
 	return resources.Fits(requests, instanceType.Allocatable())
 }
 
-func hasOffering(instanceType *cloudprovider.InstanceType, requirements scheduling.Requirements) (bool, string) {
-	var reason string
-
+func hasOffering(instanceType *cloudprovider.InstanceType, requirements scheduling.Requirements) (bool,string) {
 	for _, offering := range instanceType.Offerings.Available() {
-		if !requirements.Has(v1.LabelTopologyZone) || !requirements.Get(v1.LabelTopologyZone).Has(offering.Zone) {
-			reason += fmt.Sprintf("%s does not satisfy the requirement %s ", instanceType.Name, offering.Zone)
-		}
-		if !requirements.Has(v1beta1.CapacityTypeLabelKey) || !requirements.Get(v1beta1.CapacityTypeLabelKey).Has(offering.CapacityType) {
-			reason += fmt.Sprintf("%s does not satisfy the requirement %s ", instanceType.Name, offering.CapacityType)
-		}
-
-		if reason != "" {
-			// If any requirement is not met, return with the reason
-			return false, reason
+		if (!requirements.Has(v1.LabelTopologyZone) || requirements.Get(v1.LabelTopologyZone).Has(offering.Zone)) &&
+			(!requirements.Has(v1beta1.CapacityTypeLabelKey) || requirements.Get(v1beta1.CapacityTypeLabelKey).Has(offering.CapacityType)) {
+			return true,""
 		}
 	}
-
-	// No offerings available
-	return true, ""
+	return false,fmt.Sprintf("no offering found for requirements %s", requirements)
 }
+
