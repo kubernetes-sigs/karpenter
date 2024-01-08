@@ -218,13 +218,12 @@ func fits(instanceType *cloudprovider.InstanceType, requests v1.ResourceList) (b
 	return resources.Fits(requests, instanceType.Allocatable())
 }
 
-func hasOffering(instanceType *cloudprovider.InstanceType, requirements scheduling.Requirements) (bool,string) {
+func hasOffering(instanceType *cloudprovider.InstanceType, requirements scheduling.Requirements) (bool, string) {
 	for _, offering := range instanceType.Offerings.Available() {
 		if (!requirements.Has(v1.LabelTopologyZone) || requirements.Get(v1.LabelTopologyZone).Has(offering.Zone)) &&
 			(!requirements.Has(v1beta1.CapacityTypeLabelKey) || requirements.Get(v1beta1.CapacityTypeLabelKey).Has(offering.CapacityType)) {
-			return true,""
+			return true, ""
 		}
 	}
-	return false,fmt.Sprintf("no offering found for requirements %s", requirements)
+	return false, fmt.Sprintf("no offering found for requirements %s", requirements)
 }
-
