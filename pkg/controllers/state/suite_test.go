@@ -1444,6 +1444,61 @@ var _ = Describe("Consolidated State", func() {
 	})
 })
 
+var _ = Describe("Data Races", func() {
+	It("should ensure that calling Synced() is valid while making updates to Nodes", func() {
+		cancelCtx, cancel := context.WithCancel(ctx)
+		DeferCleanup(func() {
+			cancel()
+		})
+
+		// Keep calling Synced for the entirety of this test
+		go func() {
+			for {
+				_ = cluster.Synced(ctx)
+				if cancelCtx.Err() != nil {
+					return
+				}
+			}
+		}()
+
+		// Call UpdateNode on 100 nodes (enough to trigger a DATA RACE)
+		for i := 0; i < 100; i++ {
+			node := test.Node(test.NodeOptions{
+				ProviderID: test.RandomProviderID(),
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		}
+	})
+	It("should ensure that calling Synced() is valid while making updates to NodeClaims", func() {
+		cancelCtx, cancel := context.WithCancel(ctx)
+		DeferCleanup(func() {
+			cancel()
+		})
+
+		// Keep calling Synced for the entirety of this test
+		go func() {
+			for {
+				_ = cluster.Synced(ctx)
+				if cancelCtx.Err() != nil {
+					return
+				}
+			}
+		}()
+
+		// Call UpdateNodeClaim on 100 NodeClaims (enough to trigger a DATA RACE)
+		for i := 0; i < 100; i++ {
+			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		}
+	})
+})
+
 func ExpectStateNodeCount(comparator string, count int) int {
 	GinkgoHelper()
 	c := 0
@@ -1453,18 +1508,4 @@ func ExpectStateNodeCount(comparator string, count int) int {
 	})
 	Expect(c).To(BeNumerically(comparator, count))
 	return c
-}
-
-func ExpectStateNodeNotFoundForNodeClaim(nodeClaim *v1beta1.NodeClaim) *state.StateNode {
-	GinkgoHelper()
-	var ret *state.StateNode
-	cluster.ForEachNode(func(n *state.StateNode) bool {
-		if n.NodeClaim.Status.ProviderID != nodeClaim.Status.ProviderID {
-			return true
-		}
-		ret = n.DeepCopy()
-		return false
-	})
-	Expect(ret).To(BeNil())
-	return ret
 }
