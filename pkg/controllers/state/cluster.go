@@ -98,17 +98,18 @@ func (c *Cluster) Synced(ctx context.Context) bool {
 		return false
 	}
 	c.mu.RLock()
-	stateNodeClaimNames := sets.New(lo.Keys(c.nodeClaimNameToProviderID)...)
-	stateNodeNames := sets.New(lo.Keys(c.nodeNameToProviderID)...)
-	c.mu.RUnlock()
-
-	// Check to see if any node claim doesn't have a provider ID. If it doesn't, then the nodeclaim hasn't been
-	// launched, and we need to wait to see what the resolved values are before continuing.
-	for nc := range stateNodeClaimNames {
-		if c.nodeClaimNameToProviderID[nc] == "" {
+	stateNodeClaimNames := sets.New[string]()
+	for name, providerID := range c.nodeClaimNameToProviderID {
+		// Check to see if any node claim doesn't have a provider ID. If it doesn't, then the nodeclaim hasn't been
+		// launched, and we need to wait to see what the resolved values are before continuing.
+		if providerID == "" {
+			c.mu.RUnlock()
 			return false
 		}
+		stateNodeClaimNames.Insert(name)
 	}
+	stateNodeNames := sets.New(lo.Keys(c.nodeNameToProviderID)...)
+	c.mu.RUnlock()
 
 	nodeClaimNames := sets.New[string]()
 	for _, nodeClaim := range nodeClaimList.Items {
