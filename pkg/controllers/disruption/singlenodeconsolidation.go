@@ -19,7 +19,6 @@ package disruption
 import (
 	"context"
 	"fmt"
-	"sort"
 	"time"
 
 	"knative.dev/pkg/logging"
@@ -44,9 +43,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 	if s.IsConsolidated() {
 		return Command{}, nil
 	}
-	sort.Slice(candidates, func(i int, j int) bool {
-		return candidates[i].disruptionCost < candidates[j].disruptionCost
-	})
+	candidates = s.sortCandidates(candidates)
 	disruptionEligibleNodesGauge.With(map[string]string{
 		methodLabel:            s.Type(),
 		consolidationTypeLabel: s.ConsolidationType(),

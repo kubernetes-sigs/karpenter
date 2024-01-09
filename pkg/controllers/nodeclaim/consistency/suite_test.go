@@ -120,7 +120,7 @@ var _ = Describe("NodeClaimController", func() {
 			ExpectManualBinding(ctx, env.Client, p, node)
 			_ = env.Client.Delete(ctx, nodeClaim)
 			ExpectReconcileSucceeded(ctx, nodeClaimConsistencyController, client.ObjectKeyFromObject(nodeClaim))
-			Expect(recorder.DetectedEvent(fmt.Sprintf("can't drain node, PDB %s/%s is blocking evictions", pdb.Namespace, pdb.Name))).To(BeTrue())
+			Expect(recorder.DetectedEvent(fmt.Sprintf("can't drain node, PDB %q is blocking evictions", client.ObjectKeyFromObject(pdb)))).To(BeTrue())
 		})
 	})
 

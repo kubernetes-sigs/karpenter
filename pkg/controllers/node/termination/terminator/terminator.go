@@ -80,13 +80,18 @@ func (t *Terminator) Taint(ctx context.Context, node *v1.Node) error {
 // Drain evicts pods from the node and returns true when all pods are evicted
 // https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
 func (t *Terminator) Drain(ctx context.Context, node *v1.Node) error {
-	pods, err := nodeutil.GetEvictablePods(ctx, t.kubeClient, t.clock.Now(), node)
+	pods, err := nodeutil.GetPods(ctx, t.kubeClient, node)
 	if err != nil {
 		return fmt.Errorf("listing pods on node, %w", err)
 	}
-	// Enqueue for eviction
-	t.Evict(pods)
-	if len(pods) > 0 {
+	// evictablePods are pods that aren't yet terminating are eligible to have the eviction API called against them
+	evictablePods := lo.Filter(pods, func(p *v1.Pod, _ int) bool { return podutil.IsEvictable(p) })
+	t.Evict(evictablePods)
+
+	// podsWaitingEvictionCount are  the number of pods that either haven't had eviction called against them yet
+	// or are still actively terminated and haven't exceeded their termination grace period yet
+	podsWaitingEvictionCount := lo.CountBy(pods, func(p *v1.Pod) bool { return podutil.IsWaitingEviction(p, t.clock) })
+	if podsWaitingEvictionCount > 0 {
 		return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", len(pods)))
 	}
 	return nil
@@ -96,9 +101,6 @@ func (t *Terminator) Evict(pods []*v1.Pod) {
 	// 1. Prioritize noncritical pods, non-daemon pods https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
 	var criticalNonDaemon, criticalDaemon, nonCriticalNonDaemon, nonCriticalDaemon []*v1.Pod
 	for _, pod := range pods {
-		if !pod.DeletionTimestamp.IsZero() {
-			continue
-		}
 		if pod.Spec.PriorityClassName == "system-cluster-critical" || pod.Spec.PriorityClassName == "system-node-critical" {
 			if podutil.IsOwnedByDaemonSet(pod) {
 				criticalDaemon = append(criticalDaemon, pod)

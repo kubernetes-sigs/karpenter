@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/samber/lo"
@@ -101,6 +102,14 @@ func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
 		return false
 	}
 	return true
+}
+
+// sortCandidates sorts candidates by disruption cost (where the lowest disruption cost is first) and returns the result
+func (c *consolidation) sortCandidates(candidates []*Candidate) []*Candidate {
+	sort.Slice(candidates, func(i int, j int) bool {
+		return candidates[i].disruptionCost < candidates[j].disruptionCost
+	})
+	return candidates
 }
 
 // computeConsolidation computes a consolidation action to take

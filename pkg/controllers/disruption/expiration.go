@@ -60,7 +60,7 @@ func (e *Expiration) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 		c.NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).IsTrue()
 }
 
-// ComputeCommand generates a disrpution command given candidates
+// ComputeCommand generates a disruption command given candidates
 func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
 	sort.Slice(candidates, func(i int, j int) bool {
 		return candidates[i].NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).LastTransitionTime.Inner.Time.Before(

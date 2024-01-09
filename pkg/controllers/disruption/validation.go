@@ -80,13 +80,13 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 		case <-v.clock.After(waitDuration):
 		}
 	}
+	// Get the current representation of the proposed candidates from before the validation timeout
+	// We do this so that we can re-validate that the candidates that were computed before we made the decision are the same
+	// We perform filtering here to ensure that none of the proposed candidates have blocking PDBs or do-not-evict/do-not-disrupt pods scheduled to them
 	validationCandidates, err := GetCandidates(ctx, v.cluster, v.kubeClient, v.recorder, v.clock, v.cloudProvider, v.ShouldDisrupt, v.queue)
 	if err != nil {
 		return false, fmt.Errorf("constructing validation candidates, %w", err)
 	}
-	// Get the current representation of the proposed candidates from before the validation timeout
-	// We do this so that we can re-validate that the candidates that were computed before we made the decision are the same
-	// We perform filtering here to ensure that none of the proposed candidates have blocking PDBs or do-not-evict/do-not-disrupt pods scheduled to them
 	validationCandidates = mapCandidates(cmd.candidates, validationCandidates)
 	// If we filtered out any candidates, return false as some NodeClaims in the consolidation decision have changed.
 	if len(validationCandidates) != len(cmd.candidates) {

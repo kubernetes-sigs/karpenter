@@ -18,12 +18,12 @@ package disruption
 
 import (
 	"context"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	podutil "sigs.k8s.io/karpenter/pkg/utils/pod"
@@ -32,13 +32,15 @@ import (
 // PDBLimits is used to evaluate if evicting a list of pods is possible.
 type PDBLimits struct {
 	ctx        context.Context
+	clk        clock.Clock
 	kubeClient client.Client
 	pdbs       []*pdbItem
 }
 
-func NewPDBLimits(ctx context.Context, kubeClient client.Client) (*PDBLimits, error) {
+func NewPDBLimits(ctx context.Context, clk clock.Clock, kubeClient client.Client) (*PDBLimits, error) {
 	ps := &PDBLimits{
 		ctx:        ctx,
+		clk:        clk,
 		kubeClient: kubeClient,
 	}
 
@@ -62,9 +64,9 @@ func NewPDBLimits(ctx context.Context, kubeClient client.Client) (*PDBLimits, er
 // nolint:gocyclo
 func (s *PDBLimits) CanEvictPods(pods []*v1.Pod) (client.ObjectKey, bool) {
 	for _, pod := range pods {
-		// If the pod isn't an "active" pod or isn't eligible for being evicted, then a fully blocking PDB doesn't matter
+		// If the pod isn't eligible for being evicted, then a fully blocking PDB doesn't matter
 		// This is due to the fact that we won't call the eviction API on these pods when we are disrupting the node
-		if !podutil.IsActive(pod) || !podutil.IsEvictable(pod, time.Now()) {
+		if !podutil.IsEvictable(pod) {
 			continue
 		}
 		for _, pdb := range s.pdbs {

@@ -21,6 +21,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/utils/clock"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -36,28 +37,37 @@ func IsActive(pod *v1.Pod) bool {
 }
 
 // IsReschedulable checks if a Karpenter should consider this pod when re-scheduling to new capacity by ensuring that the pod:
-// - Isn't a terminal pod (Failed or Succeeded)
-// - Isn't actively terminating
+// - Is an active pod (isn't terminal or actively terminating)
 // - Isn't owned by a DaemonSet
 // - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
 func IsReschedulable(pod *v1.Pod) bool {
 	// these pods don't need to be rescheduled
-	return !IsTerminal(pod) &&
-		!IsTerminating(pod) &&
+	return IsActive(pod) &&
 		!IsOwnedByDaemonSet(pod) &&
 		!IsOwnedByNode(pod)
 }
 
 // IsEvictable checks if a pod is evictable by Karpenter by ensuring that the pod:
+// - Is an active pod (isn't terminal or actively terminating)
 // - Doesn't tolerate the "karepnter.sh/disruption=disrupting" taint
+// - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
+func IsEvictable(pod *v1.Pod) bool {
+	return IsActive(pod) &&
+		!ToleratesDisruptionNoScheduleTaint(pod) &&
+		!IsOwnedByNode(pod)
+}
+
+// IsWaitingEviction checks if this is a pod that we are waiting to be removed from the node by ensuring that the pod:
 // - Isn't a terminal pod (Failed or Succeeded)
 // - Isn't a pod that has been terminating past its terminationGracePeriodSeconds
+// - Doesn't tolerate the "karepnter.sh/disruption=disrupting" taint
 // - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
-func IsEvictable(pod *v1.Pod, now time.Time) bool {
-	return !ToleratesDisruptionNoScheduleTaint(pod) &&
-		!IsTerminal(pod) &&
-		!IsStuckTerminating(pod, now) &&
-		// Mirror pods cannot be deleted through the apiserver since they can't be controller
+func IsWaitingEviction(pod *v1.Pod, clk clock.Clock) bool {
+	return !IsTerminal(pod) &&
+		!IsStuckTerminating(pod, clk) &&
+		!ToleratesDisruptionNoScheduleTaint(pod) &&
+		// Mirror pods cannot be deleted through the API server since they are created and managed by kubelet
+		// This means they are effectively read-only and can't be controlled by API server calls
 		// https://kubernetes.io/docs/reference/generated/kubectl/kubectl-commands#drain
 		!IsOwnedByNode(pod)
 }
@@ -74,6 +84,14 @@ func IsProvisionable(pod *v1.Pod) bool {
 		!IsPreempting(pod) &&
 		!IsOwnedByDaemonSet(pod) &&
 		!IsOwnedByNode(pod)
+}
+
+// IsDisruptable checks if a pod can be disrupted based on validating the `karpenter.sh/do-not-disrupt` annotation on the pod.
+// It checks whether the following is true for the pod:
+// - Has the `karpenter.sh/do-not-disrupt` annotation
+// - Is an actively running pod
+func IsDisruptable(pod *v1.Pod) bool {
+	return !(IsActive(pod) && HasDoNotDisrupt(pod))
 }
 
 func FailedToSchedule(pod *v1.Pod) bool {
@@ -101,13 +119,10 @@ func IsTerminating(pod *v1.Pod) bool {
 	return pod.DeletionTimestamp != nil
 }
 
-func IsStuckTerminating(pod *v1.Pod, now time.Time) bool {
-	if pod.DeletionTimestamp.IsZero() {
-		return false
-	}
+func IsStuckTerminating(pod *v1.Pod, clk clock.Clock) bool {
 	// The pod DeletionTimestamp will be set to the time the pod was deleted plus its
 	// grace period in seconds. We give an additional minute as a buffer
-	return now.After(pod.DeletionTimestamp.Time.Add(time.Minute))
+	return IsTerminating(pod) && clk.Since(pod.DeletionTimestamp.Time) > time.Minute
 }
 
 func IsOwnedByDaemonSet(pod *v1.Pod) bool {

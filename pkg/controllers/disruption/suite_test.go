@@ -502,7 +502,7 @@ var _ = Describe("Candidate Filtering", func() {
 			}),
 		}
 		var err error
-		pdbLimits, err = disruption.NewPDBLimits(ctx, env.Client)
+		pdbLimits, err = disruption.NewPDBLimits(ctx, fakeClock, env.Client)
 		Expect(err).ToNot(HaveOccurred())
 	})
 	It("should not consider candidates that have do-not-disrupt pods scheduled", func() {
@@ -728,7 +728,7 @@ var _ = Describe("Candidate Filtering", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		var err error
-		pdbLimits, err = disruption.NewPDBLimits(ctx, env.Client)
+		pdbLimits, err = disruption.NewPDBLimits(ctx, fakeClock, env.Client)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
@@ -775,7 +775,7 @@ var _ = Describe("Candidate Filtering", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		var err error
-		pdbLimits, err = disruption.NewPDBLimits(ctx, env.Client)
+		pdbLimits, err = disruption.NewPDBLimits(ctx, fakeClock, env.Client)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
@@ -821,7 +821,7 @@ var _ = Describe("Candidate Filtering", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		var err error
-		pdbLimits, err = disruption.NewPDBLimits(ctx, env.Client)
+		pdbLimits, err = disruption.NewPDBLimits(ctx, fakeClock, env.Client)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
@@ -865,7 +865,7 @@ var _ = Describe("Candidate Filtering", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		var err error
-		pdbLimits, err = disruption.NewPDBLimits(ctx, env.Client)
+		pdbLimits, err = disruption.NewPDBLimits(ctx, fakeClock, env.Client)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
@@ -903,7 +903,7 @@ var _ = Describe("Candidate Filtering", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		var err error
-		pdbLimits, err = disruption.NewPDBLimits(ctx, env.Client)
+		pdbLimits, err = disruption.NewPDBLimits(ctx, fakeClock, env.Client)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(cluster.Nodes()).To(HaveLen(1))

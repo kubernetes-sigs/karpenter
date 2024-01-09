@@ -122,14 +122,14 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	for _, po := range pods {
 		// We only consider pods that are actively running for "karpenter.sh/do-not-disrupt"
 		// This means that we will allow Mirror Pods and DaemonSets to block disruption using this annotation
-		if pod.IsActive(po) && pod.HasDoNotDisrupt(po) {
+		if !pod.IsDisruptable(po) {
 			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf(`Pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(po)))...)
 			return nil, fmt.Errorf(`pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(po))
 		}
 	}
-	if pdb, ok := pdbs.CanEvictPods(pods); !ok {
-		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("PDB %q prevents pod evictions", pdb))...)
-		return nil, fmt.Errorf("pdb %q prevents pod evictions", pdb)
+	if pdbKey, ok := pdbs.CanEvictPods(pods); !ok {
+		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("PDB %q prevents pod evictions", pdbKey))...)
+		return nil, fmt.Errorf("pdb %q prevents pod evictions", pdbKey)
 	}
 	return &Candidate{
 		StateNode:         node.DeepCopy(),

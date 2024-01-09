@@ -179,14 +179,14 @@ func (p *Provisioner) consolidationWarnings(ctx context.Context, po *v1.Pod) {
 	if po.Spec.Affinity != nil && po.Spec.Affinity.PodAntiAffinity != nil {
 		if len(po.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) != 0 {
 			if p.cm.HasChanged(string(po.UID), "pod-antiaffinity") {
-				logging.FromContext(ctx).Infof("pod %s has a preferred Anti-Affinity which can prevent consolidation", client.ObjectKeyFromObject(po))
+				logging.FromContext(ctx).Infof("pod %q has a preferred Anti-Affinity which can prevent consolidation", client.ObjectKeyFromObject(po))
 			}
 		}
 	}
 	for _, tsc := range po.Spec.TopologySpreadConstraints {
 		if tsc.WhenUnsatisfiable == v1.ScheduleAnyway {
 			if p.cm.HasChanged(string(po.UID), "pod-topology-spread") {
-				logging.FromContext(ctx).Infof("pod %s has a preferred TopologySpreadConstraint which can prevent consolidation", client.ObjectKeyFromObject(po))
+				logging.FromContext(ctx).Infof("pod %q has a preferred TopologySpreadConstraint which can prevent consolidation", client.ObjectKeyFromObject(po))
 			}
 		}
 	}

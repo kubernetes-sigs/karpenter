@@ -19,7 +19,6 @@ package node
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -51,17 +50,6 @@ func GetReschedulablePods(ctx context.Context, kubeClient client.Client, nodes .
 	}
 	return lo.Filter(pods, func(p *v1.Pod, _ int) bool {
 		return pod.IsReschedulable(p)
-	}), nil
-}
-
-// GetEvictablePods grabs all pods from the passed nodes that satisfy the IsEvictable criteria
-func GetEvictablePods(ctx context.Context, kubeClient client.Client, now time.Time, nodes ...*v1.Node) ([]*v1.Pod, error) {
-	pods, err := GetPods(ctx, kubeClient, nodes...)
-	if err != nil {
-		return nil, fmt.Errorf("listing pods, %w", err)
-	}
-	return lo.Filter(pods, func(p *v1.Pod, _ int) bool {
-		return pod.IsEvictable(p, now)
 	}), nil
 }
 

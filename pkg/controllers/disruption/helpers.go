@@ -158,7 +158,7 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 	if err != nil {
 		return nil, err
 	}
-	pdbs, err := NewPDBLimits(ctx, kubeClient)
+	pdbs, err := NewPDBLimits(ctx, clk, kubeClient)
 	if err != nil {
 		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
