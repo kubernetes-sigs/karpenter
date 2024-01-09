@@ -13,7 +13,7 @@ The full set of instance types for the KwoK Cloud Provider should be at least th
 
 ```md
 1. Instance Type Name: (family)-(size)
-    a. size: 1x, 2x, 4x, 8x, 16x, 32x, 48x, 64x, 96x, 128x, 192x, 256x
+    a. size: 1x, 2x, 4x, 9x, 16x, 32x, 48x, 64x, 100x, 128x, 192x, 256x
     b. family: c (cpu), s (standard), m (memory)
         i. c ---> 1 vCPU : 2 GiB
         ii. s --> 1 vCPU : 4 GiB
@@ -22,7 +22,7 @@ The full set of instance types for the KwoK Cloud Provider should be at least th
 ```
 
 #### Size
-While AWS uses `medium`, `large`, `xlarge`, `2xlarge`, `4xlarge` and so on, AKS (include cpu value in name) and GCE (suffixed with cpu value) use a different naming convention, generally increasing in offering sizes by a factor of 1.5x or 2x.
+While AWS uses `medium`, `large`, `xlarge`, `2xlarge`, `4xlarge` and so on, AKS (include cpu value in name) and GCE (suffixed with cpu value) use a different naming convention, generally increasing in offering sizes by a factor of 1.5x or 2x. In addition, in case the factors of 1.5x and 2x are incorrectly modeled, we'll add in the 9x and 100x instance sizes. 
 
 #### Ratios
 AWS Instance Types fall under many "Instance Families" that give a high level overview to why a user may want to use the instance type. AWS `m` instance types are labeled General Purpose, and `c` and `r` represent Compute Optimized and Memory Optimized, most easily compared by the ratio of Memory per vCPU. Defining these ratios is important to test Karpenter's bin-packing value, where applications with more resource-skewed requirements can be more cost effectively bin-packed. 
