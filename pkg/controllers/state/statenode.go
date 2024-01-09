@@ -176,6 +176,9 @@ func (in *StateNode) Labels() map[string]string {
 }
 
 func (in *StateNode) Taints() []v1.Taint {
+	// If we have a managed node that isn't registered, we should use its NodeClaim
+	// representation of taints. Likewise, if we don't have a Node representation for this
+	// providerID in our state, we should also just use the NodeClaim since this is all that we have
 	var taints []v1.Taint
 	if (!in.Registered() && in.Managed()) || in.Node == nil {
 		taints = in.NodeClaim.Spec.Taints
@@ -200,9 +203,8 @@ func (in *StateNode) Taints() []v1.Taint {
 			}
 			return false
 		})
-	} else {
-		return taints
 	}
+	return taints
 }
 
 func (in *StateNode) Registered() bool {
