@@ -102,7 +102,7 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 	requests := resources.Merge(n.Spec.Resources.Requests, resources.RequestsForPods(pod))
 	filtered := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, requests)
 	if len(filtered.remaining) == 0 {
-		return fmt.Errorf(filtered.reason)
+		return fmt.Errorf("no instance type satisfied resources and requirements")
 	}
 
 	// Update node
@@ -191,19 +191,19 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 			results.remaining = append(results.remaining, it)
 		} else {
 			if !itFits && !itHasOffering && !results.requirementsMet {
-				results.reason = fmt.Sprintf("%s, %s, %s, %s", it.Name, itUnfitReason, offeringReason, it.Requirements.Intersects(requirements))
+				fmt.Printf("%s, %s, %s, %s", it.Name, itUnfitReason, offeringReason, it.Requirements.Intersects(requirements))
 			} else if !itFits && !itHasOffering {
-				results.reason = fmt.Sprintf("%s, %s, %s", it.Name, itUnfitReason, offeringReason)
+				fmt.Printf("%s, %s, %s", it.Name, itUnfitReason, offeringReason)
 			} else if !itCompat && !itHasOffering {
-				results.reason = fmt.Sprintf("%s, %s, %s", it.Name, it.Requirements.Intersects(requirements), offeringReason)
+				fmt.Printf("%s, %s, %s", it.Name, it.Requirements.Intersects(requirements), offeringReason)
 			} else if !itCompat && !itFits {
-				results.reason = fmt.Sprintf("%s, %s, %s", it.Name, it.Requirements.Intersects(requirements), itUnfitReason)
+				fmt.Printf("%s, %s, %s", it.Name, it.Requirements.Intersects(requirements), itUnfitReason)
 			} else if !itCompat {
-				results.reason = fmt.Sprintf("%s, %s", it.Name, it.Requirements.Intersects(requirements))
+				fmt.Printf("%s, %s", it.Name, it.Requirements.Intersects(requirements))
 			} else if !itFits {
-				results.reason = fmt.Sprintf("%s, %s", it.Name, itUnfitReason)
+				fmt.Printf("%s, %s", it.Name, itUnfitReason)
 			} else if !itHasOffering {
-				results.reason = fmt.Sprintf("%s, %s", it.Name, offeringReason)
+				fmt.Printf("%s, %s", it.Name, offeringReason)
 			}
 		}
 	}
