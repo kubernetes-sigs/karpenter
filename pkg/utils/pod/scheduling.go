@@ -26,8 +26,8 @@ import (
 )
 
 func IsProvisionable(pod *v1.Pod) bool {
-	return !IsScheduled(pod) &&
-		!IsPreempting(pod) &&
+	// return !IsScheduled(pod) &&
+	return !IsPreempting(pod) &&
 		FailedToSchedule(pod) &&
 		!IsOwnedByDaemonSet(pod) &&
 		!IsOwnedByNode(pod)

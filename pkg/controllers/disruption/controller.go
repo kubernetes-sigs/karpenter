@@ -25,6 +25,7 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -35,6 +36,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -165,7 +167,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	}
 
 	// Determine the disruption action
-	cmd, err := disruption.ComputeCommand(ctx, disruptionBudgetMapping, candidates...)
+	cmd, nominatedNodes, err := disruption.ComputeCommand(ctx, disruptionBudgetMapping, candidates...)
 	if err != nil {
 		return false, fmt.Errorf("computing disruption decision, %w", err)
 	}
@@ -174,7 +176,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	}
 
 	// Attempt to disrupt
-	if err := c.executeCommand(ctx, disruption, cmd); err != nil {
+	if err := c.executeCommand(ctx, disruption, cmd, nominatedNodes); err != nil {
 		return false, fmt.Errorf("disrupting candidates, %w", err)
 	}
 
@@ -185,7 +187,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 // 1. Taint candidate nodes
 // 2. Spin up replacement nodes
 // 3. Add Command to orchestration.Queue to wait to delete the candiates.
-func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) error {
+func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, nominatedNodes sets.Set[*scheduling.ExistingNode]) error {
 	disruptionActionsPerformedCounter.With(map[string]string{
 		actionLabel:            string(cmd.Action()),
 		methodLabel:            m.Type(),
@@ -208,6 +210,14 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 			// If we failed to launch the replacement, don't disrupt.  If this is some permanent failure,
 			// we don't want to disrupt workloads with no way to provision new nodes for them.
 			return multierr.Append(fmt.Errorf("launching replacement nodeclaim, %w", err), state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...))
+		}
+	}
+
+	// Nominate each node for scheduling and emit pod nomination events
+	for node := range nominatedNodes {
+		c.cluster.NominateNodeForPod(ctx, node.ProviderID())
+		for _, pod := range node.Pods {
+			c.recorder.Publish(scheduling.NominatePodEvent(pod, node.Node, node.NodeClaim))
 		}
 	}
 

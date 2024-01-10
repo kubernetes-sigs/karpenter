@@ -22,11 +22,14 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/samber/lo"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -72,10 +75,10 @@ func (d *Drift) filterAndSortCandidates(ctx context.Context, candidates []*Candi
 // ComputeCommand generates a disruption command given candidates
 //
 //nolint:gocyclo
-func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
+func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, sets.Set[*pscheduling.ExistingNode], error) {
 	candidates, err := d.filterAndSortCandidates(ctx, candidates)
 	if err != nil {
-		return Command{}, err
+		return Command{}, nil, err
 	}
 	disruptionEligibleNodesGauge.With(map[string]string{
 		methodLabel:            d.Type(),
@@ -101,7 +104,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 	if len(empty) > 0 {
 		return Command{
 			candidates: empty,
-		}, nil
+		}, nil, nil
 	}
 
 	for _, candidate := range candidates {
@@ -118,24 +121,23 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 			if errors.Is(err, errCandidateDeleting) {
 				continue
 			}
-			return Command{}, err
+			return Command{}, nil, err
 		}
 		// Emit an event that we couldn't reschedule the pods on the node.
 		if !results.AllNonPendingPodsScheduled() {
 			d.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
 			continue
 		}
-		if len(results.NewNodeClaims) == 0 {
-			return Command{
-				candidates: []*Candidate{candidate},
-			}, nil
-		}
+		// Only return the existing nodes that had pods scheduled to it
+		nominatedNodes := sets.New[*pscheduling.ExistingNode](lo.Filter(results.ExistingNodes, func(n *pscheduling.ExistingNode, _ int) bool {
+			return len(n.Pods) > 0
+		})...)
 		return Command{
 			candidates:   []*Candidate{candidate},
 			replacements: results.NewNodeClaims,
-		}, nil
+		}, nominatedNodes, nil
 	}
-	return Command{}, nil
+	return Command{}, nil, nil
 }
 
 func (d *Drift) Type() string {

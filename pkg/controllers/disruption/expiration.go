@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/samber/lo"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 
 	"knative.dev/pkg/logging"
@@ -30,6 +32,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -75,10 +78,10 @@ func (e *Expiration) filterAndSortCandidates(ctx context.Context, candidates []*
 }
 
 // ComputeCommand generates a disrpution command given candidates
-func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
+func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, sets.Set[*pscheduling.ExistingNode], error) {
 	candidates, err := e.filterAndSortCandidates(ctx, candidates)
 	if err != nil {
-		return Command{}, fmt.Errorf("filtering candidates, %w", err)
+		return Command{}, nil, fmt.Errorf("filtering candidates, %w", err)
 	}
 	disruptionEligibleNodesGauge.With(map[string]string{
 		methodLabel:            e.Type(),
@@ -104,7 +107,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping
 	if len(empty) > 0 {
 		return Command{
 			candidates: empty,
-		}, nil
+		}, nil, nil
 	}
 
 	for _, candidate := range candidates {
@@ -121,21 +124,24 @@ func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping
 			if errors.Is(err, errCandidateDeleting) {
 				continue
 			}
-			return Command{}, err
+			return Command{}, nil, err
 		}
 		// Emit an event that we couldn't reschedule the pods on the node.
 		if !results.AllNonPendingPodsScheduled() {
 			e.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
 			continue
 		}
-
+		// Only return the existing nodes that had pods scheduled to it
+		nominatedNodes := sets.New[*pscheduling.ExistingNode](lo.Filter(results.ExistingNodes, func(n *pscheduling.ExistingNode, _ int) bool {
+			return len(n.Pods) > 0
+		})...)
 		logging.FromContext(ctx).With("ttl", candidates[0].nodePool.Spec.Disruption.ExpireAfter.String()).Infof("triggering termination for expired node after TTL")
 		return Command{
 			candidates:   []*Candidate{candidate},
 			replacements: results.NewNodeClaims,
-		}, nil
+		}, nominatedNodes, nil
 	}
-	return Command{}, nil
+	return Command{}, nil, nil
 }
 
 func (e *Expiration) Type() string {
