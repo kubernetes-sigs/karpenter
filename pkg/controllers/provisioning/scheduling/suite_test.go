@@ -2382,7 +2382,9 @@ var _ = Context("NodePool", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, node)
+			ExpectMakeNodesInitialized(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
 			opts := test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
 				Requests: map[v1.ResourceName]resource.Quantity{
 					v1.ResourceCPU: resource.MustParse("10m"),
@@ -2406,7 +2408,9 @@ var _ = Context("NodePool", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, node)
+			ExpectMakeNodesInitialized(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
 			opts := test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
 				Requests: map[v1.ResourceName]resource.Quantity{
 					v1.ResourceCPU: resource.MustParse("10m"),
