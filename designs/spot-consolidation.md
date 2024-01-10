@@ -12,7 +12,9 @@ All consolidation actions contain an inherent tradeoff between price and availab
 
 ### 1: Minimum Flexibility [Recommended] 
 
-Karpenter could skip consolidation if the number of potential replacement instance types were below a threshold (e.g. 20). To avoid repeat interruptions, e.g. "walking down the ladder", Karpenter would have to limit its flexibility to this threshold. By ensuring that we have a minimum flexibility in our launch decisions, we can be assured that we have enough instance diversity that it's very unlikely that all instances that we select will have high interruption. Further, Karpenter would have to limit its flexibility during the launch scenario as well, else face an immediate consolidation if the launched instance type’s price were more than the price of any instance type under the flexibility threshold. Since on-demand capacity uses the lowest price strategy, its behavior is unaffected if these rules are applied equally to both spot and on-demand launches.
+Karpenter will replace a spot node with a cheaper spot node for both single and multi-node consolidation but with an additional condition for single-node consolidation. Cheaper spot instance types are selected with the `price-capacity-optimized` strategy and often the cheapest spot instance type is not launched due to the likelihood of interruption. Karpenter would replace spot node for single-node consolidation only if there are more than 15 potential replacement spot instance types. Karpenter would have to limit its flexibility to this threshold to avoid repeat interruptions, e.g. "walking down the ladder". By ensuring that we have a minimum flexibility in our launch decisions, we can be assured that we have enough instance diversity that it's very unlikely that all instances that we select will have high interruption. Further, Karpenter would have to limit its flexibility during the launch scenario as well, else face an immediate consolidation if the launched instance type’s price were more than the price of any instance type under the flexibility threshold. Since on-demand capacity uses the lowest price strategy, its behavior is unaffected if these rules are applied equally to both spot and on-demand launches.
+
+The decision of requiring a flexibility of 15 spot instance types is arrived after an analysis done on the flexiblity of AWS customers request today in the launch path.
 
 Conceptually, this approach is straightforward to explain to customers and directly aligned with Spot best practices. Some customers may be disappointed by the flexibility requirement, but given the current lack of support for spot consolidation, it’s net positive from the status quo. While there may be valid use cases for customers to trade interruption rate for lower prices, we should delay enabling customers to configure this value until the use cases are better understood. 
 
@@ -78,13 +80,15 @@ Option 1 is straightforward to explain to customers and can be implemented easil
 
 ### 1. Minimum Flexibility Example
 
+Multi-node consolidation for spot instances works the same as it does for on-demand instances today. So below example only targets single-node consolidation.
+
 Assume we have instance types sorted in ascending price order I0, I1, ..., I500 and in this example our pods can always schedule on a node if its more expensive than the current one. This isn't realistic, but works for our example.
 
-We have a set of pending pods and need to launch a spot node. The cheapest instance that would suffice is I50, so we send a CreateFleet request with the cheapest type that would work and the next 19 more expensive types that could also work I50, I51, ..., I69. We get back an I55 from PCO.
+We have a set of pending pods and need to launch a spot node. The cheapest instance that would suffice is I50, so we send a CreateInstanceFromTypes request with the cheapest type that would work and the next 19 more expensive types that could also work I50, I51, ..., I69. We get back an I55 from PCO.
 
 One pod exits, and now an I40 would work. We don't consolidate spot → spot here since the set of candidates we might consolidate to (I40, I41, ... I59) already includes the current type, an I55. 
 
-Another pod exits, and now an I30 would work. We consolidate spot → spot and send a CreateFleet request for I30, I31, ..., I49.
+Another pod exits, and now an I30 would work. We consolidate spot → spot and send a CreateInstanceFromTypes request for I30, I31, ..., I49.
 
 ### 2. Price Factor Example
 
