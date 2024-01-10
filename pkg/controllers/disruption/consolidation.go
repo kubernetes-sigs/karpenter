@@ -25,6 +25,7 @@ import (
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -115,15 +116,15 @@ func (c *consolidation) sortCandidates(candidates []*Candidate) []*Candidate {
 // computeConsolidation computes a consolidation action to take
 //
 // nolint:gocyclo
-func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...*Candidate) (Command, error) {
+func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...*Candidate) (Command, sets.Set[*pscheduling.ExistingNode], error) {
 	// Run scheduling simulation to compute consolidation option
 	results, err := SimulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, candidates...)
 	if err != nil {
 		// if a candidate node is now deleting, just retry
 		if errors.Is(err, errCandidateDeleting) {
-			return Command{}, nil
+			return Command{}, nil, nil
 		}
-		return Command{}, err
+		return Command{}, nil, err
 	}
 
 	// if not all of the pods were scheduled, we can't do anything
@@ -132,14 +133,18 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		if len(candidates) == 1 {
 			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, results.NonPendingPodSchedulingErrors())...)
 		}
-		return Command{}, nil
+		return Command{}, nil, nil
 	}
+	// Only return the existing nodes that had pods scheduled to it
+	nominatedNodes := sets.New[*pscheduling.ExistingNode](lo.Filter(results.ExistingNodes, func(n *pscheduling.ExistingNode, _ int) bool {
+		return len(n.Pods) > 0
+	})...)
 
 	// were we able to schedule all the pods on the inflight candidates?
 	if len(results.NewNodeClaims) == 0 {
 		return Command{
 			candidates: candidates,
-		}, nil
+		}, nominatedNodes, nil
 	}
 
 	// we're not going to turn a single node into multiple candidates
@@ -147,14 +152,22 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		if len(candidates) == 1 {
 			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("Can't remove without creating %d candidates", len(results.NewNodeClaims)))...)
 		}
-		return Command{}, nil
+		return Command{}, nil, nil
 	}
 
 	// get the current node price based on the offering
 	// fallback if we can't find the specific zonal pricing data
 	candidatePrice, err := getCandidatePrices(candidates)
 	if err != nil {
-		return Command{}, fmt.Errorf("getting offering price from candidate node, %w", err)
+		return Command{}, nil, fmt.Errorf("getting offering price from candidate node, %w", err)
+	}
+	results.NewNodeClaims[0].InstanceTypeOptions = filterByPrice(results.NewNodeClaims[0].InstanceTypeOptions, results.NewNodeClaims[0].Requirements, candidatePrice)
+	if len(results.NewNodeClaims[0].InstanceTypeOptions) == 0 {
+		if len(candidates) == 1 {
+			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace with a cheaper node")...)
+		}
+		// no instance types remain after filtering by price
+		return Command{}, nil, nil
 	}
 
 	allExistingAreSpot := true
@@ -178,8 +191,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		if len(candidates) == 1 {
 			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace with a cheaper node")...)
 		}
-		// no instance types remain after filtering by price
-		return Command{}, nil
+		return Command{}, nil, nil
 	}
 
 	// We are consolidating a node from OD -> [OD,Spot] but have filtered the instance types by cost based on the
@@ -194,7 +206,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	return Command{
 		candidates:   candidates,
 		replacements: results.NewNodeClaims,
-	}, nil
+	}, nominatedNodes, nil
 }
 
 // Compute command to execute spot-to-spot consolidation if:

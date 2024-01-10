@@ -66,10 +66,10 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		if s.clock.Now().After(timeout) {
 			disruptionConsolidationTimeoutTotalCounter.WithLabelValues(s.ConsolidationType()).Inc()
 			logging.FromContext(ctx).Debugf("abandoning single-node consolidation due to timeout after evaluating %d candidates", i)
-			return Command{}, nil
+			return Command{}, nil, nil
 		}
 		// compute a possible consolidation option
-		cmd, err := s.computeConsolidation(ctx, candidate)
+		cmd, nominatedNodes, err := s.computeConsolidation(ctx, candidate)
 		if err != nil {
 			logging.FromContext(ctx).Errorf("computing consolidation %s", err)
 			continue
@@ -79,13 +79,13 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		}
 		isValid, err := v.IsValid(ctx, cmd)
 		if err != nil {
-			return Command{}, fmt.Errorf("validating consolidation, %w", err)
+			return Command{}, nil, fmt.Errorf("validating consolidation, %w", err)
 		}
 		if !isValid {
 			logging.FromContext(ctx).Debugf("abandoning single-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
-			return Command{}, nil
+			return Command{}, nil, nil
 		}
-		return cmd, nil
+		return cmd, nominatedNodes, nil
 	}
 	if !constrainedByBudgets {
 		// if there are no candidates because of a budget, don't mark

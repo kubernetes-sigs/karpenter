@@ -23,6 +23,7 @@ import (
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,10 +41,14 @@ import (
 
 type Method interface {
 	ShouldDisrupt(context.Context, *Candidate) bool
-	ComputeCommand(context.Context, map[string]int, ...*Candidate) (Command, error)
+	ComputeCommand(context.Context, map[string]int, ...*Candidate) (Command, sets.Set[*scheduling.ExistingNode], error)
 	Type() string
 	ConsolidationType() string
 }
+
+// NominatedNodes is a set of node/nodeclaim provider IDs that were nominated for a scheduling simulation.
+// This is used to emit nomination events when we finish executing a command.
+type NominatedNodes sets.Set[*scheduling.ExistingNode]
 
 type CandidateFilter func(context.Context, *Candidate) bool
 

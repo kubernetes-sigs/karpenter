@@ -84,13 +84,13 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	// cluster.IsNodeNominated already).
 	select {
 	case <-ctx.Done():
-		return Command{}, errors.New("interrupted")
+		return Command{}, nil, errors.New("interrupted")
 	case <-c.clock.After(consolidationTTL):
 	}
 	validationCandidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, c.ShouldDisrupt, c.queue)
 	if err != nil {
 		logging.FromContext(ctx).Errorf("computing validation candidates %s", err)
-		return Command{}, err
+		return Command{}, nil, err
 	}
 	// Get the current representation of the proposed candidates from before the validation timeout
 	// We do this so that we can re-validate that the candidates that were computed before we made the decision are the same
@@ -98,7 +98,7 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 
 	postValidationMapping, err := BuildDisruptionBudgets(ctx, c.cluster, c.clock, c.kubeClient, c.recorder)
 	if err != nil {
-		return Command{}, fmt.Errorf("building disruption budgets, %w", err)
+		return Command{}, nil, fmt.Errorf("building disruption budgets, %w", err)
 	}
 
 	// The deletion of empty NodeClaims is easy to validate, we just ensure that:
@@ -108,11 +108,11 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	for _, n := range candidatesToDelete {
 		if len(n.reschedulablePods) != 0 || c.cluster.IsNodeNominated(n.ProviderID()) || postValidationMapping[n.nodePool.Name] == 0 {
 			logging.FromContext(ctx).Debugf("abandoning empty node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
-			return Command{}, nil
+			return Command{}, nil, nil
 		}
 		postValidationMapping[n.nodePool.Name]--
 	}
-	return cmd, nil
+	return cmd, nil, nil
 }
 
 func (c *EmptyNodeConsolidation) Type() string {

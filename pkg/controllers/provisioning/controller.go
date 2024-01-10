@@ -25,10 +25,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/events"
 	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
+	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
@@ -71,6 +73,17 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontr
 	return operatorcontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1.Pod{}).
+		// Only enqueue pods that have the node name not set. We do this here so that we can enqueue the pod
+		// requests from nodes that are deleting
+		WithEventFilter(predicate.NewPredicateFuncs(func(o client.Object) bool {
+			pod := o.(*v1.Pod)
+			return pod.Spec.NodeName == ""
+		})).
+		//
+		Watches(
+			&v1.Node{},
+			nodeclaimutil.NodeEventHandlerToPods(c.kubeClient),
+		).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
 	)
 }
