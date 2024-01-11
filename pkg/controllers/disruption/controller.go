@@ -207,7 +207,6 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, 
 			return multierr.Append(fmt.Errorf("launching replacement nodeclaim (command-id: %s), %w", commandID, err), state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...))
 		}
 	}
-
 	// Nominate each node for scheduling and emit pod nomination events
 	for node := range nominatedNodes {
 		c.cluster.NominateNodeForPod(ctx, node.ProviderID())
