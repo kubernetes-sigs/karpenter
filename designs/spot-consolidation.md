@@ -8,7 +8,7 @@ Karpenter’s consolidation algorithm minimizes the price of EC2 instances given
 
 All consolidation actions contain an inherent tradeoff between price and availability. Consolidation actions are equivalent to a spot interruption, but without the deadline. This tradeoff applies to on-demand capacity, as well. This document explores approaches to enable consolidation for spot instances without regressing to lowest price. 
 
-Each of the below solution works on a certain heuristics because most cloud providers don't surface capacity pool information for spot which presents unique challenges to efficiently select a certain spot instance Type that would cater to better price and availability with respect to the current node. Hence, the idea is to enable the consolidation based on different heuristics so that it makes sense to re-size the nodes only when there is significant cost benefit. 
+Each of the below solution works on a certain heuristics because most cloud providers don't surface capacity pool information for spot which presents unique challenges to efficiently select a certain spot instance type that would cater to better price and availability with respect to the current node. Hence, the idea is to enable the consolidation based on different heuristics so that it makes sense to re-size the nodes only when there is significant cost benefit.
 
 ## Design Options
 
@@ -49,7 +49,7 @@ Note: Regardless of the decision made to solve the spot consolidation problem, w
 
 ### 3. Optimistically Launch Replacements
 
-Karpenter could optimistically launch new EC2 instances to probe PCO decision making. If PCO launches a cheaper instance type from a CreateFleet request that include the current instance type, we know that the instance is both lower price and lower interruption rate. If the PCO algorithm selects the current instance type of the running instance, Karpenter would terminate the new instance and leave the current instance running. This approach would need to include an optimistic launch cache to minimize the number of optimistic launches.
+Karpenter could optimistically launch new EC2 instances to probe PCO decision making. If PCO launches a cheaper instance type from a CreateInstanceFromTypes request that include the current instance type, we know that the instance is both lower price and lower interruption rate. If the PCO algorithm selects the current instance type of the running instance, Karpenter would terminate the new instance and leave the current instance running. This approach would need to include an optimistic launch cache to minimize the number of optimistic launches.
 
 * 👍👍👍 Prevents consolidation from regressing to a lowest price allocation strategy
 * 👎 May not make sense for all cloud providers
