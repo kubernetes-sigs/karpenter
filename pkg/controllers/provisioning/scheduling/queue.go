@@ -34,8 +34,8 @@ type Queue struct {
 }
 
 // NewQueue constructs a new queue given the input pods, sorting them to optimize for bin-packing into nodes.
-func NewQueue(pods ...*v1.Pod) *Queue {
-	sort.Slice(pods, byCPUAndMemoryDescending(pods))
+func NewQueue(sortingFunction func(i, j int) bool, pods ...*v1.Pod) *Queue {
+	sort.Slice(pods, sortingFunction)
 	return &Queue{
 		pods:    pods,
 		lastLen: map[types.UID]int{},
@@ -73,7 +73,22 @@ func (q *Queue) List() []*v1.Pod {
 	return q.pods
 }
 
-func byCPUAndMemoryDescending(pods []*v1.Pod) func(i int, j int) bool {
+func ByDeletingThenCPUAndMemoryDescending(pods []*v1.Pod) func(i, j int) bool {
+	return func(i, j int) bool {
+		lhsPod := pods[i]
+		rhsPod := pods[j]
+
+		// Order pods that are scheduled first. We should treat pods that are already running as priority.
+		if lhsPod.Spec.NodeName != "" && rhsPod.Spec.NodeName == "" {
+			return true
+		} else if lhsPod.Spec.NodeName == "" && rhsPod.Spec.NodeName != "" {
+			return false
+		}
+		return ByCPUAndMemoryDescending(pods)(i, j)
+	}
+}
+
+func ByCPUAndMemoryDescending(pods []*v1.Pod) func(i int, j int) bool {
 	return func(i, j int) bool {
 		lhsPod := pods[i]
 		rhsPod := pods[j]

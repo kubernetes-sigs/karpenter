@@ -58,7 +58,7 @@ func (c *Controller) Name() string {
 
 // Reconcile the resource
 func (c *Controller) Reconcile(_ context.Context, p *v1.Pod) (reconcile.Result, error) {
-	if !pod.IsProvisionable(p) {
+	if !pod.CanTriggerProvisioning(p) {
 		return reconcile.Result{}, nil
 	}
 	c.provisioner.Trigger()
@@ -76,10 +76,13 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontr
 		// Only enqueue pods that have the node name not set. We do this here so that we can enqueue the pod
 		// requests from nodes that are deleting
 		WithEventFilter(predicate.NewPredicateFuncs(func(o client.Object) bool {
-			pod := o.(*v1.Pod)
+			// If the event is not for a pod ignore this logic
+			pod, ok := o.(*v1.Pod)
+			if !ok {
+				return false
+			}
 			return pod.Spec.NodeName == ""
 		})).
-		//
 		Watches(
 			&v1.Node{},
 			nodeclaimutil.NodeEventHandlerToPods(c.kubeClient),

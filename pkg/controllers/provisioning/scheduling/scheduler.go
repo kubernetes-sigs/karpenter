@@ -138,6 +138,10 @@ func (r Results) NonPendingPodSchedulingErrors() string {
 }
 
 func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) *Results {
+	return s.SolveWithSorting(ctx, pods, ByCPUAndMemoryDescending(pods))
+}
+
+func (s *Scheduler) SolveWithSorting(ctx context.Context, pods []*v1.Pod, sortingFunction func(i, j int) bool) *Results {
 	defer metrics.Measure(schedulingSimulationDuration)()
 	schedulingStart := time.Now()
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
@@ -146,7 +150,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) *Results {
 	// had 5xA pods and 5xB pods were they have a zonal topology spread, but A can only go in one zone and B in another.
 	// We need to schedule them alternating, A, B, A, B, .... and this solution also solves that as well.
 	errors := map[*v1.Pod]error{}
-	q := NewQueue(pods...)
+	q := NewQueue(sortingFunction, pods...)
 	for {
 		// Try the next pod
 		pod, ok := q.Pop()
