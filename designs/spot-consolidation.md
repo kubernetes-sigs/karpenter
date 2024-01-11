@@ -8,6 +8,8 @@ Karpenter’s consolidation algorithm minimizes the price of EC2 instances given
 
 All consolidation actions contain an inherent tradeoff between price and availability. Consolidation actions are equivalent to a spot interruption, but without the deadline. This tradeoff applies to on-demand capacity, as well. This document explores approaches to enable consolidation for spot instances without regressing to lowest price. 
 
+Each of the below solution works on a certain heuristics because most cloud providers don't surface capacity pool information for spot which presents unique challenges to efficiently select a certain spot instance Type that would cater to better price and availability with respect to the current node. Hence, the idea is to enable the consolidation based on different heuristics so that it makes sense to re-size the nodes only when there is significant cost benefit. 
+
 ## Design Options
 
 ### 1: Minimum Flexibility [Recommended] 
@@ -21,7 +23,7 @@ Conceptually, this approach is straightforward to explain to customers and direc
 * 👍👍👍 Prevents consolidation from regressing to a lowest price allocation strategy
 * 👍 Easy to explain and implements spot best practices
 * 👍 Flexibility threshold is tunable, as best practices evolve. Cloud providers could choose to set it to 1 to disable this behavior.
-* 👎 Limits potential flexibility from status quo for both instance launch and replacement. Today, Karpenter can send unbounded flexibility to PCO (e.g. 100s of instance types). 
+* 👎 Limits potential flexibility from status quo for instance replacement. Today, Karpenter can send unbounded flexibility to PCO (e.g. 100s of instance types).
 * 👎 Fails to take advantage of opportunities to migrate to healthier pools due to limited instance type flexibility.
 * 👎 Fails to take advantage of opportunities to migrate to lower price pools due to limited instance type flexibility.
 
