@@ -86,10 +86,11 @@ func NodeEventHandlerToPods(c client.Client) handler.EventHandler {
 			return []reconcile.Request{}
 		}
 		return lo.FilterMap(podList.Items, func(p v1.Pod, _ int) (reconcile.Request, bool) {
+			isReschedulable := !pod.IsTerminal(&p) && !pod.IsTerminating(&p) && !pod.IsOwnedByDaemonSet(&p) && !pod.IsOwnedByNode(&p)
 			return reconcile.Request{
 				NamespacedName: client.ObjectKeyFromObject(&p),
 				// return only pods that are reschedulable
-			}, !pod.IsTerminal(&p) && !pod.IsTerminating(&p) && !pod.IsOwnedByDaemonSet(&p) && !pod.IsOwnedByNode(&p)
+			}, isReschedulable
 		})
 	})
 }

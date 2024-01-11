@@ -25,9 +25,16 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
-func IsProvisionable(pod *v1.Pod) bool {
-	// return !IsScheduled(pod) &&
+func CanTriggerProvisioning(pod *v1.Pod) bool {
 	return !IsPreempting(pod) &&
+		FailedToSchedule(pod) &&
+		!IsOwnedByDaemonSet(pod) &&
+		!IsOwnedByNode(pod)
+}
+
+func IsProvisionable(pod *v1.Pod) bool {
+	return !IsScheduled(pod) &&
+		!IsPreempting(pod) &&
 		FailedToSchedule(pod) &&
 		!IsOwnedByDaemonSet(pod) &&
 		!IsOwnedByNode(pod)
