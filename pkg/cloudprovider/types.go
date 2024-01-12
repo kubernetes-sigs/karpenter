@@ -57,27 +57,6 @@ type CloudProvider interface {
 	Name() string
 }
 
-type InstanceTypes []*InstanceType
-
-func (its InstanceTypes) OrderByPrice(reqs scheduling.Requirements) InstanceTypes {
-	// Order instance types so that we get the cheapest instance types of the available offerings
-	sort.Slice(its, func(i, j int) bool {
-		iPrice := math.MaxFloat64
-		jPrice := math.MaxFloat64
-		if len(its[i].Offerings.Available().Requirements(reqs)) > 0 {
-			iPrice = its[i].Offerings.Available().Requirements(reqs).Cheapest().Price
-		}
-		if len(its[j].Offerings.Available().Requirements(reqs)) > 0 {
-			jPrice = its[j].Offerings.Available().Requirements(reqs).Cheapest().Price
-		}
-		if iPrice == jPrice {
-			return its[i].Name < its[j].Name
-		}
-		return iPrice < jPrice
-	})
-	return its
-}
-
 // InstanceType describes the properties of a potential node (either concrete attributes of an instance of this type
 // or supported options in the case of arrays)
 type InstanceType struct {
@@ -98,6 +77,8 @@ type InstanceType struct {
 	allocatable v1.ResourceList
 }
 
+type InstanceTypes []*InstanceType
+
 // precompute is used to ensure we only compute the allocatable resources onces as its called many times
 // and the operation is fairly expensive.
 func (i *InstanceType) precompute() {
@@ -107,6 +88,36 @@ func (i *InstanceType) precompute() {
 func (i *InstanceType) Allocatable() v1.ResourceList {
 	i.once.Do(i.precompute)
 	return i.allocatable.DeepCopy()
+}
+
+func (its InstanceTypes) OrderByPrice(reqs scheduling.Requirements) InstanceTypes {
+	// Order instance types so that we get the cheapest instance types of the available offerings
+	sort.Slice(its, func(i, j int) bool {
+		iPrice := math.MaxFloat64
+		jPrice := math.MaxFloat64
+		if len(its[i].Offerings.Available().Compatible(reqs)) > 0 {
+			iPrice = its[i].Offerings.Available().Compatible(reqs).Cheapest().Price
+		}
+		if len(its[j].Offerings.Available().Compatible(reqs)) > 0 {
+			jPrice = its[j].Offerings.Available().Compatible(reqs).Cheapest().Price
+		}
+		if iPrice == jPrice {
+			return its[i].Name < its[j].Name
+		}
+		return iPrice < jPrice
+	})
+	return its
+}
+
+// Compatible returns the list of instanceTypes based on the supported capacityType and zones in the requirements
+func (its InstanceTypes) Compatible(requirements scheduling.Requirements) InstanceTypes {
+	var filteredInstanceTypes []*InstanceType
+	for _, instanceType := range its {
+		if len(instanceType.Offerings.Available().Compatible(requirements)) > 0 {
+			filteredInstanceTypes = append(filteredInstanceTypes, instanceType)
+		}
+	}
+	return filteredInstanceTypes
 }
 
 type InstanceTypeOverhead struct {
@@ -150,8 +161,8 @@ func (ofs Offerings) Available() Offerings {
 	})
 }
 
-// Requirements filters the offerings based on the passed requirements
-func (ofs Offerings) Requirements(reqs scheduling.Requirements) Offerings {
+// Compatible returns the offerings based on the passed requirements
+func (ofs Offerings) Compatible(reqs scheduling.Requirements) Offerings {
 	return lo.Filter(ofs, func(offering Offering, _ int) bool {
 		return (!reqs.Has(v1.LabelTopologyZone) || reqs.Get(v1.LabelTopologyZone).Has(offering.Zone)) &&
 			(!reqs.Has(v1beta1.CapacityTypeLabelKey) || reqs.Get(v1beta1.CapacityTypeLabelKey).Has(offering.CapacityType))

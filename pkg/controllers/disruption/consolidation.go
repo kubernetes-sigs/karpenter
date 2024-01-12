@@ -23,6 +23,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,13 +34,18 @@ import (
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 // consolidationTTL is the TTL between creating a consolidation command and validating that it still works.
 const consolidationTTL = 15 * time.Second
+
+// MinInstanceTypesForSpotToSpotConsolidation is the minimum number of instanceTypes in a NodeClaim needed to trigger spot-to-spot single-node consolidation
+const MinInstanceTypesForSpotToSpotConsolidation = 15
 
 // consolidation is the base consolidation controller that provides common functionality used across the different
 // consolidation methods.
@@ -156,18 +162,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	if err != nil {
 		return Command{}, fmt.Errorf("getting offering price from candidate node, %w", err)
 	}
-	results.NewNodeClaims[0].InstanceTypeOptions = filterByPrice(results.NewNodeClaims[0].InstanceTypeOptions, results.NewNodeClaims[0].Requirements, candidatePrice)
-	if len(results.NewNodeClaims[0].InstanceTypeOptions) == 0 {
-		if len(candidates) == 1 {
-			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace with a cheaper node")...)
-		}
-		// no instance types remain after filtering by price
-		return Command{}, nil
-	}
 
-	// If the existing candidates are all spot and the replacement is spot, we don't consolidate.  We don't have a reliable
-	// mechanism to determine if this replacement makes sense given instance type availability (e.g. we may replace
-	// a spot node with one that is less available and more likely to be reclaimed).
 	allExistingAreSpot := true
 	for _, cn := range candidates {
 		if cn.capacityType != v1beta1.CapacityTypeSpot {
@@ -177,9 +172,19 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 
 	if allExistingAreSpot &&
 		results.NewNodeClaims[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeSpot) {
+		return c.computeSpotToSpotConsolidation(ctx, candidates, results, candidatePrice)
+	}
+
+	// filterByPrice returns the instanceTypes that are lower priced than the current candidate. If we use this directly for spot-to-spot consolidation
+	// we are bound to get repeated consolidations because the strategy that chooses to launch the spot instance from the list does it based on availability and price which could
+	// result in selection/launch of non-lowest priced instance in the list. So, we would keep repeating this loop till we get to lowest priced instance
+	// causing churns and landing onto lower available spot instance ultimately resulting in higher interruptions.
+	results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions = filterByPrice(results.NewNodeClaims[0].InstanceTypeOptions, results.NewNodeClaims[0].Requirements, candidatePrice)
+	if len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions) == 0 {
 		if len(candidates) == 1 {
-			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace a spot node with a spot node")...)
+			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace with a cheaper node")...)
 		}
+		// no instance types remain after filtering by price
 		return Command{}, nil
 	}
 
@@ -191,6 +196,73 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	if ctReq.Has(v1beta1.CapacityTypeSpot) && ctReq.Has(v1beta1.CapacityTypeOnDemand) {
 		results.NewNodeClaims[0].Requirements.Add(scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, v1beta1.CapacityTypeSpot))
 	}
+
+	return Command{
+		candidates:   candidates,
+		replacements: results.NewNodeClaims,
+	}, nil
+}
+
+// Compute command to execute spot-to-spot consolidation if:
+//  1. The SpotToSpotConsolidation feature flag is set to true.
+//  2. For single-node consolidation:
+//     a. There are at least 15 cheapest instance type replacement options to consolidate.
+//     b. The current candidate is NOT part of the first 15 cheapest instance types inorder to avoid repeated consolidation.
+func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, candidates []*Candidate, results *pscheduling.Results,
+	candidatePrice float64) (Command, error) {
+
+	// Spot consolidation is turned off.
+	if !options.FromContext(ctx).FeatureGates.SpotToSpotConsolidation {
+		if len(candidates) == 1 {
+			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "SpotToSpotConsolidation is disabled, can't replace a spot node with a spot node")...)
+		}
+		return Command{}, nil
+	}
+
+	// Since we are sure that the replacement nodeclaim considered for the spot candidates are spot, we will enforce it through the requirements.
+	results.NewNodeClaims[0].Requirements.Add(scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, v1beta1.CapacityTypeSpot))
+	// All possible replacements for the current candidate compatible with spot offerings
+	instanceTypeOptionsWithSpotOfferings :=
+		results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions.Compatible(results.NewNodeClaims[0].Requirements)
+
+	// Possible replacements that are lower priced than the current candidate
+	results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions = filterByPrice(instanceTypeOptionsWithSpotOfferings, results.NewNodeClaims[0].Requirements, candidatePrice)
+
+	if len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions) == 0 {
+		if len(candidates) == 1 {
+			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace spot node with a cheaper spot node")...)
+		}
+		// no instance types remain after filtering by price
+		return Command{}, nil
+	}
+
+	// For multi-node consolidation:
+	// We don't have any requirement to check the remaining instance type flexibility, so exit early in this case.
+	if len(candidates) > 1 {
+		return Command{
+			candidates:   candidates,
+			replacements: results.NewNodeClaims,
+		}, nil
+	}
+
+	// For single-node consolidation:
+	// We check whether we have 15 cheaper instances than the current candidate instance. If this is the case, we know the following things:
+	//   1) The current candidate is not in the set of the 15 cheapest instance types and
+	//   2) There were at least 15 options cheaper than the current candidate.
+	if len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions) < MinInstanceTypesForSpotToSpotConsolidation {
+		c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("SpotToSpotConsolidation requires %d cheaper instance type options than the current candidate to consolidate, got %d",
+			MinInstanceTypesForSpotToSpotConsolidation, len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions)))...)
+		return Command{}, nil
+	}
+
+	// Restrict the InstanceTypeOptions for launch to 15 so we don't get into a continual consolidation situation.
+	// For example:
+	// 1) Suppose we have 5 instance types, (A, B, C, D, E) in order of price with the minimum flexibility 3 and they’ll all work for our pod.  We send CreateInstanceFromTypes(A,B,C,D,E) and it gives us a E type based on price and availability of spot.
+	// 2) We check if E is part of (A,B,C) and it isn't, so we will immediately have consolidation send a CreateInstanceFromTypes(A,B,C,D), since they’re cheaper than E.
+	// 3) Assuming CreateInstanceFromTypes(A,B,C,D) returned D, we check if D is part of (A,B,C) and it isn't, so will have another consolidation send a CreateInstanceFromTypes(A,B,C), since they’re cheaper than D resulting in continual consolidation.
+	// If we had restricted instance types to min flexibility at launch at step (1) i.e CreateInstanceFromTypes(A,B,C), we would have received the instance type part of the list preventing immediate consolidation.
+	// Taking this to 15 types, we need to only send the 15 cheapest types in the CreateInstanceFromTypes call so that the resulting instance is always in that set of 15 and we won’t immediately consolidate.
+	results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions = lo.Slice(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, 0, MinInstanceTypesForSpotToSpotConsolidation)
 
 	return Command{
 		candidates:   candidates,
