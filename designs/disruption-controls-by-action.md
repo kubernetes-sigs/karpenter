@@ -1,16 +1,18 @@
 # Disruption Controls By Action 
 
 ## Motivation
-Users want the ability to have different disruption controls for the budgets. The AKS Provider Drives NodeImageUpgrade, and K8sVersionUpgrade through Drift. Users may want to specify different disruption settings for upgrade, since upgrade is a fundementally different type of disruption in comparison to consolidation for example. Since it changes the behavior of the cluster
+Users want the ability to have different disruption controls for the budgets. The AKS Provider Drives NodeImageUpgrade, and K8sVersionUpgrade through Drift. Users may want to specify different disruption settings for upgrade, since upgrade is a fundementally different type of disruption in comparison to consolidation for example. Since upgrade changes the behavior of the cluster, its disruption schedule may be different from consolidation.
 
-## Desired Behavior + behavior examples
-
+## Desired Behavior + Requirements 
+1. User needs to be able to define an action and a budget/budgets for that action. 
+2. Actions that should be supported should by any disruption actions effected by the current Budgets implementation. (Consolidation, Emptiness, Expiration, Drift) 
+3. Budgets should still support the option to set a given behavior for all disruption actions. A disruption action `All` will represent behavior will be defined as a default for all actions. It should respect this budget for actions without an active disruption budget. 
+4. One should be able to specify for a given disruption action a NodeDisruptionBudget. If multiple budgets are active at a given time, karpenter will take action with the most restrictive budget
 ## API Design
 ### Approach A: Add an action field to disruption Budgets 
 This approach outlines a simple api change to the betav1 nodepool api. To allow disruption budgets to specify a disruption action. Thats it. 
 ### Proposed Spec
-Add a simple field "action" to the DisruptionBudgets. These actions will be those the disruption controller takes action on.
-
+Add a simple field "action" is proposed to be added to the budgets. 
 ```go
 // Budget defines when Karpenter will restrict the
 // number of Node Claims that can be terminating simultaneously.
@@ -151,8 +153,6 @@ const (
 )
 ```
 
-
-
 THis design proposes first defining Action Controls as a very barebones structure with a place in the api  
 ```go
 // ActionControls defines the controls for a particular DisruptionAction, these controls are meant to apply for generic controls that apply to all disruption actions. 
@@ -208,11 +208,11 @@ This proposal is currently scoped for disruptionBudgets by action. However, we s
 * 👍 Provides place per action for generic controls intended to be shared across all disruption methods. While not all methods share the same disruption actions, there are already cases for this. 
 * 👍 Could extend other fields beyond generic values for specific actions with validation   
 *  👎👎 Breaking API Change for Budgets at least, and if we decide to model DisruptAfter we also would have to break those apis. It might make sense to break the budgets now before they have garnered large adoption as it becomes harder to make the change as time goes on.
+* 👎 Doesn't allow for easy defaulting of `All` disruption actions
 * 👎 Adds complexity to the use of budgets, before its high level on the disruption controls but with this design approach its nested inside another field.
 
 
 ### Conclusion: Preferred Design
-
-The preferred design choice depends on the balance between flexibility and complexity. If the goal is to provide a simple, backward-compatible solution with immediate applicability, Approach A is more suitable. It provides a straightforward way to manage disruptions without overhauling the existing system.
+If the goal is to provide a simple, backward-compatible solution with immediate applicability, Approach A is more suitable. It provides a straightforward way to manage disruptions without overhauling the existing system.
 
 However, if the goal is to create a more robust, future-proof system that can accommodate a wider range of disruptions and controls, Approach B is preferable. Despite its complexity and the need for API changes, it offers a more comprehensive solution that can evolve with users' needs.
