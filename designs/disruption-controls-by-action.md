@@ -3,7 +3,9 @@
 ## Motivation
 Users want the ability to have different disruption controls for the budgets. The AKS Provider Drives NodeImageUpgrade, and K8sVersionUpgrade through Drift. Users may want to specify different disruption settings for upgrade, since upgrade is a fundementally different type of disruption in comparison to consolidation for example. Since it changes the behavior of the cluster
 
-## Considerations and approaches
+## Desired Behavior + behavior examples
+
+## API Design
 ### Approach A: Add an action field to disruption Budgets 
 This approach outlines a simple api change to the betav1 nodepool api. To allow disruption budgets to specify a disruption action. Thats it. 
 ### Proposed Spec
@@ -75,7 +77,7 @@ spec: # This is not a complete NodePool Spec.
 
 In the original proposed spec, karpenter allows the user to specify up to [50 budgets](https://github.com/kubernetes-sigs/karpenter/blob/main/pkg/apis/v1beta1/nodepool.go#L96)
 
-If there are multiple active budgets, karpenter takes the most restrictive budget. This same principle will be applied to the disruption budgets in this approach. The only difference in behavior is that each disruption action will need to be able to check to see if its in an active disruption window.
+If there are multiple active budgets, karpenter takes the most restrictive budget. This same principle will be applied to the disruption budgets in this approach. The only difference in behavior is that each window will either apply to a single action or all actions. 
 
 ### Pros + Cons 
 * 👍 Simple and easy to implement 
@@ -95,15 +97,13 @@ type Disruption struct {
 	// +optional
 	ConsolidationPolicy ConsolidationPolicy `json:"consolidationPolicy,omitempty"`
 	
-	// GenericPerActionControls defines the controls for a particular DisruptionActikn, these controls are meant to apply for generic controls that apply to all disruption actions.
+	// GenericPerActionControls defines the controls for a particular DisruptionAction, these controls are meant to apply for generic controls that apply to all disruption actions.
 	GenericPerActionControls map[DisruptionAction]ActionControls `json:"actionControls,omitempty"` 
 }
 
 
 // ActionControls defines the controls for a particular DisruptionAction, these controls are meant to apply for generic controls that apply to all disruption actions. 
 type ActionControls struct {
-	// Name is the name of the disruption action that we are defining controls for.	
-	Name DisruptionAction `json:"name"`
 	// DisruptAfter is the duration the controller will wait before taking disruption action on this particular DisruptionAction 
 	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+)|(Never)$` 
 	// +kubebuilder:validation:Type="string" 
@@ -157,8 +157,6 @@ THis design proposes first defining Action Controls as a very barebones structur
 ```go
 // ActionControls defines the controls for a particular DisruptionAction, these controls are meant to apply for generic controls that apply to all disruption actions. 
 type ActionControls struct {
-	// Name is the name of the disruption action that we are defining controls for.	
-	Name DisruptionAction `json:"name"`
 	// Budgets is a list of Budgets. 
 	// If there are multiple active budgets, Karpenter uses 
 	// the most restrictive value. If left undefined, 
@@ -171,11 +169,39 @@ type ActionControls struct {
 }
 ```
 
-Some of the api choices for a given action seem to model in a similar shape. `ConsolidateAfter`, `ExpireAfter` and there are discussions of a global `DisruptAfter`. Then with disruption budgets we talk about adding behavior per action. Seems there is a need for disruption controls not just within the budgets per action. 
+#### Example 
 
-This approach models nicely with controls that apply to all existing actions. This proposal is the same as the aformentioned one above in relation to the actions we allow to be defined. (All, Consolidation, Drift, Expiration, Emptiness). 
+```yaml 
+apiVersion: karpenter.sh/v1beta1
+kind: NodePool
+metadata:
+  name: example-nodepool
+spec:
+  disruption:
+    consolidationPolicy: WhenUnderutilized
+    genericPerActionControls:
+      Consolidation:
+        disruptAfter: "30m"
+        budgets:
+          - nodes: "20%"
+            schedule: "0 0 1 * *"
+            duration: "1h"
+      Drift:
+        disruptAfter: "1h"
+        budgets:
+          - nodes: "10%"
+            schedule: "0 0 * * 0"
+            duration: "2h"
+      Expiration:
+        disruptAfter: "Never"
+```
 
-This proposal is scoped for disruptionBudgets by action, but we should also consider modeling some other generic disruption controls into the PerActionControls even if we do not implement them today. Moving the ConsolidateAfter, ExpireAfter into the per action controls is a whole migration story that needs better care and its own design, this just shows a potential model that highlights the advantages of defining a per action level of granularity. 
+#### Considerations 
+Some of the API choices for a given action seem to follow a similar pattern. These include ConsolidateAfter, ExpireAfter, and there are discussions about introducing a global DisruptAfter. Moreover, when discussing disruption budgets, we talk about adding behavior for each action. It appears there is a need for disruption controls within the budgets for each action, not just overall.
+
+This approach aligns well with controls that apply to all existing actions. The proposal presented here is similar to the one mentioned above in relation to the actions we allow to be defined (All, Consolidation, Drift, Expiration, Emptiness).
+
+This proposal is currently scoped for disruptionBudgets by action. However, we should also consider incorporating other generic disruption controls into the PerActionControls, even if we do not implement them immediately. Moving ConsolidateAfter and ExpireAfter into the per-action controls is a significant migration that requires careful planning and its own dedicated design. This proposal simply demonstrates a potential model that highlights the benefits of defining controls at a per-action level of granularity.
 
 ### Pros + Cons 
 * 👍 This model starts to make more sense as we continue to add general behaviors that apply to all disruption actions where users will want control on the action level.
