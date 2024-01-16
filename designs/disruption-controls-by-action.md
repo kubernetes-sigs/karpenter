@@ -10,7 +10,7 @@ Users want the ability to have different disruption controls for the budgets. Th
 4. One should be able to specify for a given disruption action a NodeDisruptionBudget. If multiple budgets are active at a given time, karpenter will take action with the most restrictive budget
 ## API Design
 ### Approach A: Add an action field to disruption Budgets 
-This approach outlines a simple api change to the betav1 nodepool api. To allow disruption budgets to specify a disruption action. Thats it. 
+This approach outlines a simple api change to the betav1 nodepool api to allow disruption budgets to specify a disruption action. 
 ### Proposed Spec
 Add a simple field "action" is proposed to be added to the budgets. 
 ```go
