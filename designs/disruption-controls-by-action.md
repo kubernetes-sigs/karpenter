@@ -55,7 +55,7 @@ const (
 	Consolidation DisruptionAction = "Consolidation" 
 	Drift DisruptionAction = "Drift" 
 	Expiration DisruptionAction = "Expiration" 
-	Emptiness DisruptionAction = "Emptiness" ? 
+	Emptiness DisruptionAction = "Emptiness"
 )
 ```
 If no value is specified we will assume this disruption budget is `All` and default to that value and the settings will apply to all disruption actions.
@@ -90,70 +90,7 @@ If there are multiple active budgets, karpenter takes the most restrictive budge
 ### Approach B: Defining Per Action Controls  
 Ideally, we could move all generic controls that easily map into other actions into one set of action controls, this applies to budgets and other various disruption controls that could be more generic 
 ### Proposed Spec 
-```go
-type Disruption struct {
-	// ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation
-	// algorithm. This policy defaults to "WhenUnderutilized" if not specified
-	// +kubebuilder:default:="WhenUnderutilized"
-	// +kubebuilder:validation:Enum:={WhenEmpty,WhenUnderutilized}
-	// +optional
-	ConsolidationPolicy ConsolidationPolicy `json:"consolidationPolicy,omitempty"`
-	
-	// GenericPerActionControls defines the controls for a particular DisruptionAction, these controls are meant to apply for generic controls that apply to all disruption actions.
-	GenericPerActionControls map[DisruptionAction]ActionControls `json:"actionControls,omitempty"` 
-}
-
-
-// ActionControls defines the controls for a particular DisruptionAction, these controls are meant to apply for generic controls that apply to all disruption actions. 
-type ActionControls struct {
-	// DisruptAfter is the duration the controller will wait before taking disruption action on this particular DisruptionAction 
-	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+)|(Never)$` 
-	// +kubebuilder:validation:Type="string" 
-	// +kubebuilder:validation:Schemaless 
-	// +optional 
-	DisruptAfter *NillableDuration `json:"disruptAfter,omitempty"`
-	// Budgets is a list of Budgets. 
-	// If there are multiple active budgets, Karpenter uses 
-	// the most restrictive value. If left undefined, 
-	// this will default to one budget with a value to 10%. 
-	// +kubebuilder:validation:XValidation:message="'schedule' must be set with 'duration'",rule="!self.all(x, (has(x.schedule) && !has(x.duration)) || (!has(x.schedule) && has(x.duration)))" 
-	// +kubebuilder:default:={{nodes: "10%"}} 
-	// +kubebuilder:validation:MaxItems=50 
-	// +optional 
-	Budgets []Budget `json:"budgets,omitempty" hash:"ignore"` 
-}
-
-
- // Budget defines when Karpenter will restrict the
-// number of Node Claims that can be terminating simultaneously.
-type Budget struct {
-	// Nodes dictates the maximum number of NodeClaims owned by this NodePool
-	// that can be terminating at once. This is calculated by counting nodes that
-	// have a deletion timestamp set, or are actively being deleted by Karpenter.
-	Nodes string `json:"nodes" hash:"ignore"`
-	// Schedule specifies when a budget begins being active, following
-	// the upstream cronjob syntax. If omitted, the budget is always active.
-	// Timezones are not supported.
-	Schedule *string `json:"schedule,omitempty" hash:"ignore"`
-	// Duration determines how long a Budget is active since each Schedule hit.
-	// Only minutes and hours are accepted, as cron does not work in seconds.
-	// If omitted, the budget is always active.
-	// This is required if Schedule is set.
-	Duration *metav1.Duration `json:"duration,omitempty" hash:"ignore"`
-} // ... Same as Existing 
-
-type DisruptionAction string 
-
-const (
-	All DisruptionAction = "All"
-	Consolidation DisruptionAction = "Consolidation" 
-	Drift DisruptionAction = "Drift" 
-	Expiration DisruptionAction = "Expiration" 
-	Emptiness DisruptionAction = "Emptiness" ? 
-)
-```
-
-THis design proposes first defining Action Controls as a very barebones structure with a place in the api  
+This design proposes first defining Action Controls as a very barebones structure with a place in the api  
 ```go
 // ActionControls defines the controls for a particular DisruptionAction, these controls are meant to apply for generic controls that apply to all disruption actions. 
 type ActionControls struct {
@@ -168,7 +105,7 @@ type ActionControls struct {
 	Budgets []Budget `json:"budgets,omitempty" hash:"ignore"` 
 }
 ```
-
+But the idea is we can have other generic shared controls in actionControls.
 #### Example 
 
 ```yaml 
@@ -178,22 +115,21 @@ metadata:
   name: example-nodepool
 spec:
   disruption:
-    consolidationPolicy: WhenUnderutilized
-    genericPerActionControls:
-      Consolidation:
-        disruptAfter: "30m"
-        budgets:
-          - nodes: "20%"
-            schedule: "0 0 1 * *"
-            duration: "1h"
-      Drift:
-        disruptAfter: "1h"
-        budgets:
-          - nodes: "10%"
-            schedule: "0 0 * * 0"
-            duration: "2h"
-      Expiration:
-        disruptAfter: "Never"
+    consolidation:
+      consolidationPolicy: WhenUnderutilized
+      disruptAfter: "30m"
+      budgets:
+	- nodes: "20%"
+	  schedule: "0 0 1 * *"
+	  duration: "1h"
+    drift:
+      disruptAfter: "1h"
+      budgets:
+	- nodes: "10%"
+	  schedule: "0 0 * * 0"
+	  duration: "2h"
+    expiration:
+      disruptAfter: "Never"
 ```
 
 #### Considerations 
