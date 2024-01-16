@@ -53,6 +53,8 @@ type PodOptions struct {
 	Phase                         v1.PodPhase
 	RestartPolicy                 v1.RestartPolicy
 	TerminationGracePeriodSeconds *int64
+	ReadinessProbe                *v1.Probe
+	LivenessProbe                 *v1.Probe
 }
 
 type PDBOptions struct {
@@ -127,6 +129,8 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 						ContainerPort: int32(80),
 					}
 				}),
+				ReadinessProbe: options.ReadinessProbe,
+				LivenessProbe:  options.LivenessProbe,
 			}},
 			NodeName:                      options.NodeName,
 			Volumes:                       volumes,
