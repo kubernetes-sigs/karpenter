@@ -1,13 +1,12 @@
 # Disruption Controls By Action 
-
-## Motivation
-Users want the ability to have different disruption controls for the budgets. The AKS Provider Drives NodeImageUpgrade, and K8sVersionUpgrade through Drift. Users may want to specify different disruption settings for upgrade, since upgrade is a fundementally different type of disruption in comparison to consolidation for example. Since upgrade changes the behavior of the cluster, its disruption schedule may be different from consolidation.
-
+## User Scenarios 
+1. I as a user would like to ensure upgrades only occur during business hours or stricter windows. I would also like to not restrict the cost savings of consolidation when blocking upgrade via drift.
+2. As a HFT firm, I have specific hours where I need all my compute and I can't tolerate scale down requests for consolidation, but outside of operational hours its fine to scale down. 
 ## Desired Behavior + Requirements 
 1. User needs to be able to define an action and a budget/budgets for that action. 
 2. Actions that should be supported should by any disruption actions effected by the current Budgets implementation. (Consolidation, Emptiness, Expiration, Drift) 
-3. Budgets should still support the option to set a given behavior for all disruption actions. A disruption action `All` will represent behavior will be defined as a default for all actions. It should respect this budget for actions without an active disruption budget. 
-4. One should be able to specify for a given disruption action a NodeDisruptionBudget. If multiple budgets are active at a given time, karpenter will take action with the most restrictive budget
+3. Budgets should still support the option to set a given behavior for all disruption actions. If action is unspecified we want to just assume its mean't to apply to all actions. 
+
 ## API Design
 ### Approach A: Add an action field to disruption Budgets 
 This approach outlines a simple api change to the betav1 nodepool api to allow disruption budgets to specify a disruption action. 
@@ -18,7 +17,7 @@ Add a simple field "action" is proposed to be added to the budgets.
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
 	// Action defines the disruption action that this particular disruption budget applies to. 
-	Action DisruptionAction `json:"action" hash:"ignore"`
+	Action DisruptionAction `json:"action,omitempty" hash:"ignore"`
 	// Nodes dictates the maximum number of NodeClaims owned by this NodePool
 	// that can be terminating at once. This is calculated by counting nodes that
 	// have a deletion timestamp set, or are actively being deleted by Karpenter.
@@ -88,24 +87,56 @@ If there are multiple active budgets, karpenter takes the most restrictive budge
 * 👎 Doesn't leave room for other controls based on action. Its tightly coupled with budgets, read more about this in second approach.
 
 ### Approach B: Defining Per Action Controls  
-Ideally, we could move all generic controls that easily map into other actions into one set of action controls, this applies to budgets and other various disruption controls that could be more generic 
+Ideally, we could move all generic controls that easily map into other actions into one set of action controls, this applies to budgets and other various disruption controls that could be more generic. 
 ### Proposed Spec 
-This design proposes first defining Action Controls as a very barebones structure with a place in the api  
 ```go
-// ActionControls defines the controls for a particular DisruptionAction, these controls are meant to apply for generic controls that apply to all disruption actions. 
-type ActionControls struct {
-	// Budgets is a list of Budgets. 
-	// If there are multiple active budgets, Karpenter uses 
-	// the most restrictive value. If left undefined, 
-	// this will default to one budget with a value to 10%. 
-	// +kubebuilder:validation:XValidation:message="'schedule' must be set with 'duration'",rule="!self.all(x, (has(x.schedule) && !has(x.duration)) || (!has(x.schedule) && has(x.duration)))" 
-	// +kubebuilder:default:={{nodes: "10%"}} 
-	// +kubebuilder:validation:MaxItems=50 
-	// +optional 
-	Budgets []Budget `json:"budgets,omitempty" hash:"ignore"` 
+type Disruption struct {
+    All		  DisruptionSpec `json:defaults"`
+    Consolidation ConsolidationSpec `json:"consolidation"`
+    Drift         DriftSpec         `json:"drift"`
+    Expiration    ExpirationSpec    `json:"expiration"`
+    Emptiness     EmptinessSpec     `json:"emptiness"`
 }
+
+type DisruptionCommonSpec struct {
+    DisruptAfter string   `json:"disruptAfter"`
+    Budgets      []Budget `json:"budgets"`
+}
+
+type ConsolidationSpec struct {
+    DisruptionCommonSpec
+    ConsolidationPolicy string `json:"consolidationPolicy"`
+}
+
+type DriftSpec struct {
+    DisruptionCommonSpec
+}
+
+type ExpirationSpec struct {
+    DisruptionCommonSpec
+}
+
+type EmptinessSpec struct {
+    DisruptionCommonSpec
+}
+
+type Budget struct {
+    Nodes    string  `json:"nodes"`
+    Schedule *string `json:"schedule,omitempty"`
+    Duration *string `json:"duration,omitempty"`
+}
+}
+
+type DisruptionAction string 
+
+const (
+	All DisruptionAction = "All"
+	Consolidation DisruptionAction = "Consolidation" 
+	Drift DisruptionAction = "Drift" 
+	Expiration DisruptionAction = "Expiration" 
+	Emptiness DisruptionAction = "Emptiness"
+)
 ```
-But the idea is we can have other generic shared controls in actionControls.
 #### Example 
 
 ```yaml 
@@ -115,6 +146,11 @@ metadata:
   name: example-nodepool
 spec:
   disruption:
+    defaults:
+      budgets: 
+        - nodes: 10% 
+	  schedule: "0 0 1 * *"
+	  duration: 1h 
     consolidation:
       consolidationPolicy: WhenUnderutilized
       disruptAfter: "30m"
@@ -149,6 +185,4 @@ This proposal is currently scoped for disruptionBudgets by action. However, we s
 
 
 ### Conclusion: Preferred Design
-If the goal is to provide a simple, backward-compatible solution with immediate applicability, Approach A is more suitable. It provides a straightforward way to manage disruptions without overhauling the existing system.
-
-However, if the goal is to create a more robust, future-proof system that can accommodate a wider range of disruptions and controls, Approach B is preferable. Despite its complexity and the need for API changes, it offers a more comprehensive solution that can evolve with users' needs.
+If the goal is to provide a simple, backward-compatible solution with immediate applicability, Approach A is more suitable. It provides a straightforward way to manage disruptions without overhauling the existing system. Breaking API changes in Approach B are likely too disruptive to customers. 
