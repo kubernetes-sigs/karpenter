@@ -125,6 +125,18 @@ func MaxResources(resources ...v1.ResourceList) v1.ResourceList {
 	return resourceList
 }
 
+// ZeroResources returns a default resource list with zeroed resources
+func ZeroResources() v1.ResourceList {
+	list := v1.ResourceList{
+		v1.ResourceCPU:              resource.MustParse("0"),
+		v1.ResourceMemory:           resource.MustParse("0"),
+		v1.ResourceStorage:          resource.MustParse("0"),
+		v1.ResourceEphemeralStorage: resource.MustParse("0"),
+		v1.ResourcePods:             resource.MustParse("0"),
+	}
+	return list
+}
+
 // MergeResourceLimitsIntoRequests merges resource limits into requests if no request exists for the given resource
 func MergeResourceLimitsIntoRequests(container v1.Container) v1.ResourceList {
 	resources := container.Resources.DeepCopy()

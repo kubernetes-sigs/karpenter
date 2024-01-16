@@ -21,14 +21,12 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
-	"sigs.k8s.io/karpenter/pkg/utils/functional"
 
 	v1 "k8s.io/api/core/v1"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -76,7 +74,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) 
 }
 
 func (c *Controller) resourceCountsFor(ownerLabel string, ownerName string) v1.ResourceList {
-	var res v1.ResourceList
+	res := resources.ZeroResources()
 	// Record all resources provisioned by the nodepools, we look at the cluster state nodes as their capacity
 	// is accurately reported even for nodes that haven't fully started yet. This allows us to update our nodepool
 	// status immediately upon node creation instead of waiting for the node to become ready.
@@ -91,7 +89,7 @@ func (c *Controller) resourceCountsFor(ownerLabel string, ownerName string) v1.R
 		}
 		return true
 	})
-	return functional.FilterMap(res, func(_ v1.ResourceName, v resource.Quantity) bool { return !v.IsZero() })
+	return res
 }
 
 func (c *Controller) Name() string {

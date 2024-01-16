@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -91,9 +92,11 @@ var _ = Describe("Counter", func() {
 			Status: v1beta1.NodeClaimStatus{
 				ProviderID: test.RandomProviderID(),
 				Capacity: v1.ResourceList{
-					v1.ResourceCPU:    resource.MustParse("100m"),
-					v1.ResourcePods:   resource.MustParse("256"),
-					v1.ResourceMemory: resource.MustParse("1Gi"),
+					v1.ResourceCPU:              resource.MustParse("100m"),
+					v1.ResourceMemory:           resource.MustParse("1Gi"),
+					v1.ResourcePods:             resource.MustParse("256"),
+					v1.ResourceStorage:          resource.MustParse("0"),
+					v1.ResourceEphemeralStorage: resource.MustParse("0"),
 				},
 			},
 		})
@@ -105,9 +108,11 @@ var _ = Describe("Counter", func() {
 			Status: v1beta1.NodeClaimStatus{
 				ProviderID: test.RandomProviderID(),
 				Capacity: v1.ResourceList{
-					v1.ResourceCPU:    resource.MustParse("500m"),
-					v1.ResourcePods:   resource.MustParse("1000"),
-					v1.ResourceMemory: resource.MustParse("5Gi"),
+					v1.ResourceCPU:              resource.MustParse("500m"),
+					v1.ResourceMemory:           resource.MustParse("5Gi"),
+					v1.ResourcePods:             resource.MustParse("1000"),
+					v1.ResourceStorage:          resource.MustParse("0"),
+					v1.ResourceEphemeralStorage: resource.MustParse("0"),
 				},
 			},
 		})
@@ -131,9 +136,11 @@ var _ = Describe("Counter", func() {
 
 		// Change the node capacity to be different than the nodeClaim capacity
 		node.Status.Capacity = v1.ResourceList{
-			v1.ResourceCPU:    resource.MustParse("1"),
-			v1.ResourcePods:   resource.MustParse("512"),
-			v1.ResourceMemory: resource.MustParse("2Gi"),
+			v1.ResourceCPU:              resource.MustParse("1"),
+			v1.ResourcePods:             resource.MustParse("512"),
+			v1.ResourceMemory:           resource.MustParse("2Gi"),
+			v1.ResourceStorage:          resource.MustParse("0"),
+			v1.ResourceEphemeralStorage: resource.MustParse("0"),
 		}
 		ExpectApplied(ctx, env.Client, node, nodeClaim)
 		// Don't initialize the node yet
@@ -167,9 +174,11 @@ var _ = Describe("Counter", func() {
 
 		// Should equal the sums of the nodeClaims and nodes
 		resources := v1.ResourceList{
-			v1.ResourceCPU:    resource.MustParse("600m"),
-			v1.ResourcePods:   resource.MustParse("1256"),
-			v1.ResourceMemory: resource.MustParse("6Gi"),
+			v1.ResourceCPU:              resource.MustParse("600m"),
+			v1.ResourcePods:             resource.MustParse("1256"),
+			v1.ResourceMemory:           resource.MustParse("6Gi"),
+			v1.ResourceStorage:          resource.MustParse("0"),
+			v1.ResourceEphemeralStorage: resource.MustParse("0"),
 		}
 		Expect(nodePool.Status.Resources).To(BeEquivalentTo(resources))
 		Expect(nodePool.Status.Resources).To(BeEquivalentTo(resources))
@@ -184,7 +193,7 @@ var _ = Describe("Counter", func() {
 		Expect(nodePool.Status.Resources).To(BeEquivalentTo(nodeClaim2.Status.Capacity))
 		Expect(nodePool.Status.Resources).To(BeEquivalentTo(node2.Status.Capacity))
 	})
-	It("should nil out the counter when all nodes are deleted", func() {
+	It("should zero out the counter when all nodes are deleted", func() {
 		ExpectApplied(ctx, env.Client, node, nodeClaim)
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
@@ -201,6 +210,7 @@ var _ = Describe("Counter", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
-		Expect(nodePool.Status.Resources).To(BeNil())
+
+		Expect(nodePool.Status.Resources).To(BeEquivalentTo(resources.ZeroResources()))
 	})
 })
