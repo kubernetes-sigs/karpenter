@@ -72,14 +72,6 @@ spec:
               value: "1.19.0-0"
             - name: KARPENTER_SERVICE
               value: {{ include "karpenter.fullname" . }}
-          {{- if .Values.webhook.enabled }}
-            - name: WEBHOOK_PORT
-              value: "{{ .Values.webhook.port }}"
-            - name: WEBHOOK_METRICS_PORT
-              value: "{{ .Values.webhook.metrics.port }}"
-            - name: DISABLE_WEBHOOK
-              value: "false"
-          {{- end }}
           {{- with .Values.logLevel }}
             - name: LOG_LEVEL
               value: "{{ . }}"
@@ -119,14 +111,6 @@ spec:
             - name: http-metrics
               containerPort: {{ .Values.controller.metrics.port }}
               protocol: TCP
-          {{- if .Values.webhook.enabled }}
-            - name: webhook-metrics
-              containerPort: {{ .Values.webhook.metrics.port }}
-              protocol: TCP
-            - name: https-webhook
-              containerPort: {{ .Values.webhook.port }}
-              protocol: TCP
-          {{- end }}
             - name: http
               containerPort: {{ .Values.controller.healthProbe.port }}
               protocol: TCP
@@ -146,12 +130,8 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-        {{- if or (.Values.logConfig.enabled) (.Values.controller.extraVolumeMounts) }}
+        {{- if .Values.controller.extraVolumeMounts }}
           volumeMounts:
-          {{- if .Values.logConfig.enabled }}
-            - name: config-logging
-              mountPath: /etc/karpenter/logging
-          {{- end }}
           {{- with .Values.controller.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -188,13 +168,8 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-    {{- if or (.Values.logConfig.enabled) (.Values.extraVolumes) }}
+    {{- if .Values.extraVolumes }}
       volumes:
-      {{- if .Values.logConfig.enabled }}
-        - name: config-logging
-          configMap:
-            name: config-logging
-      {{- end }}
       {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}
       {{- end }}
