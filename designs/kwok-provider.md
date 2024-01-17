@@ -2,7 +2,7 @@
 
 The kubernetes-sigs/karpenter repo uses a simulated kubernetes environment to test code changes. Users must use a cloud provider of their choice to test their changes, which can be costly and creates an unreasonable barrier to entry for contributors. Related issue: https://github.com/kubernetes-sigs/karpenter/issues/895.
 
-Creating a Cloud Provider neutral implementation of Karpenter within Karpenter-core requires creating a set of CP neutral examples of instance types and pricing that captures common tenets across CPs. 
+Creating a Cloud Provider neutral implementation of Karpenter in kubernetes-sigs/karpenter requires creating a set of CP neutral examples of instance types and pricing that captures common tenets across CPs. 
 
 This is meant to be a living document to in-depth go through the decisions on how kubernetes-sigs/karpenter models its fake instance types. 
 
@@ -22,15 +22,15 @@ The full set of instance types for the KwoK Cloud Provider should be at least th
 ```
 
 #### Size
-While AWS uses `medium`, `large`, `xlarge`, `2xlarge`, `4xlarge` and so on, AKS (include cpu value in name) and GCE (suffixed with cpu value) use a different naming convention, generally increasing in offering sizes by a factor of 1.5x or 2x. In addition, in case the factors of 1.5x and 2x are incorrectly modeled, we'll add in the 9x and 100x instance sizes. 
+While AWS uses `medium`, `large`, `xlarge`, `2xlarge`, `4xlarge` and so on, Azure (includes cpu value in name) and GCE (suffixed with cpu value) use a different naming convention, which all usually have a list of offerings that increase in size by a factor of 1.5x (32 -> 48) or 2x (16 -> 32). In addition, in case 1.5x and 2x are incorrectly modeled, we'll add in the 9x and 100x instance sizes. 
 
 #### Ratios
-AWS Instance Types fall under many "Instance Families" that give a high level overview to why a user may want to use the instance type. AWS `m` instance types are labeled General Purpose, and `c` and `r` represent Compute Optimized and Memory Optimized, most easily compared by the ratio of Memory per vCPU. Defining these ratios is important to test Karpenter's bin-packing value, where applications with more resource-skewed requirements can be more cost effectively bin-packed. 
+AWS Instance Types are categorized through "Instance Families" based on the instance type's attributes. AWS `m` instance types are labeled General Purpose, and `c` and `r` represent Compute Optimized and Memory Optimized, most easily compared by the ratio of Memory per vCPU. Defining these ratios is important to test Karpenter's bin-packing value, where applications with more resource-skewed requirements can be more cost effectively bin-packed. 
 
-These ratios seem to accurately depict a common ratios, where "standard/general" ratios for different cloud providers are seen below:
+These ratios seem to accurately depict common ratios, where "standard/general" ratios for different cloud providers are seen below:
 - AWS: General     = 1 vCPU : 4 GiB
-- AKS: D Family    = 2 vCPU : 8 GiB
-- GKE: C3 Standard = 4 vCPU : 16 GiB
+- Azure: D Family    = 2 vCPU : 8 GiB
+- GCE: C3 Standard = 4 vCPU : 16 GiB
 
 The Kwok provider will be able to select on `karpenter.sh/instance-memory` and `karpenter.sh/instance-cpu`.
 
@@ -38,11 +38,11 @@ The Kwok provider will be able to select on `karpenter.sh/instance-memory` and `
 Karpenter v1beta1 APIs use `on-demand` and `spot` as the options for `karpenter.sh/capacity-type`, reflecting how they're referenced in AWS and elsewhere. In my docs search, I've found that Cloud Providers have different names for on-demand (e.g. Regular for AKS and Standard for GKE). Since this is how Karpenter defines the capacity type labels, the KwoK CP will use the values defined in the project, regardless of how this value changes in the future.
 
 ### Pricing
-The pricing for each of the instance types will be a function of the size and capacity type.
+The pricing for each of the instance types will be a function of the size and capacity type. Instance types with the spot capacity type are guaranteed to be cheaper than their on-demand counterparts. Each cloud provider varies in the pricing discount for spot instances:
 
-EKS: Discount is [< 90%](https://aws.amazon.com/ec2/spot/pricing/#:~:text=Spot%20Instances%20are%20available%20at%20a%20discount%20of%20up%20to%2090%25%20off%20compared%20to%20On%2DDemand%20pricing.)
+AWS: Discount is [< 90%](https://aws.amazon.com/ec2/spot/pricing/#:~:text=Spot%20Instances%20are%20available%20at%20a%20discount%20of%20up%20to%2090%25%20off%20compared%20to%20On%2DDemand%20pricing.)
 AKS: Discount is [48-90%](https://azure.microsoft.com/en-us/pricing/details/virtual-machine-scale-sets/linux/)
-GKE: Discount is [60-91%](https://cloud.google.com/compute/docs/instances/create-use-spot#:~:text=Spot%20VMs%20are%20available%20at%20a%2060%2D91%25%20discount%20compared%20to%20the%20price%20of%20standard%20VMs.)
+GCE: Discount is [60-91%](https://cloud.google.com/compute/docs/instances/create-use-spot#:~:text=Spot%20VMs%20are%20available%20at%20a%2060%2D91%25%20discount%20compared%20to%20the%20price%20of%20standard%20VMs.)
 
 We'll define the pricing functions:
 
