@@ -17,11 +17,6 @@ limitations under the License.
 package main
 
 import (
-	"fmt"
-	"log"
-	"net/http"
-	"time"
-
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake/controller-kwok/kwok"
 	"sigs.k8s.io/karpenter/pkg/controllers"
@@ -33,23 +28,13 @@ func init() {
 	v1beta1.WellKnownLabels.Insert(
 		kwok.InstanceSizeLabelKey,
 		kwok.InstanceFamilyLabelKey,
-		kwok.IntegerInstanceLabelKey,
+		kwok.InstanceCPULabelKey,
+		kwok.InstanceMemoryLabelKey,
 	)
 }
 
 func main() {
 	ctx, op := operator.NewOperator()
-
-	log.Println("starting karpenter-kwok")
-	go func() {
-		debugPort := 6060
-		log.Printf("debug port is listening on %d", debugPort)
-		server := &http.Server{
-			Addr:              fmt.Sprintf(":%d", debugPort),
-			ReadHeaderTimeout: 10 * time.Second,
-		}
-		log.Println(server.ListenAndServe())
-	}()
 
 	cloudProvider := kwok.NewCloudProvider(ctx, op.KubernetesInterface, kwok.ConstructInstanceTypes())
 	op.

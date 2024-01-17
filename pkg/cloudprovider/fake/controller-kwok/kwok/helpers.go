@@ -41,7 +41,6 @@ type InstanceTypeOptions struct {
 
 func MakeInstanceTypeLabels(cpu, memFactor int) map[string]string {
 	size := fmt.Sprintf("%dx", cpu)
-	integer := fmt.Sprintf("%d", cpu)
 	var family string
 	switch memFactor {
 	case 2:
@@ -53,7 +52,12 @@ func MakeInstanceTypeLabels(cpu, memFactor int) map[string]string {
 	default:
 		family = "e" // exotic
 	}
-	return map[string]string{InstanceSizeLabelKey: size, InstanceFamilyLabelKey: family, IntegerInstanceLabelKey: integer}
+	return map[string]string{
+		InstanceSizeLabelKey:   size,
+		InstanceFamilyLabelKey: family,
+		InstanceCPULabelKey:    fmt.Sprintf("%d", cpu),
+		InstanceMemoryLabelKey: fmt.Sprintf("%d", cpu*memFactor*1024),
+	}
 }
 
 // InstanceTypesAssorted create many unique instance types with varying CPU/memory/architecture/OS/zone/capacity type.
@@ -109,7 +113,8 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 		scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string { return o.CapacityType })...),
 		scheduling.NewRequirement(InstanceSizeLabelKey, v1.NodeSelectorOpIn, options.InstanceTypeLabels[InstanceSizeLabelKey]),
 		scheduling.NewRequirement(InstanceFamilyLabelKey, v1.NodeSelectorOpIn, options.InstanceTypeLabels[InstanceFamilyLabelKey]),
-		scheduling.NewRequirement(IntegerInstanceLabelKey, v1.NodeSelectorOpIn, options.InstanceTypeLabels[IntegerInstanceLabelKey]),
+		scheduling.NewRequirement(InstanceCPULabelKey, v1.NodeSelectorOpIn, options.InstanceTypeLabels[InstanceCPULabelKey]),
+		scheduling.NewRequirement(InstanceMemoryLabelKey, v1.NodeSelectorOpIn, options.InstanceTypeLabels[InstanceMemoryLabelKey]),
 	)
 
 	return &cloudprovider.InstanceType{

@@ -37,9 +37,10 @@ import (
 )
 
 const (
-	InstanceSizeLabelKey    = v1beta1.Group + "/instance-size"
-	InstanceFamilyLabelKey  = v1beta1.Group + "/instance-family"
-	IntegerInstanceLabelKey = v1beta1.Group + "/instance-integer"
+	InstanceSizeLabelKey   = v1beta1.Group + "/instance-size"
+	InstanceFamilyLabelKey = v1beta1.Group + "/instance-family"
+	InstanceMemoryLabelKey = v1beta1.Group + "/instance-memory"
+	InstanceCPULabelKey    = v1beta1.Group + "/instance-cpu"
 	// ResourceGPUVendorA      v1.ResourceName = "fake.com/vendor-a"
 	// ResourceGPUVendorB      v1.ResourceName = "fake.com/vendor-b"
 )
