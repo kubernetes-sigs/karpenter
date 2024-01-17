@@ -1,26 +1,10 @@
-# karpenter
+# karpenter-kwok
 
-A Helm chart for Karpenter, an open-source node provisioning project built for Kubernetes.
-
-![Version: 0.33.0](https://img.shields.io/badge/Version-0.33.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.33.0](https://img.shields.io/badge/AppVersion-0.33.0-informational?style=flat-square)
+A Helm chart for Karpenter's kwok provider.
 
 ## Documentation
 
 For full Karpenter documentation please checkout [https://karpenter.sh](https://karpenter.sh/docs/).
-
-## Installing the Chart
-
-You can follow the detailed installation instruction in the [documentation](https://karpenter.sh/docs/getting-started/getting-started-with-karpenter) which covers the Karpenter prerequisites and installation options. The outcome of these instructions should result in something like the following command.
-
-```bash
-helm upgrade --install --namespace karpenter --create-namespace \
-  karpenter oci://public.ecr.aws/karpenter/karpenter \
-  --version v0.33.0 \
-  --set "serviceAccount.annotations.eks\.amazonaws\.com/role-arn=${KARPENTER_IAM_ROLE_ARN}" \
-  --set settings.clusterName=${CLUSTER_NAME} \
-  --set settings.interruptionQueue=${CLUSTER_NAME} \
-  --wait
-```
 
 ## Values
 

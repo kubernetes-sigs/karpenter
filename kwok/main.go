@@ -25,7 +25,8 @@ import (
 )
 
 func init() {
-	v1beta1.WellKnownLabels.Insert(
+	v1beta1.RestrictedLabelDomains = v1beta1.RestrictedLabelDomains.Insert(kwok.Group)
+	v1beta1.WellKnownLabels = v1beta1.WellKnownLabels.Insert(
 		kwok.InstanceSizeLabelKey,
 		kwok.InstanceFamilyLabelKey,
 		kwok.InstanceCPULabelKey,

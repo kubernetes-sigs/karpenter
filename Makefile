@@ -20,7 +20,7 @@ uninstall-kwok: ## Install kwok provider
 	UNINSTALL_KWOK=true ./hack/install-kwok.sh
 
 build: ## Build the Karpenter KWOK controller images using ko build
-	$(eval CONTROLLER_IMG=$(shell $(WITH_GOFLAGS) KO_DOCKER_REPO="$(KWOK_REPO)" ko build -B sigs.k8s.io/karpenter/pkg/cloudprovider/fake/controller-kwok))
+	$(eval CONTROLLER_IMG=$(shell $(WITH_GOFLAGS) KO_DOCKER_REPO="$(KWOK_REPO)" ko build -B sigs.k8s.io/karpenter/kwok))
 	$(eval IMG_REPOSITORY=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 1 | cut -d ":" -f 1))
 	$(eval IMG_TAG=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 1 | cut -d ":" -f 2 -s))
 	$(eval IMG_DIGEST=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 2))
@@ -32,7 +32,7 @@ apply-crds:
 # Run make install-kwok to install the kwok controller in your cluster first
 # Webhooks are currently not supported in the kwok provider.
 apply: verify apply-crds build ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
-	helm upgrade --install karpenter pkg/cloudprovider/fake/controller-kwok/charts --namespace kube-system --skip-crds \
+	helm upgrade --install karpenter kwok/charts --namespace kube-system --skip-crds \
 		$(HELM_OPTS) \
 		--set controller.image.repository=$(IMG_REPOSITORY) \
 		--set controller.image.tag=$(IMG_TAG) \

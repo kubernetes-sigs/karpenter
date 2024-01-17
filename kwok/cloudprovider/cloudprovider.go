@@ -36,15 +36,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
-const (
-	InstanceSizeLabelKey   = v1beta1.Group + "/instance-size"
-	InstanceFamilyLabelKey = v1beta1.Group + "/instance-family"
-	InstanceMemoryLabelKey = v1beta1.Group + "/instance-memory"
-	InstanceCPULabelKey    = v1beta1.Group + "/instance-cpu"
-	// ResourceGPUVendorA      v1.ResourceName = "fake.com/vendor-a"
-	// ResourceGPUVendorB      v1.ResourceName = "fake.com/vendor-b"
-)
-
 func NewCloudProvider(ctx context.Context, client kubernetes.Interface, instanceTypes []*cloudprovider.InstanceType) *CloudProvider {
 	return &CloudProvider{
 		kubeClient:    client,

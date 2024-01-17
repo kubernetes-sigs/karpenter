@@ -34,7 +34,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	fake "sigs.k8s.io/karpenter/pkg/cloudprovider/fake/test"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodepool/counter"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"

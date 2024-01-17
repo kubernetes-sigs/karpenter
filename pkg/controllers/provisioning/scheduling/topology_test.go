@@ -30,7 +30,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	fake "sigs.k8s.io/karpenter/pkg/cloudprovider/fake/test"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )

@@ -86,8 +86,6 @@ EOF
 
 done
 
-
-
 cat <<EOF > "${HOME_DIR}/kustomization.yaml"
 resources:
 - ./partition-a
