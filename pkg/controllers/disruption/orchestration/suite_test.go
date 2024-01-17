@@ -34,7 +34,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	fake "sigs.k8s.io/karpenter/pkg/cloudprovider/fake/test"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
