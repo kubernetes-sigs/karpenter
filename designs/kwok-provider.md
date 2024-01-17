@@ -1,4 +1,4 @@
-# Karpenter KwoK Cloud Provider - v0.34+
+# Karpenter KwoK Cloud Provider
 
 The kubernetes-sigs/karpenter repo uses a simulated kubernetes environment to test code changes. Users must use a cloud provider of their choice to test their changes, which can be costly and creates an unreasonable barrier to entry for contributors. Related issue: https://github.com/kubernetes-sigs/karpenter/issues/895.
 
@@ -29,10 +29,10 @@ AWS Instance Types are categorized through "Instance Families" based on the inst
 
 These ratios seem to accurately depict common ratios, where "standard/general" ratios for different cloud providers are seen below:
 - AWS: General     = 1 vCPU : 4 GiB
-- Azure: D Family    = 2 vCPU : 8 GiB
+- Azure: D Family  = 2 vCPU : 8 GiB
 - GCE: C3 Standard = 4 vCPU : 16 GiB
 
-The Kwok provider will be able to select on `karpenter.sh/instance-memory` and `karpenter.sh/instance-cpu`.
+The Kwok provider will be able to select on `karpenter.kwok.sh/instance-family`, `karpenter.kwok.sh/instance-memory`, and `karpenter.kwok.sh/instance-cpu`.
 
 #### Capacity Type Names
 Karpenter v1beta1 APIs use `on-demand` and `spot` as the options for `karpenter.sh/capacity-type`, reflecting how they're referenced in AWS and elsewhere. In my docs search, I've found that Cloud Providers have different names for on-demand (e.g. Regular for AKS and Standard for GKE). Since this is how Karpenter defines the capacity type labels, the KwoK CP will use the values defined in the project, regardless of how this value changes in the future.
