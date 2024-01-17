@@ -32,6 +32,8 @@ These ratios seem to accurately depict a common ratios, where "standard/general"
 - AKS: D Family    = 2 vCPU : 8 GiB
 - GKE: C3 Standard = 4 vCPU : 16 GiB
 
+The Kwok provider will be able to select on `karpenter.sh/instance-memory` and `karpenter.sh/instance-cpu`.
+
 #### Capacity Type Names
 Karpenter v1beta1 APIs use `on-demand` and `spot` as the options for `karpenter.sh/capacity-type`, reflecting how they're referenced in AWS and elsewhere. In my docs search, I've found that Cloud Providers have different names for on-demand (e.g. Regular for AKS and Standard for GKE). Since this is how Karpenter defines the capacity type labels, the KwoK CP will use the values defined in the project, regardless of how this value changes in the future.
 
