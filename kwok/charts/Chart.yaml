@@ -1,9 +1,9 @@
 apiVersion: v2
 name: karpenter
-description: A Helm chart for Karpenter, an open-source node provisioning project built for Kubernetes.
+description: A Helm chart for Karpenter's KwoK Provider, integrated with https://github.com/kubernetes-sigs/kwok.
 type: application
-version: 0.33.0
-appVersion: 0.33.0
+version: 0.33.1
+appVersion: 0.33.1
 keywords:
   - cluster
   - node

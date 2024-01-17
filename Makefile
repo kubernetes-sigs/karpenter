@@ -2,8 +2,7 @@
 export KWOK_REPO ?= ${ACCOUNT_ID}.dkr.ecr.${DEFAULT_REGION}.amazonaws.com
 export SYSTEM_NAMESPACE=kube-system
 
-HELM_OPTS ?= --set settings.featureGates.drift=true \
-			--set logLevel=debug \
+HELM_OPTS ?= --set logLevel=debug \
 			--set controller.resources.requests.cpu=1 \
 			--set controller.resources.requests.memory=1Gi \
 			--set controller.resources.limits.cpu=1 \
