@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -19,7 +21,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 
-	"github.com/aws/karpenter-core/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/events"
 )
 
 func EvictPod(pod *v1.Pod) events.Event {

@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -32,10 +34,9 @@ import (
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/metrics"
-	"github.com/aws/karpenter-core/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/operator/controller"
 )
 
 const (
@@ -43,7 +44,6 @@ const (
 	podNameSpace        = "namespace"
 	ownerSelfLink       = "owner"
 	podHostName         = "node"
-	podProvisioner      = "provisioner"
 	podNodePool         = "nodepool"
 	podHostZone         = "zone"
 	podHostArchitecture = "arch"
@@ -60,7 +60,7 @@ var (
 			Namespace: "karpenter",
 			Subsystem: "pods",
 			Name:      "state",
-			Help:      "Pod state is the current state of pods. This metric can be used several ways as it is labeled by the pod name, namespace, owner, node, provisioner name, zone, architecture, capacity type, instance type and pod phase.",
+			Help:      "Pod state is the current state of pods. This metric can be used several ways as it is labeled by the pod name, namespace, owner, node, nodepool name, zone, architecture, capacity type, instance type and pod phase.",
 		},
 		labelNames(),
 	)
@@ -94,7 +94,6 @@ func labelNames() []string {
 		podNameSpace,
 		ownerSelfLink,
 		podHostName,
-		podProvisioner,
 		podNodePool,
 		podHostZone,
 		podHostArchitecture,
@@ -184,7 +183,6 @@ func (c *Controller) makeLabels(ctx context.Context, pod *v1.Pod) (prometheus.La
 	metricLabels[podHostArchitecture] = node.Labels[v1.LabelArchStable]
 	metricLabels[podHostCapacityType] = node.Labels[v1beta1.CapacityTypeLabelKey]
 	metricLabels[podHostInstanceType] = node.Labels[v1.LabelInstanceTypeStable]
-	metricLabels[podProvisioner] = node.Labels[v1alpha5.ProvisionerNameLabelKey]
 	metricLabels[podNodePool] = node.Labels[v1beta1.NodePoolLabelKey]
 	return metricLabels, nil
 }

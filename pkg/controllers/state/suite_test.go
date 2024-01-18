@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -24,32 +26,32 @@ import (
 
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	cloudproviderapi "k8s.io/cloud-provider/api"
 	clock "k8s.io/utils/clock/testing"
 	"knative.dev/pkg/ptr"
 
-	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
-	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
-	"github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/operator/options"
-	"github.com/aws/karpenter-core/pkg/operator/scheme"
-	"github.com/aws/karpenter-core/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/apis"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
+	"sigs.k8s.io/karpenter/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/operator/scheme"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/test"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/test"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	. "knative.dev/pkg/logging/testing"
 
-	. "github.com/aws/karpenter-core/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
 var ctx context.Context
@@ -153,7 +155,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 		}
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectStateNodeCount("==", 1)
-		stateNode := ExpectStateNodeExists(node)
+		stateNode := ExpectStateNodeExists(cluster, node)
 
 		// Adding more volumes should cause an error since we are at the volume limits
 		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.Volumes{
@@ -175,14 +177,14 @@ var _ = Describe("Volume Usage/Limits", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectStateNodeCount("==", 1)
-		stateNode := ExpectStateNodeExists(node)
+		stateNode := ExpectStateNodeExists(cluster, node)
 
 		// Adding more volumes should cause an error since we are at the volume limits
 		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.Volumes{
 			csiProvider: sets.New("test"),
 		})).ToNot(BeNil())
 
-		// Reconcile the machine one more time to ensure that we maintain our volume usage state
+		// Reconcile the nodeclaim one more time to ensure that we maintain our volume usage state
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
 		// Ensure that we still consider adding another volume to the node breaching our volume limits
@@ -207,7 +209,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectStateNodeCount("==", 1)
-		stateNode := ExpectStateNodeExists(node)
+		stateNode := ExpectStateNodeExists(cluster, node)
 
 		// Adding more volumes should not cause an error since this PVC volume is already tracked
 		Expect(stateNode.VolumeUsage().ExceedsLimits(scheduling.Volumes{
@@ -243,7 +245,7 @@ var _ = Describe("HostPort Usage", func() {
 		}
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectStateNodeCount("==", 1)
-		stateNode := ExpectStateNodeExists(node)
+		stateNode := ExpectStateNodeExists(cluster, node)
 
 		// Adding a conflicting host port should cause an error
 		Expect(stateNode.HostPortUsage().Conflicts(test.Pod(), []scheduling.HostPort{
@@ -267,7 +269,7 @@ var _ = Describe("HostPort Usage", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectStateNodeCount("==", 1)
-		stateNode := ExpectStateNodeExists(node)
+		stateNode := ExpectStateNodeExists(cluster, node)
 
 		// Adding a conflicting host port should cause an error
 		Expect(stateNode.HostPortUsage().Conflicts(test.Pod(), []scheduling.HostPort{
@@ -305,7 +307,7 @@ var _ = Describe("HostPort Usage", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectStateNodeCount("==", 1)
-		stateNode := ExpectStateNodeExists(node)
+		stateNode := ExpectStateNodeExists(cluster, node)
 
 		// Adding a conflicting host port should not cause an error since this port is already tracked for the pod
 		Expect(stateNode.HostPortUsage().Conflicts(pods[5], []scheduling.HostPort{
@@ -378,7 +380,7 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
 
 		// two pods, but neither is bound to the node so the node's CPU requests should be zero
-		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("0.0")}, ExpectStateNodeExists(node).PodRequests())
+		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("0.0")}, ExpectStateNodeExists(cluster, node).PodRequests())
 	})
 	It("should count new pods bound to nodes", func() {
 		pod1 := test.UnschedulablePod(test.PodOptions{
@@ -414,11 +416,11 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
 
-		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("1.5")}, ExpectStateNodeExists(node).PodRequests())
+		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("1.5")}, ExpectStateNodeExists(cluster, node).PodRequests())
 
 		ExpectManualBinding(ctx, env.Client, pod2, node)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
-		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("3.5")}, ExpectStateNodeExists(node).PodRequests())
+		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("3.5")}, ExpectStateNodeExists(cluster, node).PodRequests())
 	})
 	It("should count existing pods bound to nodes", func() {
 		pod1 := test.UnschedulablePod(test.PodOptions{
@@ -452,7 +454,7 @@ var _ = Describe("Node Resource Level", func() {
 
 		// that we just noticed
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("3.5")}, ExpectStateNodeExists(node).PodRequests())
+		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("3.5")}, ExpectStateNodeExists(cluster, node).PodRequests())
 	})
 	It("should subtract requests if the pod is deleted", func() {
 		pod1 := test.UnschedulablePod(test.PodOptions{
@@ -489,16 +491,16 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
 
-		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("3.5")}, ExpectStateNodeExists(node).PodRequests())
+		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("3.5")}, ExpectStateNodeExists(cluster, node).PodRequests())
 
 		// delete the pods and the CPU usage should go down
 		ExpectDeleted(ctx, env.Client, pod2)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
-		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("1.5")}, ExpectStateNodeExists(node).PodRequests())
+		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("1.5")}, ExpectStateNodeExists(cluster, node).PodRequests())
 
 		ExpectDeleted(ctx, env.Client, pod1)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
-		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("0")}, ExpectStateNodeExists(node).PodRequests())
+		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("0")}, ExpectStateNodeExists(cluster, node).PodRequests())
 	})
 	It("should not add requests if the pod is terminal", func() {
 		pod1 := test.UnschedulablePod(test.PodOptions{
@@ -537,7 +539,7 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
 
-		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("0")}, ExpectStateNodeExists(node).PodRequests())
+		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("0")}, ExpectStateNodeExists(cluster, node).PodRequests())
 	})
 	It("should stop tracking nodes that are deleted", func() {
 		pod1 := test.UnschedulablePod(test.PodOptions{
@@ -681,7 +683,7 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectResources(v1.ResourceList{
 			v1.ResourceCPU:  resource.MustParse("0"),
 			v1.ResourcePods: resource.MustParse("0"),
-		}, ExpectStateNodeExists(node).PodRequests())
+		}, ExpectStateNodeExists(cluster, node).PodRequests())
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 		sum := 0.0
@@ -700,7 +702,7 @@ var _ = Describe("Node Resource Level", func() {
 			ExpectResources(v1.ResourceList{
 				v1.ResourceCPU:  resource.MustParse(fmt.Sprintf("%1.1f", sum)),
 				v1.ResourcePods: resource.MustParse(fmt.Sprintf("%d", podCount)),
-			}, ExpectStateNodeExists(node).PodRequests())
+			}, ExpectStateNodeExists(cluster, node).PodRequests())
 		}
 
 		for _, pod := range pods {
@@ -715,12 +717,12 @@ var _ = Describe("Node Resource Level", func() {
 			ExpectResources(v1.ResourceList{
 				v1.ResourceCPU:  resource.MustParse(fmt.Sprintf("%1.1f", sum)),
 				v1.ResourcePods: resource.MustParse(fmt.Sprintf("%d", podCount)),
-			}, ExpectStateNodeExists(node).PodRequests())
+			}, ExpectStateNodeExists(cluster, node).PodRequests())
 		}
 		ExpectResources(v1.ResourceList{
 			v1.ResourceCPU:  resource.MustParse("0"),
 			v1.ResourcePods: resource.MustParse("0"),
-		}, ExpectStateNodeExists(node).PodRequests())
+		}, ExpectStateNodeExists(cluster, node).PodRequests())
 	})
 	It("should track daemonset requested resources separately", func() {
 		ds := test.DaemonSet(
@@ -778,10 +780,10 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectResources(v1.ResourceList{
 			v1.ResourceCPU:    resource.MustParse("0"),
 			v1.ResourceMemory: resource.MustParse("0"),
-		}, ExpectStateNodeExists(node).DaemonSetRequests())
+		}, ExpectStateNodeExists(cluster, node).DaemonSetRequests())
 		ExpectResources(v1.ResourceList{
 			v1.ResourceCPU: resource.MustParse("1.5"),
-		}, ExpectStateNodeExists(node).PodRequests())
+		}, ExpectStateNodeExists(cluster, node).PodRequests())
 
 		ExpectApplied(ctx, env.Client, dsPod)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(dsPod))
@@ -792,12 +794,12 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectResources(v1.ResourceList{
 			v1.ResourceCPU:    resource.MustParse("1"),
 			v1.ResourceMemory: resource.MustParse("2Gi"),
-		}, ExpectStateNodeExists(node).DaemonSetRequests())
+		}, ExpectStateNodeExists(cluster, node).DaemonSetRequests())
 		// total request
 		ExpectResources(v1.ResourceList{
 			v1.ResourceCPU:    resource.MustParse("2.5"),
 			v1.ResourceMemory: resource.MustParse("2Gi"),
-		}, ExpectStateNodeExists(node).PodRequests())
+		}, ExpectStateNodeExists(cluster, node).PodRequests())
 	})
 	It("should mark node for deletion when node is deleted", func() {
 		node := test.Node(test.NodeOptions{
@@ -806,7 +808,7 @@ var _ = Describe("Node Resource Level", func() {
 					v1beta1.NodePoolLabelKey:   nodePool.Name,
 					v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 				},
-				Finalizers: []string{v1alpha5.TerminationFinalizer},
+				Finalizers: []string{v1beta1.TerminationFinalizer},
 			},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
@@ -822,12 +824,12 @@ var _ = Describe("Node Resource Level", func() {
 
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectNodeExists(ctx, env.Client, node.Name)
-		Expect(ExpectStateNodeExists(node).MarkedForDeletion()).To(BeTrue())
+		Expect(ExpectStateNodeExists(cluster, node).MarkedForDeletion()).To(BeTrue())
 	})
 	It("should mark node for deletion when nodeclaim is deleted", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
-				Finalizers: []string{v1alpha5.TerminationFinalizer},
+				Finalizers: []string{v1beta1.TerminationFinalizer},
 			},
 			Spec: v1beta1.NodeClaimSpec{
 				Requirements: []v1.NodeSelectorRequirement{
@@ -866,7 +868,7 @@ var _ = Describe("Node Resource Level", func() {
 					v1beta1.NodePoolLabelKey:   nodePool.Name,
 					v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 				},
-				Finalizers: []string{v1alpha5.TerminationFinalizer},
+				Finalizers: []string{v1beta1.TerminationFinalizer},
 			},
 			ProviderID: nodeClaim.Status.ProviderID,
 		})
@@ -879,8 +881,8 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		ExpectExists(ctx, env.Client, nodeClaim)
 
-		Expect(ExpectStateNodeExistsForNodeClaim(nodeClaim).MarkedForDeletion()).To(BeTrue())
-		Expect(ExpectStateNodeExists(node).MarkedForDeletion()).To(BeTrue())
+		Expect(ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim).MarkedForDeletion()).To(BeTrue())
+		Expect(ExpectStateNodeExists(cluster, node).MarkedForDeletion()).To(BeTrue())
 	})
 	It("should nominate the node until the nomination time passes", func() {
 		node := test.Node(test.NodeOptions{
@@ -889,7 +891,7 @@ var _ = Describe("Node Resource Level", func() {
 					v1beta1.NodePoolLabelKey:   nodePool.Name,
 					v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 				},
-				Finalizers: []string{v1alpha5.TerminationFinalizer},
+				Finalizers: []string{v1beta1.TerminationFinalizer},
 			},
 			Allocatable: map[v1.ResourceName]resource.Quantity{
 				v1.ResourceCPU: resource.MustParse("4"),
@@ -902,11 +904,11 @@ var _ = Describe("Node Resource Level", func() {
 		cluster.NominateNodeForPod(ctx, node.Spec.ProviderID)
 
 		// Expect that the node is now nominated
-		Expect(ExpectStateNodeExists(node).Nominated()).To(BeTrue())
+		Expect(ExpectStateNodeExists(cluster, node).Nominated()).To(BeTrue())
 		time.Sleep(time.Second * 10) // nomination window is 20s so it should still be nominated
-		Expect(ExpectStateNodeExists(node).Nominated()).To(BeTrue())
+		Expect(ExpectStateNodeExists(cluster, node).Nominated()).To(BeTrue())
 		time.Sleep(time.Second * 11) // past 20s, node should no longer be nominated
-		Expect(ExpectStateNodeExists(node).Nominated()).To(BeFalse())
+		Expect(ExpectStateNodeExists(cluster, node).Nominated()).To(BeFalse())
 	})
 	It("should handle a node changing from no providerID to registering a providerID", func() {
 		node := test.Node()
@@ -914,7 +916,7 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 		ExpectStateNodeCount("==", 1)
-		ExpectStateNodeExists(node)
+		ExpectStateNodeExists(cluster, node)
 
 		// Change the providerID; this mocks CCM adding the providerID onto the node after registration
 		node.Spec.ProviderID = fmt.Sprintf("fake://%s", node.Name)
@@ -922,7 +924,7 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 		ExpectStateNodeCount("==", 1)
-		ExpectStateNodeExists(node)
+		ExpectStateNodeExists(cluster, node)
 	})
 })
 
@@ -1262,6 +1264,28 @@ var _ = Describe("Cluster State Sync", func() {
 		}
 		Expect(cluster.Synced(ctx)).To(BeFalse())
 	})
+	It("shouldn't consider the cluster state synced if a nodeclaim is added manually with UpdateNodeClaim", func() {
+		nodeClaim := test.NodeClaim()
+		nodeClaim.Status.ProviderID = ""
+
+		cluster.UpdateNodeClaim(nodeClaim)
+		Expect(cluster.Synced(ctx)).To(BeFalse())
+	})
+	It("shouldn't consider the cluster state synced if a nodeclaim without a providerID is deleted", func() {
+		nodeClaim := test.NodeClaim()
+		nodeClaim.Status.ProviderID = ""
+
+		cluster.UpdateNodeClaim(nodeClaim)
+		Expect(cluster.Synced(ctx)).To(BeFalse())
+
+		ExpectApplied(ctx, env.Client, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		Expect(cluster.Synced(ctx)).To(BeFalse())
+
+		ExpectDeleted(ctx, env.Client, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		Expect(cluster.Synced(ctx)).To(BeTrue())
+	})
 })
 
 var _ = Describe("DaemonSet Controller", func() {
@@ -1421,6 +1445,196 @@ var _ = Describe("Consolidated State", func() {
 	})
 })
 
+var _ = Describe("Data Races", func() {
+	It("should ensure that calling Synced() is valid while making updates to Nodes", func() {
+		cancelCtx, cancel := context.WithCancel(ctx)
+		DeferCleanup(func() {
+			cancel()
+		})
+
+		// Keep calling Synced for the entirety of this test
+		go func() {
+			for {
+				_ = cluster.Synced(ctx)
+				if cancelCtx.Err() != nil {
+					return
+				}
+			}
+		}()
+
+		// Call UpdateNode on 100 nodes (enough to trigger a DATA RACE)
+		for i := 0; i < 100; i++ {
+			node := test.Node(test.NodeOptions{
+				ProviderID: test.RandomProviderID(),
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		}
+	})
+	It("should ensure that calling Synced() is valid while making updates to NodeClaims", func() {
+		cancelCtx, cancel := context.WithCancel(ctx)
+		DeferCleanup(func() {
+			cancel()
+		})
+
+		// Keep calling Synced for the entirety of this test
+		go func() {
+			for {
+				_ = cluster.Synced(ctx)
+				if cancelCtx.Err() != nil {
+					return
+				}
+			}
+		}()
+
+		// Call UpdateNodeClaim on 100 NodeClaims (enough to trigger a DATA RACE)
+		for i := 0; i < 100; i++ {
+			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		}
+	})
+})
+
+var _ = Describe("Taints", func() {
+	var nodeClaim *v1beta1.NodeClaim
+	var node *v1.Node
+	BeforeEach(func() {
+		instanceType := cloudProvider.InstanceTypes[0]
+		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.LabelInstanceTypeStable: instanceType.Name,
+			}},
+			Status: v1beta1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+			},
+		})
+	})
+	Context("Managed", func() {
+		It("should not consider ephemeral taints on a managed node that isn't initialized", func() {
+			node.Spec.Taints = []v1.Taint{
+				{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
+				{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
+				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+			}
+			ExpectApplied(ctx, env.Client, nodeClaim, node)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			stateNode := ExpectStateNodeExists(cluster, node)
+			Expect(stateNode.Taints()).To(HaveLen(0))
+		})
+		It("should consider ephemeral taints on a managed node after the node is initialized", func() {
+			ExpectApplied(ctx, env.Client, nodeClaim, node)
+			ExpectMakeNodesInitialized(ctx, env.Client, node)
+			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+
+			node = ExpectExists(ctx, env.Client, node)
+			node.Spec.Taints = []v1.Taint{
+				{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
+				{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
+				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+			}
+			ExpectApplied(ctx, env.Client, node)
+
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			stateNode := ExpectStateNodeExists(cluster, node)
+			Expect(stateNode.Taints()).To(HaveLen(3))
+			Expect(stateNode.Taints()).To(ContainElements(
+				v1.Taint{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
+				v1.Taint{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
+				v1.Taint{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+			))
+		})
+		It("should consider startup taints on a managed node that isn't initialized", func() {
+			nodeClaim.Spec.StartupTaints = []v1.Taint{
+				{Key: "taint-key", Value: "taint-value", Effect: v1.TaintEffectNoSchedule},
+				{Key: "taint-key2", Value: "taint-value2", Effect: v1.TaintEffectNoExecute},
+			}
+			node.Spec.Taints = []v1.Taint{
+				{Key: "taint-key", Value: "taint-value", Effect: v1.TaintEffectNoSchedule},
+				{Key: "taint-key2", Value: "taint-value2", Effect: v1.TaintEffectNoExecute},
+			}
+			ExpectApplied(ctx, env.Client, nodeClaim, node)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			stateNode := ExpectStateNodeExists(cluster, node)
+			Expect(stateNode.Taints()).To(HaveLen(0))
+		})
+		It("should consider startup taints on a managed node after the node is initialized", func() {
+			nodeClaim.Spec.StartupTaints = []v1.Taint{
+				{Key: "taint-key", Value: "taint-value", Effect: v1.TaintEffectNoSchedule},
+				{Key: "taint-key2", Value: "taint-value2", Effect: v1.TaintEffectNoExecute},
+			}
+			node.Spec.Taints = []v1.Taint{
+				{Key: "taint-key", Value: "taint-value", Effect: v1.TaintEffectNoSchedule},
+				{Key: "taint-key2", Value: "taint-value2", Effect: v1.TaintEffectNoExecute},
+			}
+			ExpectApplied(ctx, env.Client, nodeClaim, node)
+			ExpectMakeNodesInitialized(ctx, env.Client, node)
+			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			stateNode := ExpectStateNodeExists(cluster, node)
+			Expect(stateNode.Taints()).To(HaveLen(2))
+			Expect(stateNode.Taints()).To(ContainElements(
+				v1.Taint{Key: "taint-key", Value: "taint-value", Effect: v1.TaintEffectNoSchedule},
+				v1.Taint{Key: "taint-key2", Value: "taint-value2", Effect: v1.TaintEffectNoExecute},
+			))
+		})
+	})
+	Context("Unmanaged", func() {
+		It("should consider ephemeral taints on an unmanaged node that isn't initialized", func() {
+			node.Spec.Taints = []v1.Taint{
+				{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
+				{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
+				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+			}
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			stateNode := ExpectStateNodeExists(cluster, node)
+			Expect(stateNode.Taints()).To(HaveLen(3))
+			Expect(stateNode.Taints()).To(ContainElements(
+				v1.Taint{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
+				v1.Taint{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
+				v1.Taint{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+			))
+		})
+		It("should consider ephemeral taints on an unmanaged node after the node is initialized", func() {
+			ExpectApplied(ctx, env.Client, node)
+			ExpectMakeNodesInitialized(ctx, env.Client, node)
+
+			node = ExpectExists(ctx, env.Client, node)
+			node.Spec.Taints = []v1.Taint{
+				{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
+				{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
+				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+			}
+
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			stateNode := ExpectStateNodeExists(cluster, node)
+			Expect(stateNode.Taints()).To(HaveLen(3))
+			Expect(stateNode.Taints()).To(ContainElements(
+				v1.Taint{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
+				v1.Taint{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
+				v1.Taint{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+			))
+		})
+	})
+})
+
 func ExpectStateNodeCount(comparator string, count int) int {
 	GinkgoHelper()
 	c := 0
@@ -1430,46 +1644,4 @@ func ExpectStateNodeCount(comparator string, count int) int {
 	})
 	Expect(c).To(BeNumerically(comparator, count))
 	return c
-}
-
-func ExpectStateNodeExists(node *v1.Node) *state.StateNode {
-	GinkgoHelper()
-	var ret *state.StateNode
-	cluster.ForEachNode(func(n *state.StateNode) bool {
-		if n.Node.Name != node.Name {
-			return true
-		}
-		ret = n.DeepCopy()
-		return false
-	})
-	Expect(ret).ToNot(BeNil())
-	return ret
-}
-
-func ExpectStateNodeExistsForNodeClaim(nodeClaim *v1beta1.NodeClaim) *state.StateNode {
-	GinkgoHelper()
-	var ret *state.StateNode
-	cluster.ForEachNode(func(n *state.StateNode) bool {
-		if n.NodeClaim.Status.ProviderID != nodeClaim.Status.ProviderID {
-			return true
-		}
-		ret = n.DeepCopy()
-		return false
-	})
-	Expect(ret).ToNot(BeNil())
-	return ret
-}
-
-func ExpectStateNodeNotFoundForNodeClaim(nodeClaim *v1beta1.NodeClaim) *state.StateNode {
-	GinkgoHelper()
-	var ret *state.StateNode
-	cluster.ForEachNode(func(n *state.StateNode) bool {
-		if n.NodeClaim.Status.ProviderID != nodeClaim.Status.ProviderID {
-			return true
-		}
-		ret = n.DeepCopy()
-		return false
-	})
-	Expect(ret).To(BeNil())
-	return ret
 }

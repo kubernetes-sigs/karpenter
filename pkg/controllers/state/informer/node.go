@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -26,8 +28,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 )
 
 // NodeController reconciles nodes for the purpose of maintaining state regarding nodes that is expensive to compute.
@@ -37,7 +39,7 @@ type NodeController struct {
 }
 
 // NewNodeController constructs a controller instance
-func NewNodeController(kubeClient client.Client, cluster *state.Cluster) corecontroller.Controller {
+func NewNodeController(kubeClient client.Client, cluster *state.Cluster) operatorcontroller.Controller {
 	return &NodeController{
 		kubeClient: kubeClient,
 		cluster:    cluster,
@@ -65,8 +67,8 @@ func (c *NodeController) Reconcile(ctx context.Context, req reconcile.Request) (
 	return reconcile.Result{RequeueAfter: stateRetryPeriod}, nil
 }
 
-func (c *NodeController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(controllerruntime.
+func (c *NodeController) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+	return operatorcontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1.Node{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))

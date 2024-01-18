@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -50,9 +52,6 @@ type NodeClaimSpec struct {
 	// NodeClassRef is a reference to an object that defines provider specific configuration
 	// +required
 	NodeClassRef *NodeClassReference `json:"nodeClassRef"`
-	// Provider stores CloudProvider-specific details from a conversion from a v1alpha5.Provisioner
-	// TODO @joinnis: Remove this field when v1alpha5 is unsupported in a future version of Karpenter
-	Provider *Provider `json:"-"`
 }
 
 // ResourceRequirements models the required resources for the NodeClaim to launch
@@ -73,10 +72,6 @@ type KubeletConfiguration struct {
 	// Note that not all providers may use all addresses.
 	//+optional
 	ClusterDNS []string `json:"clusterDNS,omitempty"`
-	// TODO @joinnis: Remove this field when v1alpha5 is unsupported in a future version of Karpenter
-	// ContainerRuntime is the container runtime to be used with your worker nodes.
-	// +optional
-	ContainerRuntime *string `json:"-"`
 	// MaxPods is an override for the maximum number of pods that can run on
 	// a worker node instance.
 	// +kubebuilder:validation:Minimum:=0
@@ -170,11 +165,6 @@ type NodeClaim struct {
 
 	Spec   NodeClaimSpec   `json:"spec,omitempty"`
 	Status NodeClaimStatus `json:"status,omitempty"`
-
-	// IsMachine tells Karpenter whether the in-memory representation of this object
-	// is actually referring to a NodeClaim object. This value is not actually part of the v1beta1 public-facing API
-	// TODO @joinnis: Remove this field when v1alpha5 is unsupported in a future version of Karpenter
-	IsMachine bool `json:"-"`
 }
 
 // NodeClaimList contains a list of NodeClaims

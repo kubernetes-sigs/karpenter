@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -15,20 +17,27 @@ limitations under the License.
 package v1beta1
 
 import (
+	"context"
 	"fmt"
+	"math"
 	"sort"
+	"strconv"
 
 	"github.com/mitchellh/hashstructure/v2"
+	"github.com/robfig/cron/v3"
 	"github.com/samber/lo"
+	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/utils/clock"
 	"knative.dev/pkg/ptr"
 )
 
-// NodePoolSpec is the top level provisioner specification. Provisioners
-// launch nodes in response to pods that are unschedulable. A single provisioner
+// NodePoolSpec is the top level nodepool specification. Nodepools
+// launch nodes in response to pods that are unschedulable. A single nodepool
 // is capable of managing a diverse set of nodes. Node properties are determined
-// from a combination of provisioner and pod scheduling constraints.
+// from a combination of nodepool and pod scheduling constraints.
 type NodePoolSpec struct {
 	// Template contains the template of possibilities for the provisioning logic to launch a NodeClaim with.
 	// NodeClaims launched from this NodePool will often be further constrained than the template specifies.
@@ -43,10 +52,10 @@ type NodePoolSpec struct {
 	// Limits define a set of bounds for provisioning capacity.
 	// +optional
 	Limits Limits `json:"limits,omitempty"`
-	// Weight is the priority given to the provisioner during scheduling. A higher
-	// numerical weight indicates that this provisioner will be ordered
-	// ahead of other provisioners with lower weights. A provisioner with no weight
-	// will be treated as if it is a provisioner with a weight of 0.
+	// Weight is the priority given to the nodepool during scheduling. A higher
+	// numerical weight indicates that this nodepool will be ordered
+	// ahead of other nodepools with lower weights. A nodepool with no weight
+	// will be treated as if it is a nodepool with a weight of 0.
 	// +kubebuilder:validation:Minimum:=1
 	// +kubebuilder:validation:Maximum:=100
 	// +optional
@@ -78,6 +87,47 @@ type Disruption struct {
 	// +kubebuilder:validation:Schemaless
 	// +optional
 	ExpireAfter NillableDuration `json:"expireAfter"`
+	// Budgets is a list of Budgets.
+	// If there are multiple active budgets, Karpenter uses
+	// the most restrictive value. If left undefined,
+	// this will default to one budget with a value to 10%.
+	// +kubebuilder:validation:XValidation:message="'schedule' must be set with 'duration'",rule="!self.all(x, (has(x.schedule) && !has(x.duration)) || (!has(x.schedule) && has(x.duration)))"
+	// +kubebuilder:default:={{nodes: "10%"}}
+	// +kubebuilder:validation:MaxItems=50
+	// +optional
+	Budgets []Budget `json:"budgets,omitempty" hash:"ignore"`
+}
+
+// Budget defines when Karpenter will restrict the
+// number of Node Claims that can be terminating simultaneously.
+type Budget struct {
+	// Nodes dictates the maximum number of NodeClaims owned by this NodePool
+	// that can be terminating at once. This is calculated by counting nodes that
+	// have a deletion timestamp set, or are actively being deleted by Karpenter.
+	// This field is required when specifying a budget.
+	// This cannot be of type intstr.IntOrString since kubebuilder doesn't support pattern
+	// checking for int nodes for IntOrString nodes.
+	// Ref: https://github.com/kubernetes-sigs/controller-tools/blob/55efe4be40394a288216dab63156b0a64fb82929/pkg/crd/markers/validation.go#L379-L388
+	// +kubebuilder:validation:Pattern:="^((100|[0-9]{1,2})%|[0-9]+)$"
+	// +kubebuilder:default:="10%"
+	Nodes string `json:"nodes" hash:"ignore"`
+	// Schedule specifies when a budget begins being active, following
+	// the upstream cronjob syntax. If omitted, the budget is always active.
+	// Timezones are not supported.
+	// This field is required if Duration is set.
+	// +kubebuilder:validation:Pattern:=`^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$`
+	// +optional
+	Schedule *string `json:"schedule,omitempty" hash:"ignore"`
+	// Duration determines how long a Budget is active since each Schedule hit.
+	// Only minutes and hours are accepted, as cron does not work in seconds.
+	// If omitted, the budget is always active.
+	// This is required if Schedule is set.
+	// This regex has an optional 0s at the end since the duration.String() always adds
+	// a 0s at the end.
+	// +kubebuilder:validation:Pattern=`^([0-9]+(m|h)+(0s)?)$`
+	// +kubebuilder:validation:Type="string"
+	// +optional
+	Duration *metav1.Duration `json:"duration,omitempty" hash:"ignore"`
 }
 
 type ConsolidationPolicy string
@@ -137,11 +187,6 @@ type NodePool struct {
 
 	Spec   NodePoolSpec   `json:"spec,omitempty"`
 	Status NodePoolStatus `json:"status,omitempty"`
-
-	// IsProvisioner tells Karpenter whether the in-memory representation of this object
-	// is actually referring to a Provisioner object. This value is not actually part of the v1beta1 public-facing API
-	// TODO @joinnis: Remove this field when v1alpha5 is unsupported in a future version of Karpenter
-	IsProvisioner bool `json:"-"`
 }
 
 func (in *NodePool) Hash() string {
@@ -160,10 +205,102 @@ type NodePoolList struct {
 	Items           []NodePool `json:"items"`
 }
 
-// OrderByWeight orders the provisioners in the NodePoolList
-// by their priority weight in-place
-func (pl *NodePoolList) OrderByWeight() {
-	sort.Slice(pl.Items, func(a, b int) bool {
-		return ptr.Int32Value(pl.Items[a].Spec.Weight) > ptr.Int32Value(pl.Items[b].Spec.Weight)
+// OrderByWeight orders the NodePools in the NodePoolList by their priority weight in-place.
+// This priority evaluates the following things in precedence order:
+//  1. NodePools that have a larger weight are ordered first
+//  2. If two NodePools have the same weight, then the NodePool with the name later in the alphabet will come first
+func (nl *NodePoolList) OrderByWeight() {
+	sort.Slice(nl.Items, func(a, b int) bool {
+		weightA := ptr.Int32Value(nl.Items[a].Spec.Weight)
+		weightB := ptr.Int32Value(nl.Items[b].Spec.Weight)
+
+		if weightA == weightB {
+			// Order NodePools by name for a consistent ordering when sorting equal weight
+			return nl.Items[a].Name > nl.Items[b].Name
+		}
+		return weightA > weightB
 	})
+}
+
+// MustGetAllowedDisruptions calls GetAllowedDisruptions and returns 0 if the error is not nil. This reduces the
+// amount of state that the disruption controller must reconcile, while allowing the GetAllowedDisruptions()
+// to bubble up any errors in validation.
+func (in *NodePool) MustGetAllowedDisruptions(ctx context.Context, c clock.Clock, numNodes int) int {
+	val, err := in.GetAllowedDisruptions(ctx, c, numNodes)
+	if err != nil {
+		return 0
+	}
+	return val
+}
+
+// GetAllowedDisruptions returns the minimum allowed disruptions across all disruption budgets for a given node pool.
+// This will return an error if there is a configuration error with any budget's node or schedule values.
+func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock, numNodes int) (int, error) {
+	minVal := math.MaxInt32
+	var multiErr error
+	for i := range in.Spec.Disruption.Budgets {
+		val, err := in.Spec.Disruption.Budgets[i].GetAllowedDisruptions(c, numNodes)
+		if err != nil {
+			multiErr = multierr.Append(multiErr, err)
+		}
+		minVal = lo.Ternary(val < minVal, val, minVal)
+	}
+	return minVal, multiErr
+}
+
+// GetAllowedDisruptions returns an intstr.IntOrString that can be used a comparison
+// for calculating if a disruption action is allowed. It returns an error if the
+// schedule is invalid. This returns MAXINT if the value is unbounded.
+func (in *Budget) GetAllowedDisruptions(c clock.Clock, numNodes int) (int, error) {
+	active, err := in.IsActive(c)
+	// If the budget is misconfigured, fail closed.
+	if err != nil {
+		return 0, err
+	}
+	if !active {
+		return math.MaxInt32, nil
+	}
+	// This will round up to the nearest whole number. Therefore, a disruption can
+	// sometimes exceed the disruption budget. This is the same as how Kubernetes
+	// handles MaxUnavailable with PDBs. Take the case with 5% disruptions, but
+	// 10 nodes. Karpenter will opt to allow 1 node to be disrupted, rather than
+	// blocking all disruptions for this nodepool.
+	res, err := intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(GetIntStrFromValue(in.Nodes)), numNodes, true)
+	if err != nil {
+		// Should never happen since this is validated when the nodepool is applied
+		// If this value is incorrectly formatted, fail closed, since we don't know what
+		// they want here.
+		return 0, err
+	}
+	return res, nil
+}
+
+// IsActive takes a clock as input and returns if a budget is active.
+// It walks back in time the time.Duration associated with the schedule,
+// and checks if the next time the schedule will hit is before the current time.
+// If the last schedule hit is exactly the duration in the past, this means the
+// schedule is active, as any more schedule hits in between would only extend this
+// window. This ensures that any previous schedule hits for a schedule are considered.
+func (in *Budget) IsActive(c clock.Clock) (bool, error) {
+	if in.Schedule == nil && in.Duration == nil {
+		return true, nil
+	}
+	schedule, err := cron.ParseStandard(lo.FromPtr(in.Schedule))
+	if err != nil {
+		// Should only occur if there's a discrepancy
+		// with the validation regex and the cron package.
+		return false, fmt.Errorf("invariant violated, invalid cron %s", schedule)
+	}
+	// Walk back in time for the duration associated with the schedule
+	checkPoint := c.Now().Add(-lo.FromPtr(in.Duration).Duration)
+	nextHit := schedule.Next(checkPoint)
+	return !nextHit.After(c.Now()), nil
+}
+
+func GetIntStrFromValue(str string) intstr.IntOrString {
+	// If err is nil, we treat it as an int.
+	if intVal, err := strconv.Atoi(str); err == nil {
+		return intstr.FromInt(intVal)
+	}
+	return intstr.FromString(str)
 }

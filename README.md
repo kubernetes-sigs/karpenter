@@ -6,6 +6,8 @@
 [![Coverage Status](https://coveralls.io/repos/github/aws/karpenter-core/badge.svg?branch=main)](https://coveralls.io/github/aws/karpenter-core?branch=main)
 [![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/aws/karpenter-core/issues)
 
+# Karpenter
+
 Karpenter improves the efficiency and cost of running workloads on Kubernetes clusters by:
 
 * **Watching** for pods that the Kubernetes scheduler has marked as unschedulable
@@ -13,7 +15,25 @@ Karpenter improves the efficiency and cost of running workloads on Kubernetes cl
 * **Provisioning** nodes that meet the requirements of the pods
 * **Removing** the nodes when the nodes are no longer needed
 
-Come discuss Karpenter in the [#karpenter](https://kubernetes.slack.com/archives/C02SFFZSA2K) channel in the [Kubernetes slack](https://slack.k8s.io/)!
+## Community, discussion, contribution, and support
+
+If you have any questions or want to get the latest project news, you can connect with us in the following ways:
+- __Using and Deploying Karpenter?__ Reach out in the [#karpenter](https://kubernetes.slack.com/archives/C02SFFZSA2K) channel in the [Kubernetes slack](https://slack.k8s.io/) to ask questions about configuring or troubleshooting Karpenter.
+- __Contributing to or Developing with Karpenter?__ Join the [#karpenter-dev](https://kubernetes.slack.com/archives/C04JW2J5J5P) channel in the [Kubernetes slack](https://slack.k8s.io/) to ask in-depth questions about contribution or to get involved in design discussions.
+- Join our alternating working group meetings where we share the latest project updates, answer questions, and triage issues:
+  - Bi-weekly meetings alternating between Mondays @ 9:00 PT ([convert to your timezone](http://www.thetimezoneconverter.com/?t=9:00&tz=Seattle)) and Thursdays @ 15:00 PT ([convert to your timezone](http://www.thetimezoneconverter.com/?t=15:00&tz=Seattle)) on [Zoom](https://zoom.us/j/95618088729) - the password is 77777.
+  - Invites are managed through our [Calendar](https://calendar.google.com/calendar/u/0?cid=N3FmZGVvZjVoZWJkZjZpMnJrMmplZzVqYmtAZ3JvdXAuY2FsZW5kYXIuZ29vZ2xlLmNvbQ)
+  - Add future questions or read past discussions in our [Working Group Log](https://docs.google.com/document/d/18BT0AIMugpNpiSPJNlcAL2rv69yAE6Z06gUVj7v_clg/edit?usp=sharing)
+
+Pull Requests and feedback on issues are very welcome!
+See the [issue tracker](https://github.com/aws/karpenter-core/issues) if you're unsure where to start, especially the [Good first issue](https://github.com/aws/karpenter-core/issues?q=is%3Aopen+is%3Aissue+label%3Agood-first-issue) and [Help wanted](https://github.com/aws/karpenter-core/issues?utf8=%E2%9C%93&q=is%3Aopen+is%3Aissue+label%3Ahelp-wanted) tags, and
+also feel free to reach out to discuss.
+
+See also our [contributor guide](CONTRIBUTING.md) and the Kubernetes [community page](https://kubernetes.io/community) for more details on how to get involved.
+
+### Code of conduct
+
+Participation in the Kubernetes community is governed by the [Kubernetes Code of Conduct](code-of-conduct.md).
 
 ## Talks
 - 09/08/2022 [Workload Consolidation with Karpenter](https://youtu.be/BnksdJ3oOEs)

@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -21,7 +23,7 @@ import (
 	"github.com/imdario/mergo"
 	"github.com/samber/lo"
 
-	"github.com/aws/karpenter-core/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
 type OptionsFields struct {
@@ -44,7 +46,8 @@ type OptionsFields struct {
 }
 
 type FeatureGates struct {
-	Drift *bool
+	Drift                   *bool
+	SpotToSpotConsolidation *bool
 }
 
 func Options(overrides ...OptionsFields) *options.Options {
@@ -71,7 +74,8 @@ func Options(overrides ...OptionsFields) *options.Options {
 		BatchMaxDuration:     lo.FromPtrOr(opts.BatchMaxDuration, 10*time.Second),
 		BatchIdleDuration:    lo.FromPtrOr(opts.BatchIdleDuration, time.Second),
 		FeatureGates: options.FeatureGates{
-			Drift: lo.FromPtrOr(opts.FeatureGates.Drift, false),
+			Drift:                   lo.FromPtrOr(opts.FeatureGates.Drift, false),
+			SpotToSpotConsolidation: lo.FromPtrOr(opts.FeatureGates.SpotToSpotConsolidation, false),
 		},
 	}
 }

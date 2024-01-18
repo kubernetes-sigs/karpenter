@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -35,19 +37,19 @@ import (
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
-	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
-	"github.com/aws/karpenter-core/pkg/events"
-	"github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/operator/options"
-	"github.com/aws/karpenter-core/pkg/operator/scheme"
-	"github.com/aws/karpenter-core/pkg/test"
-	. "github.com/aws/karpenter-core/pkg/test/expectations"
+	"sigs.k8s.io/karpenter/pkg/apis"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
+	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/operator/scheme"
+	"sigs.k8s.io/karpenter/pkg/test"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
 var ctx context.Context
@@ -394,7 +396,7 @@ var _ = Describe("Provisioning", func() {
 			// only available instance type has 2 GPUs which would exceed the limit
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
-		It("should not schedule to a provisioner after a scheduling round if limits would be exceeded", func() {
+		It("should not schedule to a nodepool after a scheduling round if limits would be exceeded", func() {
 			ExpectApplied(ctx, env.Client, test.NodePool(v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
 					Limits: v1beta1.Limits(v1.ResourceList{v1.ResourceCPU: resource.MustParse("2")}),
@@ -810,6 +812,28 @@ var _ = Describe("Provisioning", func() {
 				Expect(node.Labels).To(HaveKeyWithValue(domain+"/test", "test-value"))
 			}
 		})
+		It("should label nodes with labels in the subdomain from LabelDomainExceptions list", func() {
+			for domain := range v1beta1.LabelDomainExceptions {
+				nodePool := test.NodePool(v1beta1.NodePool{
+					Spec: v1beta1.NodePoolSpec{
+						Template: v1beta1.NodeClaimTemplate{
+							ObjectMeta: v1beta1.ObjectMeta{
+								Labels: map[string]string{"subdomain." + domain + "/test": "test-value"},
+							},
+						},
+					},
+				})
+				ExpectApplied(ctx, env.Client, nodePool)
+				pod := test.UnschedulablePod(
+					test.PodOptions{
+						NodeRequirements: []v1.NodeSelectorRequirement{{Key: "subdomain." + domain + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}},
+					},
+				)
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				node := ExpectScheduled(ctx, env.Client, pod)
+				Expect(node.Labels).To(HaveKeyWithValue("subdomain."+domain+"/test", "test-value"))
+			}
+		})
 
 	})
 	Context("Taints", func() {
@@ -1141,7 +1165,27 @@ var _ = Describe("Provisioning", func() {
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
-		It("should schedule with an empty storage class", func() {
+		It("should schedule with an empty storage class if the pvc is bound", func() {
+			storageClass := ""
+			volumeName := "test-volume"
+			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				StorageClassName: &storageClass,
+				VolumeName:       volumeName,
+			})
+			persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: volumeName,
+				},
+				StorageClassName: storageClass,
+			})
+			ExpectApplied(ctx, env.Client, test.NodePool(), persistentVolumeClaim, persistentVolume)
+			pod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+			})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectScheduled(ctx, env.Client, pod)
+		})
+		It("should not schedule with an empty storage class if the pvc is not bound", func() {
 			storageClass := ""
 			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{StorageClassName: &storageClass})
 			ExpectApplied(ctx, env.Client, test.NodePool(), persistentVolumeClaim)
@@ -1149,7 +1193,39 @@ var _ = Describe("Provisioning", func() {
 				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
 			})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
+		})
+		It("should schedule with a missing storage class if the pvc is bound", func() {
+			missingStorageClass := "missing-storage-class"
+			volumeName := "test-volume"
+			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				StorageClassName: &missingStorageClass,
+				VolumeName:       volumeName,
+			})
+			persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: volumeName,
+				},
+				StorageClassName: missingStorageClass,
+			})
+			ExpectApplied(ctx, env.Client, test.NodePool(), persistentVolumeClaim, persistentVolume)
+			pod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+			})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			ExpectScheduled(ctx, env.Client, pod)
+		})
+		It("should not schedule with a missing storage class if the pvc is not bound", func() {
+			missingStorageClass := "missing-storage-class"
+			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				StorageClassName: &missingStorageClass,
+			})
+			ExpectApplied(ctx, env.Client, test.NodePool(), persistentVolumeClaim)
+			pod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+			})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 		It("should schedule valid pods when a pod with an invalid pvc is encountered (pvc)", func() {
 			ExpectApplied(ctx, env.Client, test.NodePool())
@@ -1530,8 +1606,8 @@ var _ = Describe("Provisioning", func() {
 			node := ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Labels[v1beta1.NodePoolLabelKey]).ToNot(Equal(nodePool.Name))
 		})
-		Context("Weighted nodePools", func() {
-			It("should schedule to the provisioner with the highest priority always", func() {
+		Context("Weighted NodePools", func() {
+			It("should schedule to the nodepool with the highest priority always", func() {
 				nodePools := []client.Object{
 					test.NodePool(),
 					test.NodePool(v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Weight: ptr.Int32(20)}}),
@@ -1547,7 +1623,7 @@ var _ = Describe("Provisioning", func() {
 					Expect(node.Labels[v1beta1.NodePoolLabelKey]).To(Equal(nodePools[2].GetName()))
 				}
 			})
-			It("should schedule to explicitly selected provisioner even if other nodePools are higher priority", func() {
+			It("should schedule to explicitly selected nodepool even if other nodePools are higher priority", func() {
 				targetedNodePool := test.NodePool()
 				nodePools := []client.Object{
 					targetedNodePool,

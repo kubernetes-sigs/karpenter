@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -26,9 +28,4 @@ type Injectable interface {
 	Parse(*FlagSet, ...string) error
 	// ToContext injects the callee into the given context
 	ToContext(context.Context) context.Context
-	// MergeSettings extracts settings from the given context and merges them
-	// with the options in-place. Values that were previously set by CLI flags
-	// or environment variables take precedent over settings.
-	// TODO: Remove with karpenter-global-settings
-	MergeSettings(context.Context)
 }

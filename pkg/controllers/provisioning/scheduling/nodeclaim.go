@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -19,14 +21,13 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/scheduling"
-	"github.com/aws/karpenter-core/pkg/utils/resources"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 // NodeClaim is a set of constraints, compatible pods, and possible instance types that could fulfill these constraints. This
@@ -77,7 +78,7 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 	podRequirements := scheduling.NewPodRequirements(pod)
 
 	// Check NodeClaim Affinity Requirements
-	if err := nodeClaimRequirements.Compatible(podRequirements, lo.Ternary(n.OwnerKey.IsProvisioner, scheduling.AllowUndefinedWellKnownLabelsV1Alpha5, scheduling.AllowUndefinedWellKnownLabelsV1Beta1)); err != nil {
+	if err := nodeClaimRequirements.Compatible(podRequirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
 		return fmt.Errorf("incompatible requirements, %w", err)
 	}
 	nodeClaimRequirements.Add(podRequirements.Values()...)
@@ -89,11 +90,11 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 		strictPodRequirements = scheduling.NewStrictPodRequirements(pod)
 	}
 	// Check Topology Requirements
-	topologyRequirements, err := n.topology.AddRequirements(strictPodRequirements, nodeClaimRequirements, pod, lo.Ternary(n.OwnerKey.IsProvisioner, scheduling.AllowUndefinedWellKnownLabelsV1Alpha5, scheduling.AllowUndefinedWellKnownLabelsV1Beta1))
+	topologyRequirements, err := n.topology.AddRequirements(strictPodRequirements, nodeClaimRequirements, pod, scheduling.AllowUndefinedWellKnownLabels)
 	if err != nil {
 		return err
 	}
-	if err = nodeClaimRequirements.Compatible(topologyRequirements, lo.Ternary(n.OwnerKey.IsProvisioner, scheduling.AllowUndefinedWellKnownLabelsV1Alpha5, scheduling.AllowUndefinedWellKnownLabelsV1Beta1)); err != nil {
+	if err = nodeClaimRequirements.Compatible(topologyRequirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
 		return err
 	}
 	nodeClaimRequirements.Add(topologyRequirements.Values()...)
@@ -112,7 +113,7 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 	n.InstanceTypeOptions = filtered.remaining
 	n.Spec.Resources.Requests = requests
 	n.Requirements = nodeClaimRequirements
-	n.topology.Record(pod, nodeClaimRequirements, lo.Ternary(n.OwnerKey.IsProvisioner, scheduling.AllowUndefinedWellKnownLabelsV1Alpha5, scheduling.AllowUndefinedWellKnownLabelsV1Beta1))
+	n.topology.Record(pod, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
 	n.hostPortUsage.Add(pod, hostPorts)
 	return nil
 }
@@ -269,7 +270,7 @@ func fits(instanceType *cloudprovider.InstanceType, requests v1.ResourceList) bo
 func hasOffering(instanceType *cloudprovider.InstanceType, requirements scheduling.Requirements) bool {
 	for _, offering := range instanceType.Offerings.Available() {
 		if (!requirements.Has(v1.LabelTopologyZone) || requirements.Get(v1.LabelTopologyZone).Has(offering.Zone)) &&
-			(!requirements.Has(v1alpha5.LabelCapacityType) || requirements.Get(v1alpha5.LabelCapacityType).Has(offering.CapacityType)) {
+			(!requirements.Has(v1beta1.CapacityTypeLabelKey) || requirements.Get(v1beta1.CapacityTypeLabelKey).Has(offering.CapacityType)) {
 			return true
 		}
 	}

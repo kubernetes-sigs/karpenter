@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -25,7 +27,7 @@ import (
 	. "github.com/onsi/gomega"
 	"knative.dev/pkg/ptr"
 
-	. "github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	. "sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -122,6 +124,17 @@ var _ = Describe("Validation", func() {
 			for label := range LabelDomainExceptions {
 				nodeClaim.Spec.Requirements = []v1.NodeSelectorRequirement{
 					{Key: label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+				}
+				Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
+				Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
+				nodeClaim = oldNodeClaim.DeepCopy()
+			}
+		})
+		It("should allow restricted subdomains exceptions", func() {
+			oldNodeClaim := nodeClaim.DeepCopy()
+			for label := range LabelDomainExceptions {
+				nodeClaim.Spec.Requirements = []v1.NodeSelectorRequirement{
+					{Key: "subdomain." + label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
 				}
 				Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
 				Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())

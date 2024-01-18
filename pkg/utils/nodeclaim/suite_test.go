@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -22,26 +24,25 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	. "knative.dev/pkg/logging/testing"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
-	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/operator/scheme"
-	. "github.com/aws/karpenter-core/pkg/test/expectations"
+	"sigs.k8s.io/karpenter/pkg/apis"
+	"sigs.k8s.io/karpenter/pkg/operator/scheme"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/scheduling"
-	"github.com/aws/karpenter-core/pkg/test"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/test"
+	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
-var ctx context.Context
-var env *test.Environment
+var (
+	ctx context.Context
+	env *test.Environment
+)
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -67,16 +68,16 @@ var _ = Describe("NodeClaimUtils", func() {
 		node = test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1.LabelTopologyZone:             "test-zone-1",
-					v1.LabelTopologyRegion:           "test-region",
-					"test-label-key":                 "test-label-value",
-					"test-label-key2":                "test-label-value2",
-					v1alpha5.LabelNodeRegistered:     "true",
-					v1alpha5.LabelNodeInitialized:    "true",
-					v1alpha5.ProvisionerNameLabelKey: "default",
-					v1alpha5.LabelCapacityType:       v1alpha5.CapacityTypeOnDemand,
-					v1.LabelOSStable:                 "linux",
-					v1.LabelInstanceTypeStable:       "test-instance-type",
+					v1.LabelTopologyZone:            "test-zone-1",
+					v1.LabelTopologyRegion:          "test-region",
+					"test-label-key":                "test-label-value",
+					"test-label-key2":               "test-label-value2",
+					v1beta1.NodeRegisteredLabelKey:  "true",
+					v1beta1.NodeInitializedLabelKey: "true",
+					v1beta1.NodePoolLabelKey:        "default",
+					v1beta1.CapacityTypeLabelKey:    v1beta1.CapacityTypeOnDemand,
+					v1.LabelOSStable:                "linux",
+					v1.LabelInstanceTypeStable:      "test-instance-type",
 				},
 				Annotations: map[string]string{
 					"test-annotation-key":        "test-annotation-value",
@@ -130,105 +131,6 @@ var _ = Describe("NodeClaimUtils", func() {
 		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Registered).IsTrue()).To(BeTrue())
 		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized).IsTrue()).To(BeTrue())
 	})
-	It("should retrieve a NodeClaim with a get call", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-			Spec: v1beta1.NodeClaimSpec{
-				NodeClassRef: &v1beta1.NodeClassReference{
-					Kind:       "NodeClassRef",
-					APIVersion: "test.cloudprovider/v1",
-					Name:       "default",
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, nodeClaim)
-
-		retrieved, err := nodeclaimutil.Get(ctx, env.Client, nodeclaimutil.Key{Name: nodeClaim.Name, IsMachine: false})
-		Expect(err).ToNot(HaveOccurred())
-		Expect(retrieved.Name).To(Equal(nodeClaim.Name))
-	})
-	It("should update the status on a NodeClaim", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-			Spec: v1beta1.NodeClaimSpec{
-				NodeClassRef: &v1beta1.NodeClassReference{
-					Kind:       "NodeClassRef",
-					APIVersion: "test.cloudprovider/v1",
-					Name:       "default",
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, nodeClaim)
-
-		providerID := test.RandomProviderID()
-		nodeClaim.Status.ProviderID = providerID
-		Expect(nodeclaimutil.UpdateStatus(ctx, env.Client, nodeClaim)).To(Succeed())
-
-		retrieved := &v1beta1.NodeClaim{}
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodeClaim), retrieved)).To(Succeed())
-		Expect(retrieved.Status.ProviderID).To(Equal(providerID))
-	})
-	It("should patch a NodeClaim", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-			Spec: v1beta1.NodeClaimSpec{
-				NodeClassRef: &v1beta1.NodeClassReference{
-					Kind:       "NodeClassRef",
-					APIVersion: "test.cloudprovider/v1",
-					Name:       "default",
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, nodeClaim)
-
-		stored := nodeClaim.DeepCopy()
-		nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
-			"custom-key": "custom-value",
-		})
-		Expect(nodeclaimutil.Patch(ctx, env.Client, stored, nodeClaim)).To(Succeed())
-
-		retrieved := &v1beta1.NodeClaim{}
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodeClaim), retrieved)).To(Succeed())
-		Expect(retrieved.Labels).To(HaveKeyWithValue("custom-key", "custom-value"))
-	})
-	It("should patch the status on a NodeClaim", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-			Spec: v1beta1.NodeClaimSpec{
-				NodeClassRef: &v1beta1.NodeClassReference{
-					Kind:       "NodeClassRef",
-					APIVersion: "test.cloudprovider/v1",
-					Name:       "default",
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, nodeClaim)
-
-		stored := nodeClaim.DeepCopy()
-		providerID := test.RandomProviderID()
-		nodeClaim.Status.ProviderID = providerID
-		Expect(nodeclaimutil.PatchStatus(ctx, env.Client, stored, nodeClaim)).To(Succeed())
-
-		retrieved := &v1beta1.NodeClaim{}
-		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodeClaim), retrieved)).To(Succeed())
-		Expect(retrieved.Status.ProviderID).To(Equal(providerID))
-	})
-	It("should delete a NodeClaim with a delete call", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-			Spec: v1beta1.NodeClaimSpec{
-				NodeClassRef: &v1beta1.NodeClassReference{
-					Kind:       "NodeClassRef",
-					APIVersion: "test.cloudprovider/v1",
-					Name:       "default",
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, nodeClaim)
-
-		err := nodeclaimutil.Delete(ctx, env.Client, nodeClaim)
-		Expect(err).ToNot(HaveOccurred())
-
-		nodeClaimList := &v1beta1.NodeClaimList{}
-		Expect(env.Client.List(ctx, nodeClaimList)).To(Succeed())
-		Expect(nodeClaimList.Items).To(HaveLen(0))
-		Expect(errors.IsNotFound(env.Client.Get(ctx, client.ObjectKeyFromObject(nodeClaim), &v1beta1.NodeClaim{}))).To(BeTrue())
-	})
 	It("should update the owner for a Node to a NodeClaim", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			Spec: v1beta1.NodeClaimSpec{
@@ -249,43 +151,5 @@ var _ = Describe("NodeClaimUtils", func() {
 			UID:                nodeClaim.UID,
 			BlockOwnerDeletion: lo.ToPtr(true),
 		}))
-	})
-	It("should retrieve the owner for a NodeClaim", func() {
-		nodePool := test.NodePool(v1beta1.NodePool{
-			Spec: v1beta1.NodePoolSpec{
-				Template: v1beta1.NodeClaimTemplate{
-					Spec: v1beta1.NodeClaimSpec{
-						NodeClassRef: &v1beta1.NodeClassReference{
-							Kind:       "NodeClassRef",
-							APIVersion: "test.cloudprovider/v1",
-							Name:       "default",
-						},
-					},
-				},
-			},
-		})
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
-				},
-			},
-			Spec: v1beta1.NodeClaimSpec{
-				NodeClassRef: &v1beta1.NodeClassReference{
-					Kind:       "NodeClassRef",
-					APIVersion: "test.cloudprovider/v1",
-					Name:       "default",
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-
-		ownerKey := nodeclaimutil.OwnerKey(nodeClaim)
-		Expect(ownerKey.Name).To(Equal(nodePool.Name))
-		Expect(ownerKey.IsProvisioner).To(BeFalse())
-
-		owner, err := nodeclaimutil.Owner(ctx, env.Client, nodeClaim)
-		Expect(err).ToNot(HaveOccurred())
-		Expect(owner.Name).To(Equal(nodePool.Name))
 	})
 })

@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -23,10 +25,9 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/pkg/logging"
-	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/scheduling"
+	volumeutil "sigs.k8s.io/karpenter/pkg/utils/volume"
 )
 
 func NewVolumeTopology(kubeClient client.Client) *VolumeTopology {
@@ -76,30 +77,15 @@ func (v *VolumeTopology) Inject(ctx context.Context, pod *v1.Pod) error {
 }
 
 func (v *VolumeTopology) getRequirements(ctx context.Context, pod *v1.Pod, volume v1.Volume) ([]v1.NodeSelectorRequirement, error) {
-	defaultStorageClassName, err := scheduling.DiscoverDefaultStorageClassName(ctx, v.kubeClient)
+	pvc, err := volumeutil.GetPersistentVolumeClaim(ctx, v.kubeClient, pod, volume)
 	if err != nil {
-		return nil, fmt.Errorf("discovering default storage class, %w", err)
+		return nil, fmt.Errorf("discovering persistent volume claim, %w", err)
 	}
-
-	// Get VolumeName and StorageClass name from PVC
-	pvc := &v1.PersistentVolumeClaim{}
-	switch {
-	case volume.PersistentVolumeClaim != nil:
-		if err = v.kubeClient.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: volume.PersistentVolumeClaim.ClaimName}, pvc); err != nil {
-			return nil, fmt.Errorf("discovering persistent volume claim, %w", err)
-		}
-	case volume.Ephemeral != nil:
-		// generated name per https://kubernetes.io/docs/concepts/storage/ephemeral-volumes/#persistentvolumeclaim-naming
-		if err = v.kubeClient.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: fmt.Sprintf("%s-%s", pod.Name, volume.Name)}, pvc); err != nil {
-			return nil, fmt.Errorf("discovering persistent volume claim for ephemeral volume, %w", err)
-		}
-	default:
+	// Not all volume types have PVCs, e.g. emptyDir, hostPath, etc.
+	if pvc == nil {
 		return nil, nil
 	}
-	storageClassName := lo.FromPtr(pvc.Spec.StorageClassName)
-	if storageClassName == "" {
-		storageClassName = defaultStorageClassName
-	}
+
 	// Persistent Volume Requirements
 	if pvc.Spec.VolumeName != "" {
 		requirements, err := v.getPersistentVolumeRequirements(ctx, pod, pvc.Spec.VolumeName)
@@ -109,8 +95,8 @@ func (v *VolumeTopology) getRequirements(ctx context.Context, pod *v1.Pod, volum
 		return requirements, nil
 	}
 	// Storage Class Requirements
-	if storageClassName != "" {
-		requirements, err := v.getStorageClassRequirements(ctx, storageClassName)
+	if sc := lo.FromPtr(pvc.Spec.StorageClassName); sc != "" {
+		requirements, err := v.getStorageClassRequirements(ctx, sc)
 		if err != nil {
 			return nil, err
 		}
@@ -153,45 +139,33 @@ func (v *VolumeTopology) getPersistentVolumeRequirements(ctx context.Context, po
 	return requirements, nil
 }
 
-func (v *VolumeTopology) getPersistentVolumeClaim(ctx context.Context, pod *v1.Pod, volume v1.Volume) (*v1.PersistentVolumeClaim, error) {
-	if volume.PersistentVolumeClaim == nil {
-		return nil, nil
-	}
-	pvc := &v1.PersistentVolumeClaim{}
-	if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: volume.PersistentVolumeClaim.ClaimName, Namespace: pod.Namespace}, pvc); err != nil {
-		return nil, fmt.Errorf("getting persistent volume claim %q, %w", volume.PersistentVolumeClaim.ClaimName, err)
-	}
-	return pvc, nil
-}
-
 // ValidatePersistentVolumeClaims returns an error if the pod doesn't appear to be valid with respect to
 // PVCs (e.g. the PVC is not found or references an unknown storage class).
 func (v *VolumeTopology) ValidatePersistentVolumeClaims(ctx context.Context, pod *v1.Pod) error {
 	for _, volume := range pod.Spec.Volumes {
-		var storageClassName *string
-		var volumeName string
-		if volume.PersistentVolumeClaim != nil {
-			// validate the PVC if it exists
-			pvc, err := v.getPersistentVolumeClaim(ctx, pod, volume)
-			if err != nil {
-				return err
-			}
-			// may not have a PVC
-			if pvc == nil {
-				continue
-			}
-
-			storageClassName = pvc.Spec.StorageClassName
-			volumeName = pvc.Spec.VolumeName
-		} else if volume.Ephemeral != nil {
-			storageClassName = volume.Ephemeral.VolumeClaimTemplate.Spec.StorageClassName
+		pvc, err := volumeutil.GetPersistentVolumeClaim(ctx, v.kubeClient, pod, volume)
+		if err != nil {
+			return err
+		}
+		// Not all volume types have PVCs, e.g. emptyDir, hostPath, etc.
+		if pvc == nil {
+			continue
 		}
 
+		if pvc.Spec.VolumeName != "" {
+			if err := v.validateVolume(ctx, pvc.Spec.VolumeName); err != nil {
+				return fmt.Errorf("failed to validate pvc %q with volume %q, %w", pvc.Name, pvc.Spec.VolumeName, err)
+			}
+			continue
+		}
+
+		// PVC is unbound, we can't schedule unless the pod defines a valid storage class
+		storageClassName := lo.FromPtr(pvc.Spec.StorageClassName)
+		if storageClassName == "" {
+			return fmt.Errorf("unbound pvc %s must define a storage class", pvc.Name)
+		}
 		if err := v.validateStorageClass(ctx, storageClassName); err != nil {
-			return err
-		}
-		if err := v.validateVolume(ctx, volumeName); err != nil {
-			return err
+			return fmt.Errorf("failed to validate pvc %q with storage class %q, %w", pvc.Name, storageClassName, err)
 		}
 	}
 	return nil
@@ -208,13 +182,10 @@ func (v *VolumeTopology) validateVolume(ctx context.Context, volumeName string) 
 	return nil
 }
 
-func (v *VolumeTopology) validateStorageClass(ctx context.Context, storageClassName *string) error {
-	// we have a storage class name, so ensure that it exists
-	if ptr.StringValue(storageClassName) != "" {
-		storageClass := &storagev1.StorageClass{}
-		if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: ptr.StringValue(storageClassName)}, storageClass); err != nil {
-			return err
-		}
+func (v *VolumeTopology) validateStorageClass(ctx context.Context, storageClassName string) error {
+	storageClass := &storagev1.StorageClass{}
+	if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: storageClassName}, storageClass); err != nil {
+		return err
 	}
 	return nil
 }

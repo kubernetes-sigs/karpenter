@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -26,7 +28,6 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
@@ -41,18 +42,16 @@ import (
 	"knative.dev/pkg/webhook/resourcesemantics/validation"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/operator/logging"
-	"github.com/aws/karpenter-core/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/operator/logging"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
 const component = "webhook"
 
 var Resources = map[schema.GroupVersionKind]resourcesemantics.GenericCRD{
-	v1alpha5.SchemeGroupVersion.WithKind("Provisioner"): &v1alpha5.Provisioner{},
-	v1beta1.SchemeGroupVersion.WithKind("NodePool"):     &v1beta1.NodePool{},
-	v1beta1.SchemeGroupVersion.WithKind("NodeClaim"):    &v1beta1.NodeClaim{},
+	v1beta1.SchemeGroupVersion.WithKind("NodePool"):  &v1beta1.NodePool{},
+	v1beta1.SchemeGroupVersion.WithKind("NodeClaim"): &v1beta1.NodeClaim{},
 }
 
 func NewWebhooks() []knativeinjection.ControllerConstructor {
@@ -85,9 +84,9 @@ func NewConfigValidationWebhook(ctx context.Context, _ configmap.Watcher) *contr
 
 // Start copies the relevant portions for starting the webhooks from sharedmain.MainWithConfig
 // https://github.com/knative/pkg/blob/0f52db700d63/injection/sharedmain/main.go#L227
-func Start(ctx context.Context, cfg *rest.Config, kubernetesInterface kubernetes.Interface, ctors ...knativeinjection.ControllerConstructor) {
+func Start(ctx context.Context, cfg *rest.Config, ctors ...knativeinjection.ControllerConstructor) {
 	ctx, startInformers := knativeinjection.EnableInjectionOrDie(ctx, cfg)
-	logger := logging.NewLogger(ctx, component, kubernetesInterface)
+	logger := logging.NewLogger(ctx, component)
 	ctx = knativelogging.WithLogger(ctx, logger)
 
 	cmw := sharedmain.SetupConfigMapWatchOrDie(ctx, knativelogging.FromContext(ctx))

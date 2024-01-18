@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -20,19 +22,19 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/operator/options"
-	"github.com/aws/karpenter-core/pkg/scheduling"
-	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
-	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
-	"github.com/aws/karpenter-core/pkg/utils/resources"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
+	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
+	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 //go:generate controller-gen object:headerFile="../../../hack/boilerplate.go.txt" paths="."
@@ -77,13 +79,6 @@ type StateNode struct {
 	Node      *v1.Node
 	NodeClaim *v1beta1.NodeClaim
 
-	inflightInitialized bool            // TODO @joinnis: This can be removed when machine is added
-	inflightAllocatable v1.ResourceList // TODO @joinnis: This can be removed when machine is added
-	inflightCapacity    v1.ResourceList // TODO @joinnis: This can be removed when machine is added
-
-	startupTaintsInitialized bool       // TODO: @joinnis: This can be removed when machine is added
-	startupTaints            []v1.Taint // TODO: @joinnis: This can be removed when machine is added
-
 	// daemonSetRequests is the total amount of resources that have been requested by daemon sets. This allows users
 	// of the Node to identify the remaining resources that we expect future daemonsets to consume.
 	daemonSetRequests map[types.NamespacedName]v1.ResourceList
@@ -103,26 +98,13 @@ type StateNode struct {
 
 func NewNode() *StateNode {
 	return &StateNode{
-		inflightAllocatable: v1.ResourceList{},
-		inflightCapacity:    v1.ResourceList{},
-		startupTaints:       []v1.Taint{},
-		daemonSetRequests:   map[types.NamespacedName]v1.ResourceList{},
-		daemonSetLimits:     map[types.NamespacedName]v1.ResourceList{},
-		podRequests:         map[types.NamespacedName]v1.ResourceList{},
-		podLimits:           map[types.NamespacedName]v1.ResourceList{},
-		hostPortUsage:       scheduling.NewHostPortUsage(),
-		volumeUsage:         scheduling.NewVolumeUsage(),
+		daemonSetRequests: map[types.NamespacedName]v1.ResourceList{},
+		daemonSetLimits:   map[types.NamespacedName]v1.ResourceList{},
+		podRequests:       map[types.NamespacedName]v1.ResourceList{},
+		podLimits:         map[types.NamespacedName]v1.ResourceList{},
+		hostPortUsage:     scheduling.NewHostPortUsage(),
+		volumeUsage:       scheduling.NewVolumeUsage(),
 	}
-}
-
-func (in *StateNode) OwnerKey() nodepoolutil.Key {
-	if in.Labels()[v1beta1.NodePoolLabelKey] != "" {
-		return nodepoolutil.Key{Name: in.Labels()[v1beta1.NodePoolLabelKey], IsProvisioner: false}
-	}
-	if in.Labels()[v1alpha5.ProvisionerNameLabelKey] != "" {
-		return nodepoolutil.Key{Name: in.Labels()[v1alpha5.ProvisionerNameLabelKey], IsProvisioner: true}
-	}
-	return nodepoolutil.Key{}
 }
 
 func (in *StateNode) Name() string {
@@ -132,9 +114,7 @@ func (in *StateNode) Name() string {
 	if in.NodeClaim == nil {
 		return in.Node.Name
 	}
-	// TODO @joinnis: The !in.Initialized() check can be removed when we can assume that all nodes have the v1alpha5.NodeRegisteredLabel on them
-	// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
-	if !in.Registered() && !in.Initialized() {
+	if !in.Registered() {
 		return in.NodeClaim.Name
 	}
 	return in.Node.Name
@@ -166,71 +146,65 @@ func (in *StateNode) HostName() string {
 }
 
 func (in *StateNode) Annotations() map[string]string {
-	// If the machine exists and the state node isn't initialized
-	// use the machine representation of the annotations
+	// If the nodeclaim exists and the state node isn't initialized
+	// use the nodeclaim representation of the annotations
 	if in.Node == nil {
 		return in.NodeClaim.Annotations
 	}
 	if in.NodeClaim == nil {
 		return in.Node.Annotations
 	}
-	// TODO @joinnis: The !in.Initialized() check can be removed when we can assume that all nodes have the v1alpha5.NodeRegisteredLabel on them
-	// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
-	if !in.Registered() && !in.Initialized() {
+	if !in.Registered() {
 		return in.NodeClaim.Annotations
 	}
 	return in.Node.Annotations
 }
 
-// GetLabels exists to conform to the GetLabels() function on the metav1.Object interface
-func (in *StateNode) GetLabels() map[string]string {
-	return in.Labels()
-}
-
 func (in *StateNode) Labels() map[string]string {
-	// If the machine exists and the state node isn't registered
-	// use the machine representation of the labels
+	// If the nodeclaim exists and the state node isn't registered
+	// use the nodeclaim representation of the labels
 	if in.Node == nil {
 		return in.NodeClaim.Labels
 	}
 	if in.NodeClaim == nil {
 		return in.Node.Labels
 	}
-	// TODO @joinnis: The !in.Initialized() check can be removed when we can assume that all nodes have the v1alpha5.NodeRegisteredLabel on them
-	// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
-	if !in.Registered() && !in.Initialized() {
+	if !in.Registered() {
 		return in.NodeClaim.Labels
 	}
 	return in.Node.Labels
 }
 
 func (in *StateNode) Taints() []v1.Taint {
-	// Only consider startup taints until the node is initialized. Without this, if the startup taint is generic and
-	// re-appears on the node for a different reason (e.g. the node is cordoned) we will assume that pods can
-	// schedule against the node in the future incorrectly.
-	ephemeralTaints := scheduling.KnownEphemeralTaints
-	if !in.Initialized() && in.Managed() {
-		if in.NodeClaim != nil {
-			ephemeralTaints = append(ephemeralTaints, in.NodeClaim.Spec.StartupTaints...)
-		} else {
-			ephemeralTaints = append(ephemeralTaints, in.startupTaints...)
-		}
-	}
-
+	// If we have a managed node that isn't registered, we should use its NodeClaim
+	// representation of taints. Likewise, if we don't have a Node representation for this
+	// providerID in our state, we should also just use the NodeClaim since this is all that we have
 	var taints []v1.Taint
-	// TODO @joinnis: The !in.Initialized() check can be removed when we can assume that all nodes have the v1alpha5.NodeRegisteredLabel on them
-	// We can assume that all nodes will have this label and no back-propagation will be required once we hit v1
-	if (!in.Registered() && !in.Initialized() && in.NodeClaim != nil) || in.Node == nil {
+	if (!in.Registered() && in.Managed()) || in.Node == nil {
 		taints = in.NodeClaim.Spec.Taints
 	} else {
 		taints = in.Node.Spec.Taints
 	}
-	return lo.Reject(taints, func(taint v1.Taint, _ int) bool {
-		_, found := lo.Find(ephemeralTaints, func(t v1.Taint) bool {
-			return t.MatchTaint(&taint)
+	if !in.Initialized() && in.Managed() {
+		// We reject any well-known ephemeral taints and startup taints attached to this node until
+		// the node is initialized. Without this, if the taint is generic and re-appears on the node for a
+		// different reason (e.g. the node is cordoned) we will assume that pods can schedule against the
+		// node in the future incorrectly.
+		return lo.Reject(taints, func(taint v1.Taint, _ int) bool {
+			if _, found := lo.Find(scheduling.KnownEphemeralTaints, func(t v1.Taint) bool {
+				return t.MatchTaint(&taint)
+			}); found {
+				return true
+			}
+			if _, found := lo.Find(in.NodeClaim.Spec.StartupTaints, func(t v1.Taint) bool {
+				return t.MatchTaint(&taint)
+			}); found {
+				return true
+			}
+			return false
 		})
-		return found
-	})
+	}
+	return taints
 }
 
 func (in *StateNode) Registered() bool {
@@ -265,17 +239,6 @@ func (in *StateNode) Capacity() v1.ResourceList {
 		}
 		return in.NodeClaim.Status.Capacity
 	}
-	// TODO @joinnis: Remove this when machine migration is complete
-	if !in.Initialized() && in.Managed() {
-		// Override any zero quantity values in the node status
-		ret := lo.Assign(in.Node.Status.Capacity)
-		for resourceName, quantity := range in.inflightCapacity {
-			if resources.IsZero(ret[resourceName]) {
-				ret[resourceName] = quantity
-			}
-		}
-		return ret
-	}
 	return in.Node.Status.Capacity
 }
 
@@ -292,17 +255,6 @@ func (in *StateNode) Allocatable() v1.ResourceList {
 			return ret
 		}
 		return in.NodeClaim.Status.Allocatable
-	}
-	// TODO @joinnis: Remove this when machine migration is complete
-	if !in.Initialized() && in.Managed() {
-		// Override any zero quantity values in the node status
-		ret := lo.Assign(in.Node.Status.Allocatable)
-		for resourceName, quantity := range in.inflightAllocatable {
-			if resources.IsZero(ret[resourceName]) {
-				ret[resourceName] = quantity
-			}
-		}
-		return ret
 	}
 	return in.Node.Status.Allocatable
 }
@@ -345,7 +297,6 @@ func (in *StateNode) MarkedForDeletion() bool {
 	//  1. The Node has MarkedForDeletion set
 	//  2. The Node has a NodeClaim counterpart and is actively deleting
 	//  3. The Node has no NodeClaim counterpart and is actively deleting
-	// TODO remove check for machine after v1alpha5 APIs are dropped.
 	return in.markedForDeletion ||
 		(in.NodeClaim != nil && !in.NodeClaim.DeletionTimestamp.IsZero()) ||
 		(in.Node != nil && in.NodeClaim == nil && !in.Node.DeletionTimestamp.IsZero())
@@ -360,9 +311,7 @@ func (in *StateNode) Nominated() bool {
 }
 
 func (in *StateNode) Managed() bool {
-	return in.NodeClaim != nil ||
-		(in.Node != nil && in.Node.Labels[v1alpha5.ProvisionerNameLabelKey] != "") ||
-		(in.Node != nil && in.Node.Labels[v1beta1.NodePoolLabelKey] != "")
+	return in.NodeClaim != nil
 }
 
 func (in *StateNode) updateForPod(ctx context.Context, kubeClient client.Client, pod *v1.Pod) error {
@@ -399,4 +348,53 @@ func nominationWindow(ctx context.Context) time.Duration {
 		nominationPeriod = 10 * time.Second
 	}
 	return nominationPeriod
+}
+
+// RequireNoScheduleTaint will add/remove the karpenter.sh/disruption:NoSchedule taint from the candidates.
+// This is used to enforce no taints at the beginning of disruption, and
+// to add/remove taints while executing a disruption action.
+// nolint:gocyclo
+func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTaint bool, nodes ...*StateNode) error {
+	var multiErr error
+	for _, n := range nodes {
+		// If the StateNode is Karpenter owned and only has a nodeclaim, or is not owned by
+		// Karpenter, thus having no nodeclaim, don't touch the node.
+		if n.Node == nil || n.NodeClaim == nil {
+			continue
+		}
+		node := &v1.Node{}
+		if err := kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Name}, node); client.IgnoreNotFound(err) != nil {
+			multiErr = multierr.Append(multiErr, fmt.Errorf("getting node, %w", err))
+		}
+		// If the node already has the taint, continue to the next
+		_, hasTaint := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
+			return v1beta1.IsDisruptingTaint(taint)
+		})
+		// Node is being deleted, so no need to remove taint as the node will be gone soon.
+		// This ensures that the disruption controller doesn't modify taints that the Termination
+		// controller is also modifying
+		if hasTaint && !node.DeletionTimestamp.IsZero() {
+			continue
+		}
+		stored := node.DeepCopy()
+		// If the taint is present and we want to remove the taint, remove it.
+		if !addTaint {
+			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint v1.Taint, _ int) bool {
+				return taint.Key == v1beta1.DisruptionTaintKey
+			})
+			// otherwise, add it.
+		} else if addTaint && !hasTaint {
+			// If the taint key is present (but with a different value or effect), remove it.
+			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t v1.Taint, _ int) bool {
+				return t.Key == v1beta1.DisruptionTaintKey
+			})
+			node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
+		}
+		if !equality.Semantic.DeepEqual(stored, node) {
+			if err := kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+				multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
+			}
+		}
+	}
+	return multiErr
 }

@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -25,9 +27,8 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/utils/functional"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/utils/functional"
 )
 
 // Requirements are an efficient set representation under the hood. Since its underlying
@@ -153,15 +154,7 @@ type CompatabilityOptions struct {
 	AllowUndefined sets.Set[string]
 }
 
-// TODO @joinnis: Remove AllowUndefinedWellKnownLabelsV1Alpha5 and change AllowUndefinedWellKnownLabelsV1Beta1
-// when dropping v1alpha5 support from karpenter-core
-
-var AllowUndefinedWellKnownLabelsV1Alpha5 = func(options CompatabilityOptions) CompatabilityOptions {
-	options.AllowUndefined = v1alpha5.WellKnownLabels
-	return options
-}
-
-var AllowUndefinedWellKnownLabelsV1Beta1 = func(options CompatabilityOptions) CompatabilityOptions {
+var AllowUndefinedWellKnownLabels = func(options CompatabilityOptions) CompatabilityOptions {
 	options.AllowUndefined = v1beta1.WellKnownLabels
 	return options
 }
@@ -267,7 +260,7 @@ func (r Requirements) Intersects(requirements Requirements) (errs error) {
 func (r Requirements) Labels() map[string]string {
 	labels := map[string]string{}
 	for key, requirement := range r {
-		if !v1alpha5.IsRestrictedNodeLabel(key) && !v1beta1.IsRestrictedNodeLabel(key) {
+		if !v1beta1.IsRestrictedNodeLabel(key) {
 			if value := requirement.Any(); value != "" {
 				labels[key] = value
 			}
@@ -278,7 +271,7 @@ func (r Requirements) Labels() map[string]string {
 
 func (r Requirements) String() string {
 	requirements := lo.Reject(r.Values(), func(requirement *Requirement, _ int) bool {
-		return v1alpha5.RestrictedLabels.Has(requirement.Key) || v1beta1.RestrictedLabels.Has(requirement.Key)
+		return v1beta1.RestrictedLabels.Has(requirement.Key)
 	})
 	stringRequirements := lo.Map(requirements, func(requirement *Requirement, _ int) string { return requirement.String() })
 	slices.Sort(stringRequirements)

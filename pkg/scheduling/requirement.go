@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -24,8 +26,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 )
 
 // Requirement is an efficient represenatation of v1.NodeSelectorRequirement
@@ -38,9 +39,6 @@ type Requirement struct {
 }
 
 func NewRequirement(key string, operator v1.NodeSelectorOperator, values ...string) *Requirement {
-	if normalized, ok := v1alpha5.NormalizedLabels[key]; ok {
-		key = normalized
-	}
 	if normalized, ok := v1beta1.NormalizedLabels[key]; ok {
 		key = normalized
 	}

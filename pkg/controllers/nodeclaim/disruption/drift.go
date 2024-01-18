@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -24,24 +26,22 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/metrics"
-	"github.com/aws/karpenter-core/pkg/operator/options"
-	"github.com/aws/karpenter-core/pkg/scheduling"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 const (
-	ProvisionerDrifted  cloudprovider.DriftReason = "ProvisionerDrifted"
 	NodePoolDrifted     cloudprovider.DriftReason = "NodePoolDrifted"
 	RequirementsDrifted cloudprovider.DriftReason = "RequirementsDrifted"
 )
 
-// Drift is a machine sub-controller that adds or removes status conditions on drifted machines
+// Drift is a nodeclaim sub-controller that adds or removes status conditions on drifted nodeclaims
 type Drift struct {
 	cloudProvider cloudprovider.CloudProvider
 }
@@ -86,9 +86,15 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 		Reason:   string(driftedReason),
 	})
 	if !hasDriftedCondition {
-		logging.FromContext(ctx).Debugf("marking drifted")
-		nodeclaimutil.DisruptedCounter(nodeClaim, metrics.DriftReason).Inc()
-		nodeclaimutil.DriftedCounter(nodeClaim, string(driftedReason)).Inc()
+		logging.FromContext(ctx).With("reason", string(driftedReason)).Debugf("marking drifted")
+		metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
+			metrics.TypeLabel:     metrics.DriftReason,
+			metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+		}).Inc()
+		metrics.NodeClaimsDriftedCounter.With(prometheus.Labels{
+			metrics.TypeLabel:     string(driftedReason),
+			metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+		}).Inc()
 	}
 	// Requeue after 5 minutes for the cache TTL
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
@@ -112,32 +118,20 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 // Eligible fields for static drift are described in the docs
 // https://karpenter.sh/docs/concepts/deprovisioning/#drift
 func areStaticFieldsDrifted(nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) cloudprovider.DriftReason {
-	var ownerHashKey string
-	if nodeClaim.IsMachine {
-		ownerHashKey = v1alpha5.ProvisionerHashAnnotationKey
-	} else {
-		ownerHashKey = v1beta1.NodePoolHashAnnotationKey
-	}
-	nodePoolHash, foundHashNodePool := nodePool.Annotations[ownerHashKey]
-	nodeClaimHash, foundHashNodeClaim := nodeClaim.Annotations[ownerHashKey]
+	nodePoolHash, foundHashNodePool := nodePool.Annotations[v1beta1.NodePoolHashAnnotationKey]
+	nodeClaimHash, foundHashNodeClaim := nodeClaim.Annotations[v1beta1.NodePoolHashAnnotationKey]
 	if !foundHashNodePool || !foundHashNodeClaim {
 		return ""
 	}
-	if nodePoolHash != nodeClaimHash {
-		if nodeClaim.IsMachine {
-			return ProvisionerDrifted
-		}
-		return NodePoolDrifted
-	}
-	return ""
+	return lo.Ternary(nodePoolHash != nodeClaimHash, NodePoolDrifted, "")
 }
 
 func areRequirementsDrifted(nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) cloudprovider.DriftReason {
-	provisionerReq := scheduling.NewNodeSelectorRequirements(nodePool.Spec.Template.Spec.Requirements...)
+	nodepoolReq := scheduling.NewNodeSelectorRequirements(nodePool.Spec.Template.Spec.Requirements...)
 	nodeClaimReq := scheduling.NewLabelRequirements(nodeClaim.Labels)
 
-	// Every provisioner requirement is compatible with the NodeClaim label set
-	if nodeClaimReq.Compatible(provisionerReq) != nil {
+	// Every nodepool requirement is compatible with the NodeClaim label set
+	if nodeClaimReq.Compatible(nodepoolReq) != nil {
 		return RequirementsDrifted
 	}
 

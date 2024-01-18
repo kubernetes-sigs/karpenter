@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -19,26 +21,27 @@ import (
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/controllers/disruption"
-	"github.com/aws/karpenter-core/pkg/controllers/leasegarbagecollection"
-	metricsnode "github.com/aws/karpenter-core/pkg/controllers/metrics/node"
-	metricsnodepool "github.com/aws/karpenter-core/pkg/controllers/metrics/nodepool"
-	metricspod "github.com/aws/karpenter-core/pkg/controllers/metrics/pod"
-	"github.com/aws/karpenter-core/pkg/controllers/node/termination"
-	"github.com/aws/karpenter-core/pkg/controllers/node/termination/terminator"
-	nodeclaimconsistency "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/consistency"
-	nodeclaimdisruption "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/disruption"
-	nodeclaimgarbagecollection "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/garbagecollection"
-	nodeclaimlifecycle "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/lifecycle"
-	nodeclaimtermination "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/termination"
-	nodepoolcounter "github.com/aws/karpenter-core/pkg/controllers/nodepool/counter"
-	nodepoolhash "github.com/aws/karpenter-core/pkg/controllers/nodepool/hash"
-	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
-	"github.com/aws/karpenter-core/pkg/events"
-	"github.com/aws/karpenter-core/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
+	"sigs.k8s.io/karpenter/pkg/controllers/leasegarbagecollection"
+	metricsnode "sigs.k8s.io/karpenter/pkg/controllers/metrics/node"
+	metricsnodepool "sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool"
+	metricspod "sigs.k8s.io/karpenter/pkg/controllers/metrics/pod"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/termination"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
+	nodeclaimconsistency "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/consistency"
+	nodeclaimdisruption "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
+	nodeclaimgarbagecollection "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/garbagecollection"
+	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
+	nodeclaimtermination "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/termination"
+	nodepoolcounter "sigs.k8s.io/karpenter/pkg/controllers/nodepool/counter"
+	nodepoolhash "sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
+	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/operator/controller"
 )
 
 func NewControllers(
@@ -52,12 +55,13 @@ func NewControllers(
 
 	p := provisioning.NewProvisioner(kubeClient, kubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
 	evictionQueue := terminator.NewQueue(kubernetesInterface.CoreV1(), recorder)
+	disruptionQueue := orchestration.NewQueue(kubeClient, recorder, cluster, clock, p)
 
 	return []controller.Controller{
-		p, evictionQueue,
-		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster),
+		p, evictionQueue, disruptionQueue,
+		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue),
 		provisioning.NewController(kubeClient, p, recorder),
-		nodepoolhash.NewNodePoolController(kubeClient),
+		nodepoolhash.NewController(kubeClient),
 		informer.NewDaemonSetController(kubeClient, cluster),
 		informer.NewNodeController(kubeClient, cluster),
 		informer.NewPodController(kubeClient, cluster),
@@ -67,12 +71,12 @@ func NewControllers(
 		metricspod.NewController(kubeClient),
 		metricsnodepool.NewController(kubeClient),
 		metricsnode.NewController(cluster),
-		nodepoolcounter.NewNodePoolController(kubeClient, cluster),
-		nodeclaimconsistency.NewNodeClaimController(clock, kubeClient, recorder, cloudProvider),
-		nodeclaimlifecycle.NewNodeClaimController(clock, kubeClient, cloudProvider, recorder),
+		nodepoolcounter.NewController(kubeClient, cluster),
+		nodeclaimconsistency.NewController(clock, kubeClient, recorder, cloudProvider),
+		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder),
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
-		nodeclaimtermination.NewNodeClaimController(kubeClient, cloudProvider),
-		nodeclaimdisruption.NewNodeClaimController(clock, kubeClient, cluster, cloudProvider),
+		nodeclaimtermination.NewController(kubeClient, cloudProvider),
+		nodeclaimdisruption.NewController(clock, kubeClient, cluster, cloudProvider),
 		leasegarbagecollection.NewController(kubeClient),
 	}
 }

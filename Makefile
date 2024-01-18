@@ -3,13 +3,12 @@ help: ## Display help
 
 presubmit: verify test licenses vulncheck ## Run all steps required for code to be checked in
 
-## TODO @joinnis: Reduce the gingko timeout back to 10m once the v1alpha5 testing is removed
 test: ## Run tests
 	go test ./... \
 		-race \
-		-timeout 20m \
+		-timeout 10m \
 		--ginkgo.focus="${FOCUS}" \
-		--ginkgo.timeout=20m \
+		--ginkgo.timeout=10m \
 		--ginkgo.v \
 		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
 
@@ -17,11 +16,16 @@ deflake: ## Run randomized, racing tests until the test fails to catch flakes
 	ginkgo \
 		--race \
 		--focus="${FOCUS}" \
-		--timeout=20m \
+		--timeout=10m \
 		--randomize-all \
 		--until-it-fails \
 		-v \
 		./pkg/...
+
+install-kwok: ## Install kwok into cluster
+	UNINSTALL_KWOK=false ./hack/install-kwok.sh
+uninstall-kwok: ## Install kwok provider
+	UNINSTALL_KWOK=true ./hack/install-kwok.sh
 
 vulncheck: ## Verify code vulnerabilities
 	@govulncheck ./pkg/...
@@ -36,6 +40,7 @@ verify: ## Verify code. Includes codegen, dependencies, linting, formatting, etc
 	hack/validation/taint.sh
 	hack/validation/requirements.sh
 	hack/validation/labels.sh
+	hack/dependabot.sh
 	@# Use perl instead of sed due to https://stackoverflow.com/questions/4247068/sed-command-with-i-option-failing-on-mac-but-works-on-linux
 	@# We need to do this "sed replace" until controller-tools fixes this parameterized types issue: https://github.com/kubernetes-sigs/controller-tools/issues/756
 	@perl -i -pe 's/sets.Set/sets.Set[string]/g' pkg/scheduling/zz_generated.deepcopy.go

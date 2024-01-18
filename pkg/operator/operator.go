@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -19,11 +21,17 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/pprof"
+	"runtime"
 	"runtime/debug"
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	coordinationv1 "k8s.io/api/coordination/v1"
+	"knative.dev/pkg/changeset"
+	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
+
+	"sigs.k8s.io/karpenter/pkg/metrics"
 
 	"github.com/go-logr/zapr"
 	"github.com/samber/lo"
@@ -45,16 +53,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/events"
-	"github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/operator/injection"
-	"github.com/aws/karpenter-core/pkg/operator/logging"
-	"github.com/aws/karpenter-core/pkg/operator/options"
-	"github.com/aws/karpenter-core/pkg/operator/scheme"
-	"github.com/aws/karpenter-core/pkg/webhooks"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/operator/logging"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/operator/scheme"
+	"sigs.k8s.io/karpenter/pkg/webhooks"
 )
 
 const (
@@ -62,9 +68,23 @@ const (
 	component = "controller"
 )
 
+var BuildInfo = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Namespace: metrics.Namespace,
+		Name:      "build_info",
+		Help:      "A metric with a constant '1' value labeled by version from which karpenter was built.",
+	},
+	[]string{"version", "goversion", "goarch", "commit"},
+)
+
 // Version is the karpenter app version injected during compilation
 // when using the Makefile
 var Version = "unspecified"
+
+func init() {
+	crmetrics.Registry.MustRegister(BuildInfo)
+	BuildInfo.WithLabelValues(Version, runtime.Version(), runtime.GOARCH, changeset.Get()).Set(1)
+}
 
 type Operator struct {
 	manager.Manager
@@ -108,17 +128,8 @@ func NewOperator() (context.Context, *Operator) {
 	// Client
 	kubernetesInterface := kubernetes.NewForConfigOrDie(config)
 
-	// Inject settings from the ConfigMap(s) into the context
-	ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
-
-	// Temporarily merge settings into options until configmap is removed
-	// Note: injectables are pointer to those already in context
-	for _, o := range options.Injectables {
-		o.MergeSettings(ctx)
-	}
-
 	// Logging
-	logger := logging.NewLogger(ctx, component, kubernetesInterface)
+	logger := logging.NewLogger(ctx, component)
 	ctx = knativelogging.WithLogger(ctx, logger)
 	logging.ConfigureGlobalLoggers(ctx)
 
@@ -126,12 +137,13 @@ func NewOperator() (context.Context, *Operator) {
 
 	// Manager
 	mgrOpts := controllerruntime.Options{
-		Logger:                     logging.IgnoreDebugEvents(zapr.NewLogger(logger.Desugar())),
-		LeaderElection:             options.FromContext(ctx).EnableLeaderElection,
-		LeaderElectionID:           "karpenter-leader-election",
-		LeaderElectionResourceLock: resourcelock.LeasesResourceLock,
-		LeaderElectionNamespace:    system.Namespace(),
-		Scheme:                     scheme.Scheme,
+		Logger:                        logging.IgnoreDebugEvents(zapr.NewLogger(logger.Desugar())),
+		LeaderElection:                options.FromContext(ctx).EnableLeaderElection,
+		LeaderElectionID:              "karpenter-leader-election",
+		LeaderElectionResourceLock:    resourcelock.LeasesResourceLock,
+		LeaderElectionNamespace:       system.Namespace(),
+		LeaderElectionReleaseOnCancel: true,
+		Scheme:                        scheme.Scheme,
 		Metrics: server.Options{
 			BindAddress: fmt.Sprintf(":%d", options.FromContext(ctx).MetricsPort),
 		},
@@ -139,11 +151,7 @@ func NewOperator() (context.Context, *Operator) {
 		BaseContext: func() context.Context {
 			ctx := context.Background()
 			ctx = knativelogging.WithLogger(ctx, logger)
-			ctx = injection.WithSettingsOrDie(ctx, kubernetesInterface, apis.Settings...)
 			ctx = injection.WithOptionsOrDie(ctx, options.Injectables...)
-			for _, o := range options.Injectables {
-				o.MergeSettings(ctx)
-			}
 			return ctx
 		},
 		Cache: cache.Options{
@@ -179,9 +187,6 @@ func NewOperator() (context.Context, *Operator) {
 	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.Node{}, "spec.providerID", func(o client.Object) []string {
 		return []string{o.(*v1.Node).Spec.ProviderID}
 	}), "failed to setup node provider id indexer")
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1alpha5.Machine{}, "status.providerID", func(o client.Object) []string {
-		return []string{o.(*v1alpha5.Machine).Status.ProviderID}
-	}), "failed to setup machine provider id indexer")
 	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1beta1.NodeClaim{}, "status.providerID", func(o client.Object) []string {
 		return []string{o.(*v1beta1.NodeClaim).Status.ProviderID}
 	}), "failed to setup nodeclaim provider id indexer")
@@ -229,7 +234,7 @@ func (o *Operator) Start(ctx context.Context) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			webhooks.Start(ctx, o.GetConfig(), o.KubernetesInterface, o.webhooks...)
+			webhooks.Start(ctx, o.GetConfig(), o.webhooks...)
 		}()
 	}
 	wg.Wait()

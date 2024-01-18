@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -19,25 +21,23 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	disruptionevents "github.com/aws/karpenter-core/pkg/controllers/disruption/events"
-	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/events"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/events"
 )
 
 type Method interface {
 	ShouldDisrupt(context.Context, *Candidate) bool
-	ComputeCommand(context.Context, ...*Candidate) (Command, error)
+	ComputeCommand(context.Context, map[string]int, ...*Candidate) (Command, error)
 	Type() string
 	ConsolidationType() string
 }
@@ -58,7 +58,7 @@ type Candidate struct {
 
 //nolint:gocyclo
 func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode,
-	nodePoolMap map[nodepoolutil.Key]*v1beta1.NodePool, nodePoolToInstanceTypesMap map[nodepoolutil.Key]map[string]*cloudprovider.InstanceType) (*Candidate, error) {
+	nodePoolMap map[string]*v1beta1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *orchestration.Queue) (*Candidate, error) {
 
 	if node.Node == nil || node.NodeClaim == nil {
 		return nil, fmt.Errorf("state node doesn't contain both a node and a nodeclaim")
@@ -70,6 +70,10 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	// skip candidates that aren't initialized
 	if !node.Initialized() {
 		return nil, fmt.Errorf("state node isn't initialized")
+	}
+	// If the orchestration queue is already considering a candidate we want to disrupt, don't consider it a candidate.
+	if queue.HasAny(node.ProviderID()) {
+		return nil, fmt.Errorf("candidate is already being deprovisioned")
 	}
 	if _, ok := node.Annotations()[v1beta1.DoNotDisruptAnnotationKey]; ok {
 		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Disruption is blocked with the %q annotation", v1beta1.DoNotDisruptAnnotationKey))...)
@@ -85,16 +89,16 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 			return nil, fmt.Errorf("state node doesn't have required label %q", label)
 		}
 	}
-	ownerKey := nodeclaimutil.OwnerKey(node)
-	if ownerKey.Name == "" {
+	nodePoolName, ok := node.Labels()[v1beta1.NodePoolLabelKey]
+	if !ok {
 		return nil, fmt.Errorf("state node doesn't have the Karpenter owner label")
 	}
-	nodePool := nodePoolMap[ownerKey]
-	instanceTypeMap := nodePoolToInstanceTypesMap[ownerKey]
+	nodePool := nodePoolMap[nodePoolName]
+	instanceTypeMap := nodePoolToInstanceTypesMap[nodePoolName]
 	// skip any candidates where we can't determine the nodePool
 	if nodePool == nil || instanceTypeMap == nil {
-		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Owning %s %q not found", lo.Ternary(ownerKey.IsProvisioner, "provisioner", "nodepool"), ownerKey.Name))...)
-		return nil, fmt.Errorf("%s %q can't be resolved for state node", lo.Ternary(ownerKey.IsProvisioner, "provisioner", "nodepool"), ownerKey.Name)
+		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Owning nodepool %q not found", nodePoolName))...)
+		return nil, fmt.Errorf("nodepool %q can't be resolved for state node", nodePoolName)
 	}
 	instanceType := instanceTypeMap[node.Labels()[v1.LabelInstanceTypeStable]]
 	// skip any candidates that we can't determine the instance of
@@ -112,6 +116,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		logging.FromContext(ctx).Errorf("Determining node pods, %s", err)
 		return nil, fmt.Errorf("getting pods from state node, %w", err)
 	}
+
 	cn := &Candidate{
 		StateNode:    node.DeepCopy(),
 		instanceType: instanceType,
@@ -120,6 +125,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		zone:         node.Labels()[v1.LabelTopologyZone],
 		pods:         pods,
 	}
+
 	cn.disruptionCost = disruptionCost(ctx, pods) * cn.lifetimeRemaining(clk)
 	return cn, nil
 }

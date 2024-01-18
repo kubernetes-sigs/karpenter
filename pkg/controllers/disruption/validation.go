@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -24,12 +26,13 @@ import (
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/events"
 )
 
 // Validation is used to perform validation on a consolidation command.  It makes an assumption that when re-used, all
@@ -45,9 +48,11 @@ type Validation struct {
 	provisioner      *provisioning.Provisioner
 	once             sync.Once
 	recorder         events.Recorder
+	queue            *orchestration.Queue
 }
 
-func NewValidation(validationPeriod time.Duration, clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder) *Validation {
+func NewValidation(validationPeriod time.Duration, clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
+	cp cloudprovider.CloudProvider, recorder events.Recorder, queue *orchestration.Queue) *Validation {
 	return &Validation{
 		validationPeriod: validationPeriod,
 		clock:            clk,
@@ -56,9 +61,11 @@ func NewValidation(validationPeriod time.Duration, clk clock.Clock, cluster *sta
 		provisioner:      provisioner,
 		cloudProvider:    cp,
 		recorder:         recorder,
+		queue:            queue,
 	}
 }
 
+//nolint:gocyclo
 func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 	var err error
 	v.once.Do(func() {
@@ -73,7 +80,7 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 		case <-v.clock.After(waitDuration):
 		}
 	}
-	validationCandidates, err := GetCandidates(ctx, v.cluster, v.kubeClient, v.recorder, v.clock, v.cloudProvider, v.ShouldDisrupt)
+	validationCandidates, err := GetCandidates(ctx, v.cluster, v.kubeClient, v.recorder, v.clock, v.cloudProvider, v.ShouldDisrupt, v.queue)
 	if err != nil {
 		return false, fmt.Errorf("constructing validation candidates, %w", err)
 	}
@@ -88,12 +95,19 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 	if len(validationCandidates) != len(cmd.candidates) {
 		return false, nil
 	}
-	// a candidate we are about to delete is a target of a currently pending pod, wait for that to settle
+	// Rebuild the disruption budget mapping to see if any budgets have changed since validation.
+	postValidationMapping, err := BuildDisruptionBudgets(ctx, v.cluster, v.clock, v.kubeClient)
+	if err != nil {
+		return false, fmt.Errorf("building disruption budgets, %w", err)
+	}
+	// 1. a candidate we are about to delete is a target of a currently pending pod, wait for that to settle
 	// before continuing consolidation
+	// 2. the number of candidates for a given nodepool can no longer be disrupted as it would violate the budget
 	for _, n := range validationCandidates {
-		if v.cluster.IsNodeNominated(n.ProviderID()) {
+		if v.cluster.IsNodeNominated(n.ProviderID()) || postValidationMapping[n.nodePool.Name] == 0 {
 			return false, nil
 		}
+		postValidationMapping[n.nodePool.Name]--
 	}
 	isValid, err := v.ValidateCommand(ctx, cmd, validationCandidates)
 	if err != nil {
@@ -104,6 +118,7 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 
 // ShouldDisrupt is a predicate used to filter candidates
 func (v *Validation) ShouldDisrupt(_ context.Context, c *Candidate) bool {
+	// TODO Remove checking do-not-consolidate as part of v1
 	if c.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey] == "true" {
 		return false
 	}

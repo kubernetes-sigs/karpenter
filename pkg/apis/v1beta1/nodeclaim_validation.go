@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -22,6 +24,7 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -56,6 +59,13 @@ var (
 		"pid.available",
 	)
 )
+
+func (in *NodeClaim) SupportedVerbs() []admissionregistrationv1.OperationType {
+	return []admissionregistrationv1.OperationType{
+		admissionregistrationv1.Create,
+		admissionregistrationv1.Update,
+	}
+}
 
 // Validate the NodeClaim
 func (in *NodeClaim) Validate(_ context.Context) (errs *apis.FieldError) {
@@ -119,8 +129,8 @@ func (in *NodeClaimSpec) validateTaintsField(taints []v1.Taint, existing map[tai
 	return errs
 }
 
-// This function is used by the NodeClaim validation webhook to verify the provisioner requirements.
-// When this function is called, the provisioner's requirements do not include the requirements from labels.
+// This function is used by the NodeClaim validation webhook to verify the nodepool requirements.
+// When this function is called, the nodepool's requirements do not include the requirements from labels.
 // NodeClaim requirements only support well known labels.
 func (in *NodeClaimSpec) validateRequirements() (errs *apis.FieldError) {
 	for i, requirement := range in.Requirements {

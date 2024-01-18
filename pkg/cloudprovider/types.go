@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -25,9 +27,9 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/scheduling"
-	"github.com/aws/karpenter-core/pkg/utils/resources"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 type DriftReason string
@@ -44,7 +46,7 @@ type CloudProvider interface {
 	// List retrieves all NodeClaims from the cloudprovider
 	List(context.Context) ([]*v1beta1.NodeClaim, error)
 	// GetInstanceTypes returns instance types supported by the cloudprovider.
-	// Availability of types or zone may vary by provisioner or over time.  Regardless of
+	// Availability of types or zone may vary by nodepool or over time.  Regardless of
 	// availability, the GetInstanceTypes method should always return all instance types,
 	// even those with no offerings available.
 	GetInstanceTypes(context.Context, *v1beta1.NodePool) ([]*InstanceType, error)
@@ -53,27 +55,6 @@ type CloudProvider interface {
 	IsDrifted(context.Context, *v1beta1.NodeClaim) (DriftReason, error)
 	// Name returns the CloudProvider implementation name.
 	Name() string
-}
-
-type InstanceTypes []*InstanceType
-
-func (its InstanceTypes) OrderByPrice(reqs scheduling.Requirements) InstanceTypes {
-	// Order instance types so that we get the cheapest instance types of the available offerings
-	sort.Slice(its, func(i, j int) bool {
-		iPrice := math.MaxFloat64
-		jPrice := math.MaxFloat64
-		if len(its[i].Offerings.Available().Requirements(reqs)) > 0 {
-			iPrice = its[i].Offerings.Available().Requirements(reqs).Cheapest().Price
-		}
-		if len(its[j].Offerings.Available().Requirements(reqs)) > 0 {
-			jPrice = its[j].Offerings.Available().Requirements(reqs).Cheapest().Price
-		}
-		if iPrice == jPrice {
-			return its[i].Name < its[j].Name
-		}
-		return iPrice < jPrice
-	})
-	return its
 }
 
 // InstanceType describes the properties of a potential node (either concrete attributes of an instance of this type
@@ -96,6 +77,8 @@ type InstanceType struct {
 	allocatable v1.ResourceList
 }
 
+type InstanceTypes []*InstanceType
+
 // precompute is used to ensure we only compute the allocatable resources onces as its called many times
 // and the operation is fairly expensive.
 func (i *InstanceType) precompute() {
@@ -105,6 +88,36 @@ func (i *InstanceType) precompute() {
 func (i *InstanceType) Allocatable() v1.ResourceList {
 	i.once.Do(i.precompute)
 	return i.allocatable.DeepCopy()
+}
+
+func (its InstanceTypes) OrderByPrice(reqs scheduling.Requirements) InstanceTypes {
+	// Order instance types so that we get the cheapest instance types of the available offerings
+	sort.Slice(its, func(i, j int) bool {
+		iPrice := math.MaxFloat64
+		jPrice := math.MaxFloat64
+		if len(its[i].Offerings.Available().Compatible(reqs)) > 0 {
+			iPrice = its[i].Offerings.Available().Compatible(reqs).Cheapest().Price
+		}
+		if len(its[j].Offerings.Available().Compatible(reqs)) > 0 {
+			jPrice = its[j].Offerings.Available().Compatible(reqs).Cheapest().Price
+		}
+		if iPrice == jPrice {
+			return its[i].Name < its[j].Name
+		}
+		return iPrice < jPrice
+	})
+	return its
+}
+
+// Compatible returns the list of instanceTypes based on the supported capacityType and zones in the requirements
+func (its InstanceTypes) Compatible(requirements scheduling.Requirements) InstanceTypes {
+	var filteredInstanceTypes []*InstanceType
+	for _, instanceType := range its {
+		if len(instanceType.Offerings.Available().Compatible(requirements)) > 0 {
+			filteredInstanceTypes = append(filteredInstanceTypes, instanceType)
+		}
+	}
+	return filteredInstanceTypes
 }
 
 type InstanceTypeOverhead struct {
@@ -148,8 +161,8 @@ func (ofs Offerings) Available() Offerings {
 	})
 }
 
-// Requirements filters the offerings based on the passed requirements
-func (ofs Offerings) Requirements(reqs scheduling.Requirements) Offerings {
+// Compatible returns the offerings based on the passed requirements
+func (ofs Offerings) Compatible(reqs scheduling.Requirements) Offerings {
 	return lo.Filter(ofs, func(offering Offering, _ int) bool {
 		return (!reqs.Has(v1.LabelTopologyZone) || reqs.Get(v1.LabelTopologyZone).Has(offering.Zone)) &&
 			(!reqs.Has(v1beta1.CapacityTypeLabelKey) || reqs.Get(v1beta1.CapacityTypeLabelKey).Has(offering.CapacityType))

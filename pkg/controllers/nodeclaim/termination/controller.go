@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -19,7 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -35,12 +36,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
+	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
+
+var _ operatorcontroller.FinalizingTypedController[*v1beta1.NodeClaim] = (*Controller)(nil)
 
 // Controller is a NodeClaim Termination controller that triggers deletion of the Node and the
 // CloudProvider NodeClaim through its graceful termination mechanism
@@ -50,15 +52,11 @@ type Controller struct {
 }
 
 // NewController is a constructor for the NodeClaim Controller
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
-	return &Controller{
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) operatorcontroller.Controller {
+	return operatorcontroller.Typed[*v1beta1.NodeClaim](kubeClient, &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
-	}
-}
-
-func (*Controller) Name() string {
-	return "machine.termination"
+	})
 }
 
 func (c *Controller) Reconcile(_ context.Context, _ *v1beta1.NodeClaim) (reconcile.Result, error) {
@@ -85,48 +83,27 @@ func (c *Controller) Finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 	if len(nodes) > 0 {
 		return reconcile.Result{}, nil
 	}
-	if nodeClaim.Status.ProviderID != "" || nodeClaim.Annotations[v1alpha5.MachineLinkedAnnotationKey] != "" {
+	if nodeClaim.Status.ProviderID != "" {
 		if err = c.cloudProvider.Delete(ctx, nodeClaim); cloudprovider.IgnoreNodeClaimNotFoundError(err) != nil {
 			return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
 		}
 	}
 	controllerutil.RemoveFinalizer(nodeClaim, v1beta1.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
-		if err = nodeclaimutil.Patch(ctx, c.kubeClient, stored, nodeClaim); err != nil {
+		if err = c.kubeClient.Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("removing termination finalizer, %w", err))
 		}
-		logging.FromContext(ctx).Infof("deleted %s", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"))
+		logging.FromContext(ctx).Infof("deleted nodeclaim")
 	}
 	return reconcile.Result{}, nil
 }
 
-var _ corecontroller.FinalizingTypedController[*v1beta1.NodeClaim] = (*NodeClaimController)(nil)
-
-type NodeClaimController struct {
-	*Controller
-}
-
-func NewNodeClaimController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
-	return corecontroller.Typed[*v1beta1.NodeClaim](kubeClient, &NodeClaimController{
-		Controller: NewController(kubeClient, cloudProvider),
-	})
-}
-
-func (*NodeClaimController) Name() string {
+func (*Controller) Name() string {
 	return "nodeclaim.termination"
 }
 
-func (c *NodeClaimController) Reconcile(_ context.Context, _ *v1beta1.NodeClaim) (reconcile.Result, error) {
-	return reconcile.Result{}, nil
-}
-
-func (c *NodeClaimController) Finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("nodepool", nodeClaim.Labels[v1beta1.NodePoolLabelKey]))
-	return c.Controller.Finalize(ctx, nodeClaim)
-}
-
-func (c *NodeClaimController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(controllerruntime.
+func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+	return operatorcontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1beta1.NodeClaim{}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).

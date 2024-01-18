@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -69,7 +71,7 @@ var (
 
 	// WellKnownLabels are labels that belong to the RestrictedLabelDomains but allowed.
 	// Karpenter is aware of these labels, and they can be used to further narrow down
-	// the range of the corresponding values by either provisioner or pods.
+	// the range of the corresponding values by either nodepool or pods.
 	WellKnownLabels = sets.New(
 		NodePoolLabelKey,
 		v1.LabelTopologyZone,
@@ -116,9 +118,11 @@ func IsRestrictedNodeLabel(key string) bool {
 	if WellKnownLabels.Has(key) {
 		return true
 	}
-	labelDomain := getLabelDomain(key)
-	if LabelDomainExceptions.Has(labelDomain) {
-		return false
+	labelDomain := GetLabelDomain(key)
+	for exceptionLabelDomain := range LabelDomainExceptions {
+		if strings.HasSuffix(labelDomain, exceptionLabelDomain) {
+			return false
+		}
 	}
 	for restrictedLabelDomain := range RestrictedLabelDomains {
 		if strings.HasSuffix(labelDomain, restrictedLabelDomain) {
@@ -128,7 +132,7 @@ func IsRestrictedNodeLabel(key string) bool {
 	return RestrictedLabels.Has(key)
 }
 
-func getLabelDomain(key string) string {
+func GetLabelDomain(key string) string {
 	if parts := strings.SplitN(key, "/", 2); len(parts) == 2 {
 		return parts[0]
 	}

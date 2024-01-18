@@ -1,6 +1,8 @@
 //go:build test_performance
 
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -32,18 +34,16 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/clock"
 
-	"github.com/aws/karpenter-core/pkg/apis/settings"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
-	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/events"
-	"github.com/aws/karpenter-core/pkg/test"
-	"github.com/aws/karpenter-core/pkg/utils/nodepool"
-
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/logging"
+
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/test"
 
 	v1 "k8s.io/api/core/v1"
 )
@@ -116,7 +116,6 @@ func TestSchedulingProfile(t *testing.T) {
 func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	// disable logging
 	ctx = logging.WithLogger(context.Background(), zap.NewNop().Sugar())
-	ctx = settings.ToContext(ctx, test.Settings())
 	nodePool := test.NodePool()
 
 	instanceTypes := fake.InstanceTypes(instanceCount)
@@ -124,7 +123,7 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	cloudProvider.InstanceTypes = instanceTypes
 	scheduler := scheduling.NewScheduler(ctx, nil, []*scheduling.NodeClaimTemplate{scheduling.NewNodeClaimTemplate(nodePool)},
 		nil, state.NewCluster(&clock.RealClock{}, nil, cloudProvider), nil, &scheduling.Topology{},
-		map[nodepool.Key][]*cloudprovider.InstanceType{nodepool.Key{Name: nodePool.Name, IsProvisioner: false}: instanceTypes}, nil,
+		map[string][]*cloudprovider.InstanceType{nodePool.Name: instanceTypes}, nil,
 		events.NewRecorder(&record.FakeRecorder{}),
 		scheduling.SchedulerOptions{})
 

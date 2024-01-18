@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -23,7 +25,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/utils/atomic"
+	"sigs.k8s.io/karpenter/pkg/utils/atomic"
 )
 
 const IsDefaultStorageClassAnnotation = "storageclass.kubernetes.io/is-default-class"

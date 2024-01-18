@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -23,13 +25,13 @@ import (
 	"knative.dev/pkg/apis"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/test"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/test"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	. "github.com/aws/karpenter-core/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
 var _ = Describe("Emptiness", func() {
@@ -49,7 +51,24 @@ var _ = Describe("Emptiness", func() {
 			},
 		})
 	})
+	Context("Metrics", func() {
+		It("should fire a karpenter_nodeclaims_disrupted metric when empty", func() {
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 
+			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Empty).IsTrue()).To(BeTrue())
+
+			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_disrupted", map[string]string{
+				"type":     "emptiness",
+				"nodepool": nodePool.Name,
+			})
+			Expect(found).To(BeTrue())
+			Expect(metric.GetCounter().GetValue()).To(BeNumerically("==", 1))
+		})
+	})
 	It("should mark NodeClaims as empty", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)

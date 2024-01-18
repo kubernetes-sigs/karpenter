@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -26,9 +28,8 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	podutil "github.com/aws/karpenter-core/pkg/utils/pod"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	podutil "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
 type Terminator struct {
@@ -84,13 +85,11 @@ func (t *Terminator) Drain(ctx context.Context, node *v1.Node) error {
 		return fmt.Errorf("listing pods on node, %w", err)
 	}
 
-	_, isMachine := node.Labels[v1alpha5.ProvisionerNameLabelKey]
 	// Skip node due to pods that are not able to be evicted
 	podsToEvict := lo.FilterMap(pods.Items, func(po v1.Pod, _ int) (*v1.Pod, bool) {
 		p := lo.ToPtr(po)
-		// Ignore pods that tolerate the node.kubernetes.io/unschedulable taint if linked to a machine
-		// or pods that tolerate the karpenter.sh/disruption taint if linked to a nodeclaim.
-		if lo.Ternary(isMachine, podutil.ToleratesUnschedulableTaint(p), podutil.ToleratesDisruptionNoScheduleTaint(p)) ||
+		// Ignore pods that tolerate the karpenter.sh/disruption taint.
+		if podutil.ToleratesDisruptionNoScheduleTaint(p) ||
 			// Ignore static mirror pods
 			podutil.IsOwnedByNode(p) ||
 			// Ignore if the pod is complete and doesn't need to be evicted

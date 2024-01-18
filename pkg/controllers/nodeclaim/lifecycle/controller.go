@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -25,7 +27,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -37,13 +38,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/events"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
-	"github.com/aws/karpenter-core/pkg/utils/result"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/events"
+	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
+	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
+	"sigs.k8s.io/karpenter/pkg/utils/result"
 )
+
+var _ operatorcontroller.TypedController[*v1beta1.NodeClaim] = (*Controller)(nil)
 
 type nodeClaimReconciler interface {
 	Reconcile(context.Context, *v1beta1.NodeClaim) (reconcile.Result, error)
@@ -51,7 +54,7 @@ type nodeClaimReconciler interface {
 
 // Controller is a NodeClaim Lifecycle controller that manages the lifecycle of the NodeClaim up until its termination
 // The controller is responsible for ensuring that new Nodes get launched, that they have properly registered with
-// the cluster as nodes and that they are properly initialized, ensuring that Machines that do not have matching nodes
+// the cluster as nodes and that they are properly initialized, ensuring that nodeclaims that do not have matching nodes
 // after some liveness TTL are removed
 type Controller struct {
 	kubeClient client.Client
@@ -62,15 +65,15 @@ type Controller struct {
 	liveness       *Liveness
 }
 
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) *Controller {
-	return &Controller{
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) operatorcontroller.Controller {
+	return operatorcontroller.Typed[*v1beta1.NodeClaim](kubeClient, &Controller{
 		kubeClient: kubeClient,
 
 		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Minute, time.Second*10), recorder: recorder},
 		registration:   &Registration{kubeClient: kubeClient},
 		initialization: &Initialization{kubeClient: kubeClient},
 		liveness:       &Liveness{clock: clk, kubeClient: kubeClient},
-	}
+	})
 }
 
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
@@ -83,7 +86,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	stored := nodeClaim.DeepCopy()
 	controllerutil.AddFinalizer(nodeClaim, v1beta1.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(nodeClaim, stored) {
-		if err := nodeclaimutil.Patch(ctx, c.kubeClient, stored, nodeClaim); err != nil {
+		if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 	}
@@ -103,10 +106,11 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	}
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
 		statusCopy := nodeClaim.DeepCopy()
-		if err := nodeclaimutil.Patch(ctx, c.kubeClient, stored, nodeClaim); err != nil {
+		if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(multierr.Append(errs, err))
 		}
-		if err := nodeclaimutil.PatchStatus(ctx, c.kubeClient, stored, statusCopy); err != nil {
+
+		if err := c.kubeClient.Status().Patch(ctx, statusCopy, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(multierr.Append(errs, err))
 		}
 		// We sleep here after a patch operation since we want to ensure that we are able to read our own writes
@@ -120,29 +124,12 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	return result.Min(results...), nil
 }
 
-var _ corecontroller.TypedController[*v1beta1.NodeClaim] = (*NodeClaimController)(nil)
-
-type NodeClaimController struct {
-	*Controller
-}
-
-func NewNodeClaimController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) corecontroller.Controller {
-	return corecontroller.Typed[*v1beta1.NodeClaim](kubeClient, &NodeClaimController{
-		Controller: NewController(clk, kubeClient, cloudProvider, recorder),
-	})
-}
-
-func (*NodeClaimController) Name() string {
+func (*Controller) Name() string {
 	return "nodeclaim.lifecycle"
 }
 
-func (c *NodeClaimController) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("nodepool", nodeClaim.Labels[v1beta1.NodePoolLabelKey]))
-	return c.Controller.Reconcile(ctx, nodeClaim)
-}
-
-func (c *NodeClaimController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(controllerruntime.
+func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+	return operatorcontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1beta1.NodeClaim{}, builder.WithPredicates(
 			predicate.Funcs{

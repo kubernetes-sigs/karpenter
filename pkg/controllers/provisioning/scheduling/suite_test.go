@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -36,28 +38,27 @@ import (
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
-	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
-	"github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
-	"github.com/aws/karpenter-core/pkg/events"
-	"github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/operator/options"
-	"github.com/aws/karpenter-core/pkg/operator/scheme"
-	pscheduling "github.com/aws/karpenter-core/pkg/scheduling"
-	"github.com/aws/karpenter-core/pkg/test"
+	"sigs.k8s.io/karpenter/pkg/apis"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
+	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/operator/scheme"
+	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/test"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	. "knative.dev/pkg/logging/testing"
 	"knative.dev/pkg/ptr"
 
-	. "github.com/aws/karpenter-core/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
 var ctx context.Context
@@ -421,6 +422,20 @@ var _ = Context("NodePool", func() {
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					node := ExpectScheduled(ctx, env.Client, pod)
 					Expect(node.Labels).To(HaveKeyWithValue(domain+"/test", "test-value"))
+				}
+			})
+			It("should schedule pods that have node selectors with label in subdomain from restricted domains exceptions list", func() {
+				var requirements []v1.NodeSelectorRequirement
+				for domain := range v1beta1.LabelDomainExceptions {
+					requirements = append(requirements, v1.NodeSelectorRequirement{Key: "subdomain." + domain + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}})
+				}
+				nodePool.Spec.Template.Spec.Requirements = requirements
+				ExpectApplied(ctx, env.Client, nodePool)
+				for domain := range v1beta1.LabelDomainExceptions {
+					pod := test.UnschedulablePod()
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := ExpectScheduled(ctx, env.Client, pod)
+					Expect(node.Labels).To(HaveKeyWithValue("subdomain."+domain+"/test", "test-value"))
 				}
 			})
 			It("should schedule pods that have node selectors with label in wellknown label list", func() {
@@ -853,6 +868,20 @@ var _ = Context("NodePool", func() {
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					node := ExpectScheduled(ctx, env.Client, pod)
 					Expect(node.Labels).To(HaveKeyWithValue(domain+"/test", "test-value"))
+				}
+			})
+			It("should schedule pods that have node selectors with label in subdomain from restricted domains exceptions list", func() {
+				var requirements []v1.NodeSelectorRequirement
+				for domain := range v1beta1.LabelDomainExceptions {
+					requirements = append(requirements, v1.NodeSelectorRequirement{Key: "subdomain." + domain + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}})
+				}
+				nodePool.Spec.Template.Spec.Requirements = requirements
+				ExpectApplied(ctx, env.Client, nodePool)
+				for domain := range v1beta1.LabelDomainExceptions {
+					pod := test.UnschedulablePod()
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := ExpectScheduled(ctx, env.Client, pod)
+					Expect(node.Labels).To(HaveKeyWithValue("subdomain."+domain+"/test", "test-value"))
 				}
 			})
 			It("should schedule pods that have node selectors with label in wellknown label list", func() {
@@ -2353,7 +2382,9 @@ var _ = Context("NodePool", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, node)
+			ExpectMakeNodesInitialized(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
 			opts := test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
 				Requests: map[v1.ResourceName]resource.Quantity{
 					v1.ResourceCPU: resource.MustParse("10m"),
@@ -2377,7 +2408,9 @@ var _ = Context("NodePool", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, node)
+			ExpectMakeNodesInitialized(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+
 			opts := test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
 				Requests: map[v1.ResourceName]resource.Quantity{
 					v1.ResourceCPU: resource.MustParse("10m"),
@@ -2802,8 +2835,9 @@ var _ = Context("NodePool", func() {
 
 			initialPod := test.UnschedulablePod(test.PodOptions{})
 			// Pod has an ephemeral volume claim that has a specified storage class, so it should use the one specified
+			volumeName := "tmp-ephemeral"
 			initialPod.Spec.Volumes = append(initialPod.Spec.Volumes, v1.Volume{
-				Name: "tmp-ephemeral",
+				Name: volumeName,
 				VolumeSource: v1.VolumeSource{
 					Ephemeral: &v1.EphemeralVolumeSource{
 						VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
@@ -2812,7 +2846,7 @@ var _ = Context("NodePool", func() {
 								AccessModes: []v1.PersistentVolumeAccessMode{
 									v1.ReadWriteOnce,
 								},
-								Resources: v1.ResourceRequirements{
+								Resources: v1.VolumeResourceRequirements{
 									Requests: v1.ResourceList{
 										v1.ResourceStorage: resource.MustParse("1Gi"),
 									},
@@ -2822,7 +2856,14 @@ var _ = Context("NodePool", func() {
 					},
 				},
 			})
-			ExpectApplied(ctx, env.Client, nodePool, sc, sc2, initialPod)
+			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: initialPod.Namespace,
+					Name:      fmt.Sprintf("%s-%s", initialPod.Name, volumeName),
+				},
+				StorageClassName: lo.ToPtr(sc.Name),
+			})
+			ExpectApplied(ctx, env.Client, nodePool, sc, sc2, pvc, initialPod)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
 			node := ExpectScheduled(ctx, env.Client, initialPod)
 			csiNode := &storagev1.CSINode{
@@ -2854,7 +2895,7 @@ var _ = Context("NodePool", func() {
 			pod := test.UnschedulablePod(test.PodOptions{})
 			// Pod has an ephemeral volume claim that has a specified storage class, so it should use the one specified
 			pod.Spec.Volumes = append(pod.Spec.Volumes, v1.Volume{
-				Name: "tmp-ephemeral",
+				Name: volumeName,
 				VolumeSource: v1.VolumeSource{
 					Ephemeral: &v1.EphemeralVolumeSource{
 						VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
@@ -2863,7 +2904,7 @@ var _ = Context("NodePool", func() {
 								AccessModes: []v1.PersistentVolumeAccessMode{
 									v1.ReadWriteOnce,
 								},
-								Resources: v1.ResourceRequirements{
+								Resources: v1.VolumeResourceRequirements{
 									Requests: v1.ResourceList{
 										v1.ResourceStorage: resource.MustParse("1Gi"),
 									},
@@ -2873,7 +2914,14 @@ var _ = Context("NodePool", func() {
 					},
 				},
 			})
-			ExpectApplied(ctx, env.Client, nodePool, pod)
+			pvc = test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: pod.Namespace,
+					Name:      fmt.Sprintf("%s-%s", pod.Name, volumeName),
+				},
+				StorageClassName: lo.ToPtr(sc.Name),
+			})
+			ExpectApplied(ctx, env.Client, nodePool, pvc, pod)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node2 := ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Name).ToNot(Equal(node2.Name))
@@ -2892,8 +2940,9 @@ var _ = Context("NodePool", func() {
 
 			initialPod := test.UnschedulablePod(test.PodOptions{})
 			// Pod has an ephemeral volume claim that has NO storage class, so it should use the default one
+			volumeName := "tmp-ephemeral"
 			initialPod.Spec.Volumes = append(initialPod.Spec.Volumes, v1.Volume{
-				Name: "tmp-ephemeral",
+				Name: volumeName,
 				VolumeSource: v1.VolumeSource{
 					Ephemeral: &v1.EphemeralVolumeSource{
 						VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
@@ -2901,7 +2950,7 @@ var _ = Context("NodePool", func() {
 								AccessModes: []v1.PersistentVolumeAccessMode{
 									v1.ReadWriteOnce,
 								},
-								Resources: v1.ResourceRequirements{
+								Resources: v1.VolumeResourceRequirements{
 									Requests: v1.ResourceList{
 										v1.ResourceStorage: resource.MustParse("1Gi"),
 									},
@@ -2911,7 +2960,13 @@ var _ = Context("NodePool", func() {
 					},
 				},
 			})
-			ExpectApplied(ctx, env.Client, nodePool, sc, initialPod)
+			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: initialPod.Namespace,
+					Name:      fmt.Sprintf("%s-%s", initialPod.Name, volumeName),
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, sc, initialPod, pvc)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
 			node := ExpectScheduled(ctx, env.Client, initialPod)
 			csiNode := &storagev1.CSINode{
@@ -2936,7 +2991,7 @@ var _ = Context("NodePool", func() {
 			pod := test.UnschedulablePod(test.PodOptions{})
 			// Pod has an ephemeral volume claim that has NO storage class, so it should use the default one
 			pod.Spec.Volumes = append(pod.Spec.Volumes, v1.Volume{
-				Name: "tmp-ephemeral",
+				Name: volumeName,
 				VolumeSource: v1.VolumeSource{
 					Ephemeral: &v1.EphemeralVolumeSource{
 						VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
@@ -2944,7 +2999,7 @@ var _ = Context("NodePool", func() {
 								AccessModes: []v1.PersistentVolumeAccessMode{
 									v1.ReadWriteOnce,
 								},
-								Resources: v1.ResourceRequirements{
+								Resources: v1.VolumeResourceRequirements{
 									Requests: v1.ResourceList{
 										v1.ResourceStorage: resource.MustParse("1Gi"),
 									},
@@ -2954,8 +3009,14 @@ var _ = Context("NodePool", func() {
 					},
 				},
 			})
+			pvc = test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: pod.Namespace,
+					Name:      fmt.Sprintf("%s-%s", pod.Name, volumeName),
+				},
+			})
 
-			ExpectApplied(ctx, env.Client, sc, nodePool, pod)
+			ExpectApplied(ctx, env.Client, sc, nodePool, pod, pvc)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node2 := ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Name).ToNot(Equal(node2.Name))
@@ -2989,10 +3050,11 @@ var _ = Context("NodePool", func() {
 			time.Sleep(time.Second * 2)
 			ExpectApplied(ctx, env.Client, sc2)
 
+			volumeName := "tmp-ephemeral"
 			initialPod := test.UnschedulablePod(test.PodOptions{})
 			// Pod has an ephemeral volume claim that has NO storage class, so it should use the default one
 			initialPod.Spec.Volumes = append(initialPod.Spec.Volumes, v1.Volume{
-				Name: "tmp-ephemeral",
+				Name: volumeName,
 				VolumeSource: v1.VolumeSource{
 					Ephemeral: &v1.EphemeralVolumeSource{
 						VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
@@ -3000,7 +3062,7 @@ var _ = Context("NodePool", func() {
 								AccessModes: []v1.PersistentVolumeAccessMode{
 									v1.ReadWriteOnce,
 								},
-								Resources: v1.ResourceRequirements{
+								Resources: v1.VolumeResourceRequirements{
 									Requests: v1.ResourceList{
 										v1.ResourceStorage: resource.MustParse("1Gi"),
 									},
@@ -3010,7 +3072,13 @@ var _ = Context("NodePool", func() {
 					},
 				},
 			})
-			ExpectApplied(ctx, env.Client, nodePool, sc, initialPod)
+			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: initialPod.Namespace,
+					Name:      fmt.Sprintf("%s-%s", initialPod.Name, volumeName),
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, sc, initialPod, pvc)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
 			node := ExpectScheduled(ctx, env.Client, initialPod)
 			csiNode := &storagev1.CSINode{
@@ -3042,7 +3110,7 @@ var _ = Context("NodePool", func() {
 			pod := test.UnschedulablePod(test.PodOptions{})
 			// Pod has an ephemeral volume claim that has NO storage class, so it should use the default one
 			pod.Spec.Volumes = append(pod.Spec.Volumes, v1.Volume{
-				Name: "tmp-ephemeral",
+				Name: volumeName,
 				VolumeSource: v1.VolumeSource{
 					Ephemeral: &v1.EphemeralVolumeSource{
 						VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
@@ -3050,7 +3118,7 @@ var _ = Context("NodePool", func() {
 								AccessModes: []v1.PersistentVolumeAccessMode{
 									v1.ReadWriteOnce,
 								},
-								Resources: v1.ResourceRequirements{
+								Resources: v1.VolumeResourceRequirements{
 									Requests: v1.ResourceList{
 										v1.ResourceStorage: resource.MustParse("1Gi"),
 									},
@@ -3060,42 +3128,105 @@ var _ = Context("NodePool", func() {
 					},
 				},
 			})
-			ExpectApplied(ctx, env.Client, sc, nodePool, pod)
+			pvc = test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: pod.Namespace,
+					Name:      fmt.Sprintf("%s-%s", pod.Name, volumeName),
+				},
+			})
+			ExpectApplied(ctx, env.Client, sc, nodePool, pod, pvc)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node2 := ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Name).ToNot(Equal(node2.Name))
 		})
-		It("should not launch nodes for pods with ephemeral volume using a non-existent storage classes", func() {
-			ExpectApplied(ctx, env.Client, nodePool)
-			pod := test.UnschedulablePod(test.PodOptions{})
-			pod.Spec.Volumes = append(pod.Spec.Volumes, v1.Volume{
-				Name: "tmp-ephemeral",
-				VolumeSource: v1.VolumeSource{
-					Ephemeral: &v1.EphemeralVolumeSource{
-						VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
-							Spec: v1.PersistentVolumeClaimSpec{
-								StorageClassName: ptr.String("non-existent"),
-								AccessModes: []v1.PersistentVolumeAccessMode{
-									v1.ReadWriteOnce,
-								},
-								Resources: v1.ResourceRequirements{
-									Requests: v1.ResourceList{
-										v1.ResourceStorage: resource.MustParse("1Gi"),
+		DescribeTable(
+			"should launch nodes for pods with ephemeral volume without a storage class when the PVC is bound",
+			func(storageClassName string) {
+				ExpectApplied(ctx, env.Client, nodePool)
+				volumeName := "tmp-ephemeral"
+				pod := test.UnschedulablePod(test.PodOptions{})
+				pod.Spec.Volumes = append(pod.Spec.Volumes, v1.Volume{
+					Name: volumeName,
+					VolumeSource: v1.VolumeSource{
+						Ephemeral: &v1.EphemeralVolumeSource{
+							VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
+								Spec: v1.PersistentVolumeClaimSpec{
+									StorageClassName: lo.ToPtr(storageClassName),
+									AccessModes: []v1.PersistentVolumeAccessMode{
+										v1.ReadWriteOnce,
+									},
+									Resources: v1.VolumeResourceRequirements{
+										Requests: v1.ResourceList{
+											v1.ResourceStorage: resource.MustParse("1Gi"),
+										},
 									},
 								},
 							},
 						},
 					},
-				},
-			})
-			ExpectApplied(ctx, env.Client, nodePool)
-			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				})
+				pvName := "test-pv"
+				pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: pod.Namespace,
+						Name:      fmt.Sprintf("%s-%s", pod.Name, volumeName),
+					},
+					StorageClassName: lo.ToPtr(storageClassName),
+					VolumeName:       pvName,
+				})
+				pv := test.PersistentVolume(test.PersistentVolumeOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: pod.Namespace,
+						Name:      pvName,
+					},
+				})
+				ExpectApplied(ctx, env.Client, nodePool, pvc, pv)
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 
-			var nodeList v1.NodeList
-			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
-			// no nodes should be created as the storage class doesn't eixst
-			Expect(nodeList.Items).To(HaveLen(0))
-		})
+				var nodeList v1.NodeList
+				Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
+				// no nodes should be created as the storage class doesn't eixst
+				Expect(nodeList.Items).To(HaveLen(1))
+			},
+			Entry("non-existent storage class", "non-existent"),
+			Entry("explicitly disabled storage class (empty string)", ""),
+		)
+		DescribeTable(
+			"should not launch nodes for pods with ephemeral volume without a storage class when the PVC is unbound",
+			func(storageClassName string) {
+				ExpectApplied(ctx, env.Client, nodePool)
+				pod := test.UnschedulablePod(test.PodOptions{})
+				pod.Spec.Volumes = append(pod.Spec.Volumes, v1.Volume{
+					Name: "tmp-ephemeral",
+					VolumeSource: v1.VolumeSource{
+						Ephemeral: &v1.EphemeralVolumeSource{
+							VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
+								Spec: v1.PersistentVolumeClaimSpec{
+									StorageClassName: lo.ToPtr(storageClassName),
+									AccessModes: []v1.PersistentVolumeAccessMode{
+										v1.ReadWriteOnce,
+									},
+									Resources: v1.VolumeResourceRequirements{
+										Requests: v1.ResourceList{
+											v1.ResourceStorage: resource.MustParse("1Gi"),
+										},
+									},
+								},
+							},
+						},
+					},
+				})
+				ExpectApplied(ctx, env.Client, nodePool)
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+
+				var nodeList v1.NodeList
+				Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
+				// no nodes should be created as the storage class doesn't eixst
+				Expect(nodeList.Items).To(HaveLen(0))
+			},
+			Entry("non-existent storage class", "non-existent"),
+			Entry("explicitly disabled storage class (empty string)", ""),
+		)
 		Context("CSIMigration", func() {
 			It("should launch nodes for pods with non-dynamic PVC using a migrated PVC/PV", func() {
 				// We should assume that this PVC/PV is using CSI driver implicitly to limit pod scheduling
@@ -3170,8 +3301,9 @@ var _ = Context("NodePool", func() {
 
 				initialPod := test.UnschedulablePod(test.PodOptions{})
 				// Pod has an ephemeral volume claim that references the in-tree storage provider
+				volumeName := "tmp-ephemeral"
 				initialPod.Spec.Volumes = append(initialPod.Spec.Volumes, v1.Volume{
-					Name: "tmp-ephemeral",
+					Name: volumeName,
 					VolumeSource: v1.VolumeSource{
 						Ephemeral: &v1.EphemeralVolumeSource{
 							VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
@@ -3179,7 +3311,7 @@ var _ = Context("NodePool", func() {
 									AccessModes: []v1.PersistentVolumeAccessMode{
 										v1.ReadWriteOnce,
 									},
-									Resources: v1.ResourceRequirements{
+									Resources: v1.VolumeResourceRequirements{
 										Requests: v1.ResourceList{
 											v1.ResourceStorage: resource.MustParse("1Gi"),
 										},
@@ -3190,7 +3322,13 @@ var _ = Context("NodePool", func() {
 						},
 					},
 				})
-				ExpectApplied(ctx, env.Client, nodePool, sc, initialPod)
+				pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: initialPod.Namespace,
+						Name:      fmt.Sprintf("%s-%s", initialPod.Name, volumeName),
+					},
+				})
+				ExpectApplied(ctx, env.Client, nodePool, sc, initialPod, pvc)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
 				node := ExpectScheduled(ctx, env.Client, initialPod)
 				csiNode := &storagev1.CSINode{
@@ -3215,7 +3353,7 @@ var _ = Context("NodePool", func() {
 				pod := test.UnschedulablePod(test.PodOptions{})
 				// Pod has an ephemeral volume claim that reference the in-tree storage provider
 				pod.Spec.Volumes = append(pod.Spec.Volumes, v1.Volume{
-					Name: "tmp-ephemeral",
+					Name: volumeName,
 					VolumeSource: v1.VolumeSource{
 						Ephemeral: &v1.EphemeralVolumeSource{
 							VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
@@ -3223,7 +3361,7 @@ var _ = Context("NodePool", func() {
 									AccessModes: []v1.PersistentVolumeAccessMode{
 										v1.ReadWriteOnce,
 									},
-									Resources: v1.ResourceRequirements{
+									Resources: v1.VolumeResourceRequirements{
 										Requests: v1.ResourceList{
 											v1.ResourceStorage: resource.MustParse("1Gi"),
 										},
@@ -3234,8 +3372,14 @@ var _ = Context("NodePool", func() {
 						},
 					},
 				})
+				pvc = test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: pod.Namespace,
+						Name:      fmt.Sprintf("%s-%s", pod.Name, volumeName),
+					},
+				})
 				// Pod should not schedule to the first node since we should realize that we have hit our volume limits
-				ExpectApplied(ctx, env.Client, pod)
+				ExpectApplied(ctx, env.Client, pod, pvc)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node2 := ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Name).ToNot(Equal(node2.Name))
@@ -3272,7 +3416,7 @@ func ExpectMaxSkew(ctx context.Context, c client.Client, namespace string, const
 					skew[key]++
 				}
 			}
-			if constraint.TopologyKey == v1alpha5.LabelCapacityType {
+			if constraint.TopologyKey == v1beta1.CapacityTypeLabelKey {
 				if key, ok := node.Labels[constraint.TopologyKey]; ok {
 					skew[key]++
 				}

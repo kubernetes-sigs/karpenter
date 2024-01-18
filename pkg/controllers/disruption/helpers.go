@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -28,17 +30,16 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	disruptionevents "github.com/aws/karpenter-core/pkg/controllers/disruption/events"
-	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
-	pscheduling "github.com/aws/karpenter-core/pkg/controllers/provisioning/scheduling"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/events"
-	"github.com/aws/karpenter-core/pkg/scheduling"
-	nodeutils "github.com/aws/karpenter-core/pkg/utils/node"
-	nodepoolutil "github.com/aws/karpenter-core/pkg/utils/nodepool"
-	"github.com/aws/karpenter-core/pkg/utils/pod"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
 func filterCandidates(ctx context.Context, kubeClient client.Client, recorder events.Recorder, nodes []*Candidate) ([]*Candidate, error) {
@@ -68,7 +69,8 @@ func filterCandidates(ctx context.Context, kubeClient client.Client, recorder ev
 
 //nolint:gocyclo
 func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
-	candidates ...*Candidate) (*pscheduling.Results, error) {
+	candidates ...*Candidate,
+) (*pscheduling.Results, error) {
 	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
 	nodes := cluster.Nodes()
 	deletingNodes := nodes.Deleting()
@@ -103,17 +105,17 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	scheduler, err := provisioner.NewScheduler(ctx, pods, stateNodes, pscheduling.SchedulerOptions{
 		SimulationMode: true,
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("creating scheduler, %w", err)
 	}
 
 	results := scheduler.Solve(ctx, pods)
-	// check if the scheduling relied on an existing node that isn't ready yet, if so we fail
-	// to schedule since we want to assume that we can delete a node and its pods will immediately
-	// move to an existing node which won't occur if that node isn't ready.
 	for _, n := range results.ExistingNodes {
-		if !n.Initialized() || nodeutils.GetCondition(n.Node, v1.NodeReady).Status != v1.ConditionTrue {
+		// We consider existing nodes for scheduling. When these nodes are unmanaged, their taint logic should
+		// tell us if we can schedule to them or not; however, if these nodes are managed, we will still schedule to them
+		// even if they are still in the middle of their initialization loop. In the case of disruption, we don't want
+		// to proceed disrupting if our scheduling decision relies on nodes that haven't entered a terminal state.
+		if !n.Initialized() {
 			for _, p := range n.Pods {
 				results.PodErrors[p] = fmt.Errorf("would schedule against a non-initialized node %s", n.Name())
 			}
@@ -173,32 +175,78 @@ func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
 	return cost
 }
 
-// GetCandidates returns nodes that appear to be currently disruptable based off of their nodePool
-func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter) ([]*Candidate, error) {
+// GetCandidates returns nodes that appear to be currently deprovisionable based off of their nodePool
+func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock,
+	cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter, queue *orchestration.Queue,
+) ([]*Candidate, error) {
 	nodePoolMap, nodePoolToInstanceTypesMap, err := buildNodePoolMap(ctx, kubeClient, cloudProvider)
 	if err != nil {
 		return nil, err
 	}
 	candidates := lo.FilterMap(cluster.Nodes(), func(n *state.StateNode, _ int) (*Candidate, bool) {
-		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, nodePoolMap, nodePoolToInstanceTypesMap)
+		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, nodePoolMap, nodePoolToInstanceTypesMap, queue)
 		return cn, e == nil
 	})
 	// Filter only the valid candidates that we should disrupt
 	return lo.Filter(candidates, func(c *Candidate, _ int) bool { return shouldDeprovision(ctx, c) }), nil
 }
 
+// BuildDisruptionBudgets will return a map for nodePoolName -> numAllowedDisruptions and an error
+func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clock.Clock, kubeClient client.Client) (map[string]int, error) {
+	nodePoolList := &v1beta1.NodePoolList{}
+	if err := kubeClient.List(ctx, nodePoolList); err != nil {
+		return nil, fmt.Errorf("listing node pools, %w", err)
+	}
+	numNodes := map[string]int{}
+	deleting := map[string]int{}
+	disruptionBudgetMapping := map[string]int{}
+	// We need to get all the nodes in the cluster
+	// Get each current active number of nodes per nodePool
+	// Get the max disruptions for each nodePool
+	// Get the number of deleting nodes for each of those nodePools
+	// Find the difference to know how much left we can disrupt
+	nodes := cluster.Nodes()
+	for _, node := range nodes {
+		// We only consider nodes that we own and are initialized towards the total.
+		// If a node is launched/registered, but not initialized, pods aren't scheduled
+		// to the node, and these are treated as unhealthy until they're cleaned up.
+		// This prevents odd roundup cases with percentages where replacement nodes that
+		// aren't initialized could be counted towards the total, resulting in more disruptions
+		// to active nodes than desired, where Karpenter should wait for these nodes to be
+		// healthy before continuing.
+		if !node.Managed() || !node.Initialized() {
+			continue
+		}
+		nodePool := node.Labels()[v1beta1.NodePoolLabelKey]
+		if node.MarkedForDeletion() {
+			deleting[nodePool]++
+		}
+		numNodes[nodePool]++
+	}
+
+	for i := range nodePoolList.Items {
+		nodePool := nodePoolList.Items[i]
+		disruptions := nodePool.MustGetAllowedDisruptions(ctx, clk, numNodes[nodePool.Name])
+		// Subtract the allowed number of disruptions from the number of already deleting nodes.
+		// Floor the value since the number of deleting nodes can exceed the number of allowed disruptions.
+		// Allowing this value to be negative breaks assumptions in the code used to calculate how
+		// many nodes can be disrupted.
+		disruptionBudgetMapping[nodePool.Name] = lo.Clamp(disruptions-deleting[nodePool.Name], 0, math.MaxInt32)
+	}
+	return disruptionBudgetMapping, nil
+}
+
 // buildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map
-func buildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[nodepoolutil.Key]*v1beta1.NodePool, map[nodepoolutil.Key]map[string]*cloudprovider.InstanceType, error) {
-	nodePoolMap := map[nodepoolutil.Key]*v1beta1.NodePool{}
-	nodePoolList, err := nodepoolutil.List(ctx, kubeClient)
-	if err != nil {
+func buildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[string]*v1beta1.NodePool, map[string]map[string]*cloudprovider.InstanceType, error) {
+	nodePoolMap := map[string]*v1beta1.NodePool{}
+	nodePoolList := &v1beta1.NodePoolList{}
+	if err := kubeClient.List(ctx, nodePoolList); err != nil {
 		return nil, nil, fmt.Errorf("listing node pools, %w", err)
 	}
-	nodePoolToInstanceTypesMap := map[nodepoolutil.Key]map[string]*cloudprovider.InstanceType{}
+	nodePoolToInstanceTypesMap := map[string]map[string]*cloudprovider.InstanceType{}
 	for i := range nodePoolList.Items {
 		np := &nodePoolList.Items[i]
-		key := nodepoolutil.Key{Name: np.Name, IsProvisioner: np.IsProvisioner}
-		nodePoolMap[key] = np
+		nodePoolMap[np.Name] = np
 
 		nodePoolInstanceTypes, err := cloudProvider.GetInstanceTypes(ctx, np)
 		if err != nil {
@@ -210,9 +258,9 @@ func buildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 		if len(nodePoolInstanceTypes) == 0 {
 			continue
 		}
-		nodePoolToInstanceTypesMap[key] = map[string]*cloudprovider.InstanceType{}
+		nodePoolToInstanceTypesMap[np.Name] = map[string]*cloudprovider.InstanceType{}
 		for _, it := range nodePoolInstanceTypes {
-			nodePoolToInstanceTypesMap[key][it.Name] = it
+			nodePoolToInstanceTypesMap[np.Name][it.Name] = it
 		}
 	}
 	return nodePoolMap, nodePoolToInstanceTypesMap, nil

@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -21,16 +23,16 @@ import (
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/controllers/nodeclaim/disruption"
-	controllerprov "github.com/aws/karpenter-core/pkg/controllers/nodepool/hash"
-	"github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/operator/options"
-	. "github.com/aws/karpenter-core/pkg/test/expectations"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
+	"sigs.k8s.io/karpenter/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/test"
+	"sigs.k8s.io/karpenter/pkg/test"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -55,6 +57,59 @@ var _ = Describe("Drift", func() {
 		})
 		// NodeClaims are required to be launched before they can be evaluated for drift
 		nodeClaim.StatusConditions().MarkTrue(v1beta1.Launched)
+	})
+	Context("Metrics", func() {
+		It("should fire a karpenter_nodeclaims_drifted metric when drifted", func() {
+			cp.Drifted = "CloudProviderDrifted"
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).IsTrue()).To(BeTrue())
+			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_drifted", map[string]string{
+				"type":     "CloudProviderDrifted",
+				"nodepool": nodePool.Name,
+			})
+			Expect(found).To(BeTrue())
+			Expect(metric.GetCounter().GetValue()).To(BeNumerically("==", 1))
+		})
+		It("should pass-through the correct drifted type value through the karpenter_nodeclaims_drifted metric", func() {
+			cp.Drifted = "drifted"
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+				{
+					Key:      v1.LabelInstanceTypeStable,
+					Operator: v1.NodeSelectorOpDoesNotExist,
+				},
+			}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).IsTrue()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).Reason).To(Equal(string(disruption.RequirementsDrifted)))
+
+			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_drifted", map[string]string{
+				"type":     "RequirementsDrifted",
+				"nodepool": nodePool.Name,
+			})
+			Expect(found).To(BeTrue())
+			Expect(metric.GetCounter().GetValue()).To(BeNumerically("==", 1))
+		})
+		It("should fire a karpenter_nodeclaims_disrupted metric when drifted", func() {
+			cp.Drifted = "drifted"
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).IsTrue()).To(BeTrue())
+
+			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_disrupted", map[string]string{
+				"type":     "drift",
+				"nodepool": nodePool.Name,
+			})
+			Expect(found).To(BeTrue())
+			Expect(metric.GetCounter().GetValue()).To(BeNumerically("==", 1))
+		})
 	})
 	It("should detect drift", func() {
 		cp.Drifted = "drifted"
@@ -157,9 +212,9 @@ var _ = Describe("Drift", func() {
 	})
 	Context("NodeRequirement Drift", func() {
 		DescribeTable("",
-			func(oldProvisionerReq []v1.NodeSelectorRequirement, newProvisionerReq []v1.NodeSelectorRequirement, labels map[string]string, drifted bool) {
+			func(oldNodePoolReq []v1.NodeSelectorRequirement, newNodePoolReq []v1.NodeSelectorRequirement, labels map[string]string, drifted bool) {
 				cp.Drifted = ""
-				nodePool.Spec.Template.Spec.Requirements = oldProvisionerReq
+				nodePool.Spec.Template.Spec.Requirements = oldNodePoolReq
 				nodeClaim.Labels = lo.Assign(nodeClaim.Labels, labels)
 
 				ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
@@ -167,7 +222,7 @@ var _ = Describe("Drift", func() {
 				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 				Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted)).To(BeNil())
 
-				nodePool.Spec.Template.Spec.Requirements = newProvisionerReq
+				nodePool.Spec.Template.Spec.Requirements = newNodePoolReq
 				ExpectApplied(ctx, env.Client, nodePool)
 				ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -360,12 +415,12 @@ var _ = Describe("Drift", func() {
 		})
 
 	})
-	Context("Provisioner Static Drift", func() {
+	Context("NodePool Static Drift", func() {
 		var nodePoolOptions v1beta1.NodePool
 		var nodePoolController controller.Controller
 		BeforeEach(func() {
 			cp.Drifted = ""
-			nodePoolController = controllerprov.NewNodePoolController(env.Client)
+			nodePoolController = hash.NewController(env.Client)
 			nodePoolOptions = v1beta1.NodePool{
 				ObjectMeta: nodePool.ObjectMeta,
 				Spec: v1beta1.NodePoolSpec{

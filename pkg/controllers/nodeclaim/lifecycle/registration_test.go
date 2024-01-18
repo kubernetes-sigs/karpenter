@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -19,13 +21,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/test"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/test"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	. "github.com/aws/karpenter-core/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
 var _ = Describe("Registration", func() {
@@ -86,25 +88,6 @@ var _ = Describe("Registration", func() {
 
 		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
 		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-		node = ExpectExists(ctx, env.Client, node)
-		Expect(node.Labels).To(HaveKeyWithValue(v1beta1.NodeRegisteredLabelKey, "true"))
-	})
-	It("should sync the karpenter.sh/registered label to the Node if the nodeClaim already registered", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
-				},
-			},
-		})
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.Launched)
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.Registered)
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.Initialized)
-
-		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
-		ExpectApplied(ctx, env.Client, nodeClaim, node)
-
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		node = ExpectExists(ctx, env.Client, node)
 		Expect(node.Labels).To(HaveKeyWithValue(v1beta1.NodeRegisteredLabelKey, "true"))

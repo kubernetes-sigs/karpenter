@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -18,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -25,11 +28,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/scheduling"
-	nodeutil "github.com/aws/karpenter-core/pkg/utils/node"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
-	"github.com/aws/karpenter-core/pkg/utils/resources"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
+	nodeutil "sigs.k8s.io/karpenter/pkg/utils/node"
+	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 type Initialization struct {
@@ -40,7 +44,7 @@ type Initialization struct {
 // a) its current status is set to Ready
 // b) all the startup taints have been removed from the node
 // c) all extended resources have been registered
-// This method handles both nil provisioners and nodes without extended resources gracefully.
+// This method handles both nil nodepools and nodes without extended resources gracefully.
 func (i *Initialization) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
 	if nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized).IsTrue() {
 		return reconcile.Result{}, nil
@@ -79,9 +83,11 @@ func (i *Initialization) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeC
 			return reconcile.Result{}, err
 		}
 	}
-	logging.FromContext(ctx).Infof("initialized %s", lo.Ternary(nodeClaim.IsMachine, "machine", "nodeclaim"))
+	logging.FromContext(ctx).Infof("initialized nodeclaim")
 	nodeClaim.StatusConditions().MarkTrue(v1beta1.Initialized)
-	nodeclaimutil.InitializedCounter(nodeClaim).Inc()
+	metrics.NodeClaimsInitializedCounter.With(prometheus.Labels{
+		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+	}).Inc()
 	return reconcile.Result{}, nil
 }
 
@@ -98,7 +104,7 @@ func KnownEphemeralTaintsRemoved(node *v1.Node) (*v1.Taint, bool) {
 	return nil, true
 }
 
-// StartupTaintsRemoved returns true if there are no startup taints registered for the provisioner, or if all startup
+// StartupTaintsRemoved returns true if there are no startup taints registered for the nodepool, or if all startup
 // taints have been removed from the node
 func StartupTaintsRemoved(node *v1.Node, nodeClaim *v1beta1.NodeClaim) (*v1.Taint, bool) {
 	if nodeClaim != nil {

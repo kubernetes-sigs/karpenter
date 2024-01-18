@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -31,9 +33,9 @@ import (
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/metrics"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/metrics"
+	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 )
 
 const (
@@ -48,7 +50,7 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: nodePoolSubsystem,
 			Name:      "limit",
-			Help:      "The nodepool limits are the limits specified on the provisioner that restrict the quantity of resources provisioned. Labeled by nodepool name and resource type.",
+			Help:      "The nodepool limits are the limits specified on the nodepool that restrict the quantity of resources provisioned. Labeled by nodepool name and resource type.",
 		},
 		[]string{
 			resourceTypeLabel,
@@ -79,7 +81,7 @@ type Controller struct {
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client) corecontroller.Controller {
+func NewController(kubeClient client.Client) operatorcontroller.Controller {
 	return &Controller{
 		kubeClient:  kubeClient,
 		metricStore: metrics.NewStore(),
@@ -135,8 +137,8 @@ func makeLabels(nodePool *v1beta1.NodePool, resourceTypeName string) prometheus.
 	}
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(
+func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+	return operatorcontroller.Adapt(
 		controllerruntime.
 			NewControllerManagedBy(m).
 			For(&v1beta1.NodePool{}),

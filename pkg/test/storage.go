@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -66,7 +68,7 @@ func PersistentVolume(overrides ...PersistentVolumeOptions) *v1.PersistentVolume
 		}}}}}
 	}
 	return &v1.PersistentVolume{
-		ObjectMeta: NamespacedObjectMeta(metav1.ObjectMeta{}),
+		ObjectMeta: NamespacedObjectMeta(options.ObjectMeta),
 		Spec: v1.PersistentVolumeSpec{
 			PersistentVolumeSource: source,
 			StorageClassName:       options.StorageClassName,
@@ -81,7 +83,7 @@ type PersistentVolumeClaimOptions struct {
 	metav1.ObjectMeta
 	StorageClassName *string
 	VolumeName       string
-	Resources        v1.ResourceRequirements
+	Resources        v1.VolumeResourceRequirements
 }
 
 func PersistentVolumeClaim(overrides ...PersistentVolumeClaimOptions) *v1.PersistentVolumeClaim {
@@ -92,7 +94,7 @@ func PersistentVolumeClaim(overrides ...PersistentVolumeClaimOptions) *v1.Persis
 		}
 	}
 	if len(options.Resources.Requests) == 0 {
-		options.Resources = v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceStorage: resource.MustParse("1Gi")}}
+		options.Resources = v1.VolumeResourceRequirements{Requests: v1.ResourceList{v1.ResourceStorage: resource.MustParse("1Gi")}}
 	}
 	return &v1.PersistentVolumeClaim{
 		ObjectMeta: NamespacedObjectMeta(options.ObjectMeta),
@@ -100,7 +102,10 @@ func PersistentVolumeClaim(overrides ...PersistentVolumeClaimOptions) *v1.Persis
 			StorageClassName: options.StorageClassName,
 			VolumeName:       options.VolumeName,
 			AccessModes:      []v1.PersistentVolumeAccessMode{v1.ReadWriteOnce},
-			Resources:        options.Resources,
+			Resources: v1.VolumeResourceRequirements{
+				Limits:   options.Resources.Limits,
+				Requests: options.Resources.Requests,
+			},
 		},
 	}
 }

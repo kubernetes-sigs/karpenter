@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -20,8 +22,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/cloudprovider/metrics"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/metrics"
 )
 
 var _ = Describe("Cloudprovider", func() {
@@ -30,7 +32,7 @@ var _ = Describe("Cloudprovider", func() {
 	var nodeClassNotReadyErr = cloudprovider.NewNodeClassNotReadyError(errors.New("not ready"))
 	var unknownErr = errors.New("this is an error we don't know about")
 
-	Describe("CloudProvider machine errors via GetErrorTypeLabelValue()", func() {
+	Describe("CloudProvider nodeclaim errors via GetErrorTypeLabelValue()", func() {
 		Context("when the error is known", func() {
 			It("nodeclaim not found should be recognized", func() {
 				Expect(metrics.GetErrorTypeLabelValue(nodeClaimNotFoundErr)).To(Equal(metrics.NodeClaimNotFoundError))

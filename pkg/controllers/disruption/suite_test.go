@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -28,6 +30,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clock "k8s.io/utils/clock/testing"
@@ -35,21 +38,21 @@ import (
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	coreapis "github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
-	"github.com/aws/karpenter-core/pkg/controllers/disruption"
-	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/controllers/state/informer"
-	"github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/operator/options"
-	"github.com/aws/karpenter-core/pkg/operator/scheme"
-	"github.com/aws/karpenter-core/pkg/scheduling"
-	"github.com/aws/karpenter-core/pkg/test"
-	. "github.com/aws/karpenter-core/pkg/test/expectations"
+	coreapis "sigs.k8s.io/karpenter/pkg/apis"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
+	"sigs.k8s.io/karpenter/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/operator/scheme"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/test"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
 var ctx context.Context
@@ -62,10 +65,14 @@ var nodeStateController controller.Controller
 var nodeClaimStateController controller.Controller
 var fakeClock *clock.FakeClock
 var recorder *test.EventRecorder
+var queue *orchestration.Queue
 
 var onDemandInstances []*cloudprovider.InstanceType
+var spotInstances []*cloudprovider.InstanceType
 var leastExpensiveInstance, mostExpensiveInstance *cloudprovider.InstanceType
 var leastExpensiveOffering, mostExpensiveOffering cloudprovider.Offering
+var leastExpensiveSpotInstance, mostExpensiveSpotInstance *cloudprovider.InstanceType
+var leastExpensiveSpotOffering, mostExpensiveSpotOffering cloudprovider.Offering
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -83,7 +90,8 @@ var _ = BeforeSuite(func() {
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, env.KubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
-	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster)
+	queue = orchestration.NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov)
+	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue)
 })
 
 var _ = AfterSuite(func() {
@@ -102,6 +110,7 @@ var _ = BeforeEach(func() {
 	}
 	fakeClock.SetTime(time.Now())
 	cluster.Reset()
+	queue.Reset()
 	cluster.MarkUnconsolidated()
 
 	// Reset Feature Flags to test defaults
@@ -109,18 +118,32 @@ var _ = BeforeEach(func() {
 
 	onDemandInstances = lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
 		for _, o := range i.Offerings.Available() {
-			if o.CapacityType == v1alpha5.CapacityTypeOnDemand {
+			if o.CapacityType == v1beta1.CapacityTypeOnDemand {
 				return true
 			}
 		}
 		return false
 	})
-	// Sort the instances by pricing from low to high
+	// Sort the on-demand instances by pricing from low to high
 	sort.Slice(onDemandInstances, func(i, j int) bool {
 		return onDemandInstances[i].Offerings.Cheapest().Price < onDemandInstances[j].Offerings.Cheapest().Price
 	})
 	leastExpensiveInstance, mostExpensiveInstance = onDemandInstances[0], onDemandInstances[len(onDemandInstances)-1]
 	leastExpensiveOffering, mostExpensiveOffering = leastExpensiveInstance.Offerings[0], mostExpensiveInstance.Offerings[0]
+	spotInstances = lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
+		for _, o := range i.Offerings.Available() {
+			if o.CapacityType == v1beta1.CapacityTypeSpot {
+				return true
+			}
+		}
+		return false
+	})
+	// Sort the spot instances by pricing from low to high
+	sort.Slice(spotInstances, func(i, j int) bool {
+		return spotInstances[i].Offerings.Cheapest().Price < spotInstances[j].Offerings.Cheapest().Price
+	})
+	leastExpensiveSpotInstance, mostExpensiveSpotInstance = spotInstances[0], spotInstances[len(spotInstances)-1]
+	leastExpensiveSpotOffering, mostExpensiveSpotOffering = leastExpensiveSpotInstance.Offerings[0], mostExpensiveSpotInstance.Offerings[0]
 })
 
 var _ = AfterEach(func() {
@@ -130,13 +153,13 @@ var _ = AfterEach(func() {
 var _ = Describe("Disruption Taints", func() {
 	var nodePool *v1beta1.NodePool
 	var nodeClaim *v1beta1.NodeClaim
-	var nodeClaimNode *v1.Node
+	var node *v1.Node
 	BeforeEach(func() {
 		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
 			Name: "current-on-demand",
 			Offerings: []cloudprovider.Offering{
 				{
-					CapacityType: v1alpha5.CapacityTypeOnDemand,
+					CapacityType: v1beta1.CapacityTypeOnDemand,
 					Zone:         "test-zone-1a",
 					Price:        1.5,
 					Available:    false,
@@ -147,19 +170,19 @@ var _ = Describe("Disruption Taints", func() {
 			Name: "spot-replacement",
 			Offerings: []cloudprovider.Offering{
 				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
+					CapacityType: v1beta1.CapacityTypeSpot,
 					Zone:         "test-zone-1a",
 					Price:        1.0,
 					Available:    true,
 				},
 				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
+					CapacityType: v1beta1.CapacityTypeSpot,
 					Zone:         "test-zone-1b",
 					Price:        0.2,
 					Available:    true,
 				},
 				{
-					CapacityType: v1alpha5.CapacityTypeSpot,
+					CapacityType: v1beta1.CapacityTypeSpot,
 					Zone:         "test-zone-1c",
 					Price:        0.4,
 					Available:    true,
@@ -167,13 +190,13 @@ var _ = Describe("Disruption Taints", func() {
 			},
 		})
 		nodePool = test.NodePool()
-		nodeClaim, nodeClaimNode = test.NodeClaimAndNode(v1beta1.NodeClaim{
+		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1.LabelInstanceTypeStable: currentInstance.Name,
-					v1alpha5.LabelCapacityType: currentInstance.Offerings[0].CapacityType,
-					v1.LabelTopologyZone:       currentInstance.Offerings[0].Zone,
-					v1beta1.NodePoolLabelKey:   nodePool.Name,
+					v1.LabelInstanceTypeStable:   currentInstance.Name,
+					v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
+					v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
 				},
 			},
 			Status: v1beta1.NodeClaimStatus{
@@ -199,12 +222,12 @@ var _ = Describe("Disruption Taints", func() {
 			},
 		})
 		nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: nil}
-		nodeClaimNode.Spec.Taints = append(nodeClaimNode.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, nodeClaimNode, pod)
-		ExpectManualBinding(ctx, env.Client, pod, nodeClaimNode)
+		node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and nodeClaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodeClaimNode}, []*v1beta1.NodeClaim{nodeClaim})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		// Trigger the reconcile loop to start but don't trigger the verify action
 		wg := sync.WaitGroup{}
@@ -215,8 +238,8 @@ var _ = Describe("Disruption Taints", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 		}()
 		wg.Wait()
-		nodeClaimNode = ExpectNodeExists(ctx, env.Client, nodeClaimNode.Name)
-		Expect(nodeClaimNode.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
+		node = ExpectNodeExists(ctx, env.Client, node.Name)
+		Expect(node.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 	})
 	It("should add and remove taints from NodeClaims that fail to disrupt", func() {
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
@@ -228,11 +251,11 @@ var _ = Describe("Disruption Taints", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, nodeClaimNode, pod)
-		ExpectManualBinding(ctx, env.Client, pod, nodeClaimNode)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and nodeClaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodeClaimNode}, []*v1beta1.NodeClaim{nodeClaim})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		// Trigger the reconcile loop to start but don't trigger the verify action
 		wg := sync.WaitGroup{}
@@ -240,7 +263,7 @@ var _ = Describe("Disruption Taints", func() {
 		go func() {
 			defer wg.Done()
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileFailed(ctx, disruptionController, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 		}()
 
 		// Iterate in a loop until we get to the validation action
@@ -251,8 +274,8 @@ var _ = Describe("Disruption Taints", func() {
 				break
 			}
 		}
-		nodeClaimNode = ExpectNodeExists(ctx, env.Client, nodeClaimNode.Name)
-		Expect(nodeClaimNode.Spec.Taints).To(ContainElement(v1beta1.DisruptionNoScheduleTaint))
+		node = ExpectNodeExists(ctx, env.Client, node.Name)
+		Expect(node.Spec.Taints).To(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 
 		createdNodeClaim := lo.Reject(ExpectNodeClaims(ctx, env.Client), func(nc *v1beta1.NodeClaim, _ int) bool {
 			return nc.Name == nodeClaim.Name
@@ -260,10 +283,132 @@ var _ = Describe("Disruption Taints", func() {
 		ExpectDeleted(ctx, env.Client, createdNodeClaim[0])
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, createdNodeClaim[0])
 		ExpectNotFound(ctx, env.Client, createdNodeClaim[0])
-
 		wg.Wait()
-		nodeClaimNode = ExpectNodeExists(ctx, env.Client, nodeClaimNode.Name)
-		Expect(nodeClaimNode.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
+
+		// Increment the clock so that the nodeclaim deletion isn't caught by the
+		// eventual consistency delay.
+		fakeClock.Step(6 * time.Second)
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
+		node = ExpectNodeExists(ctx, env.Client, node.Name)
+		Expect(node.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
+	})
+})
+
+var _ = Describe("BuildDisruptionBudgetMapping", func() {
+	var nodePool *v1beta1.NodePool
+	var nodeClaims []*v1beta1.NodeClaim
+	var nodes []*v1.Node
+	var numNodes int
+	BeforeEach(func() {
+		numNodes = 10
+		nodePool = test.NodePool()
+		nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Finalizers: []string{"karpenter.sh/test-finalizer"},
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1beta1.NodeClaimStatus{
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		for i := 0; i < numNodes; i++ {
+			ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+		}
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+	})
+	It("should not consider nodes that are not managed as part of disruption count", func() {
+		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "100%"}}
+		ExpectApplied(ctx, env.Client, nodePool)
+		unmanaged := test.Node()
+		ExpectApplied(ctx, env.Client, unmanaged)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{unmanaged}, []*v1beta1.NodeClaim{})
+		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client)
+		Expect(err).To(Succeed())
+		// This should not bring in the unmanaged node.
+		Expect(budgets[nodePool.Name]).To(Equal(10))
+	})
+	It("should not consider nodes that are not initialized as part of disruption count", func() {
+		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "100%"}}
+		ExpectApplied(ctx, env.Client, nodePool)
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Finalizers: []string{"karpenter.sh/test-finalizer"},
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1beta1.NodeClaimStatus{
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodeClaim, node)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
+
+		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client)
+		Expect(err).To(Succeed())
+		// This should not bring in the uninitialized node.
+		Expect(budgets[nodePool.Name]).To(Equal(10))
+	})
+	It("should not return a negative disruption value", func() {
+		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "10%"}}
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		// Mark all nodeclaims as marked for deletion
+		for _, i := range nodeClaims {
+			Expect(env.Client.Delete(ctx, i)).To(Succeed())
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(i))
+		}
+		// Mark all nodes as marked for deletion
+		for _, i := range nodes {
+			Expect(env.Client.Delete(ctx, i)).To(Succeed())
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
+		}
+
+		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client)
+		Expect(err).To(Succeed())
+		Expect(budgets[nodePool.Name]).To(Equal(0))
+	})
+	It("should consider nodes with a deletion timestamp set and MarkedForDeletion to the disruption count", func() {
+		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "100%"}}
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		// Delete one node and nodeclaim
+		Expect(env.Client.Delete(ctx, nodeClaims[0])).To(Succeed())
+		Expect(env.Client.Delete(ctx, nodes[0])).To(Succeed())
+		cluster.MarkForDeletion(nodeClaims[1].Status.ProviderID)
+
+		// Mark all nodeclaims as marked for deletion
+		for _, i := range nodeClaims {
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(i))
+		}
+		// Mark all nodes as marked for deletion
+		for _, i := range nodes {
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
+		}
+
+		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client)
+		Expect(err).To(Succeed())
+		Expect(budgets[nodePool.Name]).To(Equal(8))
 	})
 })
 
@@ -324,7 +469,7 @@ var _ = Describe("Pod Eviction Cost", func() {
 
 func leastExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
 	for _, elem := range onDemandInstances {
-		if len(elem.Offerings.Requirements(scheduling.NewRequirements(scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, zone)))) > 0 {
+		if len(elem.Offerings.Compatible(scheduling.NewRequirements(scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, zone)))) > 0 {
 			return elem
 		}
 	}
@@ -334,7 +479,7 @@ func leastExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
 func mostExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
 	for i := len(onDemandInstances) - 1; i >= 0; i-- {
 		elem := onDemandInstances[i]
-		if len(elem.Offerings.Requirements(scheduling.NewRequirements(scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, zone)))) > 0 {
+		if len(elem.Offerings.Compatible(scheduling.NewRequirements(scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, zone)))) > 0 {
 			return elem
 		}
 	}
@@ -347,12 +492,18 @@ func fromInt(i int) *intstr.IntOrString {
 	return &v
 }
 
+// This continually polls the wait group to see if there
+// is a timer waiting, incrementing the clock if not.
+// If you're seeing goroutine timeouts on suite tests, it's possible
+// another timer was added, or the computation required for a loop is taking more than
+// 20 * 400 milliseconds = 8s to complete, potentially requiring an increase in the
+// duration of the polling period.
 func ExpectTriggerVerifyAction(wg *sync.WaitGroup) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 10; i++ {
-			time.Sleep(250 * time.Millisecond)
+		for i := 0; i < 20; i++ {
+			time.Sleep(400 * time.Millisecond)
 			if fakeClock.HasWaiters() {
 				break
 			}

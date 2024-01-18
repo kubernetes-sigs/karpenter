@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -18,9 +20,9 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 func IsProvisionable(pod *v1.Pod) bool {
@@ -84,6 +86,7 @@ func HasDoNotDisrupt(pod *v1.Pod) bool {
 	if pod.Annotations == nil {
 		return false
 	}
+	// TODO Remove checking do-not-evict as part of v1
 	return pod.Annotations[v1alpha5.DoNotEvictPodAnnotationKey] == "true" ||
 		pod.Annotations[v1beta1.DoNotDisruptAnnotationKey] == "true"
 }

@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -25,12 +27,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/events"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/utils/pod"
+	"sigs.k8s.io/karpenter/pkg/events"
+	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
-var _ corecontroller.TypedController[*v1.Pod] = (*Controller)(nil)
+var _ operatorcontroller.TypedController[*v1.Pod] = (*Controller)(nil)
 
 // Controller for the resource
 type Controller struct {
@@ -40,8 +42,8 @@ type Controller struct {
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client, provisioner *Provisioner, recorder events.Recorder) corecontroller.Controller {
-	return corecontroller.Typed[*v1.Pod](kubeClient, &Controller{
+func NewController(kubeClient client.Client, provisioner *Provisioner, recorder events.Recorder) operatorcontroller.Controller {
+	return operatorcontroller.Typed[*v1.Pod](kubeClient, &Controller{
 		kubeClient:  kubeClient,
 		provisioner: provisioner,
 		recorder:    recorder,
@@ -65,8 +67,8 @@ func (c *Controller) Reconcile(_ context.Context, p *v1.Pod) (reconcile.Result, 
 	return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(controllerruntime.
+func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+	return operatorcontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1.Pod{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),

@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -23,7 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 )
 
 // NodePool creates a test NodePool with defaults that can be overridden by overrides.
@@ -56,6 +58,19 @@ func NodePool(overrides ...v1beta1.NodePool) *v1beta1.NodePool {
 	}
 	np.Spec.Template.ObjectMeta = TemplateObjectMeta(np.Spec.Template.ObjectMeta)
 	return np
+}
+
+// NodePools creates homogeneous groups of NodePools
+// based on the passed in options, evenly divided by the total NodePools requested
+func NodePools(total int, options ...v1beta1.NodePool) []*v1beta1.NodePool {
+	nodePools := make([]*v1beta1.NodePool, total)
+	for _, opts := range options {
+		for i := 0; i < total/len(options); i++ {
+			nodePool := NodePool(opts)
+			nodePools[i] = nodePool
+		}
+	}
+	return nodePools
 }
 
 // ReplaceRequirements any current requirements on the passed through NodePool with the passed in requirements

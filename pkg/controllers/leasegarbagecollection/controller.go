@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -26,8 +28,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
+	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 )
+
+var _ operatorcontroller.TypedController[*v1.Lease] = (*Controller)(nil)
 
 // Controller for the resource
 type Controller struct {
@@ -35,8 +39,8 @@ type Controller struct {
 }
 
 // NewController is a constructor
-func NewController(kubeClient client.Client) corecontroller.Controller {
-	return corecontroller.Typed[*v1.Lease](kubeClient, &Controller{
+func NewController(kubeClient client.Client) operatorcontroller.Controller {
+	return operatorcontroller.Typed[*v1.Lease](kubeClient, &Controller{
 		kubeClient: kubeClient,
 	})
 }
@@ -59,8 +63,8 @@ func (c *Controller) Reconcile(ctx context.Context, l *v1.Lease) (reconcile.Resu
 	return reconcile.Result{}, client.IgnoreNotFound(err)
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(controllerruntime.
+func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+	return operatorcontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		For(&v1.Lease{}).

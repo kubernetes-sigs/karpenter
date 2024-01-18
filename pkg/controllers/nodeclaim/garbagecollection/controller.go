@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -18,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -28,10 +31,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/metrics"
+	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 )
 
 type Controller struct {
@@ -40,7 +43,7 @@ type Controller struct {
 	cloudProvider cloudprovider.CloudProvider
 }
 
-func NewController(c clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) corecontroller.Controller {
+func NewController(c clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) operatorcontroller.Controller {
 	return &Controller{
 		clock:         c,
 		kubeClient:    kubeClient,
@@ -53,8 +56,8 @@ func (c *Controller) Name() string {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
-	nodeClaimList, err := nodeclaimutil.List(ctx, c.kubeClient)
-	if err != nil {
+	nodeClaimList := &v1beta1.NodeClaimList{}
+	if err := c.kubeClient.List(ctx, nodeClaimList); err != nil {
 		return reconcile.Result{}, err
 	}
 	cloudProviderNodeClaims, err := c.cloudProvider.List(ctx)
@@ -76,18 +79,21 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 
 	errs := make([]error, len(nodeClaims))
 	workqueue.ParallelizeUntil(ctx, 20, len(nodeClaims), func(i int) {
-		if err := nodeclaimutil.Delete(ctx, c.kubeClient, nodeClaims[i]); err != nil {
+		if err := c.kubeClient.Delete(ctx, nodeClaims[i]); err != nil {
 			errs[i] = client.IgnoreNotFound(err)
 			return
 		}
 		logging.FromContext(ctx).
 			With(
-				lo.Ternary(nodeClaims[i].IsMachine, "machine", "nodeclaim"), nodeClaims[i].Name,
+				"nodeclaim", nodeClaims[i].Name,
 				"provider-id", nodeClaims[i].Status.ProviderID,
-				lo.Ternary(nodeClaims[i].IsMachine, "provisioner", "nodepool"), nodeclaimutil.OwnerKey(nodeClaims[i]).Name,
+				"nodepool", nodeClaims[i].Labels[v1beta1.NodePoolLabelKey],
 			).
-			Debugf("garbage collecting %s with no cloudprovider representation", lo.Ternary(nodeClaims[i].IsMachine, "machine", "nodeclaim"))
-		nodeclaimutil.TerminatedCounter(nodeClaims[i], "garbage_collected").Inc()
+			Debugf("garbage collecting nodeclaim with no cloudprovider representation")
+		metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
+			metrics.ReasonLabel:   "garbage_collected",
+			metrics.NodePoolLabel: nodeClaims[i].Labels[v1beta1.NodePoolLabelKey],
+		}).Inc()
 	})
 	if err = multierr.Combine(errs...); err != nil {
 		return reconcile.Result{}, err
@@ -95,6 +101,6 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	return reconcile.Result{RequeueAfter: time.Minute * 2}, nil
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.NewSingletonManagedBy(m)
+func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+	return operatorcontroller.NewSingletonManagedBy(m)
 }

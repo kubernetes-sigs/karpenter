@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -21,12 +23,15 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	csitranslation "k8s.io/csi-translation-lib"
 	"k8s.io/csi-translation-lib/plugins"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	volumeutil "sigs.k8s.io/karpenter/pkg/utils/volume"
 )
 
 //go:generate controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="."
@@ -77,39 +82,32 @@ func (u Volumes) Insert(volumes Volumes) {
 func GetVolumes(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (Volumes, error) {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("pod", pod.Name))
 	podPVCs := Volumes{}
-	defaultStorageClassName, err := DiscoverDefaultStorageClassName(ctx, kubeClient)
-	if err != nil {
-		return nil, fmt.Errorf("discovering default storage class, %w", err)
-	}
 	for _, volume := range pod.Spec.Volumes {
 		ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("volume", volume.Name))
-		var pvcID, storageClassName, volumeName string
-		var pvc v1.PersistentVolumeClaim
-		if volume.PersistentVolumeClaim != nil {
-			if err = kubeClient.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: volume.PersistentVolumeClaim.ClaimName}, &pvc); err != nil {
-				return nil, err
+		pvc, err := volumeutil.GetPersistentVolumeClaim(ctx, kubeClient, pod, volume)
+		// If the PVC is not found it was manually deleted and its finalizer removed. We should ignore this volume when
+		// computing limits, otherwise Karpenter may never be able to update its cluster state.
+		if err != nil {
+			if errors.IsNotFound(err) {
+				logging.FromContext(ctx).Errorf("failed updating volume limits for volume, %w", err)
+				continue
 			}
-			pvcID = fmt.Sprintf("%s/%s", pod.Namespace, volume.PersistentVolumeClaim.ClaimName)
-			storageClassName = lo.FromPtr(pvc.Spec.StorageClassName)
-			volumeName = pvc.Spec.VolumeName
-		} else if volume.Ephemeral != nil {
-			// generated name per https://kubernetes.io/docs/concepts/storage/ephemeral-volumes/#persistentvolumeclaim-naming
-			pvcID = fmt.Sprintf("%s/%s-%s", pod.Namespace, pod.Name, volume.Name)
-			storageClassName = lo.FromPtr(volume.Ephemeral.VolumeClaimTemplate.Spec.StorageClassName)
-			volumeName = volume.Ephemeral.VolumeClaimTemplate.Spec.VolumeName
-		} else {
+			return nil, fmt.Errorf("failed updating volume limits, %w", err)
+		}
+		// Not all volume types have PVCs, e.g. emptyDir, hostPath, etc.
+		if pvc == nil {
 			continue
 		}
-		if storageClassName == "" {
-			storageClassName = defaultStorageClassName
-		}
-		driverName, err := resolveDriver(ctx, kubeClient, volumeName, storageClassName)
+		ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("pvc", pvc.Name))
+
+		storageClassName := lo.FromPtr(pvc.Spec.StorageClassName)
+		driverName, err := resolveDriver(ctx, kubeClient, pvc.Spec.VolumeName, storageClassName)
 		if err != nil {
 			return nil, err
 		}
 		// might be a non-CSI driver, something we don't currently handle
 		if driverName != "" {
-			podPVCs.Add(driverName, pvcID)
+			podPVCs.Add(driverName, client.ObjectKeyFromObject(pvc).String())
 		}
 	}
 	return podPVCs, nil
@@ -130,18 +128,30 @@ func resolveDriver(ctx context.Context, kubeClient client.Client, volumeName str
 			return driverName, nil
 		}
 	}
-	if storageClassName != "" {
-		driverName, err := driverFromSC(ctx, kubeClient, storageClassName)
-		if err != nil {
-			return "", err
-		}
-		if driverName != "" {
-			return driverName, nil
-		}
+
+	// This can occur in two scenarios:
+	//  1. The storage class was explicitly set to "" to disable dynamic provisioning
+	//  2. The storage class was not set but the cluster doesn't have a default storage class
+	// In either of these cases, a PV must have been previously bound to the PVC and has since been removed. We can
+	// ignore this PVC while computing limits and continue.
+	if storageClassName == "" {
+		logging.FromContext(ctx).Errorf("failed updating volume limits for volume with unbound PVC, no storage class specified")
+		return "", nil
 	}
-	// Driver name wasn't able to resolve for this volume. In this case, we just ignore the
-	// volume and move on to the other volumes that the pod has
-	return "", nil
+
+	driverName, err := driverFromSC(ctx, kubeClient, storageClassName)
+	if err != nil {
+		// There are two scenarios where a StorageClass may be defined but not found:
+		//  1. The StorageClass was manually deleted and the finalizer removed
+		//  2. The StorageClass never existed and was used to bind the PVC to an existing PV, but that PV was removed
+		// In either of these cases, we should ignore the PVC while computing limits and continue.
+		if errors.IsNotFound(err) {
+			logging.FromContext(ctx).With("storageclass", storageClassName).Errorf("failed updating volume limits for volume with unbound PVC, %w", err)
+			return "", nil
+		}
+		return "", err
+	}
+	return driverName, nil
 }
 
 // driverFromSC resolves the storage driver name by getting the Provisioner name from the StorageClass

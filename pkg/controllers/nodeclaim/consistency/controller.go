@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -31,12 +33,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/events"
-	corecontroller "github.com/aws/karpenter-core/pkg/operator/controller"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/events"
+	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
+	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
+
+var _ operatorcontroller.TypedController[*v1beta1.NodeClaim] = (*Controller)(nil)
 
 type Controller struct {
 	clock       clock.Clock
@@ -58,9 +62,9 @@ type Check interface {
 const scanPeriod = 10 * time.Minute
 
 func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Recorder,
-	provider cloudprovider.CloudProvider) *Controller {
+	provider cloudprovider.CloudProvider) operatorcontroller.Controller {
 
-	return &Controller{
+	return operatorcontroller.Typed[*v1beta1.NodeClaim](kubeClient, &Controller{
 		clock:       clk,
 		kubeClient:  kubeClient,
 		recorder:    recorder,
@@ -69,7 +73,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Re
 			NewTermination(kubeClient),
 			NewNodeShape(provider),
 		},
-	}
+	})
 }
 
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
@@ -107,28 +111,12 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	return reconcile.Result{RequeueAfter: scanPeriod}, nil
 }
 
-type NodeClaimController struct {
-	*Controller
-}
-
-func NewNodeClaimController(clk clock.Clock, kubeClient client.Client, recorder events.Recorder,
-	provider cloudprovider.CloudProvider) corecontroller.Controller {
-
-	return corecontroller.Typed[*v1beta1.NodeClaim](kubeClient, &NodeClaimController{
-		Controller: NewController(clk, kubeClient, recorder, provider),
-	})
-}
-
-func (c *NodeClaimController) Name() string {
+func (c *Controller) Name() string {
 	return "nodeclaim.consistency"
 }
 
-func (c *NodeClaimController) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	return c.Controller.Reconcile(ctx, nodeClaim)
-}
-
-func (c *NodeClaimController) Builder(_ context.Context, m manager.Manager) corecontroller.Builder {
-	return corecontroller.Adapt(controllerruntime.
+func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+	return operatorcontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1beta1.NodeClaim{}).
 		Watches(

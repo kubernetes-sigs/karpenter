@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -36,12 +38,10 @@ import (
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/scheduling"
-	nodeclaimutil "github.com/aws/karpenter-core/pkg/utils/nodeclaim"
-	podutils "github.com/aws/karpenter-core/pkg/utils/pod"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
+	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
 // Cluster maintains cluster state that is often needed but expensive to compute.
@@ -50,33 +50,33 @@ type Cluster struct {
 	cloudProvider cloudprovider.CloudProvider
 	clock         clock.Clock
 
-	mu                       sync.RWMutex
-	nodes                    map[string]*StateNode           // provider id -> cached node
-	bindings                 map[types.NamespacedName]string // pod namespaced named -> node name
-	nodeNameToProviderID     map[string]string               // node name -> provider id
-	nodeClaimKeyToProviderID map[nodeclaimutil.Key]string    // node claim key -> provider id
-	daemonSetPods            sync.Map                        // daemonSet -> existing pod
+	mu                        sync.RWMutex
+	nodes                     map[string]*StateNode           // provider id -> cached node
+	bindings                  map[types.NamespacedName]string // pod namespaced named -> node name
+	nodeNameToProviderID      map[string]string               // node name -> provider id
+	nodeClaimNameToProviderID map[string]string               // node claim name -> provider id
+	daemonSetPods             sync.Map                        // daemonSet -> existing pod
 
 	clusterStateMu sync.RWMutex // Separate mutex as this is called in some places that mu is held
 	// A monotonically increasing timestamp representing the time state of the
 	// cluster with respect to consolidation. This increases when something has
 	// changed about the cluster that might make consolidation possible. By recording
-	// the state, interested deprovisioners can check to see if this has changed to
-	// optimize and not try to deprovision if nothing about the cluster has changed.
+	// the state, interested disruption methods can check to see if this has changed to
+	// optimize and not try to disrupt if nothing about the cluster has changed.
 	clusterState     time.Time
 	antiAffinityPods sync.Map // pod namespaced name -> *v1.Pod of pods that have required anti affinities
 }
 
 func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudProvider) *Cluster {
 	return &Cluster{
-		clock:                    clk,
-		kubeClient:               client,
-		cloudProvider:            cp,
-		nodes:                    map[string]*StateNode{},
-		bindings:                 map[types.NamespacedName]string{},
-		daemonSetPods:            sync.Map{},
-		nodeNameToProviderID:     map[string]string{},
-		nodeClaimKeyToProviderID: map[nodeclaimutil.Key]string{},
+		clock:                     clk,
+		kubeClient:                client,
+		cloudProvider:             cp,
+		nodes:                     map[string]*StateNode{},
+		bindings:                  map[types.NamespacedName]string{},
+		daemonSetPods:             sync.Map{},
+		nodeNameToProviderID:      map[string]string{},
+		nodeClaimNameToProviderID: map[string]string{},
 	}
 }
 
@@ -99,18 +99,20 @@ func (c *Cluster) Synced(ctx context.Context) bool {
 	}
 	c.mu.RLock()
 	stateNodeClaimNames := sets.New[string]()
-	for k := range c.nodeClaimKeyToProviderID {
-		stateNodeClaimNames.Insert(k.Name)
+	for name, providerID := range c.nodeClaimNameToProviderID {
+		// Check to see if any node claim doesn't have a provider ID. If it doesn't, then the nodeclaim hasn't been
+		// launched, and we need to wait to see what the resolved values are before continuing.
+		if providerID == "" {
+			c.mu.RUnlock()
+			return false
+		}
+		stateNodeClaimNames.Insert(name)
 	}
 	stateNodeNames := sets.New(lo.Keys(c.nodeNameToProviderID)...)
 	c.mu.RUnlock()
 
 	nodeClaimNames := sets.New[string]()
 	for _, nodeClaim := range nodeClaimList.Items {
-		// If the nodeClaim hasn't resolved its provider id, then it hasn't resolved its status
-		if nodeClaim.Status.ProviderID == "" {
-			return false
-		}
 		nodeClaimNames.Insert(nodeClaim.Name)
 	}
 	nodeNames := sets.New[string]()
@@ -224,26 +226,30 @@ func (c *Cluster) UpdateNodeClaim(nodeClaim *v1beta1.NodeClaim) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if nodeClaim.Status.ProviderID == "" {
-		return // We can't reconcile machines that don't yet have provider ids
+	// If the nodeclaim has a providerID, create a StateNode for it, and populate the data.
+	// We only need to do this for a nodeclaim with a providerID as nodeclaims without provider IDs haven't
+	// been launched yet.
+	if nodeClaim.Status.ProviderID != "" {
+		n := c.newStateFromNodeClaim(nodeClaim, c.nodes[nodeClaim.Status.ProviderID])
+		c.nodes[nodeClaim.Status.ProviderID] = n
 	}
-	n := c.newStateFromNodeClaim(nodeClaim, c.nodes[nodeClaim.Status.ProviderID])
-	c.nodes[nodeClaim.Status.ProviderID] = n
-	c.nodeClaimKeyToProviderID[nodeclaimutil.Key{Name: nodeClaim.Name, IsMachine: nodeClaim.IsMachine}] = nodeClaim.Status.ProviderID
+	// If the nodeclaim hasn't launched yet, we want to add it into cluster state to ensure
+	// that we're not racing with the internal cache for the cluster, assuming the node doesn't exist.
+	c.nodeClaimNameToProviderID[nodeClaim.Name] = nodeClaim.Status.ProviderID
 }
 
-func (c *Cluster) DeleteNodeClaim(key nodeclaimutil.Key) {
+func (c *Cluster) DeleteNodeClaim(name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.cleanupNodeClaim(key)
+	c.cleanupNodeClaim(name)
 }
 
 func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	managed := node.Labels[v1alpha5.ProvisionerNameLabelKey] != "" || node.Labels[v1beta1.NodePoolLabelKey] != ""
+	managed := node.Labels[v1beta1.NodePoolLabelKey] != ""
 	initialized := node.Labels[v1beta1.NodeInitializedLabelKey] != ""
 	if node.Spec.ProviderID == "" {
 		// If we know that we own this node, we shouldn't allow the providerID to be empty
@@ -333,7 +339,7 @@ func (c *Cluster) Reset() {
 	defer c.mu.Unlock()
 	c.nodes = map[string]*StateNode{}
 	c.nodeNameToProviderID = map[string]string{}
-	c.nodeClaimKeyToProviderID = map[nodeclaimutil.Key]string{}
+	c.nodeClaimNameToProviderID = map[string]string{}
 	c.bindings = map[types.NamespacedName]string{}
 	c.antiAffinityPods = sync.Map{}
 	c.daemonSetPods = sync.Map{}
@@ -382,42 +388,40 @@ func (c *Cluster) newStateFromNodeClaim(nodeClaim *v1beta1.NodeClaim, oldNode *S
 		oldNode = NewNode()
 	}
 	n := &StateNode{
-		Node:                     oldNode.Node,
-		NodeClaim:                nodeClaim,
-		inflightInitialized:      oldNode.inflightInitialized,
-		inflightAllocatable:      oldNode.inflightAllocatable,
-		inflightCapacity:         oldNode.inflightCapacity,
-		startupTaintsInitialized: oldNode.startupTaintsInitialized,
-		startupTaints:            oldNode.startupTaints,
-		daemonSetRequests:        oldNode.daemonSetRequests,
-		daemonSetLimits:          oldNode.daemonSetLimits,
-		podRequests:              oldNode.podRequests,
-		podLimits:                oldNode.podLimits,
-		hostPortUsage:            oldNode.hostPortUsage,
-		volumeUsage:              oldNode.volumeUsage,
-		markedForDeletion:        oldNode.markedForDeletion,
-		nominatedUntil:           oldNode.nominatedUntil,
+		Node:              oldNode.Node,
+		NodeClaim:         nodeClaim,
+		daemonSetRequests: oldNode.daemonSetRequests,
+		daemonSetLimits:   oldNode.daemonSetLimits,
+		podRequests:       oldNode.podRequests,
+		podLimits:         oldNode.podLimits,
+		hostPortUsage:     oldNode.hostPortUsage,
+		volumeUsage:       oldNode.volumeUsage,
+		markedForDeletion: oldNode.markedForDeletion,
+		nominatedUntil:    oldNode.nominatedUntil,
 	}
 	// Cleanup the old nodeClaim with its old providerID if its providerID changes
 	// This can happen since nodes don't get created with providerIDs. Rather, CCM picks up the
 	// created node and injects the providerID into the spec.providerID
-	if id, ok := c.nodeClaimKeyToProviderID[nodeclaimutil.Key{Name: nodeClaim.Name, IsMachine: nodeClaim.IsMachine}]; ok && id != nodeClaim.Status.ProviderID {
-		c.cleanupNodeClaim(nodeclaimutil.Key{Name: nodeClaim.Name, IsMachine: nodeClaim.IsMachine})
+	if id, ok := c.nodeClaimNameToProviderID[nodeClaim.Name]; ok && id != nodeClaim.Status.ProviderID {
+		c.cleanupNodeClaim(nodeClaim.Name)
 	}
 	c.triggerConsolidationOnChange(oldNode, n)
 	return n
 }
 
-func (c *Cluster) cleanupNodeClaim(key nodeclaimutil.Key) {
-	if id := c.nodeClaimKeyToProviderID[key]; id != "" {
+func (c *Cluster) cleanupNodeClaim(name string) {
+	if id := c.nodeClaimNameToProviderID[name]; id != "" {
 		if c.nodes[id].Node == nil {
 			delete(c.nodes, id)
 		} else {
 			c.nodes[id].NodeClaim = nil
 		}
-		delete(c.nodeClaimKeyToProviderID, key)
 		c.MarkUnconsolidated()
 	}
+	// Delete the node claim from the nodeClaimNameToProviderID in the case that the provider ID hasn't resolved
+	// yet. This ensures that if a nodeClaim is created and then deleted before it was able to launch that
+	// this is cleaned up.
+	delete(c.nodeClaimNameToProviderID, name)
 }
 
 func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *StateNode) (*StateNode, error) {
@@ -425,25 +429,18 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *
 		oldNode = NewNode()
 	}
 	n := &StateNode{
-		Node:                     node,
-		NodeClaim:                oldNode.NodeClaim,
-		inflightInitialized:      oldNode.inflightInitialized,
-		inflightAllocatable:      oldNode.inflightAllocatable,
-		inflightCapacity:         oldNode.inflightCapacity,
-		startupTaintsInitialized: oldNode.startupTaintsInitialized,
-		startupTaints:            oldNode.startupTaints,
-		daemonSetRequests:        map[types.NamespacedName]v1.ResourceList{},
-		daemonSetLimits:          map[types.NamespacedName]v1.ResourceList{},
-		podRequests:              map[types.NamespacedName]v1.ResourceList{},
-		podLimits:                map[types.NamespacedName]v1.ResourceList{},
-		hostPortUsage:            scheduling.NewHostPortUsage(),
-		volumeUsage:              scheduling.NewVolumeUsage(),
-		markedForDeletion:        oldNode.markedForDeletion,
-		nominatedUntil:           oldNode.nominatedUntil,
+		Node:              node,
+		NodeClaim:         oldNode.NodeClaim,
+		daemonSetRequests: map[types.NamespacedName]v1.ResourceList{},
+		daemonSetLimits:   map[types.NamespacedName]v1.ResourceList{},
+		podRequests:       map[types.NamespacedName]v1.ResourceList{},
+		podLimits:         map[types.NamespacedName]v1.ResourceList{},
+		hostPortUsage:     scheduling.NewHostPortUsage(),
+		volumeUsage:       scheduling.NewVolumeUsage(),
+		markedForDeletion: oldNode.markedForDeletion,
+		nominatedUntil:    oldNode.nominatedUntil,
 	}
 	if err := multierr.Combine(
-		c.populateStartupTaints(ctx, n),
-		c.populateInflight(ctx, n),
 		c.populateResourceRequests(ctx, n),
 		c.populateVolumeLimits(ctx, n),
 	); err != nil {
@@ -469,59 +466,6 @@ func (c *Cluster) cleanupNode(name string) {
 		delete(c.nodeNameToProviderID, name)
 		c.MarkUnconsolidated()
 	}
-}
-
-func (c *Cluster) populateStartupTaints(ctx context.Context, n *StateNode) error {
-	// We only need to populate the startup taints once
-	if n.startupTaintsInitialized {
-		return nil
-	}
-
-	if nodeclaimutil.OwnerKey(n).Name == "" {
-		return nil
-	}
-	owner, err := nodeclaimutil.Owner(ctx, c.kubeClient, n)
-	if err != nil {
-		return client.IgnoreNotFound(err)
-	}
-	n.startupTaintsInitialized = true
-	n.startupTaints = owner.Spec.Template.Spec.StartupTaints
-	return nil
-}
-
-func (c *Cluster) populateInflight(ctx context.Context, n *StateNode) error {
-	// We only need to set inflight details once. This prevents us from logging spurious errors when the cloud provider
-	// instance types change.
-	if n.inflightInitialized {
-		return nil
-	}
-	// If the node is already initialized, we don't need to populate its inflight capacity
-	// since its capacity is already represented by the node status
-	if n.Initialized() {
-		return nil
-	}
-
-	if nodeclaimutil.OwnerKey(n).Name == "" {
-		return nil
-	}
-	owner, err := nodeclaimutil.Owner(ctx, c.kubeClient, n)
-	if err != nil {
-		return client.IgnoreNotFound(err)
-	}
-	instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, owner)
-	if err != nil {
-		return err
-	}
-	instanceType, ok := lo.Find(instanceTypes, func(it *cloudprovider.InstanceType) bool {
-		return it.Name == n.Labels()[v1.LabelInstanceTypeStable]
-	})
-	if !ok {
-		return fmt.Errorf("instance type '%s' not found", n.Labels()[v1.LabelInstanceTypeStable])
-	}
-	n.inflightInitialized = true
-	n.inflightCapacity = instanceType.Capacity
-	n.inflightAllocatable = instanceType.Allocatable()
-	return nil
 }
 
 func (c *Cluster) populateVolumeLimits(ctx context.Context, n *StateNode) error {

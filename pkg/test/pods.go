@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -51,6 +53,8 @@ type PodOptions struct {
 	Phase                         v1.PodPhase
 	RestartPolicy                 v1.RestartPolicy
 	TerminationGracePeriodSeconds *int64
+	ReadinessProbe                *v1.Probe
+	LivenessProbe                 *v1.Probe
 }
 
 type PDBOptions struct {
@@ -94,7 +98,7 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 							AccessModes: []v1.PersistentVolumeAccessMode{
 								v1.ReadWriteOnce,
 							},
-							Resources: v1.ResourceRequirements{
+							Resources: v1.VolumeResourceRequirements{
 								Requests: v1.ResourceList{
 									v1.ResourceStorage: resource.MustParse("1Gi"),
 								},
@@ -125,6 +129,8 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 						ContainerPort: int32(80),
 					}
 				}),
+				ReadinessProbe: options.ReadinessProbe,
+				LivenessProbe:  options.LivenessProbe,
 			}},
 			NodeName:                      options.NodeName,
 			Volumes:                       volumes,

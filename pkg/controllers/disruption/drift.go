@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -20,18 +22,15 @@ import (
 	"fmt"
 	"sort"
 
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/samber/lo"
-
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	disruptionevents "github.com/aws/karpenter-core/pkg/controllers/disruption/events"
-	"github.com/aws/karpenter-core/pkg/controllers/provisioning"
-	"github.com/aws/karpenter-core/pkg/controllers/state"
-	"github.com/aws/karpenter-core/pkg/events"
-	"github.com/aws/karpenter-core/pkg/metrics"
-	"github.com/aws/karpenter-core/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
 // Drift is a subreconciler that deletes drifted candidates.
@@ -71,27 +70,47 @@ func (d *Drift) filterAndSortCandidates(ctx context.Context, candidates []*Candi
 }
 
 // ComputeCommand generates a disruption command given candidates
-func (d *Drift) ComputeCommand(ctx context.Context, candidates ...*Candidate) (Command, error) {
+//
+//nolint:gocyclo
+func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
 	candidates, err := d.filterAndSortCandidates(ctx, candidates)
 	if err != nil {
 		return Command{}, err
 	}
-	deprovisioningEligibleMachinesGauge.WithLabelValues(d.Type()).Set(float64(len(candidates)))
 	disruptionEligibleNodesGauge.With(map[string]string{
 		methodLabel:            d.Type(),
 		consolidationTypeLabel: d.ConsolidationType(),
 	}).Set(float64(len(candidates)))
 
+	// Do a quick check through the candidates to see if they're empty.
+	// For each candidate that is empty with a nodePool allowing its disruption
+	// add it to the existing command.
+	empty := make([]*Candidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if len(candidate.pods) > 0 {
+			continue
+		}
+		// If there's disruptions allowed for the candidate's nodepool,
+		// add it to the list of candidates, and decrement the budget.
+		if disruptionBudgetMapping[candidate.nodePool.Name] > 0 {
+			empty = append(empty, candidate)
+			disruptionBudgetMapping[candidate.nodePool.Name]--
+		}
+	}
 	// Disrupt all empty drifted candidates, as they require no scheduling simulations.
-	if empty := lo.Filter(candidates, func(c *Candidate, _ int) bool {
-		return len(c.pods) == 0
-	}); len(empty) > 0 {
+	if len(empty) > 0 {
 		return Command{
 			candidates: empty,
 		}, nil
 	}
 
 	for _, candidate := range candidates {
+		// If the disruption budget doesn't allow this candidate to be disrupted,
+		// continue to the next candidate. We don't need to decrement any budget
+		// counter since drift commands can only have one candidate.
+		if disruptionBudgetMapping[candidate.nodePool.Name] == 0 {
+			continue
+		}
 		// Check if we need to create any NodeClaims.
 		results, err := simulateScheduling(ctx, d.kubeClient, d.cluster, d.provisioner, candidate)
 		if err != nil {
@@ -101,9 +120,8 @@ func (d *Drift) ComputeCommand(ctx context.Context, candidates ...*Candidate) (C
 			}
 			return Command{}, err
 		}
-		// Log when all pods can't schedule, as the command will get executed immediately.
+		// Emit an event that we couldn't reschedule the pods on the node.
 		if !results.AllNonPendingPodsScheduled() {
-			logging.FromContext(ctx).With(lo.Ternary(candidate.NodeClaim.IsMachine, "machine", "nodeclaim"), candidate.NodeClaim.Name, "node", candidate.Node.Name).Debugf("cannot terminate since scheduling simulation failed to schedule all pods %s", results.NonPendingPodSchedulingErrors())
 			d.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
 			continue
 		}

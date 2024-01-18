@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -31,10 +33,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/utils/env"
-	"github.com/aws/karpenter-core/pkg/utils/functional"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/utils/env"
+	"sigs.k8s.io/karpenter/pkg/utils/functional"
 )
 
 type Environment struct {
@@ -68,14 +69,6 @@ func WithFieldIndexers(fieldIndexers ...func(cache.Cache) error) functional.Opti
 	}
 }
 
-func MachineFieldIndexer(ctx context.Context) func(cache.Cache) error {
-	return func(c cache.Cache) error {
-		return c.IndexField(ctx, &v1alpha5.Machine{}, "status.providerID", func(obj client.Object) []string {
-			return []string{obj.(*v1alpha5.Machine).Status.ProviderID}
-		})
-	}
-}
-
 func NodeClaimFieldIndexer(ctx context.Context) func(cache.Cache) error {
 	return func(c cache.Cache) error {
 		return c.IndexField(ctx, &v1beta1.NodeClaim{}, "status.providerID", func(obj client.Object) []string {
@@ -89,7 +82,7 @@ func NewEnvironment(scheme *runtime.Scheme, options ...functional.Option[Environ
 	ctx, cancel := context.WithCancel(context.Background())
 
 	os.Setenv(system.NamespaceEnvKey, "default")
-	version := version.MustParseSemantic(strings.Replace(env.WithDefaultString("K8S_VERSION", "1.24.x"), ".x", ".0", -1))
+	version := version.MustParseSemantic(strings.Replace(env.WithDefaultString("K8S_VERSION", "1.28.x"), ".x", ".0", -1))
 	environment := envtest.Environment{Scheme: scheme, CRDs: opts.crds}
 	if version.Minor() >= 21 {
 		// PodAffinityNamespaceSelector is used for label selectors in pod affinities.  If the feature-gate is turned off,

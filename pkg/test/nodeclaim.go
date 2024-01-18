@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -20,7 +22,7 @@ import (
 	"github.com/imdario/mergo"
 	v1 "k8s.io/api/core/v1"
 
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 )
 
 // NodeClaim creates a test NodeClaim with defaults that can be overridden by overrides.
@@ -58,7 +60,7 @@ func NodeClaimAndNode(overrides ...v1beta1.NodeClaim) (*v1beta1.NodeClaim, *v1.N
 	return nc, NodeClaimLinkedNode(nc)
 }
 
-// NodeClaimsAndNodes creates homogeneous groups of NodeClaims and Nodes based on the passed in options, evenly divided by the total machines requested
+// NodeClaimsAndNodes creates homogeneous groups of NodeClaims and Nodes based on the passed in options, evenly divided by the total nodeclaims requested
 func NodeClaimsAndNodes(total int, options ...v1beta1.NodeClaim) ([]*v1beta1.NodeClaim, []*v1.Node) {
 	nodeClaims := make([]*v1beta1.NodeClaim, total)
 	nodes := make([]*v1.Node, total)

@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -31,27 +33,27 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/aws/karpenter-core/pkg/apis"
-	"github.com/aws/karpenter-core/pkg/apis/v1alpha5"
-	"github.com/aws/karpenter-core/pkg/apis/v1beta1"
-	"github.com/aws/karpenter-core/pkg/cloudprovider"
-	"github.com/aws/karpenter-core/pkg/cloudprovider/fake"
-	nodeclaimlifecycle "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/lifecycle"
-	nodeclaimtermination "github.com/aws/karpenter-core/pkg/controllers/nodeclaim/termination"
-	"github.com/aws/karpenter-core/pkg/events"
-	"github.com/aws/karpenter-core/pkg/operator/controller"
-	"github.com/aws/karpenter-core/pkg/operator/options"
-	"github.com/aws/karpenter-core/pkg/operator/scheme"
-	. "github.com/aws/karpenter-core/pkg/test/expectations"
+	nodeclaimtermination "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/termination"
 
-	"github.com/aws/karpenter-core/pkg/test"
+	"sigs.k8s.io/karpenter/pkg/apis"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
+	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/operator/scheme"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+
+	"sigs.k8s.io/karpenter/pkg/test"
 )
 
 var ctx context.Context
 var env *test.Environment
 var fakeClock *clock.FakeClock
 var cloudProvider *fake.CloudProvider
-var nodeClaimController controller.Controller
+var nodeClaimLifecycleController controller.Controller
 var nodeClaimTerminationController controller.Controller
 
 func TestAPIs(t *testing.T) {
@@ -69,8 +71,8 @@ var _ = BeforeSuite(func() {
 	}))
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
-	nodeClaimController = nodeclaimlifecycle.NewNodeClaimController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
-	nodeClaimTerminationController = nodeclaimtermination.NewNodeClaimController(env.Client, cloudProvider)
+	nodeClaimLifecycleController = nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
+	nodeClaimTerminationController = nodeclaimtermination.NewController(env.Client, cloudProvider)
 })
 
 var _ = AfterSuite(func() {
@@ -92,10 +94,10 @@ var _ = Describe("Termination", func() {
 		nodeClaim = test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1alpha5.ProvisionerNameLabelKey: nodePool.Name,
+					v1beta1.NodePoolLabelKey: nodePool.Name,
 				},
 				Finalizers: []string{
-					v1alpha5.TerminationFinalizer,
+					v1beta1.TerminationFinalizer,
 				},
 			},
 			Spec: v1beta1.NodeClaimSpec{
@@ -112,7 +114,7 @@ var _ = Describe("Termination", func() {
 	})
 	It("should delete the node and the CloudProvider NodeClaim when NodeClaim deletion is triggered", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, nodeClaimLifecycleController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
@@ -136,7 +138,7 @@ var _ = Describe("Termination", func() {
 	})
 	It("should delete multiple Nodes if multiple Nodes map to the NodeClaim", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, nodeClaimLifecycleController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
@@ -160,25 +162,9 @@ var _ = Describe("Termination", func() {
 		_, err = cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
 		Expect(cloudprovider.IsNodeClaimNotFoundError(err)).To(BeTrue())
 	})
-	It("should delete the Instance if the NodeClaim is linked but doesn't have its providerID resolved yet", func() {
-		node := test.NodeClaimLinkedNode(nodeClaim)
-
-		nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1alpha5.MachineLinkedAnnotationKey: nodeClaim.Status.ProviderID})
-		nodeClaim.Status.ProviderID = ""
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-
-		// Expect the nodeClaim to be gone
-		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectReconcileSucceeded(ctx, nodeClaimTerminationController, client.ObjectKeyFromObject(nodeClaim)) // triggers the nodeClaim deletion
-		ExpectNotFound(ctx, env.Client, nodeClaim)
-
-		// Expect the nodeClaim to be gone from the cloudprovider
-		_, err := cloudProvider.Get(ctx, nodeClaim.Annotations[v1alpha5.MachineLinkedAnnotationKey])
-		Expect(cloudprovider.IsNodeClaimNotFoundError(err)).To(BeTrue())
-	})
 	It("should not delete the NodeClaim until all the Nodes are removed", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, nodeClaimLifecycleController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)

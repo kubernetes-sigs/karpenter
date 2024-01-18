@@ -1,4 +1,6 @@
 /*
+Copyright The Kubernetes Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -24,10 +26,9 @@ const (
 	// Common namespace for application metrics.
 	Namespace = "karpenter"
 
-	ProvisionerLabel = "provisioner"
-	NodePoolLabel    = "nodepool"
-	ReasonLabel      = "reason"
-	TypeLabel        = "type"
+	NodePoolLabel = "nodepool"
+	ReasonLabel   = "reason"
+	TypeLabel     = "type"
 
 	// Reasons for CREATE/DELETE shared metrics
 	ConsolidationReason = "consolidation"
