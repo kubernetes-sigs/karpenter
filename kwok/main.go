@@ -37,7 +37,7 @@ func init() {
 func main() {
 	ctx, op := operator.NewOperator()
 
-	cloudProvider := kwok.NewCloudProvider(ctx, op.KubernetesInterface, kwok.ConstructInstanceTypes())
+	cloudProvider := kwok.NewCloudProvider(ctx, op.GetClient(), kwok.ConstructInstanceTypes())
 	op.
 		WithControllers(ctx, controllers.NewControllers(
 			op.Clock,

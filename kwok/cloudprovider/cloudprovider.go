@@ -27,16 +27,24 @@ import (
 	"github.com/docker/docker/pkg/namesgenerator"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
-	kubeErrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
-func NewCloudProvider(ctx context.Context, client kubernetes.Interface, instanceTypes []*cloudprovider.InstanceType) *CloudProvider {
+const (
+	kwokLabelKey          = "kwok.x-k8s.io/node"
+	kwokLabelValue        = "fake"
+	nodeViewerLabelKey    = "eks-node-viewer/instance-price"
+	kwokPartitionLabelKey = "kwok-partition"
+)
+
+func NewCloudProvider(ctx context.Context, client client.Client, instanceTypes []*cloudprovider.InstanceType) *CloudProvider {
 	return &CloudProvider{
 		kubeClient:    client,
 		instanceTypes: instanceTypes,
@@ -44,7 +52,7 @@ func NewCloudProvider(ctx context.Context, client kubernetes.Interface, instance
 }
 
 type CloudProvider struct {
-	kubeClient    kubernetes.Interface
+	kubeClient    client.Client
 	instanceTypes []*cloudprovider.InstanceType
 }
 
@@ -54,8 +62,7 @@ func (c CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 	if err != nil {
 		return nil, fmt.Errorf("translating nodeclaim to node, %w", err)
 	}
-	_, err = c.kubeClient.CoreV1().Nodes().Create(ctx, node, metav1.CreateOptions{})
-	if err != nil {
+	if err := c.kubeClient.Create(ctx, node); err != nil {
 		return nil, fmt.Errorf("creating node, %w", err)
 	}
 	// convert the node back into a node claim to get the chosen resolved requirement values.
@@ -63,10 +70,9 @@ func (c CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 }
 
 func (c CloudProvider) Delete(ctx context.Context, nodeClaim *v1beta1.NodeClaim) error {
-	err := c.kubeClient.CoreV1().Nodes().Delete(ctx, nodeClaim.Name, metav1.DeleteOptions{})
-	if err != nil {
-		if kubeErrors.IsNotFound(err) {
-			return nil
+	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
+		if errors.IsNotFound(err) {
+			return fmt.Errorf("deleting node, %w", cloudprovider.NewNodeClaimNotFoundError(err))
 		}
 		return fmt.Errorf("deleting node, %w", err)
 	}
@@ -75,26 +81,26 @@ func (c CloudProvider) Delete(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 
 func (c CloudProvider) Get(ctx context.Context, providerID string) (*v1beta1.NodeClaim, error) {
 	nodeName := strings.Replace(providerID, kwokProviderPrefix, "", -1)
-	node, err := c.kubeClient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
-	if err != nil {
+	node := &v1.Node{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
 		return nil, fmt.Errorf("finding node, %w", err)
 	}
 	return c.toNodeClaim(node)
 }
 
 func (c CloudProvider) List(ctx context.Context) ([]*v1beta1.NodeClaim, error) {
-	nodes, err := c.kubeClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-	if err != nil {
+	nodeList := &v1.NodeList{}
+	if err := c.kubeClient.List(ctx, nodeList); err != nil {
 		return nil, fmt.Errorf("listing nodes, %w", err)
 	}
 	var nodeClaims []*v1beta1.NodeClaim
-	for i, node := range nodes.Items {
+	for i, node := range nodeList.Items {
 		if !strings.HasPrefix(node.Spec.ProviderID, kwokProviderPrefix) {
 			continue
 		}
-		nc, err := c.toNodeClaim(&nodes.Items[i])
+		nc, err := c.toNodeClaim(&nodeList.Items[i])
 		if err != nil {
-			return nil, fmt.Errorf("converting machine, %w", err)
+			return nil, fmt.Errorf("converting nodeclaim, %w", err)
 		}
 		nodeClaims = append(nodeClaims, nc)
 	}
@@ -113,7 +119,7 @@ func (c CloudProvider) IsDrifted(ctx context.Context, nodeClaim *v1beta1.NodeCla
 }
 
 func (c CloudProvider) Name() string {
-	return "kwok-provider"
+	return "kwok"
 }
 
 func (c CloudProvider) getInstanceType(instanceTypeName string) (*cloudprovider.InstanceType, error) {
@@ -189,12 +195,12 @@ func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
 
 func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.InstanceType, nodeClaim *v1beta1.NodeClaim, capacityType, price string) map[string]string {
 	ret := make(map[string]string, len(labels))
-	// start with labels on the machine
+	// start with labels on the nodeclaim
 	for k, v := range labels {
 		ret[k] = v
 	}
 
-	// add the derived machine requirement labels
+	// add the derived nodeclaim requirement labels
 	for _, r := range nodeClaim.Spec.Requirements {
 		if len(r.Values) == 1 && r.Operator == v1.NodeSelectorOpIn {
 			ret[r.Key] = r.Values[0]
@@ -209,10 +215,10 @@ func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.Ins
 		}
 	}
 	// add in github.com/awslabs/eks-node-viewer label so that it shows up.
-	ret["eks-node-viewer/instance-price"] = price
+	ret[nodeViewerLabelKey] = price
 	// Kwok has some scalability limitations.
 	// Randomly add each new node to one of the pre-created kwokPartitions.
-	ret["kwok-partition"] = randomPartition(10)
+	ret[kwokPartitionLabelKey] = randomPartition(10)
 	ret[v1beta1.CapacityTypeLabelKey] = capacityType
 	// no zone set by requirements, so just pick one
 	if _, ok := ret[v1.LabelTopologyZone]; !ok {
@@ -220,7 +226,7 @@ func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.Ins
 	}
 	ret[v1.LabelHostname] = nodeClaim.Name
 
-	ret["kwok.x-k8s.io/node"] = "fake"
+	ret[kwokLabelKey] = kwokLabelValue
 	return ret
 }
 
@@ -242,7 +248,7 @@ func addKwokAnnotation(annotations map[string]string) map[string]string {
 	for k, v := range annotations {
 		ret[k] = v
 	}
-	ret["kwok.x-k8s.io/node"] = "fake"
+	ret[kwokLabelKey] = kwokLabelValue
 	return ret
 }
 

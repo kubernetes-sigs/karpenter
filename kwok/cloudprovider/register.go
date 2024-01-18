@@ -17,8 +17,7 @@ limitations under the License.
 package kwok
 
 const (
-	Group              = "karpenter.kwok.sh"
-	CompatabilityGroup = "compatibility." + Group
+	Group = "karpenter.kwok.sh"
 )
 
 const (
@@ -26,20 +25,4 @@ const (
 	InstanceFamilyLabelKey = Group + "/instance-family"
 	InstanceMemoryLabelKey = Group + "/instance-memory"
 	InstanceCPULabelKey    = Group + "/instance-cpu"
-	// ResourceGPUVendorA      v1.ResourceName = "fake.com/vendor-a"
-	// ResourceGPUVendorB      v1.ResourceName = "fake.com/vendor-b"
 )
-
-// var (
-// 	SchemeGroupVersion = schema.GroupVersion{Group: Group, Version: "v1beta1"}
-// 	SchemeBuilder      = runtime.NewSchemeBuilder(func(scheme *runtime.Scheme) error {
-// 		scheme.AddKnownTypes(SchemeGroupVersion,
-// 			&NodePool{},
-// 			&NodePoolList{},
-// 			&NodeClaim{},
-// 			&NodeClaimList{},
-// 		)
-// 		metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
-// 		return nil
-// 	})
-// )

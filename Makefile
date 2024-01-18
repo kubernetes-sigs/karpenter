@@ -39,6 +39,9 @@ apply: verify apply-crds build ## Deploy the kwok controller from the current st
 		--set-string controller.env[0].name=ENABLE_PROFILING \
 		--set-string controller.env[0].value=true
 
+delete: ## Delete the controller from your ~/.kube/config cluster
+	helm uninstall karpenter --namespace ${KARPENTER_NAMESPACE}
+	
 test: ## Run tests
 	go test ./... \
 		-race \
