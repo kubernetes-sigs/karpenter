@@ -33,6 +33,7 @@ import (
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllertest"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -111,6 +112,22 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 ) *Queue {
 	queue := &Queue{
 		RateLimitingInterface: workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(queueBaseDelay, queueMaxDelay)),
+		providerIDToCommand:   map[string]*Command{},
+		kubeClient:            kubeClient,
+		recorder:              recorder,
+		cluster:               cluster,
+		clock:                 clock,
+		provisioner:           provisioner,
+	}
+	return queue
+}
+
+// NewTestingQueue uses a test RateLimitingInterface that will immediately re-queue items.
+func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clock.Clock,
+	provisioner *provisioning.Provisioner,
+) *Queue {
+	queue := &Queue{
+		RateLimitingInterface: &controllertest.Queue{Interface: workqueue.New()},
 		providerIDToCommand:   map[string]*Command{},
 		kubeClient:            kubeClient,
 		recorder:              recorder,
@@ -320,5 +337,6 @@ func (q *Queue) Reset() {
 func (q *Queue) IsEmpty() bool {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
+	q.RateLimitingInterface = &controllertest.Queue{Interface: workqueue.New()}
 	return len(q.providerIDToCommand) == 0
 }
