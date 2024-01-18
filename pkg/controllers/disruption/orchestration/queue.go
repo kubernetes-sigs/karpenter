@@ -331,12 +331,12 @@ func (q *Queue) Remove(cmd *Command) {
 func (q *Queue) Reset() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	q.RateLimitingInterface = &controllertest.Queue{Interface: workqueue.New()}
 	q.providerIDToCommand = map[string]*Command{}
 }
 
 func (q *Queue) IsEmpty() bool {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
-	q.RateLimitingInterface = &controllertest.Queue{Interface: workqueue.New()}
 	return len(q.providerIDToCommand) == 0
 }
