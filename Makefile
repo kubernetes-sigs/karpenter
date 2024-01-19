@@ -29,8 +29,7 @@ build: ## Build the Karpenter KWOK controller images using ko build
 # Webhooks are currently not supported in the kwok provider.
 apply: verify build ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
 	hack/validation/kwok-requirements.sh
-	kubectl apply -f pkg/apis/crds/karpenter.sh_nodeclaims.yaml
-	kubectl apply -f pkg/apis/crds/karpenter.sh_nodepools.yaml
+	kubectl apply -f pkg/apis/crds
 	helm upgrade --install karpenter kwok/charts --namespace kube-system --skip-crds \
 		$(HELM_OPTS) \
 		--set controller.image.repository=$(IMG_REPOSITORY) \
