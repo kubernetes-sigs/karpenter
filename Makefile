@@ -23,14 +23,14 @@ build: ## Build the Karpenter KWOK controller images using ko build
 	$(eval IMG_REPOSITORY=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 1 | cut -d ":" -f 1))
 	$(eval IMG_TAG=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 1 | cut -d ":" -f 2 -s))
 	$(eval IMG_DIGEST=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 2))
-
-apply-crds:
-	kubectl apply -f pkg/apis/crds/karpenter.sh_nodeclaims.yaml
-	kubectl apply -f pkg/apis/crds/karpenter.sh_nodepools.yaml
+	
 
 # Run make install-kwok to install the kwok controller in your cluster first
 # Webhooks are currently not supported in the kwok provider.
-apply: verify apply-crds build ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
+apply: verify build ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
+	hack/validation/kwok-requirements.sh
+	kubectl apply -f pkg/apis/crds/karpenter.sh_nodeclaims.yaml
+	kubectl apply -f pkg/apis/crds/karpenter.sh_nodepools.yaml
 	helm upgrade --install karpenter kwok/charts --namespace kube-system --skip-crds \
 		$(HELM_OPTS) \
 		--set controller.image.repository=$(IMG_REPOSITORY) \

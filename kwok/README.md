@@ -4,6 +4,7 @@ Before using the kwok provider, make sure that you don't have an installed versi
 
 ## Requirements
 - Have an image repository that you can build, push, and pull images from.
+  - For an example on how to set up an image repository refer to [karpenter.sh](https://karpenter.sh/docs/contributing/development-guide/#environment-specific-setup)
 - Have a cluster that you can install Karpenter on to.
   - For an example on how to make a cluster in AWS, refer to [karpenter.sh](https://karpenter.sh/docs/getting-started/getting-started-with-karpenter/)
 

@@ -37,16 +37,9 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
-const (
-	kwokLabelKey          = "kwok.x-k8s.io/node"
-	kwokLabelValue        = "fake"
-	nodeViewerLabelKey    = "eks-node-viewer/instance-price"
-	kwokPartitionLabelKey = "kwok-partition"
-)
-
-func NewCloudProvider(ctx context.Context, client client.Client, instanceTypes []*cloudprovider.InstanceType) *CloudProvider {
+func NewCloudProvider(ctx context.Context, kubeClient client.Client, instanceTypes []*cloudprovider.InstanceType) *CloudProvider {
 	return &CloudProvider{
-		kubeClient:    client,
+		kubeClient:    kubeClient,
 		instanceTypes: instanceTypes,
 	}
 }
@@ -83,6 +76,9 @@ func (c CloudProvider) Get(ctx context.Context, providerID string) (*v1beta1.Nod
 	nodeName := strings.Replace(providerID, kwokProviderPrefix, "", -1)
 	node := &v1.Node{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
+		if errors.IsNotFound(err) {
+			return nil, fmt.Errorf("finding node, %w", cloudprovider.NewNodeClaimNotFoundError(err))
+		}
 		return nil, fmt.Errorf("finding node, %w", err)
 	}
 	return c.toNodeClaim(node)
