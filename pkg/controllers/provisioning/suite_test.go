@@ -560,12 +560,10 @@ var _ = Describe("Provisioning", func() {
 		It("should schedule based on the max resource requests of containers and initContainers with sidecar containers when initcontainer comes first", func() {
 			ExpectApplied(ctx, env.Client, test.NodePool())
 			pod := test.UnschedulablePod(test.PodOptions{
-
 				ResourceRequirements: v1.ResourceRequirements{
 					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("1Gi")},
 					Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("5")},
 				},
-
 				InitContainers: []v1.Container{
 					{
 						Resources: v1.ResourceRequirements{
@@ -588,16 +586,13 @@ var _ = Describe("Provisioning", func() {
 			Expect(node.Status.Capacity.Cpu().Value()).To(BeNumerically(">", 10))
 			Expect(node.Status.Capacity.Memory().Value()).To(BeNumerically(">", 4))
 		})
-
 		It("should schedule based on the max resource requests of containers and initContainers with sidecar containers when sidecar container comes first", func() {
 			ExpectApplied(ctx, env.Client, test.NodePool())
 			pod := test.UnschedulablePod(test.PodOptions{
-
 				ResourceRequirements: v1.ResourceRequirements{
 					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("1Gi")},
 					Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("5")},
 				},
-
 				InitContainers: []v1.Container{
 					{
 						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),

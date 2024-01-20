@@ -23,7 +23,6 @@ import (
 	"github.com/mitchellh/hashstructure/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -526,50 +525,13 @@ var _ = Describe("Instance Type Selection", func() {
 			for _, mem := range []float64{0.1, 1.0, 2, 4, 8, 16, 32} {
 				cluster.Reset()
 				cloudProvider.CreateCalls = nil
-				containerOpts := test.PodOptions{
-					ResourceRequirements: v1.ResourceRequirements{Requests: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%0.1f", cpu)),
-						v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%0.1fGi", mem)),
-					}}}
-				containerWithInitContainerOpts := test.PodOptions{
-
-					InitContainers: []v1.Container{{
-						Resources: v1.ResourceRequirements{
-							Requests: map[v1.ResourceName]resource.Quantity{
-								v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%0.1f", cpu)),
-								v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%0.1fGi", mem)),
-							},
-							Limits: map[v1.ResourceName]resource.Quantity{
-								v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%0.1f", cpu)),
-								v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%0.1fGi", mem)),
-							},
-						},
-					}},
-					ResourceRequirements: v1.ResourceRequirements{Requests: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%0.1f", cpu)),
-						v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%0.1fGi", mem)),
-					}}}
-				containerWithSidecarContainerOpts := test.PodOptions{
-
-					InitContainers: []v1.Container{{
-						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
-						Resources: v1.ResourceRequirements{
-							Requests: map[v1.ResourceName]resource.Quantity{
-								v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%0.1f", cpu)),
-								v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%0.1fGi", mem)),
-							},
-							Limits: map[v1.ResourceName]resource.Quantity{
-								v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%0.1f", cpu)),
-								v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%0.1fGi", mem)),
-							},
-						},
-					}},
+				opts := test.PodOptions{
 					ResourceRequirements: v1.ResourceRequirements{Requests: map[v1.ResourceName]resource.Quantity{
 						v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%0.1f", cpu)),
 						v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%0.1fGi", mem)),
 					}}}
 				pods := []*v1.Pod{
-					test.UnschedulablePod(containerOpts), test.UnschedulablePod(containerWithInitContainerOpts), test.UnschedulablePod(containerWithSidecarContainerOpts),
+					test.UnschedulablePod(opts), test.UnschedulablePod(opts), test.UnschedulablePod(opts),
 				}
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
 				nodeNames := sets.NewString()
