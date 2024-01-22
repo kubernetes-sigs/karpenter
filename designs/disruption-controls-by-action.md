@@ -1,11 +1,47 @@
 # Disruption Controls By Action 
 ## User Scenarios 
-1. I as a user would like to ensure upgrades only occur during business hours or stricter windows. I would also like to not restrict the cost savings of consolidation when blocking upgrade via drift.
-2. As a HFT firm, I have specific hours where I need all my compute and I can't tolerate scale down requests for consolidation, but outside of operational hours its fine to scale down. 
-## Desired Behavior + Requirements 
-1. User needs to be able to define an action and a budget/budgets for that action. 
-2. Actions that should be supported should by any disruption actions effected by the current Budgets implementation. (Consolidation, Emptiness, Expiration, Drift) 
-3. Budgets should still support the option to set a given behavior for all disruption actions. If action is unspecified we want to just assume its mean't to apply to all actions. 
+1. Users need the capability to schedule upgrades only during business hours or within more restricted time windows. Additionally, they require a system that doesn't compromise the cost savings from consolidation when upgrades are blocked due to drift.
+2. High-Frequency Trading (HFT) firms require full compute capacity during specific operational hours, making it imperative to avoid scale-down requests for consolidation during these periods. However, outside these hours, scale-downs are acceptable.
+
+## Known Requirements and Desired Behaviors 
+**Action and Budget Definition:** Users should be able to define an action and a corresponding budget(s).
+**Supported Actions:** All disruption actions affected by the current Budgets implementation (Consolidation, Emptiness, Expiration, Drift) should be supported.
+**Default Behavior for Unspecified Actions:** Budgets should continue to support a default behavior for all disruption actions. If an action is unspecified, it is assumed to apply to all actions.
+
+### Q: How should Karpenterr handle the default or undefined action case? 
+The current design involves specifying a specific number of disruptable nodes per action, which can complicate the disruption lifecycle. For example, if there's a 10-node budget for "Drift" and a separate 10-node budget for "Consolidation," but a 15-node budget for "All" determining which nodes will get disrupted becomes unclear. Would it be 10 nodes for "Drift" and 5 nodes for "Consolidation"?
+
+#### Unspecified Action as a Global Node Budget
+
+We could consider treating an undefined action as a budget for all disruption actions except for those with explicitly defined budgets. In this scenario, if a user specifies a disruption budget like this:
+
+```yaml
+spec: # This is not a complete NodePool Spec.
+  disruption:
+    budgets:
+    - schedule: "* * * * *"
+      action: Consolidation
+      nodes: 10
+    - schedule: "* * * * *"
+      action: Drift
+      nodes: 10
+    # For all other actions , only allow 5 nodes to be disrupted at a time
+    - nodes: 5
+      schedule: "* * * * *"
+```
+
+It means that "Consolidation" and "Drift" actions have specific budgets of 10 nodes each, while all other actions (e.g., expiration and emptiness) share a common budget of 5 nodes. This approach simplifies the configuration but has one limitation: it may not allow the execution of other disruption actions if a specific action exhausts the budget. This is a problem with the existing design for disruption budgets.
+
+There are two ways for the users to get around this behavior. 
+1. If you need gaurenteed disruption for a particular action, you can just specify that action in a budget.  
+2. We could allow some mechanism for the users to control the ordering of the disruption actions. 
+#### Q: Should users be able to change the order that disruption actions are executed in to solve this problem? 
+The answer is no, this makes it harder for cluster operators to understand behavior. It also doesn't elegantly fit into karpenters per nodepool controls. Karpenter today does not provide an easy way via the CRDS to define per cluster level controls.  
+
+### Q: Should Karpenter allow for more granular disruption reasons to have budgets? like for specific drift reasons for example? 
+In the current setup, Karpenter provides a disruption controller with standard Method implementations. However, there's a need for more granularity in defining disruption budgets. For example, users may want to have a different schedule for Kubernetes version upgrades compared to node image upgrades.
+
+Karpenter should provide a way to extend these more granular reasons that are children of the disruption methods. It does add a signficant number of questions into the mix. But almost deserves its own design as it opens up a multitude of questions.
 
 ## API Design
 ### Approach A: Add an action field to disruption Budgets 
@@ -57,7 +93,7 @@ const (
 	Emptiness DisruptionAction = "Emptiness"
 )
 ```
-If no value is specified we will assume this disruption budget is `All` and default to that value and the settings will apply to all disruption actions.
+
 
 ##### Example
 ```yaml
@@ -72,7 +108,7 @@ spec: # This is not a complete NodePool Spec.
     - schedule: "0 0 1 * *"
       action: Drift
       nodes: 15
-    # Every other time for all other disruption actions, only allow 10 nodes to be deprovisioned simultaneously
+    # Every other time for all actions that are not Drift, only allow 10 nodes to be deprovisioned simultaneously
     - nodes: 10
 ```
 
@@ -130,7 +166,7 @@ type Budget struct {
 type DisruptionAction string 
 
 const (
-	All DisruptionAction = "All"
+	All DisruptionAction = ""
 	Consolidation DisruptionAction = "Consolidation" 
 	Drift DisruptionAction = "Drift" 
 	Expiration DisruptionAction = "Expiration" 
@@ -183,6 +219,6 @@ This proposal is currently scoped for disruptionBudgets by action. However, we s
 * 👎 Doesn't allow for easy defaulting of `All` disruption actions
 * 👎 Adds complexity to the use of budgets, before its high level on the disruption controls but with this design approach its nested inside another field.
 
-
 ### Conclusion: Preferred Design
 If the goal is to provide a simple, backward-compatible solution with immediate applicability, Approach A is more suitable. It provides a straightforward way to manage disruptions without overhauling the existing system. Breaking API changes in Approach B are likely too disruptive to customers. 
+
