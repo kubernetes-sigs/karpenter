@@ -215,14 +215,14 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 //     a. There are at least 15 cheapest instance type replacement options to consolidate.
 //     b. The current candidate is NOT part of the first 15 cheapest instance types inorder to avoid repeated consolidation.
 func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, candidates []*Candidate, results *pscheduling.Results,
-	candidatePrice float64) (Command, error) {
+	candidatePrice float64) (Command, sets.Set[*pscheduling.ExistingNode], error) {
 
 	// Spot consolidation is turned off.
 	if !options.FromContext(ctx).FeatureGates.SpotToSpotConsolidation {
 		if len(candidates) == 1 {
 			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "SpotToSpotConsolidation is disabled, can't replace a spot node with a spot node")...)
 		}
-		return Command{}, nil
+		return Command{}, nil, nil
 	}
 
 	// Since we are sure that the replacement nodeclaim considered for the spot candidates are spot, we will enforce it through the requirements.
@@ -239,8 +239,13 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace spot node with a cheaper spot node")...)
 		}
 		// no instance types remain after filtering by price
-		return Command{}, nil
+		return Command{}, nil, nil
 	}
+
+	// Only return the existing nodes that had pods scheduled to it
+	nominatedNodes := sets.New[*pscheduling.ExistingNode](lo.Filter(results.ExistingNodes, func(n *pscheduling.ExistingNode, _ int) bool {
+		return len(n.Pods) > 0
+	})...)
 
 	// For multi-node consolidation:
 	// We don't have any requirement to check the remaining instance type flexibility, so exit early in this case.
@@ -248,7 +253,7 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 		return Command{
 			candidates:   candidates,
 			replacements: results.NewNodeClaims,
-		}, nil
+		}, nominatedNodes, nil
 	}
 
 	// For single-node consolidation:
@@ -258,7 +263,7 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 	if len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions) < MinInstanceTypesForSpotToSpotConsolidation {
 		c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("SpotToSpotConsolidation requires %d cheaper instance type options than the current candidate to consolidate, got %d",
 			MinInstanceTypesForSpotToSpotConsolidation, len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions)))...)
-		return Command{}, nil
+		return Command{}, nil, nil
 	}
 
 	// Restrict the InstanceTypeOptions for launch to 15 so we don't get into a continual consolidation situation.
@@ -273,7 +278,7 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 	return Command{
 		candidates:   candidates,
 		replacements: results.NewNodeClaims,
-	}, nil
+	}, nominatedNodes, nil
 }
 
 // getCandidatePrices returns the sum of the prices of the given candidates
