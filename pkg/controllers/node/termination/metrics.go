@@ -34,11 +34,11 @@ var (
 		},
 		[]string{metrics.NodePoolLabel},
 	)
-	PodEvictionCounter = prometheus.NewCounterVec(
+	PodEvictedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "karpenter",
 			Subsystem: "pods",
-			Name:      "evicted_pods",
+			Name:      "evicted",
 			Help:      "Number of pods evicted by Karpenter during node termination",
 		},
 		[]string{},

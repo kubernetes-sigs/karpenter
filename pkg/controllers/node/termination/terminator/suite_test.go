@@ -89,6 +89,11 @@ var _ = Describe("Eviction/Queue", func() {
 		})
 	})
 
+	AfterEach(func() {
+		// Reset the metrics collectors
+		termination.PodEvictedCounter.Reset()
+	})
+
 	Context("Eviction API", func() {
 		It("should succeed with no event when the pod is not found", func() {
 			ExpectApplied(ctx, env.Client, pdb)
@@ -121,6 +126,54 @@ var _ = Describe("Eviction/Queue", func() {
 			})
 			ExpectApplied(ctx, env.Client, pdb, pdb2, pod)
 			Expect(queue.Evict(ctx, types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})).To(BeFalse())
+		})
+	})
+
+	Context("Metrics", func() {
+		It("should not fire the podEvictedCounter when the pod is not found", func() {
+			ExpectApplied(ctx, env.Client, pdb)
+			Expect(queue.Evict(ctx, types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})).To(BeTrue())
+
+			_, ok := FindMetricWithLabelValues("karpenter_pods_evicted")
+			Expect(ok).To(BeFalse())
+		})
+		It("should fire the podEvictedCounter when there are no PDBs", func() {
+			ExpectApplied(ctx, env.Client, pod)
+			Expect(queue.Evict(ctx, types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})).To(BeTrue())
+
+			m, ok := FindMetricWithLabelValues("karpenter_pods_evicted")
+			Expect(ok).To(BeTrue())
+			Expect(lo.FromPtr(m.GetCounter().Value)).To(BeNumerically("==", 1))
+		})
+		It("should fire the podEvictedCounter when there are PDBs that allow an eviction", func() {
+			pdb = test.PodDisruptionBudget(test.PDBOptions{
+				Labels:         testLabels,
+				MaxUnavailable: &intstr.IntOrString{IntVal: 1},
+			})
+			ExpectApplied(ctx, env.Client, pod)
+			Expect(queue.Evict(ctx, types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})).To(BeTrue())
+
+			m, ok := FindMetricWithLabelValues("karpenter_pods_evicted")
+			Expect(ok).To(BeTrue())
+			Expect(lo.FromPtr(m.GetCounter().Value)).To(BeNumerically("==", 1))
+		})
+		It("should not fire the podEvictedCounter when a PDB is blocking", func() {
+			ExpectApplied(ctx, env.Client, pdb, pod)
+			Expect(queue.Evict(ctx, types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})).To(BeFalse())
+
+			_, ok := FindMetricWithLabelValues("karpenter_pods_evicted")
+			Expect(ok).To(BeFalse())
+		})
+		It("should not fire the podEvictedCounter when two PDBs refer to the same pod", func() {
+			pdb2 := test.PodDisruptionBudget(test.PDBOptions{
+				Labels:         testLabels,
+				MaxUnavailable: &intstr.IntOrString{IntVal: 0},
+			})
+			ExpectApplied(ctx, env.Client, pdb, pdb2, pod)
+			Expect(queue.Evict(ctx, types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})).To(BeFalse())
+
+			_, ok := FindMetricWithLabelValues("karpenter_pods_evicted")
+			Expect(ok).To(BeFalse())
 		})
 	})
 })
