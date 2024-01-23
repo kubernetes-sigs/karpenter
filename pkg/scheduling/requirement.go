@@ -36,8 +36,10 @@ type Requirement struct {
 	values      sets.Set[string]
 	greaterThan *int
 	lessThan    *int
+	MinValues   *int
 }
 
+// TODO: Make changes to accept MinValues from API
 func NewRequirement(key string, operator v1.NodeSelectorOperator, values ...string) *Requirement {
 	if normalized, ok := v1beta1.NormalizedLabels[key]; ok {
 		key = normalized

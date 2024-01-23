@@ -156,6 +156,15 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		return Command{}, nil
 	}
 
+	// Key -> requirement key supporting MinValues
+	// value -> cumulative set of values for the key from all the instanceTypes
+	for key, value := range fetchCumulativeMinimumRequirementsFromInstanceTypeOptions(results.NewNodeClaims[0].InstanceTypeOptions) {
+		// Return if any of the minvalues of requirement is not honored
+		if len(value) < lo.FromPtr(results.NewNodeClaims[0].Requirements.Get(key).MinValues) {
+			return Command{}, fmt.Errorf("min requirement not met for %s", key)
+		}
+	}
+
 	// get the current node price based on the offering
 	// fallback if we can't find the specific zonal pricing data
 	candidatePrice, err := getCandidatePrices(candidates)
