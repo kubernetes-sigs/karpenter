@@ -8,7 +8,7 @@
 **Supported Actions:** All disruption actions affected by the current Budgets implementation (Consolidation, Emptiness, Expiration, Drift) should be supported.
 **Default Behavior for Unspecified Actions:** Budgets should continue to support a default behavior for all disruption actions. If an action is unspecified, it is assumed to apply to all actions.
 
-### Q: How should Karpenterr handle the default or undefined action case? 
+### Q: How should Karpenter handle the default or undefined action case? 
 The current design involves specifying a specific number of disruptable nodes per action, which can complicate the disruption lifecycle. For example, if there's a 10-node budget for "Drift" and a separate 10-node budget for "Consolidation," but a 15-node budget for "All" determining which nodes will get disrupted becomes unclear. Would it be 10 nodes for "Drift" and 5 nodes for "Consolidation"?
 
 #### Unspecified Action as a Global Node Budget
