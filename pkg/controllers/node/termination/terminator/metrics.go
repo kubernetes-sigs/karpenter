@@ -14,28 +14,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package termination
+package terminator
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
-
-	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
 var (
-	TerminationSummary = prometheus.NewSummaryVec(
-		prometheus.SummaryOpts{
-			Namespace:  "karpenter",
-			Subsystem:  "nodes",
-			Name:       "termination_time_seconds",
-			Help:       "The time taken between a node's deletion request and the removal of its finalizer",
-			Objectives: metrics.SummaryObjectives(),
+	podEvictedCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "karpenter",
+			Subsystem: "pods",
+			Name:      "evicted",
+			Help:      "Number of pods evicted by Karpenter during node termination",
 		},
-		[]string{metrics.NodePoolLabel},
+		[]string{},
 	)
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(TerminationSummary)
+	crmetrics.Registry.MustRegister(podEvictedCounter)
 }

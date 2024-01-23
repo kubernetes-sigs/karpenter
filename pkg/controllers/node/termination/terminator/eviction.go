@@ -23,6 +23,7 @@ import (
 	"time"
 
 	set "github.com/deckarep/golang-set"
+	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -35,7 +36,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/controllers/node/termination"
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
 
@@ -145,7 +145,7 @@ func (q *Queue) Evict(ctx context.Context, nn types.NamespacedName) bool {
 		logging.FromContext(ctx).Errorf("evicting pod, %s", err)
 		return false
 	}
-	termination.PodEvictedCounter.With(prometheus.Labels{}).Inc()
+	podEvictedCounter.With(prometheus.Labels{}).Inc()
 	q.recorder.Publish(terminatorevents.EvictPod(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: nn.Name, Namespace: nn.Namespace}}))
 	return true
 }
