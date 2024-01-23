@@ -321,13 +321,16 @@ func hasDoNotDisruptPod(c *Candidate) (*v1.Pod, bool) {
 	})
 }
 
-func fetchCumulativeMinimumRequirementsFromInstanceTypeOptions(instanceTypeOptions []*cloudprovider.InstanceType) map[string]sets.Set[string] {
-	// Key -> requirement key supporting MinValues
+func fetchCumulativeMinimumRequirementsFromInstanceTypeOptions(instanceTypeOptions []*cloudprovider.InstanceType, requirements scheduling.Requirements) map[string]sets.Set[string] {
+	// Key -> requirement key asking for MinValues
 	// value -> cumulative set of values for the key from all the instanceTypes
 	cumulativeMinRequirementsFromInstanceTypes := make(map[string]sets.Set[string])
 
+	// For all the InstanceTypeOptions
 	for _, it := range instanceTypeOptions {
-		for _, req := range it.Requirements {
+		// Iterate over the scheduling requirements
+		for _, req := range requirements {
+			// Check if the scheduling requirement asks for MinValues
 			if req.MinValues != nil {
 				existingValues := cumulativeMinRequirementsFromInstanceTypes[req.Key]
 				cumulativeMinRequirementsFromInstanceTypes[req.Key] = existingValues.Insert(it.Requirements.Get(req.Key).Values()...)

@@ -267,7 +267,7 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 		// any errors.
 		if itCompat && itFits && itHasOffering {
 			results.remaining = append(results.remaining, it)
-			for _, req := range it.Requirements {
+			for _, req := range requirements {
 				if req.MinValues != nil {
 					cumulativeMinRequirementsFromInstanceTypes[req.Key] = cumulativeMinRequirementsFromInstanceTypes[req.Key].Insert(it.Requirements.Get(req.Key).Values()...)
 				}
