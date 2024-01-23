@@ -34,8 +34,17 @@ var (
 		},
 		[]string{metrics.NodePoolLabel},
 	)
+	PodEvictionCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "karpenter",
+			Subsystem: "pods",
+			Name:      "evicted_pods",
+			Help:      "Number of pods evicted by Karpenter during node termination",
+		},
+		[]string{},
+	)
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(TerminationSummary)
+	crmetrics.Registry.MustRegister(TerminationSummary, PodEvictionCounter)
 }
