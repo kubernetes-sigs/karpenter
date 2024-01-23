@@ -272,14 +272,15 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 	}
 	c.nodes[node.Spec.ProviderID] = n
 	c.nodeNameToProviderID[node.Name] = node.Spec.ProviderID
+	metrics.ClusterStateNodesGauge.WithLabelValues().Set(float64(len(c.nodes)))
 	return nil
 }
 
 func (c *Cluster) DeleteNode(name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
 	c.cleanupNode(name)
+	metrics.ClusterStateNodesGauge.WithLabelValues().Set(float64(len(c.nodes)))
 }
 
 func (c *Cluster) UpdatePod(ctx context.Context, pod *v1.Pod) error {
