@@ -91,7 +91,7 @@ var _ = Describe("Eviction/Queue", func() {
 
 	AfterEach(func() {
 		// Reset the metrics collectors
-		podEvictedCounter.Reset()
+		PodEvictedCounter.Reset()
 	})
 
 	Context("Eviction API", func() {

@@ -145,7 +145,7 @@ func (q *Queue) Evict(ctx context.Context, nn types.NamespacedName) bool {
 		logging.FromContext(ctx).Errorf("evicting pod, %s", err)
 		return false
 	}
-	podEvictedCounter.With(prometheus.Labels{}).Inc()
+	PodEvictedCounter.With(prometheus.Labels{}).Inc()
 	q.recorder.Publish(terminatorevents.EvictPod(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: nn.Name, Namespace: nn.Namespace}}))
 	return true
 }

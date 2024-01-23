@@ -22,7 +22,7 @@ import (
 )
 
 var (
-	podEvictedCounter = prometheus.NewCounterVec(
+	PodEvictedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "karpenter",
 			Subsystem: "pods",
@@ -34,5 +34,5 @@ var (
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(podEvictedCounter)
+	crmetrics.Registry.MustRegister(PodEvictedCounter)
 }
