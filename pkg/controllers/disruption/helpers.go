@@ -332,8 +332,8 @@ func fetchCumulativeMinimumRequirementsFromInstanceTypeOptions(instanceTypeOptio
 		for _, req := range requirements {
 			// Check if the scheduling requirement asks for MinValues
 			if req.MinValues != nil {
-				existingValues := cumulativeMinRequirementsFromInstanceTypes[req.Key]
-				cumulativeMinRequirementsFromInstanceTypes[req.Key] = existingValues.Insert(it.Requirements.Get(req.Key).Values()...)
+				cumulativeMinRequirementsFromInstanceTypes[req.Key] =
+					cumulativeMinRequirementsFromInstanceTypes[req.Key].Insert(it.Requirements.Get(req.Key).Values()...)
 			}
 		}
 	}
