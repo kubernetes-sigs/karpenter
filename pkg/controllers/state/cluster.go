@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -40,6 +41,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
@@ -123,8 +125,9 @@ func (c *Cluster) Synced(ctx context.Context) bool {
 	// This doesn't ensure that the two states are exactly aligned (we could still not be tracking a node
 	// that exists in the cluster state but not in the apiserver) but it ensures that we have a state
 	// representation for every node/nodeClaim that exists on the apiserver
-	return stateNodeClaimNames.IsSuperset(nodeClaimNames) &&
-		stateNodeNames.IsSuperset(nodeNames)
+	synced := stateNodeClaimNames.IsSuperset(nodeClaimNames) && stateNodeNames.IsSuperset(nodeNames)
+	    metrics.ClusterStateIsSynced.With(prometheus.Labels{}).Set(lo.Ternary[float64](synced, 1, 0))
+	return synced 
 }
 
 // ForPodsWithAntiAffinity calls the supplied function once for each pod with required anti affinity terms that is
