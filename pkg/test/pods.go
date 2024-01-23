@@ -133,13 +133,6 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 				}),
 				ReadinessProbe: options.ReadinessProbe,
 				LivenessProbe:  options.LivenessProbe,
-				Lifecycle: &v1.Lifecycle{
-					PreStop: &v1.LifecycleHandler{
-						Sleep: &v1.SleepAction{
-							Seconds: *options.PreStopSleep,
-						},
-					},
-				},
 			}},
 			NodeName:                      options.NodeName,
 			Volumes:                       volumes,
