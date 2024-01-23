@@ -24,6 +24,7 @@ import (
 const (
 	NodeSubsystem      = "nodes"
 	nodeClaimSubsystem = "nodeclaims"
+	stateSubsystem     = "cluster_state"
 )
 
 var (
@@ -130,10 +131,40 @@ var (
 			NodePoolLabel,
 		},
 	)
+
+
+	ClusterStateNodesGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: Namespace,
+			Subsystem: stateSubsystem,
+			Name:      "nodes_total",
+			Help:      "Number of nodes in karpenter's cluster state",
+		},
+		[]string{},
+	)
+	ClusterStatePodsTotal = prometheus.NewGaugeVec(
+        prometheus.GaugeOpts{
+			Namespace: Namespace, 
+			Subsystem: stateSubsystem,
+            Name: "pods_total",
+            Help: "Total number of pods in the cluster by namespace",
+        },
+        []string{"ns"},
+    )
+
+	ClusterStateIsSynced = prometheus.NewGaugeVec( 
+		prometheus.GaugeOpts{ 
+			Namespace: Namespace,
+			Subsystem: stateSubsystem,
+			Name: "is_synced", 
+			Help: "Whether the cluster state is synced",
+		},
+		[]string{},
+	)
 )
 
 func init() {
 	crmetrics.Registry.MustRegister(NodeClaimsCreatedCounter, NodeClaimsTerminatedCounter, NodeClaimsLaunchedCounter,
 		NodeClaimsRegisteredCounter, NodeClaimsInitializedCounter, NodeClaimsDisruptedCounter, NodeClaimsDriftedCounter,
-		NodesCreatedCounter, NodesTerminatedCounter)
+		NodesCreatedCounter, NodesTerminatedCounter, ClusterStateNodesGauge, ClusterStatePodsTotal, ClusterStateIsSynced)
 }
