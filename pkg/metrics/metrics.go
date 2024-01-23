@@ -132,7 +132,6 @@ var (
 		},
 	)
 
-
 	ClusterStateNodesGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: Namespace,
@@ -142,22 +141,13 @@ var (
 		},
 		[]string{},
 	)
-	ClusterStatePodsTotal = prometheus.NewGaugeVec(
-        prometheus.GaugeOpts{
-			Namespace: Namespace, 
-			Subsystem: stateSubsystem,
-            Name: "pods_total",
-            Help: "Total number of pods in the cluster by namespace",
-        },
-        []string{"ns"},
-    )
 
-	ClusterStateIsSynced = prometheus.NewGaugeVec( 
-		prometheus.GaugeOpts{ 
+	ClusterStateIsSynced = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
 			Namespace: Namespace,
 			Subsystem: stateSubsystem,
-			Name: "is_synced", 
-			Help: "Whether the cluster state is synced",
+			Name:      "is_synced",
+			Help:      "Whether the cluster state is synced",
 		},
 		[]string{},
 	)
@@ -166,5 +156,5 @@ var (
 func init() {
 	crmetrics.Registry.MustRegister(NodeClaimsCreatedCounter, NodeClaimsTerminatedCounter, NodeClaimsLaunchedCounter,
 		NodeClaimsRegisteredCounter, NodeClaimsInitializedCounter, NodeClaimsDisruptedCounter, NodeClaimsDriftedCounter,
-		NodesCreatedCounter, NodesTerminatedCounter, ClusterStateNodesGauge, ClusterStatePodsTotal, ClusterStateIsSynced)
+		NodesCreatedCounter, NodesTerminatedCounter, ClusterStateNodesGauge, ClusterStateIsSynced)
 }
