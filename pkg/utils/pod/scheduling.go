@@ -37,12 +37,14 @@ func IsActive(pod *v1.Pod) bool {
 }
 
 // IsReschedulable checks if a Karpenter should consider this pod when re-scheduling to new capacity by ensuring that the pod:
-// - Is an active pod (isn't terminal or actively terminating)
+// - Is an active pod (isn't terminal or actively terminating) OR Is owned by a StatefulSet and Is Terminating
 // - Isn't owned by a DaemonSet
 // - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
 func IsReschedulable(pod *v1.Pod) bool {
-	// these pods don't need to be rescheduled
-	return IsActive(pod) &&
+	// StatefulSet pods can be handled differently here because we know that StatefulSet pods MUST
+	// get deleted before new pods are re-created. This means that we can model terminating pods for StatefulSets
+	// differently for higher availability by considering terminating pods for scheduling
+	return (IsActive(pod) || (IsOwnedByStatefulSet(pod) && IsTerminating(pod))) &&
 		!IsOwnedByDaemonSet(pod) &&
 		!IsOwnedByNode(pod)
 }
@@ -123,6 +125,12 @@ func IsStuckTerminating(pod *v1.Pod, clk clock.Clock) bool {
 	// The pod DeletionTimestamp will be set to the time the pod was deleted plus its
 	// grace period in seconds. We give an additional minute as a buffer
 	return IsTerminating(pod) && clk.Since(pod.DeletionTimestamp.Time) > time.Minute
+}
+
+func IsOwnedByStatefulSet(pod *v1.Pod) bool {
+	return IsOwnedBy(pod, []schema.GroupVersionKind{
+		{Group: "apps", Version: "v1", Kind: "StatefulSet"},
+	})
 }
 
 func IsOwnedByDaemonSet(pod *v1.Pod) bool {
