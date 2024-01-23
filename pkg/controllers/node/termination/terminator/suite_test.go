@@ -134,7 +134,7 @@ var _ = Describe("Eviction/Queue", func() {
 			ExpectApplied(ctx, env.Client, pdb)
 			Expect(queue.Evict(ctx, types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})).To(BeTrue())
 
-			_, ok := FindMetricWithLabelValues("karpenter_pods_evicted"), make(map[string]string))
+			_, ok := FindMetricWithLabelValues("karpenter_pods_evicted", make(map[string]string))
 			Expect(ok).To(BeFalse())
 		})
 		It("should fire the podEvictedCounter when there are no PDBs", func() {
