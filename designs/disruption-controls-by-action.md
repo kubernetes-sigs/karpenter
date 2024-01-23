@@ -36,7 +36,7 @@ There are two ways for the users to get around this behavior.
 1. If you need gaurenteed disruption for a particular action, you can just specify that action in a budget.  
 2. We could allow some mechanism for the users to control the ordering of the disruption actions. 
 #### Q: Should users be able to change the order that disruption actions are executed in to solve this problem? 
-The answer is no, this makes it harder for cluster operators to understand behavior. It also doesn't elegantly fit into karpenters per nodepool controls. Karpenter today does not provide an easy way via the CRDS to define per cluster level controls.  
+The answer is no, this makes it harder for cluster operators to understand behavior. It also doesn't elegantly fit into karpenters per nodepool controls. Defining it in the nodepool would mean you have multiple nodepools with different orderings, which is diffcult. Karpenter today does not provide an easy way via the CRDS to define per cluster level controls.  
 
 ### Q: Should Karpenter allow for more granular disruption reasons to have budgets? like for specific drift reasons for example? 
 In the current setup, Karpenter provides a disruption controller with standard Method implementations. However, there's a need for more granularity in defining disruption budgets. For example, users may want to have a different schedule for Kubernetes version upgrades compared to node image upgrades.
