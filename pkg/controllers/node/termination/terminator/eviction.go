@@ -35,7 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	terminationmetrics "sigs.k8s.io/karpenter/pkg/controllers/node/termination/metrics"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/termination"
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
 
@@ -145,7 +145,7 @@ func (q *Queue) Evict(ctx context.Context, nn types.NamespacedName) bool {
 		logging.FromContext(ctx).Errorf("evicting pod, %s", err)
 		return false
 	}
-	terminationmetrics.PodEvictedCounter.With(prometheus.Labels{}).Inc()
+	termination.PodEvictedCounter.With(prometheus.Labels{}).Inc()
 	q.recorder.Publish(terminatorevents.EvictPod(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: nn.Name, Namespace: nn.Namespace}}))
 	return true
 }
