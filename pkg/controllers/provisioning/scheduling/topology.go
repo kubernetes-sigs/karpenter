@@ -162,7 +162,7 @@ func (t *Topology) AddRequirements(podRequirements, nodeRequirements scheduling.
 		}
 		domains := topology.Get(p, podDomains, nodeDomains)
 		if domains.Len() == 0 {
-			return nil, fmt.Errorf("unsatisfiable topology constraint for %s, key=%s (counts = %v, podDomains = %v, nodeDomains = %v)", topology.Type, topology.Key, topology.domains, podDomains, nodeDomains)
+			return nil, fmt.Errorf("unsatisfiable topology constraint for %s, key=%s (counts = %s, podDomains = %v, nodeDomains = %v", topology.Type, topology.Key, pretty.Map(topology.domains, 5), podDomains, nodeDomains)
 		}
 		requirements.Add(domains)
 	}
