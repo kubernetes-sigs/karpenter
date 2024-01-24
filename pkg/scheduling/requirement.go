@@ -55,6 +55,7 @@ func NewRequirement(key string, operator v1.NodeSelectorOperator, values ...stri
 			Key:        key,
 			values:     s,
 			complement: false,
+			MinValues:  lo.Ternary(key == "node.kubernetes.io/instance-type" || key == "karpenter.k8s.aws/instance-family", lo.ToPtr(3), lo.ToPtr(0)), // TODO: Remove this code. Fetch from API
 		}
 	}
 
@@ -62,6 +63,7 @@ func NewRequirement(key string, operator v1.NodeSelectorOperator, values ...stri
 		Key:        key,
 		values:     sets.New[string](),
 		complement: true,
+		MinValues:  lo.Ternary(key == "node.kubernetes.io/instance-type" || key == "karpenter.k8s.aws/instance-family", lo.ToPtr(3), lo.ToPtr(0)), // TODO: Remove this code. Fetch from API
 	}
 	if operator == v1.NodeSelectorOpIn || operator == v1.NodeSelectorOpDoesNotExist {
 		r.complement = false
@@ -159,7 +161,7 @@ func (r *Requirement) Intersection(requirement *Requirement) *Requirement {
 		greaterThan, lessThan = nil, nil
 	}
 
-	return &Requirement{Key: r.Key, values: values, complement: complement, greaterThan: greaterThan, lessThan: lessThan}
+	return &Requirement{Key: r.Key, values: values, complement: complement, greaterThan: greaterThan, lessThan: lessThan, MinValues: maxIntPtr(r.MinValues, requirement.MinValues)}
 }
 
 func (r *Requirement) Any() string {
