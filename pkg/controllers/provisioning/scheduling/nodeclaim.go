@@ -106,7 +106,10 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 
 	filtered := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, requests)
 
+	// Iterate over the minimum requirements from InstanceTypeOptions and check if it statisfies the
+	// minValues from the requirements.
 	for key, value := range filtered.cumulativeMinRequirementsFromInstanceTypes {
+		// Return if any of the minvalues of requirement is not honored
 		if len(value) < lo.FromPtr(nodeClaimRequirements.Get(key).MinValues) {
 			return fmt.Errorf("min requirement not met for %s", key)
 		}
@@ -163,7 +166,9 @@ type filterResults struct {
 	// requirementsAndOffering indicates if a single instance type met the scheduling requirements and was a required offering
 	requirementsAndOffering bool
 	// fitsAndOffering indicates if a single instance type had enough resources and was a required offering
-	fitsAndOffering                            bool
+	fitsAndOffering bool
+	// Key -> requirements that support minValues
+	// set -> values accumulated over all the instanceTypes for the key that supports minValues
 	cumulativeMinRequirementsFromInstanceTypes map[string]sets.Set[string]
 
 	requests v1.ResourceList
@@ -267,6 +272,7 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 		// any errors.
 		if itCompat && itFits && itHasOffering {
 			results.remaining = append(results.remaining, it)
+			// For the InstanceType chosen, if the requirement has "minValues", then accumulate the values for those keys across InstanceTypes.
 			for _, req := range requirements {
 				if req.MinValues != nil {
 					if _, ok := cumulativeMinRequirementsFromInstanceTypes[req.Key]; !ok {
