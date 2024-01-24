@@ -771,4 +771,10 @@ var _ = Describe("CEL/Validation", func() {
 			}
 		})
 	})
+	Context("Resources", func() {
+		It("should not allow resources to be set", func() {
+			nodePool.Spec.Template.Spec.Resources = ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+		})
+	})
 })
