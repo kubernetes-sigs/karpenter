@@ -62,11 +62,11 @@ func NewInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 	}
 	if len(options.Offerings) == 0 {
 		options.Offerings = []cloudprovider.Offering{
-			{CapacityType: "spot", Zone: "test-zone-1", Price: priceFromResources(options.Resources), Available: true},
-			{CapacityType: "spot", Zone: "test-zone-2", Price: priceFromResources(options.Resources), Available: true},
-			{CapacityType: "on-demand", Zone: "test-zone-1", Price: priceFromResources(options.Resources), Available: true},
-			{CapacityType: "on-demand", Zone: "test-zone-2", Price: priceFromResources(options.Resources), Available: true},
-			{CapacityType: "on-demand", Zone: "test-zone-3", Price: priceFromResources(options.Resources), Available: true},
+			{CapacityType: "spot", Zone: "test-zone-1", Price: PriceFromResources(options.Resources), Available: true},
+			{CapacityType: "spot", Zone: "test-zone-2", Price: PriceFromResources(options.Resources), Available: true},
+			{CapacityType: "on-demand", Zone: "test-zone-1", Price: PriceFromResources(options.Resources), Available: true},
+			{CapacityType: "on-demand", Zone: "test-zone-2", Price: PriceFromResources(options.Resources), Available: true},
+			{CapacityType: "on-demand", Zone: "test-zone-3", Price: PriceFromResources(options.Resources), Available: true},
 		}
 	}
 	if len(options.Architecture) == 0 {
@@ -125,7 +125,7 @@ func InstanceTypesAssorted() []*cloudprovider.InstanceType {
 									v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", mem)),
 								},
 							}
-							price := priceFromResources(opts.Resources)
+							price := PriceFromResources(opts.Resources)
 							opts.Offerings = []cloudprovider.Offering{
 								{
 									CapacityType: ct,
@@ -173,7 +173,7 @@ type InstanceTypeOptions struct {
 	Resources        v1.ResourceList
 }
 
-func priceFromResources(resources v1.ResourceList) float64 {
+func PriceFromResources(resources v1.ResourceList) float64 {
 	price := 0.0
 	for k, v := range resources {
 		switch k {

@@ -52,15 +52,17 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
-var ctx context.Context
-var fakeClock *clock.FakeClock
-var cluster *state.Cluster
-var nodeController controller.Controller
-var daemonsetController controller.Controller
-var cloudProvider *fake.CloudProvider
-var prov *provisioning.Provisioner
-var env *test.Environment
-var instanceTypeMap map[string]*cloudprovider.InstanceType
+var (
+	ctx                 context.Context
+	fakeClock           *clock.FakeClock
+	cluster             *state.Cluster
+	nodeController      controller.Controller
+	daemonsetController controller.Controller
+	cloudProvider       *fake.CloudProvider
+	prov                *provisioning.Provisioner
+	env                 *test.Environment
+	instanceTypeMap     map[string]*cloudprovider.InstanceType
+)
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -256,7 +258,8 @@ var _ = Describe("Provisioning", func() {
 					v1.LabelInstanceTypeStable: its[0].Name,
 				},
 				Finalizers: []string{v1beta1.TerminationFinalizer},
-			}},
+			},
+		},
 		)
 		ExpectApplied(ctx, env.Client, node, nodePool)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
@@ -342,7 +345,9 @@ var _ = Describe("Provisioning", func() {
 				ResourceRequirements: v1.ResourceRequirements{
 					Requests: v1.ResourceList{
 						v1.ResourceCPU: resource.MustParse("1.5"),
-					}}}
+					},
+				},
+			}
 			pods := []*v1.Pod{
 				test.UnschedulablePod(opts),
 				test.UnschedulablePod(opts),
@@ -511,7 +516,8 @@ var _ = Describe("Provisioning", func() {
 			ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
 			pod := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
-				NodeSelector:         map[string]string{v1beta1.NodePoolLabelKey: nodePool.Name}})
+				NodeSelector:         map[string]string{v1beta1.NodePoolLabelKey: nodePool.Name},
+			})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
 
@@ -559,6 +565,14 @@ var _ = Describe("Provisioning", func() {
 		})
 		It("should schedule based on the max resource requests of containers and initContainers with sidecar containers when initcontainer comes first", func() {
 			ExpectApplied(ctx, env.Client, test.NodePool())
+
+			resources := v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 10)),
+				v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 4)),
+			}
+
+			cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, resources)
+
 			pod := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
 					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("1Gi")},
@@ -583,11 +597,23 @@ var _ = Describe("Provisioning", func() {
 
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
-			Expect(node.Status.Capacity.Cpu().Value()).To(BeNumerically(">", 10))
-			Expect(node.Status.Capacity.Memory().Value()).To(BeNumerically(">", 4))
+			fmt.Println("node-capacity---", node.Status.Capacity.Cpu().Value())
+			ExpectResources(v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse("10"),
+				v1.ResourceMemory: resource.MustParse("4Gi"),
+			}, node.Status.Capacity)
 		})
+
 		It("should schedule based on the max resource requests of containers and initContainers with sidecar containers when sidecar container comes first", func() {
 			ExpectApplied(ctx, env.Client, test.NodePool())
+
+			resources := v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 14)),
+				v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 6)),
+			}
+
+			cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, resources)
+
 			pod := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
 					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("1Gi")},
@@ -612,8 +638,10 @@ var _ = Describe("Provisioning", func() {
 
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
-			Expect(node.Status.Capacity.Cpu().Value()).To(BeNumerically(">", 9))
-			Expect(node.Status.Capacity.Memory().Value()).To(BeNumerically(">", 5))
+			ExpectResources(v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse("14"),
+				v1.ResourceMemory: resource.MustParse("6Gi"),
+			}, node.Status.Capacity)
 		})
 		It("should not schedule if combined max resources are too large for any node", func() {
 			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
@@ -622,13 +650,15 @@ var _ = Describe("Provisioning", func() {
 						Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("10000"), v1.ResourceMemory: resource.MustParse("1Gi")},
 						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
 					},
-					InitContainers: []v1.Container{{
-						Resources: v1.ResourceRequirements{
-							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("10000"), v1.ResourceMemory: resource.MustParse("10000Gi")},
-							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
+					InitContainers: []v1.Container{
+						{
+							Resources: v1.ResourceRequirements{
+								Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("10000"), v1.ResourceMemory: resource.MustParse("10000Gi")},
+								Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
+							},
 						},
 					},
-					}}},
+				}},
 			))
 			pod := test.UnschedulablePod()
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -637,12 +667,14 @@ var _ = Describe("Provisioning", func() {
 		It("should not schedule if initContainer resources are too large", func() {
 			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{
-					InitContainers: []v1.Container{{
-						Resources: v1.ResourceRequirements{
-							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("10000"), v1.ResourceMemory: resource.MustParse("10000Gi")},
+					InitContainers: []v1.Container{
+						{
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("10000"), v1.ResourceMemory: resource.MustParse("10000Gi")},
+							},
 						},
 					},
-					}}},
+				}},
 			))
 			pod := test.UnschedulablePod()
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -789,7 +821,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, daemonsetPod)
 			ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
 
-			//Deploy pod
+			// Deploy pod
 			pod := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
 				NodeSelector: map[string]string{
@@ -897,7 +929,6 @@ var _ = Describe("Provisioning", func() {
 				Expect(node.Labels).To(HaveKeyWithValue("subdomain."+domain+"/test", "test-value"))
 			}
 		})
-
 	})
 	Context("Taints", func() {
 		It("should schedule pods that tolerate taints", func() {
@@ -1724,4 +1755,26 @@ func ExpectNodeClaimRequests(nodeClaim *v1beta1.NodeClaim, resources v1.Resource
 		v := nodeClaim.Spec.Resources.Requests[name]
 		Expect(v.AsApproximateFloat64()).To(BeNumerically("~", value.AsApproximateFloat64(), 10))
 	}
+}
+
+func AddInstanceResources(instanceTypes []*cloudprovider.InstanceType, resources v1.ResourceList) []*cloudprovider.InstanceType {
+	opts := fake.InstanceTypeOptions{
+		Name:             "example",
+		Architecture:     "arch",
+		Resources:        resources,
+		OperatingSystems: sets.New(string(v1.Linux)),
+	}
+	price := fake.PriceFromResources(opts.Resources)
+	opts.Offerings = []cloudprovider.Offering{
+		{
+			CapacityType: v1beta1.CapacityTypeSpot,
+			Zone:         "test-zone-1",
+			Price:        price,
+			Available:    true,
+		},
+	}
+
+	instanceTypes = append(instanceTypes, fake.NewInstanceType(opts))
+
+	return instanceTypes
 }
