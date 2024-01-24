@@ -156,15 +156,6 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		return Command{}, nil
 	}
 
-	// Key -> requirement key supporting MinValues
-	// value -> cumulative set of values for the key from all the instanceTypes
-	for key, value := range fetchCumulativeMinimumRequirementsFromInstanceTypeOptions(results.NewNodeClaims[0].InstanceTypeOptions, results.NewNodeClaims[0].Requirements) {
-		// Return if any of the minvalues of requirement is not honored
-		if len(value) < lo.FromPtr(results.NewNodeClaims[0].Requirements.Get(key).MinValues) {
-			return Command{}, fmt.Errorf("min requirement not met for %s", key)
-		}
-	}
-
 	// get the current node price based on the offering
 	// fallback if we can't find the specific zonal pricing data
 	candidatePrice, err := getCandidatePrices(candidates)
@@ -195,6 +186,23 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		}
 		// no instance types remain after filtering by price
 		return Command{}, nil
+	}
+
+	// We iterate over the cimulative minimum requirement of the InstanceTypeOptions to see if it meets the minValues of requirements again after filterByPrice
+	// as it may result in more constrained InstanceTypeOptions for a NodeClaim
+	// For example:
+	// Let's say the NodePool requirement has key "node.kubernetes.io/instance-type" with minValues as "3". This means that NodeClaim should
+	// contain instanceTypeOptions with atleast 3 different instance-types. So, we iterate over the InstanceTypeOptions of the NodeClaim
+	// and collect the cumulative details related to keys supporting minValues which is: fetchCumulativeMinimumRequirementsFromInstanceTypeOptions
+	// and then iterate over this to check if it meets the minValues of requirements.
+
+	// Key -> requirement key supporting MinValues
+	// value -> cumulative set of values for the key from all the instanceTypes
+	for key, value := range fetchCumulativeMinimumRequirementsFromInstanceTypeOptions(results.NewNodeClaims[0].InstanceTypeOptions, results.NewNodeClaims[0].Requirements) {
+		// Return if any of the minvalues of requirement is not honored
+		if len(value) < lo.FromPtr(results.NewNodeClaims[0].Requirements.Get(key).MinValues) {
+			return Command{}, fmt.Errorf("minimum requirement is not met for %s", key)
+		}
 	}
 
 	// We are consolidating a node from OD -> [OD,Spot] but have filtered the instance types by cost based on the
@@ -262,6 +270,15 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 		c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("SpotToSpotConsolidation requires %d cheaper instance type options than the current candidate to consolidate, got %d",
 			MinInstanceTypesForSpotToSpotConsolidation, len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions)))...)
 		return Command{}, nil
+	}
+
+	// We iterate over the cimulative minimum requirement of the InstanceTypeOptions to see if it meets the minValues of requirements again after filterByPrice
+	// as it may result in more constrained InstanceTypeOptions for a NodeClaim
+	for key, value := range fetchCumulativeMinimumRequirementsFromInstanceTypeOptions(results.NewNodeClaims[0].InstanceTypeOptions, results.NewNodeClaims[0].Requirements) {
+		// Return if any of the minvalues of requirement is not honored
+		if len(value) < lo.FromPtr(results.NewNodeClaims[0].Requirements.Get(key).MinValues) {
+			return Command{}, fmt.Errorf("minimum requirement is not met for %s", key)
+		}
 	}
 
 	// Restrict the InstanceTypeOptions for launch to 15 so we don't get into a continual consolidation situation.

@@ -111,7 +111,7 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 	for key, value := range filtered.cumulativeMinRequirementsFromInstanceTypes {
 		// Return if any of the minvalues of requirement is not honored
 		if len(value) < lo.FromPtr(nodeClaimRequirements.Get(key).MinValues) {
-			return fmt.Errorf("min requirement not met for %s", key)
+			return fmt.Errorf("minimum requirement is not met for %s", key)
 		}
 	}
 
