@@ -76,7 +76,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	// This could be further configurable in the future.
 	maxParallel := lo.Clamp(len(disruptableCandidates), 0, 100)
 
-	cmd, nominatedNodes, err := m.firstNConsolidationOption(ctx, disruptableCandidates, maxParallel)
+	cmd, results, err := m.firstNConsolidationOption(ctx, disruptableCandidates, maxParallel)
 	if err != nil {
 		return Command{}, nil, err
 	}
@@ -101,12 +101,12 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		logging.FromContext(ctx).Debugf("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
 		return Command{}, nil, nil
 	}
-	return cmd, nominatedNodes, nil
+	return cmd, results, nil
 }
 
 // firstNConsolidationOption looks at the first N NodeClaims to determine if they can all be consolidated at once.  The
 // NodeClaims are sorted by increasing disruption order which correlates to likelihood if being able to consolidate the node
-func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, candidates []*Candidate, max int) (Command, sets.Set[*scheduling.ExistingNode], error) {
+func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, candidates []*Candidate, max int) (Command, *scheduling.Results, error) {
 	// we always operate on at least two NodeClaims at once, for single NodeClaims standard consolidation will find all solutions
 	if len(candidates) < 2 {
 		return Command{}, nil, nil
@@ -117,7 +117,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	}
 
 	lastSavedCommand := Command{}
-	nominatedNodes := sets.Set[*scheduling.ExistingNode]{}
+	results := &scheduling.Results{}
 	// Set a timeout
 	timeout := m.clock.Now().Add(MultiNodeConsolidationTimeoutDuration)
 	// binary search to find the maximum number of NodeClaims we can terminate
@@ -129,12 +129,12 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 			} else {
 				logging.FromContext(ctx).Debugf("stopping multi-node consolidation after timeout, returning last valid command %s", lastSavedCommand)
 			}
-			return lastSavedCommand, nil, nil
+			return lastSavedCommand, results, nil
 		}
 		mid := (min + max) / 2
 		candidatesToConsolidate := candidates[0 : mid+1]
 
-		cmd, nominations, err := m.computeConsolidation(ctx, candidatesToConsolidate...)
+		cmd, newResults, err := m.computeConsolidation(ctx, candidatesToConsolidate...)
 		if err != nil {
 			return Command{}, nil, err
 		}
@@ -151,13 +151,13 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		if replacementHasValidInstanceTypes || cmd.Action() == DeleteAction {
 			// We can consolidate NodeClaims [0,mid]
 			lastSavedCommand = cmd
-			nominatedNodes = nominations
+			results = newResults
 			min = mid + 1
 		} else {
 			max = mid - 1
 		}
 	}
-	return lastSavedCommand, nominatedNodes, nil
+	return lastSavedCommand, results, nil
 }
 
 // filterOutSameType filters out instance types that are more expensive than the cheapest instance type that is being

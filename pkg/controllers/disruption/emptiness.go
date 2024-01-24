@@ -21,11 +21,10 @@ import (
 	"fmt"
 
 	"github.com/samber/lo"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
-	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/events"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -63,7 +62,7 @@ func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 }
 
 // ComputeCommand generates a disruption command given candidates
-func (e *Emptiness) ComputeCommand(_ context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, sets.Set[*pscheduling.ExistingNode], error) {
+func (e *Emptiness) ComputeCommand(_ context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, *scheduling.Results, error) {
 	// First check how many nodes are empty so that we can emit a metric on how many nodes are eligible
 	emptyCandidates := lo.Filter(candidates, func(cn *Candidate, _ int) bool {
 		return cn.NodeClaim.DeletionTimestamp.IsZero() && len(cn.reschedulablePods) == 0
@@ -88,7 +87,7 @@ func (e *Emptiness) ComputeCommand(_ context.Context, disruptionBudgetMapping ma
 	}
 	return Command{
 		candidates: empty,
-	}, nil, nil
+	}, &scheduling.Results{}, nil
 }
 
 func (e *Emptiness) Type() string {

@@ -23,6 +23,7 @@ import (
 
 	"knative.dev/pkg/logging"
 
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
@@ -112,7 +113,9 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		}
 		postValidationMapping[n.nodePool.Name]--
 	}
-	return cmd, nil, nil
+	// Return empty scheduling results since no empty nodes should be rescheduling any pods.
+	// Returning nil would require doing a check later in the core controller.
+	return cmd, &scheduling.Results{}, nil
 }
 
 func (c *EmptyNodeConsolidation) Type() string {

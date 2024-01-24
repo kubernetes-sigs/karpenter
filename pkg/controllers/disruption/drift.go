@@ -21,14 +21,11 @@ import (
 	"errors"
 	"sort"
 
-	"github.com/samber/lo"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
-	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -88,7 +85,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 	if len(empty) > 0 {
 		return Command{
 			candidates: empty,
-		}, nil, nil
+		}, results, nil
 	}
 
 	for _, candidate := range candidates {
@@ -112,14 +109,11 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 			d.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
 			continue
 		}
-		// Only return the existing nodes that had pods scheduled to it
-		nominatedNodes := sets.New[*pscheduling.ExistingNode](lo.Filter(results.ExistingNodes, func(n *pscheduling.ExistingNode, _ int) bool {
-			return len(n.Pods) > 0
-		})...)
+
 		return Command{
 			candidates:   []*Candidate{candidate},
 			replacements: results.NewNodeClaims,
-		}, nominatedNodes, nil
+		}, results, nil
 	}
 	return Command{}, nil, nil
 }

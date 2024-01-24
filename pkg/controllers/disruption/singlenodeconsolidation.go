@@ -69,7 +69,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 			return Command{}, nil, nil
 		}
 		// compute a possible consolidation option
-		cmd, nominatedNodes, err := s.computeConsolidation(ctx, candidate)
+		cmd, results, err := s.computeConsolidation(ctx, candidate)
 		if err != nil {
 			logging.FromContext(ctx).Errorf("computing consolidation %s", err)
 			continue
@@ -85,7 +85,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 			logging.FromContext(ctx).Debugf("abandoning single-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
 			return Command{}, nil, nil
 		}
-		return cmd, nominatedNodes, nil
+		return cmd, results, nil
 	}
 	if !constrainedByBudgets {
 		// if there are no candidates because of a budget, don't mark

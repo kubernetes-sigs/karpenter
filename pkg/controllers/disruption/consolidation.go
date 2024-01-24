@@ -25,7 +25,6 @@ import (
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -116,7 +115,8 @@ func (c *consolidation) sortCandidates(candidates []*Candidate) []*Candidate {
 // computeConsolidation computes a consolidation action to take
 //
 // nolint:gocyclo
-func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...*Candidate) (Command, sets.Set[*pscheduling.ExistingNode], error) {
+func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...*Candidate) (Command, *pscheduling.Results, error) {
+	var err error
 	// Run scheduling simulation to compute consolidation option
 	results, err := SimulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, candidates...)
 	if err != nil {
@@ -135,16 +135,12 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		}
 		return Command{}, nil, nil
 	}
-	// Only return the existing nodes that had pods scheduled to it
-	nominatedNodes := sets.New[*pscheduling.ExistingNode](lo.Filter(results.ExistingNodes, func(n *pscheduling.ExistingNode, _ int) bool {
-		return len(n.Pods) > 0
-	})...)
 
 	// were we able to schedule all the pods on the inflight candidates?
 	if len(results.NewNodeClaims) == 0 {
 		return Command{
 			candidates: candidates,
-		}, nominatedNodes, nil
+		}, results, nil
 	}
 
 	// we're not going to turn a single node into multiple candidates
@@ -206,7 +202,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	return Command{
 		candidates:   candidates,
 		replacements: results.NewNodeClaims,
-	}, nominatedNodes, nil
+	}, results, nil
 }
 
 // Compute command to execute spot-to-spot consolidation if:
@@ -215,7 +211,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 //     a. There are at least 15 cheapest instance type replacement options to consolidate.
 //     b. The current candidate is NOT part of the first 15 cheapest instance types inorder to avoid repeated consolidation.
 func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, candidates []*Candidate, results *pscheduling.Results,
-	candidatePrice float64) (Command, sets.Set[*pscheduling.ExistingNode], error) {
+	candidatePrice float64) (Command, *pscheduling.Results, error) {
 
 	// Spot consolidation is turned off.
 	if !options.FromContext(ctx).FeatureGates.SpotToSpotConsolidation {
@@ -242,18 +238,13 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 		return Command{}, nil, nil
 	}
 
-	// Only return the existing nodes that had pods scheduled to it
-	nominatedNodes := sets.New[*pscheduling.ExistingNode](lo.Filter(results.ExistingNodes, func(n *pscheduling.ExistingNode, _ int) bool {
-		return len(n.Pods) > 0
-	})...)
-
 	// For multi-node consolidation:
 	// We don't have any requirement to check the remaining instance type flexibility, so exit early in this case.
 	if len(candidates) > 1 {
 		return Command{
 			candidates:   candidates,
 			replacements: results.NewNodeClaims,
-		}, nominatedNodes, nil
+		}, results, nil
 	}
 
 	// For single-node consolidation:
@@ -278,7 +269,7 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 	return Command{
 		candidates:   candidates,
 		replacements: results.NewNodeClaims,
-	}, nominatedNodes, nil
+	}, results, nil
 }
 
 // getCandidatePrices returns the sum of the prices of the given candidates

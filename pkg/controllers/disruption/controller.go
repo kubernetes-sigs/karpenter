@@ -161,7 +161,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	}
 
 	// Determine the disruption action
-	cmd, nominatedNodes, err := disruption.ComputeCommand(ctx, disruptionBudgetMapping, candidates...)
+	cmd, schedulingResults, err := disruption.ComputeCommand(ctx, disruptionBudgetMapping, candidates...)
 	if err != nil {
 		return false, fmt.Errorf("computing disruption decision, %w", err)
 	}
@@ -170,7 +170,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	}
 
 	// Attempt to disrupt
-	if err := c.executeCommand(ctx, disruption, cmd, nominatedNodes); err != nil {
+	if err := c.executeCommand(ctx, disruption, cmd, schedulingResults); err != nil {
 		return false, fmt.Errorf("disrupting candidates, %w", err)
 	}
 
@@ -181,7 +181,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 // 1. Taint candidate nodes
 // 2. Spin up replacement nodes
 // 3. Add Command to orchestration.Queue to wait to delete the candiates.
-func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, nominatedNodes sets.Set[*scheduling.ExistingNode]) error {
+func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, schedulingResults *scheduling.Results) error {
 	disruptionActionsPerformedCounter.With(map[string]string{
 		actionLabel:            string(cmd.Action()),
 		methodLabel:            m.Type(),
@@ -207,6 +207,12 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, 
 			return multierr.Append(fmt.Errorf("launching replacement nodeclaim (command-id: %s), %w", commandID, err), state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...))
 		}
 	}
+
+	// Only return the existing nodes that had pods scheduled to it
+	nominatedNodes := sets.New[*scheduling.ExistingNode](lo.Filter(schedulingResults.ExistingNodes, func(n *scheduling.ExistingNode, _ int) bool {
+		return len(n.Pods) > 0
+	})...)
+
 	// Nominate each node for scheduling and emit pod nomination events
 	for node := range nominatedNodes {
 		c.cluster.NominateNodeForPod(ctx, node.ProviderID())
