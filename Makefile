@@ -1,5 +1,6 @@
 # This is the format of an AWS ECR Public Repo as an example.
-export KWOK_REPO ?= ${ACCOUNT_ID}.dkr.ecr.${DEFAULT_REGION}.amazonaws.com
+# export KWOK_REPO ?= ${ACCOUNT_ID}.dkr.ecr.${DEFAULT_REGION}.amazonaws.com
+export KWOK_REPO = carpainterkwok3.azurecr.io
 export SYSTEM_NAMESPACE=kube-system
 
 HELM_OPTS ?= --set logLevel=debug \
@@ -13,6 +14,9 @@ help: ## Display help
 
 presubmit: verify test licenses vulncheck ## Run all steps required for code to be checked in
 
+
+
+
 install-kwok: ## Install kwok provider
 	UNINSTALL_KWOK=false ./hack/install-kwok.sh
 uninstall-kwok: ## Install kwok provider
@@ -24,6 +28,16 @@ build: ## Build the Karpenter KWOK controller images using ko build
 	$(eval IMG_TAG=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 1 | cut -d ":" -f 2 -s))
 	$(eval IMG_DIGEST=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 2))
 	
+az-kwok-deps: 
+	./hack/create-aks.sh 
+	./hack/install-kwok.sh 
+
+az-kwok-all: az-kwok-deps apply 
+
+kwok-sample:
+	kubectl apply -f examples/kwok/default-nodepool.yaml
+	kubectl apply -f examples/workloads/inflate.yaml
+	kubectl scale deployment inflate --replicas 15
 
 # Run make install-kwok to install the kwok controller in your cluster first
 # Webhooks are currently not supported in the kwok provider.
