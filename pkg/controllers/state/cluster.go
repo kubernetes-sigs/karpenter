@@ -126,7 +126,7 @@ func (c *Cluster) Synced(ctx context.Context) bool {
 	// that exists in the cluster state but not in the apiserver) but it ensures that we have a state
 	// representation for every node/nodeClaim that exists on the apiserver
 	synced := stateNodeClaimNames.IsSuperset(nodeClaimNames) && stateNodeNames.IsSuperset(nodeNames)
-	metrics.ClusterStateIsSynced.With(prometheus.Labels{}).Set(lo.Ternary[float64](synced, 1, 0))
+	metrics.ClusterStateSynced.With(prometheus.Labels{}).Set(lo.Ternary[float64](synced, 1, 0))
 	return synced
 }
 
