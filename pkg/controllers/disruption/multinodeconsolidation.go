@@ -202,7 +202,8 @@ func filterOutSameType(newNodeClaim *scheduling.NodeClaim, consolidate []*Candid
 		}
 	}
 
-	return filterByPrice(newNodeClaim.InstanceTypeOptions, newNodeClaim.Requirements, maxPrice)
+	filterByPrice, _ := FilterByPriceAndFindIncompatibleRequirementWithMinValues(newNodeClaim.InstanceTypeOptions, newNodeClaim.Requirements, maxPrice)
+	return filterByPrice
 }
 
 func (m *MultiNodeConsolidation) Type() string {

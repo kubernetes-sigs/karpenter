@@ -175,11 +175,14 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		return c.computeSpotToSpotConsolidation(ctx, candidates, results, candidatePrice)
 	}
 
-	// filterByPrice returns the instanceTypes that are lower priced than the current candidate. If we use this directly for spot-to-spot consolidation
-	// we are bound to get repeated consolidations because the strategy that chooses to launch the spot instance from the list does it based on availability and price which could
-	// result in selection/launch of non-lowest priced instance in the list. So, we would keep repeating this loop till we get to lowest priced instance
+	var inCompatibleRequirementKey string
+	// FilterByPriceAndFindIncompatibleRequirementWithMinValues returns the instanceTypes that are lower priced than the current candidate and the requirement for the NodeClaim that does not meet minValues.
+	// If we use this directly for spot-to-spot consolidation, we are bound to get repeated consolidations because the strategy that chooses to launch the spot instance from the list does
+	// it based on availability and price which could result in selection/launch of non-lowest priced instance in the list. So, we would keep repeating this loop till we get to lowest priced instance
 	// causing churns and landing onto lower available spot instance ultimately resulting in higher interruptions.
-	results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions = filterByPrice(results.NewNodeClaims[0].InstanceTypeOptions, results.NewNodeClaims[0].Requirements, candidatePrice)
+	results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, inCompatibleRequirementKey =
+		FilterByPriceAndFindIncompatibleRequirementWithMinValues(results.NewNodeClaims[0].InstanceTypeOptions, results.NewNodeClaims[0].Requirements, candidatePrice)
+
 	if len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions) == 0 {
 		if len(candidates) == 1 {
 			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace with a cheaper node")...)
@@ -187,22 +190,8 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		// no instance types remain after filtering by price
 		return Command{}, nil
 	}
-
-	// We iterate over the cimulative minimum requirement of the InstanceTypeOptions to see if it meets the minValues of requirements again after filterByPrice
-	// as it may result in more constrained InstanceTypeOptions for a NodeClaim
-	// For example:
-	// Let's say the NodePool requirement has key "node.kubernetes.io/instance-type" with minValues as "3". This means that NodeClaim should
-	// contain instanceTypeOptions with atleast 3 different instance-types. So, we iterate over the InstanceTypeOptions of the NodeClaim
-	// and collect the cumulative details related to keys supporting minValues which is: fetchCumulativeMinimumRequirementsFromInstanceTypeOptions
-	// and then iterate over this to check if it meets the minValues of requirements.
-
-	// Key -> requirement key supporting MinValues
-	// value -> cumulative set of values for the key from all the instanceTypes
-	for key, value := range fetchCumulativeMinimumRequirementsFromInstanceTypeOptions(results.NewNodeClaims[0].InstanceTypeOptions, results.NewNodeClaims[0].Requirements) {
-		// Return if any of the minvalues of requirement is not honored
-		if len(value) < lo.FromPtr(results.NewNodeClaims[0].Requirements.Get(key).MinValues) {
-			return Command{}, fmt.Errorf("minimum requirement is not met for %s", key)
-		}
+	if len(inCompatibleRequirementKey) > 0 {
+		return Command{}, fmt.Errorf("minimum requirement is not met for %s", inCompatibleRequirementKey)
 	}
 
 	// We are consolidating a node from OD -> [OD,Spot] but have filtered the instance types by cost based on the
@@ -242,8 +231,10 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 	instanceTypeOptionsWithSpotOfferings :=
 		results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions.Compatible(results.NewNodeClaims[0].Requirements)
 
-	// Possible replacements that are lower priced than the current candidate
-	results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions = filterByPrice(instanceTypeOptionsWithSpotOfferings, results.NewNodeClaims[0].Requirements, candidatePrice)
+	var inCompatibleRequirementKey string
+	// Possible replacements that are lower priced than the current candidate and the requirement that is not compatible with minValues
+	results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, inCompatibleRequirementKey =
+		FilterByPriceAndFindIncompatibleRequirementWithMinValues(instanceTypeOptionsWithSpotOfferings, results.NewNodeClaims[0].Requirements, candidatePrice)
 
 	if len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions) == 0 {
 		if len(candidates) == 1 {
@@ -251,6 +242,9 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 		}
 		// no instance types remain after filtering by price
 		return Command{}, nil
+	}
+	if len(inCompatibleRequirementKey) > 0 {
+		return Command{}, fmt.Errorf("minimum requirement is not met for %s", inCompatibleRequirementKey)
 	}
 
 	// For multi-node consolidation:
@@ -270,15 +264,6 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 		c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("SpotToSpotConsolidation requires %d cheaper instance type options than the current candidate to consolidate, got %d",
 			MinInstanceTypesForSpotToSpotConsolidation, len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions)))...)
 		return Command{}, nil
-	}
-
-	// We iterate over the cimulative minimum requirement of the InstanceTypeOptions to see if it meets the minValues of requirements again after filterByPrice
-	// as it may result in more constrained InstanceTypeOptions for a NodeClaim
-	for key, value := range fetchCumulativeMinimumRequirementsFromInstanceTypeOptions(results.NewNodeClaims[0].InstanceTypeOptions, results.NewNodeClaims[0].Requirements) {
-		// Return if any of the minvalues of requirement is not honored
-		if len(value) < lo.FromPtr(results.NewNodeClaims[0].Requirements.Get(key).MinValues) {
-			return Command{}, fmt.Errorf("minimum requirement is not met for %s", key)
-		}
 	}
 
 	// Restrict the InstanceTypeOptions for launch to 15 so we don't get into a continual consolidation situation.

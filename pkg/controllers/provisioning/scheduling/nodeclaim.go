@@ -106,13 +106,9 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 
 	filtered := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, requests)
 
-	// Iterate over the minimum requirements from InstanceTypeOptions and check if it statisfies the
-	// minValues from the requirements.
-	for key, value := range filtered.cumulativeMinRequirementsFromInstanceTypes {
-		// Return if any of the minvalues of requirement is not honored
-		if len(value) < lo.FromPtr(nodeClaimRequirements.Get(key).MinValues) {
-			return fmt.Errorf("minimum requirement is not met for %s", key)
-		}
+	inCompatibleRequirementKey := FindRequirementKeyInCompatibleWithMinValues(filtered.cumulativeMinRequirementsFromInstanceTypes, nodeClaimRequirements)
+	if len(inCompatibleRequirementKey) > 0 {
+		return fmt.Errorf("minimum requirement is not met for %s", inCompatibleRequirementKey)
 	}
 
 	if len(filtered.remaining) == 0 {
@@ -304,4 +300,14 @@ func hasOffering(instanceType *cloudprovider.InstanceType, requirements scheduli
 		}
 	}
 	return false
+}
+
+func FindRequirementKeyInCompatibleWithMinValues(cumulativeMinRequirementsFromInstanceTypes map[string]sets.Set[string], requirements scheduling.Requirements) string {
+	for key, value := range cumulativeMinRequirementsFromInstanceTypes {
+		// Return if any of the minvalues of requirement is not honored
+		if len(value) < lo.FromPtr(requirements.Get(key).MinValues) {
+			return key
+		}
+	}
+	return ""
 }
