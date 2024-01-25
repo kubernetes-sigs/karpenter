@@ -399,6 +399,7 @@ spec:
                               description: Requests describes the minimum required resources for the NodeClaim to launch
                               type: object
                           type: object
+                          maxProperties: 0
                         startupTaints:
                           description: |-
                             StartupTaints are taints that are applied to nodes upon startup which are expected to be removed automatically

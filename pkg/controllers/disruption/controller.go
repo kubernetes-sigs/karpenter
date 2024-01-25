@@ -152,16 +152,9 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	if len(candidates) == 0 {
 		return false, nil
 	}
-	disruptionBudgetMapping, err := BuildDisruptionBudgets(ctx, c.cluster, c.clock, c.kubeClient)
+	disruptionBudgetMapping, err := BuildDisruptionBudgets(ctx, c.cluster, c.clock, c.kubeClient, c.recorder)
 	if err != nil {
 		return false, fmt.Errorf("building disruption budgets, %w", err)
-	}
-
-	// Emit metrics before we disrupt for allowed disruptions for each loop.
-	for nodePoolName, budget := range disruptionBudgetMapping {
-		disruptionBudgetsAllowedDisruptionsGauge.With(map[string]string{
-			metrics.NodePoolLabel: nodePoolName,
-		}).Set(float64(budget))
 	}
 
 	// Determine the disruption action

@@ -38,6 +38,7 @@ import (
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
@@ -238,7 +239,7 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 }
 
 // BuildDisruptionBudgets will return a map for nodePoolName -> numAllowedDisruptions and an error
-func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clock.Clock, kubeClient client.Client) (map[string]int, error) {
+func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clock.Clock, kubeClient client.Client, recorder events.Recorder) (map[string]int, error) {
 	nodePoolList := &v1beta1.NodePoolList{}
 	if err := kubeClient.List(ctx, nodePoolList); err != nil {
 		return nil, fmt.Errorf("listing node pools, %w", err)
@@ -277,7 +278,15 @@ func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clo
 		// Floor the value since the number of deleting nodes can exceed the number of allowed disruptions.
 		// Allowing this value to be negative breaks assumptions in the code used to calculate how
 		// many nodes can be disrupted.
-		disruptionBudgetMapping[nodePool.Name] = lo.Clamp(disruptions-deleting[nodePool.Name], 0, math.MaxInt32)
+		allowedDisruptions := lo.Clamp(disruptions-deleting[nodePool.Name], 0, math.MaxInt32)
+		disruptionBudgetMapping[nodePool.Name] = allowedDisruptions
+		// If the nodepool is fully blocked, emit an event
+		if allowedDisruptions == 0 {
+			recorder.Publish(disruptionevents.NodePoolBlocked(lo.ToPtr(nodePool)))
+		}
+		disruptionBudgetsAllowedDisruptionsGauge.With(map[string]string{
+			metrics.NodePoolLabel: nodePool.Name,
+		}).Set(float64(allowedDisruptions))
 	}
 	return disruptionBudgetMapping, nil
 }
