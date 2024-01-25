@@ -96,7 +96,7 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 		return false, nil
 	}
 	// Rebuild the disruption budget mapping to see if any budgets have changed since validation.
-	postValidationMapping, err := BuildDisruptionBudgets(ctx, v.cluster, v.clock, v.kubeClient)
+	postValidationMapping, err := BuildDisruptionBudgets(ctx, v.cluster, v.clock, v.kubeClient, v.recorder)
 	if err != nil {
 		return false, fmt.Errorf("building disruption budgets, %w", err)
 	}

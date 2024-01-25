@@ -335,7 +335,7 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		unmanaged := test.Node()
 		ExpectApplied(ctx, env.Client, unmanaged)
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{unmanaged}, []*v1beta1.NodeClaim{})
-		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client)
+		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 		Expect(err).To(Succeed())
 		// This should not bring in the unmanaged node.
 		Expect(budgets[nodePool.Name]).To(Equal(10))
@@ -364,7 +364,7 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
 
-		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client)
+		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 		Expect(err).To(Succeed())
 		// This should not bring in the uninitialized node.
 		Expect(budgets[nodePool.Name]).To(Equal(10))
@@ -384,7 +384,7 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
 		}
 
-		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client)
+		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 		Expect(err).To(Succeed())
 		Expect(budgets[nodePool.Name]).To(Equal(0))
 	})
@@ -406,7 +406,7 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
 		}
 
-		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client)
+		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 		Expect(err).To(Succeed())
 		Expect(budgets[nodePool.Name]).To(Equal(8))
 	})

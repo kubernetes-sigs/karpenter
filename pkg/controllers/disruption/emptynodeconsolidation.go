@@ -90,7 +90,7 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	// We do this so that we can re-validate that the candidates that were computed before we made the decision are the same
 	candidatesToDelete := mapCandidates(cmd.candidates, validationCandidates)
 
-	postValidationMapping, err := BuildDisruptionBudgets(ctx, c.cluster, c.clock, c.kubeClient)
+	postValidationMapping, err := BuildDisruptionBudgets(ctx, c.cluster, c.clock, c.kubeClient, c.recorder)
 	if err != nil {
 		return Command{}, fmt.Errorf("building disruption budgets, %w", err)
 	}
