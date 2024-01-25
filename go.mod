@@ -35,6 +35,8 @@ require (
 	sigs.k8s.io/controller-runtime v0.17.0
 )
 
+require github.com/evanphx/json-patch v4.12.0+incompatible // indirect
+
 require (
 	contrib.go.opencensus.io/exporter/ocagent v0.7.1-0.20200907061046-05415f1de66d // indirect
 	contrib.go.opencensus.io/exporter/prometheus v0.4.0 // indirect
