@@ -212,6 +212,8 @@ var _ = Describe("Consolidation", func() {
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(0))
 		})
 		It("should allow no empty nodes to be disrupted", func() {
+			// temporarily get the state of the cluster
+			state := cluster.ConsolidationState()
 			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "0%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -236,6 +238,8 @@ var _ = Describe("Consolidation", func() {
 			// Execute command, thus deleting all nodes
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(numNodes))
+			// Expect the cluster consolidated state to not change.
+			Expect(cluster.ConsolidationState()).To(Equal(state))
 		})
 		It("should only allow 3 nodes to be deleted in multi node consolidation delete", func() {
 			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "30%"}}
@@ -3109,6 +3113,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectExists(ctx, env.Client, nodes[1])
 		})
 	})
+
 	Context("Timeout", func() {
 		It("should return the last valid command when multi-nodeclaim consolidation times out", func() {
 			numNodes := 20
