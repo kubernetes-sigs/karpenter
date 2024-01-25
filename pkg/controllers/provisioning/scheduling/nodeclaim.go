@@ -106,9 +106,8 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 
 	filtered := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, requests)
 
-	inCompatibleRequirementKey := FindRequirementKeyInCompatibleWithMinValues(filtered.cumulativeMinRequirementsFromInstanceTypes, nodeClaimRequirements)
-	if len(inCompatibleRequirementKey) > 0 {
-		return fmt.Errorf("minimum requirement is not met for %s", inCompatibleRequirementKey)
+	if len(filtered.requirementInCompatibleWithMinValues) > 0 {
+		return fmt.Errorf("minimum requirement is not met for %s", filtered.requirementInCompatibleWithMinValues)
 	}
 
 	if len(filtered.remaining) == 0 {
@@ -162,12 +161,9 @@ type filterResults struct {
 	// requirementsAndOffering indicates if a single instance type met the scheduling requirements and was a required offering
 	requirementsAndOffering bool
 	// fitsAndOffering indicates if a single instance type had enough resources and was a required offering
-	fitsAndOffering bool
-	// Key -> requirements that support minValues
-	// set -> values accumulated over all the instanceTypes for the key that supports minValues
-	cumulativeMinRequirementsFromInstanceTypes map[string]sets.Set[string]
-
-	requests v1.ResourceList
+	fitsAndOffering                      bool
+	requirementInCompatibleWithMinValues string
+	requests                             v1.ResourceList
 }
 
 // FailureReason returns a presentable string explaining why all instance types were filtered out
@@ -280,7 +276,7 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 			}
 		}
 	}
-	results.cumulativeMinRequirementsFromInstanceTypes = cumulativeMinRequirementsFromInstanceTypes
+	results.requirementInCompatibleWithMinValues = FindRequirementKeyInCompatibleWithMinValues(cumulativeMinRequirementsFromInstanceTypes, requirements)
 	return results
 }
 

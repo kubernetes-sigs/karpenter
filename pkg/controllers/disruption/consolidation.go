@@ -45,7 +45,7 @@ import (
 const consolidationTTL = 15 * time.Second
 
 // MinInstanceTypesForSpotToSpotConsolidation is the minimum number of instanceTypes in a NodeClaim needed to trigger spot-to-spot single-node consolidation
-const MinInstanceTypesForSpotToSpotConsolidation = 15
+var MinInstanceTypesForSpotToSpotConsolidation = 15
 
 // consolidation is the base consolidation controller that provides common functionality used across the different
 // consolidation methods.
@@ -243,6 +243,7 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 		// no instance types remain after filtering by price
 		return Command{}, nil
 	}
+
 	if len(inCompatibleRequirementKey) > 0 {
 		return Command{}, fmt.Errorf("minimum requirement is not met for %s", inCompatibleRequirementKey)
 	}
@@ -257,9 +258,16 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 	}
 
 	// For single-node consolidation:
-	// We check whether we have 15 cheaper instances than the current candidate instance. If this is the case, we know the following things:
-	//   1) The current candidate is not in the set of the 15 cheapest instance types and
-	//   2) There were at least 15 options cheaper than the current candidate.
+
+	// If a user has minValues set in their NodePool that require less than 15 instance types, then the default 15 instance type minimum will continue to be enforced to enable a spot-to-spot consolidation.
+	// If minValues for the number of instance types is beyond 15, then number of instance types from minValues would be maintained to enable spot-to-spot consolidation.
+	if results.NewNodeClaims[0].Requirements.Has(v1.LabelInstanceTypeStable) && results.NewNodeClaims[0].Requirements.Get(v1.LabelInstanceTypeStable).MinValues != nil {
+		MinInstanceTypesForSpotToSpotConsolidation = lo.Max([]int{lo.FromPtr(results.NewNodeClaims[0].Requirements.Get(v1.LabelInstanceTypeStable).MinValues), MinInstanceTypesForSpotToSpotConsolidation})
+	}
+
+	// We check whether we have 15(if default) cheaper instances than the current candidate instance. If this is the case, we know the following things:
+	//   1) The current candidate is not in the set of the 15(if default) cheapest instance types and
+	//   2) There were at least 15(if default) options cheaper than the current candidate.
 	if len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions) < MinInstanceTypesForSpotToSpotConsolidation {
 		c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("SpotToSpotConsolidation requires %d cheaper instance type options than the current candidate to consolidate, got %d",
 			MinInstanceTypesForSpotToSpotConsolidation, len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions)))...)
