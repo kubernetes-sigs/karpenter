@@ -57,20 +57,21 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		if len(candidate.pods) > 0 {
 			continue
 		}
-		// If there's disruptions allowed for the candidate's nodepool,
-		// add it to the list of candidates, and decrement the budget.
-		if disruptionBudgetMapping[candidate.nodePool.Name] > 0 {
+		if disruptionBudgetMapping[candidate.nodePool.Name] == 0 {
 			// set constrainedByBudgets to true if any node was a candidate but was constrained by a budget
 			constrainedByBudgets = true
-			empty = append(empty, candidate)
-			disruptionBudgetMapping[candidate.nodePool.Name]--
+			continue
 		}
+		// If there's disruptions allowed for the candidate's nodepool,
+		// add it to the list of candidates, and decrement the budget.
+		empty = append(empty, candidate)
+		disruptionBudgetMapping[candidate.nodePool.Name]--
 	}
 	// none empty, so do nothing
 	if len(empty) == 0 {
-		// if there are no candidates because of a budget, don't mark
-		// as consolidated, as it's possible it should be consolidatable
-		// the next time we try to disrupt.
+		// if there are no candidates, but a nodepool had a fully blocking budget,
+		// don't mark the cluster as consolidated, as it's possible this nodepool
+		// should be consolidated the next time we try to disrupt.
 		if !constrainedByBudgets {
 			c.markConsolidated()
 		}

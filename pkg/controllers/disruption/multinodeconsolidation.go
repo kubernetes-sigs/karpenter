@@ -67,10 +67,10 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
 		if disruptionBudgetMapping[candidate.nodePool.Name] == 0 {
+			constrainedByBudgets = true
 			continue
 		}
 		// set constrainedByBudgets to true if any node was a candidate but was constrained by a budget
-		constrainedByBudgets = true
 		disruptableCandidates = append(disruptableCandidates, candidate)
 		disruptionBudgetMapping[candidate.nodePool.Name]--
 	}
