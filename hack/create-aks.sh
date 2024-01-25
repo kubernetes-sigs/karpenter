@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-
-export AZURE_LOCATION=westus2
-export AZURE_RESOURCE_GROUP=carpainterkwok3
-export AZURE_ACR_NAME=carpainterkwok3
-export AZURE_CLUSTER_NAME=kwokenter3
-export AZURE_RESOURCE_GROUP_MC=MC_${AZURE_RESOURCE_GROUP}_${AZURE_CLUSTER_NAME}_${AZURE_LOCATION}
+export AZURE_SUBSCRIPTION_ID=
+export AZURE_LOCATION=
+export AZURE_RESOURCE_GROUP=
+export AZURE_ACR_NAME=
+export AZURE_CLUSTER_NAME=
 
 az login
 az account set --subscription ${AZURE_SUBSCRIPTION_ID}
