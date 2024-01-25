@@ -128,5 +128,7 @@ func NodePoolBlocked(nodePool *v1beta1.NodePool) events.Event {
 		Reason:         "DisruptionBlocked",
 		Message:        "No allowed disruptions due to blocking budget",
 		DedupeValues:   []string{string(nodePool.UID)},
+		// Set a small timeout as a NodePool's disruption budget can change every minute.
+		DedupeTimeout: 1 * time.Minute,
 	}
 }
