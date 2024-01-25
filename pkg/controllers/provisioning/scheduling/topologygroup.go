@@ -61,8 +61,9 @@ type TopologyGroup struct {
 	selector   *metav1.LabelSelector
 	nodeFilter TopologyNodeFilter
 	// Index
-	owners  map[types.UID]struct{} // Pods that have this topology as a scheduling rule
-	domains map[string]int32       // TODO(ellistarn) explore replacing with a minheap
+	owners       map[types.UID]struct{} // Pods that have this topology as a scheduling rule
+	domains      map[string]int32       // TODO(ellistarn) explore replacing with a minheap
+	emptyDomains sets.Set[string]       // domains for which we know that no pod exists
 }
 
 func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod, namespaces sets.Set[string], labelSelector *metav1.LabelSelector, maxSkew int32, minDomains *int32, domains sets.Set[string]) *TopologyGroup {
@@ -76,15 +77,16 @@ func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod
 		nodeSelector = MakeTopologyNodeFilter(pod)
 	}
 	return &TopologyGroup{
-		Type:       topologyType,
-		Key:        topologyKey,
-		namespaces: namespaces,
-		selector:   labelSelector,
-		nodeFilter: nodeSelector,
-		maxSkew:    maxSkew,
-		domains:    domainCounts,
-		owners:     map[types.UID]struct{}{},
-		minDomains: minDomains,
+		Type:         topologyType,
+		Key:          topologyKey,
+		namespaces:   namespaces,
+		selector:     labelSelector,
+		nodeFilter:   nodeSelector,
+		maxSkew:      maxSkew,
+		domains:      domainCounts,
+		emptyDomains: domains.Clone(),
+		owners:       map[types.UID]struct{}{},
+		minDomains:   minDomains,
 	}
 }
 
@@ -104,6 +106,7 @@ func (t *TopologyGroup) Get(pod *v1.Pod, podDomains, nodeDomains *scheduling.Req
 func (t *TopologyGroup) Record(domains ...string) {
 	for _, domain := range domains {
 		t.domains[domain]++
+		t.emptyDomains.Delete(domain)
 	}
 }
 
@@ -118,6 +121,7 @@ func (t *TopologyGroup) Register(domains ...string) {
 	for _, domain := range domains {
 		if _, ok := t.domains[domain]; !ok {
 			t.domains[domain] = 0
+			t.emptyDomains.Insert(domain)
 		}
 	}
 }
@@ -245,6 +249,14 @@ func (t *TopologyGroup) nextDomainAffinity(pod *v1.Pod, podDomains *scheduling.R
 
 func (t *TopologyGroup) nextDomainAntiAffinity(domains *scheduling.Requirement) *scheduling.Requirement {
 	options := scheduling.NewRequirement(domains.Key, v1.NodeSelectorOpDoesNotExist)
+	// pods with anti-affinity must schedule to a domain where there are currently none of those pods (an empty
+	// domain). If there are none of those domains, then the pod can't schedule and we don't need to walk this
+	// list of domains.  The use case where this optimization is really great is when we are launching nodes for
+	// a deployment of pods with self anti-affinity.  The domains map here continues to grow, and we continue to
+	// fully scan it each iteration.
+	if len(t.emptyDomains) == 0 {
+		return options
+	}
 	for domain := range t.domains {
 		if domains.Has(domain) && t.domains[domain] == 0 {
 			options.Insert(domain)
