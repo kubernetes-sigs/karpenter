@@ -26,6 +26,8 @@ import (
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 
+	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
+
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"

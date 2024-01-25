@@ -28,6 +28,7 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	nodev1 "k8s.io/api/node/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -3384,6 +3385,222 @@ var _ = Context("NodePool", func() {
 				node2 := ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Name).ToNot(Equal(node2.Name))
 			})
+		})
+	})
+
+	Describe("Deleting Nodes", func() {
+		It("should re-schedule pods from a deleting node when pods are active", func() {
+			ExpectApplied(ctx, env.Client, nodePool)
+			pod := test.UnschedulablePod(
+				test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
+					Requests: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceMemory: resource.MustParse("100M"),
+					},
+				}})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+			Expect(node.Labels[v1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
+
+			// Mark for deletion so that we consider all pods on this node for reschedulability
+			cluster.MarkForDeletion(node.Spec.ProviderID)
+
+			// Trigger a provisioning loop and expect another node to get created
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov)
+
+			nodes := ExpectNodes(ctx, env.Client)
+			Expect(nodes).To(HaveLen(2))
+
+			// Expect both nodes to be of the same size to schedule the pod once it gets re-created
+			for _, n := range nodes {
+				Expect(n.Labels[v1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
+			}
+		})
+		It("should not re-schedule pods from a deleting node when pods are not active", func() {
+			ExpectApplied(ctx, env.Client, nodePool)
+			pod := test.UnschedulablePod(
+				test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
+					Requests: map[v1.ResourceName]resource.Quantity{
+						v1.ResourceMemory: resource.MustParse("100M"),
+					},
+				}})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+			Expect(node.Labels[v1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
+
+			// Mark for deletion so that we consider all pods on this node for reschedulability
+			cluster.MarkForDeletion(node.Spec.ProviderID)
+
+			// Trigger an eviction to set the deletion timestamp but not delete the pod
+			Expect(env.KubernetesInterface.PolicyV1().Evictions(pod.Namespace).Evict(ctx, &policyv1.Eviction{
+				ObjectMeta: metav1.ObjectMeta{Name: pod.Name, Namespace: pod.Namespace},
+			})).To(Succeed())
+			ExpectEvicted(ctx, env.Client, pod)
+			ExpectExists(ctx, env.Client, pod)
+
+			// Trigger a provisioning loop and expect that we don't create more nodes since we don't consider
+			// generic terminating pods
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov)
+
+			// We shouldn't create an additional node here because this is a standard pod
+			nodes := ExpectNodes(ctx, env.Client)
+			Expect(nodes).To(HaveLen(1))
+		})
+		It("should not re-schedule pods from a deleting node when pods are owned by a DaemonSet", func() {
+			ds := test.DaemonSet()
+			ExpectApplied(ctx, env.Client, nodePool, ds)
+
+			pod := test.UnschedulablePod(
+				test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								APIVersion:         "apps/v1",
+								Kind:               "DaemonSet",
+								Name:               ds.Name,
+								UID:                ds.UID,
+								Controller:         ptr.Bool(true),
+								BlockOwnerDeletion: ptr.Bool(true),
+							},
+						},
+					},
+					ResourceRequirements: v1.ResourceRequirements{
+						Requests: map[v1.ResourceName]resource.Quantity{
+							v1.ResourceMemory: resource.MustParse("100M"),
+						},
+					},
+				},
+			)
+			nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey:     nodePool.Name,
+						v1.LabelInstanceTypeStable:   "small-instance-type",
+						v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeOnDemand,
+						v1.LabelTopologyZone:         "test-zone-1a",
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim, node, pod)
+
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// Mark for deletion so that we consider all pods on this node for reschedulability
+			cluster.MarkForDeletion(node.Spec.ProviderID)
+
+			// Trigger an eviction to set the deletion timestamp but not delete the pod
+			Expect(env.KubernetesInterface.PolicyV1().Evictions(pod.Namespace).Evict(ctx, &policyv1.Eviction{
+				ObjectMeta: metav1.ObjectMeta{Name: pod.Name, Namespace: pod.Namespace},
+			})).To(Succeed())
+			ExpectEvicted(ctx, env.Client, pod)
+			ExpectExists(ctx, env.Client, pod)
+
+			// Trigger a provisioning loop and expect that we don't create more nodes since we don't consider
+			// generic terminating pods
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov)
+
+			// We shouldn't create an additional node here because this is a standard pod
+			nodes := ExpectNodes(ctx, env.Client)
+			Expect(nodes).To(HaveLen(1))
+		})
+		It("should not reschedule pods from a deleting node when pods are not active and they are owned by a ReplicaSet", func() {
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, nodePool, rs)
+
+			pod := test.UnschedulablePod(
+				test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								APIVersion:         "apps/v1",
+								Kind:               "ReplicaSet",
+								Name:               rs.Name,
+								UID:                rs.UID,
+								Controller:         ptr.Bool(true),
+								BlockOwnerDeletion: ptr.Bool(true),
+							},
+						},
+					},
+					ResourceRequirements: v1.ResourceRequirements{
+						Requests: map[v1.ResourceName]resource.Quantity{
+							v1.ResourceMemory: resource.MustParse("100M"),
+						},
+					},
+				},
+			)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+			Expect(node.Labels[v1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
+
+			// Mark for deletion so that we consider all pods on this node for reschedulability
+			cluster.MarkForDeletion(node.Spec.ProviderID)
+
+			// Trigger an eviction to set the deletion timestamp but not delete the pod
+			Expect(env.KubernetesInterface.PolicyV1().Evictions(pod.Namespace).Evict(ctx, &policyv1.Eviction{
+				ObjectMeta: metav1.ObjectMeta{Name: pod.Name, Namespace: pod.Namespace},
+			})).To(Succeed())
+			ExpectEvicted(ctx, env.Client, pod)
+			ExpectExists(ctx, env.Client, pod)
+
+			// Trigger a provisioning loop and expect that we don't create more nodes since we don't consider
+			// generic terminating pods
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov)
+
+			// We shouldn't create an additional node here because this is a standard pod
+			nodes := ExpectNodes(ctx, env.Client)
+			Expect(nodes).To(HaveLen(1))
+		})
+		It("should reschedule pods from a deleting node when pods are not active and they are owned by a StatefulSet", func() {
+			ss := test.StatefulSet()
+			ExpectApplied(ctx, env.Client, nodePool, ss)
+
+			pod := test.UnschedulablePod(
+				test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								APIVersion:         "apps/v1",
+								Kind:               "StatefulSet",
+								Name:               ss.Name,
+								UID:                ss.UID,
+								Controller:         ptr.Bool(true),
+								BlockOwnerDeletion: ptr.Bool(true),
+							},
+						},
+					},
+					ResourceRequirements: v1.ResourceRequirements{
+						Requests: map[v1.ResourceName]resource.Quantity{
+							v1.ResourceMemory: resource.MustParse("100M"),
+						},
+					},
+				},
+			)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+			Expect(node.Labels[v1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
+
+			// Mark for deletion so that we consider all pods on this node for reschedulability
+			cluster.MarkForDeletion(node.Spec.ProviderID)
+
+			// Trigger an eviction to set the deletion timestamp but not delete the pod
+			Expect(env.KubernetesInterface.PolicyV1().Evictions(pod.Namespace).Evict(ctx, &policyv1.Eviction{
+				ObjectMeta: metav1.ObjectMeta{Name: pod.Name, Namespace: pod.Namespace},
+			})).To(Succeed())
+			ExpectEvicted(ctx, env.Client, pod)
+			ExpectExists(ctx, env.Client, pod)
+
+			// Trigger a provisioning loop and expect another node to get created
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov)
+
+			nodes := ExpectNodes(ctx, env.Client)
+			Expect(nodes).To(HaveLen(2))
+
+			// Expect both nodes to be of the same size to schedule the pod once it gets re-created
+			for _, n := range nodes {
+				Expect(n.Labels[v1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
+			}
 		})
 	})
 })

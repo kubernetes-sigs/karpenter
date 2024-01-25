@@ -588,3 +588,14 @@ func ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx context.Context,
 		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(m))
 	}
 }
+
+func ExpectEvicted(ctx context.Context, c client.Client, pods ...*v1.Pod) {
+	GinkgoHelper()
+
+	Eventually(func(g Gomega) {
+		for _, pod := range pods {
+			g.Expect(c.Get(ctx, client.ObjectKeyFromObject(pod), pod)).To(Succeed())
+			g.Expect(pod.DeletionTimestamp.IsZero()).ToNot(BeTrue())
+		}
+	})
+}

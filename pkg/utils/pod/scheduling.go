@@ -51,7 +51,7 @@ func IsReschedulable(pod *v1.Pod) bool {
 
 // IsEvictable checks if a pod is evictable by Karpenter by ensuring that the pod:
 // - Is an active pod (isn't terminal or actively terminating)
-// - Doesn't tolerate the "karepnter.sh/disruption=disrupting" taint
+// - Doesn't tolerate the "karpenter.sh/disruption=disrupting" taint
 // - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
 func IsEvictable(pod *v1.Pod) bool {
 	return IsActive(pod) &&
@@ -62,7 +62,7 @@ func IsEvictable(pod *v1.Pod) bool {
 // IsWaitingEviction checks if this is a pod that we are waiting to be removed from the node by ensuring that the pod:
 // - Isn't a terminal pod (Failed or Succeeded)
 // - Isn't a pod that has been terminating past its terminationGracePeriodSeconds
-// - Doesn't tolerate the "karepnter.sh/disruption=disrupting" taint
+// - Doesn't tolerate the "karpenter.sh/disruption=disrupting" taint
 // - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
 func IsWaitingEviction(pod *v1.Pod, clk clock.Clock) bool {
 	return !IsTerminal(pod) &&
@@ -123,7 +123,9 @@ func IsTerminating(pod *v1.Pod) bool {
 
 func IsStuckTerminating(pod *v1.Pod, clk clock.Clock) bool {
 	// The pod DeletionTimestamp will be set to the time the pod was deleted plus its
-	// grace period in seconds. We give an additional minute as a buffer
+	// grace period in seconds. We give an additional minute as a buffer to allow
+	// pods to force delete off the node before we actually go and terminate the node
+	// so that we get less pod leaking on the cluster.
 	return IsTerminating(pod) && clk.Since(pod.DeletionTimestamp.Time) > time.Minute
 }
 

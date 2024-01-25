@@ -26,15 +26,15 @@ import (
 	"knative.dev/pkg/ptr"
 )
 
-type DeploymentOptions struct {
+type StatefulSetOptions struct {
 	metav1.ObjectMeta
 	Labels     map[string]string
 	Replicas   int32
 	PodOptions PodOptions
 }
 
-func Deployment(overrides ...DeploymentOptions) *appsv1.Deployment {
-	options := DeploymentOptions{}
+func StatefulSet(overrides ...StatefulSetOptions) *appsv1.StatefulSet {
+	options := StatefulSetOptions{}
 	for _, opts := range overrides {
 		if err := mergo.Merge(&options, opts, mergo.WithOverride); err != nil {
 			panic(fmt.Sprintf("Failed to merge deployment options: %s", err))
@@ -52,9 +52,9 @@ func Deployment(overrides ...DeploymentOptions) *appsv1.Deployment {
 		}
 	}
 	pod := Pod(options.PodOptions)
-	return &appsv1.Deployment{
+	return &appsv1.StatefulSet{
 		ObjectMeta: objectMeta,
-		Spec: appsv1.DeploymentSpec{
+		Spec: appsv1.StatefulSetSpec{
 			Replicas: ptr.Int32(options.Replicas),
 			Selector: &metav1.LabelSelector{MatchLabels: options.PodOptions.Labels},
 			Template: v1.PodTemplateSpec{
