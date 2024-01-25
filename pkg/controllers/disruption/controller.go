@@ -25,7 +25,6 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
@@ -208,14 +207,11 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, 
 		}
 	}
 
-	// Only return the existing nodes that had pods scheduled to it
-	nominatedNodes := sets.New[*scheduling.ExistingNode](lo.Filter(schedulingResults.ExistingNodes, func(n *scheduling.ExistingNode, _ int) bool {
-		return len(n.Pods) > 0
-	})...)
-
 	// Nominate each node for scheduling and emit pod nomination events
-	for node := range nominatedNodes {
-		c.cluster.NominateNodeForPod(ctx, node.ProviderID())
+	for _, node := range schedulingResults.ExistingNodes {
+		if len(node.Pods) > 0 {
+			c.cluster.NominateNodeForPod(ctx, node.ProviderID())
+		}
 		for _, pod := range node.Pods {
 			c.recorder.Publish(scheduling.NominatePodEvent(pod, node.Node, node.NodeClaim))
 		}
