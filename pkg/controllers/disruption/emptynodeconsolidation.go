@@ -39,7 +39,7 @@ func NewEmptyNodeConsolidation(consolidation consolidation) *EmptyNodeConsolidat
 //
 //nolint:gocyclo
 func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
-	if c.isConsolidated() {
+	if c.IsConsolidated() {
 		return Command{}, nil
 	}
 	candidates, err := c.sortAndFilterCandidates(ctx, candidates)

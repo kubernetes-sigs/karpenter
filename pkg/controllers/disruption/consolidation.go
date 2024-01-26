@@ -88,8 +88,8 @@ func (c *consolidation) sortAndFilterCandidates(ctx context.Context, candidates 
 	return candidates, nil
 }
 
-// isConsolidated returns true if nothing has changed since markConsolidated was called.
-func (c *consolidation) isConsolidated() bool {
+// IsConsolidated returns true if nothing has changed since markConsolidated was called.
+func (c *consolidation) IsConsolidated() bool {
 	return c.lastConsolidationState.Equal(c.cluster.ConsolidationState())
 }
 

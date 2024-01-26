@@ -42,7 +42,7 @@ func NewMultiNodeConsolidation(consolidation consolidation) *MultiNodeConsolidat
 }
 
 func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
-	if m.isConsolidated() {
+	if m.IsConsolidated() {
 		return Command{}, nil
 	}
 	candidates, err := m.sortAndFilterCandidates(ctx, candidates)
