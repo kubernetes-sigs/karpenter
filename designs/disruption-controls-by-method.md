@@ -1,17 +1,17 @@
-# Disruption Controls By Action 
+# Disruption Controls By Method 
 ## User Scenarios 
 1. Users need the capability to schedule upgrades only during business hours or within more restricted time windows. Additionally, they require a system that doesn't compromise the cost savings from consolidation when upgrades are blocked due to drift.
 2. High-Frequency Trading (HFT) firms require full compute capacity during specific operational hours, making it imperative to avoid scale-down requests for consolidation during these periods. However, outside these hours, scale-downs are acceptable.
 
 ## Known Requirements and Desired Behaviors 
-**Action and Budget Definition:** Users should be able to define an action and a corresponding budget(s).
-**Supported Actions:** All disruption actions affected by the current Budgets implementation (Consolidation, Emptiness, Expiration, Drift) should be supported.
-**Default Behavior for Unspecified Actions:** Budgets should continue to support a default behavior for all disruption actions. If an action is unspecified, it is assumed to apply to all actions.
+**Method and Budget Definition:** Users should be able to define an action and a corresponding budget(s).
+**Supported Methods:** All disruption actions affected by the current Budgets implementation (Consolidation, Emptiness, Expiration, Drift) should be supported.
+**Default Behavior for Unspecified Methods:** Budgets should continue to support a default behavior for all disruption actions. If an action is unspecified, it is assumed to apply to all actions.
 
 ### Q: How should Karpenter handle the default or undefined action case? 
 The current design involves specifying a specific number of disruptable nodes per action, which can complicate the disruption lifecycle. For example, if there's a 10-node budget for "Drift" and a separate 10-node budget for "Consolidation," but a 15-node budget for "All" determining which nodes will get disrupted becomes unclear. Would it be 10 nodes for "Drift" and 5 nodes for "Consolidation"?
 
-#### Unspecified Action as a Global Node Budget
+#### Unspecified Method as a Global Node Budget
 
 We could consider treating an undefined action as a budget for all disruption actions except for those with explicitly defined budgets. In this scenario, if a user specifies a disruption budget like this:
 
@@ -52,8 +52,8 @@ Add a simple field "action" is proposed to be added to the budgets.
 // Budget defines when Karpenter will restrict the
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
-	// Action defines the disruption action that this particular disruption budget applies to. 
-	Action DisruptionAction `json:"action,omitempty" hash:"ignore"`
+	// Method defines the disruption action that this particular disruption budget applies to. 
+	Method DisruptionMethod `json:"action,omitempty" hash:"ignore"`
 	// Nodes dictates the maximum number of NodeClaims owned by this NodePool
 	// that can be terminating at once. This is calculated by counting nodes that
 	// have a deletion timestamp set, or are actively being deleted by Karpenter.
@@ -83,14 +83,14 @@ type Budget struct {
 	Duration *metav1.Duration `json:"duration,omitempty" hash:"ignore"`
 }
 
-type DisruptionAction string 
+type DisruptionMethod string 
 
 const (
-	All DisruptionAction = "All"
-	Consolidation DisruptionAction = "Consolidation" 
-	Drift DisruptionAction = "Drift" 
-	Expiration DisruptionAction = "Expiration" 
-	Emptiness DisruptionAction = "Emptiness"
+	All DisruptionMethod = ""
+	Consolidation DisruptionMethod = "Consolidation" 
+	Drift DisruptionMethod = "Drift" 
+	Expiration DisruptionMethod = "Expiration" 
+	Emptiness DisruptionMethod = "Emptiness"
 )
 ```
 
@@ -122,7 +122,7 @@ If there are multiple active budgets, karpenter takes the most restrictive budge
 * 👍👍 Extending existing budgets api. No Breaking API Changes, completely backwards compatible  
 * 👎 Doesn't leave room for other controls based on action. Its tightly coupled with budgets, read more about this in second approach.
 
-### Approach B: Defining Per Action Controls  
+### Approach B: Defining Per Method Controls  
 Ideally, we could move all generic controls that easily map into other actions into one set of action controls, this applies to budgets and other various disruption controls that could be more generic. 
 ### Proposed Spec 
 ```go
@@ -163,14 +163,14 @@ type Budget struct {
 }
 }
 
-type DisruptionAction string 
+type DisruptionMethod string 
 
 const (
-	All DisruptionAction = ""
-	Consolidation DisruptionAction = "Consolidation" 
-	Drift DisruptionAction = "Drift" 
-	Expiration DisruptionAction = "Expiration" 
-	Emptiness DisruptionAction = "Emptiness"
+	All DisruptionMethod = ""
+	Consolidation DisruptionMethod = "Consolidation" 
+	Drift DisruptionMethod = "Drift" 
+	Expiration DisruptionMethod = "Expiration" 
+	Emptiness DisruptionMethod = "Emptiness"
 )
 ```
 #### Example 
@@ -209,7 +209,7 @@ Some of the API choices for a given action seem to follow a similar pattern. The
 
 This approach aligns well with controls that apply to all existing actions. The proposal presented here is similar to the one mentioned above in relation to the actions we allow to be defined (All, Consolidation, Drift, Expiration, Emptiness).
 
-This proposal is currently scoped for disruptionBudgets by action. However, we should also consider incorporating other generic disruption controls into the PerActionControls, even if we do not implement them immediately. Moving ConsolidateAfter and ExpireAfter into the per-action controls is a significant migration that requires careful planning and its own dedicated design. This proposal simply demonstrates a potential model that highlights the benefits of defining controls at a per-action level of granularity.
+This proposal is currently scoped for disruptionBudgets by action. However, we should also consider incorporating other generic disruption controls into the PerMethodControls, even if we do not implement them immediately. Moving ConsolidateAfter and ExpireAfter into the per-action controls is a significant migration that requires careful planning and its own dedicated design. This proposal simply demonstrates a potential model that highlights the benefits of defining controls at a per-action level of granularity.
 
 ### Pros + Cons 
 * 👍 This model starts to make more sense as we continue to add general behaviors that apply to all disruption actions where users will want control on the action level.
