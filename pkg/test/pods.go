@@ -55,6 +55,8 @@ type PodOptions struct {
 	TerminationGracePeriodSeconds *int64
 	ReadinessProbe                *v1.Probe
 	LivenessProbe                 *v1.Probe
+	PreStopSleep                  *int64
+	Command                       []string
 }
 
 type PDBOptions struct {
@@ -142,6 +144,25 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 			Conditions: options.Conditions,
 			Phase:      options.Phase,
 		},
+	}
+	// If PreStopSleep is enabled, add it to each of the containers.
+	// Can't use v1.LifecycleHandler == v1.SleepAction as that's a feature gate in Alpha 1.29.
+	// https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#hook-handler-implementations
+	if options.PreStopSleep != nil {
+		p.Spec.Containers[0].Lifecycle = &v1.Lifecycle{
+			PreStop: &v1.LifecycleHandler{
+				Exec: &v1.ExecAction{
+					Command: []string{
+						"/bin/sh",
+						"-c",
+						fmt.Sprintf("sleep %d", *options.PreStopSleep),
+					},
+				},
+			},
+		}
+	}
+	if options.Command != nil {
+		p.Spec.Containers[0].Command = options.Command
 	}
 	if options.InitImage != "" {
 		p.Spec.InitContainers = []v1.Container{{
