@@ -113,7 +113,6 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		}
 		postValidationMapping[n.nodePool.Name]--
 	}
-	// Return empty scheduling results since no empty nodes should be rescheduling any pods.
 	return cmd, scheduling.Results{}, nil
 }
 

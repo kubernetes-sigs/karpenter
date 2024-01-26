@@ -83,7 +83,6 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 		}
 	}
 	// Disrupt all empty drifted candidates, as they require no scheduling simulations.
-	// Return empty scheduling results since no empty nodes should be rescheduling any pods.
 	if len(empty) > 0 {
 		return Command{
 			candidates: empty,
