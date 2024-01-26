@@ -83,15 +83,20 @@ func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod
 		nodeSelector = MakeTopologyNodeFilter(pod, nodeTaintsPolicy, nodeAffinityPolicy)
 	}
 
-	domainCounts := map[string]int32{}
+	domains := map[string]int32{}
 	if nodeSelector.TaintPolicy == v1.NodeInclusionPolicyHonor {
 		domainGroup.ForEachToleratedDomain(pod, func(domain string) {
-			domainCounts[domain] = 0
+			domains[domain] = 0
 		})
 	} else {
 		domainGroup.ForEachDomain(func(domain string) {
-			domainCounts[domain] = 0
+			domains[domain] = 0
 		})
+	}
+
+	emptyDomains := sets.New[string]()
+	for domain := range domains {
+		emptyDomains.Insert(domain)
 	}
 
 	return &TopologyGroup{
@@ -101,8 +106,8 @@ func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod
 		selector:     labelSelector,
 		nodeFilter:   nodeSelector,
 		maxSkew:      maxSkew,
-		domains:      domainCounts,
-		emptyDomains: domains.Clone(),
+		domains:      domains,
+		emptyDomains: emptyDomains,
 		owners:       map[types.UID]struct{}{},
 		minDomains:   minDomains,
 	}

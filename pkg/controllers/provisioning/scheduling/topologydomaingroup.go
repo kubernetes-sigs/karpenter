@@ -28,7 +28,7 @@ import (
 type TopologyDomainGroup map[string][][]v1.Taint
 
 func NewTopologyDomainGroup() TopologyDomainGroup {
-	return map[string][][]v1.Taint{}
+	return TopologyDomainGroup{}
 }
 
 // Insert either adds a new domain to the TopologyDomainGroup or updates an existing domain.
