@@ -353,7 +353,6 @@ status:
   - `nodepool`: Identifies the NodePool entering the disruption window.
   - `method`: Specifies the disruption method related to the disruption window.
   - `reason`: Provides additional detail on the reason for entering the disruption window (if applicable).
-  - `timestamp`: Timestamp of when the disruption window was entered.
 
 - **Event**: `ExitingDisruptionWindow`
 - **Description**: Occurs when a NodePool exits a disruption window.
@@ -361,7 +360,6 @@ status:
   - `nodepool`: Identifies the NodePool exiting the disruption window.
   - `method`: Specifies the disruption method related to the disruption window.
   - `reason`: Provides additional detail on the reason for exiting the disruption window (if applicable).
-  - `timestamp`: Timestamp of when the disruption window was exited.
 
 - **Event**: `BudgetExceeded`
 - **Description**: Fired when the disruption actions exceed the specified budget for a NodePool.
