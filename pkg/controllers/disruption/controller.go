@@ -180,7 +180,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 // 1. Taint candidate nodes
 // 2. Spin up replacement nodes
 // 3. Add Command to orchestration.Queue to wait to delete the candiates.
-func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, schedulingResults *scheduling.Results) error {
+func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, schedulingResults scheduling.Results) error {
 	disruptionActionsPerformedCounter.With(map[string]string{
 		actionLabel:            string(cmd.Action()),
 		methodLabel:            m.Type(),
@@ -208,6 +208,14 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, 
 	}
 
 	// Nominate each node for scheduling and emit pod nomination events
+	// We emit all nominations before we exit the disruption loop as
+	// we want to ensure that nodes that are nominated are respected in the subsequent
+	// disruption reconciliation. This is essential in correctly modeling multiple
+	// disruption commands in parallel.
+	// This will only nominate nodes for 2 * batchingWindow. Once the candidates are
+	// tainted with the Karpenter taint, the provisioning controller will continue
+	// to do scheduling simulations and nominate the pods on the candidate nodes until
+	// the node is cleaned up.
 	for _, node := range schedulingResults.ExistingNodes {
 		if len(node.Pods) > 0 {
 			c.cluster.NominateNodeForPod(ctx, node.ProviderID())

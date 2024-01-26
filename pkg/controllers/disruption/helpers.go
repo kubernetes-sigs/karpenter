@@ -47,7 +47,7 @@ import (
 //nolint:gocyclo
 func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
 	candidates ...*Candidate,
-) (*pscheduling.Results, error) {
+) (pscheduling.Results, error) {
 	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
 	nodes := cluster.Nodes()
 	deletingNodes := nodes.Deleting()
@@ -61,18 +61,18 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	if _, ok := lo.Find(deletingNodes, func(n *state.StateNode) bool {
 		return candidateNames.Has(n.Name())
 	}); ok {
-		return nil, errCandidateDeleting
+		return pscheduling.Results{}, errCandidateDeleting
 	}
 
 	// We get the pods that are on nodes that are deleting
 	deletingNodePods, err := deletingNodes.ReschedulablePods(ctx, kubeClient)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
+		return pscheduling.Results{}, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
 	}
 	// start by getting all pending pods
 	pods, err := provisioner.GetPendingPods(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("determining pending pods, %w", err)
+		return pscheduling.Results{}, fmt.Errorf("determining pending pods, %w", err)
 	}
 	for _, n := range candidates {
 		pods = append(pods, n.reschedulablePods...)
@@ -82,7 +82,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		SimulationMode: true,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("creating scheduler, %w", err)
+		return pscheduling.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
 
 	deletingNodePodKeys := lo.SliceToMap(deletingNodePods, func(p *v1.Pod) (client.ObjectKey, interface{}) {

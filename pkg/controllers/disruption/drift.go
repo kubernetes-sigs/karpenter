@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -82,10 +83,11 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 		}
 	}
 	// Disrupt all empty drifted candidates, as they require no scheduling simulations.
+	// Return empty scheduling results since no empty nodes should be rescheduling any pods.
 	if len(empty) > 0 {
 		return Command{
 			candidates: empty,
-		}, results, nil
+		}, scheduling.Results{}, nil
 	}
 
 	for _, candidate := range candidates {
@@ -102,7 +104,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 			if errors.Is(err, errCandidateDeleting) {
 				continue
 			}
-			return Command{}, nil, err
+			return Command{}, scheduling.Results{}, err
 		}
 		// Emit an event that we couldn't reschedule the pods on the node.
 		if !results.AllNonPendingPodsScheduled() {
@@ -115,7 +117,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 			replacements: results.NewNodeClaims,
 		}, results, nil
 	}
-	return Command{}, nil, nil
+	return Command{}, scheduling.Results{}, nil
 }
 
 func (d *Drift) Type() string {

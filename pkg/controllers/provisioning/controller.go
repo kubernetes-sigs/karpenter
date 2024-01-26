@@ -20,44 +20,44 @@ import (
 	"context"
 	"time"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/events"
 	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
-	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
-var _ operatorcontroller.TypedController[*v1.Pod] = (*Controller)(nil)
+var _ operatorcontroller.TypedController[*v1.Pod] = (*PodController)(nil)
 
 // Controller for the resource
-type Controller struct {
+type PodController struct {
 	kubeClient  client.Client
 	provisioner *Provisioner
 	recorder    events.Recorder
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client, provisioner *Provisioner, recorder events.Recorder) operatorcontroller.Controller {
-	return operatorcontroller.Typed[*v1.Pod](kubeClient, &Controller{
+func NewPodController(kubeClient client.Client, provisioner *Provisioner, recorder events.Recorder) operatorcontroller.Controller {
+	return operatorcontroller.Typed[*v1.Pod](kubeClient, &PodController{
 		kubeClient:  kubeClient,
 		provisioner: provisioner,
 		recorder:    recorder,
 	})
 }
 
-func (c *Controller) Name() string {
-	return "provisioner.trigger"
+func (*PodController) Name() string {
+	return "provisioner.podtrigger"
 }
 
 // Reconcile the resource
-func (c *Controller) Reconcile(_ context.Context, p *v1.Pod) (reconcile.Result, error) {
+func (c *PodController) Reconcile(_ context.Context, p *v1.Pod) (reconcile.Result, error) {
 	if !pod.IsProvisionable(p) {
 		return reconcile.Result{}, nil
 	}
@@ -69,23 +69,56 @@ func (c *Controller) Reconcile(_ context.Context, p *v1.Pod) (reconcile.Result, 
 	return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+func (*PodController) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
 	return operatorcontroller.Adapt(controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1.Pod{}).
-		// Only enqueue pods that have the node name not set. We do this here so that we can enqueue the pod
-		// requests from nodes that are deleting
-		WithEventFilter(predicate.NewPredicateFuncs(func(o client.Object) bool {
-			pod, ok := o.(*v1.Pod)
-			if !ok {
-				return false
-			}
-			return pod.Spec.NodeName == ""
-		})).
-		Watches(
-			&v1.Node{},
-			nodeclaimutil.NodeEventHandlerToPods(c.kubeClient),
-		).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
+	)
+}
+
+var _ operatorcontroller.TypedController[*v1.Node] = (*NodeController)(nil)
+
+// NodeController for the resource
+type NodeController struct {
+	kubeClient  client.Client
+	provisioner *Provisioner
+	recorder    events.Recorder
+}
+
+// NewController constructs a controller instance
+func NewNodeController(kubeClient client.Client, provisioner *Provisioner, recorder events.Recorder) operatorcontroller.Controller {
+	return operatorcontroller.Typed[*v1.Node](kubeClient, &NodeController{
+		kubeClient:  kubeClient,
+		provisioner: provisioner,
+		recorder:    recorder,
+	})
+}
+
+func (*NodeController) Name() string {
+	return "provisioner.nodetrigger"
+}
+
+// Reconcile the resource
+func (c *NodeController) Reconcile(_ context.Context, n *v1.Node) (reconcile.Result, error) {
+	// If the disruption taint doesn't exist or the deletion timestamp isn't set, it's not being disrupted.
+	// We don't check the deletion timestamp here, as we expect the termination controller to eventually set
+	// the taint when it picks up the node from being deleted.
+	if !lo.Contains(n.Spec.Taints, v1beta1.DisruptionNoScheduleTaint) {
+		return reconcile.Result{}, nil
+	}
+	c.provisioner.Trigger()
+	// Continue to requeue until the node is no longer provisionable. Pods may
+	// not be scheduled as expected if new pods are created while nodes are
+	// coming online. Even if a provisioning loop is successful, the pod may
+	// require another provisioning loop to become schedulable.
+	return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
+}
+
+func (*NodeController) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
+	return operatorcontroller.Adapt(controllerruntime.
+		NewControllerManagedBy(m).
+		For(&v1.Node{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
 	)
 }
