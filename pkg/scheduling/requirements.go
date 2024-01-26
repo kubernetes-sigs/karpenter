@@ -150,17 +150,17 @@ func (r Requirements) Get(key string) *Requirement {
 	return r[key]
 }
 
-type CompatabilityOptions struct {
+type CompatibilityOptions struct {
 	AllowUndefined sets.Set[string]
 }
 
-var AllowUndefinedWellKnownLabels = func(options CompatabilityOptions) CompatabilityOptions {
+var AllowUndefinedWellKnownLabels = func(options CompatibilityOptions) CompatibilityOptions {
 	options.AllowUndefined = v1beta1.WellKnownLabels
 	return options
 }
 
 // Compatible ensures the provided requirements can loosely be met.
-func (r Requirements) Compatible(requirements Requirements, options ...functional.Option[CompatabilityOptions]) (errs error) {
+func (r Requirements) Compatible(requirements Requirements, options ...functional.Option[CompatibilityOptions]) (errs error) {
 	opts := functional.ResolveOptions(options...)
 	// Custom Labels must intersect, but if not defined are denied.
 	for key := range requirements.Keys().Difference(opts.AllowUndefined) {

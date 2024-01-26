@@ -123,7 +123,7 @@ func (t *Topology) Update(ctx context.Context, p *v1.Pod) error {
 }
 
 // Record records the topology changes given that pod p schedule on a node with the given requirements
-func (t *Topology) Record(p *v1.Pod, requirements scheduling.Requirements, compatabilityOptions ...functional.Option[scheduling.CompatabilityOptions]) {
+func (t *Topology) Record(p *v1.Pod, requirements scheduling.Requirements, compatabilityOptions ...functional.Option[scheduling.CompatibilityOptions]) {
 	// once we've committed to a domain, we record the usage in every topology that cares about it
 	for _, tc := range t.topologies {
 		if tc.Counts(p, requirements, compatabilityOptions...) {
@@ -152,7 +152,7 @@ func (t *Topology) Record(p *v1.Pod, requirements scheduling.Requirements, compa
 // affinities, anti-affinities or inverse anti-affinities.  The nodeHostname is the hostname that we are currently considering
 // placing the pod on.  It returns these newly tightened requirements, or an error in the case of a set of requirements that
 // cannot be satisfied.
-func (t *Topology) AddRequirements(podRequirements, nodeRequirements scheduling.Requirements, p *v1.Pod, compatabilityOptions ...functional.Option[scheduling.CompatabilityOptions]) (scheduling.Requirements, error) {
+func (t *Topology) AddRequirements(podRequirements, nodeRequirements scheduling.Requirements, p *v1.Pod, compatabilityOptions ...functional.Option[scheduling.CompatibilityOptions]) (scheduling.Requirements, error) {
 	requirements := scheduling.NewRequirements(nodeRequirements.Values()...)
 	for _, topology := range t.getMatchingTopologies(p, nodeRequirements, compatabilityOptions...) {
 		podDomains := scheduling.NewRequirement(topology.Key, v1.NodeSelectorOpExists)
@@ -364,7 +364,7 @@ func (t *Topology) buildNamespaceList(ctx context.Context, namespace string, nam
 
 // getMatchingTopologies returns a sorted list of topologies that either control the scheduling of pod p, or for which
 // the topology selects pod p and the scheduling of p affects the count per topology domain
-func (t *Topology) getMatchingTopologies(p *v1.Pod, requirements scheduling.Requirements, compatabilityOptions ...functional.Option[scheduling.CompatabilityOptions]) []*TopologyGroup {
+func (t *Topology) getMatchingTopologies(p *v1.Pod, requirements scheduling.Requirements, compatabilityOptions ...functional.Option[scheduling.CompatibilityOptions]) []*TopologyGroup {
 	var matchingTopologies []*TopologyGroup
 	for _, tc := range t.topologies {
 		if tc.IsOwnedBy(p.UID) {

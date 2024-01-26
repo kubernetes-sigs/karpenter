@@ -111,7 +111,7 @@ func (t *TopologyGroup) Record(domains ...string) {
 
 // Counts returns true if the pod would count for the topology, given that it schedule to a node with the provided
 // requirements
-func (t *TopologyGroup) Counts(pod *v1.Pod, requirements scheduling.Requirements, compatabilityOptions ...functional.Option[scheduling.CompatabilityOptions]) bool {
+func (t *TopologyGroup) Counts(pod *v1.Pod, requirements scheduling.Requirements, compatabilityOptions ...functional.Option[scheduling.CompatibilityOptions]) bool {
 	return t.selects(pod) && t.nodeFilter.MatchesRequirements(requirements, compatabilityOptions...)
 }
 
