@@ -115,12 +115,19 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 	return driftedReason, nil
 }
 
-// Eligible fields for static drift are described in the docs
+// Eligible fields for drift are described in the docs
 // https://karpenter.sh/docs/concepts/deprovisioning/#drift
 func areStaticFieldsDrifted(nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) cloudprovider.DriftReason {
 	nodePoolHash, foundHashNodePool := nodePool.Annotations[v1beta1.NodePoolHashAnnotationKey]
+	nodePoolVersionHash, foundVersionHashNodePool := nodePool.Annotations[v1beta1.NodePoolHashVersionAnnotationKey]
 	nodeClaimHash, foundHashNodeClaim := nodeClaim.Annotations[v1beta1.NodePoolHashAnnotationKey]
-	if !foundHashNodePool || !foundHashNodeClaim {
+	nodeClaimVersionHash, foundVersionHashNodeClaim := nodeClaim.Annotations[v1beta1.NodePoolHashVersionAnnotationKey]
+
+	if !foundHashNodePool || !foundHashNodeClaim || !foundVersionHashNodePool || !foundVersionHashNodeClaim {
+		return ""
+	}
+	// validate that the version of the crd is the same
+	if nodePoolVersionHash != nodeClaimVersionHash {
 		return ""
 	}
 	return lo.Ternary(nodePoolHash != nodeClaimHash, NodePoolDrifted, "")

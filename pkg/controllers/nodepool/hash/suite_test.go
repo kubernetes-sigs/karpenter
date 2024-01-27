@@ -30,9 +30,11 @@ import (
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
@@ -95,7 +97,7 @@ var _ = Describe("Static Drift Hash", func() {
 			},
 		})
 	})
-	It("should update the static drift hash when NodePool static field is updated", func() {
+	It("should update the drift hash when NodePool static field is updated", func() {
 		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
@@ -111,7 +113,7 @@ var _ = Describe("Static Drift Hash", func() {
 		expectedHashTwo := nodePool.Hash()
 		Expect(nodePool.Annotations).To(HaveKeyWithValue(v1beta1.NodePoolHashAnnotationKey, expectedHashTwo))
 	})
-	It("should not update the static drift hash when NodePool behavior field is updated", func() {
+	It("should not update the drift hash when NodePool behavior field is updated", func() {
 		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
@@ -133,5 +135,108 @@ var _ = Describe("Static Drift Hash", func() {
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		Expect(nodePool.Annotations).To(HaveKeyWithValue(v1beta1.NodePoolHashAnnotationKey, expectedHash))
+	})
+	It("should update nodepool hash version when the nodepool hash version is out of sync with the controller hash version", func() {
+		nodePool.Annotations = map[string]string{
+			v1beta1.NodePoolHashAnnotationKey:        "abceduefed",
+			v1beta1.NodePoolHashVersionAnnotationKey: "test",
+		}
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
+
+		expectedHash := nodePool.Hash()
+		Expect(nodePool.Annotations).To(HaveKeyWithValue(v1beta1.NodePoolHashAnnotationKey, expectedHash))
+		Expect(nodePool.Annotations).To(HaveKeyWithValue(v1beta1.NodePoolHashVersionAnnotationKey, v1beta1.NodePoolHashVersion))
+	})
+	It("should update nodepool hash versions on all nodeclaims when the hash versions don't match the controller hash version", func() {
+		nodePool.Annotations = map[string]string{
+			v1beta1.NodePoolHashAnnotationKey:        "abceduefed",
+			v1beta1.NodePoolHashVersionAnnotationKey: "test",
+		}
+		nodeClaimOne := test.NodeClaim(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{v1beta1.NodePoolLabelKey: nodePool.Name},
+				Annotations: map[string]string{
+					v1beta1.NodePoolHashAnnotationKey:        "123456",
+					v1beta1.NodePoolHashVersionAnnotationKey: "test",
+				},
+			},
+		})
+		nodeClaimTwo := test.NodeClaim(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{v1beta1.NodePoolLabelKey: nodePool.Name},
+				Annotations: map[string]string{
+					v1beta1.NodePoolHashAnnotationKey:        "123456",
+					v1beta1.NodePoolHashVersionAnnotationKey: "test",
+				},
+			},
+		})
+
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaimOne, nodeClaimTwo)
+
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		nodeClaimOne = ExpectExists(ctx, env.Client, nodeClaimOne)
+		nodeClaimTwo = ExpectExists(ctx, env.Client, nodeClaimTwo)
+
+		expectedHash := nodePool.Hash()
+		Expect(nodeClaimOne.Annotations).To(HaveKeyWithValue(v1beta1.NodePoolHashAnnotationKey, expectedHash))
+		Expect(nodeClaimOne.Annotations).To(HaveKeyWithValue(v1beta1.NodePoolHashVersionAnnotationKey, v1beta1.NodePoolHashVersion))
+		Expect(nodeClaimTwo.Annotations).To(HaveKeyWithValue(v1beta1.NodePoolHashAnnotationKey, expectedHash))
+		Expect(nodeClaimTwo.Annotations).To(HaveKeyWithValue(v1beta1.NodePoolHashVersionAnnotationKey, v1beta1.NodePoolHashVersion))
+	})
+	It("should not update nodepool hash on all nodeclaims when the hash versions match the controller hash version", func() {
+		nodePool.Annotations = map[string]string{
+			v1beta1.NodePoolHashAnnotationKey:        "abceduefed",
+			v1beta1.NodePoolHashVersionAnnotationKey: "test-version",
+		}
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{v1beta1.NodePoolLabelKey: nodePool.Name},
+				Annotations: map[string]string{
+					v1beta1.NodePoolHashAnnotationKey:        "1234564654",
+					v1beta1.NodePoolHashVersionAnnotationKey: v1beta1.NodePoolHashVersion,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		expectedHash := nodePool.Hash()
+
+		// Expect NodeClaims to have been updated to the original hash
+		Expect(nodePool.Annotations).To(HaveKeyWithValue(v1beta1.NodePoolHashAnnotationKey, expectedHash))
+		Expect(nodePool.Annotations).To(HaveKeyWithValue(v1beta1.NodePoolHashVersionAnnotationKey, v1beta1.NodePoolHashVersion))
+		Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1beta1.NodePoolHashAnnotationKey, "1234564654"))
+		Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1beta1.NodePoolHashVersionAnnotationKey, v1beta1.NodePoolHashVersion))
+	})
+	It("should not update nodepool hash on the nodeclaim if it's drifted", func() {
+		nodePool.Annotations = map[string]string{
+			v1beta1.NodePoolHashAnnotationKey:        "abceduefed",
+			v1beta1.NodePoolHashVersionAnnotationKey: "test",
+		}
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{v1beta1.NodePoolLabelKey: nodePool.Name},
+				Annotations: map[string]string{
+					v1beta1.NodePoolHashAnnotationKey:        "123456",
+					v1beta1.NodePoolHashVersionAnnotationKey: "test",
+				},
+			},
+		})
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Drifted)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		// Expect NodeClaims hash to not have been updated
+		Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1beta1.NodePoolHashAnnotationKey, "123456"))
+		Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1beta1.NodePoolHashVersionAnnotationKey, v1beta1.NodePoolHashVersion))
 	})
 })
