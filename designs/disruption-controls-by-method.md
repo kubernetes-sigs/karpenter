@@ -349,21 +349,9 @@ status:
 
 - **Event**: `EnteringDisruptionWindow`
 - **Description**: Triggered when a NodePool enters a disruption window as defined by the active budgets.
-- **Details**:
-  - `nodepool`: Identifies the NodePool entering the disruption window.
-  - `method`: Specifies the disruption method related to the disruption window.
-  - `reason`: Provides additional detail on the reason for entering the disruption window (if applicable).
 
 - **Event**: `ExitingDisruptionWindow`
 - **Description**: Occurs when a NodePool exits a disruption window.
-- **Details**:
-  - `nodepool`: Identifies the NodePool exiting the disruption window.
-  - `method`: Specifies the disruption method related to the disruption window.
-  - `reason`: Provides additional detail on the reason for exiting the disruption window (if applicable).
 
 - **Event**: `BudgetExceeded`
 - **Description**: Fired when the disruption actions exceed the specified budget for a NodePool.
-- **Details**:
-  - `nodepool`: Identifies the NodePool where the budget was exceeded.
-  - `method`: Specifies the disruption method related to the exceeded budget.
-  - `reason`: Provides additional detail on the reason for the budget exceedance.
