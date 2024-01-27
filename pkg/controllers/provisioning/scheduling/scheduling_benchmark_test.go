@@ -31,8 +31,10 @@ import (
 
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/clock"
+	fakecr "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -57,6 +59,7 @@ var r = rand.New(rand.NewSource(42))
 func BenchmarkScheduling1(b *testing.B) {
 	benchmarkScheduler(b, 400, 1)
 }
+
 func BenchmarkScheduling50(b *testing.B) {
 	benchmarkScheduler(b, 400, 50)
 }
@@ -121,13 +124,21 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	instanceTypes := fake.InstanceTypes(instanceCount)
 	cloudProvider = fake.NewCloudProvider()
 	cloudProvider.InstanceTypes = instanceTypes
-	scheduler := scheduling.NewScheduler(ctx, nil, []*scheduling.NodeClaimTemplate{scheduling.NewNodeClaimTemplate(nodePool)},
-		nil, state.NewCluster(&clock.RealClock{}, nil, cloudProvider), nil, &scheduling.Topology{},
+
+	client := fakecr.NewFakeClient()
+	pods := makeDiversePods(podCount)
+	cluster = state.NewCluster(&clock.RealClock{}, client, cloudProvider)
+	domains := map[string]sets.Set[string]{}
+	topology, err := scheduling.NewTopology(ctx, client, cluster, domains, pods)
+	if err != nil {
+		b.Fatalf("creating topology, %s", err)
+	}
+
+	scheduler := scheduling.NewScheduler(ctx, client, []*scheduling.NodeClaimTemplate{scheduling.NewNodeClaimTemplate(nodePool)},
+		nil, cluster, nil, topology,
 		map[string][]*cloudprovider.InstanceType{nodePool.Name: instanceTypes}, nil,
 		events.NewRecorder(&record.FakeRecorder{}),
 		scheduling.SchedulerOptions{})
-
-	pods := makeDiversePods(podCount)
 
 	b.ResetTimer()
 	// Pack benchmark
@@ -183,11 +194,13 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 
 func makeDiversePods(count int) []*v1.Pod {
 	var pods []*v1.Pod
-	pods = append(pods, makeGenericPods(count/7)...)
-	pods = append(pods, makeTopologySpreadPods(count/7, v1.LabelTopologyZone)...)
-	pods = append(pods, makeTopologySpreadPods(count/7, v1.LabelHostname)...)
-	pods = append(pods, makePodAffinityPods(count/7, v1.LabelHostname)...)
-	pods = append(pods, makePodAffinityPods(count/7, v1.LabelTopologyZone)...)
+	numTypes := 6
+	pods = append(pods, makeGenericPods(count/numTypes)...)
+	pods = append(pods, makeTopologySpreadPods(count/numTypes, v1.LabelTopologyZone)...)
+	pods = append(pods, makeTopologySpreadPods(count/numTypes, v1.LabelHostname)...)
+	pods = append(pods, makePodAffinityPods(count/numTypes, v1.LabelHostname)...)
+	pods = append(pods, makePodAffinityPods(count/numTypes, v1.LabelTopologyZone)...)
+	pods = append(pods, makePodAntiAffinityPods(count/numTypes, v1.LabelHostname)...)
 
 	// fill out due to count being not evenly divisible with generic pods
 	nRemaining := count - len(pods)
@@ -195,6 +208,31 @@ func makeDiversePods(count int) []*v1.Pod {
 	return pods
 }
 
+func makePodAntiAffinityPods(count int, key string) []*v1.Pod {
+	var pods []*v1.Pod
+	// all of these pods have anti-affinity to each other
+	labels := map[string]string{
+		"app": "nginx",
+	}
+	for i := 0; i < count; i++ {
+		pods = append(pods, test.Pod(
+			test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				PodAntiRequirements: []v1.PodAffinityTerm{
+					{
+						LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
+						TopologyKey:   key,
+					},
+				},
+				ResourceRequirements: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU:    randomCPU(),
+						v1.ResourceMemory: randomMemory(),
+					},
+				}}))
+	}
+	return pods
+}
 func makePodAffinityPods(count int, key string) []*v1.Pod {
 	var pods []*v1.Pod
 	for i := 0; i < count; i++ {
