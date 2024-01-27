@@ -23,10 +23,9 @@ import (
 	"strconv"
 
 	"github.com/samber/lo"
-	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
-	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
+	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"

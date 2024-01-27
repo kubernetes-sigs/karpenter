@@ -28,7 +28,6 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	nodev1 "k8s.io/api/node/v1"
-	policyv1 "k8s.io/api/policy/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -3431,9 +3430,6 @@ var _ = Context("NodePool", func() {
 			cluster.MarkForDeletion(node.Spec.ProviderID)
 
 			// Trigger an eviction to set the deletion timestamp but not delete the pod
-			Expect(env.KubernetesInterface.PolicyV1().Evictions(pod.Namespace).Evict(ctx, &policyv1.Eviction{
-				ObjectMeta: metav1.ObjectMeta{Name: pod.Name, Namespace: pod.Namespace},
-			})).To(Succeed())
 			ExpectEvicted(ctx, env.Client, pod)
 			ExpectExists(ctx, env.Client, pod)
 
@@ -3491,9 +3487,6 @@ var _ = Context("NodePool", func() {
 			cluster.MarkForDeletion(node.Spec.ProviderID)
 
 			// Trigger an eviction to set the deletion timestamp but not delete the pod
-			Expect(env.KubernetesInterface.PolicyV1().Evictions(pod.Namespace).Evict(ctx, &policyv1.Eviction{
-				ObjectMeta: metav1.ObjectMeta{Name: pod.Name, Namespace: pod.Namespace},
-			})).To(Succeed())
 			ExpectEvicted(ctx, env.Client, pod)
 			ExpectExists(ctx, env.Client, pod)
 
@@ -3538,9 +3531,6 @@ var _ = Context("NodePool", func() {
 			cluster.MarkForDeletion(node.Spec.ProviderID)
 
 			// Trigger an eviction to set the deletion timestamp but not delete the pod
-			Expect(env.KubernetesInterface.PolicyV1().Evictions(pod.Namespace).Evict(ctx, &policyv1.Eviction{
-				ObjectMeta: metav1.ObjectMeta{Name: pod.Name, Namespace: pod.Namespace},
-			})).To(Succeed())
 			ExpectEvicted(ctx, env.Client, pod)
 			ExpectExists(ctx, env.Client, pod)
 
@@ -3585,9 +3575,6 @@ var _ = Context("NodePool", func() {
 			cluster.MarkForDeletion(node.Spec.ProviderID)
 
 			// Trigger an eviction to set the deletion timestamp but not delete the pod
-			Expect(env.KubernetesInterface.PolicyV1().Evictions(pod.Namespace).Evict(ctx, &policyv1.Eviction{
-				ObjectMeta: metav1.ObjectMeta{Name: pod.Name, Namespace: pod.Namespace},
-			})).To(Succeed())
 			ExpectEvicted(ctx, env.Client, pod)
 			ExpectExists(ctx, env.Client, pod)
 

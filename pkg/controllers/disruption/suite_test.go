@@ -533,7 +533,7 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(err.Error()).To(Equal(fmt.Sprintf(`pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(pod))))
 		Expect(recorder.DetectedEvent(fmt.Sprintf(`Cannot disrupt Node: Pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(pod)))).To(BeTrue())
 	})
-	It("should not consider candidates that have do-not-disrupt pods scheduled to mirror pods", func() {
+	It("should not consider candidates that have do-not-disrupt mirror pods scheduled", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -571,7 +571,7 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(err.Error()).To(Equal(fmt.Sprintf(`pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(pod))))
 		Expect(recorder.DetectedEvent(fmt.Sprintf(`Cannot disrupt Node: Pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(pod)))).To(BeTrue())
 	})
-	It("should not consider candidates that have do-not-disrupt pods scheduled to DaemonSet pods", func() {
+	It("should not consider candidates that have do-not-disrupt daemonset pods scheduled", func() {
 		daemonSet := test.DaemonSet()
 		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
@@ -610,7 +610,7 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(err.Error()).To(Equal(fmt.Sprintf(`pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(pod))))
 		Expect(recorder.DetectedEvent(fmt.Sprintf(`Cannot disrupt Node: Pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(pod)))).To(BeTrue())
 	})
-	It("should consider candidates that have do-not-disrupt pods on terminating pods", func() {
+	It("should consider candidates that have do-not-disrupt terminating pods", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -640,7 +640,7 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(c.NodeClaim).ToNot(BeNil())
 		Expect(c.Node).ToNot(BeNil())
 	})
-	It("should consider candidates that have do-not-disrupt pods on terminal pods", func() {
+	It("should consider candidates that have do-not-disrupt terminal pods", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -943,7 +943,7 @@ var _ = Describe("Candidate Filtering", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{}, []*v1beta1.NodeClaim{nodeClaim})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nil, []*v1beta1.NodeClaim{nodeClaim})
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
@@ -1134,7 +1134,7 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(err.Error()).To(Equal(`instance type "" can't be resolved`))
 		Expect(recorder.DetectedEvent(`Cannot disrupt Node: Instance type "" not found`)).To(BeTrue())
 	})
-	It("should not consider candidates who's instance type cannot be resolved", func() {
+	It("should not consider candidates that have an instance type that cannot be resolved", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -1157,7 +1157,7 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(err.Error()).To(Equal(fmt.Sprintf("instance type %q can't be resolved", mostExpensiveInstance.Name)))
 		Expect(recorder.DetectedEvent(fmt.Sprintf("Cannot disrupt Node: Instance type %q not found", mostExpensiveInstance.Name))).To(BeTrue())
 	})
-	It("should not consider candidates who are actively being processed in the queue", func() {
+	It("should not consider candidates that are actively being processed in the queue", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -1172,7 +1172,7 @@ var _ = Describe("Candidate Filtering", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
-		Expect(queue.Add(orchestration.NewCommand([]string{}, []*state.StateNode{cluster.Nodes()[0]}, "", ""))).To(Succeed())
+		Expect(queue.Add(orchestration.NewCommand([]string{}, []*state.StateNode{cluster.Nodes()[0]}, "", "test-method", "fake-type"))).To(Succeed())
 
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
 		Expect(err).To(HaveOccurred())

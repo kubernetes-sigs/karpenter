@@ -21,7 +21,6 @@ import (
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
-	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
@@ -108,9 +107,6 @@ var _ = Describe("Emptiness", func() {
 
 		for _, p := range pods {
 			// Trigger an eviction to set the deletion timestamp but not delete the pod
-			Expect(env.KubernetesInterface.PolicyV1().Evictions(p.Namespace).Evict(ctx, &policyv1.Eviction{
-				ObjectMeta: metav1.ObjectMeta{Name: p.Name, Namespace: p.Namespace},
-			})).To(Succeed())
 			ExpectEvicted(ctx, env.Client, p)
 			ExpectExists(ctx, env.Client, p)
 		}
@@ -241,9 +237,6 @@ var _ = Describe("Emptiness", func() {
 		ExpectApplied(ctx, env.Client, pod)
 
 		// Trigger an eviction to set the deletion timestamp but not delete the pod
-		Expect(env.KubernetesInterface.PolicyV1().Evictions(pod.Namespace).Evict(ctx, &policyv1.Eviction{
-			ObjectMeta: metav1.ObjectMeta{Name: pod.Name, Namespace: pod.Namespace},
-		})).To(Succeed())
 		ExpectEvicted(ctx, env.Client, pod)
 		ExpectExists(ctx, env.Client, pod)
 
