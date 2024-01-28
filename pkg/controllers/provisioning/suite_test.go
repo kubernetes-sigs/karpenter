@@ -575,14 +575,14 @@ var _ = Describe("Provisioning", func() {
 
 			pod := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
-					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("1Gi")},
-					Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("5")},
+					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("4.9"), v1.ResourceMemory: resource.MustParse("0.9Gi")},
+					Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4.9"), v1.ResourceMemory: resource.MustParse("0.9Gi")},
 				},
 				InitContainers: []v1.Container{
 					{
 						Resources: v1.ResourceRequirements{
 							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("4"), v1.ResourceMemory: resource.MustParse("2Gi")},
-							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
+							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("2Gi")},
 						},
 					},
 					{
@@ -597,7 +597,6 @@ var _ = Describe("Provisioning", func() {
 
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
-			fmt.Println("node-capacity---", node.Status.Capacity.Cpu().Value())
 			ExpectResources(v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("10"),
 				v1.ResourceMemory: resource.MustParse("4Gi"),

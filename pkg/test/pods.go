@@ -71,6 +71,10 @@ type EphemeralVolumeTemplateOptions struct {
 	StorageClassName *string
 }
 
+const (
+	DefaultImage = "public.ecr.aws/eks-distro/kubernetes/pause:3.2"
+)
+
 // Pod creates a test pod with defaults that can be overridden by PodOptions.
 // Overrides are applied in order, with a last write wins semantic.
 func Pod(overrides ...PodOptions) *v1.Pod {
@@ -81,7 +85,7 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 		}
 	}
 	if options.Image == "" {
-		options.Image = "public.ecr.aws/eks-distro/kubernetes/pause:3.2"
+		options.Image = DefaultImage
 	}
 	var volumes []v1.Volume
 	for _, pvc := range options.PersistentVolumeClaims {
@@ -168,13 +172,13 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 		p.Spec.Overhead = options.Overhead
 	}
 	if options.InitContainers != nil {
-
 		for _, init := range options.InitContainers {
 			init.Name = RandomName()
-			init.Image = "pause"
+			if init.Image == "" {
+				init.Image = DefaultImage
+			}
 			p.Spec.InitContainers = append(p.Spec.InitContainers, init)
 		}
-
 	}
 
 	return p
