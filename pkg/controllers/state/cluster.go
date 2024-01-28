@@ -41,7 +41,6 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
@@ -126,7 +125,9 @@ func (c *Cluster) Synced(ctx context.Context) bool {
 	// that exists in the cluster state but not in the apiserver) but it ensures that we have a state
 	// representation for every node/nodeClaim that exists on the apiserver
 	synced := stateNodeClaimNames.IsSuperset(nodeClaimNames) && stateNodeNames.IsSuperset(nodeNames)
-	metrics.ClusterStateSynced.With(prometheus.Labels{}).Set(lo.Ternary[float64](synced, 1, 0))
+	ClusterStateSynced.With(prometheus.Labels{
+		SyncedKey: fmt.Sprintf("%t", synced),
+	}).Set(lo.Ternary[float64](synced, 1, 0))
 	return synced
 }
 
@@ -272,7 +273,7 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 	}
 	c.nodes[node.Spec.ProviderID] = n
 	c.nodeNameToProviderID[node.Name] = node.Spec.ProviderID
-	metrics.ClusterStateNodesGauge.WithLabelValues().Set(float64(len(c.nodes)))
+	ClusterStateNodesTotal.WithLabelValues().Set(float64(len(c.nodes)))
 	return nil
 }
 
@@ -280,7 +281,7 @@ func (c *Cluster) DeleteNode(name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.cleanupNode(name)
-	metrics.ClusterStateNodesGauge.WithLabelValues().Set(float64(len(c.nodes)))
+	ClusterStateNodesTotal.WithLabelValues().Set(float64(len(c.nodes)))
 }
 
 func (c *Cluster) UpdatePod(ctx context.Context, pod *v1.Pod) error {
