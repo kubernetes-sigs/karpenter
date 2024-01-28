@@ -1406,14 +1406,9 @@ func ExpectTriggerVerifyAction(wg *sync.WaitGroup) {
 	}()
 }
 
-<<<<<<< HEAD
 // ExpectTaintedNodeCount will assert the number of nodes and tainted nodes in the cluster and return the tainted nodes.
 func ExpectTaintedNodeCount(ctx context.Context, c client.Client, numTainted int) []*v1.Node {
 	GinkgoHelper()
-=======
-// ExpectTaintedNodes will assert the number of nodes and tainted nodes in the cluster and return the tainted nodes.
-func ExpectTaintedNodes(ctx context.Context, c client.Client, numTainted int) []*v1.Node {
->>>>>>> c0767f67 (cmoments)
 	tainted := lo.Filter(ExpectNodes(ctx, c), func(n *v1.Node, _ int) bool {
 		return lo.Contains(n.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
 	})
