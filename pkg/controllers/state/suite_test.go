@@ -68,6 +68,14 @@ var nodePool *v1beta1.NodePool
 
 const csiProvider = "fake.csi.provider"
 
+var isSyncedTrueLabels = map[string]string{
+	state.SyncedKey: "true",
+}
+
+var isSyncedFalseLabels = map[string]string{
+	state.SyncedKey: "false",
+}
+
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
@@ -1121,12 +1129,12 @@ var _ = Describe("Cluster State Sync", func() {
 			})
 			ExpectApplied(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-			ExpectMetricGaugeValue("karpenter_cluster_state_nodes_total", float64(i+1), make(map[string]string))
+			ExpectMetricGaugeValue("karpenter_state_nodes_total", float64(i+1), make(map[string]string))
 		}
 
 		Expect(cluster.Synced(ctx)).To(BeTrue())
-		ExpectMetricGaugeValue("karpenter_cluster_state_synced", 1.0, make(map[string]string))
-		ExpectMetricGaugeValue("karpenter_cluster_state_nodes_total", 1000.0, make(map[string]string))
+		ExpectMetricGaugeValue("karpenter_state_synced", 1.0, isSyncedTrueLabels)
+		ExpectMetricGaugeValue("karpenter_state_nodes_total", 1000.0, make(map[string]string))
 	})
 	It("should consider the cluster state synced when nodes don't have provider id", func() {
 		// Deploy 1000 nodes and sync them all with the cluster
@@ -1134,11 +1142,11 @@ var _ = Describe("Cluster State Sync", func() {
 			node := test.Node()
 			ExpectApplied(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-			ExpectMetricGaugeValue("karpenter_cluster_state_nodes_total", float64(i+1), make(map[string]string))
+			ExpectMetricGaugeValue("karpenter_state_nodes_total", float64(i+1), make(map[string]string))
 		}
 		Expect(cluster.Synced(ctx)).To(BeTrue())
-		ExpectMetricGaugeValue("karpenter_cluster_state_synced", 1.0, make(map[string]string))
-		ExpectMetricGaugeValue("karpenter_cluster_state_nodes_total", 1000.0, make(map[string]string))
+		ExpectMetricGaugeValue("karpenter_state_synced", 1.0, isSyncedTrueLabels)
+		ExpectMetricGaugeValue("karpenter_state_nodes_total", 1000.0, make(map[string]string))
 
 	})
 	It("should consider the cluster state synced when nodes register provider id", func() {
@@ -1148,7 +1156,7 @@ var _ = Describe("Cluster State Sync", func() {
 			nodes = append(nodes, test.Node())
 			ExpectApplied(ctx, env.Client, nodes[i])
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodes[i]))
-			ExpectMetricGaugeValue("karpenter_cluster_state_nodes_total", float64(i+1), make(map[string]string))
+			ExpectMetricGaugeValue("karpenter_state_nodes_total", float64(i+1), make(map[string]string))
 		}
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 		for i := 0; i < 1000; i++ {
@@ -1157,8 +1165,8 @@ var _ = Describe("Cluster State Sync", func() {
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodes[i]))
 		}
 		Expect(cluster.Synced(ctx)).To(BeTrue())
-		ExpectMetricGaugeValue("karpenter_cluster_state_synced", 1.0, make(map[string]string))
-		ExpectMetricGaugeValue("karpenter_cluster_state_nodes_total", 1000.0, make(map[string]string))
+		ExpectMetricGaugeValue("karpenter_state_synced", 1.0, isSyncedTrueLabels)
+		ExpectMetricGaugeValue("karpenter_state_nodes_total", 1000.0, make(map[string]string))
 	})
 	It("should consider the cluster state synced when all nodeclaims are tracked", func() {
 		// Deploy 1000 nodeClaims and sync them all with the cluster
@@ -1274,6 +1282,7 @@ var _ = Describe("Cluster State Sync", func() {
 			}
 		}
 		Expect(cluster.Synced(ctx)).To(BeFalse())
+		ExpectMetricGaugeValue("karpenter_state_synced", 0, isSyncedFalseLabels)
 	})
 	It("shouldn't consider the cluster state synced if a nodeclaim is added manually with UpdateNodeClaim", func() {
 		nodeClaim := test.NodeClaim()
@@ -1288,14 +1297,17 @@ var _ = Describe("Cluster State Sync", func() {
 
 		cluster.UpdateNodeClaim(nodeClaim)
 		Expect(cluster.Synced(ctx)).To(BeFalse())
+		ExpectMetricGaugeValue("karpenter_state_synced", 0, isSyncedFalseLabels)
 
 		ExpectApplied(ctx, env.Client, nodeClaim)
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		Expect(cluster.Synced(ctx)).To(BeFalse())
+		ExpectMetricGaugeValue("karpenter_state_synced", 0, isSyncedFalseLabels)
 
 		ExpectDeleted(ctx, env.Client, nodeClaim)
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		Expect(cluster.Synced(ctx)).To(BeTrue())
+		ExpectMetricGaugeValue("karpenter_state_synced", 1, isSyncedTrueLabels)
 	})
 })
 

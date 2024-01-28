@@ -14,21 +14,21 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package state 
+package state
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
-	"sigs.k8s.io/karpenter/pkg/metrics"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
+
+	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
 const (
 	stateSubsystem = "state"
-	SyncedKey = "synced"
+	SyncedKey      = "synced"
 )
 
 var (
-
 	ClusterStateNodesTotal = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
@@ -44,7 +44,7 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: stateSubsystem,
 			Name:      "synced",
-			Help:      "synced is 1 if the nodeclaims and nodes stored in the apiserver have the same representation in cluster state",
+			Help:      "synced validates that nodeclaims and nodes that are stored in the apiserver have the same representation in karpenter's cluster state",
 		},
 		[]string{SyncedKey},
 	)
@@ -53,6 +53,3 @@ var (
 func init() {
 	crmetrics.Registry.MustRegister(ClusterStateNodesTotal, ClusterStateSynced)
 }
-
-
-
