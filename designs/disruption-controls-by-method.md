@@ -11,8 +11,6 @@
 ### Q: How should Karpenter handle the default or undefined action case? 
 The current design involves specifying a specific number of disruptable nodes per action, which can complicate the disruption lifecycle. For example, if there's a 10-node budget for "Drift" and a separate 10-node budget for "Consolidation," but a 15-node budget for "All" determining which nodes will get disrupted becomes unclear. Would it be 10 nodes for "Drift" and 5 nodes for "Consolidation"?
 
-#### Unspecified Method as a Global Node Budget
-
 We could consider treating an undefined action as a budget for all disruption actions except for those with explicitly defined budgets. In this scenario, if a user specifies a disruption budget like this:
 
 ```yaml
@@ -60,10 +58,37 @@ The [AWS Provider](https://github.com/search?q=repo%3Aaws%2Fkarpenter-provider-a
 - K8sVersionDrift 
 - ImageVersionDrift
 
-As you can see there are quite a few cases for drift, and the type of action that is taken from these forms of drift are very different. This leads to Reasons having a place in the API.
+As you can see there are quite a few cases for drift, and the type of action that is taken from these forms of drift are very different. This leads to Drift Reasons needing a place in the api.
 
 #### Q: If all the reasons mainly apply to drift, why add a Method paired with reason rather than only allowing DriftReason and specifying that alongside drift only?
-There may a need to restrict certain types of consolidation. 
+Currently the method interface has a Type() implying that other methods also will want to specify disruption method types at a finer granularity 
+
+```go
+type Method interface {
+	ShouldDisrupt(context.Context, *Candidate) bool
+	ComputeCommand(context.Context, map[string]int, ...*Candidate) (Command, error)
+	Type() string
+	ConsolidationType() string
+}
+```
+
+#### Q: Why have the distinction between method and reason? Why not just have everything be a reason?
+#### Q: Budgets currently work by tracking deletion in total. In this new system, karpenter has to be aware of each disruption method + reason, does adding two fields Method + Reason make it harder to track how much of budget we have used? Should we add DisruptionReason to the nodeclaim? 
+To properly track nodeclaims in deleting state for each nodepool effectively and easily in cluster state adding an additional field or status condition to indicate why the nodeclaim is being disrupted/deleted  makes a lot of sense.
+##### Q: Should we have two status conditions for disruption method and disruption reason? Or should they be consolidated into one condition?
+#### Q: For a conflicting child reason, do we respect the parent method? 
+```yaml 
+spec:
+  disruption:
+    budgets:
+    - nodes: 50
+      method: "Drift" 
+      reason: "NodeImageDrift"
+    - nodes: 25 
+      method: "Drift" 
+
+```
+In this case, do we only allow for 25 disruptions for any drift method regardless of the reason?  Or Do we say that for NodeImageDrift, we allow 50 and for all other drift reasons we allow 25? I would say the ladder is the desirable behavior and easiest to reason about. 
 
 ## API Design
 ### Approach A: Add a method field to disruption Budgets 
@@ -342,6 +367,7 @@ status:
       reason: "WithinBudget"
       message: "Disruption allowed within current budget."
       lastTransitionTime: "2024-01-25T09:00:00Z"
+    - type: DisruptionReason
 ```
 
 
