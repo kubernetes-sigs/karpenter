@@ -171,6 +171,13 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 	if options.Overhead != nil {
 		p.Spec.Overhead = options.Overhead
 	}
+
+	setInitContainers(options, p)
+
+	return p
+}
+
+func setInitContainers(options PodOptions, p *v1.Pod) {
 	if options.InitContainers != nil {
 		for _, init := range options.InitContainers {
 			init.Name = RandomName()
@@ -180,8 +187,6 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 			p.Spec.InitContainers = append(p.Spec.InitContainers, init)
 		}
 	}
-
-	return p
 }
 
 // Pods creates homogeneous groups of pods based on the passed in options, evenly divided by the total pods requested
