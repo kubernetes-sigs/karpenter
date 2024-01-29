@@ -49,7 +49,7 @@ type Controller struct {
 	recorder      events.Recorder
 	clock         clock.Clock
 	cloudProvider cloudprovider.CloudProvider
-	Methods       []Method
+	methods       []Method
 	mu            sync.Mutex
 	lastRun       map[string]time.Time
 }
@@ -72,7 +72,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 		recorder:      recorder,
 		cloudProvider: cp,
 		lastRun:       map[string]time.Time{},
-		Methods: []Method{
+		methods: []Method{
 			// Expire any NodeClaims that must be deleted, allowing their pods to potentially land on currently
 			NewExpiration(clk, kubeClient, cluster, provisioner, recorder),
 			// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
@@ -124,7 +124,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	}
 
 	// Attempt different disruption methods. We'll only let one method perform an action
-	for _, m := range c.Methods {
+	for _, m := range c.methods {
 		c.recordRun(fmt.Sprintf("%T", m))
 		success, err := c.disrupt(ctx, m)
 		if err != nil {
