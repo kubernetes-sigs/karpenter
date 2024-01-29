@@ -32,7 +32,6 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
-	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
 // PodEventHandler is a watcher on v1.Pods that maps Pods to NodeClaim based on the node names
@@ -71,26 +70,6 @@ func NodeEventHandler(c client.Client) handler.EventHandler {
 			return reconcile.Request{
 				NamespacedName: client.ObjectKeyFromObject(&n),
 			}
-		})
-	})
-}
-
-func NodeEventHandlerToPods(c client.Client) handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
-		node := o.(*v1.Node)
-		if ok := lo.Contains(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint); !ok {
-			return []reconcile.Request{}
-		}
-		podList := &v1.PodList{}
-		if err := c.List(ctx, podList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
-			return []reconcile.Request{}
-		}
-		return lo.FilterMap(podList.Items, func(p v1.Pod, _ int) (reconcile.Request, bool) {
-			isReschedulable := !pod.IsTerminal(&p) && !pod.IsTerminating(&p) && !pod.IsOwnedByDaemonSet(&p) && !pod.IsOwnedByNode(&p)
-			return reconcile.Request{
-				NamespacedName: client.ObjectKeyFromObject(&p),
-				// return only pods that are reschedulable
-			}, isReschedulable
 		})
 	})
 }

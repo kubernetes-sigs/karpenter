@@ -134,7 +134,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		mid := (min + max) / 2
 		candidatesToConsolidate := candidates[0 : mid+1]
 
-		cmd, newResults, err := m.computeConsolidation(ctx, candidatesToConsolidate...)
+		cmd, results, err := m.computeConsolidation(ctx, candidatesToConsolidate...)
 		if err != nil {
 			return Command{}, scheduling.Results{}, err
 		}
@@ -151,7 +151,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		if replacementHasValidInstanceTypes || cmd.Action() == DeleteAction {
 			// We can consolidate NodeClaims [0,mid]
 			lastSavedCommand = cmd
-			lastSavedResults = newResults
+			lastSavedResults = results
 			min = mid + 1
 		} else {
 			max = mid - 1

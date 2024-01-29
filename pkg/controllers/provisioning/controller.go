@@ -36,14 +36,14 @@ import (
 
 var _ operatorcontroller.TypedController[*v1.Pod] = (*PodController)(nil)
 
-// Controller for the resource
+// PodController for the resource
 type PodController struct {
 	kubeClient  client.Client
 	provisioner *Provisioner
 	recorder    events.Recorder
 }
 
-// NewController constructs a controller instance
+// NewPodController constructs a controller instance
 func NewPodController(kubeClient client.Client, provisioner *Provisioner, recorder events.Recorder) operatorcontroller.Controller {
 	return operatorcontroller.Typed[*v1.Pod](kubeClient, &PodController{
 		kubeClient:  kubeClient,
@@ -53,7 +53,7 @@ func NewPodController(kubeClient client.Client, provisioner *Provisioner, record
 }
 
 func (*PodController) Name() string {
-	return "provisioner.podtrigger"
+	return "provisioner.trigger.pod"
 }
 
 // Reconcile the resource
@@ -86,7 +86,7 @@ type NodeController struct {
 	recorder    events.Recorder
 }
 
-// NewController constructs a controller instance
+// NewNodeController constructs a controller instance
 func NewNodeController(kubeClient client.Client, provisioner *Provisioner, recorder events.Recorder) operatorcontroller.Controller {
 	return operatorcontroller.Typed[*v1.Node](kubeClient, &NodeController{
 		kubeClient:  kubeClient,
@@ -96,7 +96,7 @@ func NewNodeController(kubeClient client.Client, provisioner *Provisioner, recor
 }
 
 func (*NodeController) Name() string {
-	return "provisioner.nodetrigger"
+	return "provisioner.trigger.node"
 }
 
 // Reconcile the resource
