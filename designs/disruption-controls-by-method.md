@@ -22,8 +22,6 @@ Add a simple field "action" is proposed to be added to the budgets.
 type Budget struct {
       // Method defines the disruption action that this particular disruption budget applies to. 
       Method DisruptionMethod `json:"action,omitempty" hash:"ignore"`
-      // Reason is the reason a particular disruptionMethod is taking a disruption action
-      Reason string `json:"reason,omitempty"`
       // Nodes dictates the maximum number of NodeClaims owned by this NodePool
       // that can be terminating at once. This is calculated by counting nodes that
       // have a deletion timestamp set, or are actively being deleted by Karpenter.
@@ -291,9 +289,9 @@ Having two separate status conditions for disruption method and disruption reaso
 ```go
 type NodeClaimStatus struct {
 	...
-	// DisruptionDetails represents the method and reason for the disruption
+	// DisruptionReason represents the method and reason for the disruption
 	// in the format of "method:reason".
-	DisruptionDetails string `json:"disruptionDetails,omitempty"`
+	DisruptionReason string `json:"disruptionDetails,omitempty"`
 	...
 }
 ```
@@ -377,7 +375,7 @@ func (in *StateNode) MarkedForDeletion() bool {
 }
 ```
 Rather than this function that simply looks for a nodeclaims/nodes deletion timestamp, we will need to include some marking on the nodes indicating why they were deleted.
-We can use the `DisruptionDetails` to determine why a given nodeclaim was disrupted, then track in cluster state the current number of nodeclaims that are in a deleting state.
+We can use the `DisruptionReason` to determine why a given nodeclaim was disrupted, then track in cluster state the current number of nodeclaims that are in a deleting state.
 
 ## Observability and Supportability 
 One major aspect to budgets that is missing is a proper monitoring story. The monitoring story can be broken into the following categories 
