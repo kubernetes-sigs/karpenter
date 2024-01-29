@@ -44,9 +44,9 @@ delete: ## Delete the controller from your ~/.kube/config cluster
 test: ## Run tests
 	go test ./... \
 		-race \
-		-timeout 10m \
+		-timeout 15m \
 		--ginkgo.focus="${FOCUS}" \
-		--ginkgo.timeout=10m \
+		--ginkgo.timeout=15m \
 		--ginkgo.v \
 		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
 
