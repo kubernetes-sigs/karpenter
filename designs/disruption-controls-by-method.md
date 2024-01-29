@@ -156,26 +156,26 @@ spec:
     defaults:
       budgets: 
         - nodes: 10% 
-	  schedule: "0 0 1 * *"
-	  duration: 1h 
+          schedule: "0 0 1 * *"
+          duration: 1h 
     consolidation:
       consolidationPolicy: WhenUnderutilized
       disruptAfter: "30m"
     drift:
       budgets:
-      - nodes: "20%"
-        schedule: "0 0 1 * *"
-        duration: "1h"
-        drift:
-          disruptAfter: "1h"
-          budgets:
-      - nodes: "10%"
-        reason: "NodeImageDrift"
-        schedule: "0 0 * * 0"
-        duration: "2h"
-      - nodes: "50%" 
-        reason: "K8sVersionUpgrade"
-        schedule: "@yearly"
+        - nodes: "20%"
+          schedule: "0 0 1 * *"
+          duration: "1h"
+          drift:
+            disruptAfter: "1h"
+            budgets:
+              - nodes: "10%"
+                reason: "NodeImageDrift"
+                schedule: "0 0 * * 0"
+                duration: "2h"
+              - nodes: "50%" 
+                reason: "K8sVersionUpgrade"
+                schedule: "@yearly"
     expiration:
       disruptAfter: "Never"
 ```
@@ -183,7 +183,8 @@ spec:
 #### Reasons
 In this design, rather than methods being defined at the budget level, we add an additonal layer of abstraction. Then for each budget, we apply a reason or All/Undefined. If reason isn't specifed in a budget we take the same behavior in terms of fallback for all on these method types.
 
-This design allows for simplification of reason as its very easy to directly define a relationship between a given disruption method and its subaction since the disruption method is explicitly declared. 
+This design allows for simplification of reason as its very easy to directly define a relationship between a given disruption method and its sub-action since the disruption method is explicitly declared. 
+
 
 #### Considerations 
 Some of the API choices for a given action seem to follow a similar pattern. These include ConsolidateAfter, ExpireAfter, and there are discussions about introducing a global DisruptAfter. Moreover, when discussing disruption budgets, we talk about adding behavior for each action. It appears there is a need for disruption controls within the budgets for each action, not just overall.
@@ -269,6 +270,8 @@ type Method interface {
 }
 ```
 
+
+
 #### Q: Why have the distinction between method and reason? Why not just have everything be a reason?
 The distinction between method and reason is crucial for providing both a high-level and a granular control over disruptions. The method corresponds to the type of disruption action, such as "Drift" or "Consolidation", which is a broad category of disruption. Within each method, there can be multiple reasons that provide specific context for the disruption, such as "AMIDrift" in the case of AWS.
 
@@ -277,6 +280,8 @@ By separating method and reason, Karpenter allows users to define budgets and po
 Moreover, the distinction helps in maintaining clarity and organization within the API. It allows for a structured way to handle disruptions, where methods can be seen as categories, and reasons as subcategories. This hierarchy makes it easier for users to navigate and understand the disruption policies they have set up.
 
 This also allows karpenter to easily tell inside of the disruption controller which actions it needs to be looking for when checking Type(). Without this top method, it becomes much more challenging to match a Type() with a Reason. 
+
+Alternatively we could do `method:reason`, then omit `:reason` to specify only the method granularity on a budget. But with this input coming from users, we will see more complex validation 
 
 #### Q: Budgets currently work by tracking deletion in total. In this new system, karpenter has to be aware of each disruption method + reason, does adding two fields Method + Reason make it harder to track how much of budget we have used? Should we add DisruptionReason to the nodeclaim? 
 To properly track nodeclaims in deleting state for each nodepool effectively and easily in cluster state adding an additional field or status condition to indicate why the nodeclaim is being disrupted/deleted  makes a lot of sense. A single reason makes it easier to track on the nodeclaim.
@@ -305,6 +310,74 @@ spec:
 
 ```
 In this case, do we only allow for 25 disruptions for any drift method regardless of the reason?  Or Do we say that for NodeImageDrift, we allow 50 and for all other drift reasons we allow 25? I would say the ladder is the desirable behavior and easiest to reason about.
+
+
+#### Q: How should karpenter track node deletion by reason
+To answer this question we can first answer, how does the disruption budgets implementation track node deletion today? 
+
+```go
+// BuildDisruptionBudgets will return a map for nodePoolName[key] -> numAllowedDisruptions and an error
+func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clock.Clock, kubeClient client.Client) (map[string]int, error) {
+	nodePoolList := &v1beta1.NodePoolList{}
+	if err := kubeClient.List(ctx, nodePoolList); err != nil {
+		return nil, fmt.Errorf("listing node pools, %w", err)
+	}
+	numNodes := map[string]int{}
+	deleting := map[string]int{}
+	disruptionBudgetMapping := map[string]int{}
+	// We need to get all the nodes in the cluster
+	// Get each current active number of nodes per nodePool
+	// Get the max disruptions for each nodePool
+	// Get the number of deleting nodes for each of those nodePools
+	// Find the difference to know how much left we can disrupt
+	nodes := cluster.Nodes()
+	for _, node := range nodes {
+		// We only consider nodes that we own and are initialized towards the total.
+		// If a node is launched/registered, but not initialized, pods aren't scheduled
+		// to the node, and these are treated as unhealthy until they're cleaned up.
+		// This prevents odd roundup cases with percentages where replacement nodes that
+		// aren't initialized could be counted towards the total, resulting in more disruptions
+		// to active nodes than desired, where Karpenter should wait for these nodes to be
+		// healthy before continuing.
+		if !node.Managed() || !node.Initialized() {
+			continue
+		}
+		nodePool := node.Labels()[v1beta1.NodePoolLabelKey]
+		if node.MarkedForDeletion() {
+			deleting[nodePool]++
+		}
+		numNodes[nodePool]++
+	}
+
+	for i := range nodePoolList.Items {
+		nodePool := nodePoolList.Items[i]
+		disruptions := nodePool.MustGetAllowedDisruptions(ctx, clk, numNodes[nodePool.Name])
+		// Subtract the allowed number of disruptions from the number of already deleting nodes.
+		// Floor the value since the number of deleting nodes can exceed the number of allowed disruptions.
+		// Allowing this value to be negative breaks assumptions in the code used to calculate how
+		// many nodes can be disrupted.
+		disruptionBudgetMapping[nodePool.Name] = lo.Clamp(disruptions-deleting[nodePool.Name], 0, math.MaxInt32)
+	}
+	return disruptionBudgetMapping, nil
+}
+```
+The disruption budgets used by karpenter today will check the minimum allowed disruptions specified in all the budgets, minus the number of nodes currently undergoing disruption.
+
+This implementation will have to change, and karpenter cluster state will have to become aware of the reason for node deletion.
+
+```go
+func (in *StateNode) MarkedForDeletion() bool {
+	// The Node is marked for deletion if:
+	//  1. The Node has MarkedForDeletion set
+	//  2. The Node has a NodeClaim counterpart and is actively deleting
+	//  3. The Node has no NodeClaim counterpart and is actively deleting
+	return in.markedForDeletion ||
+		(in.NodeClaim != nil && !in.NodeClaim.DeletionTimestamp.IsZero()) ||
+		(in.Node != nil && in.NodeClaim == nil && !in.Node.DeletionTimestamp.IsZero())
+}
+```
+Rather than this function that simply looks for a nodeclaims/nodes deletion timestamp, we will need to include some marking on the nodes indicating why they were deleted.
+We can use the `DisruptionDetails` to determine why a given nodeclaim was disrupted, then track in cluster state the current number of nodeclaims that are in a deleting state.
 
 ## Observability and Supportability 
 One major aspect to budgets that is missing is a proper monitoring story. The monitoring story can be broken into the following categories 
@@ -373,7 +446,7 @@ status:
 ```
 
 #### NodeClaimConditions
-
+We want to communicate when 
 ```yaml 
 kind: NodeClaim
 status:
@@ -383,11 +456,6 @@ status:
       reason: "BudgetExceeded"
       message: "Disruption restricted due to budget limitations."
       lastTransitionTime: "2024-01-25T10:00:00Z"
-    - type: "DisruptionAllowed"
-      status: "True|False"
-      reason: "WithinBudget"
-      message: "Disruption allowed within current budget."
-      lastTransitionTime: "2024-01-25T09:00:00Z"
 ```
 
 
@@ -400,4 +468,4 @@ status:
 - **Description**: Occurs when a NodePool exits a disruption window.
 
 - **Event**: `BudgetExceeded`
-- **Description**: Fired when the disruption actions exceed the specified budget for a NodePool.
+- **Description**: Fired when the disruption actions exceed the specified budget for a NodePool
