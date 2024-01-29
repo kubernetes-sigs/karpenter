@@ -62,7 +62,7 @@ var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
 	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *orchestration.Queue,
 ) *Controller {
-	c := makeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)
+	c := MakeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)
 	return &Controller{
 		queue:         queue,
 		clock:         clk,

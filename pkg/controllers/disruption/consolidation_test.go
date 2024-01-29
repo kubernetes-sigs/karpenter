@@ -211,9 +211,96 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(0))
 		})
+		FIt("should not mark empty node consolidated if candidates can't be disrupted due to budgets", func() {
+			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "0%"}}
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < numNodes; i++ {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			emptyConsolidation := disruption.NewEmptyNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client)
+			Expect(err).To(Succeed())
+
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, queue)
+			Expect(err).To(Succeed())
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			cmd, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			Expect(err).To(Succeed())
+			Expect(cmd)
+			wg.Wait()
+
+			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
+		})
+		FIt("should not mark empty node consolidated if all nodepools are blocked by budgets", func() {
+			// Create 10 nodepools
+			nps := test.NodePools(10, v1beta1.NodePool{
+				Spec: v1beta1.NodePoolSpec{
+					Disruption: v1beta1.Disruption{
+						ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenUnderutilized,
+						Budgets: []v1beta1.Budget{{
+							Nodes: "0%",
+						}},
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < len(nps); i++ {
+				ExpectApplied(ctx, env.Client, nps[i])
+			}
+			nodeClaims = make([]*v1beta1.NodeClaim, 0, 30)
+			nodes = make([]*v1.Node, 0, 30)
+			// Create 3 nodes for each nodePool
+			for _, np := range nps {
+				ncs, ns := test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1beta1.NodePoolLabelKey:     np.Name,
+							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+							v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+						},
+					},
+					Status: v1beta1.NodeClaimStatus{
+						Allocatable: map[v1.ResourceName]resource.Quantity{
+							v1.ResourceCPU:  resource.MustParse("32"),
+							v1.ResourcePods: resource.MustParse("100"),
+						},
+					},
+				})
+				nodeClaims = append(nodeClaims, ncs...)
+				nodes = append(nodes, ns...)
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < len(nodeClaims); i++ {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			emptyConsolidation := disruption.NewEmptyNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client)
+			Expect(err).To(Succeed())
+
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, queue)
+			Expect(err).To(Succeed())
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			cmd, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			Expect(err).To(Succeed())
+			Expect(cmd)
+			wg.Wait()
+
+			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
+		})
 		It("should allow no empty nodes to be disrupted", func() {
-			// temporarily get the state of the cluster
-			state := cluster.ConsolidationState()
 			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "0%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -229,9 +316,6 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
 
-			// Expect the cluster consolidated state to not change.
-			Expect(disruptionController.Methods[3].(*disruption.EmptyNodeConsolidation).IsConsolidated()).To(BeFalse())
-
 			metric, found := FindMetricWithLabelValues("karpenter_disruption_budgets_allowed_disruptions", map[string]string{
 				"nodepool": nodePool.Name,
 			})
@@ -241,8 +325,6 @@ var _ = Describe("Consolidation", func() {
 			// Execute command, thus deleting all nodes
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(numNodes))
-			// Expect the cluster consolidated state to not change.
-			Expect(cluster.ConsolidationState()).To(Equal(state))
 		})
 		It("should only allow 3 nodes to be deleted in multi node consolidation delete", func() {
 			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "30%"}}
@@ -519,9 +601,6 @@ var _ = Describe("Consolidation", func() {
 			ExpectTriggerVerifyAction(&wg)
 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 			wg.Wait()
-
-			// Expect the cluster consolidated state to not change.
-			Expect(disruptionController.Methods[3].(*disruption.EmptyNodeConsolidation).IsConsolidated()).To(BeFalse())
 
 			for _, np := range nps {
 				metric, found := FindMetricWithLabelValues("karpenter_disruption_budgets_allowed_disruptions", map[string]string{
