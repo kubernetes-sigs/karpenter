@@ -3,13 +3,12 @@
 1. Users need the capability to schedule upgrades only during business hours or within more restricted time windows. Additionally, they require a system that doesn't compromise the cost savings from consolidation when upgrades are blocked due to drift.
 2. High-Frequency Trading (HFT) firms require full compute capacity during specific operational hours, making it imperative to avoid scale-down requests for consolidation during these periods. However, outside these hours, scale-downs are acceptable.
 
-## Known Requirements and Desired Behaviors 
+## Known Requirements 
 **Method and Budget Definition:** Users should be able to define an action and a corresponding budget(s).
 **Supported Methods:** All disruption methods affected by the current Budgets implementation (Consolidation, Emptiness, Expiration, Drift) should be supported.
 **Supported Reasons** All disruption methods may have a child Reason EX: Drift has AMIDrift. We must support any cloudprovider.DriftReason in the budgets to allow control on node image upgrade vs other types of drift. 
-**Default Behavior for Unspecified Methods:** Budgets should continue to support a default behavior for all disruption actions. If an action is unspecified, it is assumed to apply to all actions. If a reason is unspecifed, we apply the budget to be shared by all reasons that are unspecified. 
+**Default Behavior for Unspecified Methods:** Budgets should continue to support a default behavior for all disruption actions. If an action is unspecified, it is assumed to apply to all actions. If a reason is unspecified, we apply the budget to be shared by all reasons that are unspecified. 
 
-Further Clarification of behavioral questions will be in a section after the API Design 
 
 ## API Design
 ### Approach A: Add a method field to disruption Budgets 
@@ -72,12 +71,16 @@ metadata:
 spec: # This is not a complete NodePool Spec.
   disruption:
     budgets:
-    # On Weekdays during business hours, do not drift nodes 
-    - schedule: "0 0 1 * *"
+    - schedule: "* * * * *"
       action: Drift
-      nodes: 15
-    # Every other time for all actions that are not Drift, only allow 10 nodes to be deprovisioned simultaneously
-    - nodes: 10
+      nodes: 10
+    - schedule: "* * * * *"
+      action: Drift
+      nodes: 10
+    # For all other actions , only allow 5 nodes to be disrupted at a time
+    - nodes: 5
+      schedule: "* * * * *"
+
 ```
 
 In the original proposed spec, karpenter allows the user to specify up to [50 budgets](https://github.com/kubernetes-sigs/karpenter/blob/main/pkg/apis/v1beta1/nodepool.go#L96)
@@ -90,6 +93,7 @@ If there are multiple active budgets, karpenter takes the most restrictive budge
 * 👎 With action being clearly tied to budgets, and other api logic being driven by disruption Method, we lose the chance to generalize per method controls 
 * 👎👎 Adds complexity to understanding which disruptionMethod is associated with a particular disruption reason. 
 * 👎 Makes validation of a particular disruption 
+
 ### Approach B: Defining Per Method Controls  
 Ideally, we could move all generic controls that easily map into other actions into one set of action controls, this applies to budgets and other various disruption controls that could be more generic. 
 ### Proposed Spec 
@@ -164,22 +168,19 @@ spec:
         - nodes: "20%"
           schedule: "0 0 1 * *"
           duration: "1h"
-          drift:
-            disruptAfter: "1h"
-            budgets:
-              - nodes: "10%"
-                reason: "NodeImageDrift"
-                schedule: "0 0 * * 0"
-                duration: "2h"
-              - nodes: "50%" 
-                reason: "K8sVersionUpgrade"
-                schedule: "@yearly"
+        - nodes: "10%"
+          reason: "NodeImageDrift"
+          schedule: "0 0 * * 0"
+          duration: "2h"
+        - nodes: "50%" 
+          reason: "K8sVersionUpgrade"
+          schedule: "@yearly"
     expiration:
       disruptAfter: "Never"
 ```
 
 #### Reasons
-In this design, rather than methods being defined at the budget level, we add an additonal layer of abstraction. Then for each budget, we apply a reason or All/Undefined. If reason isn't specifed in a budget we take the same behavior in terms of fallback for all on these method types.
+Rather than methods being defined at the budget level, we add an additonal layer of abstraction. Then for each budget, we apply a reason or All/Undefined. If reason isn't specifed in a budget we take the same behavior in terms of fallback for all on these method types.
 
 This design allows for simplification of reason as its very easy to directly define a relationship between a given disruption method and its sub-action since the disruption method is explicitly declared. 
 
