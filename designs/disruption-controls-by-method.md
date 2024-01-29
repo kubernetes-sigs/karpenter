@@ -9,7 +9,7 @@
 **Supported Reasons** All disruption methods may have a child Reason EX: Drift has AMIDrift. We must support any cloudprovider.DriftReason in the budgets to allow control on node image upgrade vs other types of drift. 
 **Default Behavior for Unspecified Methods:** Budgets should continue to support a default behavior for all disruption actions. If an action is unspecified, it is assumed to apply to all actions. If a reason is unspecifed, we apply the budget to be shared by all reasons that are unspecified. 
 
-Further Clarification of requirements are specified lower in the document.
+Further Clarification of behavioral questions will be in a section after the API Design 
 
 ## API Design
 ### Approach A: Add a method field to disruption Budgets 
@@ -20,37 +20,37 @@ Add a simple field "action" is proposed to be added to the budgets.
 // Budget defines when Karpenter will restrict the
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
-	// Method defines the disruption action that this particular disruption budget applies to. 
-	Method DisruptionMethod `json:"action,omitempty" hash:"ignore"`
-	// Reason is the reason a particular disruptionMethod is taking a disruption action
-	Reason string `json:"reason,omitempty"`
-	// Nodes dictates the maximum number of NodeClaims owned by this NodePool
-	// that can be terminating at once. This is calculated by counting nodes that
-	// have a deletion timestamp set, or are actively being deleted by Karpenter.
-	// This field is required when specifying a budget.
-	// This cannot be of type intstr.IntOrString since kubebuilder doesn't support pattern
-	// checking for int nodes for IntOrString nodes.
-	// Ref: https://github.com/kubernetes-sigs/controller-tools/blob/55efe4be40394a288216dab63156b0a64fb82929/pkg/crd/markers/validation.go#L379-L388
-	// +kubebuilder:validation:Pattern:="^((100|[0-9]{1,2})%|[0-9]+)$"
-	// +kubebuilder:default:="10%"
-	Nodes string `json:"nodes" hash:"ignore"`
-	// Schedule specifies when a budget begins being active, following
-	// the upstream cronjob syntax. If omitted, the budget is always active.
-	// Timezones are not supported.
-	// This field is required if Duration is set.
-	// +kubebuilder:validation:Pattern:=`^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$`
-	// +optional
-	Schedule *string `json:"schedule,omitempty" hash:"ignore"`
-	// Duration determines how long a Budget is active since each Schedule hit.
-	// Only minutes and hours are accepted, as cron does not work in seconds.
-	// If omitted, the budget is always active.
-	// This is required if Schedule is set.
-	// This regex has an optional 0s at the end since the duration.String() always adds
-	// a 0s at the end.
-	// +kubebuilder:validation:Pattern=`^([0-9]+(m|h)+(0s)?)$`
-	// +kubebuilder:validation:Type="string"
-	// +optional
-	Duration *metav1.Duration `json:"duration,omitempty" hash:"ignore"`
+      // Method defines the disruption action that this particular disruption budget applies to. 
+      Method DisruptionMethod `json:"action,omitempty" hash:"ignore"`
+      // Reason is the reason a particular disruptionMethod is taking a disruption action
+      Reason string `json:"reason,omitempty"`
+      // Nodes dictates the maximum number of NodeClaims owned by this NodePool
+      // that can be terminating at once. This is calculated by counting nodes that
+      // have a deletion timestamp set, or are actively being deleted by Karpenter.
+      // This field is required when specifying a budget.
+      // This cannot be of type intstr.IntOrString since kubebuilder doesn't support pattern
+      // checking for int nodes for IntOrString nodes.
+      // Ref: https://github.com/kubernetes-sigs/controller-tools/blob/55efe4be40394a288216dab63156b0a64fb82929/pkg/crd/markers/validation.go#L379-L388
+      // +kubebuilder:validation:Pattern:="^((100|[0-9]{1,2})%|[0-9]+)$"
+      // +kubebuilder:default:="10%"
+      Nodes string `json:"nodes" hash:"ignore"`
+      // Schedule specifies when a budget begins being active, following
+      // the upstream cronjob syntax. If omitted, the budget is always active.
+      // Timezones are not supported.
+      // This field is required if Duration is set.
+      // +kubebuilder:validation:Pattern:=`^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$`
+      // +optional
+      Schedule *string `json:"schedule,omitempty" hash:"ignore"`
+      // Duration determines how long a Budget is active since each Schedule hit.
+      // Only minutes and hours are accepted, as cron does not work in seconds.
+      // If omitted, the budget is always active.
+      // This is required if Schedule is set.
+      // This regex has an optional 0s at the end since the duration.String() always adds
+      // a 0s at the end.
+      // +kubebuilder:validation:Pattern=`^([0-9]+(m|h)+(0s)?)$`
+      // +kubebuilder:validation:Type="string"
+      // +optional
+      Duration *metav1.Duration `json:"duration,omitempty" hash:"ignore"`
 }
 
 type DisruptionMethod string 
