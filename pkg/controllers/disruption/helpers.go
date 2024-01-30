@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	utilsnode "sigs.k8s.io/karpenter/pkg/utils/node"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
@@ -219,7 +220,10 @@ func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clo
 			continue
 		}
 		nodePool := node.Labels()[v1beta1.NodePoolLabelKey]
-		if node.MarkedForDeletion() {
+		// If the node satisfies one of the following, we subtract it from the allowed disruptions.
+		// 1. Has a NotReady conditiion
+		// 2. Is marked as deleting
+		if cond := utilsnode.GetCondition(node.Node, v1.NodeReady); cond.Status != v1.ConditionTrue || node.MarkedForDeletion() {
 			deleting[nodePool]++
 		}
 		numNodes[nodePool]++

@@ -410,6 +410,25 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		Expect(err).To(Succeed())
 		Expect(budgets[nodePool.Name]).To(Equal(8))
 	})
+	It("should consider not ready nodes to the disruption count", func() {
+		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "100%"}}
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		ExpectMakeNodesNotReady(ctx, env.Client, nodes[0], nodes[1])
+
+		// Mark all nodeclaims as marked for deletion
+		for _, i := range nodeClaims {
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(i))
+		}
+		// Mark all nodes as marked for deletion
+		for _, i := range nodes {
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
+		}
+
+		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
+		Expect(err).To(Succeed())
+		Expect(budgets[nodePool.Name]).To(Equal(8))
+	})
 })
 
 var _ = Describe("Pod Eviction Cost", func() {
