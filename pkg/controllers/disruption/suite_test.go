@@ -47,6 +47,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -595,142 +596,6 @@ var _ = Describe("Disruption Taints", func() {
 
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
 		Expect(node.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
-	})
-})
-
-var _ = Describe("BuildDisruptionBudgetMapping", func() {
-	var nodePool *v1beta1.NodePool
-	var nodeClaims []*v1beta1.NodeClaim
-	var nodes []*v1.Node
-	var numNodes int
-	BeforeEach(func() {
-		numNodes = 10
-		nodePool = test.NodePool()
-		nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Finalizers: []string{"karpenter.sh/test-finalizer"},
-				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey:     nodePool.Name,
-					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
-				},
-			},
-			Status: v1beta1.NodeClaimStatus{
-				Allocatable: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU:  resource.MustParse("32"),
-					v1.ResourcePods: resource.MustParse("100"),
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, nodePool)
-
-		for i := 0; i < numNodes; i++ {
-			ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
-		}
-
-		// inform cluster state about nodes and nodeclaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-	})
-	It("should not consider nodes that are not managed as part of disruption count", func() {
-		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "100%"}}
-		ExpectApplied(ctx, env.Client, nodePool)
-		unmanaged := test.Node()
-		ExpectApplied(ctx, env.Client, unmanaged)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{unmanaged}, []*v1beta1.NodeClaim{})
-		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
-		Expect(err).To(Succeed())
-		// This should not bring in the unmanaged node.
-		Expect(budgets[nodePool.Name]).To(Equal(10))
-	})
-	It("should not consider nodes that are not initialized as part of disruption count", func() {
-		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "100%"}}
-		ExpectApplied(ctx, env.Client, nodePool)
-		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Finalizers: []string{"karpenter.sh/test-finalizer"},
-				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey:     nodePool.Name,
-					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
-				},
-			},
-			Status: v1beta1.NodeClaimStatus{
-				Allocatable: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU:  resource.MustParse("32"),
-					v1.ResourcePods: resource.MustParse("100"),
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, nodeClaim, node)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
-
-		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
-		Expect(err).To(Succeed())
-		// This should not bring in the uninitialized node.
-		Expect(budgets[nodePool.Name]).To(Equal(10))
-	})
-	It("should not return a negative disruption value", func() {
-		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "10%"}}
-		ExpectApplied(ctx, env.Client, nodePool)
-
-		// Mark all nodeclaims as marked for deletion
-		for _, i := range nodeClaims {
-			Expect(env.Client.Delete(ctx, i)).To(Succeed())
-			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(i))
-		}
-		// Mark all nodes as marked for deletion
-		for _, i := range nodes {
-			Expect(env.Client.Delete(ctx, i)).To(Succeed())
-			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
-		}
-
-		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
-		Expect(err).To(Succeed())
-		Expect(budgets[nodePool.Name]).To(Equal(0))
-	})
-	It("should consider nodes with a deletion timestamp set and MarkedForDeletion to the disruption count", func() {
-		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "100%"}}
-		ExpectApplied(ctx, env.Client, nodePool)
-
-		// Delete one node and nodeclaim
-		Expect(env.Client.Delete(ctx, nodeClaims[0])).To(Succeed())
-		Expect(env.Client.Delete(ctx, nodes[0])).To(Succeed())
-		cluster.MarkForDeletion(nodeClaims[1].Status.ProviderID)
-
-		// Mark all nodeclaims as marked for deletion
-		for _, i := range nodeClaims {
-			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(i))
-		}
-		// Mark all nodes as marked for deletion
-		for _, i := range nodes {
-			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
-		}
-
-		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
-		Expect(err).To(Succeed())
-		Expect(budgets[nodePool.Name]).To(Equal(8))
-	})
-	It("should consider not ready nodes to the disruption count", func() {
-		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "100%"}}
-		ExpectApplied(ctx, env.Client, nodePool)
-
-		ExpectMakeNodesNotReady(ctx, env.Client, nodes[0], nodes[1])
-
-		// Mark all nodeclaims as marked for deletion
-		for _, i := range nodeClaims {
-			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(i))
-		}
-		// Mark all nodes as marked for deletion
-		for _, i := range nodes {
-			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
-		}
-
-		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
-		Expect(err).To(Succeed())
-		Expect(budgets[nodePool.Name]).To(Equal(8))
 	})
 })
 
@@ -1310,7 +1175,7 @@ var _ = Describe("Candidate Filtering", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
-		cluster.MarkForDeletion(node.Spec.ProviderID)
+		cluster.MarkForDeletion(metrics.ConsolidationReason, node.Spec.ProviderID)
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)

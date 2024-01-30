@@ -65,12 +65,12 @@ func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 }
 
 // ComputeCommand generates a disruption command given candidates
-func (e *Emptiness) ComputeCommand(_ context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
+func (e *Emptiness) ComputeCommand(_ context.Context, disruptionBudgetMapping map[string]map[v1beta1.DisruptionReason]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	return Command{
 		candidates: lo.Filter(candidates, func(c *Candidate, _ int) bool {
 			// Include candidate iff disruptions are allowed for its nodepool.
-			if disruptionBudgetMapping[c.nodePool.Name] > 0 {
-				disruptionBudgetMapping[c.nodePool.Name]--
+			if disruptionBudgetMapping[c.nodePool.Name][v1beta1.DisruptionReasonEmpty] > 0 {
+				disruptionBudgetMapping[c.nodePool.Name][v1beta1.DisruptionReasonEmpty]--
 				return true
 			}
 			return false
