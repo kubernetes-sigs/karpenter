@@ -186,7 +186,7 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 		consolidationTypeLabel: m.ConsolidationType(),
 	}).Inc()
 	uid := uuid.NewUUID()
-	logging.FromContext(ctx).With("uid", uid).Infof("disrupting via %s %s", m.Type(), cmd)
+	logging.FromContext(ctx).With("command-uid", uid).Infof("disrupting via %s %s", m.Type(), cmd)
 
 	stateNodes := lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode {
 		return c.StateNode
