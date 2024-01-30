@@ -57,6 +57,7 @@ type Command struct {
 	Replacements      []Replacement
 	candidates        []*state.StateNode
 	timeAdded         time.Time // timeAdded is used to track timeouts
+	uid               types.UID // used for log tracking
 	method            string    // used for metrics
 	consolidationType string    // used for metrics
 	lastError         error
@@ -139,7 +140,7 @@ func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster
 }
 
 // NewCommand creates a command key and adds in initial data for the orchestration queue.
-func NewCommand(replacements []string, candidates []*state.StateNode, method string, consolidationType string) *Command {
+func NewCommand(replacements []string, candidates []*state.StateNode, uid types.UID, method, consolidationType string) *Command {
 	return &Command{
 		Replacements: lo.Map(replacements, func(name string, _ int) Replacement {
 			return Replacement{name: name}
@@ -147,6 +148,7 @@ func NewCommand(replacements []string, candidates []*state.StateNode, method str
 		candidates:        candidates,
 		method:            method,
 		consolidationType: consolidationType,
+		uid:               uid,
 	}
 }
 
@@ -202,10 +204,11 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 		// Log the error
 		logging.FromContext(ctx).With("nodes", strings.Join(lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string {
 			return s.Name()
-		}), ",")).Errorf("failed to disrupt nodes, %s", multiErr)
+		}), ","), "uid", cmd.uid).Errorf("failed to disrupt nodes, %s", multiErr)
 	}
 	// If command is complete, remove command from queue.
 	q.Remove(cmd)
+	logging.FromContext(ctx).With("uid", cmd.uid).Infof("command succeeded")
 	return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 }
 
