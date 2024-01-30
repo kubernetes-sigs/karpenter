@@ -15,6 +15,7 @@ limitations under the License.
 package pretty
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -42,4 +43,20 @@ func Slice[T any](s []T, maxItems int) string {
 		fmt.Fprint(&sb, elem)
 	}
 	return sb.String()
+}
+
+// Map truncates a map after a certain number of max items to ensure that the
+// description in a log doesn't get too long
+func Map[K comparable, V any](values map[K]V, maxItems int) string {
+	var buf bytes.Buffer
+	for k, v := range values {
+		fmt.Fprintf(&buf, "%v: %v ", k, v)
+		if buf.Len() > maxItems {
+			break
+		}
+	}
+	if maxItems < buf.Len() {
+		fmt.Fprintf(&buf, "and %d other(s)", buf.Len()-maxItems)
+	}
+	return buf.String()
 }
