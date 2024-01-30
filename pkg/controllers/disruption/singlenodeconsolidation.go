@@ -40,7 +40,7 @@ func NewSingleNodeConsolidation(consolidation consolidation) *SingleNodeConsolid
 // ComputeCommand generates a disruption command given candidates
 // nolint:gocyclo
 func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
-	if s.isConsolidated() {
+	if s.IsConsolidated() {
 		return Command{}, nil
 	}
 	candidates, err := s.sortAndFilterCandidates(ctx, candidates)
@@ -56,12 +56,14 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 
 	// Set a timeout
 	timeout := s.clock.Now().Add(SingleNodeConsolidationTimeoutDuration)
+	constrainedByBudgets := false
 	// binary search to find the maximum number of NodeClaims we can terminate
 	for i, candidate := range candidates {
 		// If the disruption budget doesn't allow this candidate to be disrupted,
 		// continue to the next candidate. We don't need to decrement any budget
 		// counter since single node consolidation commands can only have one candidate.
 		if disruptionBudgetMapping[candidate.nodePool.Name] == 0 {
+			constrainedByBudgets = true
 			continue
 		}
 		if s.clock.Now().After(timeout) {
@@ -88,8 +90,12 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		}
 		return cmd, nil
 	}
-	// couldn't remove any candidate
-	s.markConsolidated()
+	if !constrainedByBudgets {
+		// if there are no candidates because of a budget, don't mark
+		// as consolidated, as it's possible it should be consolidatable
+		// the next time we try to disrupt.
+		s.markConsolidated()
+	}
 	return Command{}, nil
 }
 

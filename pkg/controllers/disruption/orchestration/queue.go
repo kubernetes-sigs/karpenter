@@ -242,7 +242,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 		initializedStatus := nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized)
 		if !initializedStatus.IsTrue() {
 			q.recorder.Publish(disruptionevents.WaitingOnReadiness(nodeClaim))
-			waitErrs[i] = fmt.Errorf("node claim not initialized")
+			waitErrs[i] = fmt.Errorf("nodeclaim %s not initialized", nodeClaim.Name)
 			continue
 		}
 		cmd.Replacements[i].Initialized = true
