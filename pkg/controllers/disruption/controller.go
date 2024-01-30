@@ -185,8 +185,8 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 		methodLabel:            m.Type(),
 		consolidationTypeLabel: m.ConsolidationType(),
 	}).Inc()
-	uid := uuid.NewUUID()
-	logging.FromContext(ctx).With("command-uid", uid).Infof("disrupting via %s %s", m.Type(), cmd)
+	commandID := uuid.NewUUID()
+	logging.FromContext(ctx).With("command-id", commandID).Infof("disrupting via %s %s", m.Type(), cmd)
 
 	stateNodes := lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode {
 		return c.StateNode
@@ -211,7 +211,7 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 	c.cluster.MarkForDeletion(providerIDs...)
 
 	if err := c.queue.Add(orchestration.NewCommand(nodeClaimNames,
-		lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode }), uid, m.Type(), m.ConsolidationType())); err != nil {
+		lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode }), commandID, m.Type(), m.ConsolidationType())); err != nil {
 		c.cluster.UnmarkForDeletion(providerIDs...)
 		return fmt.Errorf("adding command to queue, %w", multierr.Append(err, state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...)))
 	}
