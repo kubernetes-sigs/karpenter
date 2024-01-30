@@ -614,7 +614,7 @@ var _ = Describe("Consolidation", func() {
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
 		})
-		It("should not mark multi node consolidated if candidates can't be disrupted due to budgets", func() {
+		It("should not mark multi node consolidated if the candidates can't be disrupted due to budgets with one nodepool", func() {
 			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "0%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -640,7 +640,7 @@ var _ = Describe("Consolidation", func() {
 
 			Expect(multiConsolidation.IsConsolidated()).To(BeFalse())
 		})
-		It("should not mark multi node consolidated if all nodepools are blocked by budgets", func() {
+		It("should not mark multi node consolidated if all candidates can't be disrupted due to budgets with many nodepools", func() {
 			// Create 10 nodepools
 			nps := test.NodePools(10, v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
@@ -703,7 +703,7 @@ var _ = Describe("Consolidation", func() {
 
 			Expect(multiConsolidation.IsConsolidated()).To(BeFalse())
 		})
-		It("should not mark single node consolidated if candidates can't be disrupted due to budgets", func() {
+		It("should not mark single node consolidated if the candidates can't be disrupted due to budgets with one nodepool", func() {
 			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "0%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -729,7 +729,7 @@ var _ = Describe("Consolidation", func() {
 
 			Expect(singleConsolidation.IsConsolidated()).To(BeFalse())
 		})
-		It("should not mark single node consolidated if all nodepools are blocked by budgets", func() {
+		It("should not mark single node consolidated if all candidates can't be disrupted due to budgets with many nodepools", func() {
 			// Create 10 nodepools
 			nps := test.NodePools(10, v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
