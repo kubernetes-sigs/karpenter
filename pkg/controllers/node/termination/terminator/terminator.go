@@ -19,6 +19,7 @@ package terminator
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -29,7 +30,6 @@ import (
 
 	nodeutil "sigs.k8s.io/karpenter/pkg/utils/node"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	podutil "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
@@ -47,18 +47,18 @@ func NewTerminator(clk clock.Clock, kubeClient client.Client, eq *Queue) *Termin
 	}
 }
 
-// Taint idempotently adds the karpenter.sh/disruption taint to a node with a NodeClaim
-func (t *Terminator) Taint(ctx context.Context, node *v1.Node) error {
+// Taint idempotently adds an arbitrary taint to a node with a NodeClaim
+func (t *Terminator) Taint(ctx context.Context, node *v1.Node, taint v1.Taint) error {
 	stored := node.DeepCopy()
-	// If the taint already has the karpenter.sh/disruption=disrupting:NoSchedule taint, do nothing.
+	// If the node already has the correct taint (key, value, and effect), do nothing.
 	if _, ok := lo.Find(node.Spec.Taints, func(t v1.Taint) bool {
-		return v1beta1.IsDisruptingTaint(t)
+		return t.MatchTaint(&taint) && t.Value == taint.Value && t.Effect == taint.Effect
 	}); !ok {
-		// If the taint key exists (but with a different value or effect), remove it.
+		// Otherwise, if the taint key exists (but with a different value or effect), remove it.
 		node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t v1.Taint, _ int) bool {
-			return t.Key == v1beta1.DisruptionTaintKey
+			return t.Key == taint.Key
 		})
-		node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
+		node.Spec.Taints = append(node.Spec.Taints, taint)
 	}
 	// Adding this label to the node ensures that the node is removed from the load-balancer target group
 	// while it is draining and before it is terminated. This prevents 500s coming prior to health check
@@ -72,23 +72,21 @@ func (t *Terminator) Taint(ctx context.Context, node *v1.Node) error {
 		if err := t.kubeClient.Patch(ctx, node, client.StrategicMergeFrom(stored)); err != nil {
 			return err
 		}
-		logging.FromContext(ctx).Infof("tainted node")
+		logging.FromContext(ctx).With("taint.Key", taint.Key).With("taint.Effect", taint.Effect).With("taint.Value", taint.Value).Infof("tainted node")
 	}
 	return nil
 }
 
 // Drain evicts pods from the node and returns true when all pods are evicted
 // https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
-func (t *Terminator) Drain(ctx context.Context, node *v1.Node) error {
+func (t *Terminator) Drain(ctx context.Context, node *v1.Node, nodeGracePeriodExpirationTime *time.Time) error {
 	pods, err := nodeutil.GetPods(ctx, t.kubeClient, node)
 	if err != nil {
 		return fmt.Errorf("listing pods on node, %w", err)
 	}
-	// evictablePods are pods that aren't yet terminating are eligible to have the eviction API called against them
-	evictablePods := lo.Filter(pods, func(p *v1.Pod, _ int) bool { return podutil.IsEvictable(p) })
-	t.Evict(evictablePods)
+	t.EvictOrDelete(pods, nodeGracePeriodExpirationTime)
 
-	// podsWaitingEvictionCount are  the number of pods that either haven't had eviction called against them yet
+	// podsWaitingEvictionCount are the number of pods that either haven't had eviction called against them yet
 	// or are still actively terminated and haven't exceeded their termination grace period yet
 	podsWaitingEvictionCount := lo.CountBy(pods, func(p *v1.Pod) bool { return podutil.IsWaitingEviction(p, t.clock) })
 	if podsWaitingEvictionCount > 0 {
@@ -97,10 +95,22 @@ func (t *Terminator) Drain(ctx context.Context, node *v1.Node) error {
 	return nil
 }
 
-func (t *Terminator) Evict(pods []*v1.Pod) {
+func (t *Terminator) EvictOrDelete(pods []*v1.Pod, nodeGracePeriodExpirationTime *time.Time) {
 	// 1. Prioritize noncritical pods, non-daemon pods https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
 	var criticalNonDaemon, criticalDaemon, nonCriticalNonDaemon, nonCriticalDaemon []*v1.Pod
 	for _, pod := range pods {
+		// check if the node has an expiration time and the pod needs to be deleted
+		deleteTime := t.shouldDeletePodToEnsureGracePeriod(nodeGracePeriodExpirationTime, pod)
+		if deleteTime != nil {
+			t.evictionQueue.Add(deleteTime, pod)
+			continue
+		}
+
+		// evictablePods are pods that aren't yet terminating are eligible to have the eviction API called against them
+		if !podutil.IsEvictable(pod) {
+			continue // skip queueing this pod for eviction
+		}
+
 		if pod.Spec.PriorityClassName == "system-cluster-critical" || pod.Spec.PriorityClassName == "system-node-critical" {
 			if podutil.IsOwnedByDaemonSet(pod) {
 				criticalDaemon = append(criticalDaemon, pod)
@@ -120,13 +130,32 @@ func (t *Terminator) Evict(pods []*v1.Pod) {
 	// b. non-critical daemonsets
 	// c. critical non-daemonsets
 	// d. critical daemonsets
-	if len(nonCriticalNonDaemon) != 0 {
-		t.evictionQueue.Add(nonCriticalNonDaemon...)
-	} else if len(nonCriticalDaemon) != 0 {
-		t.evictionQueue.Add(nonCriticalDaemon...)
-	} else if len(criticalNonDaemon) != 0 {
-		t.evictionQueue.Add(criticalNonDaemon...)
-	} else if len(criticalDaemon) != 0 {
-		t.evictionQueue.Add(criticalDaemon...)
+	t.EvictInOrder([][]*v1.Pod{
+		nonCriticalNonDaemon,
+		nonCriticalDaemon,
+		criticalNonDaemon,
+		criticalDaemon,
+	})
+}
+
+func (t *Terminator) EvictInOrder(pods [][]*v1.Pod) {
+	for _, podList := range pods {
+		if len(podList) > 0 {
+			// evict the first list of pods that is not empty, ignore the rest
+			t.evictionQueue.Add(nil, podList...)
+			return
+		}
 	}
+}
+
+// if a pod should be deleted to give it the full terminationGracePeriodSeconds of time before the node will shut down, return the time the pod should be deleted
+func (t *Terminator) shouldDeletePodToEnsureGracePeriod(nodeGracePeriodExpirationTime *time.Time, pod *v1.Pod) *time.Time {
+	if nodeGracePeriodExpirationTime == nil || pod.Spec.TerminationGracePeriodSeconds == nil {
+		return nil
+	}
+
+	// check if the pod would be force terminated before being allowed its full terminationGracePeriodSeconds in time to gracefully terminate
+	// eg: if a node will be force terminated in 30m, but the current pod has a grace period of 45m, we return a time of 15m ago
+	deleteTime := nodeGracePeriodExpirationTime.Add(time.Duration(*pod.Spec.TerminationGracePeriodSeconds) * time.Second * -1)
+	return &deleteTime
 }

@@ -18,6 +18,7 @@ package events
 
 import (
 	"fmt"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 
@@ -34,12 +35,32 @@ func EvictPod(pod *v1.Pod) events.Event {
 	}
 }
 
+func DeletePod(pod *v1.Pod) events.Event {
+	return events.Event{
+		InvolvedObject: pod,
+		Type:           v1.EventTypeNormal,
+		Reason:         "Deleted",
+		Message:        fmt.Sprintf("Deleted pod regardless of PDBs and lifecycle hooks, %v seconds before node termination to accommodate it's terminationGracePeriodSeconds", pod.Spec.TerminationGracePeriodSeconds),
+		DedupeValues:   []string{pod.Name},
+	}
+}
+
 func NodeFailedToDrain(node *v1.Node, err error) events.Event {
 	return events.Event{
 		InvolvedObject: node,
 		Type:           v1.EventTypeWarning,
 		Reason:         "FailedDraining",
 		Message:        fmt.Sprintf("Failed to drain node, %s", err),
+		DedupeValues:   []string{node.Name},
+	}
+}
+
+func NodeTerminationGracePeriod(node *v1.Node, expirationTime time.Time, terminationGracePeriod string) events.Event {
+	return events.Event{
+		InvolvedObject: node,
+		Type:           v1.EventTypeWarning,
+		Reason:         "TerminationGracePeriodExpiration",
+		Message:        fmt.Sprintf("Node will have the out-of-service taint applied at: %s (TerminationGracePeriod: %s)", expirationTime, terminationGracePeriod),
 		DedupeValues:   []string{node.Name},
 	}
 }

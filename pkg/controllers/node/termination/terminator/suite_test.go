@@ -92,7 +92,7 @@ var _ = Describe("Eviction/Queue", func() {
 
 	Context("Eviction API", func() {
 		It("should succeed with no event when the pod is not found", func() {
-			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod))).To(BeTrue())
+			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod, nil))).To(BeTrue())
 			Expect(recorder.Events()).To(HaveLen(0))
 		})
 		It("should succeed with no event when the pod UID conflicts", func() {
@@ -102,7 +102,7 @@ var _ = Describe("Eviction/Queue", func() {
 		})
 		It("should succeed with an evicted event when there are no PDBs", func() {
 			ExpectApplied(ctx, env.Client, pod)
-			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod))).To(BeTrue())
+			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod, nil))).To(BeTrue())
 			Expect(recorder.Calls("Evicted")).To(Equal(1))
 		})
 		It("should succeed with no event when there are PDBs that allow an eviction", func() {
@@ -111,12 +111,12 @@ var _ = Describe("Eviction/Queue", func() {
 				MaxUnavailable: &intstr.IntOrString{IntVal: 1},
 			})
 			ExpectApplied(ctx, env.Client, pod)
-			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod))).To(BeTrue())
+			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod, nil))).To(BeTrue())
 			Expect(recorder.Calls("Evicted")).To(Equal(1))
 		})
 		It("should return a NodeDrainError event when a PDB is blocking", func() {
 			ExpectApplied(ctx, env.Client, pdb, pod)
-			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod))).To(BeFalse())
+			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod, nil))).To(BeFalse())
 			Expect(recorder.Calls("FailedDraining")).To(Equal(1))
 		})
 		It("should fail when two PDBs refer to the same pod", func() {
@@ -125,7 +125,7 @@ var _ = Describe("Eviction/Queue", func() {
 				MaxUnavailable: &intstr.IntOrString{IntVal: 0},
 			})
 			ExpectApplied(ctx, env.Client, pdb, pdb2, pod)
-			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod))).To(BeFalse())
+			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod, nil))).To(BeFalse())
 		})
 		It("should ensure that calling Evict() is valid while making Add() calls", func() {
 			cancelCtx, cancel := context.WithCancel(ctx)
@@ -150,8 +150,21 @@ var _ = Describe("Eviction/Queue", func() {
 
 			// Ensure that we add enough pods to the queue while we are pulling items off of the queue (enough to trigger a DATA RACE)
 			for i := 0; i < 10000; i++ {
-				queue.Add(test.Pod())
+				queue.Add(nil, test.Pod())
 			}
+		})
+	})
+
+	Context("Pod Deletion API", func() {
+		It("should succeed with no event when the pod is not found", func() {
+			ExpectApplied(ctx, env.Client)
+			Expect(queue.Delete(ctx, terminator.NewQueueKey(pod, nil))).To(BeTrue())
+			Expect(recorder.Events()).To(HaveLen(0))
+		})
+		It("should succeed with an deletion event", func() {
+			ExpectApplied(ctx, env.Client, pod)
+			Expect(queue.Delete(ctx, terminator.NewQueueKey(pod, nil))).To(BeTrue())
+			Expect(recorder.Calls("Deleted")).To(Equal(1))
 		})
 	})
 })

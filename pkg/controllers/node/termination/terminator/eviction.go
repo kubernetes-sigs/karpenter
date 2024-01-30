@@ -65,13 +65,15 @@ func IsNodeDrainError(err error) bool {
 
 type QueueKey struct {
 	types.NamespacedName
-	UID types.UID
+	UID        types.UID
+	DeleteTime *time.Time
 }
 
-func NewQueueKey(pod *v1.Pod) QueueKey {
+func NewQueueKey(pod *v1.Pod, deleteTime *time.Time) QueueKey {
 	return QueueKey{
 		NamespacedName: client.ObjectKeyFromObject(pod),
 		UID:            pod.UID,
+		DeleteTime:     deleteTime,
 	}
 }
 
@@ -104,12 +106,12 @@ func (q *Queue) Builder(_ context.Context, m manager.Manager) controller.Builder
 }
 
 // Add adds pods to the Queue
-func (q *Queue) Add(pods ...*v1.Pod) {
+func (q *Queue) Add(deleteTime *time.Time, pods ...*v1.Pod) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	for _, pod := range pods {
-		qk := NewQueueKey(pod)
+		qk := NewQueueKey(pod, deleteTime)
 		if !q.set.Has(qk) {
 			q.set.Insert(qk)
 			q.RateLimitingInterface.Add(qk)
@@ -117,11 +119,11 @@ func (q *Queue) Add(pods ...*v1.Pod) {
 	}
 }
 
-func (q *Queue) Has(pod *v1.Pod) bool {
+func (q *Queue) Has(qk QueueKey) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	return q.set.Has(NewQueueKey(pod))
+	return q.set.Has(qk)
 }
 
 func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
@@ -137,22 +139,35 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 	if shutdown {
 		return reconcile.Result{}, fmt.Errorf("EvictionQueue is broken and has shutdown")
 	}
+
 	qk := item.(QueueKey)
 	defer q.RateLimitingInterface.Done(qk)
-	// Evict pod
-	if q.Evict(ctx, qk) {
+
+	// Evict or Delete the pod
+	if q.EvictOrDelete(ctx, qk) {
 		q.RateLimitingInterface.Forget(qk)
 		q.mu.Lock()
 		q.set.Delete(qk)
 		q.mu.Unlock()
 		return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 	}
-	// Requeue pod if eviction failed
+
+	// Requeue pod if evict or delete failed
 	q.RateLimitingInterface.AddRateLimited(qk)
 	return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 }
 
-// Evict returns true if successful eviction call, and false if not an eviction-related error
+// EvictOrDelete returns true if the call was successful eviction call, and false if there was an error
+func (q *Queue) EvictOrDelete(ctx context.Context, key QueueKey) bool {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("pod", key.NamespacedName))
+
+	if key.DeleteTime != nil && time.Now().After(*key.DeleteTime) {
+		return q.Delete(ctx, key)
+	}
+	return q.Evict(ctx, key)
+}
+
+// Evict returns true if successful eviction call, and false if there was an eviction-related error
 func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("pod", key.NamespacedName))
 	if err := q.kubeClient.SubResource("eviction").Create(ctx,
@@ -184,6 +199,23 @@ func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 		return false
 	}
 	q.recorder.Publish(terminatorevents.EvictPod(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}))
+	return true
+}
+
+// Delete returns true if successful delete call, and false if there was a delete-related error
+func (q *Queue) Delete(ctx context.Context, key QueueKey) bool {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("pod", key.NamespacedName))
+	if err := q.kubeClient.Delete(ctx,
+		&v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: key.Name}},
+	); err != nil {
+		if apierrors.IsNotFound(err) { // 404
+			return true
+		}
+		logging.FromContext(ctx).Errorf("deleting pod, %s", err)
+		return false
+	}
+	logging.FromContext(ctx).Infof("deleted pod: %v/%v", key.Namespace, key.Name)
+	q.recorder.Publish(terminatorevents.DeletePod(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}))
 	return true
 }
 

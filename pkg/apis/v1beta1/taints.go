@@ -22,6 +22,8 @@ import v1 "k8s.io/api/core/v1"
 const (
 	DisruptionTaintKey             = Group + "/disruption"
 	DisruptingNoScheduleTaintValue = "disrupting"
+
+	DisruptionNonGracefulShutdownValue = "nodeshutdown"
 )
 
 var (
@@ -31,6 +33,15 @@ var (
 		Key:    DisruptionTaintKey,
 		Effect: v1.TaintEffectNoSchedule,
 		Value:  DisruptingNoScheduleTaintValue,
+	}
+
+	// DisruptionNonGracefulShutdown is used by the deprovisioning controller to forcefully
+	// shut down a node. This does not respect graceful termination of any pods on the node.
+	// https://kubernetes.io/docs/concepts/architecture/nodes/#non-graceful-node-shutdown
+	DisruptionNonGracefulShutdown = v1.Taint{
+		Key:    v1.TaintNodeOutOfService,
+		Effect: v1.TaintEffectNoExecute,
+		Value:  DisruptionNonGracefulShutdownValue,
 	}
 )
 
