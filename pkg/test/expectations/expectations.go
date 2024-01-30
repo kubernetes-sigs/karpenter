@@ -478,6 +478,7 @@ func FindMetricWithLabelValues(name string, labelValues map[string]string) (*pro
 }
 
 func ExpectMetricGaugeValue(metricName string, expectedValue float64, labels map[string]string) {
+	GinkgoHelper()
 	metric, ok := FindMetricWithLabelValues(metricName, labels)
 	Expect(ok).To(BeTrue(), "Metric "+metricName+" should be available")
 	Expect(lo.FromPtr(metric.Gauge.Value)).To(Equal(expectedValue), "Metric "+metricName+" should have the expected value")
