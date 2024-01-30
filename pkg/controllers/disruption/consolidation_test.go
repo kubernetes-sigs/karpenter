@@ -525,7 +525,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(30))
 		})
-		It("should not mark empty node consolidated if candidates can't be disrupted due to budgets", func() {
+		It("should not mark empty node consolidated if the candidates can't be disrupted due to budgets with one nodepool", func() {
 			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "0%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -551,7 +551,7 @@ var _ = Describe("Consolidation", func() {
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
 		})
-		It("should not mark empty node consolidated if all nodepools are blocked by budgets", func() {
+		It("should not mark empty node consolidated if all candidates can't be disrupted due to budgets with many nodepools", func() {
 			// Create 10 nodepools
 			nps := test.NodePools(10, v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
