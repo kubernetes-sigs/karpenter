@@ -39,7 +39,7 @@ func NewEmptyNodeConsolidation(consolidation consolidation) *EmptyNodeConsolidat
 //
 //nolint:gocyclo
 func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
-	if c.isConsolidated() {
+	if c.IsConsolidated() {
 		return Command{}, nil
 	}
 	candidates, err := c.sortAndFilterCandidates(ctx, candidates)
@@ -52,20 +52,29 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	}).Set(float64(len(candidates)))
 
 	empty := make([]*Candidate, 0, len(candidates))
+	constrainedByBudgets := false
 	for _, candidate := range candidates {
 		if len(candidate.pods) > 0 {
 			continue
 		}
+		if disruptionBudgetMapping[candidate.nodePool.Name] == 0 {
+			// set constrainedByBudgets to true if any node was a candidate but was constrained by a budget
+			constrainedByBudgets = true
+			continue
+		}
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
-		if disruptionBudgetMapping[candidate.nodePool.Name] > 0 {
-			empty = append(empty, candidate)
-			disruptionBudgetMapping[candidate.nodePool.Name]--
-		}
+		empty = append(empty, candidate)
+		disruptionBudgetMapping[candidate.nodePool.Name]--
 	}
+	// none empty, so do nothing
 	if len(empty) == 0 {
-		// none empty, so do nothing
-		c.markConsolidated()
+		// if there are no candidates, but a nodepool had a fully blocking budget,
+		// don't mark the cluster as consolidated, as it's possible this nodepool
+		// should be consolidated the next time we try to disrupt.
+		if !constrainedByBudgets {
+			c.markConsolidated()
+		}
 		return Command{}, nil
 	}
 
