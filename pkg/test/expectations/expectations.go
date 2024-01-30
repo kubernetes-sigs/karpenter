@@ -372,6 +372,26 @@ func ExpectMakeNodesInitialized(ctx context.Context, c client.Client, nodes ...*
 	}
 }
 
+func ExpectMakeNodesNotReady(ctx context.Context, c client.Client, nodes ...*v1.Node) {
+	for i := range nodes {
+		nodes[i] = ExpectExists(ctx, c, nodes[i])
+		nodes[i].Status.Phase = v1.NodeRunning
+		nodes[i].Status.Conditions = []v1.NodeCondition{
+			{
+				Type:               v1.NodeReady,
+				Status:             v1.ConditionFalse,
+				LastHeartbeatTime:  metav1.Now(),
+				LastTransitionTime: metav1.Now(),
+				Reason:             "NotReady",
+			},
+		}
+		if nodes[i].Labels == nil {
+			nodes[i].Labels = map[string]string{}
+		}
+		ExpectApplied(ctx, c, nodes[i])
+	}
+}
+
 func ExpectMakeNodesReady(ctx context.Context, c client.Client, nodes ...*v1.Node) {
 	for i := range nodes {
 		nodes[i] = ExpectExists(ctx, c, nodes[i])

@@ -219,7 +219,12 @@ func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clo
 			continue
 		}
 		nodePool := node.Labels()[v1beta1.NodePoolLabelKey]
-		if node.MarkedForDeletion() {
+		// If the node satisfies one of the following, we subtract it from the allowed disruptions.
+		// 1. Has a NotReady conditiion
+		// 2. Is marked as deleting
+		if _, found := lo.Find(node.Node.Status.Conditions, func(nc v1.NodeCondition) bool {
+			return nc.Type == v1.NodeReady && nc.Status != v1.ConditionTrue
+		}); found || node.MarkedForDeletion() {
 			deleting[nodePool]++
 		}
 		numNodes[nodePool]++
