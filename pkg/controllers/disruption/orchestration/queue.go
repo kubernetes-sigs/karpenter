@@ -179,7 +179,7 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 		panic("unexpected failure, disruption queue has shut down")
 	}
 	cmd := item.(*Command)
-	ctx = context.WithValue(ctx, "command-id", cmd.id)
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("command-id", string(cmd.id)))
 	if err := q.waitOrTerminate(ctx, cmd); err != nil {
 		// If recoverable, re-queue and try again.
 		if !IsUnrecoverableError(err) {
