@@ -62,7 +62,7 @@ func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 }
 
 // ComputeCommand generates a disruption command given candidates
-func (e *Emptiness) ComputeCommand(_ context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
+func (e *Emptiness) ComputeCommand(_ context.Context, disruptionBudgetMapping map[string]map[v1beta1.DisruptionReason]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	// First check how many nodes are empty so that we can emit a metric on how many nodes are eligible
 	emptyCandidates := lo.Filter(candidates, func(cn *Candidate, _ int) bool {
 		return cn.NodeClaim.DeletionTimestamp.IsZero() && len(cn.reschedulablePods) == 0
@@ -80,10 +80,12 @@ func (e *Emptiness) ComputeCommand(_ context.Context, disruptionBudgetMapping ma
 		}
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
-		if disruptionBudgetMapping[candidate.nodePool.Name] > 0 {
+		if disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonEmpty] > 0 {
 			empty = append(empty, candidate)
-			disruptionBudgetMapping[candidate.nodePool.Name]--
+			
+			disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonEmpty]--
 		}
+
 	}
 	return Command{
 		candidates: empty,

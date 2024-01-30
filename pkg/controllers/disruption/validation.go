@@ -101,10 +101,10 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 	// before continuing consolidation
 	// 2. the number of candidates for a given nodepool can no longer be disrupted as it would violate the budget
 	for _, n := range validationCandidates {
-		if v.cluster.IsNodeNominated(n.ProviderID()) || postValidationMapping[n.nodePool.Name] == 0 {
+		if v.cluster.IsNodeNominated(n.ProviderID()) || postValidationMapping[n.nodePool.Name][v1beta1.DisruptionReasonUnderutilized] == 0 {
 			return false, nil
 		}
-		postValidationMapping[n.nodePool.Name]--
+		postValidationMapping[n.nodePool.Name][v1beta1.DisruptionReasonUnderutilized]--
 	}
 	isValid, err := v.ValidateCommand(ctx, cmd, validationCandidates)
 	if err != nil {
