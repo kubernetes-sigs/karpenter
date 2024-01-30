@@ -57,6 +57,7 @@ type Command struct {
 	Replacements      []Replacement
 	candidates        []*state.StateNode
 	timeAdded         time.Time // timeAdded is used to track timeouts
+	id                types.UID // used for log tracking
 	method            string    // used for metrics
 	consolidationType string    // used for metrics
 	lastError         error
@@ -139,7 +140,7 @@ func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster
 }
 
 // NewCommand creates a command key and adds in initial data for the orchestration queue.
-func NewCommand(replacements []string, candidates []*state.StateNode, method string, consolidationType string) *Command {
+func NewCommand(replacements []string, candidates []*state.StateNode, id types.UID, method, consolidationType string) *Command {
 	return &Command{
 		Replacements: lo.Map(replacements, func(name string, _ int) Replacement {
 			return Replacement{name: name}
@@ -147,6 +148,7 @@ func NewCommand(replacements []string, candidates []*state.StateNode, method str
 		candidates:        candidates,
 		method:            method,
 		consolidationType: consolidationType,
+		id:                id,
 	}
 }
 
@@ -177,6 +179,7 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 		panic("unexpected failure, disruption queue has shut down")
 	}
 	cmd := item.(*Command)
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("command-id", string(cmd.id)))
 	if err := q.waitOrTerminate(ctx, cmd); err != nil {
 		// If recoverable, re-queue and try again.
 		if !IsUnrecoverableError(err) {
@@ -206,6 +209,7 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 	}
 	// If command is complete, remove command from queue.
 	q.Remove(cmd)
+	logging.FromContext(ctx).Infof("command succeeded")
 	return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 }
 

@@ -25,6 +25,7 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
+	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -184,14 +185,15 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 		methodLabel:            m.Type(),
 		consolidationTypeLabel: m.ConsolidationType(),
 	}).Inc()
-	logging.FromContext(ctx).Infof("disrupting via %s %s", m.Type(), cmd)
+	commandID := uuid.NewUUID()
+	logging.FromContext(ctx).With("command-id", commandID).Infof("disrupting via %s %s", m.Type(), cmd)
 
 	stateNodes := lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode {
 		return c.StateNode
 	})
 	// Cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
 	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, true, stateNodes...); err != nil {
-		return multierr.Append(fmt.Errorf("tainting nodes, %w", err), state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...))
+		return multierr.Append(fmt.Errorf("tainting nodes (command-id: %s), %w", commandID, err), state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...))
 	}
 
 	var nodeClaimNames []string
@@ -200,7 +202,7 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 		if nodeClaimNames, err = c.createReplacementNodeClaims(ctx, m, cmd); err != nil {
 			// If we failed to launch the replacement, don't disrupt.  If this is some permanent failure,
 			// we don't want to disrupt workloads with no way to provision new nodes for them.
-			return multierr.Append(fmt.Errorf("launching replacement nodeclaim, %w", err), state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...))
+			return multierr.Append(fmt.Errorf("launching replacement nodeclaim (command-id: %s), %w", commandID, err), state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...))
 		}
 	}
 
@@ -209,9 +211,9 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 	c.cluster.MarkForDeletion(providerIDs...)
 
 	if err := c.queue.Add(orchestration.NewCommand(nodeClaimNames,
-		lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode }), m.Type(), m.ConsolidationType())); err != nil {
+		lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode }), commandID, m.Type(), m.ConsolidationType())); err != nil {
 		c.cluster.UnmarkForDeletion(providerIDs...)
-		return fmt.Errorf("adding command to queue, %w", multierr.Append(err, state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...)))
+		return fmt.Errorf("adding command to queue (command-id: %s), %w", commandID, multierr.Append(err, state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...)))
 	}
 	return nil
 }
