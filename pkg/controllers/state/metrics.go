@@ -25,7 +25,6 @@ import (
 
 const (
 	stateSubsystem = "state"
-	SyncedKey      = "synced"
 )
 
 var (
@@ -46,7 +45,7 @@ var (
 			Name:      "synced",
 			Help:      "synced validates that nodeclaims and nodes that are stored in the apiserver have the same representation in karpenter's cluster state",
 		},
-		[]string{SyncedKey},
+		[]string{},
 	)
 )
 
