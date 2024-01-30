@@ -56,10 +56,22 @@ const PrintStats = false
 //nolint:gosec
 var r = rand.New(rand.NewSource(42))
 
+// To run the benchmarks use:
+// `go test -tags=test_performance -run=XXX -bench=.`
+//
+// to get something statistically significant for comparison we need to run them several times and then
+// compare the results between the old performance and the new performance.
+// ```sh
+//
+//	go test -tags=test_performance -run=XXX -bench=. -count=10 | tee /tmp/old
+//	# make your changes to the code
+//	go test -tags=test_performance -run=XXX -bench=. -count=10 | tee /tmp/new
+//	benchstat /tmp/old /tmp/new
+//
+// ```
 func BenchmarkScheduling1(b *testing.B) {
 	benchmarkScheduler(b, 400, 1)
 }
-
 func BenchmarkScheduling50(b *testing.B) {
 	benchmarkScheduler(b, 400, 50)
 }
@@ -102,7 +114,7 @@ func TestSchedulingProfile(t *testing.T) {
 	totalNodes := 0
 	var totalTime time.Duration
 	for _, instanceCount := range []int{400} {
-		for _, podCount := range []int{10, 100, 500, 1000, 1500, 2000, 2500} {
+		for _, podCount := range []int{10, 100, 500, 1000, 1500, 2000, 5000} {
 			start := time.Now()
 			res := testing.Benchmark(func(b *testing.B) { benchmarkScheduler(b, instanceCount, podCount) })
 			totalTime += time.Since(start) / time.Duration(res.N)

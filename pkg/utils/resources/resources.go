@@ -162,7 +162,7 @@ func Cmp(lhs resource.Quantity, rhs resource.Quantity) int {
 func Fits(candidate, total v1.ResourceList) bool {
 	// If any of the total resource values are negative then the resource will never fit
 	for _, quantity := range total {
-		if Cmp(resource.MustParse("0"), quantity) > 0 {
+		if Cmp(*resource.NewScaledQuantity(0, resource.Kilo), quantity) > 0 {
 			return false
 		}
 	}

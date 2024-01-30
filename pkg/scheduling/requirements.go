@@ -237,9 +237,38 @@ func labelHint(r Requirements, key string, allowedUndefined sets.Set[string]) st
 	return ""
 }
 
+// badKeyError allows lazily generating the error string in the case of a bad key error. When requirements fail
+// to match, we are most often interested in the failure and not why it fails.
+type badKeyError struct {
+	key      string
+	incoming *Requirement
+	existing *Requirement
+}
+
+func (b badKeyError) Error() string {
+	return fmt.Sprintf("key %s, %s not in %s", b.key, b.incoming, b.existing)
+}
+
+// intersectKeys is much faster and allocates less han getting the two key sets separately and intersecting them
+func (r Requirements) intersectKeys(rhs Requirements) sets.Set[string] {
+	smallest := r
+	largest := rhs
+	if len(smallest) > len(largest) {
+		smallest, largest = largest, smallest
+	}
+	keys := sets.Set[string]{}
+
+	for key := range smallest {
+		if _, ok := largest[key]; ok {
+			keys.Insert(key)
+		}
+	}
+	return keys
+}
+
 // Intersects returns errors if the requirements don't have overlapping values, undefined keys are allowed
 func (r Requirements) Intersects(requirements Requirements) (errs error) {
-	for key := range r.Keys().Intersection(requirements.Keys()) {
+	for key := range r.intersectKeys(requirements) {
 		existing := r.Get(key)
 		incoming := requirements.Get(key)
 		// There must be some value, except
@@ -251,7 +280,11 @@ func (r Requirements) Intersects(requirements Requirements) (errs error) {
 					continue
 				}
 			}
-			errs = multierr.Append(errs, fmt.Errorf("key %s, %s not in %s", key, incoming, existing))
+			errs = multierr.Append(errs, badKeyError{
+				key:      key,
+				incoming: incoming,
+				existing: existing,
+			})
 		}
 	}
 	return errs
