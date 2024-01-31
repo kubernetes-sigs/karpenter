@@ -33,7 +33,7 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: stateSubsystem,
 			Name:      "nodes_total",
-			Help:      "total nodes in karpenter's cluster state",
+			Help:      "Total nodes in karpenter's cluster state",
 		},
 		[]string{},
 	)
