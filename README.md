@@ -20,8 +20,8 @@ Karpenter improves the efficiency and cost of running workloads on Kubernetes cl
 If you have any questions or want to get the latest project news, you can connect with us in the following ways:
 - __Using and Deploying Karpenter?__ Reach out in the [#karpenter](https://kubernetes.slack.com/archives/C02SFFZSA2K) channel in the [Kubernetes slack](https://slack.k8s.io/) to ask questions about configuring or troubleshooting Karpenter.
 - __Contributing to or Developing with Karpenter?__ Join the [#karpenter-dev](https://kubernetes.slack.com/archives/C04JW2J5J5P) channel in the [Kubernetes slack](https://slack.k8s.io/) to ask in-depth questions about contribution or to get involved in design discussions.
-- Join our alternating working group meetings where we share the latest project updates, answer questions, and triage issues:
-  - Bi-weekly meetings alternating between Mondays @ 9:00 PT ([convert to your timezone](http://www.thetimezoneconverter.com/?t=9:00&tz=Seattle)) and Thursdays @ 14:00 PT ([convert to your timezone](http://www.thetimezoneconverter.com/?t=14:00&tz=Seattle)) on [Zoom](https://zoom.us/j/95618088729) - the password is 77777.
+- Join our working group meetings where we share the latest project updates, answer questions, and triage issues:
+  - Weekly meetings on Mondays @ 8:00 PT ([convert to your timezone](http://www.thetimezoneconverter.com/?t=8:00&tz=Seattle)) on [Zoom](https://zoom.us/j/95618088729) - the password is 77777.
   - Invites are managed through our [Calendar](https://calendar.google.com/calendar/u/0?cid=N3FmZGVvZjVoZWJkZjZpMnJrMmplZzVqYmtAZ3JvdXAuY2FsZW5kYXIuZ29vZ2xlLmNvbQ)
   - Add future questions or read past discussions in our [Working Group Log](https://docs.google.com/document/d/18BT0AIMugpNpiSPJNlcAL2rv69yAE6Z06gUVj7v_clg/edit?usp=sharing)
 
