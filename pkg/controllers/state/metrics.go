@@ -43,7 +43,7 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: stateSubsystem,
 			Name:      "synced",
-			Help:      "synced validates that nodeclaims and nodes that are stored in the apiserver have the same representation in karpenter's cluster state",
+			Help:      "Synced validates that nodeclaims and nodes that are stored in the apiserver have the same representation as karpenter's cluster state",
 		},
 		[]string{},
 	)
