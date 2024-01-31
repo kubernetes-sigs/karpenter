@@ -157,9 +157,9 @@ func GetPodEvictionCost(ctx context.Context, p *v1.Pod) float64 {
 	return clamp(-10.0, cost, 10.0)
 }
 
-// FilterByPriceAndFindIncompatibleRequirementWithMinValues returns the instanceTypes that are lower priced than the current candidate and iterates over the cumulative minimum requirement of the InstanceTypeOptions to see if it meets the minValues of requirements.
+// filterByPriceWithMinValues returns the instanceTypes that are lower priced than the current candidate and iterates over the cumulative minimum requirement of the InstanceTypeOptions to see if it meets the minValues of requirements.
 // The minValues requirement is checked again after filterByPrice as it may result in more constrained InstanceTypeOptions for a NodeClaim
-func FilterByPriceAndFindIncompatibleRequirementWithMinValues(options []*cloudprovider.InstanceType, reqs scheduling.Requirements, price float64) ([]*cloudprovider.InstanceType, string) {
+func filterByPriceWithMinValues(options []*cloudprovider.InstanceType, reqs scheduling.Requirements, price float64) ([]*cloudprovider.InstanceType, string) {
 	var result []*cloudprovider.InstanceType
 	// cumulativeMinRequirementsFromInstanceTypes is a map for the requirement key with the cumulative values that has minValues supported across InstanceTypeOptions
 	// and fetch the invalid requirement key from the result map.
@@ -210,7 +210,9 @@ func FilterByPriceAndFindIncompatibleRequirementWithMinValues(options []*cloudpr
 			}
 		}
 	}
-	invalidMinimumRequirementKey := pscheduling.FindRequirementKeyInCompatibleWithMinValues(cumulativeMinRequirementsFromInstanceTypes, reqs)
+	invalidMinimumRequirementKey := pscheduling.FindRequirementKeyIncompatibleWithMinValues(cumulativeMinRequirementsFromInstanceTypes, reqs)
+	// If minValues is NOT met for any of the requirement across InstanceTypes, then return empty InstanceTypeOptions as we cannot launch with the remaining InstanceTypes.
+	result = lo.Ternary(len(invalidMinimumRequirementKey) > 0, []*cloudprovider.InstanceType{}, result)
 	return result, invalidMinimumRequirementKey
 }
 

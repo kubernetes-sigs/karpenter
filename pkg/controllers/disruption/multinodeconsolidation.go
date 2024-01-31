@@ -209,7 +209,7 @@ func filterOutSameType(newNodeClaim *scheduling.NodeClaim, consolidate []*Candid
 		}
 	}
 
-	filterByPrice, _ := FilterByPriceAndFindIncompatibleRequirementWithMinValues(newNodeClaim.InstanceTypeOptions, newNodeClaim.Requirements, maxPrice)
+	filterByPrice, _ := filterByPriceWithMinValues(newNodeClaim.InstanceTypeOptions, newNodeClaim.Requirements, maxPrice)
 	return filterByPrice
 }
 

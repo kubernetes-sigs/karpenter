@@ -106,10 +106,6 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 
 	filtered := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, requests)
 
-	if len(filtered.requirementInCompatibleWithMinValues) > 0 {
-		return fmt.Errorf("minimum requirement is not met for %s", filtered.requirementInCompatibleWithMinValues)
-	}
-
 	if len(filtered.remaining) == 0 {
 		// log the total resources being requested (daemonset + the pod)
 		cumulativeResources := resources.Merge(n.daemonResources, resources.RequestsForPods(pod))
@@ -162,7 +158,7 @@ type filterResults struct {
 	requirementsAndOffering bool
 	// fitsAndOffering indicates if a single instance type had enough resources and was a required offering
 	fitsAndOffering                      bool
-	requirementInCompatibleWithMinValues string
+	requirementIncompatibleWithMinValues string
 	requests                             v1.ResourceList
 }
 
@@ -224,6 +220,10 @@ func (r filterResults) FailureReason() string {
 		return "no instance type which met the scheduling requirements and the required offering had the required resources"
 	}
 
+	if len(r.requirementIncompatibleWithMinValues) > 0 {
+		return "minimum requirement is not met for " + r.requirementIncompatibleWithMinValues
+	}
+
 	// finally all instances were filtered out, but we had at least one instance that met each criteria, and met each
 	// pairwise set of criteria, so the only thing that remains is no instance which met all three criteria simultaneously
 	return "no instance type met the requirements/resources/offering tuple"
@@ -276,7 +276,9 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 			}
 		}
 	}
-	results.requirementInCompatibleWithMinValues = FindRequirementKeyInCompatibleWithMinValues(cumulativeMinRequirementsFromInstanceTypes, requirements)
+	results.requirementIncompatibleWithMinValues = FindRequirementKeyIncompatibleWithMinValues(cumulativeMinRequirementsFromInstanceTypes, requirements)
+	// If minValues is NOT met for any of the requirement across InstanceTypes, then return empty InstanceTypeOptions as we cannot launch with the remaining InstanceTypes.
+	results.remaining = lo.Ternary(len(results.requirementIncompatibleWithMinValues) > 0, []*cloudprovider.InstanceType{}, results.remaining)
 	return results
 }
 
@@ -298,7 +300,7 @@ func hasOffering(instanceType *cloudprovider.InstanceType, requirements scheduli
 	return false
 }
 
-func FindRequirementKeyInCompatibleWithMinValues(cumulativeMinRequirementsFromInstanceTypes map[string]sets.Set[string], requirements scheduling.Requirements) string {
+func FindRequirementKeyIncompatibleWithMinValues(cumulativeMinRequirementsFromInstanceTypes map[string]sets.Set[string], requirements scheduling.Requirements) string {
 	for key, value := range cumulativeMinRequirementsFromInstanceTypes {
 		// Return if any of the minvalues of requirement is not honored
 		if len(value) < lo.FromPtr(requirements.Get(key).MinValues) {

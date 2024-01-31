@@ -45,7 +45,7 @@ import (
 const consolidationTTL = 15 * time.Second
 
 // MinInstanceTypesForSpotToSpotConsolidation is the minimum number of instanceTypes in a NodeClaim needed to trigger spot-to-spot single-node consolidation
-var MinInstanceTypesForSpotToSpotConsolidation = 15
+const MinInstanceTypesForSpotToSpotConsolidation = 15
 
 // consolidation is the base consolidation controller that provides common functionality used across the different
 // consolidation methods.
@@ -176,12 +176,16 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	}
 
 	var inCompatibleRequirementKey string
-	// FilterByPriceAndFindIncompatibleRequirementWithMinValues returns the instanceTypes that are lower priced than the current candidate and the requirement for the NodeClaim that does not meet minValues.
+	// filterByPriceWithMinValues returns the instanceTypes that are lower priced than the current candidate and the requirement for the NodeClaim that does not meet minValues.
 	// If we use this directly for spot-to-spot consolidation, we are bound to get repeated consolidations because the strategy that chooses to launch the spot instance from the list does
 	// it based on availability and price which could result in selection/launch of non-lowest priced instance in the list. So, we would keep repeating this loop till we get to lowest priced instance
 	// causing churns and landing onto lower available spot instance ultimately resulting in higher interruptions.
 	results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, inCompatibleRequirementKey =
-		FilterByPriceAndFindIncompatibleRequirementWithMinValues(results.NewNodeClaims[0].InstanceTypeOptions, results.NewNodeClaims[0].Requirements, candidatePrice)
+		filterByPriceWithMinValues(results.NewNodeClaims[0].InstanceTypeOptions, results.NewNodeClaims[0].Requirements, candidatePrice)
+
+	if len(inCompatibleRequirementKey) > 0 {
+		return Command{}, fmt.Errorf("minimum requirement is not met for %s", inCompatibleRequirementKey)
+	}
 
 	if len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions) == 0 {
 		if len(candidates) == 1 {
@@ -189,9 +193,6 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		}
 		// no instance types remain after filtering by price
 		return Command{}, nil
-	}
-	if len(inCompatibleRequirementKey) > 0 {
-		return Command{}, fmt.Errorf("minimum requirement is not met for %s", inCompatibleRequirementKey)
 	}
 
 	// We are consolidating a node from OD -> [OD,Spot] but have filtered the instance types by cost based on the
@@ -234,7 +235,11 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 	var inCompatibleRequirementKey string
 	// Possible replacements that are lower priced than the current candidate and the requirement that is not compatible with minValues
 	results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, inCompatibleRequirementKey =
-		FilterByPriceAndFindIncompatibleRequirementWithMinValues(instanceTypeOptionsWithSpotOfferings, results.NewNodeClaims[0].Requirements, candidatePrice)
+		filterByPriceWithMinValues(instanceTypeOptionsWithSpotOfferings, results.NewNodeClaims[0].Requirements, candidatePrice)
+
+	if len(inCompatibleRequirementKey) > 0 {
+		return Command{}, fmt.Errorf("minimum requirement is not met for %s", inCompatibleRequirementKey)
+	}
 
 	if len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions) == 0 {
 		if len(candidates) == 1 {
@@ -242,10 +247,6 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 		}
 		// no instance types remain after filtering by price
 		return Command{}, nil
-	}
-
-	if len(inCompatibleRequirementKey) > 0 {
-		return Command{}, fmt.Errorf("minimum requirement is not met for %s", inCompatibleRequirementKey)
 	}
 
 	// For multi-node consolidation:
@@ -259,29 +260,27 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 
 	// For single-node consolidation:
 
-	// If a user has minValues set in their NodePool that require less than 15 instance types, then the default 15 instance type minimum will continue to be enforced to enable a spot-to-spot consolidation.
-	// If minValues for the number of instance types is beyond 15, then number of instance types from minValues would be maintained to enable spot-to-spot consolidation.
-	if results.NewNodeClaims[0].Requirements.Has(v1.LabelInstanceTypeStable) && results.NewNodeClaims[0].Requirements.Get(v1.LabelInstanceTypeStable).MinValues != nil {
-		MinInstanceTypesForSpotToSpotConsolidation = lo.Max([]int{lo.FromPtr(results.NewNodeClaims[0].Requirements.Get(v1.LabelInstanceTypeStable).MinValues), MinInstanceTypesForSpotToSpotConsolidation})
-	}
-
-	// We check whether we have 15(if default) cheaper instances than the current candidate instance. If this is the case, we know the following things:
-	//   1) The current candidate is not in the set of the 15(if default) cheapest instance types and
-	//   2) There were at least 15(if default) options cheaper than the current candidate.
+	// We check whether we have 15 cheaper instances than the current candidate instance. If this is the case, we know the following things:
+	//   1) The current candidate is not in the set of the 15 cheapest instance types and
+	//   2) There were at least 15 options cheaper than the current candidate.
 	if len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions) < MinInstanceTypesForSpotToSpotConsolidation {
 		c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("SpotToSpotConsolidation requires %d cheaper instance type options than the current candidate to consolidate, got %d",
 			MinInstanceTypesForSpotToSpotConsolidation, len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions)))...)
 		return Command{}, nil
 	}
 
-	// Restrict the InstanceTypeOptions for launch to 15 so we don't get into a continual consolidation situation.
+	// If a user has minValues set in their NodePool that require less than 15 instance types, then the default 15 instance type minimum will continue to be enforced for launch to enable a spot-to-spot consolidation.
+	// If minValues for the number of instance types is beyond 15, then number of instance types from minValues would be maintained for launch to enable spot-to-spot consolidation.
+	// Restrict the InstanceTypeOptions for launch to 15(if default) so we don't get into a continual consolidation situation.
 	// For example:
 	// 1) Suppose we have 5 instance types, (A, B, C, D, E) in order of price with the minimum flexibility 3 and they’ll all work for our pod.  We send CreateInstanceFromTypes(A,B,C,D,E) and it gives us a E type based on price and availability of spot.
-	// 2) We check if E is part of (A,B,C) and it isn't, so we will immediately have consolidation send a CreateInstanceFromTypes(A,B,C,D), since they’re cheaper than E.
+	// 2) We check if E is part of (A,B,C,D) and it isn't, so we will immediately have consolidation send a CreateInstanceFromTypes(A,B,C,D), since they’re cheaper than E.
 	// 3) Assuming CreateInstanceFromTypes(A,B,C,D) returned D, we check if D is part of (A,B,C) and it isn't, so will have another consolidation send a CreateInstanceFromTypes(A,B,C), since they’re cheaper than D resulting in continual consolidation.
 	// If we had restricted instance types to min flexibility at launch at step (1) i.e CreateInstanceFromTypes(A,B,C), we would have received the instance type part of the list preventing immediate consolidation.
 	// Taking this to 15 types, we need to only send the 15 cheapest types in the CreateInstanceFromTypes call so that the resulting instance is always in that set of 15 and we won’t immediately consolidate.
-	results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions = lo.Slice(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, 0, MinInstanceTypesForSpotToSpotConsolidation)
+	if results.NewNodeClaims[0].Requirements.Get(v1.LabelInstanceTypeStable).MinValues == nil {
+		results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions = lo.Slice(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, 0, MinInstanceTypesForSpotToSpotConsolidation)
+	}
 
 	return Command{
 		candidates:   candidates,
