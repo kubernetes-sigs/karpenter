@@ -45,7 +45,7 @@ import (
 )
 
 //nolint:gocyclo
-func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
+func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
 	candidates ...*Candidate,
 ) (*pscheduling.Results, error) {
 	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
@@ -93,7 +93,18 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		// to proceed disrupting if our scheduling decision relies on nodes that haven't entered a terminal state.
 		if !n.Initialized() {
 			for _, p := range n.Pods {
-				results.PodErrors[p] = fmt.Errorf("would schedule against a non-initialized node %s", n.Name())
+				// Only add a pod scheduling error if it isn't on an already deleting node.
+				// If the pod is on a deleting node, we assume one of two things has already happened:
+				// 1. The node was manually terminated, at which the provisioning controller has scheduled or is scheduling a node
+				//    for the pod.
+				// 2. The node was chosen for a previous disruption command, we assume that the uninitialized node will come up
+				//    for this command, and we assume it will be successful. If it is not successful, the node will become
+				//    not terminating, and we will no longer need to consider these pods.
+				if _, ok := lo.Find(deletingNodePods, func(deleting *v1.Pod) bool {
+					return deleting.Name == p.Name && deleting.Namespace == p.Namespace
+				}); !ok {
+					results.PodErrors[p] = fmt.Errorf("would schedule against a non-initialized node %s", n.Name())
+				}
 			}
 		}
 	}
@@ -155,7 +166,7 @@ func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
 func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock,
 	cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter, queue *orchestration.Queue,
 ) ([]*Candidate, error) {
-	nodePoolMap, nodePoolToInstanceTypesMap, err := buildNodePoolMap(ctx, kubeClient, cloudProvider)
+	nodePoolMap, nodePoolToInstanceTypesMap, err := BuildNodePoolMap(ctx, kubeClient, cloudProvider)
 	if err != nil {
 		return nil, err
 	}
@@ -227,8 +238,8 @@ func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clo
 	return disruptionBudgetMapping, nil
 }
 
-// buildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map
-func buildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[string]*v1beta1.NodePool, map[string]map[string]*cloudprovider.InstanceType, error) {
+// BuildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map
+func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[string]*v1beta1.NodePool, map[string]map[string]*cloudprovider.InstanceType, error) {
 	nodePoolMap := map[string]*v1beta1.NodePool{}
 	nodePoolList := &v1beta1.NodePoolList{}
 	if err := kubeClient.List(ctx, nodePoolList); err != nil {

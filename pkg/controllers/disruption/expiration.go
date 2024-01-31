@@ -101,7 +101,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping
 			continue
 		}
 		// Check if we need to create any NodeClaims.
-		results, err := simulateScheduling(ctx, e.kubeClient, e.cluster, e.provisioner, candidate)
+		results, err := SimulateScheduling(ctx, e.kubeClient, e.cluster, e.provisioner, candidate)
 		if err != nil {
 			// if a candidate node is now deleting, just retry
 			if errors.Is(err, errCandidateDeleting) {

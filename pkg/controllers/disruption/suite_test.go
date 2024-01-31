@@ -150,6 +150,82 @@ var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 })
 
+var _ = Describe("Simulate Scheduling", func() {
+	var nodePool *v1beta1.NodePool
+	var nodeClaims []*v1beta1.NodeClaim
+	var nodes []*v1.Node
+	var numNodes int
+	BeforeEach(func() {
+		numNodes = 10
+		nodePool = test.NodePool()
+		nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Finalizers: []string{"karpenter.sh/test-finalizer"},
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1beta1.NodeClaimStatus{
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		for i := 0; i < numNodes; i++ {
+			ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+		}
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+	})
+	It("should allow pods on deleting nodes to reschedule to uninitialized nodes", func() {
+		pod := test.Pod(test.PodOptions{
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("100m"),
+					v1.ResourceMemory: resource.MustParse("100Mi"),
+				},
+			},
+		})
+		nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: nil}
+		ExpectApplied(ctx, env.Client, pod)
+		ExpectManualBinding(ctx, env.Client, pod, nodes[0])
+
+		// nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "100%"}}
+		// ExpectApplied(ctx, env.Client, nodePool)
+
+		nodePoolMap, nodePoolToInstanceTypesMap, err := disruption.BuildNodePoolMap(ctx, env.Client, cloudProvider)
+		Expect(err).To(Succeed())
+
+		// Mark all nodeclaims as marked for deletion
+		for i, nc := range nodeClaims {
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nc))
+			cluster.MarkForDeletion(nodeClaims[i].Status.ProviderID)
+		}
+		cluster.UnmarkForDeletion(nodeClaims[0].Status.ProviderID)
+		// Mark all nodes as marked for deletion
+		for _, n := range nodes {
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
+		}
+
+		// Generate a candidate
+		stateNode := ExpectStateNodeExists(cluster, nodes[0])
+		candidate, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, stateNode, nodePoolMap, nodePoolToInstanceTypesMap, queue)
+		Expect(err).To(Succeed())
+
+		results, err := disruption.SimulateScheduling(ctx, env.Client, cluster, prov, candidate)
+		Expect(err).To(Succeed())
+		Expect(results.PodErrors[pod]).To(BeNil())
+	})
+})
+
 var _ = Describe("Disruption Taints", func() {
 	var nodePool *v1beta1.NodePool
 	var nodeClaim *v1beta1.NodeClaim
