@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -125,7 +124,7 @@ func (c *Cluster) Synced(ctx context.Context) bool {
 	// that exists in the cluster state but not in the apiserver) but it ensures that we have a state
 	// representation for every node/nodeClaim that exists on the apiserver
 	synced := stateNodeClaimNames.IsSuperset(nodeClaimNames) && stateNodeNames.IsSuperset(nodeNames)
-	ClusterStateSynced.With(prometheus.Labels{}).Set(lo.Ternary[float64](synced, 1, 0))
+	ClusterStateSynced.Set(lo.Ternary[float64](synced, 1, 0))
 	return synced
 }
 
@@ -238,6 +237,7 @@ func (c *Cluster) UpdateNodeClaim(nodeClaim *v1beta1.NodeClaim) {
 	// If the nodeclaim hasn't launched yet, we want to add it into cluster state to ensure
 	// that we're not racing with the internal cache for the cluster, assuming the node doesn't exist.
 	c.nodeClaimNameToProviderID[nodeClaim.Name] = nodeClaim.Status.ProviderID
+	ClusterStateNodesTotal.WithLabelValues().Set(float64(len(c.nodes)))
 }
 
 func (c *Cluster) DeleteNodeClaim(name string) {
@@ -245,6 +245,7 @@ func (c *Cluster) DeleteNodeClaim(name string) {
 	defer c.mu.Unlock()
 
 	c.cleanupNodeClaim(name)
+	ClusterStateNodesTotal.WithLabelValues().Set(float64(len(c.nodes)))
 }
 
 func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {

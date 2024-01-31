@@ -45,7 +45,6 @@ var (
 			Name:      "synced",
 			Help:      "Synced validates that nodeclaims and nodes that are stored in the apiserver have the same representation as karpenter's cluster state",
 		},
-		[]string{},
 	)
 )
 
