@@ -28,14 +28,13 @@ const (
 )
 
 var (
-	ClusterStateNodesTotal = prometheus.NewGaugeVec(
+	ClusterStateNodesTotal = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: stateSubsystem,
 			Name:      "nodes_total",
 			Help:      "Total nodes in karpenter's cluster state",
 		},
-		[]string{},
 	)
 
 	ClusterStateSynced = prometheus.NewGauge(
