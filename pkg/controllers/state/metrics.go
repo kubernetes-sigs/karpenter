@@ -38,7 +38,7 @@ var (
 		[]string{},
 	)
 
-	ClusterStateSynced = prometheus.NewGaugeVec(
+	ClusterStateSynced = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: stateSubsystem,
