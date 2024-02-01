@@ -62,7 +62,7 @@ func (e *Expiration) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 }
 
 // ComputeCommand generates a disruption command given candidates
-func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
+func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	sort.Slice(candidates, func(i int, j int) bool {
 		return candidates[i].NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).LastTransitionTime.Inner.Time.Before(
 			candidates[j].NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).LastTransitionTime.Inner.Time)
