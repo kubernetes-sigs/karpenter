@@ -608,5 +608,5 @@ func EventuallyExpectTerminating(ctx context.Context, c client.Client, objs ...c
 			g.Expect(c.Get(ctx, client.ObjectKeyFromObject(obj), obj)).To(Succeed())
 			g.Expect(obj.GetDeletionTimestamp().IsZero()).ToNot(BeTrue())
 		}
-	}, ReconcilerPropagationTime, RequestInterval)
+	}, ReconcilerPropagationTime, RequestInterval).Should(Succeed())
 }
