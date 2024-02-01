@@ -277,14 +277,17 @@ var _ = Describe("Simulate Scheduling", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 		wg.Wait()
 
+		// Expect a replace action
 		ExpectTaintedNodeCount(ctx, env.Client, 1)
 		ncs := ExpectNodeClaims(ctx, env.Client)
+		// which would create one more node claim
 		Expect(len(ncs)).To(Equal(11))
 		nc, new := lo.Find(ncs, func(nc *v1beta1.NodeClaim) bool {
 			_, ok := nodeClaimNames[nc.Name]
 			return !ok
 		})
 		Expect(new).To(BeTrue())
+		// which needs to be deployed
 		ExpectNodeClaimDeployed(ctx, env.Client, cluster, cloudProvider, nc)
 		nodeClaimNames[nc.Name] = struct{}{}
 
@@ -292,6 +295,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 		wg.Wait()
 
+		// Another replacement disruption action
 		ncs = ExpectNodeClaims(ctx, env.Client)
 		Expect(len(ncs)).To(Equal(12))
 		nc, new = lo.Find(ncs, func(nc *v1beta1.NodeClaim) bool {
@@ -306,6 +310,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 		wg.Wait()
 
+		// One more replacement disruption action
 		ncs = ExpectNodeClaims(ctx, env.Client)
 		Expect(len(ncs)).To(Equal(13))
 		nc, new = lo.Find(ncs, func(nc *v1beta1.NodeClaim) bool {
@@ -316,6 +321,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		ExpectNodeClaimDeployed(ctx, env.Client, cluster, cloudProvider, nc)
 		nodeClaimNames[nc.Name] = struct{}{}
 
+		// Try one more time, but fail since the budgets only allow 3 disruptions.
 		ExpectTriggerVerifyAction(&wg)
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 		wg.Wait()
