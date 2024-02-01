@@ -361,6 +361,16 @@ func ExpectMakeNodeClaimsInitialized(ctx context.Context, c client.Client, nodeC
 	}
 }
 
+func ExpectMakeNodeClaimsLaunchedAndStateUpdated(ctx context.Context, c client.Client, nodeClaimStateController controller.Controller, nodeClaims ...*v1beta1.NodeClaim) {
+	GinkgoHelper()
+	for i := range nodeClaims {
+		nodeClaims[i] = ExpectExists(ctx, c, nodeClaims[i])
+		nodeClaims[i].StatusConditions().MarkTrue(v1beta1.Launched)
+		ExpectApplied(ctx, c, nodeClaims[i])
+		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaims[i]))
+	}
+}
+
 func ExpectMakeNodesInitialized(ctx context.Context, c client.Client, nodes ...*v1.Node) {
 	GinkgoHelper()
 	ExpectMakeNodesReady(ctx, c, nodes...)
