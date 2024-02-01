@@ -548,7 +548,7 @@ var _ = Describe("Consolidation", func() {
 			cmd, results, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
 			Expect(results).To(Equal(pscheduling.Results{}))
-			Expect(cmd).To(Not(BeEmpty()))
+			Expect(cmd).To(Equal(disruption.Command{}))
 			wg.Wait()
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
@@ -612,7 +612,7 @@ var _ = Describe("Consolidation", func() {
 			cmd, results, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
 			Expect(results).To(Equal(pscheduling.Results{}))
-			Expect(cmd).To(Not(BeEmpty()))
+			Expect(cmd).To(Equal(disruption.Command{}))
 			wg.Wait()
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
@@ -639,7 +639,7 @@ var _ = Describe("Consolidation", func() {
 			cmd, results, err := multiConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
 			Expect(results).To(Equal(pscheduling.Results{}))
-			Expect(cmd).To(Not(BeEmpty()))
+			Expect(cmd).To(Equal(disruption.Command{}))
 			wg.Wait()
 
 			Expect(multiConsolidation.IsConsolidated()).To(BeFalse())
@@ -703,7 +703,7 @@ var _ = Describe("Consolidation", func() {
 			cmd, results, err := multiConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
 			Expect(results).To(Equal(pscheduling.Results{}))
-			Expect(cmd).To(Not(BeEmpty()))
+			Expect(cmd).To(Equal(disruption.Command{}))
 			wg.Wait()
 
 			Expect(multiConsolidation.IsConsolidated()).To(BeFalse())
@@ -730,7 +730,7 @@ var _ = Describe("Consolidation", func() {
 			cmd, results, err := singleConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
 			Expect(results).To(Equal(pscheduling.Results{}))
-			Expect(cmd).To(Not(BeEmpty()))
+			Expect(cmd).To(Equal(disruption.Command{}))
 			wg.Wait()
 
 			Expect(singleConsolidation.IsConsolidated()).To(BeFalse())
@@ -794,7 +794,7 @@ var _ = Describe("Consolidation", func() {
 			cmd, results, err := singleConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
 			Expect(results).To(Equal(pscheduling.Results{}))
-			Expect(cmd).To(Not(BeEmpty()))
+			Expect(cmd).To(Equal(disruption.Command{}))
 			wg.Wait()
 
 			Expect(singleConsolidation.IsConsolidated()).To(BeFalse())
