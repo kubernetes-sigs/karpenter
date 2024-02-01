@@ -44,6 +44,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -546,7 +547,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectTriggerVerifyAction(&wg)
 			cmd, results, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(results).To(Not(BeEmpty()))
+			Expect(results).To(Equal(pscheduling.Results{}))
 			Expect(cmd).To(Not(BeEmpty()))
 			wg.Wait()
 
@@ -610,7 +611,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectTriggerVerifyAction(&wg)
 			cmd, results, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(results).To(Not(BeEmpty()))
+			Expect(results).To(Equal(pscheduling.Results{}))
 			Expect(cmd).To(Not(BeEmpty()))
 			wg.Wait()
 
@@ -637,7 +638,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectTriggerVerifyAction(&wg)
 			cmd, results, err := multiConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(results).To(Not(BeEmpty()))
+			Expect(results).To(Equal(pscheduling.Results{}))
 			Expect(cmd).To(Not(BeEmpty()))
 			wg.Wait()
 
@@ -701,7 +702,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectTriggerVerifyAction(&wg)
 			cmd, results, err := multiConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(results).To(Not(BeEmpty()))
+			Expect(results).To(Equal(pscheduling.Results{}))
 			Expect(cmd).To(Not(BeEmpty()))
 			wg.Wait()
 
@@ -728,7 +729,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectTriggerVerifyAction(&wg)
 			cmd, results, err := singleConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(results).To(Not(BeEmpty()))
+			Expect(results).To(Equal(pscheduling.Results{}))
 			Expect(cmd).To(Not(BeEmpty()))
 			wg.Wait()
 
@@ -792,7 +793,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectTriggerVerifyAction(&wg)
 			cmd, results, err := singleConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(results).To(Not(BeEmpty()))
+			Expect(results).To(Equal(pscheduling.Results{}))
 			Expect(cmd).To(Not(BeEmpty()))
 			wg.Wait()
 
