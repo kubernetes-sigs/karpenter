@@ -71,7 +71,6 @@ var _ = Describe("Resources Handling", func() {
 				v1.ResourceMemory: resource.MustParse("3Gi"),
 			})
 		})
-
 		It("should calculate resource requests based off of containers, sidecarContainers, initContainers, and overhead", func() {
 			pod := test.Pod(test.PodOptions{
 				Overhead: v1.ResourceList{
@@ -109,14 +108,12 @@ var _ = Describe("Resources Handling", func() {
 				v1.ResourceMemory: resource.MustParse("5Gi"),
 			})
 		})
-
 		It("should calculate resource requests when there is a large initContainer after a sidecarContainer that exceeds container resource requests", func() {
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
 					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("1Gi")},
 					Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("1Gi")},
 				},
-
 				InitContainers: []v1.Container{
 					{
 						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
@@ -143,11 +140,11 @@ var _ = Describe("Resources Handling", func() {
 				v1.ResourceMemory: resource.MustParse("4Gi"),
 			})
 		})
-		It("should calculate resource requests when there is a large initContainer after a sidecarContainer that doesn't exceed container resource requests", func() {
+		It("should calculate resource requests when there is an initContainer after a sidecarContainer that doesn't exceed container resource requests", func() {
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
-					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("1Gi")},
-					Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("1Gi")},
+					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("2Gi")},
+					Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("2Gi")},
 				},
 
 				InitContainers: []v1.Container{
@@ -160,23 +157,22 @@ var _ = Describe("Resources Handling", func() {
 					},
 					{
 						Resources: v1.ResourceRequirements{
-							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("1Gi")},
-							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("1Gi")},
+							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
+							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
 						},
 					},
 				},
 			})
 			podResources := Ceiling(pod)
 			ExpectResources(podResources.Requests, v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("9"),
-				v1.ResourceMemory: resource.MustParse("3Gi"),
+				v1.ResourceCPU:    resource.MustParse("6"),
+				v1.ResourceMemory: resource.MustParse("4Gi"),
 			})
 			ExpectResources(podResources.Limits, v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("9"),
-				v1.ResourceMemory: resource.MustParse("3Gi"),
+				v1.ResourceCPU:    resource.MustParse("6"),
+				v1.ResourceMemory: resource.MustParse("4Gi"),
 			})
 		})
-
 		It("should calculate resource requests when a single sidecarContainer is bigger than the container resource requests", func() {
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
@@ -194,8 +190,8 @@ var _ = Describe("Resources Handling", func() {
 					},
 					{
 						Resources: v1.ResourceRequirements{
-							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("2Gi")},
-							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("2Gi")},
+							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
+							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
 						},
 					},
 				},
@@ -203,19 +199,18 @@ var _ = Describe("Resources Handling", func() {
 			podResources := Ceiling(pod)
 			ExpectResources(podResources.Requests, v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("6"),
-				v1.ResourceMemory: resource.MustParse("4Gi"),
+				v1.ResourceMemory: resource.MustParse("3Gi"),
 			})
 			ExpectResources(podResources.Limits, v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("6"),
-				v1.ResourceMemory: resource.MustParse("4Gi"),
+				v1.ResourceMemory: resource.MustParse("3Gi"),
 			})
 		})
-
 		It("should calculate resource requests when a single sidecarContainer is not bigger than container resource requests", func() {
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
-					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("1Gi")},
-					Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("1Gi")},
+					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("2Gi")},
+					Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("2Gi")},
 				},
 
 				InitContainers: []v1.Container{
@@ -224,12 +219,6 @@ var _ = Describe("Resources Handling", func() {
 						Resources: v1.ResourceRequirements{
 							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
 							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
-						},
-					},
-					{
-						Resources: v1.ResourceRequirements{
-							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("2Gi")},
-							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("2Gi")},
 						},
 					},
 				},
@@ -244,62 +233,7 @@ var _ = Describe("Resources Handling", func() {
 				v1.ResourceMemory: resource.MustParse("3Gi"),
 			})
 		})
-
 		It("should calculate resource requests when an initContainer comes after multiple sidecarContainers that exceeds container resource requests", func() {
-			pod := test.Pod(test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{
-					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("3"), v1.ResourceMemory: resource.MustParse("3Gi")},
-					Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("3"), v1.ResourceMemory: resource.MustParse("3Gi")},
-				},
-
-				InitContainers: []v1.Container{
-					{
-						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
-						Resources: v1.ResourceRequirements{
-							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("2Gi")},
-							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("2Gi")},
-						},
-					},
-					{
-						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
-						Resources: v1.ResourceRequirements{
-							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
-							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
-						},
-					},
-					{
-						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
-						Resources: v1.ResourceRequirements{
-							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("3"), v1.ResourceMemory: resource.MustParse("3Gi")},
-							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("3")},
-						},
-					},
-					{
-						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
-						Resources: v1.ResourceRequirements{
-							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("5Gi")},
-							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("5")},
-						},
-					},
-					{
-						Resources: v1.ResourceRequirements{
-							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("20"), v1.ResourceMemory: resource.MustParse("20Gi")},
-							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("20"), v1.ResourceMemory: resource.MustParse("20Gi")},
-						},
-					},
-				},
-			})
-			podResources := Ceiling(pod)
-			ExpectResources(podResources.Requests, v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("31"),
-				v1.ResourceMemory: resource.MustParse("31Gi"),
-			})
-			ExpectResources(podResources.Limits, v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("31"),
-				v1.ResourceMemory: resource.MustParse("31Gi"),
-			})
-		})
-		It("should calculate resource requests when an initContainer comes after multiple sidecarContainers that doesn't exceed container resource requests", func() {
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
 					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("3"), v1.ResourceMemory: resource.MustParse("3Gi")},
@@ -337,24 +271,76 @@ var _ = Describe("Resources Handling", func() {
 					},
 					{
 						Resources: v1.ResourceRequirements{
-							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("10"), v1.ResourceMemory: resource.MustParse("20Gi")},
-							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("10"), v1.ResourceMemory: resource.MustParse("20Gi")},
+							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("20"), v1.ResourceMemory: resource.MustParse("20Gi")},
+							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("20"), v1.ResourceMemory: resource.MustParse("20Gi")},
 						},
 					},
 				},
 			})
 			podResources := Ceiling(pod)
 			ExpectResources(podResources.Requests, v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("21"),
+				v1.ResourceCPU:    resource.MustParse("31"),
 				v1.ResourceMemory: resource.MustParse("31Gi"),
 			})
 			ExpectResources(podResources.Limits, v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("21"),
+				v1.ResourceCPU:    resource.MustParse("31"),
 				v1.ResourceMemory: resource.MustParse("31Gi"),
 			})
 		})
-
-		It("should calculate resource requests when a small initContainer comes after multiple sidecarContainers that exceeds container resource requests", func() {
+		It("should calculate resource requests when an initContainer comes after multiple sidecarContainers that doesn't exceed container resource requests", func() {
+			pod := test.Pod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{
+					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("3"), v1.ResourceMemory: resource.MustParse("3Gi")},
+					Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("3"), v1.ResourceMemory: resource.MustParse("3Gi")},
+				},
+				InitContainers: []v1.Container{
+					{
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
+						Resources: v1.ResourceRequirements{
+							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("2Gi")},
+							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("2Gi")},
+						},
+					},
+					{
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
+						Resources: v1.ResourceRequirements{
+							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
+							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
+						},
+					},
+					{
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
+						Resources: v1.ResourceRequirements{
+							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("3"), v1.ResourceMemory: resource.MustParse("3Gi")},
+							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("3"), v1.ResourceMemory: resource.MustParse("3Gi")},
+						},
+					},
+					{
+						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
+						Resources: v1.ResourceRequirements{
+							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("5Gi")},
+							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("5Gi")},
+						},
+					},
+					{
+						Resources: v1.ResourceRequirements{
+							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
+							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
+						},
+					},
+				},
+			})
+			podResources := Ceiling(pod)
+			ExpectResources(podResources.Requests, v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse("14"),
+				v1.ResourceMemory: resource.MustParse("14Gi"),
+			})
+			ExpectResources(podResources.Limits, v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse("14"),
+				v1.ResourceMemory: resource.MustParse("14Gi"),
+			})
+		})
+		It("should calculate resource requests when an initContainer comes after multiple sidecarContainers that exceeds container resource requests", func() {
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
 					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("3"), v1.ResourceMemory: resource.MustParse("3Gi")},
@@ -408,7 +394,6 @@ var _ = Describe("Resources Handling", func() {
 				v1.ResourceMemory: resource.MustParse("26Gi"),
 			})
 		})
-
 		It("should calculate resource requests with multiple sidecarContainers when one initContainer exceeds the sum of all sidecarContainers and container resource requests", func() {
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
@@ -481,7 +466,7 @@ var _ = Describe("Resources Handling", func() {
 				v1.ResourceMemory: resource.MustParse("25Gi"),
 			})
 		})
-		It("should calculate resource requests with multiple sidecarContainers covering the initContainers when one initContainer exceeds the sum of all sidecarContainers and container resource requests", func() {
+		It("should calculate resource requests with multiple sidecarContainers and initContainers when one initContainer exceeds the sum of all sidecarContainers and container resource requests", func() {
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
 					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("3"), v1.ResourceMemory: resource.MustParse("3Gi")},
@@ -553,7 +538,6 @@ var _ = Describe("Resources Handling", func() {
 				v1.ResourceMemory: resource.MustParse("26Gi"),
 			})
 		})
-
 		It("should calculate resource requests with multiple sidecarContainers and initContainers when there are multiple initContainers interspersed with sidecarContainers", func() {
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
