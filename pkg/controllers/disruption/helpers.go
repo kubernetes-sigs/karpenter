@@ -85,6 +85,10 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return nil, fmt.Errorf("creating scheduler, %w", err)
 	}
 
+	deletingNodePodKeys := lo.SliceToMap(deletingNodePods, func(p *v1.Pod) (client.ObjectKey, interface{}) {
+		return client.ObjectKeyFromObject(p), nil
+	})
+
 	results := scheduler.Solve(ctx, pods)
 	for _, n := range results.ExistingNodes {
 		// We consider existing nodes for scheduling. When these nodes are unmanaged, their taint logic should
@@ -100,9 +104,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 				// 2. The node was chosen for a previous disruption command, we assume that the uninitialized node will come up
 				//    for this command, and we assume it will be successful. If it is not successful, the node will become
 				//    not terminating, and we will no longer need to consider these pods.
-				if _, ok := lo.Find(deletingNodePods, func(deleting *v1.Pod) bool {
-					return deleting.Name == p.Name && deleting.Namespace == p.Namespace
-				}); !ok {
+				if _, ok := deletingNodePodKeys[client.ObjectKeyFromObject(p)]; !ok {
 					results.PodErrors[p] = fmt.Errorf("would schedule against a non-initialized node %s", n.Name())
 				}
 			}

@@ -170,7 +170,7 @@ var _ = Describe("Simulate Scheduling", func() {
 			},
 			Status: v1beta1.NodeClaimStatus{
 				Allocatable: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourceCPU:  resource.MustParse("3"),
 					v1.ResourcePods: resource.MustParse("100"),
 				},
 			},
@@ -189,7 +189,8 @@ var _ = Describe("Simulate Scheduling", func() {
 		pod := test.Pod(test.PodOptions{
 			ResourceRequirements: v1.ResourceRequirements{
 				Requests: v1.ResourceList{
-					v1.ResourceCPU:    resource.MustParse("100m"),
+					// 2 cpu so each node can only fit one pod.
+					v1.ResourceCPU:    resource.MustParse("2"),
 					v1.ResourceMemory: resource.MustParse("100Mi"),
 				},
 			},
@@ -223,6 +224,101 @@ var _ = Describe("Simulate Scheduling", func() {
 		results, err := disruption.SimulateScheduling(ctx, env.Client, cluster, prov, candidate)
 		Expect(err).To(Succeed())
 		Expect(results.PodErrors[pod]).To(BeNil())
+	})
+	It("should allow multiple replace operations to happen successively", func() {
+		// Create a pod for each node
+		pods := test.Pods(10, test.PodOptions{
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("100m"),
+					v1.ResourceMemory: resource.MustParse("100Mi"),
+				},
+			},
+		})
+		// Set a partition so that each node pool fits one node
+		nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirement{
+			Key:      "test-partition",
+			Operator: v1.NodeSelectorOpExists,
+		})
+		nodePool.Spec.Disruption.ExpireAfter = v1beta1.NillableDuration{Duration: lo.ToPtr(5 * time.Minute)}
+		nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: nil}
+		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "3"}}
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		// Mark all nodeclaims as expired
+		for _, nc := range nodeClaims {
+			nc.StatusConditions().MarkTrue(v1beta1.Expired)
+			ExpectApplied(ctx, env.Client, nc)
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nc))
+		}
+		// Add a partition label into each node so we have 10 distinct scheduling requiments for each pod/node pair
+		for i, n := range nodes {
+			n.Labels = lo.Assign(n.Labels, map[string]string{"test-partition": fmt.Sprintf("%d", i)})
+			ExpectApplied(ctx, env.Client, n)
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
+		}
+
+		for i := range pods {
+			pods[i].Spec.NodeSelector = lo.Assign(pods[i].Spec.NodeSelector, map[string]string{"test-partition": fmt.Sprintf("%d", i)})
+			ExpectApplied(ctx, env.Client, pods[i])
+			ExpectManualBinding(ctx, env.Client, pods[i], nodes[i])
+		}
+
+		// Get a set of the node claim names so that it's easy to check if a new one is made
+		nodeClaimNames := lo.SliceToMap(nodeClaims, func(nc *v1beta1.NodeClaim) (string, struct{}) {
+			return nc.Name, struct{}{}
+		})
+
+		wg := sync.WaitGroup{}
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+		wg.Wait()
+
+		ExpectTaintedNodeCount(ctx, env.Client, 1)
+		ncs := ExpectNodeClaims(ctx, env.Client)
+		Expect(len(ncs)).To(Equal(11))
+		nc, new := lo.Find(ncs, func(nc *v1beta1.NodeClaim) bool {
+			_, ok := nodeClaimNames[nc.Name]
+			return !ok
+		})
+		Expect(new).To(BeTrue())
+		ExpectNodeClaimDeployed(ctx, env.Client, cluster, cloudProvider, nc)
+		nodeClaimNames[nc.Name] = struct{}{}
+
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+		wg.Wait()
+
+		ncs = ExpectNodeClaims(ctx, env.Client)
+		Expect(len(ncs)).To(Equal(12))
+		nc, new = lo.Find(ncs, func(nc *v1beta1.NodeClaim) bool {
+			_, ok := nodeClaimNames[nc.Name]
+			return !ok
+		})
+		Expect(new).To(BeTrue())
+		ExpectNodeClaimDeployed(ctx, env.Client, cluster, cloudProvider, nc)
+		nodeClaimNames[nc.Name] = struct{}{}
+
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+		wg.Wait()
+
+		ncs = ExpectNodeClaims(ctx, env.Client)
+		Expect(len(ncs)).To(Equal(13))
+		nc, new = lo.Find(ncs, func(nc *v1beta1.NodeClaim) bool {
+			_, ok := nodeClaimNames[nc.Name]
+			return !ok
+		})
+		Expect(new).To(BeTrue())
+		ExpectNodeClaimDeployed(ctx, env.Client, cluster, cloudProvider, nc)
+		nodeClaimNames[nc.Name] = struct{}{}
+
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+		wg.Wait()
+
+		ncs = ExpectNodeClaims(ctx, env.Client)
+		Expect(len(ncs)).To(Equal(13))
 	})
 })
 
@@ -1299,6 +1395,16 @@ func ExpectTriggerVerifyAction(wg *sync.WaitGroup) {
 		}
 		fakeClock.Step(45 * time.Second)
 	}()
+}
+
+// ExpectTaintedNodeCount will assert the number of nodes and tainted nodes in the cluster and return the tainted nodes.
+func ExpectTaintedNodeCount(ctx context.Context, c client.Client, numTainted int) []*v1.Node {
+	GinkgoHelper()
+	tainted := lo.Filter(ExpectNodes(ctx, c), func(n *v1.Node, _ int) bool {
+		return lo.Contains(n.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
+	})
+	Expect(len(tainted)).To(Equal(numTainted))
+	return tainted
 }
 
 // ExpectNewNodeClaimsDeleted simulates the nodeClaims being created and then removed, similar to what would happen
