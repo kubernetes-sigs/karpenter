@@ -178,7 +178,7 @@ func ExpectDeletionTimestampSet(ctx context.Context, c client.Client, objects ..
 		DeferCleanup(func(obj client.Object) {
 			mergeFrom := client.MergeFrom(obj.DeepCopyObject().(client.Object))
 			obj.SetFinalizers([]string{})
-			Expect(c.Patch(ctx, obj, mergeFrom)).To(Succeed())
+			Expect(client.IgnoreNotFound(c.Patch(ctx, obj, mergeFrom))).To(Succeed())
 		}, object)
 	}
 }
@@ -587,4 +587,26 @@ func ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx context.Context,
 	for _, m := range nodeClaims {
 		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(m))
 	}
+}
+
+// ExpectEvicted triggers an eviction call for all the passed pods
+func ExpectEvicted(ctx context.Context, c client.Client, pods ...*v1.Pod) {
+	GinkgoHelper()
+
+	for _, pod := range pods {
+		Expect(c.SubResource("eviction").Create(ctx, pod, &policyv1.Eviction{})).To(Succeed())
+	}
+	EventuallyExpectTerminating(ctx, c, lo.Map(pods, func(p *v1.Pod, _ int) client.Object { return p })...)
+}
+
+// EventuallyExpectTerminating ensures that the deletion timestamp is eventually set
+func EventuallyExpectTerminating(ctx context.Context, c client.Client, objs ...client.Object) {
+	GinkgoHelper()
+
+	Eventually(func(g Gomega) {
+		for _, obj := range objs {
+			g.Expect(c.Get(ctx, client.ObjectKeyFromObject(obj), obj)).To(Succeed())
+			g.Expect(obj.GetDeletionTimestamp().IsZero()).ToNot(BeTrue())
+		}
+	}, ReconcilerPropagationTime, RequestInterval)
 }

@@ -90,7 +90,7 @@ func (e *Emptiness) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, n
 		}
 		return reconcile.Result{RequeueAfter: time.Second * 30}, nil
 	}
-	pods, err := node.GetNodePods(ctx, e.kubeClient, n)
+	pods, err := node.GetReschedulablePods(ctx, e.kubeClient, n)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("retrieving node pods, %w", err)
 	}

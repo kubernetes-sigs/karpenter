@@ -70,6 +70,18 @@ func (n StateNodes) Pods(ctx context.Context, c client.Client) ([]*v1.Pod, error
 	return pods, nil
 }
 
+func (n StateNodes) ReschedulablePods(ctx context.Context, c client.Client) ([]*v1.Pod, error) {
+	var pods []*v1.Pod
+	for _, node := range n {
+		p, err := node.ReschedulablePods(ctx, c)
+		if err != nil {
+			return nil, err
+		}
+		pods = append(pods, p...)
+	}
+	return pods, nil
+}
+
 // StateNode is a cached version of a node in the cluster that maintains state which is expensive to compute every time it's
 // needed.  This currently contains node utilization across all the allocatable resources, but will soon be used to
 // compute topology information.
@@ -135,7 +147,15 @@ func (in *StateNode) Pods(ctx context.Context, c client.Client) ([]*v1.Pod, erro
 	if in.Node == nil {
 		return nil, nil
 	}
-	return nodeutils.GetNodePods(ctx, c, in.Node)
+	return nodeutils.GetPods(ctx, c, in.Node)
+}
+
+// ReschedulablePods gets the pods assigned to the Node that are reschedulable based on the kubernetes api-server bindings
+func (in *StateNode) ReschedulablePods(ctx context.Context, c client.Client) ([]*v1.Pod, error) {
+	if in.Node == nil {
+		return nil, nil
+	}
+	return nodeutils.GetReschedulablePods(ctx, c, in.Node)
 }
 
 func (in *StateNode) HostName() string {

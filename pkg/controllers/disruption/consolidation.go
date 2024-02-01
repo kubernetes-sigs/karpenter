@@ -74,20 +74,6 @@ func MakeConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient cli
 	}
 }
 
-// sortAndFilterCandidates orders candidates by the disruptionCost, removing any that we already know won't
-// be viable consolidation options.
-func (c *consolidation) sortAndFilterCandidates(ctx context.Context, candidates []*Candidate) ([]*Candidate, error) {
-	candidates, err := filterCandidates(ctx, c.kubeClient, c.recorder, candidates)
-	if err != nil {
-		return nil, fmt.Errorf("filtering candidates, %w", err)
-	}
-
-	sort.Slice(candidates, func(i int, j int) bool {
-		return candidates[i].disruptionCost < candidates[j].disruptionCost
-	})
-	return candidates, nil
-}
-
 // IsConsolidated returns true if nothing has changed since markConsolidated was called.
 func (c *consolidation) IsConsolidated() bool {
 	return c.lastConsolidationState.Equal(c.cluster.ConsolidationState())
@@ -116,6 +102,14 @@ func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
 		return false
 	}
 	return true
+}
+
+// sortCandidates sorts candidates by disruption cost (where the lowest disruption cost is first) and returns the result
+func (c *consolidation) sortCandidates(candidates []*Candidate) []*Candidate {
+	sort.Slice(candidates, func(i int, j int) bool {
+		return candidates[i].disruptionCost < candidates[j].disruptionCost
+	})
+	return candidates
 }
 
 // computeConsolidation computes a consolidation action to take

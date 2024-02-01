@@ -24,6 +24,9 @@ import (
 
 	"github.com/samber/lo"
 
+	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
+	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
+
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
@@ -32,7 +35,6 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
@@ -40,34 +42,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
-	utilsnode "sigs.k8s.io/karpenter/pkg/utils/node"
-	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
-
-func filterCandidates(ctx context.Context, kubeClient client.Client, recorder events.Recorder, nodes []*Candidate) ([]*Candidate, error) {
-	pdbs, err := NewPDBLimits(ctx, kubeClient)
-	if err != nil {
-		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
-	}
-
-	// filter out nodes that can't be terminated
-	nodes = lo.Filter(nodes, func(cn *Candidate, _ int) bool {
-		if !cn.Node.DeletionTimestamp.IsZero() {
-			recorder.Publish(disruptionevents.Blocked(cn.Node, cn.NodeClaim, "Node in the process of deletion")...)
-			return false
-		}
-		if pdb, ok := pdbs.CanEvictPods(cn.pods); !ok {
-			recorder.Publish(disruptionevents.Blocked(cn.Node, cn.NodeClaim, fmt.Sprintf("PDB %q prevents pod evictions", pdb))...)
-			return false
-		}
-		if p, ok := hasDoNotDisruptPod(cn); ok {
-			recorder.Publish(disruptionevents.Blocked(cn.Node, cn.NodeClaim, fmt.Sprintf("Pod %q has do not evict annotation", client.ObjectKeyFromObject(p)))...)
-			return false
-		}
-		return true
-	})
-	return nodes, nil
-}
 
 //nolint:gocyclo
 func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
@@ -90,7 +65,7 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	}
 
 	// We get the pods that are on nodes that are deleting
-	deletingNodePods, err := deletingNodes.Pods(ctx, kubeClient)
+	deletingNodePods, err := deletingNodes.ReschedulablePods(ctx, kubeClient)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
 	}
@@ -99,9 +74,8 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	if err != nil {
 		return nil, fmt.Errorf("determining pending pods, %w", err)
 	}
-
 	for _, n := range candidates {
-		pods = append(pods, n.pods...)
+		pods = append(pods, n.reschedulablePods...)
 	}
 	pods = append(pods, deletingNodePods...)
 	scheduler, err := provisioner.NewScheduler(ctx, pods, stateNodes, pscheduling.SchedulerOptions{
@@ -185,8 +159,12 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 	if err != nil {
 		return nil, err
 	}
+	pdbs, err := NewPDBLimits(ctx, clk, kubeClient)
+	if err != nil {
+		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
+	}
 	candidates := lo.FilterMap(cluster.Nodes(), func(n *state.StateNode, _ int) (*Candidate, bool) {
-		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, nodePoolMap, nodePoolToInstanceTypesMap, queue)
+		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue)
 		return cn, e == nil
 	})
 	// Filter only the valid candidates that we should disrupt
@@ -223,7 +201,7 @@ func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clo
 		// If the node satisfies one of the following, we subtract it from the allowed disruptions.
 		// 1. Has a NotReady conditiion
 		// 2. Is marked as deleting
-		if cond := utilsnode.GetCondition(node.Node, v1.NodeReady); cond.Status != v1.ConditionTrue || node.MarkedForDeletion() {
+		if cond := nodeutils.GetCondition(node.Node, v1.NodeReady); cond.Status != v1.ConditionTrue || node.MarkedForDeletion() {
 			deleting[nodePool]++
 		}
 		numNodes[nodePool]++
@@ -323,13 +301,4 @@ func clamp(min, val, max float64) float64 {
 		return max
 	}
 	return val
-}
-
-func hasDoNotDisruptPod(c *Candidate) (*v1.Pod, bool) {
-	return lo.Find(c.pods, func(p *v1.Pod) bool {
-		if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
-			return false
-		}
-		return pod.HasDoNotDisrupt(p)
-	})
 }

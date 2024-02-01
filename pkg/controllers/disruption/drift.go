@@ -19,7 +19,6 @@ package disruption
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sort"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -56,27 +55,12 @@ func (d *Drift) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 		c.NodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).IsTrue()
 }
 
-// SortCandidates orders drifted candidates by when they've drifted
-func (d *Drift) filterAndSortCandidates(ctx context.Context, candidates []*Candidate) ([]*Candidate, error) {
-	candidates, err := filterCandidates(ctx, d.kubeClient, d.recorder, candidates)
-	if err != nil {
-		return nil, fmt.Errorf("filtering candidates, %w", err)
-	}
+// ComputeCommand generates a disruption command given candidates
+func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
 	sort.Slice(candidates, func(i int, j int) bool {
 		return candidates[i].NodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).LastTransitionTime.Inner.Time.Before(
 			candidates[j].NodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).LastTransitionTime.Inner.Time)
 	})
-	return candidates, nil
-}
-
-// ComputeCommand generates a disruption command given candidates
-//
-//nolint:gocyclo
-func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
-	candidates, err := d.filterAndSortCandidates(ctx, candidates)
-	if err != nil {
-		return Command{}, err
-	}
 	disruptionEligibleNodesGauge.With(map[string]string{
 		methodLabel:            d.Type(),
 		consolidationTypeLabel: d.ConsolidationType(),
@@ -87,7 +71,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 	// add it to the existing command.
 	empty := make([]*Candidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		if len(candidate.pods) > 0 {
+		if len(candidate.reschedulablePods) > 0 {
 			continue
 		}
 		// If there's disruptions allowed for the candidate's nodepool,

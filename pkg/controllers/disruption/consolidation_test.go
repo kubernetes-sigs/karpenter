@@ -919,6 +919,188 @@ var _ = Describe("Consolidation", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaim)
 		})
+		It("will consider a node with a DaemonSet pod as empty", func() {
+			// assign the nodeclaims to the least expensive offering so we don't get a replacement
+			nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
+				v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
+				v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.CapacityType,
+				v1.LabelTopologyZone:         leastExpensiveOffering.Zone,
+			})
+			node.Labels = lo.Assign(node.Labels, map[string]string{
+				v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
+				v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.CapacityType,
+				v1.LabelTopologyZone:         leastExpensiveOffering.Zone,
+			})
+
+			ds := test.DaemonSet()
+			ExpectApplied(ctx, env.Client, ds, nodeClaim, node, nodePool)
+
+			// Pods owned by a Deployment
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "DaemonSet",
+							Name:               ds.Name,
+							UID:                ds.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					},
+				},
+				Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}},
+			})
+			ExpectApplied(ctx, env.Client, pod)
+
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			wg.Wait()
+
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
+			// Cascade any deletion of the nodeclaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// we should delete the empty node
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		})
+		It("will consider a node with terminating Deployment pods as empty", func() {
+			// assign the nodeclaims to the least expensive offering so we don't get a replacement
+			nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
+				v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
+				v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.CapacityType,
+				v1.LabelTopologyZone:         leastExpensiveOffering.Zone,
+			})
+			node.Labels = lo.Assign(node.Labels, map[string]string{
+				v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
+				v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.CapacityType,
+				v1.LabelTopologyZone:         leastExpensiveOffering.Zone,
+			})
+
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs, nodeClaim, node, nodePool)
+
+			// Pod owned by a Deployment
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					},
+				},
+				Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}},
+			})
+			ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *v1.Pod, _ int) client.Object { return p })...)
+
+			for _, p := range pods {
+				ExpectManualBinding(ctx, env.Client, p, node)
+			}
+
+			// Evict the pods off of the node
+			for _, p := range pods {
+				// Trigger an eviction to set the deletion timestamp but not delete the pod
+				ExpectEvicted(ctx, env.Client, p)
+				ExpectExists(ctx, env.Client, p)
+			}
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			wg.Wait()
+
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
+			// Cascade any deletion of the nodeclaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// we should delete the empty node
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		})
+		It("will not consider a node with a terminating StatefulSet pod as empty", func() {
+			// assign the nodeclaims to the least expensive offering so we don't get a replacement
+			nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
+				v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
+				v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.CapacityType,
+				v1.LabelTopologyZone:         leastExpensiveOffering.Zone,
+			})
+			node.Labels = lo.Assign(node.Labels, map[string]string{
+				v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
+				v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.CapacityType,
+				v1.LabelTopologyZone:         leastExpensiveOffering.Zone,
+			})
+
+			ss := test.StatefulSet()
+			ExpectApplied(ctx, env.Client, ss, nodeClaim, node, nodePool)
+
+			// Pod owned by a StatefulSet
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "StatefulSet",
+							Name:               ss.Name,
+							UID:                ss.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					},
+				},
+				Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}},
+			})
+			ExpectApplied(ctx, env.Client, pod)
+
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// Trigger an eviction to set the deletion timestamp but not delete the pod
+			ExpectEvicted(ctx, env.Client, pod)
+			ExpectExists(ctx, env.Client, pod)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			wg.Wait()
+
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
+			// Cascade any deletion of the nodeclaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// we shouldn't delete the node due to emptiness with a statefulset terminating pod
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, nodeClaim)
+			ExpectExists(ctx, env.Client, node)
+		})
 	})
 	Context("Replace", func() {
 		DescribeTable("can replace node",

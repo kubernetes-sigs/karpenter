@@ -23,6 +23,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/apis"
+	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -72,6 +73,74 @@ var _ = Describe("Emptiness", func() {
 	It("should mark NodeClaims as empty", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+
+		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Empty).IsTrue()).To(BeTrue())
+	})
+	It("should mark NodeClaims as empty that have only pods in terminating state", func() {
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+
+		// Pod owned by a Deployment
+		pods := test.Pods(3, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				},
+			},
+			NodeName:   node.Name,
+			Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}},
+		})
+		ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *v1.Pod, _ int) client.Object { return p })...)
+
+		for _, p := range pods {
+			// Trigger an eviction to set the deletion timestamp but not delete the pod
+			ExpectEvicted(ctx, env.Client, p)
+			ExpectExists(ctx, env.Client, p)
+		}
+
+		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Empty).IsTrue()).To(BeTrue())
+	})
+	It("should mark NodeClaims as empty that have only DaemonSet pods", func() {
+		ds := test.DaemonSet()
+		ExpectApplied(ctx, env.Client, ds)
+
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+
+		// Pod owned by a DaemonSet
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "DaemonSet",
+						Name:               ds.Name,
+						UID:                ds.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				},
+			},
+			NodeName:   node.Name,
+			Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}},
+		})
+		ExpectApplied(ctx, env.Client, pod)
 
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
@@ -137,6 +206,42 @@ var _ = Describe("Emptiness", func() {
 
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Empty)).To(BeNil())
+	})
+	It("should remove the status condition from NodeClaims that have a StatefulSet pod in terminating state", func() {
+		ss := test.StatefulSet()
+		ExpectApplied(ctx, env.Client, ss)
+
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Empty)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+
+		// Pod owned by a StatefulSet
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "StatefulSet",
+						Name:               ss.Name,
+						UID:                ss.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				},
+			},
+			NodeName:   node.Name,
+			Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}},
+		})
+		ExpectApplied(ctx, env.Client, pod)
+
+		// Trigger an eviction to set the deletion timestamp but not delete the pod
+		ExpectEvicted(ctx, env.Client, pod)
+		ExpectExists(ctx, env.Client, pod)
+
+		// The node isn't empty even though it only has terminating pods
+		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Empty)).To(BeNil())
 	})

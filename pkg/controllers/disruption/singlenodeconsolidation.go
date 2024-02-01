@@ -43,10 +43,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 	if s.IsConsolidated() {
 		return Command{}, nil
 	}
-	candidates, err := s.sortAndFilterCandidates(ctx, candidates)
-	if err != nil {
-		return Command{}, fmt.Errorf("sorting candidates, %w", err)
-	}
+	candidates = s.sortCandidates(candidates)
 	disruptionEligibleNodesGauge.With(map[string]string{
 		methodLabel:            s.Type(),
 		consolidationTypeLabel: s.ConsolidationType(),

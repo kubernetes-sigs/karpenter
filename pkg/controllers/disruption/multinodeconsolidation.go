@@ -45,10 +45,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	if m.IsConsolidated() {
 		return Command{}, nil
 	}
-	candidates, err := m.sortAndFilterCandidates(ctx, candidates)
-	if err != nil {
-		return Command{}, fmt.Errorf("sorting candidates, %w", err)
-	}
+	candidates = m.sortCandidates(candidates)
 	disruptionEligibleNodesGauge.With(map[string]string{
 		methodLabel:            m.Type(),
 		consolidationTypeLabel: m.ConsolidationType(),

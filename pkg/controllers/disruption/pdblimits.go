@@ -23,19 +23,24 @@ import (
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	podutil "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
 // PDBLimits is used to evaluate if evicting a list of pods is possible.
 type PDBLimits struct {
 	ctx        context.Context
+	clk        clock.Clock
 	kubeClient client.Client
 	pdbs       []*pdbItem
 }
 
-func NewPDBLimits(ctx context.Context, kubeClient client.Client) (*PDBLimits, error) {
+func NewPDBLimits(ctx context.Context, clk clock.Clock, kubeClient client.Client) (*PDBLimits, error) {
 	ps := &PDBLimits{
 		ctx:        ctx,
+		clk:        clk,
 		kubeClient: kubeClient,
 	}
 
@@ -56,10 +61,16 @@ func NewPDBLimits(ctx context.Context, kubeClient client.Client) (*PDBLimits, er
 
 // CanEvictPods returns true if every pod in the list is evictable. They may not all be evictable simultaneously, but
 // for every PDB that controls the pods at least one pod can be evicted.
+// nolint:gocyclo
 func (s *PDBLimits) CanEvictPods(pods []*v1.Pod) (client.ObjectKey, bool) {
 	for _, pod := range pods {
+		// If the pod isn't eligible for being evicted, then a fully blocking PDB doesn't matter
+		// This is due to the fact that we won't call the eviction API on these pods when we are disrupting the node
+		if !podutil.IsEvictable(pod) {
+			continue
+		}
 		for _, pdb := range s.pdbs {
-			if pdb.name.Namespace == pod.ObjectMeta.Namespace {
+			if pdb.key.Namespace == pod.ObjectMeta.Namespace {
 				if pdb.selector.Matches(labels.Set(pod.Labels)) {
 
 					// if the PDB policy is set to allow evicting unhealthy pods, then it won't stop us from
@@ -75,7 +86,7 @@ func (s *PDBLimits) CanEvictPods(pods []*v1.Pod) (client.ObjectKey, bool) {
 					}
 
 					if !ignorePod && pdb.disruptionsAllowed == 0 {
-						return pdb.name, false
+						return pdb.key, false
 					}
 				}
 			}
@@ -85,7 +96,7 @@ func (s *PDBLimits) CanEvictPods(pods []*v1.Pod) (client.ObjectKey, bool) {
 }
 
 type pdbItem struct {
-	name                        client.ObjectKey
+	key                         client.ObjectKey
 	selector                    labels.Selector
 	disruptionsAllowed          int32
 	canAlwaysEvictUnhealthyPods bool
@@ -102,7 +113,7 @@ func newPdb(pdb policyv1.PodDisruptionBudget) (*pdbItem, error) {
 		canAlwaysEvictUnhealthyPods = true
 	}
 	return &pdbItem{
-		name:                        client.ObjectKeyFromObject(&pdb),
+		key:                         client.ObjectKeyFromObject(&pdb),
 		selector:                    selector,
 		disruptionsAllowed:          pdb.Status.DisruptionsAllowed,
 		canAlwaysEvictUnhealthyPods: canAlwaysEvictUnhealthyPods,
