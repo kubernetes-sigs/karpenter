@@ -40,9 +40,9 @@ func NewSingleNodeConsolidation(consolidation consolidation) *SingleNodeConsolid
 
 // ComputeCommand generates a disruption command given candidates
 // nolint:gocyclo
-func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
+func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	if s.IsConsolidated() {
-		return Command{}, nil
+		return Command{}, scheduling.Results{}, nil
 	}
 	candidates = s.sortCandidates(candidates)
 	disruptionEligibleNodesGauge.With(map[string]string{
@@ -94,7 +94,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		// the next time we try to disrupt.
 		s.markConsolidated()
 	}
-	return Command{}, nil
+	return Command{}, scheduling.Results{}, nil
 }
 
 func (s *SingleNodeConsolidation) Type() string {

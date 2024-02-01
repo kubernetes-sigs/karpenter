@@ -544,9 +544,10 @@ var _ = Describe("Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			cmd, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmd, results, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd)
+			Expect(results).To(Not(BeEmpty()))
+			Expect(cmd).To(Not(BeEmpty()))
 			wg.Wait()
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
@@ -607,9 +608,10 @@ var _ = Describe("Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			cmd, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmd, results, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd)
+			Expect(results).To(Not(BeEmpty()))
+			Expect(cmd).To(Not(BeEmpty()))
 			wg.Wait()
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
@@ -633,9 +635,10 @@ var _ = Describe("Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			cmd, err := multiConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmd, results, err := multiConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd)
+			Expect(results).To(Not(BeEmpty()))
+			Expect(cmd).To(Not(BeEmpty()))
 			wg.Wait()
 
 			Expect(multiConsolidation.IsConsolidated()).To(BeFalse())
@@ -696,9 +699,10 @@ var _ = Describe("Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			cmd, err := multiConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmd, results, err := multiConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd)
+			Expect(results).To(Not(BeEmpty()))
+			Expect(cmd).To(Not(BeEmpty()))
 			wg.Wait()
 
 			Expect(multiConsolidation.IsConsolidated()).To(BeFalse())
@@ -722,9 +726,10 @@ var _ = Describe("Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			cmd, err := singleConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmd, results, err := singleConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd)
+			Expect(results).To(Not(BeEmpty()))
+			Expect(cmd).To(Not(BeEmpty()))
 			wg.Wait()
 
 			Expect(singleConsolidation.IsConsolidated()).To(BeFalse())
@@ -785,9 +790,10 @@ var _ = Describe("Consolidation", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			cmd, err := singleConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmd, results, err := singleConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd)
+			Expect(results).To(Not(BeEmpty()))
+			Expect(cmd).To(Not(BeEmpty()))
 			wg.Wait()
 
 			Expect(singleConsolidation.IsConsolidated()).To(BeFalse())

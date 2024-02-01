@@ -39,9 +39,9 @@ func NewEmptyNodeConsolidation(consolidation consolidation) *EmptyNodeConsolidat
 // ComputeCommand generates a disruption command given candidates
 //
 //nolint:gocyclo
-func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
+func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	if c.IsConsolidated() {
-		return Command{}, nil
+		return Command{}, scheduling.Results{}, nil
 	}
 	candidates = c.sortCandidates(candidates)
 	disruptionEligibleNodesGauge.With(map[string]string{
@@ -73,7 +73,7 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		if !constrainedByBudgets {
 			c.markConsolidated()
 		}
-		return Command{}, nil
+		return Command{}, scheduling.Results{}, nil
 	}
 
 	cmd := Command{

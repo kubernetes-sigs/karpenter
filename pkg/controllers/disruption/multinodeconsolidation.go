@@ -41,9 +41,9 @@ func NewMultiNodeConsolidation(consolidation consolidation) *MultiNodeConsolidat
 	return &MultiNodeConsolidation{consolidation: consolidation}
 }
 
-func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
+func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	if m.IsConsolidated() {
-		return Command{}, nil
+		return Command{}, scheduling.Results{}, nil
 	}
 	candidates = m.sortCandidates(candidates)
 	disruptionEligibleNodesGauge.With(map[string]string{
@@ -88,7 +88,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		if !constrainedByBudgets {
 			m.markConsolidated()
 		}
-		return cmd, nil
+		return cmd, scheduling.Results{}, nil
 	}
 
 	v := NewValidation(consolidationTTL, m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder, m.queue)
