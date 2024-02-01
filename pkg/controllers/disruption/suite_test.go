@@ -216,9 +216,12 @@ var _ = Describe("Simulate Scheduling", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
 		}
 
+		pdbs, err := disruption.NewPDBLimits(ctx, fakeClock, env.Client)
+		Expect(err).To(Succeed())
+
 		// Generate a candidate
 		stateNode := ExpectStateNodeExists(cluster, nodes[0])
-		candidate, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, stateNode, nodePoolMap, nodePoolToInstanceTypesMap, queue)
+		candidate, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, stateNode, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue)
 		Expect(err).To(Succeed())
 
 		results, err := disruption.SimulateScheduling(ctx, env.Client, cluster, prov, candidate)
