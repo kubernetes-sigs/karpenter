@@ -19,7 +19,7 @@ spec:
   template:
     spec:
       requirements:
-        - key: karpenter.kwok.sh.instance-family
+        - key: karpenter.kwok.sh/instance-family
           operator: In
           values: ["c", "m", "r"]
           minValues: 2
@@ -45,7 +45,7 @@ spec:
   template:
     spec:
       requirements:
-      - key: karpenter.kwok.sh.instance-family
+      - key: karpenter.kwok.sh/instance-family
         operator: In
         values: ["c", "m", "r"]
         minValues: 2
@@ -69,7 +69,7 @@ kind: EC2NodeClass
 spec:
   minValues:
     node.kubernetes.io/instance-type: 10
-    karpenter.kwok.sh.instance-family: 2
+    karpenter.kwok.sh/instance-family: 2
 ---
 apiVersion: karpenter.sh/v1beta1
 kind: NodePool
@@ -77,7 +77,7 @@ spec:
   template:
     spec:
       requirements:
-      - key: karpenter.kwok.sh.instance-family
+      - key: karpenter.kwok.sh/instance-family
         operator: In
         values: ["c", "m", "r"]
       - key: node.kubernetes.io/instance-type
