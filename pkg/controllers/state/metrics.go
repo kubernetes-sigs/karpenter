@@ -28,7 +28,7 @@ const (
 )
 
 var (
-	ClusterStateNodesTotal = prometheus.NewGauge(
+	clusterStateNodesTotal = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: stateSubsystem,
