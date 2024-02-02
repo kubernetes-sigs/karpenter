@@ -5,12 +5,13 @@
 
 ## Known Requirements 
 **Reason and Budget Definition:** Users should be able to define an action and a corresponding budget(s).
-**Supported Reasons:** All disruption Reasons affected by the current Budgets implementation (Consolidation, Emptiness, Expiration, Drift) should be supported. We must support any cloudprovider.DriftReason in the budgets to allow control on node image upgrade vs other types of drift. 
+**Supported Reasons:** All disruption Reasons affected by the current Budgets implementation (Consolidation, Emptiness, Expiration, Drift) should be supported. 
 **Default Behavior for Unspecified Reasons:** Budgets should continue to support a default behavior for all disruption actions. If an action is unspecified, it is assumed to apply to all actions. If a reason is unspecified, we apply the budget to be shared by all reasons that are unspecified. 
 
 ## API Design
 ### Approach A: Add a reason field to disruption Budgets 
-This approach outlines a simple api change to the v1beta1 nodepool api to allow disruption budgets to specify a disruption action. 
+This approach outlines a simple api change to the v1beta1 nodepool api to allow disruption budgets to specify a disruption method. 
+
 ### Proposed Spec
 Add a simple field "reason" is proposed to be added to the budgets. 
 ```go
@@ -48,13 +49,6 @@ type Budget struct {
       Duration *metav1.Duration `json:"duration,omitempty" hash:"ignore"`
 }
 
-
-var (
-  // These reasons that are inserted by the cloud provider and will be used to validate drift reasons the cloud provider wants to whitelist
-  CloudProviderAllowedDriftReasons = set.New() 
-)
-
-
 ```
 
 
@@ -84,7 +78,6 @@ If there are multiple active budgets, karpenter takes the most restrictive budge
 * 👍 No nested definitions required 
 * 👍👍 Extending existing budgets api. No Breaking API Changes, completely backwards compatible  
 * 👎 With action being clearly tied to budgets, and other api logic being driven by disruption Reason, we lose the chance to generalize per Reason controls 
-* 👎 Makes validation of a particular disruption 
 
 ### Approach B: Defining Per Reason Controls  
 Ideally, we could move all generic controls that easily map into other actions into one set of action controls, this applies to budgets and other various disruption controls that could be more generic. 
@@ -161,21 +154,13 @@ spec:
           schedule: "0 0 1 * *"
           duration: "1h"
         - nodes: "10%"
-          reasons: ["NodeImageDrift"]
           schedule: "0 0 * * 0"
           duration: "2h"
         - nodes: "50%" 
-          reasons: ["K8sVersionUpgrade", "NodeImageDrift"]
-          schedule: "@yearly"
+          schedule: "@monthly"
     expiration:
       disruptAfter: "Never"
 ```
-
-#### Reasons
-Rather than Reasons being defined at the budget level, we could add an additonal layer of abstraction. Then for each budget, we apply a reason or All/Undefined. If reason isn't specifed in a budget we take the same behavior in terms of fallback for all on these Reason types.
-
-This design allows for simplification of reason as its very easy to directly define a relationship between a given disruption Reason and its sub-action since the disruption Reason is explicitly declared. Reasons aren't going to be solved by this doc, but this goes to show how this api design leaves a clear place for customer behavior per action.
-
 #### Considerations 
 Some of the API choices for a given action seem to follow a similar pattern. These include ConsolidateAfter, ExpireAfter, and there are discussions about introducing a global DisruptAfter. Moreover, when discussing disruption budgets, we talk about adding behavior for each action. It appears there is a need for disruption controls within the budgets for each action, not just overall.
 
@@ -251,72 +236,27 @@ type Budget struct {
       Duration *metav1.Duration `json:"duration,omitempty" hash:"ignore"`
 }
 ```
-
+The second approach allows for less redundancy. Budgets themselves already have a high level of granularity, and no way to share configuration at the cluster level for disruption settings or controls. This allows for elimination of another dimension of copy paste if I want to share a budget in my nodepools.
 
 ```yaml
 yaml: 
   - nodes: 10
-  reasons: [Drift, Consolidation, K8sVersionUpgrade]
+  reasons: [Drift, Consolidation]
   schedule: "* * * * *"
   - nodes: 5 
-  reasons: [K8sVersionUpgrade] 
+  reasons: [Emptiness] 
   schedule: "* * * * *" 
+  - nodes: 100%
+  
 ```
   
 
 
 #### Q: How should karpenter track node deletion by reason
 To answer this question we can first answer, how does the disruption budgets implementation track node deletion today? 
-
-```go
-func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clock.Clock, kubeClient client.Client) (map[string]int, error) {
-	nodePoolList := &v1beta1.NodePoolList{}
-	if err := kubeClient.List(ctx, nodePoolList); err != nil {
-		return nil, fmt.Errorf("listing node pools, %w", err)
-	}
-	numNodes := map[string]int{}
-	deleting := map[string]int{}
-	disruptionBudgetMapping := map[string]int{}
-	// We need to get all the nodes in the cluster
-	// Get each current active number of nodes per nodePool
-	// Get the max disruptions for each nodePool
-	// Get the number of deleting nodes for each of those nodePools
-	// Find the difference to know how much left we can disrupt
-	nodes := cluster.Nodes()
-	for _, node := range nodes {
-		// We only consider nodes that we own and are initialized towards the total.
-		// If a node is launched/registered, but not initialized, pods aren't scheduled
-		// to the node, and these are treated as unhealthy until they're cleaned up.
-		// This prevents odd roundup cases with percentages where replacement nodes that
-		// aren't initialized could be counted towards the total, resulting in more disruptions
-		// to active nodes than desired, where Karpenter should wait for these nodes to be
-		// healthy before continuing.
-		if !node.Managed() || !node.Initialized() {
-			continue
-		}
-		nodePool := node.Labels()[v1beta1.NodePoolLabelKey]
-		if node.MarkedForDeletion() {
-			deleting[nodePool]++
-		}
-		numNodes[nodePool]++
-	}
-
-	for i := range nodePoolList.Items {
-		nodePool := nodePoolList.Items[i]
-		disruptions := nodePool.MustGetAllowedDisruptions(ctx, clk, numNodes[nodePool.Name])
-		// Subtract the allowed number of disruptions from the number of already deleting nodes.
-		// Floor the value since the number of deleting nodes can exceed the number of allowed disruptions.
-		// Allowing this value to be negative breaks assumptions in the code used to calculate how
-		// many nodes can be disrupted.
-		disruptionBudgetMapping[nodePool.Name] = lo.Clamp(disruptions-deleting[nodePool.Name], 0, math.MaxInt32)
-	}
-	return disruptionBudgetMapping, nil
-}
-```
 The disruption budgets used by karpenter today will check the minimum allowed disruptions specified in all the budgets, minus the number of nodes currently undergoing disruption.
 
-This implementation will have to change, and karpenter cluster state will have to become aware of the reason for node deletion.
-
+This implementation will have to change, and karpenter cluster state will have to become aware of the reason for node disruption.
 ```go
 func (in *StateNode) MarkedForDeletion() bool {
 	// The Node is marked for deletion if:
@@ -334,8 +274,7 @@ We can use the `DisruptionReason` to determine why a given nodeclaim was disrupt
 ```go
 type NodeClaimStatus struct {
 	...
-	// DisruptionReason represents the reason why the node was disrupted. This can be Consolidation, Drift, Expiration, Emptiness, and the cloudprovider drift reasons
-	// in the format of "Reason:reason".
+	// DisruptionReason represents the reason why the node was disrupted. This can be Consolidation, Drift, Expiration, Emptiness
 	DisruptionReason string `json:"disruptionDetails,omitempty"`
 	...
 }
@@ -343,11 +282,9 @@ type NodeClaimStatus struct {
 
 
 ## Observability and Supportability 
-One major aspect to budgets that is missing is a proper monitoring story. The monitoring story can be broken into the following categories 
-1. Metrics 
-2. NodePoolStatus 
-3. NodeClaimConditions
-4. Events 
+One major aspect to budgets that is missing is a proper monitoring story. This doc adds basic observability concerns with another doc pending observability concerns for budgets.
+
+
 
 ### Metrics
 - **Metric**: `karpenter_nodepool_active_budgets`
@@ -367,56 +304,6 @@ One major aspect to budgets that is missing is a proper monitoring story. The mo
 - **Type**: Counter
 - **Value**: Cumulative count of disrupted nodes for each combination of Reason and reason in the NodePool.
 - EstimatedCardinality: X
-
-#### NodePool Status 
-```yaml
-apiVersion: karpenter.sh/v1beta1
-kind: NodePool
-metadata:
-  annotations:
-    karpenter.sh/nodepool-hash: "18334584923024176540"
-    kubectl.kubernetes.io/last-applied-configuration: |
-  creationTimestamp: "2024-01-25T06:59:08Z"
-  generation: 2
-  name: default
-  resourceVersion: "721558"
-  uid: f09b662b-eb65-4495-81ae-e407a8a6da5a
-spec:
-  disruption:
-    budgets:
-    - nodes: 10%
-      Reason: "Drift" 
-
-    consolidationPolicy: WhenUnderutilized
-    expireAfter: 720h
-  limits:
-    cpu: 1000
-
-status:
-  disruption:
-    activeBudgets:
-      - Reason: "Drift"
-        nodes: "5" # Current number of nodes disrupted under this budget
-        remainingBudget: "45"
-    totalDisruptedNodes: "20" # Total number of nodes disrupted across all Reasons
-    lastDisruptionTime: "2024-01-25T10:00:00Z" # Timestamp of the last disruption
-  resources:
-    nodes: 500 # Useful when trying to understand percentage values in the nodes declaration of a budget
-```
-
-#### NodeClaimConditions
-We want to communicate when 
-```yaml 
-kind: NodeClaim
-status:
-  conditions:
-    - type: "DisruptionBudgetRestricted"
-      status: "True|False"
-      reason: "BudgetExceeded"
-      message: "Disruption restricted due to budget limitations."
-      lastTransitionTime: "2024-01-25T10:00:00Z"
-```
-
 
 #### Events 
 
