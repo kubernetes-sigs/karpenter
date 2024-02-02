@@ -96,9 +96,9 @@ func Subtract(lhs, rhs v1.ResourceList) v1.ResourceList {
 	return result
 }
 
+// podRequests calculates the max between the sum of container resources and max of initContainers along with sidecar feature consideration
 // inspired from https://github.com/kubernetes/kubernetes/blob/e2afa175e4077d767745246662170acd86affeaf/pkg/api/v1/resource/helpers.go#L96
 // https://kubernetes.io/blog/2023/08/25/native-sidecar-containers/
-// Ceiling calculates the max between the sum of container resources and max of initContainers along with sidecar feature consideration
 func podRequests(pod *v1.Pod) v1.ResourceList {
 	requests := v1.ResourceList{}
 	restartableInitContainerReqs := v1.ResourceList{}
@@ -131,6 +131,9 @@ func podRequests(pod *v1.Pod) v1.ResourceList {
 	return requests
 }
 
+// podLimits calculates the max between the sum of container resources and max of initContainers along with sidecar feature consideration
+// inspired from https://github.com/kubernetes/kubernetes/blob/e2afa175e4077d767745246662170acd86affeaf/pkg/api/v1/resource/helpers.go#L96
+// https://kubernetes.io/blog/2023/08/25/native-sidecar-containers/
 func podLimits(pod *v1.Pod) v1.ResourceList {
 	limits := v1.ResourceList{}
 	restartableInitContainerLimits := v1.ResourceList{}
