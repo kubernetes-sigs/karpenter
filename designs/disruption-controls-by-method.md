@@ -10,7 +10,7 @@
 
 ## API Design
 ### Approach A: Add a reason field to disruption Budgets 
-This approach outlines a simple api change to the betav1 nodepool api to allow disruption budgets to specify a disruption action. 
+This approach outlines a simple api change to the v1beta1 nodepool api to allow disruption budgets to specify a disruption action. 
 ### Proposed Spec
 Add a simple field "reason" is proposed to be added to the budgets. 
 ```go
