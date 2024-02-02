@@ -33,7 +33,7 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: stateSubsystem,
 			Name:      "nodes_count",
-			Help:      "Total nodes in karpenter's cluster state",
+			Help:      "Current count of nodes in Karpenter's cluster state",
 		},
 	)
 
