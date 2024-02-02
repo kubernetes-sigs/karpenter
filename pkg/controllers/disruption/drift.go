@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -56,7 +57,7 @@ func (d *Drift) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 }
 
 // ComputeCommand generates a disruption command given candidates
-func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
+func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	sort.Slice(candidates, func(i int, j int) bool {
 		return candidates[i].NodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).LastTransitionTime.Inner.Time.Before(
 			candidates[j].NodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).LastTransitionTime.Inner.Time)
@@ -85,7 +86,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 	if len(empty) > 0 {
 		return Command{
 			candidates: empty,
-		}, nil
+		}, scheduling.Results{}, nil
 	}
 
 	for _, candidate := range candidates {
@@ -102,24 +103,20 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 			if errors.Is(err, errCandidateDeleting) {
 				continue
 			}
-			return Command{}, err
+			return Command{}, scheduling.Results{}, err
 		}
 		// Emit an event that we couldn't reschedule the pods on the node.
 		if !results.AllNonPendingPodsScheduled() {
 			d.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
 			continue
 		}
-		if len(results.NewNodeClaims) == 0 {
-			return Command{
-				candidates: []*Candidate{candidate},
-			}, nil
-		}
+
 		return Command{
 			candidates:   []*Candidate{candidate},
 			replacements: results.NewNodeClaims,
-		}, nil
+		}, results, nil
 	}
-	return Command{}, nil
+	return Command{}, scheduling.Results{}, nil
 }
 
 func (d *Drift) Type() string {

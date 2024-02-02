@@ -40,7 +40,7 @@ import (
 
 type Method interface {
 	ShouldDisrupt(context.Context, *Candidate) bool
-	ComputeCommand(context.Context, map[string]int, ...*Candidate) (Command, error)
+	ComputeCommand(context.Context, map[string]int, ...*Candidate) (Command, scheduling.Results, error)
 	Type() string
 	ConsolidationType() string
 }

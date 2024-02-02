@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -61,7 +62,7 @@ func (e *Expiration) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 }
 
 // ComputeCommand generates a disruption command given candidates
-func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
+func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	sort.Slice(candidates, func(i int, j int) bool {
 		return candidates[i].NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).LastTransitionTime.Inner.Time.Before(
 			candidates[j].NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).LastTransitionTime.Inner.Time)
@@ -87,10 +88,11 @@ func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping
 		}
 	}
 	// Disrupt all empty expired candidates, as they require no scheduling simulations.
+	// Return empty scheduling results since no empty nodes should be rescheduling any pods.
 	if len(empty) > 0 {
 		return Command{
 			candidates: empty,
-		}, nil
+		}, scheduling.Results{}, nil
 	}
 
 	for _, candidate := range candidates {
@@ -107,21 +109,20 @@ func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping
 			if errors.Is(err, errCandidateDeleting) {
 				continue
 			}
-			return Command{}, err
+			return Command{}, scheduling.Results{}, err
 		}
 		// Emit an event that we couldn't reschedule the pods on the node.
 		if !results.AllNonPendingPodsScheduled() {
 			e.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
 			continue
 		}
-
 		logging.FromContext(ctx).With("ttl", candidates[0].nodePool.Spec.Disruption.ExpireAfter.String()).Infof("triggering termination for expired node after TTL")
 		return Command{
 			candidates:   []*Candidate{candidate},
 			replacements: results.NewNodeClaims,
-		}, nil
+		}, results, nil
 	}
-	return Command{}, nil
+	return Command{}, scheduling.Results{}, nil
 }
 
 func (e *Expiration) Type() string {

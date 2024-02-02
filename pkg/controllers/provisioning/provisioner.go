@@ -290,7 +290,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	return scheduler.NewScheduler(ctx, p.kubeClient, nodeClaimTemplates, nodePoolList.Items, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, opts), nil
 }
 
-func (p *Provisioner) Schedule(ctx context.Context) (*scheduler.Results, error) {
+func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	defer metrics.Measure(schedulingDuration)()
 
 	// We collect the nodes with their used capacities before we get the list of pending pods. This ensures that
@@ -307,7 +307,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (*scheduler.Results, error) 
 	// Get pods, exit if nothing to do
 	pendingPods, err := p.GetPendingPods(ctx)
 	if err != nil {
-		return nil, err
+		return scheduler.Results{}, err
 	}
 	// Get pods from nodes that are preparing for deletion
 	// We do this after getting the pending pods so that we undershoot if pods are
@@ -315,20 +315,20 @@ func (p *Provisioner) Schedule(ctx context.Context) (*scheduler.Results, error) 
 	// NOTE: The assumption is that these nodes are cordoned and no additional pods will schedule to them
 	deletingNodePods, err := nodes.Deleting().ReschedulablePods(ctx, p.kubeClient)
 	if err != nil {
-		return nil, err
+		return scheduler.Results{}, err
 	}
 	pods := append(pendingPods, deletingNodePods...)
 	// nothing to schedule, so just return success
 	if len(pods) == 0 {
-		return &scheduler.Results{}, nil
+		return scheduler.Results{}, nil
 	}
 	s, err := p.NewScheduler(ctx, pods, nodes.Active(), scheduler.SchedulerOptions{})
 	if err != nil {
 		if errors.Is(err, ErrNodePoolsNotFound) {
 			logging.FromContext(ctx).Info(ErrNodePoolsNotFound)
-			return &scheduler.Results{}, nil
+			return scheduler.Results{}, nil
 		}
-		return nil, fmt.Errorf("creating scheduler, %w", err)
+		return scheduler.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
 	return s.Solve(ctx, pods), nil
 }

@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -159,7 +160,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	}
 
 	// Determine the disruption action
-	cmd, err := disruption.ComputeCommand(ctx, disruptionBudgetMapping, candidates...)
+	cmd, schedulingResults, err := disruption.ComputeCommand(ctx, disruptionBudgetMapping, candidates...)
 	if err != nil {
 		return false, fmt.Errorf("computing disruption decision, %w", err)
 	}
@@ -168,7 +169,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	}
 
 	// Attempt to disrupt
-	if err := c.executeCommand(ctx, disruption, cmd); err != nil {
+	if err := c.executeCommand(ctx, disruption, cmd, schedulingResults); err != nil {
 		return false, fmt.Errorf("disrupting candidates, %w", err)
 	}
 
@@ -179,7 +180,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 // 1. Taint candidate nodes
 // 2. Spin up replacement nodes
 // 3. Add Command to orchestration.Queue to wait to delete the candiates.
-func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) error {
+func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, schedulingResults scheduling.Results) error {
 	disruptionActionsPerformedCounter.With(map[string]string{
 		actionLabel:            string(cmd.Action()),
 		methodLabel:            m.Type(),
@@ -203,6 +204,24 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command) 
 			// If we failed to launch the replacement, don't disrupt.  If this is some permanent failure,
 			// we don't want to disrupt workloads with no way to provision new nodes for them.
 			return multierr.Append(fmt.Errorf("launching replacement nodeclaim (command-id: %s), %w", commandID, err), state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...))
+		}
+	}
+
+	// Nominate each node for scheduling and emit pod nomination events
+	// We emit all nominations before we exit the disruption loop as
+	// we want to ensure that nodes that are nominated are respected in the subsequent
+	// disruption reconciliation. This is essential in correctly modeling multiple
+	// disruption commands in parallel.
+	// This will only nominate nodes for 2 * batchingWindow. Once the candidates are
+	// tainted with the Karpenter taint, the provisioning controller will continue
+	// to do scheduling simulations and nominate the pods on the candidate nodes until
+	// the node is cleaned up.
+	for _, node := range schedulingResults.ExistingNodes {
+		if len(node.Pods) > 0 {
+			c.cluster.NominateNodeForPod(ctx, node.ProviderID())
+		}
+		for _, pod := range node.Pods {
+			c.recorder.Publish(scheduling.NominatePodEvent(pod, node.Node, node.NodeClaim))
 		}
 	}
 
