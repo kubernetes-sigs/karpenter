@@ -28,7 +28,7 @@ const (
 )
 
 var (
-	clusterStateNodesTotal = prometheus.NewGauge(
+	clusterStateNodesCount = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: stateSubsystem,
@@ -37,7 +37,7 @@ var (
 		},
 	)
 
-	ClusterStateSynced = prometheus.NewGauge(
+	clusterStateSynced = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: stateSubsystem,
@@ -48,5 +48,5 @@ var (
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(ClusterStateNodesTotal, ClusterStateSynced)
+	crmetrics.Registry.MustRegister(clusterStateNodesCount, clusterStateSynced)
 }

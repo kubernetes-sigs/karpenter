@@ -795,7 +795,7 @@ var _ = Describe("Node Resource Level", func() {
 			v1.ResourceCPU:    resource.MustParse("1"),
 			v1.ResourceMemory: resource.MustParse("2Gi"),
 		}, ExpectStateNodeExists(cluster, node).DaemonSetRequests())
-		// total request
+		// count request
 		ExpectResources(v1.ResourceList{
 			v1.ResourceCPU:    resource.MustParse("2.5"),
 			v1.ResourceMemory: resource.MustParse("2Gi"),
@@ -1121,12 +1121,12 @@ var _ = Describe("Cluster State Sync", func() {
 			})
 			ExpectApplied(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-			ExpectMetricGaugeValue("karpenter_state_nodes_total", float64(i+1), make(map[string]string))
+			ExpectMetricGaugeValue("karpenter_state_nodes_count", float64(i+1), make(map[string]string))
 		}
 
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 		ExpectMetricGaugeValue("karpenter_state_synced", 1.0, make(map[string]string))
-		ExpectMetricGaugeValue("karpenter_state_nodes_total", 1000.0, make(map[string]string))
+		ExpectMetricGaugeValue("karpenter_state_nodes_count", 1000.0, make(map[string]string))
 	})
 	It("should consider the cluster state synced when nodes don't have provider id", func() {
 		// Deploy 1000 nodes and sync them all with the cluster
@@ -1134,11 +1134,11 @@ var _ = Describe("Cluster State Sync", func() {
 			node := test.Node()
 			ExpectApplied(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-			ExpectMetricGaugeValue("karpenter_state_nodes_total", float64(i+1), make(map[string]string))
+			ExpectMetricGaugeValue("karpenter_state_nodes_count", float64(i+1), make(map[string]string))
 		}
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 		ExpectMetricGaugeValue("karpenter_state_synced", 1.0, make(map[string]string))
-		ExpectMetricGaugeValue("karpenter_state_nodes_total", 1000.0, make(map[string]string))
+		ExpectMetricGaugeValue("karpenter_state_nodes_count", 1000.0, make(map[string]string))
 
 	})
 	It("should consider the cluster state synced when nodes register provider id", func() {
@@ -1148,7 +1148,7 @@ var _ = Describe("Cluster State Sync", func() {
 			nodes = append(nodes, test.Node())
 			ExpectApplied(ctx, env.Client, nodes[i])
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodes[i]))
-			ExpectMetricGaugeValue("karpenter_state_nodes_total", float64(i+1), make(map[string]string))
+			ExpectMetricGaugeValue("karpenter_state_nodes_count", float64(i+1), make(map[string]string))
 		}
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 		for i := 0; i < 1000; i++ {
@@ -1158,7 +1158,7 @@ var _ = Describe("Cluster State Sync", func() {
 		}
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 		ExpectMetricGaugeValue("karpenter_state_synced", 1.0, make(map[string]string))
-		ExpectMetricGaugeValue("karpenter_state_nodes_total", 1000.0, make(map[string]string))
+		ExpectMetricGaugeValue("karpenter_state_nodes_count", 1000.0, make(map[string]string))
 	})
 	It("should consider the cluster state synced when all nodeclaims are tracked", func() {
 		// Deploy 1000 nodeClaims and sync them all with the cluster
