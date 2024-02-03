@@ -795,7 +795,7 @@ var _ = Describe("Node Resource Level", func() {
 			v1.ResourceCPU:    resource.MustParse("1"),
 			v1.ResourceMemory: resource.MustParse("2Gi"),
 		}, ExpectStateNodeExists(cluster, node).DaemonSetRequests())
-		// count request
+		// total request
 		ExpectResources(v1.ResourceList{
 			v1.ResourceCPU:    resource.MustParse("2.5"),
 			v1.ResourceMemory: resource.MustParse("2Gi"),
