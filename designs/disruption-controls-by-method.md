@@ -249,7 +249,25 @@ yaml:
   - nodes: 100%
   
 ```
+
+The conclusion is yes. Budget reasons should be reflected as a list instead of a single string.
+
+
+#### Q: How should we handle an unspecfied default action? 
+```yaml
+yaml: 
+  - nodes: 10
+  reasons: [Drift, Consolidation]
+  schedule: "* * * * *"
+  - nodes: 5 
+  reasons: [Emptiness] 
+  schedule: "* * * * *" 
+  - nodes: 100%
   
+```
+In the case of a budget like above, default is undefined. Should karpenter assume the user doesn't want to disrupt any other actions? Or should we assume that if a default is unspecified, they want us to disrupt anyway?  
+The intuitive options if there is no active default budget is to allow disruption of either 0 or total number of nodes(meaning unbounded disruption).
+Lets choose total number of nodes, since this allows the user to also specify periods where no nodes are to be disrupted of a particular type of disruption, and makes more sense with the existing karpenter behavior today.
 
 
 #### Q: How should karpenter track node deletion by reason
@@ -269,17 +287,7 @@ func (in *StateNode) MarkedForDeletion() bool {
 }
 ```
 Rather than this function that simply looks for a nodeclaims/nodes deletion timestamp, we will need to include some marking on the nodes indicating why they were deleted.
-We can use the `DisruptionReason` to determine why a given nodeclaim was disrupted, then track in cluster state the current number of nodeclaims that are in a deleting state.
-
-```go
-type NodeClaimStatus struct {
-	...
-	// DisruptionReason represents the reason why the node was disrupted. This can be Consolidation, Drift, Expiration, Emptiness
-	DisruptionReason string `json:"disruptionDetails,omitempty"`
-	...
-}
-```
-
+We can use the disrupted taint to determine why a given nodeclaim was disrupted, then track in cluster state the current number of nodeclaims that are in a deleting state.
 
 ## Observability and Supportability 
 One major aspect to budgets that is missing is a proper monitoring story. This doc adds basic observability concerns with another doc pending observability concerns for budgets.
