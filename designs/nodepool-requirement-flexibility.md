@@ -6,7 +6,7 @@
 
 ## Motivation
 
-Karpenter’s scheduling algorithm uses a well-known bin-packing algorithm ([First Fit Descending](https://en.wikipedia.org/wiki/First-fit-decreasing_bin_packing)) to pack as many pods onto a set of instance type options as possible. This algorithm will necessarily continue packing pods onto Preflight Nodes so long as you have at least one instance type option that can fulfill all the pod requests.
+Karpenter’s scheduling algorithm uses a well-known bin-packing algorithm ([First Fit Decreasing](https://en.wikipedia.org/wiki/First-fit-decreasing_bin_packing)) to pack as many pods onto a set of instance type options as possible. This algorithm will necessarily continue packing pods onto Preflight Nodes so long as you have at least one instance type option that can fulfill all the pod requests.
 
 This methodology works fine for on-demand instance types, but starts to break down when you are requesting spot capacity. If you are launching spot capacity and want to ensure that you will not launch an instance that will immediately get interrupted after launch, you need to make sure that you have enough launch options in your launch request that your likelihood for launching a low-availability instance will be slim. Karpenter currently has no mechanism to ensure that today.
 
@@ -31,8 +31,7 @@ spec:
 ## Use-Cases
 
 1. I want to configure Karpenter to enforce more flexibility when launching spot nodes, ensuring that I am constantly using enough instance types that I get a high-availability instance type
-2. I want to increase the number of nodes that Karpenter creates by ensuring that Karpenter doesn’t over-pack pods onto nodes when it’s scheduling
-3. I want to ensure that application pods scheduling to this NodePool *must* be flexible to different instance types, architectures, etc.
+2. want to ensure that application pods scheduling to this NodePool *must* be flexible to different instance types, architectures, etc.
 
 ## Solutions
 
@@ -84,14 +83,16 @@ spec:
         operator: Exists
 ```
 
-Enabling this solution allows specific Cloud Providers to make this change without pushing this new field down into the neutral API; however, this means we need to define a neutral way where a cloudprovider can define its own flexibility requirements and pass them back to the scheduler. One option here is to allow CloudProviders to layer on their own flexibility requirements for NodePools through the [CloudProvider interface](https://github.com/kubernetes-sigs/karpenter/blob/4e85912c81ed9a51fc8ebd107db8e88e7828fae7/pkg/cloudprovider/types.go). This function in the interface might look like `func GetFlexibility(np *v1beta1.NodePool) scheduling.Flexibility` where `scheduling.Flexibility` is a `map[string]int`.
+In this solution, the onus is on the Cloud Provider to implement and pass-down some form of flexibility or minValues down into the scheduler. Cloud Providers could choose to selectively enable or disable this feature by surfacing this API through their NodeClass. 
+
+Enabling this allows specific Cloud Providers to make this change without pushing this new field down into the neutral API; however, this means we need to define a neutral way where a Cloud Provider can define its own flexibility requirements and pass them back to the scheduler. One option here is to allow CloudProviders to layer on their own flexibility requirements for NodePools through the [CloudProvider interface](https://github.com/kubernetes-sigs/karpenter/blob/4e85912c81ed9a51fc8ebd107db8e88e7828fae7/pkg/cloudprovider/types.go). This function in the interface might look like `func GetFlexibility(np *v1beta1.NodePool) scheduling.Flexibility` where `scheduling.Flexibility` is a `map[string]int`.
 
 #### Pros/Cons
 
 1. 👍👍 Isolates the minValues feature to whether a Cloud Provider wants to implement it or not
 2. 👍 Enables Cloud Providers to have the concept of “default” minValues that is controlled at runtime, allowing cloud providers to enforce certain minimums from their users for things like spot best practices without having to have the user specify it directly (e.g. “don’t allow a spot instance to launch without at least 10 spot instances in the request”).
 3. 👎 Leaks more scheduling behavior into the NodeClass (What if a Cloud Provider doesn’t implement a NodeClass directly? They would have to design one specifically for this feature). As a guiding design principle, we have generally chosen to avoid scheduler-based decision making driven through the NodeClass API
-4. 👎 Requires an additional method on the cloud providers OR requires piggy-backing off of `GetInstanceTypes()` to surface additional minValues information into the scheduler which may be awkward for cloud providers that don’t care about this requirement
+4. 👎 Requires an additional method on the cloud providers which expands our existing interface OR requires piggy-backing off of `GetInstanceTypes()` to surface additional minValues information into the scheduler which may be awkward for cloud providers that don’t care about this requirement
 
 ### Solution 3: `flexibility` field in the `spec.requirements` section of the NodeClaim Template (becomes part of the template on the NodePool)
 
@@ -149,6 +150,8 @@ A check to `minValues` should be done in the context of the pod `[Add()](https:/
 The scheduling simulation should return a result from consolidation that respects `minValues` consistent with the launch behavior. Karpenter will then reduce the set of instance types here to be strictly cheaper than the combined price of all instance types that we plan to replace (this is our `filterByPrice` function).
 
 It’s possible that after Karpenter reduces these instance types down to only cheaper ones, it no longer fulfills the `minValues` criteria of the NodePool requirements. As a result, consolidation will need to re-check whether the `minValues` is met after the instance types are filtered down by price to ensure that we can proceed with the launch. If the `minValues` is not satisfied, we should reject the consolidation decision.
+
+It's important to note here that by setting high `minValues` requirements, you are necessarily constraining the consolidation decisions that Karpenter can make. If Karpenter is forced to maintain a `minValues` of 10 for instance types and you only have 11 instance type options specified, you will only be able to consolidate from the 11th instance type down to one of the bottom 10. At the point that you consolidated down to one of the bottom 10 instance types, you would no longer be able to continue consolidating.
 
 ### How does `minValues` interact with spot-to-spot consolidation?
 
