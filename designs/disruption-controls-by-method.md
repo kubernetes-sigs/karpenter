@@ -93,7 +93,7 @@ Ideally, we could move all generic controls that easily map into other reasons i
 ### Proposed Spec 
 ```go
 type Disruption struct {
-    All		  DisruptionSpec `json:defaults"`
+    Default	  DisruptionSpec `json:defaults"`
     Consolidation ConsolidationSpec `json:"consolidation"`
     Drift         DriftSpec         `json:"drift"`
     Expiration    ExpirationSpec    `json:"expiration"`
@@ -128,17 +128,7 @@ type Budget struct {
     Duration *string `json:"duration,omitempty"`
     Reasons []string 
 }
-}
 
-type DisruptionReason string 
-
-const (
-	All DisruptionReason = ""
-	Consolidation DisruptionReason = "Consolidation" 
-	Drift DisruptionReason = "Drift" 
-	Expiration DisruptionReason = "Expiration" 
-	Emptiness DisruptionReason = "Emptiness"
-)
 ```
 #### Example 
 
@@ -173,7 +163,7 @@ spec:
 #### Considerations 
 Some of the API choices for a given reason seem to follow a similar pattern. These include ConsolidateAfter, ExpireAfter, and there are discussions about introducing a global DisruptAfter. Moreover, when discussing disruption budgets, we talk about adding behavior for each reason. It appears there is a need for disruption controls within the budgets for each reason, not just overall.
 
-This approach aligns well with controls that apply to all existing reasons. The proposal presented here is similar to the one mentioned above in relation to the reasons we allow to be defined (All, Consolidation, Drift, Expiration, Emptiness).
+This approach aligns well with controls that apply to all existing reasons. The proposal presented here is similar to the one mentioned above in relation to the reasons we allow to be defined (Default, Consolidation, Drift, Expiration, Emptiness).
 
 This proposal is currently scoped for disruptionBudgets by reason. However, we should also consider incorporating other generic disruption controls into the PerReasonControls, even if we do not implement them immediately. Moving ConsolidateAfter and ExpireAfter into the per-reason controls is a significant migration that requires careful planning and its own dedicated design. This proposal simply demonstrates a potential model that highlights the benefits of defining controls at a per-reason level of granularity.
 
@@ -191,7 +181,7 @@ If the goal is to provide a simple, backward-compatible solution with immediate 
 
 ## Clarifying Expected Behavior 
 ### Q: How should Karpenter handle the default or undefined reason case? 
-The current design involves specifying a specific number of disruptable nodes per reason, which can complicate the disruption lifecycle. For example, if there's a 10-node budget for "Drift" and a separate 10-node budget for "Consolidation", but a 15-node budget for "All" determining which nodes will get disrupted becomes unclear. Would it be 10 nodes for "Drift" and 5 nodes for "Consolidation"?
+The current design involves specifying a specific number of disruptable nodes per reason, which can complicate the disruption lifecycle. For example, if there's a 10-node budget for "Drift" and a separate 10-node budget for "Consolidation", but a 15-node budget for "default" determining which nodes will get disrupted becomes unclear. Would it be 10 nodes for "Drift" and 5 nodes for "Consolidation"?
 
 We could consider treating an undefined reason as a budget for all disruption reasons except for those with explicitly defined budgets. In this scenario, if a user specifies a disruption budget like this:
 
