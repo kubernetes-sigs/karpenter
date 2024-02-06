@@ -4,7 +4,8 @@
 2. High-Frequency Trading (HFT) firms require full compute capacity during specific operational hours, making it imperative to avoid scale-down requests for consolidation during these periods. However, outside these hours, scale-downs are acceptable.
 See Less Made Up Scenarios here: 
 - https://github.com/kubernetes-sigs/karpenter/issues/924 
-- https://github.com/kubernetes-sigs/karpenter/issues/753#issuecomment-1790110838 
+- https://github.com/kubernetes-sigs/karpenter/issues/753#issuecomment-1790110838
+- https://github.com/kubernetes-sigs/karpenter/issues/672
 
 ## Known Requirements 
 **Reason and Budget Definition:** Users should be able to define an reason and a corresponding budget(s).
