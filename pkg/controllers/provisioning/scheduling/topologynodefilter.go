@@ -58,7 +58,7 @@ func (t TopologyNodeFilter) Matches(node *v1.Node) bool {
 // MatchesRequirements returns true if the TopologyNodeFilter doesn't prohibit a node with the requirements from
 // participating in the topology. This method allows checking the requirements from a scheduling.NodeClaim to see if the
 // node we will soon create participates in this topology.
-func (t TopologyNodeFilter) MatchesRequirements(requirements scheduling.Requirements, compatabilityOptions ...functional.Option[scheduling.CompatabilityOptions]) bool {
+func (t TopologyNodeFilter) MatchesRequirements(requirements scheduling.Requirements, compatabilityOptions ...functional.Option[scheduling.CompatibilityOptions]) bool {
 	// no requirements, so it always matches
 	if len(t) == 0 {
 		return true

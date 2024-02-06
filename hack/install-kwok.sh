@@ -10,7 +10,6 @@ set -euo pipefail
 
 # get the latest version
 KWOK_REPO=kubernetes-sigs/kwok
-# KWOK_LATEST_RELEASE=$(curl "https://api.github.com/repos/${KWOK_REPO}/releases/latest" | jq -r '.tag_name')
 KWOK_LATEST_RELEASE=v0.3.0
 # make a base directory for multi-base kustomization
 HOME_DIR=$(mktemp -d)
@@ -85,8 +84,6 @@ cat <<EOF > "${SUB_LET_DIR}/kustomization.yaml"
 EOF
 
 done
-
-
 
 cat <<EOF > "${HOME_DIR}/kustomization.yaml"
 resources:

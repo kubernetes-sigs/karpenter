@@ -80,23 +80,20 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 		case <-v.clock.After(waitDuration):
 		}
 	}
+	// Get the current representation of the proposed candidates from before the validation timeout
+	// We do this so that we can re-validate that the candidates that were computed before we made the decision are the same
+	// We perform filtering here to ensure that none of the proposed candidates have blocking PDBs or do-not-evict/do-not-disrupt pods scheduled to them
 	validationCandidates, err := GetCandidates(ctx, v.cluster, v.kubeClient, v.recorder, v.clock, v.cloudProvider, v.ShouldDisrupt, v.queue)
 	if err != nil {
 		return false, fmt.Errorf("constructing validation candidates, %w", err)
 	}
-	// Get the current representation of the proposed candidates from before the validation timeout
-	// We do this so that we can re-validate that the candidates that were computed before we made the decision are the same
-	// We perform filtering here to ensure that none of the proposed candidates have blocking PDBs or do-not-evict/do-not-disrupt pods scheduled to them
-	validationCandidates, err = filterCandidates(ctx, v.kubeClient, v.recorder, mapCandidates(cmd.candidates, validationCandidates))
-	if err != nil {
-		return false, fmt.Errorf("filtering candidates, %w", err)
-	}
+	validationCandidates = mapCandidates(cmd.candidates, validationCandidates)
 	// If we filtered out any candidates, return false as some NodeClaims in the consolidation decision have changed.
 	if len(validationCandidates) != len(cmd.candidates) {
 		return false, nil
 	}
 	// Rebuild the disruption budget mapping to see if any budgets have changed since validation.
-	postValidationMapping, err := BuildDisruptionBudgets(ctx, v.cluster, v.clock, v.kubeClient)
+	postValidationMapping, err := BuildDisruptionBudgets(ctx, v.cluster, v.clock, v.kubeClient, v.recorder)
 	if err != nil {
 		return false, fmt.Errorf("building disruption budgets, %w", err)
 	}
@@ -131,7 +128,7 @@ func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidate
 	if len(candidates) == 0 {
 		return false, nil
 	}
-	results, err := simulateScheduling(ctx, v.kubeClient, v.cluster, v.provisioner, candidates...)
+	results, err := SimulateScheduling(ctx, v.kubeClient, v.cluster, v.provisioner, candidates...)
 	if err != nil {
 		return false, fmt.Errorf("simluating scheduling, %w", err)
 	}

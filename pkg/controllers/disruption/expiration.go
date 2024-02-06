@@ -19,7 +19,6 @@ package disruption
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sort"
 
 	"k8s.io/utils/clock"
@@ -30,6 +29,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -61,25 +61,12 @@ func (e *Expiration) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 		c.NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).IsTrue()
 }
 
-// SortCandidates orders expired candidates by when they've expired
-func (e *Expiration) filterAndSortCandidates(ctx context.Context, candidates []*Candidate) ([]*Candidate, error) {
-	candidates, err := filterCandidates(ctx, e.kubeClient, e.recorder, candidates)
-	if err != nil {
-		return nil, fmt.Errorf("filtering candidates, %w", err)
-	}
+// ComputeCommand generates a disruption command given candidates
+func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	sort.Slice(candidates, func(i int, j int) bool {
 		return candidates[i].NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).LastTransitionTime.Inner.Time.Before(
 			candidates[j].NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).LastTransitionTime.Inner.Time)
 	})
-	return candidates, nil
-}
-
-// ComputeCommand generates a disrpution command given candidates
-func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
-	candidates, err := e.filterAndSortCandidates(ctx, candidates)
-	if err != nil {
-		return Command{}, fmt.Errorf("filtering candidates, %w", err)
-	}
 	disruptionEligibleNodesGauge.With(map[string]string{
 		methodLabel:            e.Type(),
 		consolidationTypeLabel: e.ConsolidationType(),
@@ -90,7 +77,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping
 	// add it to the existing command.
 	empty := make([]*Candidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		if len(candidate.pods) > 0 {
+		if len(candidate.reschedulablePods) > 0 {
 			continue
 		}
 		// If there's disruptions allowed for the candidate's nodepool,
@@ -101,10 +88,11 @@ func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping
 		}
 	}
 	// Disrupt all empty expired candidates, as they require no scheduling simulations.
+	// Return empty scheduling results since no empty nodes should be rescheduling any pods.
 	if len(empty) > 0 {
 		return Command{
 			candidates: empty,
-		}, nil
+		}, scheduling.Results{}, nil
 	}
 
 	for _, candidate := range candidates {
@@ -115,27 +103,26 @@ func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping
 			continue
 		}
 		// Check if we need to create any NodeClaims.
-		results, err := simulateScheduling(ctx, e.kubeClient, e.cluster, e.provisioner, candidate)
+		results, err := SimulateScheduling(ctx, e.kubeClient, e.cluster, e.provisioner, candidate)
 		if err != nil {
 			// if a candidate node is now deleting, just retry
 			if errors.Is(err, errCandidateDeleting) {
 				continue
 			}
-			return Command{}, err
+			return Command{}, scheduling.Results{}, err
 		}
 		// Emit an event that we couldn't reschedule the pods on the node.
 		if !results.AllNonPendingPodsScheduled() {
 			e.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
 			continue
 		}
-
 		logging.FromContext(ctx).With("ttl", candidates[0].nodePool.Spec.Disruption.ExpireAfter.String()).Infof("triggering termination for expired node after TTL")
 		return Command{
 			candidates:   []*Candidate{candidate},
 			replacements: results.NewNodeClaims,
-		}, nil
+		}, results, nil
 	}
-	return Command{}, nil
+	return Command{}, scheduling.Results{}, nil
 }
 
 func (e *Expiration) Type() string {

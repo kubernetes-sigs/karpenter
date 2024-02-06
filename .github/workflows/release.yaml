@@ -32,7 +32,7 @@ jobs:
           prerelease: false
 
       - name: Install tejolote
-        uses: kubernetes-sigs/release-actions/setup-tejolote@dd08496c83441d6477114cc0555b96d404dacff7 # v0.1.2
+        uses: kubernetes-sigs/release-actions/setup-tejolote@10fecc1c66829d291b2f2fb1a27329d152f212e6 # v0.1.3
       - name: Run tejolote
         run: |
           tejolote attest "github://kubernetes-sigs/karpenter/${{ github.run_id }}" --artifacts "github://kubernetes-sigs/karpenter/$TAG" --output karpenter.intoto.json --sign

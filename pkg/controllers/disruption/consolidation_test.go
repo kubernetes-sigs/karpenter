@@ -44,6 +44,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -461,6 +462,343 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(0))
 		})
+		It("should allow no nodes from each nodePool to be deleted", func() {
+			// Create 10 nodepools
+			nps := test.NodePools(10, v1beta1.NodePool{
+				Spec: v1beta1.NodePoolSpec{
+					Disruption: v1beta1.Disruption{
+						ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenUnderutilized,
+						Budgets: []v1beta1.Budget{{
+							Nodes: "0%",
+						}},
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < len(nps); i++ {
+				ExpectApplied(ctx, env.Client, nps[i])
+			}
+			nodeClaims = make([]*v1beta1.NodeClaim, 0, 30)
+			nodes = make([]*v1.Node, 0, 30)
+			// Create 3 nodes for each nodePool
+			for _, np := range nps {
+				ncs, ns := test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1beta1.NodePoolLabelKey:     np.Name,
+							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+							v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+						},
+					},
+					Status: v1beta1.NodeClaimStatus{
+						Allocatable: map[v1.ResourceName]resource.Quantity{
+							v1.ResourceCPU:  resource.MustParse("32"),
+							v1.ResourcePods: resource.MustParse("100"),
+						},
+					},
+				})
+				nodeClaims = append(nodeClaims, ncs...)
+				nodes = append(nodes, ns...)
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < len(nodeClaims); i++ {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			wg.Wait()
+
+			for _, np := range nps {
+				metric, found := FindMetricWithLabelValues("karpenter_disruption_budgets_allowed_disruptions", map[string]string{
+					"nodepool": np.Name,
+				})
+				Expect(found).To(BeTrue())
+				Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 0))
+			}
+
+			// Execute the command in the queue, deleting all node claims
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(30))
+		})
+		It("should not mark empty node consolidated if the candidates can't be disrupted due to budgets with one nodepool", func() {
+			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "0%"}}
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < numNodes; i++ {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			emptyConsolidation := disruption.NewEmptyNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
+			Expect(err).To(Succeed())
+
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, queue)
+			Expect(err).To(Succeed())
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			cmd, results, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			Expect(err).To(Succeed())
+			Expect(results).To(Equal(pscheduling.Results{}))
+			Expect(cmd).To(Equal(disruption.Command{}))
+			wg.Wait()
+
+			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
+		})
+		It("should not mark empty node consolidated if all candidates can't be disrupted due to budgets with many nodepools", func() {
+			// Create 10 nodepools
+			nps := test.NodePools(10, v1beta1.NodePool{
+				Spec: v1beta1.NodePoolSpec{
+					Disruption: v1beta1.Disruption{
+						ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenUnderutilized,
+						Budgets: []v1beta1.Budget{{
+							Nodes: "0%",
+						}},
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < len(nps); i++ {
+				ExpectApplied(ctx, env.Client, nps[i])
+			}
+			nodeClaims = make([]*v1beta1.NodeClaim, 0, 30)
+			nodes = make([]*v1.Node, 0, 30)
+			// Create 3 nodes for each nodePool
+			for _, np := range nps {
+				ncs, ns := test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1beta1.NodePoolLabelKey:     np.Name,
+							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+							v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+						},
+					},
+					Status: v1beta1.NodeClaimStatus{
+						Allocatable: map[v1.ResourceName]resource.Quantity{
+							v1.ResourceCPU:  resource.MustParse("32"),
+							v1.ResourcePods: resource.MustParse("100"),
+						},
+					},
+				})
+				nodeClaims = append(nodeClaims, ncs...)
+				nodes = append(nodes, ns...)
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < len(nodeClaims); i++ {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			emptyConsolidation := disruption.NewEmptyNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
+			Expect(err).To(Succeed())
+
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, queue)
+			Expect(err).To(Succeed())
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			cmd, results, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			Expect(err).To(Succeed())
+			Expect(results).To(Equal(pscheduling.Results{}))
+			Expect(cmd).To(Equal(disruption.Command{}))
+			wg.Wait()
+
+			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
+		})
+		It("should not mark multi node consolidated if the candidates can't be disrupted due to budgets with one nodepool", func() {
+			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "0%"}}
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < numNodes; i++ {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			multiConsolidation := disruption.NewMultiNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
+			Expect(err).To(Succeed())
+
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, queue)
+			Expect(err).To(Succeed())
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			cmd, results, err := multiConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			Expect(err).To(Succeed())
+			Expect(results).To(Equal(pscheduling.Results{}))
+			Expect(cmd).To(Equal(disruption.Command{}))
+			wg.Wait()
+
+			Expect(multiConsolidation.IsConsolidated()).To(BeFalse())
+		})
+		It("should not mark multi node consolidated if all candidates can't be disrupted due to budgets with many nodepools", func() {
+			// Create 10 nodepools
+			nps := test.NodePools(10, v1beta1.NodePool{
+				Spec: v1beta1.NodePoolSpec{
+					Disruption: v1beta1.Disruption{
+						ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenUnderutilized,
+						Budgets: []v1beta1.Budget{{
+							Nodes: "0%",
+						}},
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < len(nps); i++ {
+				ExpectApplied(ctx, env.Client, nps[i])
+			}
+			nodeClaims = make([]*v1beta1.NodeClaim, 0, 30)
+			nodes = make([]*v1.Node, 0, 30)
+			// Create 3 nodes for each nodePool
+			for _, np := range nps {
+				ncs, ns := test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1beta1.NodePoolLabelKey:     np.Name,
+							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+							v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+						},
+					},
+					Status: v1beta1.NodeClaimStatus{
+						Allocatable: map[v1.ResourceName]resource.Quantity{
+							v1.ResourceCPU:  resource.MustParse("32"),
+							v1.ResourcePods: resource.MustParse("100"),
+						},
+					},
+				})
+				nodeClaims = append(nodeClaims, ncs...)
+				nodes = append(nodes, ns...)
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < len(nodeClaims); i++ {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			multiConsolidation := disruption.NewMultiNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
+			Expect(err).To(Succeed())
+
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, queue)
+			Expect(err).To(Succeed())
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			cmd, results, err := multiConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			Expect(err).To(Succeed())
+			Expect(results).To(Equal(pscheduling.Results{}))
+			Expect(cmd).To(Equal(disruption.Command{}))
+			wg.Wait()
+
+			Expect(multiConsolidation.IsConsolidated()).To(BeFalse())
+		})
+		It("should not mark single node consolidated if the candidates can't be disrupted due to budgets with one nodepool", func() {
+			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "0%"}}
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < numNodes; i++ {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			singleConsolidation := disruption.NewSingleNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
+			Expect(err).To(Succeed())
+
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, queue)
+			Expect(err).To(Succeed())
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			cmd, results, err := singleConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			Expect(err).To(Succeed())
+			Expect(results).To(Equal(pscheduling.Results{}))
+			Expect(cmd).To(Equal(disruption.Command{}))
+			wg.Wait()
+
+			Expect(singleConsolidation.IsConsolidated()).To(BeFalse())
+		})
+		It("should not mark single node consolidated if all candidates can't be disrupted due to budgets with many nodepools", func() {
+			// Create 10 nodepools
+			nps := test.NodePools(10, v1beta1.NodePool{
+				Spec: v1beta1.NodePoolSpec{
+					Disruption: v1beta1.Disruption{
+						ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenUnderutilized,
+						Budgets: []v1beta1.Budget{{
+							Nodes: "0%",
+						}},
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < len(nps); i++ {
+				ExpectApplied(ctx, env.Client, nps[i])
+			}
+			nodeClaims = make([]*v1beta1.NodeClaim, 0, 30)
+			nodes = make([]*v1.Node, 0, 30)
+			// Create 3 nodes for each nodePool
+			for _, np := range nps {
+				ncs, ns := test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1beta1.NodePoolLabelKey:     np.Name,
+							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+							v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+						},
+					},
+					Status: v1beta1.NodeClaimStatus{
+						Allocatable: map[v1.ResourceName]resource.Quantity{
+							v1.ResourceCPU:  resource.MustParse("32"),
+							v1.ResourcePods: resource.MustParse("100"),
+						},
+					},
+				})
+				nodeClaims = append(nodeClaims, ncs...)
+				nodes = append(nodes, ns...)
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < len(nodeClaims); i++ {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			singleConsolidation := disruption.NewSingleNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
+			Expect(err).To(Succeed())
+
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, queue)
+			Expect(err).To(Succeed())
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			cmd, results, err := singleConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			Expect(err).To(Succeed())
+			Expect(results).To(Equal(pscheduling.Results{}))
+			Expect(cmd).To(Equal(disruption.Command{}))
+			wg.Wait()
+
+			Expect(singleConsolidation.IsConsolidated()).To(BeFalse())
+		})
 	})
 	Context("Empty", func() {
 		var nodeClaim2 *v1beta1.NodeClaim
@@ -587,6 +925,188 @@ var _ = Describe("Consolidation", func() {
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaim)
+		})
+		It("will consider a node with a DaemonSet pod as empty", func() {
+			// assign the nodeclaims to the least expensive offering so we don't get a replacement
+			nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
+				v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
+				v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.CapacityType,
+				v1.LabelTopologyZone:         leastExpensiveOffering.Zone,
+			})
+			node.Labels = lo.Assign(node.Labels, map[string]string{
+				v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
+				v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.CapacityType,
+				v1.LabelTopologyZone:         leastExpensiveOffering.Zone,
+			})
+
+			ds := test.DaemonSet()
+			ExpectApplied(ctx, env.Client, ds, nodeClaim, node, nodePool)
+
+			// Pods owned by a Deployment
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "DaemonSet",
+							Name:               ds.Name,
+							UID:                ds.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					},
+				},
+				Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}},
+			})
+			ExpectApplied(ctx, env.Client, pod)
+
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			wg.Wait()
+
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
+			// Cascade any deletion of the nodeclaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// we should delete the empty node
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		})
+		It("will consider a node with terminating Deployment pods as empty", func() {
+			// assign the nodeclaims to the least expensive offering so we don't get a replacement
+			nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
+				v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
+				v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.CapacityType,
+				v1.LabelTopologyZone:         leastExpensiveOffering.Zone,
+			})
+			node.Labels = lo.Assign(node.Labels, map[string]string{
+				v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
+				v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.CapacityType,
+				v1.LabelTopologyZone:         leastExpensiveOffering.Zone,
+			})
+
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs, nodeClaim, node, nodePool)
+
+			// Pod owned by a Deployment
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					},
+				},
+				Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}},
+			})
+			ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *v1.Pod, _ int) client.Object { return p })...)
+
+			for _, p := range pods {
+				ExpectManualBinding(ctx, env.Client, p, node)
+			}
+
+			// Evict the pods off of the node
+			for _, p := range pods {
+				// Trigger an eviction to set the deletion timestamp but not delete the pod
+				ExpectEvicted(ctx, env.Client, p)
+				ExpectExists(ctx, env.Client, p)
+			}
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			wg.Wait()
+
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
+			// Cascade any deletion of the nodeclaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// we should delete the empty node
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		})
+		It("will not consider a node with a terminating StatefulSet pod as empty", func() {
+			// assign the nodeclaims to the least expensive offering so we don't get a replacement
+			nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
+				v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
+				v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.CapacityType,
+				v1.LabelTopologyZone:         leastExpensiveOffering.Zone,
+			})
+			node.Labels = lo.Assign(node.Labels, map[string]string{
+				v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
+				v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.CapacityType,
+				v1.LabelTopologyZone:         leastExpensiveOffering.Zone,
+			})
+
+			ss := test.StatefulSet()
+			ExpectApplied(ctx, env.Client, ss, nodeClaim, node, nodePool)
+
+			// Pod owned by a StatefulSet
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "StatefulSet",
+							Name:               ss.Name,
+							UID:                ss.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					},
+				},
+				Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}},
+			})
+			ExpectApplied(ctx, env.Client, pod)
+
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// Trigger an eviction to set the deletion timestamp but not delete the pod
+			ExpectEvicted(ctx, env.Client, pod)
+			ExpectExists(ctx, env.Client, pod)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			wg.Wait()
+
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
+			// Cascade any deletion of the nodeclaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// we shouldn't delete the node due to emptiness with a statefulset terminating pod
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, nodeClaim)
+			ExpectExists(ctx, env.Client, node)
 		})
 	})
 	Context("Replace", func() {
@@ -3109,6 +3629,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectExists(ctx, env.Client, nodes[1])
 		})
 	})
+
 	Context("Timeout", func() {
 		It("should return the last valid command when multi-nodeclaim consolidation times out", func() {
 			numNodes := 20

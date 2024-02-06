@@ -52,7 +52,7 @@ func Deployment(overrides ...DeploymentOptions) *appsv1.Deployment {
 		}
 	}
 	pod := Pod(options.PodOptions)
-	dep := &appsv1.Deployment{
+	return &appsv1.Deployment{
 		ObjectMeta: objectMeta,
 		Spec: appsv1.DeploymentSpec{
 			Replicas: ptr.Int32(options.Replicas),
@@ -63,5 +63,4 @@ func Deployment(overrides ...DeploymentOptions) *appsv1.Deployment {
 			},
 		},
 	}
-	return dep
 }

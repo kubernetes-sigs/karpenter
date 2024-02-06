@@ -18,7 +18,6 @@ package termination_test
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -181,7 +180,7 @@ var _ = Describe("Termination", func() {
 			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
 
 			// Expect podEvict to be evicting, and delete it
-			ExpectEvicted(env.Client, podEvict)
+			EventuallyExpectTerminating(ctx, env.Client, podEvict)
 			ExpectDeleted(ctx, env.Client, podEvict)
 
 			// Reconcile to delete node
@@ -209,7 +208,7 @@ var _ = Describe("Termination", func() {
 			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
 
 			// Expect podEvict to be evicting, and delete it
-			ExpectEvicted(env.Client, podEvict)
+			EventuallyExpectTerminating(ctx, env.Client, podEvict)
 			ExpectDeleted(ctx, env.Client, podEvict)
 
 			ExpectNotEnqueuedForEviction(queue, podSkip)
@@ -237,7 +236,7 @@ var _ = Describe("Termination", func() {
 			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
 
 			// Expect podEvict to be evicting, and delete it
-			ExpectEvicted(env.Client, podEvict)
+			EventuallyExpectTerminating(ctx, env.Client, podEvict)
 			ExpectDeleted(ctx, env.Client, podEvict)
 
 			// Reconcile to delete node
@@ -260,7 +259,7 @@ var _ = Describe("Termination", func() {
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
 
 			// Expect pod with no owner ref to be enqueued for eviction
-			ExpectEvicted(env.Client, pod)
+			EventuallyExpectTerminating(ctx, env.Client, pod)
 
 			// Expect node to exist and be draining
 			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
@@ -380,7 +379,7 @@ var _ = Describe("Termination", func() {
 			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
 
 			// Expect podEvict to be evicting, and delete it
-			ExpectEvicted(env.Client, podEvict)
+			EventuallyExpectTerminating(ctx, env.Client, podEvict)
 			ExpectDeleted(ctx, env.Client, podEvict)
 
 			// Expect the noncritical Daemon pod to be evicted
@@ -388,7 +387,7 @@ var _ = Describe("Termination", func() {
 			ExpectPodExists(ctx, env.Client, podDaemonEvict.Name, podDaemonEvict.Namespace)
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
-			ExpectEvicted(env.Client, podDaemonEvict)
+			EventuallyExpectTerminating(ctx, env.Client, podDaemonEvict)
 			ExpectDeleted(ctx, env.Client, podDaemonEvict)
 
 			// Expect the critical pods to be evicted and deleted
@@ -398,8 +397,8 @@ var _ = Describe("Termination", func() {
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
-			ExpectEvicted(env.Client, podNodeCritical)
-			ExpectEvicted(env.Client, podClusterCritical)
+
+			EventuallyExpectTerminating(ctx, env.Client, podNodeCritical, podClusterCritical)
 			ExpectDeleted(ctx, env.Client, podNodeCritical)
 			ExpectDeleted(ctx, env.Client, podClusterCritical)
 
@@ -410,8 +409,8 @@ var _ = Describe("Termination", func() {
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
-			ExpectEvicted(env.Client, podDaemonNodeCritical)
-			ExpectEvicted(env.Client, podDaemonClusterCritical)
+
+			EventuallyExpectTerminating(ctx, env.Client, podDaemonNodeCritical, podDaemonClusterCritical)
 			ExpectDeleted(ctx, env.Client, podDaemonNodeCritical)
 			ExpectDeleted(ctx, env.Client, podDaemonClusterCritical)
 
@@ -437,7 +436,7 @@ var _ = Describe("Termination", func() {
 			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
 
 			// Expect podEvict to be evicting, and delete it
-			ExpectEvicted(env.Client, podEvict)
+			EventuallyExpectTerminating(ctx, env.Client, podEvict)
 			ExpectDeleted(ctx, env.Client, podEvict)
 
 			// Expect the critical pods to be evicted and deleted
@@ -445,8 +444,8 @@ var _ = Describe("Termination", func() {
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
-			ExpectEvicted(env.Client, podNodeCritical)
-			ExpectEvicted(env.Client, podClusterCritical)
+
+			EventuallyExpectTerminating(ctx, env.Client, podNodeCritical, podClusterCritical)
 			ExpectDeleted(ctx, env.Client, podNodeCritical)
 			ExpectDeleted(ctx, env.Client, podClusterCritical)
 
@@ -482,7 +481,7 @@ var _ = Describe("Termination", func() {
 			ExpectNotEnqueuedForEviction(queue, podNoEvict)
 
 			// Expect podEvict to be enqueued for eviction then be successful
-			ExpectEvicted(env.Client, podEvict)
+			EventuallyExpectTerminating(ctx, env.Client, podEvict)
 
 			// Expect node to exist and be draining
 			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
@@ -512,7 +511,7 @@ var _ = Describe("Termination", func() {
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
 
 			// Expect the pods to be evicted
-			ExpectEvicted(env.Client, pods[0], pods[1])
+			EventuallyExpectTerminating(ctx, env.Client, pods[0], pods[1])
 
 			// Expect node to exist and be draining, but not deleted
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
@@ -545,7 +544,7 @@ var _ = Describe("Termination", func() {
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
 
 			// Expect the pods to be evicted
-			ExpectEvicted(env.Client, pods[0], pods[1])
+			EventuallyExpectTerminating(ctx, env.Client, pods[0], pods[1])
 
 			// Expect node to exist and be draining, but not deleted
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
@@ -573,7 +572,7 @@ var _ = Describe("Termination", func() {
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
 			ExpectNodeExists(ctx, env.Client, node.Name)
-			ExpectEvicted(env.Client, pod)
+			EventuallyExpectTerminating(ctx, env.Client, pod)
 
 			// After grace period, node should delete. The deletion timestamps are from etcd which we can't control, so
 			// to eliminate test-flakiness we reset the time to current time + 90 seconds instead of just advancing
@@ -614,22 +613,11 @@ func ExpectNotEnqueuedForEviction(e *terminator.Queue, pods ...*v1.Pod) {
 	}
 }
 
-func ExpectEvicted(c client.Client, pods ...*v1.Pod) {
-	GinkgoHelper()
-	for _, pod := range pods {
-		Eventually(func() bool {
-			return ExpectPodExists(ctx, c, pod.Name, pod.Namespace).GetDeletionTimestamp().IsZero()
-		}, ReconcilerPropagationTime, RequestInterval).Should(BeFalse(), func() string {
-			return fmt.Sprintf("expected %s/%s to be evicting, but it isn't", pod.Namespace, pod.Name)
-		})
-	}
-}
-
 func ExpectNodeWithNodeClaimDraining(c client.Client, nodeName string) *v1.Node {
 	GinkgoHelper()
 	node := ExpectNodeExists(ctx, c, nodeName)
 	Expect(node.Spec.Taints).To(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 	Expect(lo.Contains(node.Finalizers, v1beta1.TerminationFinalizer)).To(BeTrue())
-	Expect(node.DeletionTimestamp.IsZero()).To(BeFalse())
+	Expect(node.DeletionTimestamp).ToNot(BeNil())
 	return node
 }

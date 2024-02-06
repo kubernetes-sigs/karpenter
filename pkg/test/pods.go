@@ -32,10 +32,10 @@ import (
 type PodOptions struct {
 	metav1.ObjectMeta
 	Image                         string
-	InitImage                     string
 	NodeName                      string
+	Overhead                      v1.ResourceList
 	PriorityClassName             string
-	InitResourceRequirements      v1.ResourceRequirements
+	InitContainers                []v1.Container
 	ResourceRequirements          v1.ResourceRequirements
 	NodeSelector                  map[string]string
 	NodeRequirements              []v1.NodeSelectorRequirement
@@ -53,6 +53,10 @@ type PodOptions struct {
 	Phase                         v1.PodPhase
 	RestartPolicy                 v1.RestartPolicy
 	TerminationGracePeriodSeconds *int64
+	ReadinessProbe                *v1.Probe
+	LivenessProbe                 *v1.Probe
+	PreStopSleep                  *int64
+	Command                       []string
 }
 
 type PDBOptions struct {
@@ -67,8 +71,13 @@ type EphemeralVolumeTemplateOptions struct {
 	StorageClassName *string
 }
 
+const (
+	DefaultImage = "public.ecr.aws/eks-distro/kubernetes/pause:3.2"
+)
+
 // Pod creates a test pod with defaults that can be overridden by PodOptions.
 // Overrides are applied in order, with a last write wins semantic.
+// nolint:gocyclo
 func Pod(overrides ...PodOptions) *v1.Pod {
 	options := PodOptions{}
 	for _, opts := range overrides {
@@ -77,7 +86,7 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 		}
 	}
 	if options.Image == "" {
-		options.Image = "public.ecr.aws/eks-distro/kubernetes/pause:3.2"
+		options.Image = DefaultImage
 	}
 	var volumes []v1.Volume
 	for _, pvc := range options.PersistentVolumeClaims {
@@ -127,6 +136,8 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 						ContainerPort: int32(80),
 					}
 				}),
+				ReadinessProbe: options.ReadinessProbe,
+				LivenessProbe:  options.LivenessProbe,
 			}},
 			NodeName:                      options.NodeName,
 			Volumes:                       volumes,
@@ -139,12 +150,36 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 			Phase:      options.Phase,
 		},
 	}
-	if options.InitImage != "" {
-		p.Spec.InitContainers = []v1.Container{{
-			Name:      RandomName(),
-			Image:     options.InitImage,
-			Resources: options.InitResourceRequirements,
-		}}
+	// If PreStopSleep is enabled, add it to each of the containers.
+	// Can't use v1.LifecycleHandler == v1.SleepAction as that's a feature gate in Alpha 1.29.
+	// https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#hook-handler-implementations
+	if options.PreStopSleep != nil {
+		p.Spec.Containers[0].Lifecycle = &v1.Lifecycle{
+			PreStop: &v1.LifecycleHandler{
+				Exec: &v1.ExecAction{
+					Command: []string{
+						"/bin/sh",
+						"-c",
+						fmt.Sprintf("sleep %d", *options.PreStopSleep),
+					},
+				},
+			},
+		}
+	}
+	if options.Command != nil {
+		p.Spec.Containers[0].Command = options.Command
+	}
+	if options.Overhead != nil {
+		p.Spec.Overhead = options.Overhead
+	}
+	if options.InitContainers != nil {
+		for _, init := range options.InitContainers {
+			init.Name = RandomName()
+			if init.Image == "" {
+				init.Image = DefaultImage
+			}
+			p.Spec.InitContainers = append(p.Spec.InitContainers, init)
+		}
 	}
 	return p
 }

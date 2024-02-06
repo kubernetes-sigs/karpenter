@@ -33,14 +33,13 @@ import (
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllertest"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
-
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllertest"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
@@ -58,6 +57,7 @@ type Command struct {
 	Replacements      []Replacement
 	candidates        []*state.StateNode
 	timeAdded         time.Time // timeAdded is used to track timeouts
+	id                types.UID // used for log tracking
 	method            string    // used for metrics
 	consolidationType string    // used for metrics
 	lastError         error
@@ -140,7 +140,7 @@ func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster
 }
 
 // NewCommand creates a command key and adds in initial data for the orchestration queue.
-func NewCommand(replacements []string, candidates []*state.StateNode, method string, consolidationType string) *Command {
+func NewCommand(replacements []string, candidates []*state.StateNode, id types.UID, method, consolidationType string) *Command {
 	return &Command{
 		Replacements: lo.Map(replacements, func(name string, _ int) Replacement {
 			return Replacement{name: name}
@@ -148,6 +148,7 @@ func NewCommand(replacements []string, candidates []*state.StateNode, method str
 		candidates:        candidates,
 		method:            method,
 		consolidationType: consolidationType,
+		id:                id,
 	}
 }
 
@@ -178,6 +179,7 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 		panic("unexpected failure, disruption queue has shut down")
 	}
 	cmd := item.(*Command)
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("command-id", string(cmd.id)))
 	if err := q.waitOrTerminate(ctx, cmd); err != nil {
 		// If recoverable, re-queue and try again.
 		if !IsUnrecoverableError(err) {
@@ -207,6 +209,7 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 	}
 	// If command is complete, remove command from queue.
 	q.Remove(cmd)
+	logging.FromContext(ctx).Infof("command succeeded")
 	return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 }
 
@@ -243,7 +246,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 		initializedStatus := nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized)
 		if !initializedStatus.IsTrue() {
 			q.recorder.Publish(disruptionevents.WaitingOnReadiness(nodeClaim))
-			waitErrs[i] = fmt.Errorf("node claim not initialized")
+			waitErrs[i] = fmt.Errorf("nodeclaim %s not initialized", nodeClaim.Name)
 			continue
 		}
 		cmd.Replacements[i].Initialized = true
