@@ -204,7 +204,7 @@ spec: # This is not a complete NodePool Spec.
 It means that "Consolidation" and "Drift" actions have specific budgets of 10 nodes each, while all other actions (e.g., expiration and emptiness) share a common budget of 5 nodes. This approach simplifies the configuration but has one limitation: it may not allow the execution of other disruption actions if a specific action exhausts the budget. This is a problem with the existing design for disruption budgets.
 
 There are two ways for the users to get around this behavior. 
-1. If you need gaurenteed disruption for a particular action, you can just specify that action in a budget.  
+1. If you need guaranteed disruption for a particular action, you can just specify that action in a budget.  
 2. We could allow some mechanism for the users to control the ordering of the disruption actions.
 
 
