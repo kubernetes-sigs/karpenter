@@ -86,8 +86,9 @@ If there are multiple active budgets, karpenter takes the most restrictive budge
 
 ### Pros + Cons 
 * 👍 No nested definitions required 
-* 👍👍 Extending existing budgets api. No Breaking API Changes, completely backwards compatible  
-* 👎 With reason being clearly tied to budgets, and other api logic being driven by disruption Reason, we lose the chance to generalize per Reason controls 
+* 👍👍 Extending existing budgets api. No Breaking API Changes, completely backwards compatible
+* 👍 Easy Top level list. Defining the list of reasons in one dimension makes it easier to share that configuration with other nodepools, and easier to apply one generic schedule to many disruption reasons
+* 👎 With reason being clearly tied to budgets, and other api logic being driven by disruption reason, we lose the chance to generalize per Reason controls 
 
 ### Approach B: Defining Per Reason Controls  
 Ideally, we could move all generic controls that easily map into other reasons into one set of reason controls, this applies to budgets and other various disruption controls that could be more generic. 
