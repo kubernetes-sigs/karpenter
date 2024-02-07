@@ -18,8 +18,6 @@ package disruption
 
 import (
 	"context"
-	"fmt"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
@@ -32,7 +30,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
-	"sigs.k8s.io/karpenter/pkg/utils/node"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
@@ -57,13 +54,13 @@ func (e *Consolidation) Reconcile(ctx context.Context, nodePool *v1beta1.NodePoo
 		return reconcile.Result{}, nil
 	}
 	if initCond := nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized); initCond == nil || initCond.IsFalse() {
-		if hasEmptyCondition {
+		if hasCondition {
 			_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.Consolidated)
 			logging.FromContext(ctx).Debugf("removing consolidated status condition, isn't initialized")
 		}
 		return reconcile.Result{}, nil
 	}
-	n, err := nodeclaimutil.NodeForNodeClaim(ctx, e.kubeClient, nodeClaim)
+	_, err := nodeclaimutil.NodeForNodeClaim(ctx, e.kubeClient, nodeClaim)
 	if err != nil {
 		if nodeclaimutil.IsDuplicateNodeError(err) || nodeclaimutil.IsNodeNotFoundError(err) {
 			_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.Consolidated)

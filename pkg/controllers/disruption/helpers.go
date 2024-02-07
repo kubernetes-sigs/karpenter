@@ -318,7 +318,7 @@ func clamp(min, val, max float64) float64 {
 }
 
 // CalculateUtilizationOfResource calculates utilization of a given resource for a node.
-func CalculateUtilizationOfResource(node *v1.Node, resourceName v1.ResourceName, pods *[]v1.Pod) (float64, error) {
+func CalculateUtilizationOfResource(node *v1.Node, resourceName v1.ResourceName, pods []*v1.Pod) (float64, error) {
 	allocatable, found := node.Status.Allocatable[resourceName]
 	if !found {
 		return 0, fmt.Errorf("failed to get %v from %s", resourceName, node.Name)

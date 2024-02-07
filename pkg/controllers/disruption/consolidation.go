@@ -116,7 +116,7 @@ func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
 		if err != nil {
 			return false
 		}
-		if cpu > threshold || memory > threshold {
+		if cpu > float64(*threshold/100) || memory > float64(*threshold/100) {
 			return false
 		}
 	}
