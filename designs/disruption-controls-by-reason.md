@@ -10,19 +10,9 @@
   - [Specifying Default Reason Explicitly](#q-should-default-be-specifed-only-as-omitted-or-should-users-be-able-to-define-default)
   - [Defining an 'All' Case](#q-should-there-be-an-all-case-that-can-be-defined-as-well)
 - [API Design](#api-design)
-  - [Approach A: Add a reason field to disruption Budgets](#approach-a-add-a-reason-field-to-disruption-budgets)
-    - [Proposed Spec](#proposed-spec)
-    - [Example](#example)
-    - [Pros and Cons](#pros--cons)
-  - [Approach B: Defining Single Reason](#approach-b-defining-single-reason-rather-than-a-list-of-reasons)
-    - [Proposed Spec](#proposed-spec-1)
-    - [Example](#example-1)
-    - [Pros and Cons](#pros-and-cons)
+  - [Approach A: List of Reasons A Budget Applies to](#approach-a-list-of-reasons-a-budget-applies-to)
+  - [Approach B: Single Reason Per Budget](#approach-b-single-reason-per-budget)
   - [Approach C: Defining Per Reason Controls](#approach-c-defining-per-reason-controls)
-    - [Proposed Spec](#proposed-spec-2)
-    - [Example](#example-2)
-    - [Considerations](#considerations)
-    - [Pros and Cons](#pros--cons-1)
 - [API Design Conclusion: Preferred Design](#api-design-conclusion-preferred-design)
 
 
@@ -116,7 +106,7 @@ To communicate the same thing to karpenter. So we should allow users to specify 
 Should we also in turn allow users to directly specify a limit for disruption in the reason field saying ["All"] Meaning that the sum of disruptions going on by ALL actions cannot exceed this limit? Users would like to specify a number of nodes in absolutes that cannot be disrupted at any point in time. While default + all other defined actions effectively does this, it may be useful to have an explict control for this. Its low cost to support in the current design with an added benefit of an additional dimension of control.
 
 ## API Design
-### Approach A: Add a reason field to disruption Budgets 
+### Approach A: List of Reasons a Budget Applies to
 This approach outlines a simple api change to the v1beta1 nodepool api to allow disruption budgets to specify a list of disruption methods. 
 
 ### Proposed Spec
@@ -163,8 +153,6 @@ type Budget struct {
 }
 
 ```
-
-
 ##### Example
 ```yaml
 apiVersion: karpenter.sh/v1beta1
@@ -195,7 +183,7 @@ If there are multiple active budgets, karpenter takes the most restrictive budge
 
 Note some pros and cons between A + B can be shared, and are in a list next to the pros + cons for approach b.
 
-### Approach B: Defining Single Reason rather than a List of reasons
+### Approach B: Single Reason Per Budget 
 
 ### Proposed Spec
 Add a simple field "reason" is proposed to be added to the budgets. 
