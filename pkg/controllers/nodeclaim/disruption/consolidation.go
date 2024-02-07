@@ -33,7 +33,7 @@ import (
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
-// Emptiness is a nodeclaim sub-controller that adds or removes status conditions on empty nodeclaims based on TTLSecondsAfterEmpty
+// Consolidation is a nodeclaim sub-controller that adds or removes status conditions on nodeclaims when using WhenUnderutilized policy.
 type Consolidation struct {
 	kubeClient client.Client
 	cluster    *state.Cluster
