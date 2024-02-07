@@ -101,6 +101,25 @@ func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
 		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", cn.nodePool.Name))...)
 		return false
 	}
+	if !cn.NodeClaim.StatusConditions().GetCondition(v1beta1.Consolidated).IsTrue() ||
+		c.clock.Now().Before(cn.NodeClaim.StatusConditions().GetCondition(v1beta1.Consolidated).LastTransitionTime.Inner.Add(*cn.nodePool.Spec.Disruption.ConsolidateAfter.Duration)) {
+		return false
+	}
+	// Check the node utilization if the utilizationThreshold is specified, the node can be disruptted only if the utilization is below the threshold.
+	threshold := cn.nodePool.Spec.Disruption.UtilizationThreshold
+	if threshold != nil {
+		cpu, err := CalculateUtilizationOfResource(cn.Node, v1.ResourceCPU, cn.runningPods)
+		if err != nil {
+			return false
+		}
+		memory, err := CalculateUtilizationOfResource(cn.Node, v1.ResourceMemory, cn.runningPods)
+		if err != nil {
+			return false
+		}
+		if cpu > threshold || memory > threshold {
+			return false
+		}
+	}
 	return true
 }
 

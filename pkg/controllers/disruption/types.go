@@ -56,6 +56,7 @@ type Candidate struct {
 	zone              string
 	capacityType      string
 	disruptionCost    float64
+	runningPods       []*v1.Pod
 	reschedulablePods []*v1.Pod
 }
 
@@ -137,6 +138,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		nodePool:          nodePool,
 		capacityType:      node.Labels()[v1beta1.CapacityTypeLabelKey],
 		zone:              node.Labels()[v1.LabelTopologyZone],
+		runningPods:       pods,
 		reschedulablePods: lo.Filter(pods, func(p *v1.Pod, _ int) bool { return pod.IsReschedulable(p) }),
 		// We get the disruption cost from all pods in the candidate, not just the reschedulable pods
 		disruptionCost: disruptionCost(ctx, pods) * lifetimeRemaining(clk, nodePool, node.Node),
