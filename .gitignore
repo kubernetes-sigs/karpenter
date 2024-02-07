@@ -4,6 +4,7 @@ coverage.html
 *.test
 *.cpuprofile
 *.heapprofile
+*.swp
 
 # Common in OSs and IDEs
 .idea
