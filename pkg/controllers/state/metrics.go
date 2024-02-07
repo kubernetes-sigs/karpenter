@@ -32,7 +32,7 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: stateSubsystem,
-			Name:      "nodes_count",
+			Name:      "node_count",
 			Help:      "Current count of nodes in Karpenter's cluster state",
 		},
 	)
