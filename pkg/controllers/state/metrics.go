@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	stateSubsystem = "state"
+	stateSubsystem = "cluster_state"
 )
 
 var (
