@@ -1,4 +1,31 @@
-# Disruption Controls By Reason 
+# Disruption Controls By Reason
+
+## TOC and Overview
+- [User Scenarios](#user-scenarios)
+- [Known Requirements](#known-requirements)
+- [Clarifying Expected Behavior](#clarifying-expected-behavior)
+  - [Handling Default or Undefined Reason](#q-how-should-karpenter-handle-the-default-or-undefined-reason-case)
+  - [Order of Disruption Reason Execution](#q-should-users-be-able-to-change-the-order-that-disruption-reasons-are-executed-in-to-solve-this-problem)
+  - [Handling Unspecified Default Reason](#q-how-should-we-handle-an-unspecfied-default-reason)
+  - [Specifying Default Reason Explicitly](#q-should-default-be-specifed-only-as-omitted-or-should-users-be-able-to-define-default)
+  - [Defining an 'All' Case](#q-should-there-be-an-all-case-that-can-be-defined-as-well)
+- [API Design](#api-design)
+  - [Approach A: Add a reason field to disruption Budgets](#approach-a-add-a-reason-field-to-disruption-budgets)
+    - [Proposed Spec](#proposed-spec)
+    - [Example](#example)
+    - [Pros and Cons](#pros--cons)
+  - [Approach B: Defining Single Reason](#approach-b-defining-single-reason-rather-than-a-list-of-reasons)
+    - [Proposed Spec](#proposed-spec-1)
+    - [Example](#example-1)
+    - [Pros and Cons](#pros-and-cons)
+  - [Approach C: Defining Per Reason Controls](#approach-c-defining-per-reason-controls)
+    - [Proposed Spec](#proposed-spec-2)
+    - [Example](#example-2)
+    - [Considerations](#considerations)
+    - [Pros and Cons](#pros--cons-1)
+- [API Design Conclusion: Preferred Design](#api-design-conclusion-preferred-design)
+
+
 ## User Scenarios 
 1. Users need the capability to schedule upgrades only during business hours or within more restricted time windows. Additionally, they require a system that doesn't compromise the cost savings from consolidation when upgrades are blocked due to drift.
 2. High-Frequency Trading (HFT) firms require full compute capacity during specific operational hours, making it imperative to avoid scale-down requests for consolidation during these periods. However, outside these hours, scale-downs are acceptable.
