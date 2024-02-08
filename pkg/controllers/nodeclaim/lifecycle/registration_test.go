@@ -92,6 +92,24 @@ var _ = Describe("Registration", func() {
 		node = ExpectExists(ctx, env.Client, node)
 		Expect(node.Labels).To(HaveKeyWithValue(v1beta1.NodeRegisteredLabelKey, "true"))
 	})
+	It("should sync the karpenter.sh/nodeclaim label to the Node when the Node comes online", func() {
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		node = ExpectExists(ctx, env.Client, node)
+		Expect(node.Labels).To(HaveKeyWithValue(v1beta1.NodeClaimLabelKey, nodeClaim.Name))
+	})
 	It("should sync the labels to the Node when the Node comes online", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{

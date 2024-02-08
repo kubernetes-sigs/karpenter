@@ -34,6 +34,7 @@ const (
 
 // Karpenter specific domains and labels
 const (
+	NodeClaimLabelKey       = Group + "/nodeclaim"
 	NodePoolLabelKey        = Group + "/nodepool"
 	NodeInitializedLabelKey = Group + "/initialized"
 	NodeRegisteredLabelKey  = Group + "/registered"
