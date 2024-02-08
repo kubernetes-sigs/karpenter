@@ -62,7 +62,7 @@ var (
 	Registered   apis.ConditionType = "Registered"
 	Initialized  apis.ConditionType = "Initialized"
 	Empty        apis.ConditionType = "Empty"
-	Consolidated apis.ConditionType = "consolidated"
+	Consolidated apis.ConditionType = "Consolidated"
 	Drifted      apis.ConditionType = "Drifted"
 	Expired      apis.ConditionType = "Expired"
 )
