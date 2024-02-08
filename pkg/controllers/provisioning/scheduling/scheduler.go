@@ -137,7 +137,7 @@ func (r Results) NonPendingPodSchedulingErrors() string {
 	return msg.String()
 }
 
-func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) *Results {
+func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) Results {
 	defer metrics.Measure(schedulingSimulationDuration)()
 	schedulingStart := time.Now()
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
@@ -181,7 +181,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) *Results {
 			delete(errors, k)
 		}
 	}
-	return &Results{
+	return Results{
 		NewNodeClaims: s.newNodeClaims,
 		ExistingNodes: s.existingNodes,
 		PodErrors:     errors,

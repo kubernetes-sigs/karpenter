@@ -24,6 +24,9 @@ import (
 
 	"github.com/samber/lo"
 
+	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
+	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
+
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
@@ -32,7 +35,6 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
@@ -40,39 +42,12 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
-	utilsnode "sigs.k8s.io/karpenter/pkg/utils/node"
-	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
-func filterCandidates(ctx context.Context, kubeClient client.Client, recorder events.Recorder, nodes []*Candidate) ([]*Candidate, error) {
-	pdbs, err := NewPDBLimits(ctx, kubeClient)
-	if err != nil {
-		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
-	}
-
-	// filter out nodes that can't be terminated
-	nodes = lo.Filter(nodes, func(cn *Candidate, _ int) bool {
-		if !cn.Node.DeletionTimestamp.IsZero() {
-			recorder.Publish(disruptionevents.Blocked(cn.Node, cn.NodeClaim, "Node in the process of deletion")...)
-			return false
-		}
-		if pdb, ok := pdbs.CanEvictPods(cn.pods); !ok {
-			recorder.Publish(disruptionevents.Blocked(cn.Node, cn.NodeClaim, fmt.Sprintf("PDB %q prevents pod evictions", pdb))...)
-			return false
-		}
-		if p, ok := hasDoNotDisruptPod(cn); ok {
-			recorder.Publish(disruptionevents.Blocked(cn.Node, cn.NodeClaim, fmt.Sprintf("Pod %q has do not evict annotation", client.ObjectKeyFromObject(p)))...)
-			return false
-		}
-		return true
-	})
-	return nodes, nil
-}
-
 //nolint:gocyclo
-func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
+func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
 	candidates ...*Candidate,
-) (*pscheduling.Results, error) {
+) (pscheduling.Results, error) {
 	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
 	nodes := cluster.Nodes()
 	deletingNodes := nodes.Deleting()
@@ -86,30 +61,33 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	if _, ok := lo.Find(deletingNodes, func(n *state.StateNode) bool {
 		return candidateNames.Has(n.Name())
 	}); ok {
-		return nil, errCandidateDeleting
+		return pscheduling.Results{}, errCandidateDeleting
 	}
 
 	// We get the pods that are on nodes that are deleting
-	deletingNodePods, err := deletingNodes.Pods(ctx, kubeClient)
+	deletingNodePods, err := deletingNodes.ReschedulablePods(ctx, kubeClient)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
+		return pscheduling.Results{}, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
 	}
 	// start by getting all pending pods
 	pods, err := provisioner.GetPendingPods(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("determining pending pods, %w", err)
+		return pscheduling.Results{}, fmt.Errorf("determining pending pods, %w", err)
 	}
-
 	for _, n := range candidates {
-		pods = append(pods, n.pods...)
+		pods = append(pods, n.reschedulablePods...)
 	}
 	pods = append(pods, deletingNodePods...)
 	scheduler, err := provisioner.NewScheduler(ctx, pods, stateNodes, pscheduling.SchedulerOptions{
 		SimulationMode: true,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("creating scheduler, %w", err)
+		return pscheduling.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
+
+	deletingNodePodKeys := lo.SliceToMap(deletingNodePods, func(p *v1.Pod) (client.ObjectKey, interface{}) {
+		return client.ObjectKeyFromObject(p), nil
+	})
 
 	results := scheduler.Solve(ctx, pods)
 	for _, n := range results.ExistingNodes {
@@ -119,7 +97,16 @@ func simulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		// to proceed disrupting if our scheduling decision relies on nodes that haven't entered a terminal state.
 		if !n.Initialized() {
 			for _, p := range n.Pods {
-				results.PodErrors[p] = fmt.Errorf("would schedule against a non-initialized node %s", n.Name())
+				// Only add a pod scheduling error if it isn't on an already deleting node.
+				// If the pod is on a deleting node, we assume one of two things has already happened:
+				// 1. The node was manually terminated, at which the provisioning controller has scheduled or is scheduling a node
+				//    for the pod.
+				// 2. The node was chosen for a previous disruption command, we assume that the uninitialized node will come up
+				//    for this command, and we assume it will be successful. If it is not successful, the node will become
+				//    not terminating, and we will no longer need to consider these pods.
+				if _, ok := deletingNodePodKeys[client.ObjectKeyFromObject(p)]; !ok {
+					results.PodErrors[p] = fmt.Errorf("would schedule against a non-initialized node %s", n.Name())
+				}
 			}
 		}
 	}
@@ -229,12 +216,16 @@ func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
 func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock,
 	cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter, queue *orchestration.Queue,
 ) ([]*Candidate, error) {
-	nodePoolMap, nodePoolToInstanceTypesMap, err := buildNodePoolMap(ctx, kubeClient, cloudProvider)
+	nodePoolMap, nodePoolToInstanceTypesMap, err := BuildNodePoolMap(ctx, kubeClient, cloudProvider)
 	if err != nil {
 		return nil, err
 	}
+	pdbs, err := NewPDBLimits(ctx, clk, kubeClient)
+	if err != nil {
+		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
+	}
 	candidates := lo.FilterMap(cluster.Nodes(), func(n *state.StateNode, _ int) (*Candidate, bool) {
-		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, nodePoolMap, nodePoolToInstanceTypesMap, queue)
+		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue)
 		return cn, e == nil
 	})
 	// Filter only the valid candidates that we should disrupt
@@ -271,7 +262,7 @@ func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clo
 		// If the node satisfies one of the following, we subtract it from the allowed disruptions.
 		// 1. Has a NotReady conditiion
 		// 2. Is marked as deleting
-		if cond := utilsnode.GetCondition(node.Node, v1.NodeReady); cond.Status != v1.ConditionTrue || node.MarkedForDeletion() {
+		if cond := nodeutils.GetCondition(node.Node, v1.NodeReady); cond.Status != v1.ConditionTrue || node.MarkedForDeletion() {
 			deleting[nodePool]++
 		}
 		numNodes[nodePool]++
@@ -297,8 +288,8 @@ func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clo
 	return disruptionBudgetMapping, nil
 }
 
-// buildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map
-func buildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[string]*v1beta1.NodePool, map[string]map[string]*cloudprovider.InstanceType, error) {
+// BuildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map
+func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[string]*v1beta1.NodePool, map[string]map[string]*cloudprovider.InstanceType, error) {
 	nodePoolMap := map[string]*v1beta1.NodePool{}
 	nodePoolList := &v1beta1.NodePoolList{}
 	if err := kubeClient.List(ctx, nodePoolList); err != nil {
@@ -371,13 +362,4 @@ func clamp(min, val, max float64) float64 {
 		return max
 	}
 	return val
-}
-
-func hasDoNotDisruptPod(c *Candidate) (*v1.Pod, bool) {
-	return lo.Find(c.pods, func(p *v1.Pod) bool {
-		if pod.IsTerminating(p) || pod.IsTerminal(p) || pod.IsOwnedByNode(p) {
-			return false
-		}
-		return pod.HasDoNotDisrupt(p)
-	})
 }

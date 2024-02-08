@@ -83,7 +83,7 @@ func ConstructInstanceTypes() []*cloudprovider.InstanceType {
 						},
 						InstanceTypeLabels: labels,
 					}
-					price := priceFromResources(opts.Resources)
+					price := PriceFromResources(opts.Resources)
 
 					opts.Offerings = cloudprovider.Offerings{}
 					for _, zone := range KwokZones {
@@ -131,7 +131,7 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 	}
 }
 
-func priceFromResources(resources v1.ResourceList) float64 {
+func PriceFromResources(resources v1.ResourceList) float64 {
 	price := 0.0
 	for k, v := range resources {
 		switch k {
