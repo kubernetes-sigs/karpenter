@@ -144,8 +144,6 @@ spec:
                       type: integer
                   type: object
                   x-kubernetes-validations:
-                    - message: consolidateAfter cannot be combined with consolidationPolicy=WhenUnderutilized
-                      rule: 'has(self.consolidateAfter) ? self.consolidationPolicy != ''WhenUnderutilized'' || self.consolidateAfter == ''Never'' : true'
                     - message: consolidateAfter must be specified with consolidationPolicy=WhenEmpty
                       rule: 'self.consolidationPolicy == ''WhenEmpty'' ? has(self.consolidateAfter) : true'
                 limits:
