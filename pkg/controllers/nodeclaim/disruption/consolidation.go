@@ -44,9 +44,7 @@ type Consolidation struct {
 func (e *Consolidation) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
 	hasCondition := nodeClaim.StatusConditions().GetCondition(v1beta1.Consolidated) != nil
 
-	if nodePool.Spec.Disruption.ConsolidationPolicy != v1beta1.ConsolidationPolicyWhenUnderutilized ||
-		nodePool.Spec.Disruption.ConsolidateAfter == nil ||
-		nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
+	if nodePool.Spec.Disruption.ConsolidationPolicy != v1beta1.ConsolidationPolicyWhenUnderutilized {
 		if hasCondition {
 			_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.Consolidated)
 			logging.FromContext(ctx).Debugf("removing consolidated status condition, emptiness is disabled")
