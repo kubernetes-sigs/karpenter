@@ -186,6 +186,12 @@ var _ = Describe("Webhook/Validation", func() {
 					Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 				}
 			})
+			It("should fail for restricted labels", func() {
+				for label := range RestrictedLabels {
+					nodePool.Spec.Template.Labels = map[string]string{label: randomdata.SillyName()}
+					Expect(nodePool.Validate(ctx)).ToNot(Succeed())
+				}
+			})
 			It("should allow labels kOps require", func() {
 				nodePool.Spec.Template.Labels = map[string]string{
 					"kops.k8s.io/instancegroup": "karpenter-nodes",

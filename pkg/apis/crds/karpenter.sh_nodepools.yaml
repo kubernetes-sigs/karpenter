@@ -184,11 +184,7 @@ spec:
                             - message: label domain "k8s.io" is restricted
                               rule: self.all(x, x.find("^([^/]+)").endsWith("kops.k8s.io") || !x.find("^([^/]+)").endsWith("k8s.io"))
                             - message: label domain "karpenter.sh" is restricted
-                              rule: self.all(x, x in ["karpenter.sh/capacity-type", "karpenter.sh/nodepool"] || !x.find("^([^/]+)").endsWith("karpenter.sh"))
-                            - message: label "karpenter.sh/nodepool" is restricted
-                              rule: self.all(x, x != "karpenter.sh/nodepool")
-                            - message: label "kubernetes.io/hostname" is restricted
-                              rule: self.all(x, x != "kubernetes.io/hostname")
+                              rule: self.all(x, x in ["karpenter.sh/capacity-type"] || !x.find("^([^/]+)").endsWith("karpenter.sh"))
                       type: object
                     spec:
                       description: NodeClaimSpec describes the desired state of the NodeClaim
@@ -346,11 +342,7 @@ spec:
                                   - message: label domain "k8s.io" is restricted
                                     rule: self.find("^([^/]+)").endsWith("kops.k8s.io") || !self.find("^([^/]+)").endsWith("k8s.io")
                                   - message: label domain "karpenter.sh" is restricted
-                                    rule: self in ["karpenter.sh/capacity-type", "karpenter.sh/nodepool"] || !self.find("^([^/]+)").endsWith("karpenter.sh")
-                                  - message: label "karpenter.sh/nodepool" is restricted
-                                    rule: self != "karpenter.sh/nodepool"
-                                  - message: label "kubernetes.io/hostname" is restricted
-                                    rule: self != "kubernetes.io/hostname"
+                                    rule: self in ["karpenter.sh/capacity-type"] || !self.find("^([^/]+)").endsWith("karpenter.sh")
                               operator:
                                 description: |-
                                   Represents a key's relationship to a set of values.

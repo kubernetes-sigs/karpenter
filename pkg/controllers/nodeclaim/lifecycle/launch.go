@@ -117,6 +117,7 @@ func PopulateNodeClaimDetails(nodeClaim, retrieved *v1beta1.NodeClaim) *v1beta1.
 		retrieved.Labels, // CloudProvider-resolved labels
 		scheduling.NewNodeSelectorRequirements(nodeClaim.Spec.Requirements...).Labels(), // Single-value requirement resolved labels
 		nodeClaim.Labels, // User-defined labels
+		map[string]string{v1beta1.NodeClaimLabelKey: nodeClaim.Name}, // A self-referential label for scheduling and observability on the node
 	)
 	nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, retrieved.Annotations)
 	nodeClaim.Status.ProviderID = retrieved.Status.ProviderID

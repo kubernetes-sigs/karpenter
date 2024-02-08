@@ -70,6 +70,44 @@ var _ = Describe("Launch", func() {
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Launched).Status).To(Equal(v1.ConditionTrue))
 	})
+	It("should add instance type labels into the labels after launching the NodeClaim", func() {
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		expectedLabels := map[string]string{
+			v1.LabelOSStable:             "darwin",
+			v1.LabelInstanceTypeStable:   "small-instance-type",
+			v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot,
+			v1.LabelArchStable:           v1beta1.ArchitectureAmd64,
+			v1.LabelTopologyZone:         "test-zone-1",
+		}
+		for k, v := range expectedLabels {
+			Expect(nodeClaim.Labels).To(HaveKeyWithValue(k, v))
+		}
+	})
+	It("should add karpenter.sh/nodeclaim label into the labels after launching the NodeClaim", func() {
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.Labels).To(HaveKeyWithValue(v1beta1.NodeClaimLabelKey, nodeClaim.Name))
+	})
 	It("should delete the nodeclaim if InsufficientCapacity is returned from the cloudprovider", func() {
 		cloudProvider.NextCreateErr = cloudprovider.NewInsufficientCapacityError(fmt.Errorf("all instance types were unavailable"))
 		nodeClaim := test.NodeClaim()

@@ -633,6 +633,113 @@ var _ = Describe("Topology", func() {
 			Expect(nodes.Items).To(HaveLen(4))
 		})
 	})
+	Context("NodeClaim Name", func() {
+		It("should balance pods across nodes", func() {
+			topology := []v1.TopologySpreadConstraint{{
+				TopologyKey:       v1beta1.NodeClaimLabelKey,
+				WhenUnsatisfiable: v1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+			}}
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}, 4)...,
+			)
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 1, 1))
+		})
+		It("should balance pods on the same NodeClaim up to maxskew", func() {
+			topology := []v1.TopologySpreadConstraint{{
+				TopologyKey:       v1beta1.NodeClaimLabelKey,
+				WhenUnsatisfiable: v1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           4,
+			}}
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
+				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}, 4)...,
+			)
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(4))
+		})
+		It("balance multiple deployments with NodeClaim topology spread", func() {
+			// Issue #1425
+			spreadPod := func(appName string) test.PodOptions {
+				return test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app": appName,
+						},
+					},
+					TopologySpreadConstraints: []v1.TopologySpreadConstraint{
+						{
+							MaxSkew:           1,
+							TopologyKey:       v1beta1.NodeClaimLabelKey,
+							WhenUnsatisfiable: v1.DoNotSchedule,
+							LabelSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{"app": appName},
+							},
+						},
+					},
+				}
+			}
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			pods := []*v1.Pod{
+				test.UnschedulablePod(spreadPod("app1")), test.UnschedulablePod(spreadPod("app1")),
+				test.UnschedulablePod(spreadPod("app2")), test.UnschedulablePod(spreadPod("app2")),
+			}
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			for _, p := range pods {
+				ExpectScheduled(ctx, env.Client, p)
+			}
+			nodes := v1.NodeList{}
+			Expect(env.Client.List(ctx, &nodes)).To(Succeed())
+			// this wasn't part of #1425, but ensures that we launch the minimum number of nodes
+			Expect(nodes.Items).To(HaveLen(2))
+		})
+		It("balance multiple deployments with NodeClaim topology spread & varying arch", func() {
+			// Issue #1425
+			spreadPod := func(appName, arch string) test.PodOptions {
+				return test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app": appName,
+						},
+					},
+					NodeRequirements: []v1.NodeSelectorRequirement{
+						{
+							Key:      v1.LabelArchStable,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{arch},
+						},
+					},
+					TopologySpreadConstraints: []v1.TopologySpreadConstraint{
+						{
+							MaxSkew:           1,
+							TopologyKey:       v1beta1.NodeClaimLabelKey,
+							WhenUnsatisfiable: v1.DoNotSchedule,
+							LabelSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{"app": appName},
+							},
+						},
+					},
+				}
+			}
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			pods := []*v1.Pod{
+				test.UnschedulablePod(spreadPod("app1", v1beta1.ArchitectureAmd64)), test.UnschedulablePod(spreadPod("app1", v1beta1.ArchitectureAmd64)),
+				test.UnschedulablePod(spreadPod("app2", v1beta1.ArchitectureArm64)), test.UnschedulablePod(spreadPod("app2", v1beta1.ArchitectureArm64)),
+			}
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			for _, p := range pods {
+				ExpectScheduled(ctx, env.Client, p)
+			}
+			nodes := v1.NodeList{}
+			Expect(env.Client.List(ctx, &nodes)).To(Succeed())
+			// same test as the previous one, but now the architectures are different so we need four nodes in total
+			Expect(nodes.Items).To(HaveLen(4))
+		})
+	})
 
 	Context("CapacityType", func() {
 		It("should balance pods across capacity types", func() {

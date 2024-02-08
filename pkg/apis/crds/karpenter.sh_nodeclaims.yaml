@@ -223,8 +223,6 @@ spec:
                             rule: self.find("^([^/]+)").endsWith("kops.k8s.io") || !self.find("^([^/]+)").endsWith("k8s.io")
                           - message: label domain "karpenter.sh" is restricted
                             rule: self in ["karpenter.sh/capacity-type", "karpenter.sh/nodepool"] || !self.find("^([^/]+)").endsWith("karpenter.sh")
-                          - message: label "kubernetes.io/hostname" is restricted
-                            rule: self != "kubernetes.io/hostname"
                       operator:
                         description: |-
                           Represents a key's relationship to a set of values.

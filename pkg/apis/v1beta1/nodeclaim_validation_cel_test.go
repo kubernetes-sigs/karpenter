@@ -119,6 +119,14 @@ var _ = Describe("Validation", func() {
 				Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
 			}
 		})
+		It("should fail for restricted labels", func() {
+			for label := range RestrictedLabels {
+				nodeClaim.Spec.Requirements = []v1.NodeSelectorRequirement{
+					{Key: label, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+				}
+				Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
+			}
+		})
 		It("should allow restricted domains exceptions", func() {
 			oldNodeClaim := nodeClaim.DeepCopy()
 			for label := range LabelDomainExceptions {

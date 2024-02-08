@@ -118,6 +118,14 @@ var _ = Describe("Validation", func() {
 				Expect(nodeClaim.Validate(ctx)).ToNot(Succeed())
 			}
 		})
+		It("should fail for restricted labels", func() {
+			for label := range RestrictedLabels {
+				nodeClaim.Spec.Requirements = []v1.NodeSelectorRequirement{
+					{Key: label, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+				}
+				Expect(nodeClaim.Validate(ctx)).ToNot(Succeed())
+			}
+		})
 		It("should allow restricted domains exceptions", func() {
 			for label := range LabelDomainExceptions {
 				nodeClaim.Spec.Requirements = []v1.NodeSelectorRequirement{

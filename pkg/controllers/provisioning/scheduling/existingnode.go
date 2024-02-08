@@ -23,6 +23,8 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
@@ -58,6 +60,10 @@ func NewExistingNode(n *state.StateNode, topology *Topology, daemonResources v1.
 	}
 	node.requirements.Add(scheduling.NewRequirement(v1.LabelHostname, v1.NodeSelectorOpIn, n.HostName()))
 	topology.Register(v1.LabelHostname, n.HostName())
+	// karpenter.sh/nodeclaim may already exist in labels, but if on an existing node, topologies may not be aware of the values
+	if _, ok := n.Labels()[v1beta1.NodeClaimLabelKey]; ok {
+		topology.Register(v1beta1.NodeClaimLabelKey, n.Labels()[v1beta1.NodeClaimLabelKey])
+	}
 	return node
 }
 

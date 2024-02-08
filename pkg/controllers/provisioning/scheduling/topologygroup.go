@@ -28,6 +28,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/functional"
 )
@@ -194,8 +196,8 @@ func (t *TopologyGroup) nextDomainTopologySpread(pod *v1.Pod, podDomains, nodeDo
 }
 
 func (t *TopologyGroup) domainMinCount(domains *scheduling.Requirement) int32 {
-	// hostname based topologies always have a min pod count of zero since we can create one
-	if t.Key == v1.LabelHostname {
+	// hostname or nodeclaim based topologies always have a min pod count of zero since we can create one
+	if t.Key == v1.LabelHostname || t.Key == v1beta1.NodeClaimLabelKey {
 		return 0
 	}
 

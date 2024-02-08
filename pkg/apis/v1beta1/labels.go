@@ -34,6 +34,7 @@ const (
 
 // Karpenter specific domains and labels
 const (
+	NodeClaimLabelKey       = Group + "/nodeclaim"
 	NodePoolLabelKey        = Group + "/nodepool"
 	NodeInitializedLabelKey = Group + "/initialized"
 	NodeRegisteredLabelKey  = Group + "/registered"
@@ -87,6 +88,7 @@ var (
 	// because they may interfere with the internal provisioning logic.
 	RestrictedLabels = sets.New(
 		v1.LabelHostname,
+		NodeClaimLabelKey,
 	)
 
 	// NormalizedLabels translate aliased concepts into the controller's

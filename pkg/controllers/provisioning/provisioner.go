@@ -483,7 +483,15 @@ func validateNodeSelectorTerm(term v1.NodeSelectorTerm) (errs error) {
 	}
 	if term.MatchExpressions != nil {
 		for _, requirement := range term.MatchExpressions {
-			errs = multierr.Append(errs, v1beta1.ValidateRequirement(requirement))
+			// NodeClaim label is an exception to the rules that are applied to other requirements
+			// If you specify an exists requirement on the node affinity, it is valid
+			if requirement.Key == v1beta1.NodeClaimLabelKey {
+				if requirement.Operator != v1.NodeSelectorOpExists {
+					errs = multierr.Append(errs, fmt.Errorf("key %s is only valid when using the Exists operator", v1beta1.NodeClaimLabelKey))
+				}
+			} else {
+				errs = multierr.Append(errs, v1beta1.ValidateRequirement(requirement))
+			}
 		}
 	}
 	return errs

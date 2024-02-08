@@ -44,13 +44,16 @@ type NodeClaim struct {
 var nodeID int64
 
 func NewNodeClaim(nodeClaimTemplate *NodeClaimTemplate, topology *Topology, daemonResources v1.ResourceList, instanceTypes []*cloudprovider.InstanceType) *NodeClaim {
-	// Copy the template, and add hostname
+	// Copy the template, and add hostname and nodeClaimName placeholders
 	hostname := fmt.Sprintf("hostname-placeholder-%04d", atomic.AddInt64(&nodeID, 1))
+	nodeClaimName := fmt.Sprintf("nodeclaim-placeholder-%04d", atomic.AddInt64(&nodeID, 1))
 	topology.Register(v1.LabelHostname, hostname)
+	topology.Register(v1beta1.NodeClaimLabelKey, nodeClaimName)
 	template := *nodeClaimTemplate
 	template.Requirements = scheduling.NewRequirements()
 	template.Requirements.Add(nodeClaimTemplate.Requirements.Values()...)
 	template.Requirements.Add(scheduling.NewRequirement(v1.LabelHostname, v1.NodeSelectorOpIn, hostname))
+	template.Requirements.Add(scheduling.NewRequirement(v1beta1.NodeClaimLabelKey, v1.NodeSelectorOpIn, nodeClaimName))
 	template.InstanceTypeOptions = instanceTypes
 	template.Spec.Resources.Requests = daemonResources
 
@@ -124,6 +127,7 @@ func (n *NodeClaim) FinalizeScheduling() {
 	// We need nodes to have hostnames for topology purposes, but we don't want to pass that node name on to consumers
 	// of the node as it will be displayed in error messages
 	delete(n.Requirements, v1.LabelHostname)
+	delete(n.Requirements, v1beta1.NodeClaimLabelKey)
 }
 
 func InstanceTypeList(instanceTypeOptions []*cloudprovider.InstanceType) string {

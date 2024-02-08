@@ -107,6 +107,7 @@ var _ = Describe("Registration", func() {
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.Labels).To(HaveKeyWithValue("custom-label", "custom-value"))
 		Expect(nodeClaim.Labels).To(HaveKeyWithValue("other-custom-label", "other-custom-value"))
+		Expect(nodeClaim.Labels).To(HaveKeyWithValue(v1beta1.NodeClaimLabelKey, nodeClaim.Name))
 
 		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
 		ExpectApplied(ctx, env.Client, node)

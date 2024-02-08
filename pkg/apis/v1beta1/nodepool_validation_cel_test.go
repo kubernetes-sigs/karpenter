@@ -607,6 +607,15 @@ var _ = Describe("CEL/Validation", func() {
 				Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
 			}
 		})
+		It("should fail for restricted labels", func() {
+			for label := range RestrictedLabels {
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+					{Key: label, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+				}
+				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+				Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+			}
+		})
 		It("should allow restricted domains exceptions", func() {
 			oldNodePool := nodePool.DeepCopy()
 			for label := range LabelDomainExceptions {
@@ -707,8 +716,14 @@ var _ = Describe("CEL/Validation", func() {
 		})
 		It("should fail for restricted label domains", func() {
 			for label := range RestrictedLabelDomains {
-				fmt.Println(label)
 				nodePool.Spec.Template.Labels = map[string]string{label + "/unknown": randomdata.SillyName()}
+				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+				Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
+			}
+		})
+		It("should fail for restricted labels", func() {
+			for label := range RestrictedLabels {
+				nodePool.Spec.Template.Labels = map[string]string{label: randomdata.SillyName()}
 				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 				Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
 			}

@@ -139,6 +139,8 @@ var _ = Describe("Provisioning", func() {
 		unschedulable := []*v1.Pod{
 			// Ignored, matches another nodepool
 			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1beta1.NodePoolLabelKey: "unknown"}}),
+			// Ignored, using an explicit label on a NodeClaim
+			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1beta1.NodeClaimLabelKey: "unknown"}}),
 			// Ignored, invalid zone
 			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelTopologyZone: "unknown"}}),
 			// Ignored, invalid instance type
@@ -167,6 +169,8 @@ var _ = Describe("Provisioning", func() {
 		schedulable := []*v1.Pod{
 			// Constrained by nodepool
 			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1beta1.NodePoolLabelKey, Operator: v1.NodeSelectorOpIn, Values: []string{nodePool.Name}}}}),
+			// Constrained to any nodeclaim
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1beta1.NodeClaimLabelKey, Operator: v1.NodeSelectorOpExists}}}),
 			// Constrained by zone
 			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}}),
 			// Constrained by instanceType
@@ -179,6 +183,8 @@ var _ = Describe("Provisioning", func() {
 		unschedulable := []*v1.Pod{
 			// Ignored, matches another nodepool
 			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1beta1.NodePoolLabelKey, Operator: v1.NodeSelectorOpIn, Values: []string{"unknown"}}}}),
+			// Ignored, using an explicit selector on a NodeClaim
+			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1beta1.NodeClaimLabelKey, Operator: v1.NodeSelectorOpIn, Values: []string{"unknown"}}}}),
 			// Ignored, invalid zone
 			test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"unknown"}}}}),
 			// Ignored, invalid instance type
