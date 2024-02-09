@@ -44,6 +44,10 @@ const (
 	loggerCfgFilePath = loggerCfgDir + "/zap-logger-config"
 )
 
+// NopLogger is used to throw away logs when we don't actually want to log in
+// certain portions of the code since logging would be too noisy
+var NopLogger = zap.NewNop().Sugar()
+
 func DefaultZapConfig(ctx context.Context, component string) zap.Config {
 	logLevel := lo.Ternary(component != "webhook", zap.NewAtomicLevelAt(zap.InfoLevel), zap.NewAtomicLevelAt(zap.ErrorLevel))
 	if l := options.FromContext(ctx).LogLevel; l != "" && component != "webhook" {

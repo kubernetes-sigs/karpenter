@@ -41,6 +41,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -78,9 +79,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		pods = append(pods, n.reschedulablePods...)
 	}
 	pods = append(pods, deletingNodePods...)
-	scheduler, err := provisioner.NewScheduler(ctx, pods, stateNodes, pscheduling.SchedulerOptions{
-		SimulationMode: true,
-	})
+	scheduler, err := provisioner.NewScheduler(logging.WithLogger(ctx, operatorlogging.NopLogger), pods, stateNodes)
 	if err != nil {
 		return pscheduling.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
@@ -89,8 +88,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return client.ObjectKeyFromObject(p), nil
 	})
 
-	results := scheduler.Solve(ctx, pods)
-	results = results.TruncateInstanceTypes(pscheduling.MaxInstanceTypes)
+	results := scheduler.Solve(logging.WithLogger(ctx, operatorlogging.NopLogger), pods).TruncateInstanceTypes(pscheduling.MaxInstanceTypes)
 	for _, n := range results.ExistingNodes {
 		// We consider existing nodes for scheduling. When these nodes are unmanaged, their taint logic should
 		// tell us if we can schedule to them or not; however, if these nodes are managed, we will still schedule to them
