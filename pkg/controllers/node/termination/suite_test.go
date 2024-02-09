@@ -68,7 +68,7 @@ var _ = BeforeSuite(func() {
 
 	cloudProvider = fake.NewCloudProvider()
 	recorder = test.NewEventRecorder()
-	queue = terminator.NewQueue(env.KubernetesInterface.CoreV1(), recorder)
+	queue = terminator.NewQueue(env.Client, recorder)
 	terminationController = termination.NewController(env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, queue), recorder)
 })
 
@@ -321,7 +321,7 @@ var _ = Describe("Termination", func() {
 
 			// Expect podNoEvict to fail eviction due to PDB, and be retried
 			Eventually(func() int {
-				return queue.NumRequeues(client.ObjectKeyFromObject(podNoEvict))
+				return queue.NumRequeues(terminator.NewQueueKey(podNoEvict))
 			}).Should(BeNumerically(">=", 1))
 
 			// Delete pod to simulate successful eviction
@@ -581,6 +581,59 @@ var _ = Describe("Termination", func() {
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 			ExpectNotFound(ctx, env.Client, node)
 		})
+		It("should not evict a new pod with the same name using the old pod's eviction queue key", func() {
+			pod := test.Pod(test.PodOptions{
+				NodeName: node.Name,
+				ObjectMeta: metav1.ObjectMeta{
+					Name:            "test-pod",
+					OwnerReferences: defaultOwnerRefs,
+				},
+			})
+			ExpectApplied(ctx, env.Client, node, pod)
+
+			// Trigger Termination Controller
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+
+			// Don't trigger a call into the queue to make sure that we effectively aren't triggering eviction
+			// We'll use this to try to leave pods in the queue
+
+			// Expect node to exist and be draining
+			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
+
+			// Delete the pod directly to act like something else is doing the pod termination
+			ExpectDeleted(ctx, env.Client, pod)
+
+			// Requeue the termination controller to completely delete the node
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+
+			// Expect that the old pod's key still exists in the queue
+			Expect(queue.Has(terminator.NewQueueKey(pod)))
+
+			// Re-create the pod and node, it should now have the same name, but a different UUID
+			node = test.Node(test.NodeOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Finalizers: []string{v1beta1.TerminationFinalizer},
+				},
+			})
+			pod = test.Pod(test.PodOptions{
+				NodeName: node.Name,
+				ObjectMeta: metav1.ObjectMeta{
+					Name:            "test-pod",
+					OwnerReferences: defaultOwnerRefs,
+				},
+			})
+			ExpectApplied(ctx, env.Client, node, pod)
+
+			// Trigger eviction queue with the pod key still in it
+			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
+
+			Consistently(func(g Gomega) {
+				g.Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), pod)).To(Succeed())
+				g.Expect(pod.DeletionTimestamp.IsZero()).To(BeTrue())
+			}, ReconcilerPropagationTime, RequestInterval).Should(Succeed())
+		})
 	})
 	Context("Metrics", func() {
 		It("should fire the terminationSummary metric when deleting nodes", func() {
@@ -609,7 +662,7 @@ var _ = Describe("Termination", func() {
 func ExpectNotEnqueuedForEviction(e *terminator.Queue, pods ...*v1.Pod) {
 	GinkgoHelper()
 	for _, pod := range pods {
-		Expect(e.Contains(client.ObjectKeyFromObject(pod))).To(BeFalse())
+		Expect(e.Has(terminator.NewQueueKey(pod))).To(BeFalse())
 	}
 }
 
