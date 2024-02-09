@@ -5,7 +5,6 @@ go 1.21
 require (
 	github.com/Pallinder/go-randomdata v1.2.0
 	github.com/avast/retry-go v3.0.0+incompatible
-	github.com/deckarep/golang-set v1.8.0
 	github.com/go-logr/logr v1.3.0
 	github.com/go-logr/zapr v1.3.0
 	github.com/imdario/mergo v0.3.16
