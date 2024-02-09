@@ -22,13 +22,13 @@ import (
 	"fmt"
 	"time"
 
-	set "github.com/deckarep/golang-set"
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -62,19 +62,31 @@ func IsNodeDrainError(err error) bool {
 	return errors.As(err, &nodeDrainErr)
 }
 
-type Queue struct {
-	workqueue.RateLimitingInterface
-	set.Set
-
-	coreV1Client corev1.CoreV1Interface
-	recorder     events.Recorder
+type QueueKey struct {
+	types.NamespacedName
+	UID types.UID
 }
 
-func NewQueue(coreV1Client corev1.CoreV1Interface, recorder events.Recorder) *Queue {
+func NewQueueKey(pod *v1.Pod) QueueKey {
+	return QueueKey{
+		NamespacedName: client.ObjectKeyFromObject(pod),
+		UID:            pod.UID,
+	}
+}
+
+type Queue struct {
+	workqueue.RateLimitingInterface
+	sets.Set[QueueKey]
+
+	kubeClient client.Client
+	recorder   events.Recorder
+}
+
+func NewQueue(kubeClient client.Client, recorder events.Recorder) *Queue {
 	queue := &Queue{
 		RateLimitingInterface: workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(evictionQueueBaseDelay, evictionQueueMaxDelay)),
-		Set:                   set.NewSet(),
-		coreV1Client:          coreV1Client,
+		Set:                   sets.New[QueueKey](),
+		kubeClient:            kubeClient,
 		recorder:              recorder,
 	}
 	return queue
@@ -91,9 +103,10 @@ func (q *Queue) Builder(_ context.Context, m manager.Manager) controller.Builder
 // Add adds pods to the Queue
 func (q *Queue) Add(pods ...*v1.Pod) {
 	for _, pod := range pods {
-		if nn := client.ObjectKeyFromObject(pod); !q.Set.Contains(nn) {
-			q.Set.Add(nn)
-			q.RateLimitingInterface.Add(nn)
+		qk := NewQueueKey(pod)
+		if !q.Set.Has(qk) {
+			q.Set.Insert(qk)
+			q.RateLimitingInterface.Add(qk)
 		}
 	}
 }
@@ -102,7 +115,7 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 	// Check if the queue is empty. client-go recommends not using this function to gate the subsequent
 	// get call, but since we're popping items off the queue synchronously, there should be no synchonization
 	// issues.
-	if q.Len() == 0 {
+	if q.RateLimitingInterface.Len() == 0 {
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 	// Get pod from queue. This waits until queue is non-empty.
@@ -110,45 +123,55 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 	if shutdown {
 		return reconcile.Result{}, fmt.Errorf("EvictionQueue is broken and has shutdown")
 	}
-	nn := item.(types.NamespacedName)
-	defer q.RateLimitingInterface.Done(nn)
+	qk := item.(QueueKey)
+	defer q.RateLimitingInterface.Done(qk)
 	// Evict pod
-	if q.Evict(ctx, nn) {
-		q.RateLimitingInterface.Forget(nn)
-		q.Set.Remove(nn)
+	if q.Evict(ctx, qk) {
+		q.RateLimitingInterface.Forget(qk)
+		q.Set.Delete(qk)
 		return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 	}
 	// Requeue pod if eviction failed
-	q.RateLimitingInterface.AddRateLimited(nn)
+	q.RateLimitingInterface.AddRateLimited(qk)
 	return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 }
 
 // Evict returns true if successful eviction call, and false if not an eviction-related error
-func (q *Queue) Evict(ctx context.Context, nn types.NamespacedName) bool {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("pod", nn))
-	if err := q.coreV1Client.Pods(nn.Namespace).EvictV1(ctx, &policyv1.Eviction{
-		ObjectMeta: metav1.ObjectMeta{Name: nn.Name, Namespace: nn.Namespace},
-	}); err != nil {
+func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("pod", key.NamespacedName))
+	if err := q.kubeClient.SubResource("eviction").Create(ctx,
+		&v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: key.Name}},
+		&policyv1.Eviction{
+			DeleteOptions: &metav1.DeleteOptions{
+				Preconditions: &metav1.Preconditions{
+					UID: lo.ToPtr(key.UID),
+				},
+			},
+		}); err != nil {
 		// status codes for the eviction API are defined here:
 		// https://kubernetes.io/docs/concepts/scheduling-eviction/api-eviction/#how-api-initiated-eviction-works
-		if apierrors.IsNotFound(err) { // 404
+		if apierrors.IsNotFound(err) || apierrors.IsConflict(err) {
+			// 404 - The pod no longer exists
+			// https://github.com/kubernetes/kubernetes/blob/ad19beaa83363de89a7772f4d5af393b85ce5e61/pkg/registry/core/pod/storage/eviction.go#L160
+			// 409 - The pod exists, but it is not the same pod that we initiated the eviction on
+			// https://github.com/kubernetes/kubernetes/blob/ad19beaa83363de89a7772f4d5af393b85ce5e61/pkg/registry/core/pod/storage/eviction.go#L318
 			return true
 		}
 		if apierrors.IsTooManyRequests(err) { // 429 - PDB violation
 			q.recorder.Publish(terminatorevents.NodeFailedToDrain(&v1.Node{ObjectMeta: metav1.ObjectMeta{
-				Name:      nn.Name,
-				Namespace: nn.Namespace,
-			}}, fmt.Errorf("evicting pod %s/%s violates a PDB", nn.Namespace, nn.Name)))
+				Name:      key.Name,
+				Namespace: key.Namespace,
+			}}, fmt.Errorf("evicting pod %s/%s violates a PDB", key.Namespace, key.Name)))
 			return false
 		}
 		logging.FromContext(ctx).Errorf("evicting pod, %s", err)
 		return false
 	}
-	q.recorder.Publish(terminatorevents.EvictPod(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: nn.Name, Namespace: nn.Namespace}}))
+	q.recorder.Publish(terminatorevents.EvictPod(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}))
 	return true
 }
 
 func (q *Queue) Reset() {
 	q.RateLimitingInterface = workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(evictionQueueBaseDelay, evictionQueueMaxDelay))
-	q.Set = set.NewSet()
+	q.Set = sets.New[QueueKey]()
 }
