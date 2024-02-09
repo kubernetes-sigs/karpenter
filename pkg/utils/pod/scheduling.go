@@ -75,7 +75,7 @@ func IsWaitingEviction(pod *v1.Pod, clk clock.Clock) bool {
 }
 
 // IsProvisionable checks if a pod needs to be scheduled to new capacity by Karpenter by ensuring that the pod:
-// - Has been marked as "Pending" by the kube-scheduler
+// - Has been marked as "Unschedulable" in the PodScheduled reason by the kube-scheduler
 // - Has not been bound to a node
 // - Isn't currently preempting other pods on the cluster and about to schedule
 // - Isn't owned by a DaemonSet
@@ -96,6 +96,12 @@ func IsDisruptable(pod *v1.Pod) bool {
 	return !(IsActive(pod) && HasDoNotDisrupt(pod))
 }
 
+// FailedToSchedule ensures that the kube-scheduler has seen this pod and has intentionally
+// marked this pod with a condition, noting that it thinks that the pod can't schedule anywhere
+// It does this by marking the pod status condition "PodScheduled" as "Unschedulable"
+// Note that it's possible that other schedulers may be scheduling another pod and may have a different
+// semantic (e.g. Fargate on AWS marks with MATCH_NODE_SELECTOR_FAILED). If that's the case, Karpenter
+// won't react to this pod because the scheduler didn't add this specific condition.
 func FailedToSchedule(pod *v1.Pod) bool {
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type == v1.PodScheduled && condition.Reason == v1.PodReasonUnschedulable {
