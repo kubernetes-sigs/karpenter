@@ -179,7 +179,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		filterByPriceWithMinValues(results.NewNodeClaims[0].InstanceTypeOptions, results.NewNodeClaims[0].Requirements, candidatePrice)
 
 	if len(inCompatibleRequirementKey) > 0 {
-		return Command{}, fmt.Errorf("minimum requirement is not met for %s", inCompatibleRequirementKey)
+		return Command{}, pscheduling.Results{}, fmt.Errorf("minimum requirement is not met for %s", inCompatibleRequirementKey)
 	}
 
 	if len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions) == 0 {
@@ -232,7 +232,7 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 		filterByPriceWithMinValues(instanceTypeOptionsWithSpotOfferings, results.NewNodeClaims[0].Requirements, candidatePrice)
 
 	if len(inCompatibleRequirementKey) > 0 {
-		return Command{}, fmt.Errorf("minimum requirement is not met for %s", inCompatibleRequirementKey)
+		return Command{}, pscheduling.Results{}, fmt.Errorf("minimum requirement is not met for %s", inCompatibleRequirementKey)
 	}
 
 	if len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions) == 0 {
