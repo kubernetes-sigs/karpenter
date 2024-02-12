@@ -43,16 +43,13 @@ budgets:
 Meaning that for any actions other than Drift + consolidation, the total amount of disrupting + unhealthy nodes has to be less than 30 for them to trigger disruption.
 
 ### Q: How should allowed disruptions be calculated in a multi-reason world? 
-Allowed Disruptions before this RFC are calculated like so 
-AllowedDisruptions = minNodeCountOfAnActiveBudget - unhealthyNodes - totalDisruptingNodes
-With the introduction of Disruption Budget Reasons, this allowedDisruptions equation gets more complex. 
+The calculation of allowed disruptions in a system with multiple disruption reasons has become more intricate following the introduction of Disruption Budget Reasons. Previously, the formula was straightforward:
 
+AllowedDisruptions = minNodeCountOfAnActiveBudget - unhealthyNodes - totalDisruptingNodes.
 
-There are two equations that make sense when calculating the budgets.
-
-AllowedDisruptionByReason = minNodeCountOfActiveBudget[reason] - unhealthyNodes - totalDisruptingNodes[reason] 
-AllowedDisruptionByReason = minNodeCountOfActiveBudget[reason] - unhealthyNodes - totalDisruptingNodes
-
+When calculating by reason, two potential equations emerge:
+1. AllowedDisruptionByReason = minNodeCountOfActiveBudget[reason] - unhealthyNodes - totalDisruptingNodes[reason]
+2. AllowedDisruptionByReason = minNodeCountOfActiveBudget[reason] - unhealthyNodes - totalDisruptingNodes
 The second equation is the one we should opt into.
 
 Take this budget as an example
@@ -67,35 +64,39 @@ budgets:
   - nodes: 30 
     schedule: "* * * * *" 
 ```
+First, calculate minNodeCountOfActiveBudget. Given there are two budgets for Drift, we select the lower number:
 
-First we need to calculate the minNodeCountOfActiveBudget, in this case we note that we set 10 for Drift, since there are two active budgets for drift we take the minimum.
+```
 minNodeCountOfActiveBudget = {
   Drift: 10 
   Consolidation: 15 
   Default: 5
 }
+```
 
-If we use the first equation, we then need to also track in karpenter state the number of nodes currently being disrupted by a given disruption action. 
+In the first equation, tracking the number of nodes disrupted by each reason is required. For example:
+```
 disrupting = {
   Drift: 3 
   Consolidation: 6
   Expriation: 3
   Emptiness: 2
 }
+```
 
-Let say unhealthy nodes are zero. 
-
+Assuming zero unhealthy nodes:
 **First Equation**
-Drift = 10 - 3 # We can take disruption, because the Drift Bucket isn't full
-Consolidation = 15 - 6 # We can disrupt because 15 - 6 > 0
-Default = 5 - Expriation - Emptiness = 0, # We cannot disrupt any other reasons than consolidation and drift
-**Second Equation** 
-totalDisrupting = 3 + 6 + 5 = 14
-Drift = 10 - 14 # We cannot disrupt due to drift 
-Consolidation = 15 - 14 # We can disrupt due to consolidation at leasrt for one node.
-Default: 5 - 14 # We cannot disrupt any other methods
+- Drift = 10 - 3: Disruption allowed as Drift bucket isn't full.
+- Consolidation = 15 - 6: Disruption allowed since 15 - 6 > 0.
+- Default = 5 - Expiration - Emptiness = 0: No disruption allowed for reasons other than consolidation and drift.
 
-With the second equation, its much simpler to reason about. A node can be marked for multiple disruption reasons(Emptiness, Drift, Consolidation). SO its challenging to calculate in flight, which exact disruption you will end up hitting. With the second equation, it makes reasoning about how many nodes are getting disrupted simpler for cluster operators.
+**Second Equation**
+- Total Disrupting = 3 + 6 + 5 = 14.
+- Drift = 10 - 14: No disruption allowed due to drift.
+- Consolidation = 15 - 14: Disruption allowed for at least one node due to consolidation.
+- Default: 5 - 14: No disruption allowed for other methods.
+
+The second equation simplifies reasoning for cluster operators. A node can be tagged for multiple disruption reasons (e.g., Emptiness, Drift, Consolidation), making it challenging to precisely calculate in-flight disruptions. The second equation streamlines this process by providing a clearer view of the overall disruption impact. 
 
 ### Q: How should we handle an unspecfied default reason? 
 ```yaml
