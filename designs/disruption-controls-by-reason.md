@@ -21,6 +21,8 @@
 ## User Scenarios 
 1. Users need the capability to schedule upgrades only during business hours or within more restricted time windows. Additionally, they require a system that doesn't compromise the cost savings from consolidation when upgrades are blocked due to drift.
 2. High-Frequency Trading (HFT) firms require full compute capacity during specific operational hours, making it imperative to avoid scale-down requests for consolidation during these periods. However, outside these hours, scale-downs are acceptable.
+3. Users want to minimize workload disruptions during business hours but still want to be able to delete empty nodes throughout the day.  That is, WhenEmpty considation can run all day, while limiting cost savings and upgrades due to drift to non-business hours only.
+
 See Less Made Up Scenarios here: 
 - https://github.com/kubernetes-sigs/karpenter/issues/924 
 - https://github.com/kubernetes-sigs/karpenter/issues/753#issuecomment-1790110838
