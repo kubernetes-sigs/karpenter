@@ -269,6 +269,15 @@ func (r Requirements) Labels() map[string]string {
 	return labels
 }
 
+func (r Requirements) HasMinValues() bool {
+	for _, req := range r {
+		if req.MinValues != nil {
+			return true
+		}
+	}
+	return false
+}
+
 func (r Requirements) String() string {
 	requirements := lo.Reject(r.Values(), func(requirement *Requirement, _ int) bool {
 		return v1beta1.RestrictedLabels.Has(requirement.Key)

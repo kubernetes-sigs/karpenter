@@ -170,16 +170,16 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		return c.computeSpotToSpotConsolidation(ctx, candidates, results, candidatePrice)
 	}
 
-	var inCompatibleRequirementKey string
+	var incompatibleRequirementKey string
 	// filterByPriceWithMinValues returns the instanceTypes that are lower priced than the current candidate and the requirement for the NodeClaim that does not meet minValues.
 	// If we use this directly for spot-to-spot consolidation, we are bound to get repeated consolidations because the strategy that chooses to launch the spot instance from the list does
 	// it based on availability and price which could result in selection/launch of non-lowest priced instance in the list. So, we would keep repeating this loop till we get to lowest priced instance
 	// causing churns and landing onto lower available spot instance ultimately resulting in higher interruptions.
-	results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, inCompatibleRequirementKey =
+	results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, incompatibleRequirementKey =
 		filterByPriceWithMinValues(results.NewNodeClaims[0].InstanceTypeOptions, results.NewNodeClaims[0].Requirements, candidatePrice)
 
-	if len(inCompatibleRequirementKey) > 0 {
-		return Command{}, pscheduling.Results{}, fmt.Errorf("minimum requirement is not met for %s", inCompatibleRequirementKey)
+	if len(incompatibleRequirementKey) > 0 {
+		return Command{}, pscheduling.Results{}, fmt.Errorf("minValues requirement is not met for %s", incompatibleRequirementKey)
 	}
 
 	if len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions) == 0 {
@@ -226,13 +226,13 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 	instanceTypeOptionsWithSpotOfferings :=
 		results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions.Compatible(results.NewNodeClaims[0].Requirements)
 
-	var inCompatibleRequirementKey string
+	var incompatibleRequirementKey string
 	// Possible replacements that are lower priced than the current candidate and the requirement that is not compatible with minValues
-	results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, inCompatibleRequirementKey =
+	results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, incompatibleRequirementKey =
 		filterByPriceWithMinValues(instanceTypeOptionsWithSpotOfferings, results.NewNodeClaims[0].Requirements, candidatePrice)
 
-	if len(inCompatibleRequirementKey) > 0 {
-		return Command{}, pscheduling.Results{}, fmt.Errorf("minimum requirement is not met for %s", inCompatibleRequirementKey)
+	if len(incompatibleRequirementKey) > 0 {
+		return Command{}, pscheduling.Results{}, fmt.Errorf("minValues requirement is not met for %s", incompatibleRequirementKey)
 	}
 
 	if len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions) == 0 {
@@ -272,7 +272,15 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 	// 3) Assuming CreateInstanceFromTypes(A,B,C,D) returned D, we check if D is part of (A,B,C) and it isn't, so will have another consolidation send a CreateInstanceFromTypes(A,B,C), since they’re cheaper than D resulting in continual consolidation.
 	// If we had restricted instance types to min flexibility at launch at step (1) i.e CreateInstanceFromTypes(A,B,C), we would have received the instance type part of the list preventing immediate consolidation.
 	// Taking this to 15 types, we need to only send the 15 cheapest types in the CreateInstanceFromTypes call so that the resulting instance is always in that set of 15 and we won’t immediately consolidate.
-	if results.NewNodeClaims[0].Requirements.Get(v1.LabelInstanceTypeStable).MinValues == nil {
+
+	if results.NewNodeClaims[0].Requirements.HasMinValues() {
+		instanceTypes := lo.Slice(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions.OrderByPrice(results.NewNodeClaims[0].Requirements), 0, 100)
+		incompatibleKey := pscheduling.FindIncompatibleRequirementKeyAcrossInstanceTypeOptions(results.NewNodeClaims[0].Requirements, instanceTypes)
+		if len(incompatibleKey) > 0 {
+			return Command{}, pscheduling.Results{}, fmt.Errorf("minValues requirement is not met for %s because of truncated instanceTypeOptions", incompatibleKey)
+		}
+		results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions = lo.Slice(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, 0, 100)
+	} else {
 		results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions = lo.Slice(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, 0, MinInstanceTypesForSpotToSpotConsolidation)
 	}
 

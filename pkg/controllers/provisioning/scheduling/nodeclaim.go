@@ -221,7 +221,7 @@ func (r filterResults) FailureReason() string {
 	}
 
 	if len(r.requirementIncompatibleWithMinValues) > 0 {
-		return "minimum requirement is not met for " + r.requirementIncompatibleWithMinValues
+		return "minValues requirement is not met for " + r.requirementIncompatibleWithMinValues
 	}
 
 	// finally all instances were filtered out, but we had at least one instance that met each criteria, and met each
@@ -241,6 +241,34 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 		requirementsAndOffering: false,
 		fitsAndOffering:         false,
 	}
+	// cumulativeMinRequirementsFromInstanceTypes is a map for the requirement key with the cumulative values that has minValues supported across InstanceTypeOptions
+	// and fetch the invalid requirement key from the result map.
+	// For example:
+	// NodePool requirement:
+	//   - key: node.kubernetes.io/instance-type
+	//     operator: In
+	//     values: ["c4.large","c4.xlarge","c5.large","c5.xlarge","m4.large","m4.xlarge"]
+	//     minValues: 3
+	//   - key: karpenter.k8s.aws/instance-family
+	//     operator: In
+	//     values: ["c4","c5","m4"]
+	//     minValues: 3
+	//
+	// And if NodeClaim has InstanceTypeOptions: ["c4.large","c5.xlarge","m4.2xlarge"], it PASSES the requirements
+	//
+	//	we get the map as : {
+	//		node.kubernetes.io/instance-type:  ["c4.large","c5.xlarge","m4.2xlarge"],
+	//		karpenter.k8s.aws/instance-family: ["c4","c5","m4"]
+	//	}
+	//
+	// And if NodeClaim has InstanceTypeOptions: ["c4.large","c4.xlarge","c5.2xlarge"], it FAILS the requirements
+	//
+	//	we get the map as : {
+	//		node.kubernetes.io/instance-type:  ["c4.large","c4.xlarge","c5.2xlarge"],
+	//		karpenter.k8s.aws/instance-family: ["c4","c5"] // minimum requirement failed for this.
+	//	}
+	// Key -> requirement key supporting MinValues
+	// value -> cumulative set of values for the key from all the instanceTypes
 	cumulativeMinRequirementsFromInstanceTypes := make(map[string]sets.Set[string])
 
 	for _, it := range instanceTypes {

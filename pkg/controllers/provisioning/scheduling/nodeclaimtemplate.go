@@ -22,12 +22,15 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"knative.dev/pkg/ptr"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
+
+const MaxInstanceTypes = 100
 
 // NodeClaimTemplate encapsulates the fields required to create a node and mirrors
 // the fields in NodePool. These structs are maintained separately in order
@@ -52,9 +55,15 @@ func NewNodeClaimTemplate(nodePool *v1beta1.NodePool) *NodeClaimTemplate {
 	return nct
 }
 
-func (i *NodeClaimTemplate) ToNodeClaim(nodePool *v1beta1.NodePool) *v1beta1.NodeClaim {
+func (i *NodeClaimTemplate) ToNodeClaim(nodePool *v1beta1.NodePool) (*v1beta1.NodeClaim, error) {
 	// Order the instance types by price and only take the first 100 of them to decrease the instance type size in the requirements
-	instanceTypes := lo.Slice(i.InstanceTypeOptions.OrderByPrice(i.Requirements), 0, 100)
+	instanceTypes := lo.Slice(i.InstanceTypeOptions.OrderByPrice(i.Requirements), 0, MaxInstanceTypes)
+	if i.Requirements.HasMinValues() {
+		incompatibleKey := FindIncompatibleRequirementKeyAcrossInstanceTypeOptions(i.Requirements, instanceTypes)
+		if len(incompatibleKey) > 0 {
+			return nil, fmt.Errorf("minValues requirement is not met for %s because of truncated instanceTypeOptions", incompatibleKey)
+		}
+	}
 	i.Requirements.Add(scheduling.NewRequirement(v1.LabelInstanceTypeStable, v1.NodeSelectorOpIn, lo.Map(instanceTypes, func(i *cloudprovider.InstanceType, _ int) string {
 		return i.Name
 	})...))
@@ -77,5 +86,22 @@ func (i *NodeClaimTemplate) ToNodeClaim(nodePool *v1beta1.NodePool) *v1beta1.Nod
 		Spec: i.Spec,
 	}
 	nc.Spec.Requirements = i.Requirements.NodeSelectorRequirements()
-	return nc
+	return nc, nil
+}
+
+func FindIncompatibleRequirementKeyAcrossInstanceTypeOptions(requirements scheduling.Requirements, instanceTypes cloudprovider.InstanceTypes) string {
+	cumulativeMinRequirementsFromInstanceTypes := make(map[string]sets.Set[string])
+	// For all the InstanceTypes, if the requirement has "minValues", then accumulate the values for those keys across InstanceTypes.
+	for _, it := range instanceTypes {
+		for _, req := range requirements {
+			if req.MinValues != nil {
+				if _, ok := cumulativeMinRequirementsFromInstanceTypes[req.Key]; !ok {
+					cumulativeMinRequirementsFromInstanceTypes[req.Key] = sets.Set[string]{}
+				}
+				cumulativeMinRequirementsFromInstanceTypes[req.Key] =
+					cumulativeMinRequirementsFromInstanceTypes[req.Key].Insert(it.Requirements.Get(req.Key).Values()...)
+			}
+		}
+	}
+	return FindRequirementKeyIncompatibleWithMinValues(cumulativeMinRequirementsFromInstanceTypes, requirements)
 }

@@ -207,7 +207,8 @@ func filterOutSameType(newNodeClaim *scheduling.NodeClaim, consolidate []*Candid
 			}
 		}
 	}
-
+	// computeConsolidation would have thrown error related to `incompatibleRequirementKey` if minValues from requirements is not satisfied by the InstanceTypeOptions before we get to `filterOutSameType`.
+	// And we re-run the check here and if the minValues is not satisfied after `filterOutSameType`, we return empty InstanceTypeOptions thereby preventing consolidation.
 	filterByPrice, _ := filterByPriceWithMinValues(newNodeClaim.InstanceTypeOptions, newNodeClaim.Requirements, maxPrice)
 	return filterByPrice
 }
