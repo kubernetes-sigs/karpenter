@@ -264,7 +264,8 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 	}
 
 	// If a user has minValues set in their NodePool that require less than 15 instance types, then the default 15 instance type minimum will continue to be enforced for launch to enable a spot-to-spot consolidation.
-	// If minValues for the number of instance types is beyond 15, then number of instance types from minValues would be maintained for launch to enable spot-to-spot consolidation.
+	// If minValues for the number of instance types is beyond 15, then we cap the number at 100 which would be the actual number of instancetypes sent for launch. We also validate if truncating the number of instance types to 100
+	// breaks the minValue requirement. If so, we return with an error with appropriate message.
 	// Restrict the InstanceTypeOptions for launch to 15(if default) so we don't get into a continual consolidation situation.
 	// For example:
 	// 1) Suppose we have 5 instance types, (A, B, C, D, E) in order of price with the minimum flexibility 3 and they’ll all work for our pod.  We send CreateInstanceFromTypes(A,B,C,D,E) and it gives us a E type based on price and availability of spot.
@@ -274,12 +275,12 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 	// Taking this to 15 types, we need to only send the 15 cheapest types in the CreateInstanceFromTypes call so that the resulting instance is always in that set of 15 and we won’t immediately consolidate.
 
 	if results.NewNodeClaims[0].Requirements.HasMinValues() {
-		instanceTypes := lo.Slice(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions.OrderByPrice(results.NewNodeClaims[0].Requirements), 0, 100)
+		instanceTypes := lo.Slice(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions.OrderByPrice(results.NewNodeClaims[0].Requirements), 0, pscheduling.MaxInstanceTypes)
 		incompatibleKey := pscheduling.FindIncompatibleRequirementKeyAcrossInstanceTypeOptions(results.NewNodeClaims[0].Requirements, instanceTypes)
 		if len(incompatibleKey) > 0 {
 			return Command{}, pscheduling.Results{}, fmt.Errorf("minValues requirement is not met for %s because of truncated instanceTypeOptions", incompatibleKey)
 		}
-		results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions = lo.Slice(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, 0, 100)
+		results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions = lo.Slice(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, 0, pscheduling.MaxInstanceTypes)
 	} else {
 		results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions = lo.Slice(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, 0, MinInstanceTypesForSpotToSpotConsolidation)
 	}
