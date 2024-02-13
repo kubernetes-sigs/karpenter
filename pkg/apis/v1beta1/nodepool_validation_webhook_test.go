@@ -131,7 +131,7 @@ var _ = Describe("Webhook/Validation", func() {
 			}}
 			Expect(nodePool.Validate(ctx)).To(Succeed())
 		})
-		It("should fail to validate two budgets where one is invalid", func() {
+		It("should fail when creating two budgets where one has an invalid crontab", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{
 				{
 					Nodes:    "10",
@@ -143,6 +143,23 @@ var _ = Describe("Webhook/Validation", func() {
 					Schedule: ptr.String("*"),
 					Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				}}
+			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
+		})
+		It("should fail when creating multiple budgets where one doesn't have both schedule and duration", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{
+				{
+					Nodes:    "10",
+					Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
+				},
+				{
+					Nodes:    "10",
+					Schedule: ptr.String("* * * * *"),
+					Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
+				},
+				{
+					Nodes: "10",
+				},
+			}
 			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 		})
 	})
