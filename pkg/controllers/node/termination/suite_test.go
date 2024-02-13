@@ -64,7 +64,7 @@ var _ = BeforeSuite(func() {
 
 	cloudProvider = fake.NewCloudProvider()
 	recorder = test.NewEventRecorder()
-	queue = terminator.NewQueue(env.KubernetesInterface.CoreV1(), recorder)
+	queue = terminator.NewQueue(env.Client, recorder)
 	terminationController = termination.NewController(env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, queue), recorder)
 })
 
@@ -75,7 +75,7 @@ var _ = AfterSuite(func() {
 func ExpectNotEnqueuedForEviction(e *terminator.Queue, pods ...*v1.Pod) {
 	GinkgoHelper()
 	for _, pod := range pods {
-		Expect(e.Contains(client.ObjectKeyFromObject(pod))).To(BeFalse())
+		Expect(e.Has(terminator.NewQueueKey(pod))).To(BeFalse())
 	}
 }
 

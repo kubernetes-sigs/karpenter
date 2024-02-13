@@ -28,7 +28,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/util/workqueue"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -76,7 +75,6 @@ func WithReason(reason string) func(LaunchOptions) LaunchOptions {
 type Provisioner struct {
 	cloudProvider  cloudprovider.CloudProvider
 	kubeClient     client.Client
-	coreV1Client   corev1.CoreV1Interface
 	batcher        *Batcher
 	volumeTopology *scheduler.VolumeTopology
 	cluster        *state.Cluster
@@ -84,13 +82,13 @@ type Provisioner struct {
 	cm             *pretty.ChangeMonitor
 }
 
-func NewProvisioner(kubeClient client.Client, coreV1Client corev1.CoreV1Interface,
-	recorder events.Recorder, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Provisioner {
+func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
+	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster,
+) *Provisioner {
 	p := &Provisioner{
 		batcher:        NewBatcher(),
 		cloudProvider:  cloudProvider,
 		kubeClient:     kubeClient,
-		coreV1Client:   coreV1Client,
 		volumeTopology: scheduler.NewVolumeTopology(kubeClient),
 		cluster:        cluster,
 		recorder:       recorder,
