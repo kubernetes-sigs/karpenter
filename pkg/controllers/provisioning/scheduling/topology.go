@@ -21,12 +21,12 @@ import (
 	"fmt"
 	"math"
 
+	"k8s.io/apimachinery/pkg/api/errors"
+
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/functional"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
-
-	"k8s.io/apimachinery/pkg/api/errors"
 
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
@@ -83,6 +83,19 @@ func NewTopology(ctx context.Context, kubeClient client.Client, cluster *state.C
 		return nil, errs
 	}
 	return t, nil
+}
+
+// topologyError allows lazily generating the error string in the topology error.  If a pod fails to schedule, most often
+// we are only interested in the fact that it failed to schedule and not why.
+type topologyError struct {
+	topology    *TopologyGroup
+	podDomains  *scheduling.Requirement
+	nodeDomains *scheduling.Requirement
+}
+
+func (t topologyError) Error() string {
+	return fmt.Sprintf("unsatisfiable topology constraint for %s, key=%s (counts = %s, podDomains = %v, nodeDomains = %v", t.topology.Type, t.topology.Key,
+		pretty.Map(t.topology.domains, 25), t.podDomains, t.nodeDomains)
 }
 
 // Update unregisters the pod as the owner of all affinities and then creates any new topologies based on the pod spec
@@ -165,7 +178,11 @@ func (t *Topology) AddRequirements(podRequirements, nodeRequirements scheduling.
 		}
 		domains := topology.Get(p, podDomains, nodeDomains)
 		if domains.Len() == 0 {
-			return nil, fmt.Errorf("unsatisfiable topology constraint for %s, key=%s (counts = %s, podDomains = %v, nodeDomains = %v", topology.Type, topology.Key, pretty.Map(topology.domains, 5), podDomains, nodeDomains)
+			return nil, topologyError{
+				topology:    topology,
+				podDomains:  podDomains,
+				nodeDomains: nodeDomains,
+			}
 		}
 		requirements.Add(domains)
 	}
