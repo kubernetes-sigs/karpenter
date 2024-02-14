@@ -43,6 +43,7 @@ const (
 // Karpenter specific annotations
 const (
 	DoNotDisruptAnnotationKey          = Group + "/do-not-disrupt"
+	DoNotConsolidateAnnotationKey      = Group + "/do-not-consolidate"
 	ProviderCompatabilityAnnotationKey = CompatabilityGroup + "/provider"
 	ManagedByAnnotationKey             = Group + "/managed-by"
 	NodePoolHashAnnotationKey          = Group + "/nodepool-hash"

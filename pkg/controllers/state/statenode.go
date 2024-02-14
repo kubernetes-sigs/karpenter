@@ -27,9 +27,11 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
@@ -417,4 +419,81 @@ func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTa
 		}
 	}
 	return multiErr
+}
+
+// ValidateNoScheduleTaint checks if the node has a disruption taint and if it should be removed.
+// returns a list of node names that had their disruption taint removed
+func ValidateNoScheduleTaint(ctx context.Context, kubeClient client.Client, disruptionReason string, nodes ...*StateNode) ([]*StateNode, error) {
+	var multiErr error
+	nodesNotDisrupted := []*StateNode{}
+
+	for _, n := range nodes {
+		if n.Node == nil || n.NodeClaim == nil {
+			continue
+		}
+		node := &v1.Node{}
+		if err := kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Name}, node); client.IgnoreNotFound(err) != nil {
+			return nil, fmt.Errorf("getting node, %w", err)
+		}
+
+		_, hasTaint := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
+			return v1beta1.IsDisruptingTaint(taint)
+		})
+
+		if !hasTaint {
+			continue
+		}
+
+		doNotDisruptNode, err := nodeHasNonDisruptablePods(ctx, kubeClient, n, disruptionReason)
+		if err != nil {
+			multiErr = multierr.Append(multiErr, fmt.Errorf("checking node %s, %w", node.Name, err))
+		}
+
+		stored := node.DeepCopy()
+		if doNotDisruptNode {
+			nodesNotDisrupted = append(nodesNotDisrupted, n)
+			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t v1.Taint, _ int) bool {
+				return t.Key == v1beta1.DisruptionTaintKey
+			})
+			if err := kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+				multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
+			}
+		}
+	}
+	return nodesNotDisrupted, multiErr
+}
+
+func nodeHasNonDisruptablePods(ctx context.Context, kubeClient client.Client, node *StateNode, disruptionReason string) (bool, error) {
+	pods, err := node.Pods(ctx, kubeClient)
+	if err != nil {
+		return false, fmt.Errorf("getting pods for node %s, %w", node.Name(), err)
+	}
+
+	for _, p := range pods {
+		if p.Status.Phase == v1.PodFailed || p.Status.Phase == v1.PodSucceeded {
+			continue
+		}
+
+		if _, ok := p.Annotations[v1beta1.DoNotDisruptAnnotationKey]; ok {
+			logging.FromContext(ctx).With("node", node.Name()).Infof(
+				"removing disruption taint from node, pod %s/%s has a %s annotation",
+				p.Namespace, p.Name, v1beta1.DoNotDisruptAnnotationKey,
+			)
+			return true, nil
+		}
+
+		if _, ok := p.Annotations[v1beta1.DoNotConsolidateAnnotationKey]; ok {
+			if disruptionReason != metrics.ConsolidationReason &&
+				disruptionReason != metrics.EmptinessReason {
+				continue
+			}
+			logging.FromContext(ctx).With("node", node.Name()).Infof(
+				"removing disruption taint from node, pod %s/%s has a %s annotation "+
+					"and disruption reason is %s",
+				p.Namespace, p.Name, v1beta1.DoNotConsolidateAnnotationKey, disruptionReason,
+			)
+			return true, nil
+		}
+	}
+	return false, nil
 }

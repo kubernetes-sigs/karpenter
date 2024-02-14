@@ -61,8 +61,8 @@ type Candidate struct {
 
 //nolint:gocyclo
 func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode, pdbs *PDBLimits,
-	nodePoolMap map[string]*v1beta1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *orchestration.Queue) (*Candidate, error) {
-
+	nodePoolMap map[string]*v1beta1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *orchestration.Queue,
+) (*Candidate, error) {
 	if node.Node == nil || node.NodeClaim == nil {
 		return nil, fmt.Errorf("state node doesn't contain both a node and a nodeclaim")
 	}

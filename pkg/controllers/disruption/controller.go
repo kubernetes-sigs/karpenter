@@ -59,7 +59,7 @@ type Controller struct {
 }
 
 // pollingPeriod that we inspect cluster to look for opportunities to disrupt
-const pollingPeriod = 10 * time.Second
+const pollingPeriod = 30 * time.Second
 
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 
@@ -194,8 +194,24 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, 
 		return multierr.Append(fmt.Errorf("tainting nodes (command-id: %s), %w", commandID, err), state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...))
 	}
 
+	logging.FromContext(ctx).With("command-id", commandID).Infof("waiting for 30 seconds to check for do-not-disrupt or do-not-consolidate pods that may have scheduled...")
+	time.Sleep(30 * time.Second)
+
+	// verify that the nodes we intend to disrupt do not have any do-not-disrupt pods, remove the DoNotSchedule disruption taint if they do
+	nodesToNotDisrupt, err := state.ValidateNoScheduleTaint(ctx, c.kubeClient, m.Type(), stateNodes...)
+	if err != nil {
+		return fmt.Errorf("validating noschedule taint (command-id: %s), %w", commandID, err)
+	}
+
+	// remove any nodes that had do-not-disrupt pods from the list of nodes we intend to disrupt
+	for _, n := range nodesToNotDisrupt {
+		logging.FromContext(ctx).With("command-id", commandID).Infof("avoiding disruption of node %s due to a do-not-disrupt or do-not-consolidate annotation race condition", n.Node.Name)
+	}
+	cmd.candidates = lo.Reject(cmd.candidates, func(c *Candidate, _ int) bool {
+		return lo.Contains(nodesToNotDisrupt, c.StateNode)
+	})
+
 	var nodeClaimNames []string
-	var err error
 	if len(cmd.replacements) > 0 {
 		if nodeClaimNames, err = c.createReplacementNodeClaims(ctx, m, cmd); err != nil {
 			// If we failed to launch the replacement, don't disrupt.  If this is some permanent failure,
