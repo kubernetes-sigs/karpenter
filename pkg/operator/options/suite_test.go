@@ -43,7 +43,6 @@ func TestOptions(t *testing.T) {
 }
 
 var _ = Describe("Options", func() {
-	var envState map[string]string
 	var environmentVariables = []string{
 		"KARPENTER_SERVICE",
 		"DISABLE_WEBHOOK",
@@ -51,6 +50,7 @@ var _ = Describe("Options", func() {
 		"METRICS_PORT",
 		"WEBHOOK_METRICS_PORT",
 		"HEALTH_PROBE_PORT",
+		"KUBE_CLIENT_QPS",
 		"KUBE_CLIENT_BURST",
 		"ENABLE_PROFILING",
 		"LEADER_ELECT",
@@ -62,15 +62,6 @@ var _ = Describe("Options", func() {
 	}
 
 	BeforeEach(func() {
-		envState = map[string]string{}
-		for _, ev := range environmentVariables {
-			val, ok := os.LookupEnv(ev)
-			if ok {
-				envState[ev] = val
-			}
-			os.Unsetenv(ev)
-		}
-
 		fs = &options.FlagSet{
 			FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
 		}
@@ -80,10 +71,7 @@ var _ = Describe("Options", func() {
 
 	AfterEach(func() {
 		for _, ev := range environmentVariables {
-			os.Unsetenv(ev)
-		}
-		for ev, val := range envState {
-			os.Setenv(ev, val)
+			Expect(os.Unsetenv(ev)).To(Succeed())
 		}
 	})
 

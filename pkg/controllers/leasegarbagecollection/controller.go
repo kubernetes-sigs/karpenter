@@ -57,7 +57,7 @@ func (c *Controller) Reconcile(ctx context.Context, l *v1.Lease) (reconcile.Resu
 	err := c.kubeClient.Delete(ctx, l)
 	if err == nil {
 		logging.FromContext(ctx).Debug("found and delete leaked lease")
-		NodeLeaseDeletedCounter.Inc()
+		NodeLeaseDeletedCounter.WithLabelValues().Inc()
 	}
 
 	return reconcile.Result{}, client.IgnoreNotFound(err)

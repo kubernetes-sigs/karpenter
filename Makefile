@@ -15,7 +15,8 @@ presubmit: verify test licenses vulncheck ## Run all steps required for code to 
 
 install-kwok: ## Install kwok provider
 	UNINSTALL_KWOK=false ./hack/install-kwok.sh
-uninstall-kwok: ## Install kwok provider
+
+uninstall-kwok: ## Uninstall kwok provider
 	UNINSTALL_KWOK=true ./hack/install-kwok.sh
 
 build: ## Build the Karpenter KWOK controller images using ko build
@@ -46,7 +47,7 @@ test: ## Run tests
 		-race \
 		-timeout 15m \
 		--ginkgo.focus="${FOCUS}" \
-		--ginkgo.timeout=15m \
+		--ginkgo.randomize-all \
 		--ginkgo.v \
 		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
 
@@ -94,4 +95,4 @@ download: ## Recursively "go mod download" on all directories where go.mod exist
 toolchain: ## Install developer toolchain
 	./hack/toolchain.sh
 
-.PHONY: help presubmit dev test verify toolchain
+.PHONY: help presubmit install-kwok uninstall-kwok build apply delete test deflake vulncheck licenses verify download toolchain

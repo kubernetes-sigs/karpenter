@@ -24,13 +24,14 @@ import (
 )
 
 var (
-	NodeLeaseDeletedCounter = prometheus.NewCounter(
+	NodeLeaseDeletedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "karpenter",
 			Subsystem: metrics.NodeSubsystem,
 			Name:      "leases_deleted",
 			Help:      "Number of deleted leaked leases.",
 		},
+		[]string{},
 	)
 )
 
