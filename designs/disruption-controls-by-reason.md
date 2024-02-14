@@ -31,6 +31,8 @@ See Less Made Up Scenarios here:
 **Reason and Budget Definition:** Users should be able to define an reason and a corresponding budget(s).
 **Supported Reasons:** All disruption Reasons affected by the current Budgets implementation (Consolidation, Emptiness, Expiration, Drift) should be supported. 
 **Default Behavior for Unspecified Reasons:** Budgets should continue to support a default behavior for all disruption reasons. 
+
+
 ### Q: How should Karpenter handle the default or undefined reason case? 
 If a budget reason is unspecified like budgets[2], we will assume this budget applies to all actions that are not specified 
 ```yaml
@@ -97,8 +99,7 @@ Assuming zero unhealthy nodes:
 - Consolidation = 15 - 14: Disruption allowed for at least one node due to consolidation.
 - Default: 5 - 14: No disruption allowed for other methods.
 
-The second equation simplifies reasoning for cluster operators. A node can be tagged for multiple disruption reasons (e.g., Emptiness, Drift, Consolidation), making it challenging to precisely calculate in-flight disruptions. The second equation streamlines this process by providing a clearer view of the overall disruption impact. 
-
+The second equation simplifies reasoning for cluster operators. A node can be tagged for multiple disruption reasons (e.g., Emptiness, Drift, Consolidation), making it challenging to precisely calculate in-flight disruptions. The second equation streamlines this process by providing a clearer view of the overall disruption impact.
 ### Q: How should we handle an unspecfied default reason? 
 ```yaml
 budgets: 
@@ -112,11 +113,6 @@ budgets:
 In the case of a budget like above, default is undefined. Should karpenter assume the user doesn't want to disrupt any other reasons? Or should we assume that if a default is unspecified, they want us to disrupt anyway?  
 The intuitive options if there is no active default budget is to allow disruption of either 0 or total number of nodes(meaning unbounded disruption).
 Lets choose total number of nodes, since this allows the user to also specify periods where no nodes are to be disrupted of a particular type of disruption, and makes more sense with the existing karpenter behavior today.
-
-### Q: Should default be specifed only as omitted? Or should users be able to define default? 
-If I specify a budget for consolidation and Drift, then a separate budget with an empty reason in the same active window will be taken as the default number of disruptable nodes in a given window for all actions that were not defined. Should we also be able to define default as a reason explicitly? 
-
-The answer is no, since we decided above to move from disruption buckets, and use the "second equation" that considers all Disruptions rather than bucketing them by reason. 
 
 # API Design
 ## Approach A: Extending the Budget API to specify a reason 
