@@ -170,18 +170,18 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		return c.computeSpotToSpotConsolidation(ctx, candidates, results, candidatePrice)
 	}
 
-	var incompatibleRequirementKey string
+	var minimumRequirementsInfo *MinimumRequirementsInfo
 	// filterByPriceWithMinValues returns the instanceTypes that are lower priced than the current candidate and the requirement for the NodeClaim that does not meet minValues.
 	// If we use this directly for spot-to-spot consolidation, we are bound to get repeated consolidations because the strategy that chooses to launch the spot instance from the list does
 	// it based on availability and price which could result in selection/launch of non-lowest priced instance in the list. So, we would keep repeating this loop till we get to lowest priced instance
 	// causing churns and landing onto lower available spot instance ultimately resulting in higher interruptions.
-	results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, incompatibleRequirementKey =
+	results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, minimumRequirementsInfo =
 		filterByPriceWithMinValues(results.NewNodeClaims[0].InstanceTypeOptions, results.NewNodeClaims[0].Requirements, candidatePrice)
 
 	if len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions) == 0 {
 		if len(candidates) == 1 {
-			if len(incompatibleRequirementKey) > 0 {
-				c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("minValues requirement is not met for %s", incompatibleRequirementKey))...)
+			if len(minimumRequirementsInfo.invalidMinimumRequirementKey) > 0 {
+				c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("minValues requirement is not met for %s", minimumRequirementsInfo.invalidMinimumRequirementKey))...)
 			} else {
 				c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace with a cheaper node")...)
 			}
@@ -226,15 +226,15 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 	instanceTypeOptionsWithSpotOfferings :=
 		results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions.Compatible(results.NewNodeClaims[0].Requirements)
 
-	var incompatibleRequirementKey string
+	var minimumRequirementsInfo *MinimumRequirementsInfo
 	// Possible replacements that are lower priced than the current candidate and the requirement that is not compatible with minValues
-	results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, incompatibleRequirementKey =
+	results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, minimumRequirementsInfo =
 		filterByPriceWithMinValues(instanceTypeOptionsWithSpotOfferings, results.NewNodeClaims[0].Requirements, candidatePrice)
 
 	if len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions) == 0 {
 		if len(candidates) == 1 {
-			if len(incompatibleRequirementKey) > 0 {
-				c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("minValues requirement is not met for %s", incompatibleRequirementKey))...)
+			if len(minimumRequirementsInfo.invalidMinimumRequirementKey) > 0 {
+				c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("minValues requirement is not met for %s", minimumRequirementsInfo.invalidMinimumRequirementKey))...)
 			} else {
 				c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace spot node with a cheaper spot node")...)
 			}
@@ -274,7 +274,7 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 	// Taking this to 15 types, we need to only send the 15 cheapest types in the CreateInstanceFromTypes call so that the resulting instance is always in that set of 15 and we won’t immediately consolidate.
 
 	if results.NewNodeClaims[0].Requirements.HasMinValues() {
-		results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions = lo.Slice(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, 0, pscheduling.MaxInstanceTypes)
+		results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions = lo.Slice(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, 0, lo.Max([]int{MinInstanceTypesForSpotToSpotConsolidation, minimumRequirementsInfo.minimumNumInstanceTypes}))
 	} else {
 		results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions = lo.Slice(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, 0, MinInstanceTypesForSpotToSpotConsolidation)
 	}

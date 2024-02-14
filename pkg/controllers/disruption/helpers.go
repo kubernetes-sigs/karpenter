@@ -145,9 +145,16 @@ func GetPodEvictionCost(ctx context.Context, p *v1.Pod) float64 {
 	return clamp(-10.0, cost, 10.0)
 }
 
+// MinimumRequirementsInfo provides info on incompatible minValue requirement key if exists and minimum number of
+// instanceTypes required to meet all the minValue requirements.
+type MinimumRequirementsInfo struct {
+	invalidMinimumRequirementKey string
+	minimumNumInstanceTypes      int
+}
+
 // filterByPriceWithMinValues returns the instanceTypes that are lower priced than the current candidate and iterates over the cumulative minimum requirement of the InstanceTypeOptions to see if it meets the minValues of requirements.
 // The minValues requirement is checked again after filterByPrice as it may result in more constrained InstanceTypeOptions for a NodeClaim
-func filterByPriceWithMinValues(options []*cloudprovider.InstanceType, reqs scheduling.Requirements, price float64) ([]*cloudprovider.InstanceType, string) {
+func filterByPriceWithMinValues(options []*cloudprovider.InstanceType, reqs scheduling.Requirements, price float64) ([]*cloudprovider.InstanceType, *MinimumRequirementsInfo) {
 	var result []*cloudprovider.InstanceType
 
 	for _, it := range options {
@@ -156,10 +163,15 @@ func filterByPriceWithMinValues(options []*cloudprovider.InstanceType, reqs sche
 			result = append(result, it)
 		}
 	}
-	invalidMinimumRequirementKey := lo.Ternary(reqs.HasMinValues(), pscheduling.IncompatibleReqAcrossInstanceTypes(reqs, result), "")
+	var incompatibleReqKey string
+	var numInstanceTypes int
+	// Only try to find the incompatible minValue requirement key if requirements have minValues.
+	if reqs.HasMinValues() {
+		incompatibleReqKey, numInstanceTypes = pscheduling.IncompatibleReqAcrossInstanceTypes(reqs, result)
+	}
 	// If minValues is NOT met for any of the requirement across InstanceTypes, then return empty InstanceTypeOptions as we cannot launch with the remaining InstanceTypes.
-	result = lo.Ternary(len(invalidMinimumRequirementKey) > 0, []*cloudprovider.InstanceType{}, result)
-	return result, invalidMinimumRequirementKey
+	result = lo.Ternary(len(incompatibleReqKey) > 0, []*cloudprovider.InstanceType{}, result)
+	return result, &MinimumRequirementsInfo{invalidMinimumRequirementKey: incompatibleReqKey, minimumNumInstanceTypes: numInstanceTypes}
 }
 
 func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
