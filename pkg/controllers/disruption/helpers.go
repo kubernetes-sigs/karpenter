@@ -149,56 +149,14 @@ func GetPodEvictionCost(ctx context.Context, p *v1.Pod) float64 {
 // The minValues requirement is checked again after filterByPrice as it may result in more constrained InstanceTypeOptions for a NodeClaim
 func filterByPriceWithMinValues(options []*cloudprovider.InstanceType, reqs scheduling.Requirements, price float64) ([]*cloudprovider.InstanceType, string) {
 	var result []*cloudprovider.InstanceType
-	// cumulativeMinRequirementsFromInstanceTypes is a map for the requirement key with the cumulative values that has minValues supported across InstanceTypeOptions
-	// and fetch the invalid requirement key from the result map.
-	// For example:
-	// NodePool requirement:
-	//   - key: node.kubernetes.io/instance-type
-	//     operator: In
-	//     values: ["c4.large","c4.xlarge","c5.large","c5.xlarge","m4.large","m4.xlarge"]
-	//     minValues: 3
-	//   - key: karpenter.k8s.aws/instance-family
-	//     operator: In
-	//     values: ["c4","c5","m4"]
-	//     minValues: 3
-	//
-	// And if NodeClaim has InstanceTypeOptions: ["c4.large","c5.xlarge","m4.2xlarge"], it PASSES the requirements
-	//
-	//	we get the map as : {
-	//		node.kubernetes.io/instance-type:  ["c4.large","c5.xlarge","m4.2xlarge"],
-	//		karpenter.k8s.aws/instance-family: ["c4","c5","m4"]
-	//	}
-	//	so, returns empty key.
-	//
-	// And if NodeClaim has InstanceTypeOptions: ["c4.large","c4.xlarge","c5.2xlarge"], it FAILS the requirements
-	//
-	//	we get the map as : {
-	//		node.kubernetes.io/instance-type:  ["c4.large","c4.xlarge","c5.2xlarge"],
-	//		karpenter.k8s.aws/instance-family: ["c4","c5"] // minimum requirement failed for this.
-	//	}
-	//	so, returns "karpenter.k8s.aws/instance-family"
-	// Key -> requirement key supporting MinValues
-	// value -> cumulative set of values for the key from all the instanceTypes
-	cumulativeMinRequirementsFromInstanceTypes := make(map[string]sets.Set[string])
 
 	for _, it := range options {
 		launchPrice := worstLaunchPrice(it.Offerings.Available(), reqs)
 		if launchPrice < price {
 			result = append(result, it)
-			// Check for minValues in the requirements for the InstanceType which are lower priced than the current candidate
-			for _, req := range reqs {
-				// Check if the scheduling requirement has MinValues
-				if req.MinValues != nil {
-					if _, ok := cumulativeMinRequirementsFromInstanceTypes[req.Key]; !ok {
-						cumulativeMinRequirementsFromInstanceTypes[req.Key] = sets.Set[string]{}
-					}
-					cumulativeMinRequirementsFromInstanceTypes[req.Key] =
-						cumulativeMinRequirementsFromInstanceTypes[req.Key].Insert(it.Requirements.Get(req.Key).Values()...)
-				}
-			}
 		}
 	}
-	invalidMinimumRequirementKey := pscheduling.FindRequirementKeyIncompatibleWithMinValues(cumulativeMinRequirementsFromInstanceTypes, reqs)
+	invalidMinimumRequirementKey := lo.Ternary(reqs.HasMinValues(), pscheduling.IncompatibleReqAcrossInstanceTypes(reqs, result), "")
 	// If minValues is NOT met for any of the requirement across InstanceTypes, then return empty InstanceTypeOptions as we cannot launch with the remaining InstanceTypes.
 	result = lo.Ternary(len(invalidMinimumRequirementKey) > 0, []*cloudprovider.InstanceType{}, result)
 	return result, invalidMinimumRequirementKey

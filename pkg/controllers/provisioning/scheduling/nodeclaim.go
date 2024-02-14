@@ -241,35 +241,6 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 		requirementsAndOffering: false,
 		fitsAndOffering:         false,
 	}
-	// cumulativeMinRequirementsFromInstanceTypes is a map for the requirement key with the cumulative values that has minValues supported across InstanceTypeOptions
-	// and fetch the invalid requirement key from the result map.
-	// For example:
-	// NodePool requirement:
-	//   - key: node.kubernetes.io/instance-type
-	//     operator: In
-	//     values: ["c4.large","c4.xlarge","c5.large","c5.xlarge","m4.large","m4.xlarge"]
-	//     minValues: 3
-	//   - key: karpenter.k8s.aws/instance-family
-	//     operator: In
-	//     values: ["c4","c5","m4"]
-	//     minValues: 3
-	//
-	// And if NodeClaim has InstanceTypeOptions: ["c4.large","c5.xlarge","m4.2xlarge"], it PASSES the requirements
-	//
-	//	we get the map as : {
-	//		node.kubernetes.io/instance-type:  ["c4.large","c5.xlarge","m4.2xlarge"],
-	//		karpenter.k8s.aws/instance-family: ["c4","c5","m4"]
-	//	}
-	//
-	// And if NodeClaim has InstanceTypeOptions: ["c4.large","c4.xlarge","c5.2xlarge"], it FAILS the requirements
-	//
-	//	we get the map as : {
-	//		node.kubernetes.io/instance-type:  ["c4.large","c4.xlarge","c5.2xlarge"],
-	//		karpenter.k8s.aws/instance-family: ["c4","c5"] // minimum requirement failed for this.
-	//	}
-	// Key -> requirement key supporting MinValues
-	// value -> cumulative set of values for the key from all the instanceTypes
-	cumulativeMinRequirementsFromInstanceTypes := make(map[string]sets.Set[string])
 
 	for _, it := range instanceTypes {
 		// the tradeoff to not short circuiting on the filtering is that we can report much better error messages
@@ -292,19 +263,9 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 		// any errors.
 		if itCompat && itFits && itHasOffering {
 			results.remaining = append(results.remaining, it)
-			// For the InstanceType chosen, if the requirement has "minValues", then accumulate the values for those keys across InstanceTypes.
-			for _, req := range requirements {
-				if req.MinValues != nil {
-					if _, ok := cumulativeMinRequirementsFromInstanceTypes[req.Key]; !ok {
-						cumulativeMinRequirementsFromInstanceTypes[req.Key] = sets.Set[string]{}
-					}
-					cumulativeMinRequirementsFromInstanceTypes[req.Key] =
-						cumulativeMinRequirementsFromInstanceTypes[req.Key].Insert(it.Requirements.Get(req.Key).Values()...)
-				}
-			}
 		}
 	}
-	results.requirementIncompatibleWithMinValues = FindRequirementKeyIncompatibleWithMinValues(cumulativeMinRequirementsFromInstanceTypes, requirements)
+	results.requirementIncompatibleWithMinValues = lo.Ternary(requirements.HasMinValues(), IncompatibleReqAcrossInstanceTypes(requirements, results.remaining), "")
 	// If minValues is NOT met for any of the requirement across InstanceTypes, then return empty InstanceTypeOptions as we cannot launch with the remaining InstanceTypes.
 	results.remaining = lo.Ternary(len(results.requirementIncompatibleWithMinValues) > 0, []*cloudprovider.InstanceType{}, results.remaining)
 	return results
@@ -328,7 +289,56 @@ func hasOffering(instanceType *cloudprovider.InstanceType, requirements scheduli
 	return false
 }
 
-func FindRequirementKeyIncompatibleWithMinValues(cumulativeMinRequirementsFromInstanceTypes map[string]sets.Set[string], requirements scheduling.Requirements) string {
+func IncompatibleReqAcrossInstanceTypes(requirements scheduling.Requirements, instanceTypes cloudprovider.InstanceTypes) string {
+	// cumulativeMinRequirementsFromInstanceTypes is a map for the requirement key with the cumulative values that has minValues supported across InstanceTypeOptions
+	// and later fetch the invalid requirement key from the result map.
+	// For example:
+	// NodePool requirement:
+	//   - key: node.kubernetes.io/instance-type
+	//     operator: In
+	//     values: ["c4.large","c4.xlarge","c5.large","c5.xlarge","m4.large","m4.xlarge"]
+	//     minValues: 3
+	//   - key: karpenter.k8s.aws/instance-family
+	//     operator: In
+	//     values: ["c4","c5","m4"]
+	//     minValues: 3
+	//
+	// And if NodeClaim has InstanceTypeOptions: ["c4.large","c5.xlarge","m4.2xlarge"], it PASSES the requirements
+	//
+	//	we get the map as : {
+	//		node.kubernetes.io/instance-type:  ["c4.large","c5.xlarge","m4.2xlarge"],
+	//		karpenter.k8s.aws/instance-family: ["c4","c5","m4"]
+	//	}
+	//  so, returns empty key.
+	//
+	// And if NodeClaim has InstanceTypeOptions: ["c4.large","c4.xlarge","c5.2xlarge"], it FAILS the requirements
+	//
+	//	we get the map as : {
+	//		node.kubernetes.io/instance-type:  ["c4.large","c4.xlarge","c5.2xlarge"],
+	//		karpenter.k8s.aws/instance-family: ["c4","c5"] // minimum requirement failed for this.
+	//	}
+	//  so, returns "karpenter.k8s.aws/instance-family"
+	// Key -> requirement key supporting MinValues
+	// value -> cumulative set of values for the key from all the instanceTypes
+	cumulativeMinRequirementsFromInstanceTypes := make(map[string]sets.Set[string])
+	// We validate if sorting by price and truncating the number of instance types to 100 breaks the minValue requirement since we pass the same bounded request to the Launch API.
+	// If minValue requirement fails, we return the incompatible key.
+	its := lo.Slice(instanceTypes.OrderByPrice(requirements), 0, MaxInstanceTypes)
+	for _, it := range its {
+		for _, req := range requirements {
+			if req.MinValues != nil {
+				if _, ok := cumulativeMinRequirementsFromInstanceTypes[req.Key]; !ok {
+					cumulativeMinRequirementsFromInstanceTypes[req.Key] = sets.Set[string]{}
+				}
+				cumulativeMinRequirementsFromInstanceTypes[req.Key] =
+					cumulativeMinRequirementsFromInstanceTypes[req.Key].Insert(it.Requirements.Get(req.Key).Values()...)
+			}
+		}
+	}
+	return RequirementIncompatibleWithMinValues(cumulativeMinRequirementsFromInstanceTypes, requirements)
+}
+
+func RequirementIncompatibleWithMinValues(cumulativeMinRequirementsFromInstanceTypes map[string]sets.Set[string], requirements scheduling.Requirements) string {
 	for key, value := range cumulativeMinRequirementsFromInstanceTypes {
 		// Return if any of the minvalues of requirement is not honored
 		if len(value) < lo.FromPtr(requirements.Get(key).MinValues) {
