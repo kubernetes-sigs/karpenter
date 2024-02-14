@@ -21,11 +21,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/samber/lo"
 	coordinationsv1 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/samber/lo"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/controllers/leasegarbagecollection"
@@ -97,6 +96,10 @@ var _ = Describe("GarbageCollection", func() {
 				Labels:            map[string]string{test.DiscoveryLabel: "unspecified"},
 			},
 		}
+	})
+	AfterEach(func() {
+		// Reset the metrics collectors
+		leasegarbagecollection.NodeLeaseDeletedCounter.Reset()
 	})
 	Context("Metrics", func() {
 		It("should fire the leaseDeletedCounter metric when deleting leases", func() {

@@ -76,10 +76,10 @@ var _ = AfterSuite(func() {
 
 var _ = BeforeEach(func() {
 	ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(true)}}))
+	fakeClock.SetTime(time.Now())
 })
 
 var _ = AfterEach(func() {
-	fakeClock.SetTime(time.Now())
 	cp.Reset()
 	cluster.Reset()
 	ExpectCleanedUp(ctx, env.Client)
