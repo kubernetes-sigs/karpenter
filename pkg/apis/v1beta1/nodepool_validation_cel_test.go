@@ -188,7 +188,7 @@ var _ = Describe("CEL/Validation", func() {
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
-		It("should fail when creating two budgets where one is invalid", func() {
+		It("should fail when creating two budgets where one has an invalid crontab", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{
 				{
 					Nodes:    "10",
@@ -200,6 +200,23 @@ var _ = Describe("CEL/Validation", func() {
 					Schedule: ptr.String("*"),
 					Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+		})
+		It("should fail when creating multiple budgets where one doesn't have both schedule and duration", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{
+				{
+					Nodes:    "10",
+					Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
+				},
+				{
+					Nodes:    "10",
+					Schedule: ptr.String("* * * * *"),
+					Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
+				},
+				{
+					Nodes: "10",
+				},
+			}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
 	})

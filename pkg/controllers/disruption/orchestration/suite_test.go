@@ -81,7 +81,7 @@ var _ = BeforeSuite(func() {
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
-	prov = provisioning.NewProvisioner(env.Client, env.KubernetesInterface.CoreV1(), recorder, cloudProvider, cluster)
+	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster)
 	queue = orchestration.NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov)
 })
 

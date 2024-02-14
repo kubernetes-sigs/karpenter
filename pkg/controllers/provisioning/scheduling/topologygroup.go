@@ -256,10 +256,7 @@ func (t *TopologyGroup) nextDomainAntiAffinity(domains *scheduling.Requirement) 
 	// list of domains.  The use case where this optimization is really great is when we are launching nodes for
 	// a deployment of pods with self anti-affinity.  The domains map here continues to grow, and we continue to
 	// fully scan it each iteration.
-	if len(t.emptyDomains) == 0 {
-		return options
-	}
-	for domain := range t.domains {
+	for domain := range t.emptyDomains {
 		if domains.Has(domain) && t.domains[domain] == 0 {
 			options.Insert(domain)
 		}
