@@ -1367,7 +1367,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectExists(ctx, env.Client, spotNodeClaim)
 			ExpectExists(ctx, env.Client, spotNode)
 		})
-		FIt("spot to spot consolidation should order the instance types by price before enforcing minimum flexibility.", func() {
+		It("spot to spot consolidation should order the instance types by price before enforcing minimum flexibility.", func() {
 			// Fetch 18 spot instances
 			spotInstances = lo.Slice(lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
 				for _, o := range i.Offerings {
