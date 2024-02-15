@@ -1367,6 +1367,122 @@ var _ = Describe("Consolidation", func() {
 			ExpectExists(ctx, env.Client, spotNodeClaim)
 			ExpectExists(ctx, env.Client, spotNode)
 		})
+		It("spot to spot consolidation should order the instance types by price before enforcing minimum flexibility.", func() {
+			// Fetch 18 spot instances
+			spotInstances = lo.Slice(lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
+				for _, o := range i.Offerings {
+					if o.CapacityType == v1beta1.CapacityTypeSpot {
+						return true
+					}
+				}
+				return false
+			}), 0, 18)
+			// Assign the prices for 18 spot instance in ascending order incrementally
+			for i, inst := range spotInstances {
+				inst.Offerings[0].Price = 1.00 + float64(i)*0.1
+			}
+			// Force an instancetype that is outside the bound of 15 instances to have the cheapest price among the lot.
+			spotInstances[16].Offerings[0].Price = 0.001
+
+			// We now have these spot instance in the list as lowest priced and highest priced instanceTypes
+			cheapestSpotInstanceType := spotInstances[16]
+			mostExpensiveInstanceType := spotInstances[17]
+
+			// Add these spot instance with this special condition to cloud provider instancetypes
+			cloudProvider.InstanceTypes = spotInstances
+
+			expectedInstanceTypesForConsolidation := make([]*cloudprovider.InstanceType, len(spotInstances))
+			copy(expectedInstanceTypesForConsolidation, spotInstances)
+			// Sort the spot instances by pricing from low to high
+			sort.Slice(expectedInstanceTypesForConsolidation, func(i, j int) bool {
+				return expectedInstanceTypesForConsolidation[i].Offerings[0].Price < expectedInstanceTypesForConsolidation[j].Offerings[0].Price
+			})
+			// These 15 cheapest instance types should eventually be considered for consolidation.
+			var expectedInstanceTypesNames []string
+			for i := 0; i < 15; i++ {
+				expectedInstanceTypesNames = append(expectedInstanceTypesNames, expectedInstanceTypesForConsolidation[i].Name)
+			}
+
+			// Assign the most expensive spot instancetype so that it will definitely be replaced through consolidation
+			spotNodeClaim.Labels = lo.Assign(spotNodeClaim.Labels, map[string]string{
+				v1beta1.NodePoolLabelKey:     nodePool.Name,
+				v1.LabelInstanceTypeStable:   mostExpensiveInstanceType.Name,
+				v1beta1.CapacityTypeLabelKey: mostExpensiveInstanceType.Offerings[0].CapacityType,
+				v1.LabelTopologyZone:         mostExpensiveInstanceType.Offerings[0].Zone,
+			})
+
+			spotNode.Labels = lo.Assign(spotNode.Labels, map[string]string{
+				v1beta1.NodePoolLabelKey:     nodePool.Name,
+				v1.LabelInstanceTypeStable:   mostExpensiveInstanceType.Name,
+				v1beta1.CapacityTypeLabelKey: mostExpensiveInstanceType.Offerings[0].CapacityType,
+				v1.LabelTopologyZone:         mostExpensiveInstanceType.Offerings[0].Zone,
+			})
+
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         ptr.Bool(true),
+							BlockOwnerDeletion: ptr.Bool(true),
+						},
+					}}})
+			ExpectApplied(ctx, env.Client, rs, pod, spotNode, spotNodeClaim, nodePool)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pod, spotNode)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{spotNode}, []*v1beta1.NodeClaim{spotNodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+
+			// consolidation won't delete the old nodeclaim until the new nodeclaim is ready
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			wg.Wait()
+
+			// Process the item so that the nodes can be deleted.
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
+			// Cascade any deletion of the nodeclaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, spotNodeClaim)
+
+			// should create a new nodeclaim as there is a cheaper one that can hold the pod
+			nodeClaims := ExpectNodeClaims(ctx, env.Client)
+			nodes := ExpectNodes(ctx, env.Client)
+			Expect(nodeClaims).To(HaveLen(1))
+			Expect(nodes).To(HaveLen(1))
+
+			// Expect that the new nodeclaim does not request the most expensive instance type
+			Expect(nodeClaims[0].Name).ToNot(Equal(spotNodeClaim.Name))
+			Expect(scheduling.NewNodeSelectorRequirements(nodeClaims[0].Spec.Requirements...).Has(v1.LabelInstanceTypeStable)).To(BeTrue())
+			Expect(scheduling.NewNodeSelectorRequirements(nodeClaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Has(mostExpensiveInstanceType.Name)).To(BeFalse())
+
+			// Make sure that the cheapest instance that was outside the bound of 15 instance types is considered for consolidation.
+			Expect(scheduling.NewNodeSelectorRequirements(nodeClaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Has(cheapestSpotInstanceType.Name)).To(BeTrue())
+			spotInstancesConsideredForConsolidation := scheduling.NewNodeSelectorRequirements(nodeClaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Values()
+
+			// Make sure that we send only 15 instance types.
+			Expect(len(spotInstancesConsideredForConsolidation)).To(Equal(15))
+
+			// Make sure we considered the first 15 cheapest instance types.
+			for i := 0; i < 15; i++ {
+				Expect(spotInstancesConsideredForConsolidation).To(ContainElement(expectedInstanceTypesNames[i]))
+			}
+
+			// and delete the old one
+			ExpectNotFound(ctx, env.Client, spotNodeClaim, spotNode)
+		})
 		DescribeTable("can replace nodes if another nodePool returns no instance types",
 			func(spotToSpot bool) {
 				nodeClaim = lo.Ternary(spotToSpot, spotNodeClaim, nodeClaim)
