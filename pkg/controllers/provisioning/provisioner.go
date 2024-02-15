@@ -328,7 +328,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		return scheduler.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
 	results := s.Solve(ctx, pods)
-	return results.NodeClaimsMeetingMinimumRequirements(), nil
+	return results.TruncateInstanceTypes(scheduler.MaxInstanceTypes), nil
 }
 
 func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) (string, error) {

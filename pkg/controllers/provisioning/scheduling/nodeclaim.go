@@ -266,8 +266,7 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 		}
 	}
 	if requirements.HasMinValues() {
-		// We do not need minimum number of instanceTypes to satisfy all the minimum requirements here since we always send
-		// 100 instancetypes to launch path
+		// We don't care about the minimum number of instance types that meet our requirements here, we only care if they meet our requirements.
 		results.requirementIncompatibleWithMinValues, _ = IncompatibleReqAcrossInstanceTypes(requirements, results.remaining)
 	}
 	// If minValues is NOT met for any of the requirement across InstanceTypes, then return empty InstanceTypeOptions as we cannot launch with the remaining InstanceTypes.

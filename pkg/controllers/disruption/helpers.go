@@ -90,7 +90,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	})
 
 	results := scheduler.Solve(ctx, pods)
-	results = results.NodeClaimsMeetingMinimumRequirements()
+	results = results.TruncateInstanceTypes(pscheduling.MaxInstanceTypes)
 	for _, n := range results.ExistingNodes {
 		// We consider existing nodes for scheduling. When these nodes are unmanaged, their taint logic should
 		// tell us if we can schedule to them or not; however, if these nodes are managed, we will still schedule to them
