@@ -21,14 +21,13 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
+	v1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	v1 "k8s.io/api/core/v1"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 
@@ -124,6 +123,27 @@ var _ = Describe("Eviction/Queue", func() {
 			})
 			ExpectApplied(ctx, env.Client, pdb, pdb2, pod)
 			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod))).To(BeFalse())
+		})
+		It("should ensure that calling Evict() is valid while making Add() calls", func() {
+			cancelCtx, cancel := context.WithCancel(ctx)
+			DeferCleanup(func() {
+				cancel()
+			})
+
+			// Keep calling Reconcile() for the entirety of this test
+			go func() {
+				for {
+					ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
+					if cancelCtx.Err() != nil {
+						return
+					}
+				}
+			}()
+
+			// Ensure that we add enough pods to the queue while we are pulling items off of the queue (enough to trigger a DATA RACE)
+			for i := 0; i < 10000; i++ {
+				queue.Add(test.Pod())
+			}
 		})
 	})
 })
