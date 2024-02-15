@@ -477,6 +477,13 @@ func FindMetricWithLabelValues(name string, labelValues map[string]string) (*pro
 	return nil, false
 }
 
+func ExpectMetricGaugeValue(metricName string, expectedValue float64, labels map[string]string) {
+	GinkgoHelper()
+	metric, ok := FindMetricWithLabelValues(metricName, labels)
+	Expect(ok).To(BeTrue(), "Metric "+metricName+" should be available")
+	Expect(lo.FromPtr(metric.Gauge.Value)).To(Equal(expectedValue), "Metric "+metricName+" should have the expected value")
+}
+
 func ExpectManualBinding(ctx context.Context, c client.Client, pod *v1.Pod, node *v1.Node) {
 	GinkgoHelper()
 	Expect(c.Create(ctx, &v1.Binding{

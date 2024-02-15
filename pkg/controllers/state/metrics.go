@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package leasegarbagecollection
+package state
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
@@ -23,18 +23,30 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
+const (
+	stateSubsystem = "cluster_state"
+)
+
 var (
-	NodeLeaseDeletedCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "karpenter",
-			Subsystem: metrics.NodeSubsystem,
-			Name:      "leases_deleted",
-			Help:      "Number of deleted leaked leases.",
+	clusterStateNodesCount = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: stateSubsystem,
+			Name:      "node_count",
+			Help:      "Current count of nodes in cluster state",
 		},
-		[]string{},
+	)
+
+	clusterStateSynced = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: stateSubsystem,
+			Name:      "synced",
+			Help:      "Returns 1 if cluster state is synced and 0 otherwise. Synced checks that nodeclaims and nodes that are stored in the APIServer have the same representation as Karpenter's cluster state",
+		},
 	)
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(NodeLeaseDeletedCounter)
+	crmetrics.Registry.MustRegister(clusterStateNodesCount, clusterStateSynced)
 }
