@@ -1380,13 +1380,13 @@ var _ = Describe("Consolidation", func() {
 			// Assign the prices for 18 spot instance in ascending order incrementally
 			for i, inst := range spotInstances {
 				inst.Offerings[0].Price = 1.00 + float64(i)*0.1
-				inst.Offerings[0].CapacityType = v1beta1.CapacityTypeSpot
 			}
 			// Force an instancetype that is outside the bound of 15 instances to have the cheapest price among the lot.
 			spotInstances[16].Offerings[0].Price = 0.001
-			spotInstances[16].Offerings[0].CapacityType = v1beta1.CapacityTypeSpot
-			cheapestSpotInstanceName := spotInstances[16].Name
-			mostExpensiveInstanceName := spotInstances[17].Name
+
+			// We now have these spot instance in the list as lowest priced and highest priced instanceTypes
+			cheapestSpotInstanceType := spotInstances[16]
+			mostExpensiveInstanceType := spotInstances[17]
 
 			// Add these spot instance with this special condition to cloud provider instancetypes
 			cloudProvider.InstanceTypes = spotInstances
@@ -1394,16 +1394,16 @@ var _ = Describe("Consolidation", func() {
 			// Assign the most expensive spot instancetype so that it will definitely be replaced through consolidation
 			spotNodeClaim.Labels = lo.Assign(spotNodeClaim.Labels, map[string]string{
 				v1beta1.NodePoolLabelKey:     nodePool.Name,
-				v1.LabelInstanceTypeStable:   cloudProvider.InstanceTypes[17].Name,
-				v1beta1.CapacityTypeLabelKey: cloudProvider.InstanceTypes[17].Offerings[0].CapacityType,
-				v1.LabelTopologyZone:         cloudProvider.InstanceTypes[17].Offerings[0].Zone,
+				v1.LabelInstanceTypeStable:   mostExpensiveInstanceType.Name,
+				v1beta1.CapacityTypeLabelKey: mostExpensiveInstanceType.Offerings[0].CapacityType,
+				v1.LabelTopologyZone:         mostExpensiveInstanceType.Offerings[0].Zone,
 			})
 
 			spotNode.Labels = lo.Assign(spotNode.Labels, map[string]string{
 				v1beta1.NodePoolLabelKey:     nodePool.Name,
-				v1.LabelInstanceTypeStable:   cloudProvider.InstanceTypes[17].Name,
-				v1beta1.CapacityTypeLabelKey: cloudProvider.InstanceTypes[17].Offerings[0].CapacityType,
-				v1.LabelTopologyZone:         cloudProvider.InstanceTypes[17].Offerings[0].Zone,
+				v1.LabelInstanceTypeStable:   mostExpensiveInstanceType.Name,
+				v1beta1.CapacityTypeLabelKey: mostExpensiveInstanceType.Offerings[0].CapacityType,
+				v1.LabelTopologyZone:         mostExpensiveInstanceType.Offerings[0].Zone,
 			})
 
 			rs := test.ReplicaSet()
@@ -1454,10 +1454,10 @@ var _ = Describe("Consolidation", func() {
 			// Expect that the new nodeclaim does not request the most expensive instance type
 			Expect(nodeClaims[0].Name).ToNot(Equal(spotNodeClaim.Name))
 			Expect(scheduling.NewNodeSelectorRequirements(nodeClaims[0].Spec.Requirements...).Has(v1.LabelInstanceTypeStable)).To(BeTrue())
-			Expect(scheduling.NewNodeSelectorRequirements(nodeClaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Has(mostExpensiveInstanceName)).To(BeFalse())
+			Expect(scheduling.NewNodeSelectorRequirements(nodeClaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Has(mostExpensiveInstanceType.Name)).To(BeFalse())
 
 			// Make sure that the cheapest instance that was outside the bound of 15 instance types is considered for consolidation.
-			Expect(scheduling.NewNodeSelectorRequirements(nodeClaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Has(cheapestSpotInstanceName)).To(BeTrue())
+			Expect(scheduling.NewNodeSelectorRequirements(nodeClaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Has(cheapestSpotInstanceType.Name)).To(BeTrue())
 
 			// and delete the old one
 			ExpectNotFound(ctx, env.Client, spotNodeClaim, spotNode)
