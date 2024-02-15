@@ -16,6 +16,7 @@ package terminator_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -126,12 +127,17 @@ var _ = Describe("Eviction/Queue", func() {
 		})
 		It("should ensure that calling Evict() is valid while making Add() calls", func() {
 			cancelCtx, cancel := context.WithCancel(ctx)
+			wg := sync.WaitGroup{}
 			DeferCleanup(func() {
 				cancel()
+				wg.Wait() // Ensure that we wait for reconcile loop to finish so that we don't get a RACE
 			})
 
 			// Keep calling Reconcile() for the entirety of this test
+			wg.Add(1)
 			go func() {
+				defer wg.Done()
+
 				for {
 					ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
 					if cancelCtx.Err() != nil {
