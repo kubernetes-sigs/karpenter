@@ -86,7 +86,11 @@ func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudPro
 // utilizing the cluster state as our source of truth
 //
 //nolint:gocyclo
-func (c *Cluster) Synced(ctx context.Context) bool {
+func (c *Cluster) Synced(ctx context.Context) (synced bool) {
+	// Set the metric to whatever the result of the Synced() call is
+	defer func() {
+		clusterStateSynced.Set(lo.Ternary[float64](synced, 1, 0))
+	}()
 	nodeClaimList := &v1beta1.NodeClaimList{}
 	if err := c.kubeClient.List(ctx, nodeClaimList); err != nil {
 		logging.FromContext(ctx).Errorf("checking cluster state sync, %v", err)
@@ -123,9 +127,7 @@ func (c *Cluster) Synced(ctx context.Context) bool {
 	// This doesn't ensure that the two states are exactly aligned (we could still not be tracking a node
 	// that exists in the cluster state but not in the apiserver) but it ensures that we have a state
 	// representation for every node/nodeClaim that exists on the apiserver
-	synced := stateNodeClaimNames.IsSuperset(nodeClaimNames) && stateNodeNames.IsSuperset(nodeNames)
-	clusterStateSynced.Set(lo.Ternary[float64](synced, 1, 0))
-	return synced
+	return stateNodeClaimNames.IsSuperset(nodeClaimNames) && stateNodeNames.IsSuperset(nodeNames)
 }
 
 // ForPodsWithAntiAffinity calls the supplied function once for each pod with required anti affinity terms that is
