@@ -1391,6 +1391,18 @@ var _ = Describe("Consolidation", func() {
 			// Add these spot instance with this special condition to cloud provider instancetypes
 			cloudProvider.InstanceTypes = spotInstances
 
+			expectedInstanceTypesForConsolidation := make([]*cloudprovider.InstanceType, len(spotInstances))
+			copy(expectedInstanceTypesForConsolidation, spotInstances)
+			// Sort the spot instances by pricing from low to high
+			sort.Slice(expectedInstanceTypesForConsolidation, func(i, j int) bool {
+				return expectedInstanceTypesForConsolidation[i].Offerings[0].Price < expectedInstanceTypesForConsolidation[j].Offerings[0].Price
+			})
+			// These 15 cheapest instance types should eventually be considered for consolidation.
+			var expectedInstanceTypesNames []string
+			for i := 0; i < 15; i++ {
+				expectedInstanceTypesNames = append(expectedInstanceTypesNames, expectedInstanceTypesForConsolidation[i].Name)
+			}
+
 			// Assign the most expensive spot instancetype so that it will definitely be replaced through consolidation
 			spotNodeClaim.Labels = lo.Assign(spotNodeClaim.Labels, map[string]string{
 				v1beta1.NodePoolLabelKey:     nodePool.Name,
@@ -1458,6 +1470,15 @@ var _ = Describe("Consolidation", func() {
 
 			// Make sure that the cheapest instance that was outside the bound of 15 instance types is considered for consolidation.
 			Expect(scheduling.NewNodeSelectorRequirements(nodeClaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Has(cheapestSpotInstanceType.Name)).To(BeTrue())
+			spotInstancesConsideredForConsolidation := scheduling.NewNodeSelectorRequirements(nodeClaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Values()
+
+			// Make sure that we send only 15 instance types.
+			Expect(len(spotInstancesConsideredForConsolidation)).To(Equal(15))
+
+			// Make sure we considered the first 15 cheapest instance types.
+			for i := 0; i < 15; i++ {
+				Expect(spotInstancesConsideredForConsolidation).To(ContainElement(expectedInstanceTypesNames[i]))
+			}
 
 			// and delete the old one
 			ExpectNotFound(ctx, env.Client, spotNodeClaim, spotNode)
