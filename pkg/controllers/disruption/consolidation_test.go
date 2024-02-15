@@ -1367,7 +1367,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectExists(ctx, env.Client, spotNodeClaim)
 			ExpectExists(ctx, env.Client, spotNode)
 		})
-		It("spot to spot consolidation should order the instance types by price before enforcing minimum flexibility.", func() {
+		FIt("spot to spot consolidation should order the instance types by price before enforcing minimum flexibility.", func() {
 			// Fetch 18 spot instances
 			spotInstances = lo.Slice(lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
 				for _, o := range i.Offerings {
@@ -1386,6 +1386,7 @@ var _ = Describe("Consolidation", func() {
 			spotInstances[16].Offerings[0].Price = 0.001
 			spotInstances[16].Offerings[0].CapacityType = v1beta1.CapacityTypeSpot
 			cheapestSpotInstanceName := spotInstances[16].Name
+			mostExpensiveInstanceName := spotInstances[17].Name
 
 			// Add these spot instance with this special condition to cloud provider instancetypes
 			cloudProvider.InstanceTypes = spotInstances
@@ -1453,13 +1454,13 @@ var _ = Describe("Consolidation", func() {
 			// Expect that the new nodeclaim does not request the most expensive instance type
 			Expect(nodeClaims[0].Name).ToNot(Equal(spotNodeClaim.Name))
 			Expect(scheduling.NewNodeSelectorRequirements(nodeClaims[0].Spec.Requirements...).Has(v1.LabelInstanceTypeStable)).To(BeTrue())
-			Expect(scheduling.NewNodeSelectorRequirements(nodeClaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Has(mostExpensiveInstance.Name)).To(BeFalse())
+			Expect(scheduling.NewNodeSelectorRequirements(nodeClaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Has(mostExpensiveInstanceName)).To(BeFalse())
 
 			// Make sure that the cheapest instance that was outside the bound of 15 instance types is considered for consolidation.
 			Expect(scheduling.NewNodeSelectorRequirements(nodeClaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Has(cheapestSpotInstanceName)).To(BeTrue())
 
 			// and delete the old one
-			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+			ExpectNotFound(ctx, env.Client, spotNodeClaim, spotNode)
 		})
 		DescribeTable("can replace nodes if another nodePool returns no instance types",
 			func(spotToSpot bool) {
