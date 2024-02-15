@@ -327,9 +327,8 @@ func IncompatibleReqAcrossInstanceTypes(requirements scheduling.Requirements, in
 	cumulativeMinRequirementsFromInstanceTypes := make(map[string]sets.Set[string])
 	// We validate if sorting by price and truncating the number of instance types to 100 breaks the minValue requirement since we pass the same bounded request to the Launch API.
 	// If minValue requirement fails, we return the incompatible key.
-	its := lo.Slice(instanceTypes.OrderByPrice(requirements), 0, MaxInstanceTypes)
 	var incompatibleKey string
-	for i, it := range its {
+	for i, it := range instanceTypes {
 		for _, req := range requirements {
 			if req.MinValues != nil {
 				if _, ok := cumulativeMinRequirementsFromInstanceTypes[req.Key]; !ok {
@@ -345,7 +344,7 @@ func IncompatibleReqAcrossInstanceTypes(requirements scheduling.Requirements, in
 			return "", i + 1
 		}
 	}
-	return incompatibleKey, len(its)
+	return incompatibleKey, len(instanceTypes)
 }
 
 func RequirementIncompatibleWithMinValues(cumulativeMinRequirementsFromInstanceTypes map[string]sets.Set[string], requirements scheduling.Requirements) string {

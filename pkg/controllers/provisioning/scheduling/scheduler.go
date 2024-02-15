@@ -137,6 +137,39 @@ func (r Results) NonPendingPodSchedulingErrors() string {
 	return msg.String()
 }
 
+func (r Results) NodeClaimsMeetingMinimumRequirements() Results {
+	var validNewNodeClaims []*NodeClaim
+	errorPods := map[*v1.Pod]error{}
+	for _, newNodeClaim := range r.NewNodeClaims {
+		// The InstanceTypeOptions are truncated due to limitations in sending the number of instances to launch API which is capped to 100 today.
+		newNodeClaim.InstanceTypeOptions = lo.Slice(newNodeClaim.InstanceTypeOptions.OrderByPrice(newNodeClaim.NodeClaimTemplate.Requirements), 0, MaxInstanceTypes)
+		// Only check for a validity of NodeClaim if its requirement has minValues in it.
+		if newNodeClaim.NodeClaimTemplate.Requirements.HasMinValues() {
+			// Check if the truncated InstanceTypeOptions in each NewNodeClaim from the results still satisfy the minimum requirements
+			incompatibleKey, _ := IncompatibleReqAcrossInstanceTypes(newNodeClaim.NodeClaimTemplate.Requirements, newNodeClaim.InstanceTypeOptions)
+			// If number of instancetypes in the nodeclaim cannot satisfy the minimum requirements, add its Pods to error map with reason.
+			if len(incompatibleKey) > 0 {
+				for _, pod := range newNodeClaim.Pods {
+					errorPods[pod] = fmt.Errorf("pod didn’t schedule because NodePool %q couldn’t meet minValues requirements after truncating to 100 instance types", newNodeClaim.NodeClaimTemplate.NodePoolName)
+				}
+			} else {
+				// Add to valid nodeclaims since it meets minimum requirement.
+				validNewNodeClaims = append(validNewNodeClaims, newNodeClaim)
+			}
+		} else {
+			// NodeClaims which do not have minValues in requirement are already valid.
+			validNewNodeClaims = append(validNewNodeClaims, newNodeClaim)
+		}
+	}
+	// Assign the new valid NodeClaims to result.
+	r.NewNodeClaims = validNewNodeClaims
+	// Add the error pods to existing error map in the result.
+	for k, v := range errorPods {
+		r.PodErrors[k] = v
+	}
+	return r
+}
+
 func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) Results {
 	defer metrics.Measure(schedulingSimulationDuration)()
 	schedulingStart := time.Now()
