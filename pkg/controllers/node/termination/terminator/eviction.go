@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/samber/lo"
@@ -76,7 +77,9 @@ func NewQueueKey(pod *v1.Pod) QueueKey {
 
 type Queue struct {
 	workqueue.RateLimitingInterface
-	sets.Set[QueueKey]
+
+	mu  sync.Mutex
+	set sets.Set[QueueKey]
 
 	kubeClient client.Client
 	recorder   events.Recorder
@@ -85,7 +88,7 @@ type Queue struct {
 func NewQueue(kubeClient client.Client, recorder events.Recorder) *Queue {
 	queue := &Queue{
 		RateLimitingInterface: workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(evictionQueueBaseDelay, evictionQueueMaxDelay)),
-		Set:                   sets.New[QueueKey](),
+		set:                   sets.New[QueueKey](),
 		kubeClient:            kubeClient,
 		recorder:              recorder,
 	}
@@ -102,13 +105,23 @@ func (q *Queue) Builder(_ context.Context, m manager.Manager) controller.Builder
 
 // Add adds pods to the Queue
 func (q *Queue) Add(pods ...*v1.Pod) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
 	for _, pod := range pods {
 		qk := NewQueueKey(pod)
-		if !q.Set.Has(qk) {
-			q.Set.Insert(qk)
+		if !q.set.Has(qk) {
+			q.set.Insert(qk)
 			q.RateLimitingInterface.Add(qk)
 		}
 	}
+}
+
+func (q *Queue) Has(pod *v1.Pod) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	return q.set.Has(NewQueueKey(pod))
 }
 
 func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
@@ -128,7 +141,9 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 	// Evict pod
 	if q.Evict(ctx, qk) {
 		q.RateLimitingInterface.Forget(qk)
-		q.Set.Delete(qk)
+		q.mu.Lock()
+		q.set.Delete(qk)
+		q.mu.Unlock()
 		return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 	}
 	// Requeue pod if eviction failed
@@ -172,6 +187,9 @@ func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 }
 
 func (q *Queue) Reset() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
 	q.RateLimitingInterface = workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(evictionQueueBaseDelay, evictionQueueMaxDelay))
-	q.Set = sets.New[QueueKey]()
+	q.set = sets.New[QueueKey]()
 }
