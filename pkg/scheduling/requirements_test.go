@@ -17,10 +17,13 @@ limitations under the License.
 package scheduling
 
 import (
+	"os"
+	"runtime/pprof"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 )
 
@@ -653,4 +656,33 @@ func FuzzEditDistance(f *testing.F) {
 	f.Fuzz(func(t *testing.T, lhs, rhs string) {
 		editDistance(lhs, rhs)
 	})
+}
+
+// TestSchedulingProfile is used to gather profiling metrics, benchmarking is primarily done with standard
+// Go benchmark functions
+// go test -tags=test_performance -run=RequirementsProfile
+func TestRequirementsProfile(t *testing.T) {
+	cpuf, err := os.Create("requirements.cpuprofile")
+	if err != nil {
+		t.Fatalf("error creating CPU profile: %s", err)
+	}
+	lo.Must0(pprof.StartCPUProfile(cpuf))
+	defer pprof.StopCPUProfile()
+
+	heapf, err := os.Create("requirements.heapprofile")
+	if err != nil {
+		t.Fatalf("error creating heap profile: %s", err)
+	}
+	defer lo.Must0(pprof.WriteHeapProfile(heapf))
+
+	reqsA := NewRequirements(NewRequirement("foo", v1.NodeSelectorOpIn, "a", "b", "c"))
+	reqsB := NewRequirements(NewRequirement("foo", v1.NodeSelectorOpIn, "d", "e", "f"))
+
+	for i := 0; i < 525000; i++ {
+		_ = reqsA.Intersects(reqsB)
+		_ = reqsA.Compatible(reqsB)
+		_ = reqsA.NodeSelectorRequirements()
+		_ = reqsA.Keys()
+		_ = reqsA.Values()
+	}
 }
