@@ -112,7 +112,7 @@ var _ = Describe("Expiration", func() {
 		nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 200)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
-		fakeClock.Step(time.Second * 100)
+		fakeClock.SetTime(nodeClaim.CreationTimestamp.Time.Add(time.Second * 100))
 
 		result := ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 		Expect(result.RequeueAfter).To(BeNumerically("~", time.Second*100, time.Second))
