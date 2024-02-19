@@ -67,7 +67,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping
 		return candidates[i].NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).LastTransitionTime.Inner.Time.Before(
 			candidates[j].NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).LastTransitionTime.Inner.Time)
 	})
-	disruptionEligibleNodesGauge.With(map[string]string{
+	EligibleNodesGauge.With(map[string]string{
 		methodLabel:            e.Type(),
 		consolidationTypeLabel: e.ConsolidationType(),
 	}).Set(float64(len(candidates)))

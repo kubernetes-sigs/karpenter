@@ -142,7 +142,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 }
 
 func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {
-	defer metrics.Measure(disruptionEvaluationDurationHistogram.With(map[string]string{
+	defer metrics.Measure(EvaluationDurationHistogram.With(map[string]string{
 		methodLabel:            disruption.Type(),
 		consolidationTypeLabel: disruption.ConsolidationType(),
 	}))()
@@ -181,11 +181,6 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 // 2. Spin up replacement nodes
 // 3. Add Command to orchestration.Queue to wait to delete the candiates.
 func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, schedulingResults scheduling.Results) error {
-	disruptionActionsPerformedCounter.With(map[string]string{
-		actionLabel:            string(cmd.Action()),
-		methodLabel:            m.Type(),
-		consolidationTypeLabel: m.ConsolidationType(),
-	}).Inc()
 	commandID := uuid.NewUUID()
 	logging.FromContext(ctx).With("command-id", commandID).Infof("disrupting via %s %s", m.Type(), cmd)
 
@@ -233,6 +228,27 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, 
 		lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode }), commandID, m.Type(), m.ConsolidationType())); err != nil {
 		c.cluster.UnmarkForDeletion(providerIDs...)
 		return fmt.Errorf("adding command to queue (command-id: %s), %w", commandID, multierr.Append(err, state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...)))
+	}
+
+	// An action is only performed and pods/nodes are only disrupted after a successful add to the queue
+	ActionsPerformedCounter.With(map[string]string{
+		actionLabel:            string(cmd.Action()),
+		methodLabel:            m.Type(),
+		consolidationTypeLabel: m.ConsolidationType(),
+	}).Inc()
+	for _, cd := range cmd.candidates {
+		NodesDisruptedCounter.With(map[string]string{
+			metrics.NodePoolLabel:  cd.nodePool.Name,
+			actionLabel:            string(cmd.Action()),
+			methodLabel:            m.Type(),
+			consolidationTypeLabel: m.ConsolidationType(),
+		}).Inc()
+		PodsDisruptedCounter.With(map[string]string{
+			metrics.NodePoolLabel:  cd.nodePool.Name,
+			actionLabel:            string(cmd.Action()),
+			methodLabel:            m.Type(),
+			consolidationTypeLabel: m.ConsolidationType(),
+		}).Add(float64(len(cd.reschedulablePods)))
 	}
 	return nil
 }

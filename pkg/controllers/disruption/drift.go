@@ -62,7 +62,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 		return candidates[i].NodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).LastTransitionTime.Inner.Time.Before(
 			candidates[j].NodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).LastTransitionTime.Inner.Time)
 	})
-	disruptionEligibleNodesGauge.With(map[string]string{
+	EligibleNodesGauge.With(map[string]string{
 		methodLabel:            d.Type(),
 		consolidationTypeLabel: d.ConsolidationType(),
 	}).Set(float64(len(candidates)))
