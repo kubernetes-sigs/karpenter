@@ -46,7 +46,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		return Command{}, scheduling.Results{}, nil
 	}
 	candidates = m.sortCandidates(candidates)
-	disruptionEligibleNodesGauge.With(map[string]string{
+	EligibleNodesGauge.With(map[string]string{
 		methodLabel:            m.Type(),
 		consolidationTypeLabel: m.ConsolidationType(),
 	}).Set(float64(len(candidates)))
@@ -123,7 +123,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	// binary search to find the maximum number of NodeClaims we can terminate
 	for min <= max {
 		if m.clock.Now().After(timeout) {
-			disruptionConsolidationTimeoutTotalCounter.WithLabelValues(m.ConsolidationType()).Inc()
+			ConsolidationTimeoutTotalCounter.WithLabelValues(m.ConsolidationType()).Inc()
 			if lastSavedCommand.candidates == nil {
 				logging.FromContext(ctx).Debugf("failed to find a multi-node consolidation after timeout, last considered batch had %d", (min+max)/2)
 			} else {

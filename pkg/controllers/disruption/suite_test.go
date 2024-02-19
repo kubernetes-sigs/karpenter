@@ -148,6 +148,11 @@ var _ = BeforeEach(func() {
 
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
+
+	// Reset the metrics collectors
+	disruption.ActionsPerformedCounter.Reset()
+	disruption.NodesDisruptedCounter.Reset()
+	disruption.PodsDisruptedCounter.Reset()
 })
 
 var _ = Describe("Simulate Scheduling", func() {
@@ -1358,6 +1363,370 @@ var _ = Describe("Candidate Filtering", func() {
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(Equal("candidate is already being deprovisioned"))
+	})
+})
+
+var _ = Describe("Metrics", func() {
+	var nodePool *v1beta1.NodePool
+	var labels = map[string]string{
+		"app": "test",
+	}
+	BeforeEach(func() {
+		nodePool = test.NodePool(v1beta1.NodePool{
+			Spec: v1beta1.NodePoolSpec{
+				Disruption: v1beta1.Disruption{
+					ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenUnderutilized,
+					// Disrupt away!
+					Budgets: []v1beta1.Budget{{
+						Nodes: "100%",
+					}},
+				},
+			},
+		})
+	})
+	It("should fire metrics for single node empty disruption", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1beta1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Drifted)
+		ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+		fakeClock.Step(10 * time.Minute)
+
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		wg.Wait()
+
+		ExpectMetricCounterValue("karpenter_disruption_actions_performed_total", 1, map[string]string{
+			"action": "delete",
+			"method": "drift",
+		})
+		ExpectMetricCounterValue("karpenter_disruption_nodes_disrupted_total", 1, map[string]string{
+			"nodepool": nodePool.Name,
+			"action":   "delete",
+			"method":   "drift",
+		})
+		ExpectMetricCounterValue("karpenter_disruption_pods_disrupted_total", 0, map[string]string{
+			"nodepool": nodePool.Name,
+			"action":   "delete",
+			"method":   "drift",
+		})
+	})
+	It("should fire metrics for single node delete disruption", func() {
+		nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         leastExpensiveOffering.Zone,
+				},
+			},
+			Status: v1beta1.NodeClaimStatus{
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		pods := test.Pods(4, test.PodOptions{})
+
+		nodeClaims[0].StatusConditions().MarkTrue(v1beta1.Drifted)
+
+		ExpectApplied(ctx, env.Client, pods[0], pods[1], pods[2], pods[3], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodePool)
+
+		// bind pods to nodes
+		ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+		ExpectManualBinding(ctx, env.Client, pods[1], nodes[0])
+		ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
+		ExpectManualBinding(ctx, env.Client, pods[3], nodes[1])
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+
+		fakeClock.Step(10 * time.Minute)
+
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		wg.Wait()
+
+		ExpectMetricCounterValue("karpenter_disruption_actions_performed_total", 1, map[string]string{
+			"action": "delete",
+			"method": "drift",
+		})
+		ExpectMetricCounterValue("karpenter_disruption_nodes_disrupted_total", 1, map[string]string{
+			"nodepool": nodePool.Name,
+			"action":   "delete",
+			"method":   "drift",
+		})
+		ExpectMetricCounterValue("karpenter_disruption_pods_disrupted_total", 2, map[string]string{
+			"nodepool": nodePool.Name,
+			"action":   "delete",
+			"method":   "drift",
+		})
+	})
+	It("should fire metrics for single node replace disruption", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1beta1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		pods := test.Pods(4, test.PodOptions{})
+		nodeClaim.StatusConditions().MarkTrue(v1beta1.Drifted)
+
+		ExpectApplied(ctx, env.Client, pods[0], pods[1], pods[2], pods[3], nodeClaim, node, nodePool)
+
+		// bind pods to nodes
+		ExpectManualBinding(ctx, env.Client, pods[0], node)
+		ExpectManualBinding(ctx, env.Client, pods[1], node)
+		ExpectManualBinding(ctx, env.Client, pods[2], node)
+		ExpectManualBinding(ctx, env.Client, pods[3], node)
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+		fakeClock.Step(10 * time.Minute)
+
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		wg.Wait()
+
+		ExpectMetricCounterValue("karpenter_disruption_actions_performed_total", 1, map[string]string{
+			"action": "replace",
+			"method": "drift",
+		})
+		ExpectMetricCounterValue("karpenter_disruption_nodes_disrupted_total", 1, map[string]string{
+			"nodepool": nodePool.Name,
+			"action":   "replace",
+			"method":   "drift",
+		})
+		ExpectMetricCounterValue("karpenter_disruption_pods_disrupted_total", 4, map[string]string{
+			"nodepool": nodePool.Name,
+			"action":   "replace",
+			"method":   "drift",
+		})
+	})
+	It("should fire metrics for multi-node empty disruption", func() {
+		nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         leastExpensiveOffering.Zone,
+				},
+			},
+			Status: v1beta1.NodeClaimStatus{
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2], nodePool)
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1], nodes[2]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
+
+		fakeClock.Step(10 * time.Minute)
+
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+		wg.Wait()
+
+		ExpectMetricCounterValue("karpenter_disruption_actions_performed_total", 1, map[string]string{
+			"action":             "delete",
+			"method":             "consolidation",
+			"consolidation_type": "empty",
+		})
+		ExpectMetricCounterValue("karpenter_disruption_nodes_disrupted_total", 3, map[string]string{
+			"nodepool":           nodePool.Name,
+			"action":             "delete",
+			"method":             "consolidation",
+			"consolidation_type": "empty",
+		})
+		ExpectMetricCounterValue("karpenter_disruption_pods_disrupted_total", 0, map[string]string{
+			"nodepool":           nodePool.Name,
+			"action":             "delete",
+			"method":             "consolidation",
+			"consolidation_type": "empty",
+		})
+	})
+	It("should fire metrics for multi-node delete disruption", func() {
+		nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         leastExpensiveOffering.Zone,
+				},
+			},
+			Status: v1beta1.NodeClaimStatus{
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		pods := test.Pods(4, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				},
+			},
+		})
+
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], pods[3], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2], nodePool)
+
+		// bind pods to nodes
+		ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+		ExpectManualBinding(ctx, env.Client, pods[1], nodes[1])
+		ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1], nodes[2]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
+
+		fakeClock.Step(10 * time.Minute)
+
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+		wg.Wait()
+
+		ExpectMetricCounterValue("karpenter_disruption_actions_performed_total", 1, map[string]string{
+			"action":             "delete",
+			"method":             "consolidation",
+			"consolidation_type": "multi",
+		})
+		ExpectMetricCounterValue("karpenter_disruption_nodes_disrupted_total", 2, map[string]string{
+			"nodepool":           nodePool.Name,
+			"action":             "delete",
+			"method":             "consolidation",
+			"consolidation_type": "multi",
+		})
+		ExpectMetricCounterValue("karpenter_disruption_pods_disrupted_total", 2, map[string]string{
+			"nodepool":           nodePool.Name,
+			"action":             "delete",
+			"method":             "consolidation",
+			"consolidation_type": "multi",
+		})
+	})
+	It("should fire metrics for multi-node replace disruption", func() {
+		nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1beta1.NodeClaimStatus{
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		pods := test.Pods(4, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				},
+			},
+		})
+
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], pods[3], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2], nodePool)
+
+		// bind pods to nodes
+		ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+		ExpectManualBinding(ctx, env.Client, pods[1], nodes[1])
+		ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
+		ExpectManualBinding(ctx, env.Client, pods[3], nodes[2])
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1], nodes[2]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
+
+		fakeClock.Step(10 * time.Minute)
+
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+		wg.Wait()
+
+		ExpectMetricCounterValue("karpenter_disruption_actions_performed_total", 1, map[string]string{
+			"action":             "replace",
+			"method":             "consolidation",
+			"consolidation_type": "multi",
+		})
+		ExpectMetricCounterValue("karpenter_disruption_nodes_disrupted_total", 3, map[string]string{
+			"nodepool":           nodePool.Name,
+			"action":             "replace",
+			"method":             "consolidation",
+			"consolidation_type": "multi",
+		})
+		ExpectMetricCounterValue("karpenter_disruption_pods_disrupted_total", 4, map[string]string{
+			"nodepool":           nodePool.Name,
+			"action":             "replace",
+			"method":             "consolidation",
+			"consolidation_type": "multi",
+		})
 	})
 })
 
