@@ -98,7 +98,7 @@ func (e *Consolidation) Reconcile(ctx context.Context, nodePool *v1beta1.NodePoo
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("failed to calculate memory, %w", err)
 		}
-		if cpu > float64(*threshold/100) || memory > float64(*threshold/100) {
+		if cpu < float64(*threshold/100) && memory < float64(*threshold/100) {
 			if !hasCondition {
 				nodeClaim.StatusConditions().SetCondition(apis.Condition{
 					Type:     v1beta1.Underutilized,
