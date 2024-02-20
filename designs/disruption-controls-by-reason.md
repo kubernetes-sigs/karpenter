@@ -99,6 +99,7 @@ Assuming zero unhealthy nodes:
 - Consolidation = 15 - 14: Disruption allowed for at least one node due to consolidation.
 - Default: 5 - 14: No disruption allowed for other methods.
 
+#### Decision
 The second equation simplifies reasoning for cluster operators. A node can be tagged for multiple disruption reasons (e.g., Emptiness, Drift, Consolidation), making it challenging to precisely calculate in-flight disruptions. The second equation streamlines this process by providing a clearer view of the overall disruption impact.
 ### Q: How should we handle an unspecfied default reason? 
 ```yaml
@@ -145,14 +146,7 @@ type Budget struct {
       // +kubebuilder:default:="10%"
       Nodes string `json:"nodes" hash:"ignore"`
       // Schedule specifies when a budget begins being active, following
-      // the upstream cronjob syntax. If omitted, the budget is always active.
-      // Timezones are not supported.
-      // This field is required if Duration is set.
-      // +kubebuilder:validation:Pattern:=`^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$`
-      // +optional
-      Schedule *string `json:"schedule,omitempty" hash:"ignore"`
-      // Duration determines how long a Budget is active since each Schedule hit.
-      // Only minutes and hours are accepted, as cron does not work in seconds.
+      // the upstream cronjob syntax. If omitted, the budget is always active. // Timezones are not supported. // This field is required if Duration is set. // +kubebuilder:validation:Pattern:=`^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$` // +optional Schedule *string `json:"schedule,omitempty" hash:"ignore"` // Duration determines how long a Budget is active since each Schedule hit. // Only minutes and hours are accepted, as cron does not work in seconds.
       // If omitted, the budget is always active.
       // This is required if Schedule is set.
       // This regex has an optional 0s at the end since the duration.String() always adds
@@ -258,7 +252,7 @@ spec: # This is not a complete NodePool Spec.
 👎 Less Flexibility: Lacks the flexibility to share a budget across multiple reasons.
 
 #### Pros and Cons for List and Per Reason Definitions
-Some of the Pros and Cons are shared by both Approach A, and Approach B, as they have the same advantages and disadvantages in comparison to Approach C 
+Some of the Pros and Cons are shared by both list and single reason, as they have the same advantages and disadvantages in comparison to Per Reason Controls 
 * 👍👍 Extends Existing API:  No Breaking API Changes, completely backwards compatible
 * 👍 No Nesting Required: Leaves budgets at the top level of the api.
 * 👎 Limited Generalization of Reason Controls: With reason being clearly tied to budgets, and other api logic being driven by disruption reason, we lose the chance to generalize per Reason controls. If we ever decide we need a place per action,  there will be some duplication for reason. 
