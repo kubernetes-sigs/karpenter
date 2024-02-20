@@ -59,6 +59,8 @@ var _ = Describe("Consolidation", func() {
 	var labels = map[string]string{
 		"app": "test",
 	}
+	singleNodeConsolidationTimeout := 5 * time.Minute
+	multiNodeConsolidationTimeout := 1 * time.Minute
 	BeforeEach(func() {
 		nodePool = test.NodePool(v1beta1.NodePool{
 			Spec: v1beta1.NodePoolSpec{
@@ -97,7 +99,15 @@ var _ = Describe("Consolidation", func() {
 				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
 			},
 		})
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{SpotToSpotConsolidation: lo.ToPtr(true)}}))
+		ctx = options.ToContext(ctx,
+			test.Options(
+				test.OptionsFields{
+					FeatureGates:                       test.FeatureGates{SpotToSpotConsolidation: lo.ToPtr(true)},
+					ConsolidationSingleTimeoutDuration: lo.ToPtr(singleNodeConsolidationTimeout),
+					ConsolidationMultiTimeoutDuration:  lo.ToPtr(multiNodeConsolidationTimeout),
+				},
+			),
+		)
 	})
 	Context("Events", func() {
 		It("should not fire an event for ConsolidationDisabled when the NodePool has consolidation set to WhenEmpty", func() {
@@ -3814,7 +3824,7 @@ var _ = Describe("Consolidation", func() {
 			}()
 
 			// advance the clock so that the timeout expires
-			fakeClock.Step(disruption.MultiNodeConsolidationTimeoutDuration)
+			fakeClock.Step(1 * time.Minute)
 
 			// wait for the controller to block on the validation timeout
 			Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
@@ -3905,9 +3915,9 @@ var _ = Describe("Consolidation", func() {
 			}()
 
 			// advance the clock so that the timeout expires for multi-nodeClaim
-			fakeClock.Step(disruption.MultiNodeConsolidationTimeoutDuration)
+			fakeClock.Step(multiNodeConsolidationTimeout)
 			// advance the clock so that the timeout expires for single-nodeClaim
-			fakeClock.Step(disruption.SingleNodeConsolidationTimeoutDuration)
+			fakeClock.Step(singleNodeConsolidationTimeout)
 
 			ExpectTriggerVerifyAction(&wg)
 
