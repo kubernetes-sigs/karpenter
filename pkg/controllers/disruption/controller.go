@@ -299,6 +299,6 @@ func (c *Controller) logInvalidBudgets(ctx context.Context) {
 		}
 	}
 	if buf.Len() > 0 {
-		logging.FromContext(ctx).Errorf("detected disruption budget errors: ", buf.String())
+		logging.FromContext(ctx).Errorf("detected disruption budget errors: %s", buf.String())
 	}
 }
