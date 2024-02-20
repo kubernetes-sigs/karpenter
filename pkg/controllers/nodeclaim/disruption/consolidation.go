@@ -43,6 +43,7 @@ type Consolidation struct {
 //nolint:gocyclo
 func (e *Consolidation) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
 	hasCondition := nodeClaim.StatusConditions().GetCondition(v1beta1.Consolidated) != nil
+	logging.FromContext(ctx).Infof("Consolidate nodeclaim %s %v", nodeClaim.Name, hasCondition)
 
 	if nodePool.Spec.Disruption.ConsolidationPolicy != v1beta1.ConsolidationPolicyWhenUnderutilized {
 		if hasCondition {
@@ -74,6 +75,7 @@ func (e *Consolidation) Reconcile(ctx context.Context, nodePool *v1beta1.NodePoo
 		Status:   v1.ConditionTrue,
 		Severity: apis.ConditionSeverityWarning,
 	})
+	logging.FromContext(ctx).Infof("update nodeclaim %s status", nodeClaim.Name)
 	if !hasCondition {
 		logging.FromContext(ctx).Debugf("marking consolidated")
 		metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
