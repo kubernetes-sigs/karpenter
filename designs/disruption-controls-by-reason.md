@@ -64,7 +64,7 @@ budgets:
   - nodes: 10
     reasons: [Drift]
     schedule: "* * * * *"
-  - nodes: 30 
+  - nodes: 5 
     schedule: "* * * * *" 
 ```
 First, calculate minNodeCountOfActiveBudget. Given there are two budgets for Drift, we select the lower number:
