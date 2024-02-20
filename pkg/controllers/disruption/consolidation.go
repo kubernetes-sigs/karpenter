@@ -26,7 +26,6 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
@@ -86,7 +85,7 @@ func (c *consolidation) markConsolidated() {
 }
 
 // ShouldDisrupt is a predicate used to filter candidates
-func (c *consolidation) ShouldDisrupt(ctx context.Context, cn *Candidate) bool {
+func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
 	// TODO: Remove the check for do-not-consolidate at v1
 	if cn.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey] == "true" {
 		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s annotation exists", v1alpha5.DoNotConsolidateNodeAnnotationKey))...)
@@ -102,28 +101,14 @@ func (c *consolidation) ShouldDisrupt(ctx context.Context, cn *Candidate) bool {
 		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", cn.nodePool.Name))...)
 		return false
 	}
-	if !cn.NodeClaim.StatusConditions().GetCondition(v1beta1.Consolidated).IsTrue() ||
-		c.clock.Now().Before(cn.NodeClaim.StatusConditions().GetCondition(v1beta1.Consolidated).LastTransitionTime.Inner.Add(*cn.nodePool.Spec.Disruption.ConsolidateAfter.Duration)) {
-		return false
+	// Only check when UtilizationThreshold is specified to make it compatible
+	if cn.nodePool.Spec.Disruption.UtilizationThreshold != nil {
+		if !cn.NodeClaim.StatusConditions().GetCondition(v1beta1.Underutilized).IsTrue() ||
+			c.clock.Now().Before(cn.NodeClaim.StatusConditions().GetCondition(v1beta1.Underutilized).LastTransitionTime.Inner.Add(*cn.nodePool.Spec.Disruption.ConsolidateAfter.Duration)) {
+			return false
+		}
 	}
-	logging.FromContext(ctx).Infof("disrupt nodeclaim %v", cn.NodeClaim.Name, cn.NodeClaim.StatusConditions().GetCondition(v1beta1.Consolidated).LastTransitionTime.Inner)
-	// Check the node utilization if the utilizationThreshold is specified, the node can be disruptted only if the utilization is below the threshold.
-	threshold := cn.nodePool.Spec.Disruption.UtilizationThreshold
-	if threshold != nil {
-		logging.FromContext(ctx).Infof("disrupt nodeclaim %v", cn.NodeClaim.Name, *threshold)
-		cpu, err := CalculateUtilizationOfResource(cn.Node, v1.ResourceCPU, cn.runningPods)
-		if err != nil {
-			return false
-		}
-		memory, err := CalculateUtilizationOfResource(cn.Node, v1.ResourceMemory, cn.runningPods)
-		if err != nil {
-			return false
-		}
-		if cpu > float64(*threshold/100) || memory > float64(*threshold/100) {
-			return false
-		}
-		logging.FromContext(ctx).Infof("disrupt nodeclaim %v %v", memory, cpu)
-	}
+
 	return true
 }
 

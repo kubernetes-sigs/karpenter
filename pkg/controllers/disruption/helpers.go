@@ -28,7 +28,6 @@ import (
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
@@ -315,24 +314,4 @@ func clamp(min, val, max float64) float64 {
 		return max
 	}
 	return val
-}
-
-// CalculateUtilizationOfResource calculates utilization of a given resource for a node.
-func CalculateUtilizationOfResource(node *v1.Node, resourceName v1.ResourceName, pods []*v1.Pod) (float64, error) {
-	allocatable, found := node.Status.Allocatable[resourceName]
-	if !found {
-		return 0, fmt.Errorf("failed to get %v from %s", resourceName, node.Name)
-	}
-	if allocatable.MilliValue() == 0 {
-		return 0, fmt.Errorf("%v is 0 at %s", resourceName, node.Name)
-	}
-	podsRequest := resource.MustParse("0")
-	for _, pod := range pods {
-		for _, container := range pod.Spec.Containers {
-			if resourceValue, found := container.Resources.Requests[resourceName]; found {
-				podsRequest.Add(resourceValue)
-			}
-		}
-	}
-	return float64(podsRequest.MilliValue()) / float64(allocatable.MilliValue()), nil
 }

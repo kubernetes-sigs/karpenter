@@ -58,13 +58,13 @@ var LivingConditions = []apis.ConditionType{
 }
 
 var (
-	Launched     apis.ConditionType = "Launched"
-	Registered   apis.ConditionType = "Registered"
-	Initialized  apis.ConditionType = "Initialized"
-	Empty        apis.ConditionType = "Empty"
-	Consolidated apis.ConditionType = "Consolidated"
-	Drifted      apis.ConditionType = "Drifted"
-	Expired      apis.ConditionType = "Expired"
+	Launched      apis.ConditionType = "Launched"
+	Registered    apis.ConditionType = "Registered"
+	Initialized   apis.ConditionType = "Initialized"
+	Empty         apis.ConditionType = "Empty"
+	Underutilized apis.ConditionType = "Underutilized"
+	Drifted       apis.ConditionType = "Drifted"
+	Expired       apis.ConditionType = "Expired"
 )
 
 func (in *NodeClaim) GetConditions() apis.Conditions {
