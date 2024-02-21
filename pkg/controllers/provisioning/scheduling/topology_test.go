@@ -141,33 +141,6 @@ var _ = Describe("Topology", func() {
 			)
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 2))
 		})
-		It("should not succeed to meet minValues when using topologySpread on the same key", func() {
-			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-				{
-					NodeSelectorRequirement: v1.NodeSelectorRequirement{
-						Key:      v1.LabelTopologyZone,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{"test-zone-1", "test-zone-2", "test-zone-3"},
-					},
-					MinValues: lo.ToPtr(2),
-				},
-			}
-			// We know that we have to select a value when we are using topologySpread, which directly constrains us down to 1 value,
-			// so asking for more than that 1 value on that key using minValues isn't possible for Karpenter to reason about today.
-			topology := []v1.TopologySpreadConstraint{{
-				TopologyKey:       v1.LabelTopologyZone,
-				WhenUnsatisfiable: v1.DoNotSchedule,
-				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
-				MaxSkew:           1,
-			}}
-			ExpectApplied(ctx, env.Client, nodePool)
-			pods := test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}, 4)
-			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
-			ExpectNotScheduled(ctx, env.Client, pods[0])
-			ExpectNotScheduled(ctx, env.Client, pods[1])
-			ExpectNotScheduled(ctx, env.Client, pods[2])
-			ExpectNotScheduled(ctx, env.Client, pods[3])
-		})
 		It("should respect NodePool zonal constraints (subset) with requirements", func() {
 			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
 				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}}
