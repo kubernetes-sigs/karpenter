@@ -244,9 +244,11 @@ var _ = Describe("Simulate Scheduling", func() {
 			},
 		})
 		// Set a partition so that each node pool fits one node
-		nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirement{
-			Key:      "test-partition",
-			Operator: v1.NodeSelectorOpExists,
+		nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1beta1.NodeSelectorRequirementWithMinValues{
+			NodeSelectorRequirement: v1.NodeSelectorRequirement{
+				Key:      "test-partition",
+				Operator: v1.NodeSelectorOpExists,
+			},
 		})
 		nodePool.Spec.Disruption.ExpireAfter = v1beta1.NillableDuration{Duration: lo.ToPtr(5 * time.Minute)}
 		nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: nil}

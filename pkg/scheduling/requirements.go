@@ -43,11 +43,20 @@ func NewRequirements(requirements ...*Requirement) Requirements {
 	return r
 }
 
+// NewRequirements constructs requirements from NodeSelectorRequirementWithMinValues
+func NewNodeSelectorRequirementsWithMinValues(requirements ...v1beta1.NodeSelectorRequirementWithMinValues) Requirements {
+	r := NewRequirements()
+	for _, requirement := range requirements {
+		r.Add(NewRequirementWithFlexibility(requirement.Key, requirement.Operator, requirement.MinValues, requirement.Values...))
+	}
+	return r
+}
+
 // NewRequirements constructs requirements from NodeSelectorRequirements
 func NewNodeSelectorRequirements(requirements ...v1.NodeSelectorRequirement) Requirements {
 	r := NewRequirements()
 	for _, requirement := range requirements {
-		r.Add(NewRequirement(requirement.Key, requirement.Operator, requirement.Values...))
+		r.Add(NewRequirementWithFlexibility(requirement.Key, requirement.Operator, nil, requirement.Values...))
 	}
 	return r
 }
@@ -108,8 +117,8 @@ func HasPreferredNodeAffinity(p *v1.Pod) bool {
 	return p.Spec.Affinity != nil && p.Spec.Affinity.NodeAffinity != nil && len(p.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution) > 0
 }
 
-func (r Requirements) NodeSelectorRequirements() []v1.NodeSelectorRequirement {
-	return lo.Map(lo.Values(r), func(req *Requirement, _ int) v1.NodeSelectorRequirement {
+func (r Requirements) NodeSelectorRequirements() []v1beta1.NodeSelectorRequirementWithMinValues {
+	return lo.Map(lo.Values(r), func(req *Requirement, _ int) v1beta1.NodeSelectorRequirementWithMinValues {
 		return req.NodeSelectorRequirement()
 	})
 }
@@ -300,6 +309,15 @@ func (r Requirements) Labels() map[string]string {
 		}
 	}
 	return labels
+}
+
+func (r Requirements) HasMinValues() bool {
+	for _, req := range r {
+		if req.MinValues != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func (r Requirements) String() string {
