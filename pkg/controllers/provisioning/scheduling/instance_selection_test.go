@@ -75,7 +75,7 @@ var _ = Describe("Instance Type Selection", func() {
 		cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 		instanceTypeMap = getInstanceTypeMap(cloudProvider.InstanceTypes)
 		minPrice = getMinPrice(cloudProvider.InstanceTypes)
-
+		scheduling.MaxInstanceTypes = 100
 		// add some randomness to instance type ordering to ensure we sort everywhere we need to
 		rand.Shuffle(len(cloudProvider.InstanceTypes), func(i, j int) {
 			cloudProvider.InstanceTypes[i], cloudProvider.InstanceTypes[j] = cloudProvider.InstanceTypes[j], cloudProvider.InstanceTypes[i]
