@@ -127,7 +127,7 @@ func areStaticFieldsDrifted(nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeC
 }
 
 func areRequirementsDrifted(nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) cloudprovider.DriftReason {
-	nodepoolReq := scheduling.NewNodeSelectorRequirements(nodePool.Spec.Template.Spec.Requirements...)
+	nodepoolReq := scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...)
 	nodeClaimReq := scheduling.NewLabelRequirements(nodeClaim.Labels)
 
 	// Every nodepool requirement is compatible with the NodeClaim label set

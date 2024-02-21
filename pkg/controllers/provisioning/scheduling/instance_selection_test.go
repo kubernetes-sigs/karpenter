@@ -23,6 +23,7 @@ import (
 	"github.com/mitchellh/hashstructure/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -30,6 +31,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	scheduler "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
@@ -49,16 +52,20 @@ var _ = Describe("Instance Type Selection", func() {
 			Spec: v1beta1.NodePoolSpec{
 				Template: v1beta1.NodeClaimTemplate{
 					Spec: v1beta1.NodeClaimSpec{
-						Requirements: []v1.NodeSelectorRequirement{
+						Requirements: []v1beta1.NodeSelectorRequirementWithMinValues{
 							{
-								Key:      v1beta1.CapacityTypeLabelKey,
-								Operator: v1.NodeSelectorOpIn,
-								Values:   []string{v1beta1.CapacityTypeSpot, v1beta1.CapacityTypeOnDemand},
+								NodeSelectorRequirement: v1.NodeSelectorRequirement{
+									Key:      v1beta1.CapacityTypeLabelKey,
+									Operator: v1.NodeSelectorOpIn,
+									Values:   []string{v1beta1.CapacityTypeSpot, v1beta1.CapacityTypeOnDemand},
+								},
 							},
 							{
-								Key:      v1.LabelArchStable,
-								Operator: v1.NodeSelectorOpIn,
-								Values:   []string{v1beta1.ArchitectureArm64, v1beta1.ArchitectureAmd64},
+								NodeSelectorRequirement: v1.NodeSelectorRequirement{
+									Key:      v1.LabelArchStable,
+									Operator: v1.NodeSelectorOpIn,
+									Values:   []string{v1beta1.ArchitectureArm64, v1beta1.ArchitectureAmd64},
+								},
 							},
 						},
 					},
@@ -114,11 +121,13 @@ var _ = Describe("Instance Type Selection", func() {
 		ExpectInstancesWithLabel(supportedInstanceTypes(cloudProvider.CreateCalls[0]), v1.LabelArchStable, v1beta1.ArchitectureArm64)
 	})
 	It("should schedule on one of the cheapest instances (prov arch = amd64)", func() {
-		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+		nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
 			{
-				Key:      v1.LabelArchStable,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{v1beta1.ArchitectureAmd64},
+				NodeSelectorRequirement: v1.NodeSelectorRequirement{
+					Key:      v1.LabelArchStable,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{v1beta1.ArchitectureAmd64},
+				},
 			},
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
@@ -129,11 +138,13 @@ var _ = Describe("Instance Type Selection", func() {
 		ExpectInstancesWithLabel(supportedInstanceTypes(cloudProvider.CreateCalls[0]), v1.LabelArchStable, v1beta1.ArchitectureAmd64)
 	})
 	It("should schedule on one of the cheapest instances (prov arch = arm64)", func() {
-		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+		nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
 			{
-				Key:      v1.LabelArchStable,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{v1beta1.ArchitectureArm64},
+				NodeSelectorRequirement: v1.NodeSelectorRequirement{
+					Key:      v1.LabelArchStable,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{v1beta1.ArchitectureArm64},
+				},
 			},
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
@@ -144,11 +155,13 @@ var _ = Describe("Instance Type Selection", func() {
 		ExpectInstancesWithLabel(supportedInstanceTypes(cloudProvider.CreateCalls[0]), v1.LabelArchStable, v1beta1.ArchitectureArm64)
 	})
 	It("should schedule on one of the cheapest instances (prov os = windows)", func() {
-		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+		nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
 			{
-				Key:      v1.LabelOSStable,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{string(v1.Windows)},
+				NodeSelectorRequirement: v1.NodeSelectorRequirement{
+					Key:      v1.LabelOSStable,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{string(v1.Windows)},
+				},
 			},
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
@@ -172,11 +185,13 @@ var _ = Describe("Instance Type Selection", func() {
 		ExpectInstancesWithLabel(supportedInstanceTypes(cloudProvider.CreateCalls[0]), v1.LabelOSStable, string(v1.Windows))
 	})
 	It("should schedule on one of the cheapest instances (prov os = windows)", func() {
-		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+		nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
 			{
-				Key:      v1.LabelOSStable,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{string(v1.Windows)},
+				NodeSelectorRequirement: v1.NodeSelectorRequirement{
+					Key:      v1.LabelOSStable,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{string(v1.Windows)},
+				},
 			},
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
@@ -213,11 +228,13 @@ var _ = Describe("Instance Type Selection", func() {
 		ExpectInstancesWithLabel(supportedInstanceTypes(cloudProvider.CreateCalls[0]), v1.LabelOSStable, string(v1.Linux))
 	})
 	It("should schedule on one of the cheapest instances (prov zone = test-zone-2)", func() {
-		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+		nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
 			{
-				Key:      v1.LabelTopologyZone,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{"test-zone-2"},
+				NodeSelectorRequirement: v1.NodeSelectorRequirement{
+					Key:      v1.LabelTopologyZone,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{"test-zone-2"},
+				},
 			},
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
@@ -241,11 +258,13 @@ var _ = Describe("Instance Type Selection", func() {
 		ExpectInstancesWithLabel(supportedInstanceTypes(cloudProvider.CreateCalls[0]), v1.LabelTopologyZone, "test-zone-2")
 	})
 	It("should schedule on one of the cheapest instances (prov ct = spot)", func() {
-		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+		nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
 			{
-				Key:      v1beta1.CapacityTypeLabelKey,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{v1beta1.CapacityTypeSpot},
+				NodeSelectorRequirement: v1.NodeSelectorRequirement{
+					Key:      v1beta1.CapacityTypeLabelKey,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{v1beta1.CapacityTypeSpot},
+				},
 			},
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
@@ -269,16 +288,20 @@ var _ = Describe("Instance Type Selection", func() {
 		ExpectInstancesWithLabel(supportedInstanceTypes(cloudProvider.CreateCalls[0]), v1beta1.CapacityTypeLabelKey, v1beta1.CapacityTypeSpot)
 	})
 	It("should schedule on one of the cheapest instances (prov ct = ondemand, prov zone = test-zone-1)", func() {
-		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+		nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
 			{
-				Key:      v1beta1.CapacityTypeLabelKey,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{v1beta1.CapacityTypeOnDemand},
+				NodeSelectorRequirement: v1.NodeSelectorRequirement{
+					Key:      v1beta1.CapacityTypeLabelKey,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{v1beta1.CapacityTypeOnDemand},
+				},
 			},
 			{
-				Key:      v1.LabelTopologyZone,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{"test-zone-1"},
+				NodeSelectorRequirement: v1.NodeSelectorRequirement{
+					Key:      v1.LabelTopologyZone,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{"test-zone-1"},
+				},
 			},
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
@@ -308,11 +331,13 @@ var _ = Describe("Instance Type Selection", func() {
 		ExpectInstancesWithOffering(supportedInstanceTypes(cloudProvider.CreateCalls[0]), v1beta1.CapacityTypeSpot, "test-zone-1")
 	})
 	It("should schedule on one of the cheapest instances (prov ct = spot, pod zone = test-zone-2)", func() {
-		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+		nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
 			{
-				Key:      v1beta1.CapacityTypeLabelKey,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{v1beta1.CapacityTypeSpot},
+				NodeSelectorRequirement: v1.NodeSelectorRequirement{
+					Key:      v1beta1.CapacityTypeLabelKey,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{v1beta1.CapacityTypeSpot},
+				},
 			},
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
@@ -328,26 +353,34 @@ var _ = Describe("Instance Type Selection", func() {
 		ExpectInstancesWithOffering(supportedInstanceTypes(cloudProvider.CreateCalls[0]), v1beta1.CapacityTypeSpot, "test-zone-2")
 	})
 	It("should schedule on one of the cheapest instances (prov ct = ondemand/test-zone-1/arm64/windows)", func() {
-		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+		nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
 			{
-				Key:      v1.LabelArchStable,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{v1beta1.ArchitectureArm64},
+				NodeSelectorRequirement: v1.NodeSelectorRequirement{
+					Key:      v1.LabelArchStable,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{v1beta1.ArchitectureArm64},
+				},
 			},
 			{
-				Key:      v1.LabelOSStable,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{string(v1.Windows)},
+				NodeSelectorRequirement: v1.NodeSelectorRequirement{
+					Key:      v1.LabelOSStable,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{string(v1.Windows)},
+				},
 			},
 			{
-				Key:      v1beta1.CapacityTypeLabelKey,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{v1beta1.CapacityTypeOnDemand},
+				NodeSelectorRequirement: v1.NodeSelectorRequirement{
+					Key:      v1beta1.CapacityTypeLabelKey,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{v1beta1.CapacityTypeOnDemand},
+				},
 			},
 			{
-				Key:      v1.LabelTopologyZone,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{"test-zone-1"},
+				NodeSelectorRequirement: v1.NodeSelectorRequirement{
+					Key:      v1.LabelTopologyZone,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{"test-zone-1"},
+				},
 			},
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
@@ -360,16 +393,20 @@ var _ = Describe("Instance Type Selection", func() {
 		ExpectInstancesWithLabel(supportedInstanceTypes(cloudProvider.CreateCalls[0]), v1.LabelArchStable, "arm64")
 	})
 	It("should schedule on one of the cheapest instances (prov = spot/test-zone-2, pod = amd64/linux)", func() {
-		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+		nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
 			{
-				Key:      v1.LabelArchStable,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{v1beta1.ArchitectureAmd64},
+				NodeSelectorRequirement: v1.NodeSelectorRequirement{
+					Key:      v1.LabelArchStable,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{v1beta1.ArchitectureAmd64},
+				},
 			},
 			{
-				Key:      v1.LabelOSStable,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{string(v1.Linux)},
+				NodeSelectorRequirement: v1.NodeSelectorRequirement{
+					Key:      v1.LabelOSStable,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{string(v1.Linux)},
+				},
 			},
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
@@ -485,11 +522,13 @@ var _ = Describe("Instance Type Selection", func() {
 			return true
 		})
 
-		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+		nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
 			{
-				Key:      v1.LabelArchStable,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{v1beta1.ArchitectureArm64},
+				NodeSelectorRequirement: v1.NodeSelectorRequirement{
+					Key:      v1.LabelArchStable,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{v1beta1.ArchitectureArm64},
+				},
 			},
 		}
 		Expect(len(cloudProvider.InstanceTypes)).To(BeNumerically(">", 0))
@@ -589,11 +628,13 @@ var _ = Describe("Instance Type Selection", func() {
 				},
 			}),
 		}
-		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
+		nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
 			{
-				Key:      v1beta1.CapacityTypeLabelKey,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{"on-demand"},
+				NodeSelectorRequirement: v1.NodeSelectorRequirement{
+					Key:      v1beta1.CapacityTypeLabelKey,
+					Operator: v1.NodeSelectorOpIn,
+					Values:   []string{"on-demand"},
+				},
 			},
 		}
 
@@ -602,5 +643,938 @@ var _ = Describe("Instance Type Selection", func() {
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		node := ExpectScheduled(ctx, env.Client, pod)
 		Expect(node.Labels[v1.LabelInstanceTypeStable]).To(Equal("test-instance1"))
+	})
+	Context("MinValues", func() {
+		It("should schedule respecting the minValues from instance-type requirements", func() {
+			var instanceTypes []*cloudprovider.InstanceType
+			// Create fake InstanceTypeOptions where one instances can fit 2 pods and another one can fit only 1 pod.
+			opts1 := fake.InstanceTypeOptions{
+				Name:             "instance-type-1",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("1"),
+					v1.ResourceMemory: resource.MustParse("1Gi"),
+				},
+			}
+			opts1.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        0.52,
+					Available:    true,
+				},
+			}
+			opts2 := fake.InstanceTypeOptions{
+				Name:             "instance-type-2",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("4"),
+					v1.ResourceMemory: resource.MustParse("4Gi"),
+				},
+			}
+			opts2.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        1.0,
+					Available:    true,
+				},
+			}
+			instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1))
+			instanceTypes = append(instanceTypes, fake.NewInstanceType(opts2))
+			cloudProvider.InstanceTypes = instanceTypes
+
+			// Define NodePool that has minValues on instance-type requirement.
+			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+				{
+					NodeSelectorRequirement: v1.NodeSelectorRequirement{
+						Key:      v1.LabelInstanceTypeStable,
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{"instance-type-1", "instance-type-2"},
+					},
+					MinValues: lo.ToPtr(2),
+				},
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// 2 pods are created with resources such that both fit together only in one of the 2 InstanceTypes created above.
+			// Both of these should schedule on a instance-type-2 without the minValues requirement being specified.
+			pod1 := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("0.9"),
+					v1.ResourceMemory: resource.MustParse("0.9Gi")},
+				},
+			})
+			pod2 := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("0.9"),
+					v1.ResourceMemory: resource.MustParse("0.9Gi")},
+				},
+			})
+
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod1, pod2)
+			node1 := ExpectScheduled(ctx, env.Client, pod1)
+			node2 := ExpectScheduled(ctx, env.Client, pod2)
+
+			// This ensures that the pods are scheduled in 2 different nodes.
+			Expect(node1.Name).ToNot(Equal(node2.Name))
+
+			// Ensures that NodeClaims are created with 2 instanceTypes
+			Expect(len(supportedInstanceTypes(cloudProvider.CreateCalls[0]))).To(BeNumerically(">=", 2))
+		})
+		It("should schedule respecting the minValues in Gt operator", func() {
+			// custom key that will help us with numerical values to be used for Gt operator
+			instanceGeneration := "karpenter/numerical-value"
+			var instanceTypes []*cloudprovider.InstanceType
+			opts1 := fake.InstanceTypeOptions{
+				Name:             "instance-type-1",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("1"),
+					v1.ResourceMemory: resource.MustParse("1Gi"),
+				},
+			}
+			opts1.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        0.52,
+					Available:    true,
+				},
+			}
+			opts2 := fake.InstanceTypeOptions{
+				Name:             "instance-type-2",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("1"),
+					v1.ResourceMemory: resource.MustParse("1Gi"),
+				},
+			}
+			opts2.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        1.0,
+					Available:    true,
+				},
+			}
+			opts3 := fake.InstanceTypeOptions{
+				Name:             "instance-type-3",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("4"),
+					v1.ResourceMemory: resource.MustParse("4Gi"),
+				},
+			}
+			opts3.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        1.2,
+					Available:    true,
+				},
+			}
+
+			instanceTypes = append(instanceTypes, fake.NewInstanceTypeWithCustomRequirement(opts1, scheduler.NewRequirement(instanceGeneration, v1.NodeSelectorOpIn, "2")))
+			instanceTypes = append(instanceTypes, fake.NewInstanceTypeWithCustomRequirement(opts2, scheduler.NewRequirement(instanceGeneration, v1.NodeSelectorOpIn, "3")))
+			instanceTypes = append(instanceTypes, fake.NewInstanceTypeWithCustomRequirement(opts3, scheduler.NewRequirement(instanceGeneration, v1.NodeSelectorOpIn, "4")))
+			cloudProvider.InstanceTypes = instanceTypes
+
+			// Define NodePool that has minValues on instance generation using Gt operator in requirement.
+			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+				{
+					NodeSelectorRequirement: v1.NodeSelectorRequirement{
+						Key:      instanceGeneration,
+						Operator: v1.NodeSelectorOpGt,
+						Values:   []string{"2"},
+					},
+					MinValues: lo.ToPtr(2),
+				},
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// 2 pods are created with resources such that both fit together only in one of the 2 InstanceTypes created above.
+			// Both of these should schedule on a instance-type-3 without the minValues requirement being specified.
+			pod1 := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("0.9"),
+					v1.ResourceMemory: resource.MustParse("0.9Gi")},
+				},
+			})
+			pod2 := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("0.9"),
+					v1.ResourceMemory: resource.MustParse("0.9Gi")},
+				},
+			})
+
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod1, pod2)
+			node1 := ExpectScheduled(ctx, env.Client, pod1)
+			node2 := ExpectScheduled(ctx, env.Client, pod2)
+
+			// This ensures that the pods are scheduled in 2 different nodes.
+			Expect(node1.Name).ToNot(Equal(node2.Name))
+
+			// Ensures that NodeClaims are created with 2 instanceTypes
+			Expect(len(supportedInstanceTypes(cloudProvider.CreateCalls[0]))).To(BeNumerically(">=", 2))
+		})
+		It("scheduler should fail if the minValues in Gt operator is not satisfied", func() {
+			// custom key that will help us with numerical values to be used for Gt operator
+			instanceGeneration := "karpenter/numerical-value"
+			var instanceTypes []*cloudprovider.InstanceType
+			opts1 := fake.InstanceTypeOptions{
+				Name:             "instance-type-1",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("1"),
+					v1.ResourceMemory: resource.MustParse("1Gi"),
+				},
+			}
+			opts1.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        0.52,
+					Available:    true,
+				},
+			}
+			opts2 := fake.InstanceTypeOptions{
+				Name:             "instance-type-2",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("4"),
+					v1.ResourceMemory: resource.MustParse("4Gi"),
+				},
+			}
+			opts2.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        1.0,
+					Available:    true,
+				},
+			}
+			instanceTypes = append(instanceTypes, fake.NewInstanceTypeWithCustomRequirement(opts1, scheduler.NewRequirement(instanceGeneration, v1.NodeSelectorOpIn, "2")))
+			instanceTypes = append(instanceTypes, fake.NewInstanceTypeWithCustomRequirement(opts2, scheduler.NewRequirement(instanceGeneration, v1.NodeSelectorOpIn, "3")))
+			cloudProvider.InstanceTypes = instanceTypes
+
+			// Define NodePool that has minValues on instance generation using Gt operator in requirement.
+			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+				{
+					NodeSelectorRequirement: v1.NodeSelectorRequirement{
+						Key:      instanceGeneration,
+						Operator: v1.NodeSelectorOpGt,
+						Values:   []string{"2"},
+					},
+					MinValues: lo.ToPtr(2),
+				},
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// Both of these should schedule on a instance-type-2 without the minValues requirement being specified.
+			pod1 := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("0.9"),
+					v1.ResourceMemory: resource.MustParse("0.9Gi")},
+				},
+			})
+			pod2 := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("0.9"),
+					v1.ResourceMemory: resource.MustParse("0.9Gi")},
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, pod1)
+			ExpectApplied(ctx, env.Client, pod2)
+			results, _ := prov.Schedule(ctx)
+			for _, v := range results.PodErrors {
+				Expect(v.Error()).To(ContainSubstring("minValues requirement is not met for karpenter/numerical-value"))
+			}
+			ExpectNotScheduled(ctx, env.Client, pod1)
+			ExpectNotScheduled(ctx, env.Client, pod2)
+		})
+		It("should schedule respecting the minValues in Lt operator", func() {
+			// custom key that will help us with numerical values to be used for Lt operator
+			instanceGeneration := "karpenter/numerical-value"
+			var instanceTypes []*cloudprovider.InstanceType
+			opts1 := fake.InstanceTypeOptions{
+				Name:             "instance-type-1",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("1"),
+					v1.ResourceMemory: resource.MustParse("1Gi"),
+				},
+			}
+			opts1.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        0.52,
+					Available:    true,
+				},
+			}
+			opts2 := fake.InstanceTypeOptions{
+				Name:             "instance-type-2",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("2"),
+					v1.ResourceMemory: resource.MustParse("2Gi"),
+				},
+			}
+			opts2.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        1.0,
+					Available:    true,
+				},
+			}
+			opts3 := fake.InstanceTypeOptions{
+				Name:             "instance-type-3",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("4"),
+					v1.ResourceMemory: resource.MustParse("4Gi"),
+				},
+			}
+			opts3.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        1.2,
+					Available:    true,
+				},
+			}
+			instanceTypes = append(instanceTypes, fake.NewInstanceTypeWithCustomRequirement(opts1, scheduler.NewRequirement(instanceGeneration, v1.NodeSelectorOpIn, "2")))
+			instanceTypes = append(instanceTypes, fake.NewInstanceTypeWithCustomRequirement(opts2, scheduler.NewRequirement(instanceGeneration, v1.NodeSelectorOpIn, "3")))
+			instanceTypes = append(instanceTypes, fake.NewInstanceTypeWithCustomRequirement(opts3, scheduler.NewRequirement(instanceGeneration, v1.NodeSelectorOpIn, "4")))
+			cloudProvider.InstanceTypes = instanceTypes
+
+			// Define NodePool that has minValues on instance generation using Lt operator in requirement.
+			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+				{
+					NodeSelectorRequirement: v1.NodeSelectorRequirement{
+						Key:      instanceGeneration,
+						Operator: v1.NodeSelectorOpLt,
+						Values:   []string{"4"},
+					},
+					MinValues: lo.ToPtr(2),
+				},
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// 2 pods are created with resources such that both fit together only in one of the 2 InstanceTypes created above.
+			// Both of these should schedule on a instance-type-2 without the minValues requirement being specified.
+			pod1 := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("0.9"),
+					v1.ResourceMemory: resource.MustParse("0.9Gi")},
+				},
+			})
+			pod2 := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("0.9"),
+					v1.ResourceMemory: resource.MustParse("0.9Gi")},
+				},
+			})
+
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod1, pod2)
+			node1 := ExpectScheduled(ctx, env.Client, pod1)
+			node2 := ExpectScheduled(ctx, env.Client, pod2)
+
+			// This ensures that the pods are scheduled in 2 different nodes.
+			Expect(node1.Name).ToNot(Equal(node2.Name))
+
+			// Ensures that NodeClaims are created with 2 instanceTypes
+			Expect(len(supportedInstanceTypes(cloudProvider.CreateCalls[0]))).To(BeNumerically(">=", 2))
+		})
+		It("scheduler should fail if the minValues in Lt operator is not satisfied", func() {
+			// custom key that will help us with numerical values to be used for Lt operator
+			instanceGeneration := "karpenter/numerical-value"
+			var instanceTypes []*cloudprovider.InstanceType
+			opts1 := fake.InstanceTypeOptions{
+				Name:             "instance-type-1",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("2"),
+					v1.ResourceMemory: resource.MustParse("2Gi"),
+				},
+			}
+			opts1.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        0.52,
+					Available:    true,
+				},
+			}
+			opts2 := fake.InstanceTypeOptions{
+				Name:             "instance-type-2",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("4"),
+					v1.ResourceMemory: resource.MustParse("4Gi"),
+				},
+			}
+			opts2.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        1.2,
+					Available:    true,
+				},
+			}
+			instanceTypes = append(instanceTypes, fake.NewInstanceTypeWithCustomRequirement(opts1, scheduler.NewRequirement(instanceGeneration, v1.NodeSelectorOpIn, "2")))
+			instanceTypes = append(instanceTypes, fake.NewInstanceTypeWithCustomRequirement(opts2, scheduler.NewRequirement(instanceGeneration, v1.NodeSelectorOpIn, "4")))
+			cloudProvider.InstanceTypes = instanceTypes
+
+			// Define NodePool that has minValues on instance generation using Lt operator in requirement.
+			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+				{
+					NodeSelectorRequirement: v1.NodeSelectorRequirement{
+						Key:      instanceGeneration,
+						Operator: v1.NodeSelectorOpLt,
+						Values:   []string{"4"},
+					},
+					MinValues: lo.ToPtr(2),
+				},
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// Both of these should schedule on a instance-type-1 without the minValues requirement being specified.
+			pod1 := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("0.9"),
+					v1.ResourceMemory: resource.MustParse("0.9Gi")},
+				},
+			})
+			pod2 := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("0.9"),
+					v1.ResourceMemory: resource.MustParse("0.9Gi")},
+				},
+			})
+
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod1, pod2)
+			ExpectNotScheduled(ctx, env.Client, pod1)
+			ExpectNotScheduled(ctx, env.Client, pod2)
+		})
+		It("should schedule considering the max of the minValues of In and NotIn operators in the instance-type requirements", func() {
+			var instanceTypes []*cloudprovider.InstanceType
+			opts1 := fake.InstanceTypeOptions{
+				Name:             "instance-type-1",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("1"),
+					v1.ResourceMemory: resource.MustParse("1Gi"),
+				},
+			}
+			opts1.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        0.52,
+					Available:    true,
+				},
+			}
+			opts2 := fake.InstanceTypeOptions{
+				Name:             "instance-type-2",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("2"),
+					v1.ResourceMemory: resource.MustParse("2Gi"),
+				},
+			}
+			opts2.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        1.0,
+					Available:    true,
+				},
+			}
+			opts3 := fake.InstanceTypeOptions{
+				Name:             "instance-type-3",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("4"),
+					v1.ResourceMemory: resource.MustParse("4Gi"),
+				},
+			}
+			opts3.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        1.2,
+					Available:    true,
+				},
+			}
+			instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1))
+			instanceTypes = append(instanceTypes, fake.NewInstanceType(opts2))
+			instanceTypes = append(instanceTypes, fake.NewInstanceType(opts3))
+			cloudProvider.InstanceTypes = instanceTypes
+
+			// Define NodePool that has minValues on both In and NotIn operators for instance-type requirement.
+			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+				{
+					NodeSelectorRequirement: v1.NodeSelectorRequirement{
+						Key:      v1.LabelInstanceTypeStable,
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{"instance-type-1", "instance-type-2", "instance-type-3"},
+					},
+					MinValues: lo.ToPtr(1),
+				},
+				{
+					NodeSelectorRequirement: v1.NodeSelectorRequirement{
+						Key:      v1.LabelInstanceTypeStable,
+						Operator: v1.NodeSelectorOpNotIn,
+						Values:   []string{"instance-type-3"},
+					},
+					MinValues: lo.ToPtr(2),
+				},
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// Both of these should schedule on a instance-type-2 without the minValues requirement being specified.
+			pod1 := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("0.9"),
+					v1.ResourceMemory: resource.MustParse("0.9Gi")},
+				},
+			})
+			pod2 := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("0.9"),
+					v1.ResourceMemory: resource.MustParse("0.9Gi")},
+				},
+			})
+
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod1, pod2)
+			node1 := ExpectScheduled(ctx, env.Client, pod1)
+			node2 := ExpectScheduled(ctx, env.Client, pod2)
+
+			// This ensures that the pods are scheduled in 2 different nodes.
+			Expect(node1.Name).ToNot(Equal(node2.Name))
+
+			// Ensures that NodeClaims are created with 2 instanceTypes which is the max of both the minValues of operators.
+			Expect(len(supportedInstanceTypes(cloudProvider.CreateCalls[0]))).To(BeNumerically(">=", 2))
+		})
+		It("should schedule considering the max of the minValues of Gt and Lt operators.", func() {
+			// custom key that will help us with numerical values to be used for Gt operator
+			instanceGeneration := "karpenter/numerical-value"
+			var instanceTypes []*cloudprovider.InstanceType
+			opts1 := fake.InstanceTypeOptions{
+				Name:             "instance-type-1",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("1"),
+					v1.ResourceMemory: resource.MustParse("1Gi"),
+				},
+			}
+			opts1.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        0.52,
+					Available:    true,
+				},
+			}
+			opts2 := fake.InstanceTypeOptions{
+				Name:             "instance-type-2",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("1"),
+					v1.ResourceMemory: resource.MustParse("1Gi"),
+				},
+			}
+			opts2.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        1.0,
+					Available:    true,
+				},
+			}
+			opts3 := fake.InstanceTypeOptions{
+				Name:             "instance-type-3",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("4"),
+					v1.ResourceMemory: resource.MustParse("4Gi"),
+				},
+			}
+			opts3.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        1.2,
+					Available:    true,
+				},
+			}
+			opts4 := fake.InstanceTypeOptions{
+				Name:             "instance-type-4",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("4"),
+					v1.ResourceMemory: resource.MustParse("4Gi"),
+				},
+			}
+			opts4.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        1.2,
+					Available:    true,
+				},
+			}
+			instanceTypes = append(instanceTypes, fake.NewInstanceTypeWithCustomRequirement(opts1, scheduler.NewRequirement(instanceGeneration, v1.NodeSelectorOpIn, "2")))
+			instanceTypes = append(instanceTypes, fake.NewInstanceTypeWithCustomRequirement(opts2, scheduler.NewRequirement(instanceGeneration, v1.NodeSelectorOpIn, "3")))
+			instanceTypes = append(instanceTypes, fake.NewInstanceTypeWithCustomRequirement(opts3, scheduler.NewRequirement(instanceGeneration, v1.NodeSelectorOpIn, "4")))
+			instanceTypes = append(instanceTypes, fake.NewInstanceTypeWithCustomRequirement(opts3, scheduler.NewRequirement(instanceGeneration, v1.NodeSelectorOpIn, "5")))
+			cloudProvider.InstanceTypes = instanceTypes
+
+			// Define NodePool that has minValues on instance generation using Gt operator in requirement.
+			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+				{
+					NodeSelectorRequirement: v1.NodeSelectorRequirement{
+						Key:      instanceGeneration,
+						Operator: v1.NodeSelectorOpGt,
+						Values:   []string{"2"},
+					},
+					MinValues: lo.ToPtr(1),
+				},
+				{
+					NodeSelectorRequirement: v1.NodeSelectorRequirement{
+						Key:      instanceGeneration,
+						Operator: v1.NodeSelectorOpLt,
+						Values:   []string{"5"},
+					},
+					MinValues: lo.ToPtr(2),
+				},
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// Both of these should schedule on a instance-type-3 without the minValues requirement being specified.
+			pod1 := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("0.9"),
+					v1.ResourceMemory: resource.MustParse("0.9Gi")},
+				},
+			})
+			pod2 := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("0.9"),
+					v1.ResourceMemory: resource.MustParse("0.9Gi")},
+				},
+			})
+
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod1, pod2)
+			node1 := ExpectScheduled(ctx, env.Client, pod1)
+			node2 := ExpectScheduled(ctx, env.Client, pod2)
+
+			// This ensures that the pods are scheduled in 2 different nodes.
+			Expect(node1.Name).ToNot(Equal(node2.Name))
+
+			// Ensures that NodeClaims are created with 2 instanceTypes
+			Expect(len(supportedInstanceTypes(cloudProvider.CreateCalls[0]))).To(BeNumerically(">=", 2))
+		})
+		It("schedule should fail if minimum number of InstanceTypes is not met as per the minValues in the requirement", func() {
+			// Construct InstanceTypeOptions
+			var instanceTypes []*cloudprovider.InstanceType
+			for i, instanceType := range cloudProvider.InstanceTypes {
+				if i < 10 {
+					instanceTypes = append(instanceTypes, instanceType)
+				}
+			}
+			cloudProvider.InstanceTypes = instanceTypes
+
+			// Define NodePool that has minValues on instance-type requirement such that it is more than
+			// the number of instanceTypes that the scheduler has from the requirement.
+			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+				{
+					NodeSelectorRequirement: v1.NodeSelectorRequirement{
+						Key:      v1.LabelInstanceTypeStable,
+						Operator: v1.NodeSelectorOpExists,
+					},
+					MinValues: lo.ToPtr(11),
+				},
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+			pod := test.UnschedulablePod()
+
+			// Pods are not scheduled since the requirements are not met
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
+		})
+		It("schedule should fail if minimum number of InstanceTypes is not met as per the minValues in the requirement after truncation", func() {
+			var instanceTypes []*cloudprovider.InstanceType
+			// Create fake InstanceTypeOptions where one instances can fit 2 pods and another one can fit only 1 pod.
+			opts1 := fake.InstanceTypeOptions{
+				Name:             "instance-type-1",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("1"),
+					v1.ResourceMemory: resource.MustParse("1Gi"),
+				},
+			}
+			opts1.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        0.52,
+					Available:    true,
+				},
+			}
+			opts2 := fake.InstanceTypeOptions{
+				Name:             "instance-type-2",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("4"),
+					v1.ResourceMemory: resource.MustParse("4Gi"),
+				},
+			}
+			opts2.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        1.0,
+					Available:    true,
+				},
+			}
+			instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1))
+			instanceTypes = append(instanceTypes, fake.NewInstanceType(opts2))
+			// We have the required InstanceTypes that meet the minValues requirement.
+			cloudProvider.InstanceTypes = instanceTypes
+			// The truncation is changed from the default 100 to 1 for the ease of testing.
+			// This will truncate the 2 InstanceTypes to 1 resulting in breaking the minValue requirement and hence should fail the scheduling.
+			scheduling.MaxInstanceTypes = 1
+
+			// Define NodePool that has minValues on instance-type requirement.
+			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+				{
+					NodeSelectorRequirement: v1.NodeSelectorRequirement{
+						Key:      v1.LabelInstanceTypeStable,
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{"instance-type-1", "instance-type-2"},
+					},
+					MinValues: lo.ToPtr(2),
+				},
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// 2 pods are created with resources such that both fit together only in one of the 2 InstanceTypes created above.
+			// Both of these should schedule on a instance-type-2 without the minValues requirement being specified.
+			pod1 := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("0.9"),
+					v1.ResourceMemory: resource.MustParse("0.9Gi")},
+				},
+			})
+			pod2 := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("0.9"),
+					v1.ResourceMemory: resource.MustParse("0.9Gi")},
+				},
+			})
+			// Pods are not scheduled since the requirements are not met
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod1, pod2)
+			ExpectNotScheduled(ctx, env.Client, pod1)
+			ExpectNotScheduled(ctx, env.Client, pod2)
+		})
+		It("should schedule and pick the max of minValues of InstanceTypes if multiple operators are used for the same requirement.", func() {
+			// Create fake InstanceTypeOptions where one instances can fit 2 pods and another one can fit only 1 pod.
+			var instanceTypes []*cloudprovider.InstanceType
+			opts1 := fake.InstanceTypeOptions{
+				Name:             "instance-type-1",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("1"),
+					v1.ResourceMemory: resource.MustParse("1Gi"),
+				},
+			}
+			opts1.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        0.52,
+					Available:    true,
+				},
+			}
+			opts2 := fake.InstanceTypeOptions{
+				Name:             "instance-type-2",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("4"),
+					v1.ResourceMemory: resource.MustParse("4Gi"),
+				},
+			}
+			opts2.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        1.0,
+					Available:    true,
+				},
+			}
+			instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1))
+			instanceTypes = append(instanceTypes, fake.NewInstanceType(opts2))
+			cloudProvider.InstanceTypes = instanceTypes
+
+			// Define NodePool that has minValues on instance-type requirement with multiple operators
+			// like "In", "Exists"
+			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+				{
+					NodeSelectorRequirement: v1.NodeSelectorRequirement{
+						Key:      v1.LabelInstanceTypeStable,
+						Operator: v1.NodeSelectorOpExists,
+					},
+					MinValues: lo.ToPtr(1),
+				},
+				{
+					NodeSelectorRequirement: v1.NodeSelectorRequirement{
+						Key:      v1.LabelInstanceTypeStable,
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{"instance-type-1", "instance-type-2"},
+					},
+					MinValues: lo.ToPtr(2),
+				},
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// 2 pods are created with resources such that both fit together only in one of the 2 InstanceTypes created above.
+			// Both of these should schedule on a instance-type-2 without the minValues requirement being specified.
+			pod1 := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("0.9"),
+					v1.ResourceMemory: resource.MustParse("0.9Gi")},
+				},
+			})
+			pod2 := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("0.9"),
+					v1.ResourceMemory: resource.MustParse("0.9Gi")},
+				},
+			})
+
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod1, pod2)
+			node1 := ExpectScheduled(ctx, env.Client, pod1)
+			node2 := ExpectScheduled(ctx, env.Client, pod2)
+
+			// This ensures that the pods are scheduled in 2 different nodes.
+			Expect(node1.Name).ToNot(Equal(node2.Name))
+
+			// Ensures that NodeClaims are created with 2 instanceTypes
+			Expect(len(supportedInstanceTypes(cloudProvider.CreateCalls[0]))).To(BeNumerically(">=", 2))
+		})
+		It("should schedule and respect multiple requirement keys with minValues", func() {
+			// Create fake InstanceTypeOptions where one instances can fit 2 pods and another one can fit only 1 pod.
+			var instanceTypes []*cloudprovider.InstanceType
+			opts1 := fake.InstanceTypeOptions{
+				Name:             "instance-type-1",
+				Architecture:     v1beta1.ArchitectureArm64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("1"),
+					v1.ResourceMemory: resource.MustParse("1Gi"),
+				},
+			}
+			opts1.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        0.52,
+					Available:    true,
+				},
+			}
+			opts2 := fake.InstanceTypeOptions{
+				Name:             "instance-type-2",
+				Architecture:     v1beta1.ArchitectureAmd64,
+				OperatingSystems: sets.New(string(v1.Linux)),
+				Resources: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("4"),
+					v1.ResourceMemory: resource.MustParse("4Gi"),
+				},
+			}
+			opts2.Offerings = []cloudprovider.Offering{
+				{
+					CapacityType: v1beta1.CapacityTypeSpot,
+					Zone:         "test-zone-1-spot",
+					Price:        1.0,
+					Available:    true,
+				},
+			}
+			instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1))
+			instanceTypes = append(instanceTypes, fake.NewInstanceType(opts2))
+			cloudProvider.InstanceTypes = instanceTypes
+
+			// Define NodePool that has minValues on multiple requirements
+			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+				{
+					NodeSelectorRequirement: v1.NodeSelectorRequirement{
+						Key:      v1.LabelArchStable,
+						Operator: v1.NodeSelectorOpExists,
+					},
+					MinValues: lo.ToPtr(2),
+				},
+				{
+					NodeSelectorRequirement: v1.NodeSelectorRequirement{
+						Key:      v1.LabelInstanceTypeStable,
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{"instance-type-1", "instance-type-2"},
+					},
+					MinValues: lo.ToPtr(1),
+				},
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// 2 pods are created with resources such that both fit together only in one of the 2 InstanceTypes created above.
+			// Both of these should schedule on a instance-type-2 without the minValues requirement being specified.
+			pod1 := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("0.9"),
+					v1.ResourceMemory: resource.MustParse("0.9Gi")},
+				},
+			})
+			pod2 := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("0.9"),
+					v1.ResourceMemory: resource.MustParse("0.9Gi")},
+				},
+			})
+
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod1, pod2)
+			node1 := ExpectScheduled(ctx, env.Client, pod1)
+			node2 := ExpectScheduled(ctx, env.Client, pod2)
+
+			// This ensures that the pods are scheduled in 2 different nodes.
+			Expect(node1.Name).ToNot(Equal(node2.Name))
+
+			// Ensures that NodeClaims are created with 2 instanceTypes
+			Expect(len(supportedInstanceTypes(cloudProvider.CreateCalls[0]))).To(BeNumerically(">=", 2))
+		})
 	})
 })

@@ -75,7 +75,6 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 	if err := n.hostPortUsage.Conflicts(pod, hostPorts); err != nil {
 		return fmt.Errorf("checking host port usage, %w", err)
 	}
-
 	nodeClaimRequirements := scheduling.NewRequirements(n.Requirements.Values()...)
 	podRequirements := scheduling.NewPodRequirements(pod)
 
@@ -170,6 +169,11 @@ func (r filterResults) FailureReason() string {
 		return ""
 	}
 
+	// minValues is specified in the requirements and is not met
+	if len(r.requirementIncompatibleWithMinValues) > 0 {
+		return "minValues requirement is not met for " + r.requirementIncompatibleWithMinValues
+	}
+
 	// no instance type met any of the three criteria, meaning each criteria was enough to completely prevent
 	// this pod from scheduling
 	if !r.requirementsMet && !r.fits && !r.hasOffering {
@@ -218,10 +222,6 @@ func (r filterResults) FailureReason() string {
 	}
 	if r.requirementsAndOffering {
 		return "no instance type which met the scheduling requirements and the required offering had the required resources"
-	}
-
-	if len(r.requirementIncompatibleWithMinValues) > 0 {
-		return "minValues requirement is not met for " + r.requirementIncompatibleWithMinValues
 	}
 
 	// finally all instances were filtered out, but we had at least one instance that met each criteria, and met each

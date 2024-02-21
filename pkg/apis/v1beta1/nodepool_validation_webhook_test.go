@@ -293,86 +293,92 @@ var _ = Describe("Webhook/Validation", func() {
 		})
 		Context("Requirements", func() {
 			It("should fail for the karpenter.sh/nodepool label", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
-					{Key: NodePoolLabelKey, Operator: v1.NodeSelectorOpIn, Values: []string{randomdata.SillyName()}},
+				nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: NodePoolLabelKey, Operator: v1.NodeSelectorOpIn, Values: []string{randomdata.SillyName()}}},
 				}
 				Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 			})
 			It("should allow supported ops", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
-					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
-					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"1"}},
-					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{"1"}},
-					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn},
-					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpExists},
+				nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}}},
+					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"1"}}},
+					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{"1"}}},
+					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn}},
+					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpExists}},
 				}
 				Expect(nodePool.Validate(ctx)).To(Succeed())
 			})
 			It("should fail for unsupported ops", func() {
 				for _, op := range []v1.NodeSelectorOperator{"unknown"} {
-					nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
-						{Key: v1.LabelTopologyZone, Operator: op, Values: []string{"test"}},
+					nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+						{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: op, Values: []string{"test"}}},
 					}
 					Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 				}
 			})
 			It("should fail for restricted domains", func() {
 				for label := range RestrictedLabelDomains {
-					nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
-						{Key: label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+					nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+						{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}}},
 					}
 					Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 				}
 			})
 			It("should allow restricted domains exceptions", func() {
 				for label := range LabelDomainExceptions {
-					nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
-						{Key: label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+					nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+						{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}}},
 					}
 					Expect(nodePool.Validate(ctx)).To(Succeed())
 				}
 			})
 			It("should allow restricted subdomains exceptions", func() {
 				for label := range LabelDomainExceptions {
-					nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
-						{Key: "subdomain." + label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+					nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+						{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "subdomain." + label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}}},
 					}
 					Expect(nodePool.Validate(ctx)).To(Succeed())
 				}
 			})
 			It("should allow well known label exceptions", func() {
 				for label := range WellKnownLabels.Difference(sets.New(NodePoolLabelKey)) {
-					nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
-						{Key: label, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+					nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+						{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: label, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}}},
 					}
 					Expect(nodePool.Validate(ctx)).To(Succeed())
 				}
 			})
 			It("should allow non-empty set after removing overlapped value", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{
-					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test", "foo"}},
-					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn, Values: []string{"test", "bar"}},
+				nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test", "foo"}}},
+					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn, Values: []string{"test", "bar"}}},
 				}
 				Expect(nodePool.Validate(ctx)).To(Succeed())
 			})
 			It("should allow empty requirements", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{}
+				nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{}
 				Expect(nodePool.Validate(ctx)).To(Succeed())
 			})
 			It("should fail with invalid GT or LT values", func() {
-				for _, requirement := range []v1.NodeSelectorRequirement{
-					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{}},
-					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"1", "2"}},
-					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"a"}},
-					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"-1"}},
-					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{}},
-					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{"1", "2"}},
-					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{"a"}},
-					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{"-1"}},
+				for _, requirement := range []NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{}}},
+					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"1", "2"}}},
+					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"a"}}},
+					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"-1"}}},
+					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{}}},
+					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{"1", "2"}}},
+					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{"a"}}},
+					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{"-1"}}},
 				} {
-					nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{requirement}
+					nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{requirement}
 					Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 				}
+			})
+			It("should error when minValues is greater than the number of unique values specified within In operator", func() {
+				nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"insance-type-1"}}, MinValues: lo.ToPtr(2)},
+				}
+				Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 			})
 		})
 		Context("KubeletConfiguration", func() {

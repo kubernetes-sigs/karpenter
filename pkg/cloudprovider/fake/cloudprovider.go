@@ -93,7 +93,7 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	if len(c.CreateCalls) > c.AllowedCreateCalls {
 		return &v1beta1.NodeClaim{}, fmt.Errorf("erroring as number of AllowedCreateCalls has been exceeded")
 	}
-	reqs := scheduling.NewNodeSelectorRequirements(nodeClaim.Spec.Requirements...)
+	reqs := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
 	np := &v1beta1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: nodeClaim.Labels[v1beta1.NodePoolLabelKey]}}
 	instanceTypes := lo.Filter(lo.Must(c.GetInstanceTypes(ctx, np)), func(i *cloudprovider.InstanceType, _ int) bool {
 		return reqs.Compatible(i.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil &&

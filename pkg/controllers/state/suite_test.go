@@ -832,16 +832,20 @@ var _ = Describe("Node Resource Level", func() {
 				Finalizers: []string{v1beta1.TerminationFinalizer},
 			},
 			Spec: v1beta1.NodeClaimSpec{
-				Requirements: []v1.NodeSelectorRequirement{
+				Requirements: []v1beta1.NodeSelectorRequirementWithMinValues{
 					{
-						Key:      v1.LabelInstanceTypeStable,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{cloudProvider.InstanceTypes[0].Name},
+						NodeSelectorRequirement: v1.NodeSelectorRequirement{
+							Key:      v1.LabelInstanceTypeStable,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{cloudProvider.InstanceTypes[0].Name},
+						},
 					},
 					{
-						Key:      v1.LabelTopologyZone,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{"test-zone-1"},
+						NodeSelectorRequirement: v1.NodeSelectorRequirement{
+							Key:      v1.LabelTopologyZone,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+						},
 					},
 				},
 				NodeClassRef: &v1beta1.NodeClassReference{

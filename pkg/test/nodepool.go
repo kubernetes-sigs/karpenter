@@ -49,7 +49,7 @@ func NodePool(overrides ...v1beta1.NodePool) *v1beta1.NodePool {
 		}
 	}
 	if override.Spec.Template.Spec.Requirements == nil {
-		override.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirement{}
+		override.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{}
 	}
 	np := &v1beta1.NodePool{
 		ObjectMeta: ObjectMeta(override.ObjectMeta),
@@ -76,9 +76,9 @@ func NodePools(total int, options ...v1beta1.NodePool) []*v1beta1.NodePool {
 // ReplaceRequirements any current requirements on the passed through NodePool with the passed in requirements
 // If any of the keys match between the existing requirements and the new requirements, the new requirement with the same
 // key will replace the old requirement with that key
-func ReplaceRequirements(nodePool *v1beta1.NodePool, reqs ...v1.NodeSelectorRequirement) *v1beta1.NodePool {
-	keys := sets.New[string](lo.Map(reqs, func(r v1.NodeSelectorRequirement, _ int) string { return r.Key })...)
-	nodePool.Spec.Template.Spec.Requirements = lo.Reject(nodePool.Spec.Template.Spec.Requirements, func(r v1.NodeSelectorRequirement, _ int) bool {
+func ReplaceRequirements(nodePool *v1beta1.NodePool, reqs ...v1beta1.NodeSelectorRequirementWithMinValues) *v1beta1.NodePool {
+	keys := sets.New[string](lo.Map(reqs, func(r v1beta1.NodeSelectorRequirementWithMinValues, _ int) string { return r.Key })...)
+	nodePool.Spec.Template.Spec.Requirements = lo.Reject(nodePool.Spec.Template.Spec.Requirements, func(r v1beta1.NodeSelectorRequirementWithMinValues, _ int) bool {
 		return keys.Has(r.Key)
 	})
 	nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, reqs...)
