@@ -247,7 +247,7 @@ func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clo
 		if allowedDisruptions == 0 {
 			recorder.Publish(disruptionevents.NodePoolBlocked(lo.ToPtr(nodePool)))
 		}
-		disruptionBudgetsAllowedDisruptionsGauge.With(map[string]string{
+		BudgetsAllowedDisruptionsGauge.With(map[string]string{
 			metrics.NodePoolLabel: nodePool.Name,
 		}).Set(float64(allowedDisruptions))
 	}
