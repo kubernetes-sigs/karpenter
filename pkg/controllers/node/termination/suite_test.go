@@ -611,7 +611,7 @@ var _ = Describe("Termination", func() {
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 
 			// Expect that the old pod's key still exists in the queue
-			Expect(queue.Has(pod))
+			Expect(queue.Has(pod)).To(BeTrue())
 
 			// Re-create the pod and node, it should now have the same name, but a different UUID
 			node = test.Node(test.NodeOptions{
