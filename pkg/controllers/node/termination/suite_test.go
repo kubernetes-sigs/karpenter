@@ -20,6 +20,9 @@ import (
 	"testing"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
 	"github.com/samber/lo"
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -34,8 +37,6 @@ import (
 	"github.com/aws/karpenter-core/pkg/operator/scheme"
 	"github.com/aws/karpenter-core/pkg/test"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	. "knative.dev/pkg/logging/testing"
@@ -75,7 +76,7 @@ var _ = AfterSuite(func() {
 func ExpectNotEnqueuedForEviction(e *terminator.Queue, pods ...*v1.Pod) {
 	GinkgoHelper()
 	for _, pod := range pods {
-		Expect(e.Has(terminator.NewQueueKey(pod))).To(BeFalse())
+		Expect(e.Has(pod)).To(BeFalse())
 	}
 }
 
