@@ -176,7 +176,8 @@ type NodeClaim struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   NodeClaimSpec   `json:"spec,omitempty"`
+	// +required
+	Spec   NodeClaimSpec   `json:"spec"`
 	Status NodeClaimStatus `json:"status,omitempty"`
 }
 
