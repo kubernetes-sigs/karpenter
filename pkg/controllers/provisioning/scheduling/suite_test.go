@@ -104,6 +104,7 @@ var _ = BeforeEach(func() {
 	cloudProvider.InstanceTypes, _ = newCP.GetInstanceTypes(ctx, nil)
 	cloudProvider.CreateCalls = nil
 	pscheduling.ResetDefaultStorageClass()
+	scheduling.MaxInstanceTypes = 100
 })
 
 var _ = AfterEach(func() {
