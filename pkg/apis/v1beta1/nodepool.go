@@ -185,7 +185,8 @@ type NodePool struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   NodePoolSpec   `json:"spec,omitempty"`
+	// +required
+	Spec   NodePoolSpec   `json:"spec"`
 	Status NodePoolStatus `json:"status,omitempty"`
 }
 
