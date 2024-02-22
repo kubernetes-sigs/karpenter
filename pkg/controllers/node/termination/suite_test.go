@@ -21,6 +21,9 @@ import (
 	"testing"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
 	"github.com/samber/lo"
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -35,13 +38,12 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/test"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	. "knative.dev/pkg/logging/testing"
 	"knative.dev/pkg/ptr"
+
+	. "knative.dev/pkg/logging/testing"
 
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -172,7 +174,7 @@ var _ = Describe("Termination", func() {
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
-			ExpectNotEnqueuedForEviction(queue, podSkip)
+			Expect(queue.Has(podSkip)).To(BeFalse())
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
 
 			// Expect node to exist and be draining
@@ -200,7 +202,7 @@ var _ = Describe("Termination", func() {
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
-			ExpectNotEnqueuedForEviction(queue, podSkip)
+			Expect(queue.Has(podSkip)).To(BeFalse())
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
 
 			// Expect node to exist and be draining
@@ -210,7 +212,7 @@ var _ = Describe("Termination", func() {
 			ExpectEvicted(env.Client, podEvict)
 			ExpectDeleted(ctx, env.Client, podEvict)
 
-			ExpectNotEnqueuedForEviction(queue, podSkip)
+			Expect(queue.Has(podSkip)).To(BeFalse())
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
@@ -477,7 +479,7 @@ var _ = Describe("Termination", func() {
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
 
 			// Expect mirror pod to not be queued for eviction
-			ExpectNotEnqueuedForEviction(queue, podNoEvict)
+			Expect(queue.Has(podNoEvict)).To(BeFalse())
 
 			// Expect podEvict to be enqueued for eviction then be successful
 			ExpectEvicted(env.Client, podEvict)
@@ -608,7 +610,7 @@ var _ = Describe("Termination", func() {
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 
 			// Expect that the old pod's key still exists in the queue
-			Expect(queue.Has(terminator.NewQueueKey(pod)))
+			Expect(queue.Has(pod)).To(BeTrue())
 
 			// Re-create the pod and node, it should now have the same name, but a different UUID
 			node = test.Node(test.NodeOptions{
@@ -657,13 +659,6 @@ var _ = Describe("Termination", func() {
 		})
 	})
 })
-
-func ExpectNotEnqueuedForEviction(e *terminator.Queue, pods ...*v1.Pod) {
-	GinkgoHelper()
-	for _, pod := range pods {
-		Expect(e.Has(terminator.NewQueueKey(pod))).To(BeFalse())
-	}
-}
 
 func ExpectEvicted(c client.Client, pods ...*v1.Pod) {
 	GinkgoHelper()
