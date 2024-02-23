@@ -32,6 +32,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
+
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
@@ -211,14 +213,7 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, 
 	// tainted with the Karpenter taint, the provisioning controller will continue
 	// to do scheduling simulations and nominate the pods on the candidate nodes until
 	// the node is cleaned up.
-	for _, node := range schedulingResults.ExistingNodes {
-		if len(node.Pods) > 0 {
-			c.cluster.NominateNodeForPod(ctx, node.ProviderID())
-		}
-		for _, pod := range node.Pods {
-			c.recorder.Publish(scheduling.NominatePodEvent(pod, node.Node, node.NodeClaim))
-		}
-	}
+	schedulingResults.Record(logging.WithLogger(ctx, operatorlogging.NopLogger), c.recorder, c.cluster)
 
 	providerIDs := lo.Map(cmd.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
 	// We have the new NodeClaims created at the API server so mark the old NodeClaims for deletion

@@ -192,7 +192,7 @@ func (p *Provisioner) consolidationWarnings(ctx context.Context, po *v1.Pod) {
 var ErrNodePoolsNotFound = errors.New("no nodepools found")
 
 //nolint:gocyclo
-func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNodes []*state.StateNode, opts scheduler.SchedulerOptions) (*scheduler.Scheduler, error) {
+func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNodes []*state.StateNode) (*scheduler.Scheduler, error) {
 	// Build node templates
 	var nodeClaimTemplates []*scheduler.NodeClaimTemplate
 	instanceTypes := map[string][]*cloudprovider.InstanceType{}
@@ -284,11 +284,12 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	if err != nil {
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
-	return scheduler.NewScheduler(ctx, p.kubeClient, nodeClaimTemplates, nodePoolList.Items, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, opts), nil
+	return scheduler.NewScheduler(ctx, p.kubeClient, nodeClaimTemplates, nodePoolList.Items, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder), nil
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	defer metrics.Measure(schedulingDuration)()
+	start := time.Now()
 
 	// We collect the nodes with their used capacities before we get the list of pending pods. This ensures that
 	// the node capacities we schedule against are always >= what the actual capacity is at any given instance. This
@@ -319,7 +320,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	if len(pods) == 0 {
 		return scheduler.Results{}, nil
 	}
-	s, err := p.NewScheduler(ctx, pods, nodes.Active(), scheduler.SchedulerOptions{})
+	s, err := p.NewScheduler(ctx, pods, nodes.Active())
 	if err != nil {
 		if errors.Is(err, ErrNodePoolsNotFound) {
 			logging.FromContext(ctx).Info(ErrNodePoolsNotFound)
@@ -327,8 +328,12 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		}
 		return scheduler.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
-	results := s.Solve(ctx, pods)
-	return results.TruncateInstanceTypes(scheduler.MaxInstanceTypes), nil
+	results := s.Solve(ctx, pods).TruncateInstanceTypes(scheduler.MaxInstanceTypes)
+	logging.FromContext(ctx).With("pods", pretty.Slice(lo.Map(pods, func(p *v1.Pod, _ int) string { return client.ObjectKeyFromObject(p).String() }), 5)).
+		With("duration", time.Since(start)).
+		Infof("found provisionable pod(s)")
+	results.Record(ctx, p.recorder, p.cluster)
+	return results, nil
 }
 
 func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) (string, error) {
