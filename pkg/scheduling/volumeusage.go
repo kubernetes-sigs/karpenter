@@ -80,16 +80,14 @@ func (u Volumes) Insert(volumes Volumes) {
 
 //nolint:gocyclo
 func GetVolumes(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (Volumes, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("pod", pod.Name))
 	podPVCs := Volumes{}
 	for _, volume := range pod.Spec.Volumes {
-		ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("volume", volume.Name))
 		pvc, err := volumeutil.GetPersistentVolumeClaim(ctx, kubeClient, pod, volume)
 		// If the PVC is not found it was manually deleted and its finalizer removed. We should ignore this volume when
 		// computing limits, otherwise Karpenter may never be able to update its cluster state.
 		if err != nil {
 			if errors.IsNotFound(err) {
-				logging.FromContext(ctx).Errorf("failed updating volume limits for volume, %w", err)
+				logging.FromContext(ctx).With("pod", pod.Name, "volume", volume.Name).Errorf("failed updating volume limits for volume, %w", err)
 				continue
 			}
 			return nil, fmt.Errorf("failed updating volume limits, %w", err)
@@ -98,10 +96,8 @@ func GetVolumes(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (Vol
 		if pvc == nil {
 			continue
 		}
-		ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("pvc", pvc.Name))
-
 		storageClassName := lo.FromPtr(pvc.Spec.StorageClassName)
-		driverName, err := resolveDriver(ctx, kubeClient, pvc.Spec.VolumeName, storageClassName)
+		driverName, err := resolveDriver(ctx, kubeClient, pod, volume.Name, pvc, storageClassName)
 		if err != nil {
 			return nil, err
 		}
@@ -116,11 +112,11 @@ func GetVolumes(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (Vol
 // resolveDriver resolves the storage driver name in the following order:
 //  1. If the PV associated with the pod volume is using CSI.driver in its spec, then use that name
 //  2. If the StorageClass associated with the PV has a Provisioner
-func resolveDriver(ctx context.Context, kubeClient client.Client, volumeName string, storageClassName string) (string, error) {
+func resolveDriver(ctx context.Context, kubeClient client.Client, pod *v1.Pod, volumeName string, pvc *v1.PersistentVolumeClaim, storageClassName string) (string, error) {
 	// We can track the volume usage by the CSI Driver name which is pulled from the storage class for dynamic
 	// volumes, or if it's bound/static we can pull the volume name
-	if volumeName != "" {
-		driverName, err := driverFromVolume(ctx, kubeClient, volumeName)
+	if pvc.Spec.VolumeName != "" {
+		driverName, err := driverFromVolume(ctx, kubeClient, pvc.Spec.VolumeName)
 		if err != nil {
 			return "", err
 		}
@@ -135,7 +131,7 @@ func resolveDriver(ctx context.Context, kubeClient client.Client, volumeName str
 	// In either of these cases, a PV must have been previously bound to the PVC and has since been removed. We can
 	// ignore this PVC while computing limits and continue.
 	if storageClassName == "" {
-		logging.FromContext(ctx).Errorf("failed updating volume limits for volume with unbound PVC, no storage class specified")
+		logging.FromContext(ctx).With("pod", pod.Name, "volume", volumeName, "pvc", pvc.Name).Errorf("failed updating volume limits for volume with unbound PVC, no storage class specified")
 		return "", nil
 	}
 
@@ -146,7 +142,7 @@ func resolveDriver(ctx context.Context, kubeClient client.Client, volumeName str
 		//  2. The StorageClass never existed and was used to bind the PVC to an existing PV, but that PV was removed
 		// In either of these cases, we should ignore the PVC while computing limits and continue.
 		if errors.IsNotFound(err) {
-			logging.FromContext(ctx).With("storageclass", storageClassName).Errorf("failed updating volume limits for volume with unbound PVC, %w", err)
+			logging.FromContext(ctx).With("pod", pod.Name, "volume", volumeName, "pvc", pvc.Name, "storageclass", storageClassName).Errorf("failed updating volume limits for volume with unbound PVC, %w", err)
 			return "", nil
 		}
 		return "", err
