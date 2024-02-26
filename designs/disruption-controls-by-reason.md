@@ -118,7 +118,7 @@ Lets choose total number of nodes, since this allows the user to also specify pe
 ## Approach A: Extending the Budget API to specify a reason 
 This section contrasts two approaches for specifying disruption reasons in the v1beta1 nodepool API: a list of reasons (List Approach) and a single reason per budget (Single Reason Approach).
 
-### List Approach: Multiple Reasons per Budget
+### List Approach: Multiple Reasons per Budget - Recommended
 This approach allows specifying multiple disruption methods within a single budget entry. It is proposed to add a field Reasons to the budgets, which can include a list of reasons this budget applies to.
 #### Proposed Spec
 Add a simple field "reasons" is proposed to be added to the budgets. 
