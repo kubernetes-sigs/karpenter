@@ -33,7 +33,7 @@ See Less Made Up Scenarios here:
 
 
 ### Q: How should Karpenter handle the default or undefined reason case? 
-If a budget reason is unspecified like budgets[2], we will assume this budget applies to all actions that are not specified 
+If a budget reason is unspecified like budgets[1], we will assume this budget applies to all actions that are not specified 
 ```yaml
 budgets: 
   - nodes: 10
