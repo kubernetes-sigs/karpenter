@@ -193,7 +193,7 @@ In this approach, each budget entry specifies a single reason for disruption.
 // Budget defines when Karpenter will restrict the
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
-      // +kubebuilder:validation:Enum:={"all", "default","consolidation","expired","empty","drift"}
+      // +kubebuilder:validation:Enum:={"consolidation","expired","empty","drift"}
       // +optional
       Reason string `json:"reason,omitempty" hash:"ignore"`
       // Nodes dictates the maximum number of NodeClaims owned by this NodePool
