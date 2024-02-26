@@ -127,9 +127,9 @@ Add a simple field "reasons" is proposed to be added to the budgets.
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
       // Reasons is a list of methods for disruption that apply to this budget. If Reasons is not set, this budget applies to all methods.
-      // If a reason == "default", it will apply to all reasons that don't have an active budget. If a reason is set, it will only apply to that method. If multiple reasons are specified,
+      // If a reason is set, it will only apply to that method. If multiple reasons are specified,
       // this budget will apply to all of them. If a budget is not specified for a method, the default budget will be used.
-      // allowed reasons are "default", "consolidation", "expired", "empty", "drift"
+      // allowed reasons are "consolidation", "expired", "empty", "drift"
       // +kubebuilder:validation:MaxItems=5
       // +kubebuilder:validation:Enum:={"consolidation","expired","empty","drift"}
       // +optional
