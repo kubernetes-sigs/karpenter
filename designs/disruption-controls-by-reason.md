@@ -129,7 +129,7 @@ type Budget struct {
       // Reasons is a list of methods for disruption that apply to this budget. If Reasons is not set, this budget applies to all methods.
       // If a reason is set, it will only apply to that method. If multiple reasons are specified,
       // this budget will apply to all of them. If a budget is not specified for a method, the default budget will be used.
-      // allowed reasons are "consolidation", "expired", "empty", "drift"
+      // allowed reasons are "underutilized", "expired", "empty", "drift"
       // +kubebuilder:validation:MaxItems=5
       // +kubebuilder:validation:Enum:={"consolidation","expired","empty","drift"}
       // +optional
