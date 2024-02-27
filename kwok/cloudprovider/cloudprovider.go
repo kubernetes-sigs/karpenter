@@ -20,7 +20,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"math"
 	"math/rand"
 	"strings"
 
@@ -138,12 +137,7 @@ func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
 	//nolint
 	newName = fmt.Sprintf("%s-%d", newName, rand.Uint32())
 
-	capacityType := v1beta1.CapacityTypeOnDemand
-	requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.
-		Spec.Requirements...)
-	if requirements.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeSpot) {
-		capacityType = v1beta1.CapacityTypeSpot
-	}
+	requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
 	req, found := lo.Find(nodeClaim.Spec.Requirements, func(req v1beta1.NodeSelectorRequirementWithMinValues) bool {
 		return req.Key == v1.LabelInstanceTypeStable
 	})
@@ -151,28 +145,23 @@ func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
 		return nil, fmt.Errorf("instance type requirement not found")
 	}
 
-	minInstanceTypePrice := math.MaxFloat64
 	var instanceType *cloudprovider.InstanceType
+	var bestOffering *cloudprovider.Offering
 	// Loop through instance type values, as the node claim will only have the In operator.
 	for _, val := range req.Values {
-		var price float64
-		var ok bool
 		it, err := c.getInstanceType(val)
 		if err != nil {
 			return nil, fmt.Errorf("instance type %s not found", val)
 		}
 
-		// Since we're constructing the instance types we know that each instance type with OD offerings will have spot
-		// offerings, where spot will always be cheapest.
-		zone := randomChoice(KwokZones)
-		offering, ok := it.Offerings.Get(capacityType, zone)
-		if !ok {
-			return nil, fmt.Errorf("failed to find offering %s/%s/%s", capacityType, zone, val)
-		}
-		// All offerings of the same capacity type are the same price.
-		price = offering.Price
-		if price < minInstanceTypePrice {
-			minInstanceTypePrice = price
+		availableOfferings := lo.Filter(it.Offerings.Available(), func(of cloudprovider.Offering, _ int) bool {
+			return offeringMatchesRequirements(&of, &requirements)
+		})
+
+		offeringsByPrice := lo.GroupBy(availableOfferings, func(of cloudprovider.Offering) float64 { return of.Price })
+		minOfferingPrice := lo.Min(lo.Keys(offeringsByPrice))
+		if bestOffering == nil || minOfferingPrice < bestOffering.Price {
+			bestOffering = lo.ToPtr(lo.Sample(offeringsByPrice[minOfferingPrice]))
 			instanceType = it
 		}
 	}
@@ -180,7 +169,7 @@ func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
 	return &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        newName,
-			Labels:      addInstanceLabels(nodeClaim.Labels, instanceType, nodeClaim, capacityType, fmt.Sprintf("%f", minInstanceTypePrice)),
+			Labels:      addInstanceLabels(nodeClaim.Labels, instanceType, nodeClaim, bestOffering),
 			Annotations: addKwokAnnotation(nodeClaim.Annotations),
 		},
 		Spec: v1.NodeSpec{
@@ -194,7 +183,19 @@ func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
 	}, nil
 }
 
-func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.InstanceType, nodeClaim *v1beta1.NodeClaim, capacityType, price string) map[string]string {
+func offeringMatchesRequirements(of *cloudprovider.Offering, requirements *scheduling.Requirements) bool {
+	if !requirements.Get(v1beta1.CapacityTypeLabelKey).Has(of.CapacityType) {
+		return false
+	}
+
+	if !requirements.Get(v1.LabelTopologyZone).Has(of.Zone) {
+		return false
+	}
+
+	return true
+}
+
+func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.InstanceType, nodeClaim *v1beta1.NodeClaim, offering *cloudprovider.Offering) map[string]string {
 	ret := make(map[string]string, len(labels))
 	// start with labels on the nodeclaim
 	for k, v := range labels {
@@ -216,32 +217,16 @@ func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.Ins
 		}
 	}
 	// add in github.com/awslabs/eks-node-viewer label so that it shows up.
-	ret[nodeViewerLabelKey] = price
+	ret[nodeViewerLabelKey] = fmt.Sprintf("%f", offering.Price)
 	// Kwok has some scalability limitations.
 	// Randomly add each new node to one of the pre-created kwokPartitions.
-	ret[kwokPartitionLabelKey] = randomPartition(10)
-	ret[v1beta1.CapacityTypeLabelKey] = capacityType
-	// no zone set by requirements, so just pick one
-	if _, ok := ret[v1.LabelTopologyZone]; !ok {
-		ret[v1.LabelTopologyZone] = randomChoice(KwokZones)
-	}
+	ret[kwokPartitionLabelKey] = lo.Sample(KwokPartitions)
+	ret[v1beta1.CapacityTypeLabelKey] = offering.CapacityType
+	ret[v1.LabelTopologyZone] = offering.Zone
 	ret[v1.LabelHostname] = nodeClaim.Name
 
 	ret[kwokLabelKey] = kwokLabelValue
 	return ret
-}
-
-// pick one of the first n kwok partitions
-func randomPartition(n int) string {
-	//nolint
-	i := rand.Intn(n)
-	return KwokPartitions[i]
-}
-
-func randomChoice(zones []string) string {
-	//nolint
-	i := rand.Intn(len(zones))
-	return zones[i]
 }
 
 func addKwokAnnotation(annotations map[string]string) map[string]string {

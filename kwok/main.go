@@ -17,6 +17,9 @@ limitations under the License.
 package main
 
 import (
+	"fmt"
+	"os"
+
 	kwok "sigs.k8s.io/karpenter/kwok/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/controllers"
@@ -27,6 +30,7 @@ import (
 func init() {
 	v1beta1.RestrictedLabelDomains = v1beta1.RestrictedLabelDomains.Insert(kwok.Group)
 	v1beta1.WellKnownLabels = v1beta1.WellKnownLabels.Insert(
+		kwok.InstanceTypeLabelKey,
 		kwok.InstanceSizeLabelKey,
 		kwok.InstanceFamilyLabelKey,
 		kwok.InstanceCPULabelKey,
@@ -35,9 +39,14 @@ func init() {
 }
 
 func main() {
-	ctx, op := operator.NewOperator()
+	instanceTypes, err := kwok.ConstructInstanceTypes()
+	if err != nil {
+		fmt.Printf("kwok provider failed: %v\n", err)
+		os.Exit(1)
+	}
 
-	cloudProvider := kwok.NewCloudProvider(ctx, op.GetClient(), kwok.ConstructInstanceTypes())
+	ctx, op := operator.NewOperator()
+	cloudProvider := kwok.NewCloudProvider(ctx, op.GetClient(), instanceTypes)
 	op.
 		WithControllers(ctx, controllers.NewControllers(
 			op.Clock,
