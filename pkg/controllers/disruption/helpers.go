@@ -31,8 +31,8 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -82,7 +82,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		pods = append(pods, n.reschedulablePods...)
 	}
 	pods = append(pods, deletingNodePods...)
-	scheduler, err := provisioner.NewScheduler(logging.WithLogger(ctx, operatorlogging.NopLogger), pods, stateNodes)
+	scheduler, err := provisioner.NewScheduler(log.IntoContext(ctx, operatorlogging.NopLogger), pods, stateNodes)
 	if err != nil {
 		return pscheduling.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
@@ -91,7 +91,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return client.ObjectKeyFromObject(p), nil
 	})
 
-	results := scheduler.Solve(logging.WithLogger(ctx, operatorlogging.NopLogger), pods).TruncateInstanceTypes(pscheduling.MaxInstanceTypes)
+	results := scheduler.Solve(log.IntoContext(ctx, operatorlogging.NopLogger), pods).TruncateInstanceTypes(pscheduling.MaxInstanceTypes)
 	for _, n := range results.ExistingNodes {
 		// We consider existing nodes for scheduling. When these nodes are unmanaged, their taint logic should
 		// tell us if we can schedule to them or not; however, if these nodes are managed, we will still schedule to them
@@ -150,8 +150,8 @@ func GetPodEvictionCost(ctx context.Context, p *v1.Pod) float64 {
 	if ok {
 		podDeletionCost, err := strconv.ParseFloat(podDeletionCostStr, 64)
 		if err != nil {
-			logging.FromContext(ctx).Errorf("parsing %s=%s from pod %s, %s",
-				v1.PodDeletionCost, podDeletionCostStr, client.ObjectKeyFromObject(p), err)
+			log.FromContext(ctx).Error(err, "parsing %s=%s from pod %s, %s",
+				v1.PodDeletionCost, podDeletionCostStr, client.ObjectKeyFromObject(p))
 		} else {
 			// the pod deletion disruptionCost is in [-2147483647, 2147483647]
 			// the min pod disruptionCost makes one pod ~ -15 pods, and the max pod disruptionCost to ~ 17 pods.
@@ -288,7 +288,7 @@ func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 		if err != nil {
 			// don't error out on building the node pool, we just won't be able to handle any nodes that
 			// were created by it
-			logging.FromContext(ctx).Errorf("listing instance types for %s, %s", np.Name, err)
+			log.FromContext(ctx).Error(err, "listing instance types for %s, %s", np.Name)
 			continue
 		}
 		if len(nodePoolInstanceTypes) == 0 {

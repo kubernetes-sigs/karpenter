@@ -22,10 +22,10 @@ import (
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
-	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -54,8 +54,8 @@ func NewPodController(kubeClient client.Client, provisioner *Provisioner, record
 
 // Reconcile the resource
 func (c *PodController) Reconcile(ctx context.Context, p *v1.Pod) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("provisioner.trigger.pod").With("pod", client.ObjectKeyFromObject(p).String())) //nolint:ineffassign,staticcheck
-	ctx = injection.WithControllerName(ctx, "provisioner.trigger.pod")                                                                           //nolint:ineffassign,staticcheck
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithName("provisioner.trigger.pod").WithValues("pod", client.ObjectKeyFromObject(p).String())) //nolint:ineffassign,staticcheck
+	ctx = injection.WithControllerName(ctx, "provisioner.trigger.pod")                                                                             //nolint:ineffassign,staticcheck
 
 	if !pod.IsProvisionable(p) {
 		return reconcile.Result{}, nil
@@ -95,8 +95,8 @@ func NewNodeController(kubeClient client.Client, provisioner *Provisioner, recor
 // Reconcile the resource
 func (c *NodeController) Reconcile(ctx context.Context, n *v1.Node) (reconcile.Result, error) {
 	//nolint:ineffassign
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("provisioner.trigger.node").With("node", n.Name)) //nolint:ineffassign,staticcheck
-	ctx = injection.WithControllerName(ctx, "provisioner.trigger.node")                                            //nolint:ineffassign,staticcheck
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithName("provisioner.trigger.node").WithValues("node", n.Name)) //nolint:ineffassign,staticcheck
+	ctx = injection.WithControllerName(ctx, "provisioner.trigger.node")                                              //nolint:ineffassign,staticcheck
 
 	// If the disruption taint doesn't exist or the deletion timestamp isn't set, it's not being disrupted.
 	// We don't check the deletion timestamp here, as we expect the termination controller to eventually set

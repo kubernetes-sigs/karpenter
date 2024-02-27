@@ -22,8 +22,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -55,7 +55,7 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) 
 	if err := l.kubeClient.Delete(ctx, nodeClaim); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	logging.FromContext(ctx).With("ttl", registrationTTL).Infof("terminating due to registration ttl")
+	log.FromContext(ctx).V(1).WithValues("ttl", registrationTTL).Info("terminating due to registration ttl")
 	metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
 		metrics.ReasonLabel:       "liveness",
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1beta1.NodePoolLabelKey],

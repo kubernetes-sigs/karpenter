@@ -27,9 +27,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -119,7 +119,7 @@ func (c *Controller) Name() string {
 
 // Reconcile executes a termination control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("metrics.pod").With("pod", req.String()))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithName("metrics.pod").WithValues("pod", req.String()))
 	ctx = injection.WithControllerName(ctx, "metrics.pod")
 
 	pod := &v1.Pod{}

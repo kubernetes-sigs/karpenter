@@ -22,10 +22,10 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -50,7 +50,7 @@ func NewPodController(kubeClient client.Client, cluster *state.Cluster) *PodCont
 }
 
 func (c *PodController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("state.pod").With("pod", req.String()))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithName("state.pod").WithValues("pod", req.String()))
 	ctx = injection.WithControllerName(ctx, "state.pod")
 
 	pod := &v1.Pod{}

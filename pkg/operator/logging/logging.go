@@ -28,13 +28,9 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"go.uber.org/zap/zapio"
-	"k8s.io/client-go/rest"
-	"k8s.io/klog/v2"
 	"knative.dev/pkg/changeset"
-	"knative.dev/pkg/logging"
+
 	"knative.dev/pkg/logging/logkey"
-	ctrl "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
@@ -46,7 +42,7 @@ const (
 
 // NopLogger is used to throw away logs when we don't actually want to log in
 // certain portions of the code since logging would be too noisy
-var NopLogger = zap.NewNop().Sugar()
+var NopLogger = zapr.NewLogger(zap.NewNop())
 
 func DefaultZapConfig(ctx context.Context, component string) zap.Config {
 	logLevel := lo.Ternary(component != "webhook", zap.NewAtomicLevelAt(zap.InfoLevel), zap.NewAtomicLevelAt(zap.ErrorLevel))
@@ -126,17 +122,6 @@ func loggerFromFile(ctx context.Context, component string) *zap.SugaredLogger {
 		cfg.Level = lo.Must(zap.ParseAtomicLevel(string(raw)))
 	}
 	return WithCommit(lo.Must(cfg.Build()).Sugar()).Named(component)
-}
-
-// ConfigureGlobalLoggers sets up any package-wide loggers like "log" or "klog" that are utilized by other packages
-// to use the configured *zap.SugaredLogger from the context
-func ConfigureGlobalLoggers(ctx context.Context) {
-	klog.SetLogger(zapr.NewLogger(logging.FromContext(ctx).Desugar()))
-	ctrl.SetLogger(zapr.NewLogger(logging.FromContext(ctx).Desugar()))
-	w := &zapio.Writer{Log: logging.FromContext(ctx).Desugar(), Level: zap.DebugLevel}
-	log.SetFlags(0)
-	log.SetOutput(w)
-	rest.SetDefaultWarningHandler(&logging.WarningHandler{Logger: logging.FromContext(ctx)})
 }
 
 type ignoreDebugEventsSink struct {

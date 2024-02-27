@@ -21,7 +21,7 @@ import (
 	"errors"
 
 	"github.com/samber/lo"
-	"knative.dev/pkg/logging"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -89,7 +89,7 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	validatedCandidates, err := v.ValidateCandidates(ctx, cmd.candidates...)
 	if err != nil {
 		if IsValidationError(err) {
-			logging.FromContext(ctx).Debugf("abandoning empty node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+			log.FromContext(ctx).V(1).Info("abandoning empty node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
 			return Command{}, scheduling.Results{}, nil
 		}
 		return Command{}, scheduling.Results{}, err
@@ -99,7 +99,7 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	if lo.ContainsBy(validatedCandidates, func(c *Candidate) bool {
 		return len(c.reschedulablePods) != 0
 	}) {
-		logging.FromContext(ctx).Debugf("abandoning empty node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+		log.FromContext(ctx).V(1).Info("abandoning empty node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
 		return Command{}, scheduling.Results{}, nil
 	}
 

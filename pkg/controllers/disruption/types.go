@@ -24,8 +24,8 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 
@@ -116,7 +116,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	}
 	pods, err := node.Pods(ctx, kubeClient)
 	if err != nil {
-		logging.FromContext(ctx).Errorf("determining node pods, %s", err)
+		log.FromContext(ctx).Error(err, "determining node pods, %s")
 		return nil, fmt.Errorf("getting pods from state node, %w", err)
 	}
 	for _, po := range pods {

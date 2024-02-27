@@ -24,9 +24,9 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -47,8 +47,7 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeCla
 		nodeClaim.StatusConditions().SetFalse(v1beta1.ConditionTypeRegistered, "NotLaunched", "Node not launched")
 		return reconcile.Result{}, nil
 	}
-
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", nodeClaim.Status.ProviderID))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("provider-id", nodeClaim.Status.ProviderID))
 	node, err := nodeclaimutil.NodeForNodeClaim(ctx, r.kubeClient, nodeClaim)
 	if err != nil {
 		if nodeclaimutil.IsNodeNotFoundError(err) {
@@ -61,11 +60,11 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeCla
 		}
 		return reconcile.Result{}, fmt.Errorf("getting node for nodeclaim, %w", err)
 	}
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("node", node.Name))
 	if err = r.syncNode(ctx, nodeClaim, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("syncing node, %w", err)
 	}
-	logging.FromContext(ctx).Infof("registered nodeclaim")
+	log.FromContext(ctx).Info("registered nodeclaim")
 	nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeRegistered)
 	nodeClaim.Status.NodeName = node.Name
 

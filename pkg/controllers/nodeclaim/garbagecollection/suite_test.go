@@ -32,7 +32,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
-	. "knative.dev/pkg/logging/testing"
+
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"

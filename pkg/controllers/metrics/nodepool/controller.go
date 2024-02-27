@@ -21,15 +21,16 @@ import (
 	"strings"
 	"time"
 
+	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"knative.dev/pkg/logging"
 
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
 	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
-	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
@@ -91,7 +92,7 @@ func NewController(kubeClient client.Client) *Controller {
 
 // Reconcile executes a termination control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("metrics.nodepool").With("nodepool", req.Name))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithName("metrics.nodepool").WithValues("nodepool", req.Name))
 	ctx = injection.WithControllerName(ctx, "metrics.nodepool")
 
 	nodePool := &v1beta1.NodePool{}

@@ -21,10 +21,11 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"knative.dev/pkg/logging"
+
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -48,7 +49,7 @@ func NewNodeController(kubeClient client.Client, cluster *state.Cluster) *NodeCo
 }
 
 func (c *NodeController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("state.node").With("node", req.Name))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithName("state.node").WithValues("node", req.Name))
 	ctx = injection.WithControllerName(ctx, "state.node")
 
 	node := &v1.Node{}

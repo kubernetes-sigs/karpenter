@@ -24,6 +24,8 @@ import (
 	"sync"
 	"time"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
@@ -31,7 +33,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllertest"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -177,7 +178,8 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 		panic("unexpected failure, disruption queue has shut down")
 	}
 	cmd := item.(*Command)
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("command-id", string(cmd.id)))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("command-id", string(cmd.id)))
+
 	if err := q.waitOrTerminate(ctx, cmd); err != nil {
 		// If recoverable, re-queue and try again.
 		if !IsUnrecoverableError(err) {
@@ -201,13 +203,13 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 		}).Add(float64(len(failedLaunches)))
 		multiErr := multierr.Combine(err, cmd.lastError, state.RequireNoScheduleTaint(ctx, q.kubeClient, false, cmd.candidates...))
 		// Log the error
-		logging.FromContext(ctx).With("nodes", strings.Join(lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string {
+		log.FromContext(ctx).WithValues("nodes", strings.Join(lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string {
 			return s.Name()
-		}), ",")).Errorf("failed to disrupt nodes, %s", multiErr)
+		}), ",")).Error(multiErr, "failed to disrupt nodes")
 	}
 	// If command is complete, remove command from queue.
 	q.Remove(cmd)
-	logging.FromContext(ctx).Infof("command succeeded")
+	log.FromContext(ctx).Info("command succeeded")
 	return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 }
 

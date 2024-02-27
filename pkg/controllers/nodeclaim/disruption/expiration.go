@@ -21,8 +21,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -43,7 +43,7 @@ func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, 
 	if nodePool.Spec.Disruption.ExpireAfter.Duration == nil {
 		_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeExpired)
 		if hasExpiredCondition {
-			logging.FromContext(ctx).Debugf("removing expiration status condition, expiration has been disabled")
+			log.FromContext(ctx).V(1).Info("removing expiration status condition, expiration has been disabled")
 		}
 		return reconcile.Result{}, nil
 	}
@@ -52,7 +52,7 @@ func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, 
 	if e.clock.Now().Before(expirationTime) {
 		_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeExpired)
 		if hasExpiredCondition {
-			logging.FromContext(ctx).Debugf("removing expired status condition, not expired")
+			log.FromContext(ctx).V(1).Info("removing expired status condition, not expired")
 		}
 		// If the NodeClaim isn't expired and doesn't have the status condition, return.
 		// Use t.Sub(clock.Now()) instead of time.Until() to ensure we're using the injected clock.
@@ -61,7 +61,7 @@ func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, 
 	// 3. Otherwise, if the NodeClaim is expired, but doesn't have the status condition, add it.
 	nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeExpired)
 	if !hasExpiredCondition {
-		logging.FromContext(ctx).Debugf("marking expired")
+		log.FromContext(ctx).V(1).Info("marking expired")
 		metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
 			metrics.TypeLabel:     metrics.ExpirationReason,
 			metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
