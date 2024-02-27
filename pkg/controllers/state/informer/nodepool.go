@@ -19,7 +19,7 @@ package informer
 import (
 	"context"
 
-	controllerruntime "sigs.k8s.io/controller-runtime"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -58,7 +58,7 @@ func (c *NodePoolController) Reconcile(_ context.Context, _ *v1beta1.NodePool) (
 }
 
 func (c *NodePoolController) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.Adapt(controllerruntime.
+	return operatorcontroller.Adapt(ctrl.
 		NewControllerManagedBy(m).
 		For(&v1beta1.NodePool{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).

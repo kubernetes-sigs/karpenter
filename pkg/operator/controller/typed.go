@@ -22,9 +22,9 @@ import (
 	"strings"
 
 	"github.com/samber/lo"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -62,9 +62,9 @@ func (t *typedDecorator[T]) Name() string {
 
 func (t *typedDecorator[T]) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	obj := reflect.New(reflect.TypeOf(*new(T)).Elem()).Interface().(T) // Create a new pointer to a client.Object
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).
-		Named(t.typedController.Name()).
-		With(
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).
+		WithName(t.typedController.Name()).
+		WithValues(
 			strings.ToLower(lo.Must(apiutil.GVKForObject(obj, scheme.Scheme)).Kind),
 			lo.Ternary(req.NamespacedName.Namespace != "", req.NamespacedName.String(), req.Name),
 		),

@@ -23,16 +23,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
-	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -114,7 +113,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	// with making any scheduling decision off of our state nodes. Otherwise, we have the potential to make
 	// a scheduling decision based on a smaller subset of nodes in our cluster state than actually exist.
 	if !c.cluster.Synced(ctx) {
-		logging.FromContext(ctx).Debugf("waiting on cluster sync")
+		log.FromContext(ctx).Info("waiting on cluster sync")
 		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}
 
@@ -184,7 +183,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 // 3. Add Command to orchestration.Queue to wait to delete the candiates.
 func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, schedulingResults scheduling.Results) error {
 	commandID := uuid.NewUUID()
-	logging.FromContext(ctx).With("command-id", commandID).Infof("disrupting via %s %s", m.Type(), cmd)
+	log.FromContext(ctx).WithValues("command-id", commandID).Info("disrupting via %s %s", m.Type(), cmd)
 
 	stateNodes := lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode {
 		return c.StateNode
@@ -213,7 +212,7 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, 
 	// tainted with the Karpenter taint, the provisioning controller will continue
 	// to do scheduling simulations and nominate the pods on the candidate nodes until
 	// the node is cleaned up.
-	schedulingResults.Record(logging.WithLogger(ctx, operatorlogging.NopLogger), c.recorder, c.cluster)
+	schedulingResults.Record(log.IntoContext(ctx, logr.New(logr.Discard().GetSink())), c.recorder, c.cluster)
 
 	providerIDs := lo.Map(cmd.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
 	// We have the new NodeClaims created at the API server so mark the old NodeClaims for deletion
@@ -274,7 +273,7 @@ func (c *Controller) logAbnormalRuns(ctx context.Context) {
 	defer c.mu.Unlock()
 	for name, runTime := range c.lastRun {
 		if timeSince := c.clock.Since(runTime); timeSince > AbnormalTimeLimit {
-			logging.FromContext(ctx).Debugf("abnormal time between runs of %s = %s", name, timeSince)
+			log.FromContext(ctx).V(1).Info("abnormal time between runs of %s = %s", name, timeSince)
 		}
 	}
 }
@@ -283,7 +282,7 @@ func (c *Controller) logAbnormalRuns(ctx context.Context) {
 func (c *Controller) logInvalidBudgets(ctx context.Context) {
 	nodePoolList := &v1beta1.NodePoolList{}
 	if err := c.kubeClient.List(ctx, nodePoolList); err != nil {
-		logging.FromContext(ctx).Errorf("listing nodepools, %s", err)
+		log.FromContext(ctx).Error(err, "listing nodepools, %s")
 		return
 	}
 	var buf bytes.Buffer
@@ -294,6 +293,6 @@ func (c *Controller) logInvalidBudgets(ctx context.Context) {
 		}
 	}
 	if buf.Len() > 0 {
-		logging.FromContext(ctx).Errorf("detected disruption budget errors: %s", buf.String())
+		log.FromContext(ctx).Error(nil, "detected disruption budget errors: %s", buf.String())
 	}
 }

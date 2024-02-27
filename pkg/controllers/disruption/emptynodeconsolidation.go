@@ -21,7 +21,7 @@ import (
 	"errors"
 	"fmt"
 
-	"knative.dev/pkg/logging"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -90,7 +90,7 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	}
 	validationCandidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, c.ShouldDisrupt, c.queue)
 	if err != nil {
-		logging.FromContext(ctx).Errorf("computing validation candidates %s", err)
+		log.FromContext(ctx).Error(err, "computing validation candidates %s")
 		return Command{}, scheduling.Results{}, err
 	}
 	// Get the current representation of the proposed candidates from before the validation timeout
@@ -108,7 +108,7 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	// 3. the number of candidates for a given nodepool can no longer be disrupted as it would violate the budget
 	for _, n := range candidatesToDelete {
 		if len(n.reschedulablePods) != 0 || c.cluster.IsNodeNominated(n.ProviderID()) || postValidationMapping[n.nodePool.Name] == 0 {
-			logging.FromContext(ctx).Debugf("abandoning empty node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+			log.FromContext(ctx).V(1).Info("abandoning empty node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
 			return Command{}, scheduling.Results{}, nil
 		}
 		postValidationMapping[n.nodePool.Name]--

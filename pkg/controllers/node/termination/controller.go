@@ -26,11 +26,11 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/client-go/util/workqueue"
-	"knative.dev/pkg/logging"
-	controllerruntime "sigs.k8s.io/controller-runtime"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -139,13 +139,13 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *v1.Node) error {
 		TerminationSummary.With(prometheus.Labels{
 			metrics.NodePoolLabel: n.Labels[v1beta1.NodePoolLabelKey],
 		}).Observe(time.Since(stored.DeletionTimestamp.Time).Seconds())
-		logging.FromContext(ctx).Infof("deleted node")
+		log.FromContext(ctx).Info("deleted node")
 	}
 	return nil
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.Adapt(controllerruntime.
+	return operatorcontroller.Adapt(ctrl.
 		NewControllerManagedBy(m).
 		For(&v1.Node{}).
 		WithOptions(

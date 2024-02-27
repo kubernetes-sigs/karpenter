@@ -21,13 +21,14 @@ import (
 	"strings"
 	"time"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"knative.dev/pkg/logging"
 
 	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
-	controllerruntime "sigs.k8s.io/controller-runtime"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
@@ -94,7 +95,8 @@ func (c *Controller) Name() string {
 
 // Reconcile executes a termination control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("nodepool", req.Name))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithName(c.Name()).WithValues("nodepool", req.Name))
+
 	nodePool := &v1beta1.NodePool{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, nodePool); err != nil {
 		if errors.IsNotFound(err) {
@@ -139,7 +141,7 @@ func makeLabels(nodePool *v1beta1.NodePool, resourceTypeName string) prometheus.
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
 	return operatorcontroller.Adapt(
-		controllerruntime.
+		ctrl.
 			NewControllerManagedBy(m).
 			For(&v1beta1.NodePool{}),
 	)

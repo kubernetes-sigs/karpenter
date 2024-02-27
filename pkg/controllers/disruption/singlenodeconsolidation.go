@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"time"
 
-	"knative.dev/pkg/logging"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -66,13 +66,13 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		}
 		if s.clock.Now().After(timeout) {
 			ConsolidationTimeoutTotalCounter.WithLabelValues(s.ConsolidationType()).Inc()
-			logging.FromContext(ctx).Debugf("abandoning single-node consolidation due to timeout after evaluating %d candidates", i)
+			log.FromContext(ctx).V(1).Info("abandoning single-node consolidation due to timeout after evaluating %d candidates", i)
 			return Command{}, scheduling.Results{}, nil
 		}
 		// compute a possible consolidation option
 		cmd, results, err := s.computeConsolidation(ctx, candidate)
 		if err != nil {
-			logging.FromContext(ctx).Errorf("computing consolidation %s", err)
+			log.FromContext(ctx).Error(err, "computing consolidation %s")
 			continue
 		}
 		if cmd.Action() == NoOpAction {
@@ -83,7 +83,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 			return Command{}, scheduling.Results{}, fmt.Errorf("validating consolidation, %w", err)
 		}
 		if !isValid {
-			logging.FromContext(ctx).Debugf("abandoning single-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+			log.FromContext(ctx).V(1).Info("abandoning single-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
 			return Command{}, scheduling.Results{}, nil
 		}
 		return cmd, results, nil

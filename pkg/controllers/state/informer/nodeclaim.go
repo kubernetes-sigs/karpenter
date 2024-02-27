@@ -20,10 +20,10 @@ import (
 	"context"
 
 	"k8s.io/apimachinery/pkg/api/errors"
-	"knative.dev/pkg/logging"
-	controllerruntime "sigs.k8s.io/controller-runtime"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -51,7 +51,7 @@ func (c *NodeClaimController) Name() string {
 }
 
 func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("nodeclaim", req.NamespacedName.Name))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithName(c.Name()).WithValues("nodeclaim", req.NamespacedName.Name))
 	nodeClaim := &v1beta1.NodeClaim{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, nodeClaim); err != nil {
 		if errors.IsNotFound(err) {
@@ -66,7 +66,7 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 }
 
 func (c *NodeClaimController) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.Adapt(controllerruntime.
+	return operatorcontroller.Adapt(ctrl.
 		NewControllerManagedBy(m).
 		For(&v1beta1.NodeClaim{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))
