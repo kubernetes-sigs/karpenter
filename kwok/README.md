@@ -1,6 +1,6 @@
 # Kwok Provider
 
-Before using the kwok provider, make sure that you don't have an installed version of Karpenter in your cluster. 
+Before using the kwok provider, make sure that you don't have an installed version of Karpenter in your cluster.
 
 ## Requirements
 - Have an image repository that you can build, push, and pull images from.
@@ -16,7 +16,7 @@ make apply
 
 ## Create a NodePool
 
-Once kwok is installed and Karpenter successfully applies to the cluster, you should now be able to create a NodePool. 
+Once kwok is installed and Karpenter successfully applies to the cluster, you should now be able to create a NodePool.
 
 ```bash
 cat <<EOF | envsubst | kubectl apply -f -
@@ -47,9 +47,51 @@ spec:
 EOF
 ```
 
+## Specifying Instance Types
+
+By default, Karpenter will create a hypothetical set of instance types that it uses for node provisioning.  You can
+specify a custom set of instance types by providing a JSON file with the list of supported instance options.  Specify
+the location of this file using the `KWOK_INSTANCE_TYPES_FILE` environment variable.
+
+The format for this file is as follows:
+
+```
+[
+    {
+        "name": "<instance type name>",
+        "offerings": {
+            // Karpenter instance type offerings,
+        },
+        "architecture": "(arm64|amd64)",
+        "operatingSystems": {
+            "linux": {}
+        },
+        "resources": {
+            "cpu": "<cpu count>",
+            "memory": "<memory amount>",
+            // ...
+        }
+    },
+    // ...
+]
+```
+
+The offerings struct has the following format:
+
+```
+{
+    "capacityType": "(on-demand|spot)",
+    "zone": "<zone or region name>",
+    "price": <instance type price>,
+}
+```
+
+There is an example instance types file in [examples/instance\_types.json](examples/instance_types.json).
+
 ## Notes
-- The kwok provider will have additional labels `karpenter.kwok.sh/instance-size`, `karpenter.kwok.sh/instance-family`, `karpenter.kwok.sh/instance-cpu`, and `karpenter.sh/instance-memory`. These are only available in the kwok provider to select fake generated instance types. These labels will not work with a real Karpenter installation.
-- Additionally, this installs Karpenter with a hard-coded set of instance types. A dynamic set of instance types is not supported yet.
+The kwok provider will have additional labels `karpenter.kwok.sh/instance-size`, `karpenter.kwok.sh/instance-family`,
+`karpenter.kwok.sh/instance-cpu`, and `karpenter.sh/instance-memory`. These are only available in the kwok provider to
+select fake generated instance types. These labels will not work with a real Karpenter installation.
 
 ## Uninstalling
 ```bash
