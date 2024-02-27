@@ -100,7 +100,7 @@ Assuming zero unhealthy nodes:
 
 #### Decision
 The second equation simplifies reasoning for cluster operators. A node can be tagged for multiple disruption reasons (e.g., empty, drifted, underutilized), making it challenging to precisely calculate in-flight disruptions. The second equation streamlines this process by providing a clearer view of the overall disruption impact.
-### Q: How should we handle an unspecified default reason? 
+### Q: How should we handle an unspecified reason when others are specified? 
 ```yaml
 budgets: 
   - nodes: 10
