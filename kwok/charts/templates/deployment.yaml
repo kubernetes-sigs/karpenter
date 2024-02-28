@@ -134,12 +134,13 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-        {{- if .Values.controller.extraVolumeMounts }}
           volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
           {{- with .Values.controller.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
-        {{- end }}
         {{- with .Values.controller.sidecarContainer }}
           {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -172,9 +173,13 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-    {{- if .Values.extraVolumes }}
       volumes:
+        - name: config
+          configMap:
+            name: {{ include "karpenter.fullname" . }}-instances-config
+            items:
+              - key: instance_types.json
+                path: instance_types.json
       {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}
       {{- end }}
-    {{- end }}
