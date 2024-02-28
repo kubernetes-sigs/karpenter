@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "karpenter.fullname" . }}-instances-config
+  namespace: {{ .Release.Namespace }}
+data:
+  {{- $files := .Files }}
+  instance_types.json: |-
+{{ $files.Get "generic_instance_types.json" | indent 4 }}

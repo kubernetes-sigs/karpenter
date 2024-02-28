@@ -40,7 +40,6 @@ const (
 
 // Hard coded Kwok values
 var (
-	KwokZones      = []string{"test-zone-a", "test-zone-b", "test-zone-c", "test-zone-d"}
 	KwokPartitions = []string{"partition-a", "partition-b", "partition-c", "partition-d", "partition-e",
 		"partition-f", "partition-g", "partition-h", "partition-i", "partition-j"}
 )
