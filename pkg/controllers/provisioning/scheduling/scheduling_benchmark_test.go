@@ -142,36 +142,32 @@ func TestSchedulingProfile(t *testing.T) {
 func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	// disable logging
 	ctx = logging.WithLogger(context.Background(), zap.NewNop().Sugar())
-	var nodePool *v1beta1.NodePool
-	if *includeMinValues {
-		nodePool = test.NodePool(v1beta1.NodePool{
-			Spec: v1beta1.NodePoolSpec{
-				Template: v1beta1.NodeClaimTemplate{
-					Spec: v1beta1.NodeClaimSpec{
-						Requirements: []v1beta1.NodeSelectorRequirementWithMinValues{
-							{
-								NodeSelectorRequirement: v1.NodeSelectorRequirement{
-									Key:      v1.LabelInstanceTypeStable,
-									Operator: v1.NodeSelectorOpExists,
-								},
-								MinValues: lo.ToPtr(50),
+	nodePoolWithMinValues := test.NodePool(v1beta1.NodePool{
+		Spec: v1beta1.NodePoolSpec{
+			Template: v1beta1.NodeClaimTemplate{
+				Spec: v1beta1.NodeClaimSpec{
+					Requirements: []v1beta1.NodeSelectorRequirementWithMinValues{
+						{
+							NodeSelectorRequirement: v1.NodeSelectorRequirement{
+								Key:      v1.LabelInstanceTypeStable,
+								Operator: v1.NodeSelectorOpExists,
 							},
-							{
-								NodeSelectorRequirement: v1.NodeSelectorRequirement{
-									Key:      v1.LabelArchStable,
-									Operator: v1.NodeSelectorOpExists,
-								},
-								MinValues: lo.ToPtr(1),
+							MinValues: lo.ToPtr(50),
+						},
+						{
+							NodeSelectorRequirement: v1.NodeSelectorRequirement{
+								Key:      v1.LabelArchStable,
+								Operator: v1.NodeSelectorOpExists,
 							},
+							MinValues: lo.ToPtr(1),
 						},
 					},
 				},
 			},
-		})
-	} else {
-		nodePool = test.NodePool()
-	}
-
+		},
+	})
+	nodePoolWithoutMinValues := test.NodePool()
+	nodePool := lo.Ternary(*includeMinValues, nodePoolWithMinValues, nodePoolWithoutMinValues)
 	instanceTypes := fake.InstanceTypes(instanceCount)
 	cloudProvider = fake.NewCloudProvider()
 	cloudProvider.InstanceTypes = instanceTypes
