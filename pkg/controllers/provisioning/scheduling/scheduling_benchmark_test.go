@@ -152,7 +152,7 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 								Key:      v1.LabelInstanceTypeStable,
 								Operator: v1.NodeSelectorOpExists,
 							},
-							MinValues: lo.ToPtr(50),
+							MinValues: lo.ToPtr(50), // Adding highest possible minValues and safest way to add it would be to instanceType requirement.
 						},
 					},
 				},
