@@ -136,7 +136,7 @@ func (v *VolumeTopology) getPersistentVolumeRequirements(ctx context.Context, po
 		// Terms are ORed, only use the first term
 		requirements = pv.Spec.NodeAffinity.Required.NodeSelectorTerms[0].MatchExpressions
 		// If we are using a Local volume or a HostPath volume, then we should ignore the Hostname affinity
-		// on it because re-scheduling this pod means not using the same Hostname affinity that we currently have
+		// on it because re-scheduling this pod to a new node means not using the same Hostname affinity that we currently have
 		if pv.Spec.Local != nil || pv.Spec.HostPath != nil {
 			requirements = lo.Reject(requirements, func(n v1.NodeSelectorRequirement, _ int) bool {
 				return n.Key == v1.LabelHostname
