@@ -154,13 +154,6 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 							},
 							MinValues: lo.ToPtr(50),
 						},
-						{
-							NodeSelectorRequirement: v1.NodeSelectorRequirement{
-								Key:      v1.LabelArchStable,
-								Operator: v1.NodeSelectorOpExists,
-							},
-							MinValues: lo.ToPtr(1),
-						},
 					},
 				},
 			},
