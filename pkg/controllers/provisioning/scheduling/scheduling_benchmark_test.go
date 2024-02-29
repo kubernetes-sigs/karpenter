@@ -96,10 +96,10 @@ func BenchmarkScheduling5000(b *testing.B) {
 	benchmarkScheduler(b, 400, 5000)
 }
 
-var includeMinValues *bool
+var includeMinValues bool
 
 func init() {
-	includeMinValues = flag.Bool("minValues", false, "include minValues in NodePool requirement")
+	flag.BoolVar(&includeMinValues, "minValues", false, "include minValues in NodePool requirement")
 }
 
 // TestSchedulingProfile is used to gather profiling metrics, benchmarking is primarily done with standard
@@ -135,7 +135,7 @@ func TestSchedulingProfile(t *testing.T) {
 			totalNodes += int(nodeCount)
 		}
 	}
-	fmt.Println("scheduled", totalPods, "against", totalNodes, "nodes in total in", totalTime, "with minValues included", *includeMinValues, float64(totalPods)/totalTime.Seconds(), "pods/sec")
+	fmt.Println("scheduled", totalPods, "against", totalNodes, "nodes in total in", totalTime, "with minValues included", includeMinValues, float64(totalPods)/totalTime.Seconds(), "pods/sec")
 	tw.Flush()
 }
 
@@ -160,7 +160,7 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 		},
 	})
 	nodePoolWithoutMinValues := test.NodePool()
-	nodePool := lo.Ternary(*includeMinValues, nodePoolWithMinValues, nodePoolWithoutMinValues)
+	nodePool := lo.Ternary(includeMinValues, nodePoolWithMinValues, nodePoolWithoutMinValues)
 	instanceTypes := fake.InstanceTypes(instanceCount)
 	cloudProvider = fake.NewCloudProvider()
 	cloudProvider.InstanceTypes = instanceTypes
