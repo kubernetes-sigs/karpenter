@@ -20,6 +20,20 @@ spec:
         - jsonPath: .spec.template.spec.nodeClassRef.name
           name: NodeClass
           type: string
+        - jsonPath: .status.resources.cpu
+          name: CPU
+          type: string
+        - jsonPath: .spec.limits.cpu
+          name: CPU_Limit
+          priority: 1
+          type: string
+        - jsonPath: .status.resources.memory
+          name: Memory
+          type: string
+        - jsonPath: .spec.limits.memory
+          name: MEM_Limit
+          priority: 1
+          type: string
         - jsonPath: .spec.weight
           name: Weight
           priority: 1
