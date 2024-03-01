@@ -1,6 +1,22 @@
 # Disruption Controls By Reason
-## TOC and Overview
-<Generate ME ChatGPT>
+# Table of Contents
+1. [Disruption Controls By Reason](#disruption-controls-by-reason)
+2. [API Design](#api-design)
+   1. [Approach A: Extending the Budget API to Specify a Reason](#approach-a-extending-the-budget-api-to-specify-a-reason)
+      1. [List Approach: Multiple Reasons per Budget - Recommended](#list-approach-multiple-reasons-per-budget---recommended)
+      2. [Single Reason Approach: One Reason per Budget](#single-reason-approach-one-reason-per-budget)
+   2. [Approach B: Defining Per Reason Controls](#approach-b-defining-per-reason-controls)
+   3. [Preferred Option: List Approach](#preferred-option-list-approach)
+   4. [Disruption Behavior](#disruption-behavior)
+   5. [Scenarios](#scenarios)
+      1. [Block Drift and Allow Expiration](#block-drift-and-allow-expiration)
+      2. [Fully Blocking Drift & Expiration while Allowing Consolidation](#fully-blocking-drift--expiration-while-allowing-consolidation)
+      3. [Fully Blocking Drift and Expiration while Allowing Emptiness](#fully-blocking-drift-and-expiration-while-allowing-emptiness)
+      4. [Limiting Drift & Expiration while Allowing Aggressive but Not Unbounded Consolidation](#limiting-drift--expiration-while-allowing-aggressive-but-not-unbounded-consolidation)
+      5. [Limiting Cost Saving Disruption to Occur During Weekends](#limiting-cost-saving-disruption-to-occur-during-weekends)
+      6. [Which Equation Best Covers All the Scenarios?](#which-equation-best-covers-all-the-scenarios)
+      7. [How Should We Handle an Unspecified Reason When Others are Specified?](#how-should-we-handle-an-unspecified-reason-when-others-are-specified)
+
 ## User Scenarios 
 1. Users need the capability to schedule upgrades only during business hours or within more restricted time windows. Additionally, they require a system that doesn't compromise the cost savings from consolidation when upgrades are blocked due to drift.
 2. Users want to minimize workload disruptions during business hours but still want to be able to delete empty nodes throughout the day.  That is, empty can run all day, while limiting cost savings and upgrades due to drift to non-business hours only.
