@@ -37,7 +37,7 @@ If a budget reason is unspecified like budgets[1], we will assume this budget ap
 ```yaml
 budgets: 
   - nodes: 10
-    reasons: [drifted, underutilized]
+    reasons: [Drifted, Underutilized]
     schedule: "* * * * *"
   - nodes: 30 
     schedule: "* * * * *" 
@@ -52,16 +52,16 @@ AllowedDisruptions = minNodeCountOfAnActiveBudget - unhealthyNodes - totalDisrup
 When calculating by reason, two potential equations emerge:
 1. AllowedDisruptionByReason = minNodeCountOfActiveBudget[reason] - unhealthyNodes - totalDisruptingNodes[reason]
 2. AllowedDisruptionByReason = minNodeCountOfActiveBudget[reason] - unhealthyNodes - totalDisruptingNodes
-The second equation is the one we should opt into.
 
+The second equation is the one we should opt into.
 Take this budget as an example
 ```yaml
 budgets: 
   - nodes: 15 
-    reasons: [drifted, underutilized]
+    reasons: [Drifted, Underutilized]
     schedule: "* * * * *"
   - nodes: 10
-    reasons: [drifted]
+    reasons: [Drifted]
     schedule: "* * * * *"
   - nodes: 5 
     schedule: "* * * * *" 
@@ -104,10 +104,10 @@ The second equation simplifies reasoning for cluster operators. A node can be ta
 ```yaml
 budgets: 
   - nodes: 10
-    reasons: [drift, underutilized]
+    reasons: [Drifted, Underutilized]
     schedule: "* * * * *"
   - nodes: 5 
-    reasons: [empty] 
+    reasons: [Empty] 
     schedule: "* * * * *" 
 ```
 In the case of a budget like above, default is undefined. Should karpenter assume the user doesn't want to disrupt any other reasons? Or should we assume that if a default is unspecified, they want us to disrupt anyway?  
@@ -126,12 +126,12 @@ Add a simple field "reasons" is proposed to be added to the budgets.
 // Budget defines when Karpenter will restrict the
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
-      // Reasons is a list of methods for disruption that apply to this budget. If Reasons is not set, this budget applies to all methods.
+      // Reasons is a list of disruption reasons. If Reasons is not set, this budget applies to all methods.
       // If a reason is set, it will only apply to that method. If multiple reasons are specified,
       // this budget will apply to all of them. If a budget is not specified for a method, the default budget will be used.
-      // allowed reasons are "underutilized", "expired", "empty", "drift"
+      // allowed reasons are "Underutilized", "Expired", "Empty", "Drifted"
       // +kubebuilder:validation:MaxItems=5
-      // +kubebuilder:validation:Enum:={"consolidation","expired","empty","drift"}
+      // +kubebuilder:validation:Enum:={"Underutilized","Expired","Empty","Drifted"}
       // +optional
       Reasons []string `json:"reason,omitempty" hash:"ignore"`
       // Nodes dictates the maximum number of NodeClaims owned by this NodePool
@@ -167,7 +167,7 @@ spec: # This is not a complete NodePool Spec.
   disruption:
     budgets:
     - schedule: "* * * * *"
-      reason: [drifted, underutilized]
+      reason: [Drifted, Underutilized]
       nodes: 10
     # For all other reasons , only allow 5 nodes to be disrupted at a time
     - nodes: 5
@@ -193,8 +193,8 @@ In this approach, each budget entry specifies a single reason for disruption.
 // Budget defines when Karpenter will restrict the
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
-      // +kubebuilder:validation:Enum:={"consolidation","expired","empty","drift"}
       // +optional
+      // +kubebuilder:validation:Enum:={"Underutilized","Expired","Empty","Drifted"}
       Reason string `json:"reason,omitempty" hash:"ignore"`
       // Nodes dictates the maximum number of NodeClaims owned by this NodePool
       // that can be terminating at once. This is calculated by counting nodes that
