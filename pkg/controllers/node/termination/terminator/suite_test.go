@@ -18,18 +18,19 @@ package terminator_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
+	v1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/uuid"
 	. "knative.dev/pkg/logging/testing"
-
-	v1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 
@@ -57,7 +58,7 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
 	ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(true)}}))
 	recorder = test.NewEventRecorder()
-	queue = terminator.NewQueue(env.KubernetesInterface.CoreV1(), recorder)
+	queue = terminator.NewQueue(env.Client, recorder)
 })
 
 var _ = AfterSuite(func() {
@@ -91,13 +92,17 @@ var _ = Describe("Eviction/Queue", func() {
 
 	Context("Eviction API", func() {
 		It("should succeed with no event when the pod is not found", func() {
-			ExpectApplied(ctx, env.Client, pdb)
-			Expect(queue.Evict(ctx, types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})).To(BeTrue())
+			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod))).To(BeTrue())
+			Expect(recorder.Events()).To(HaveLen(0))
+		})
+		It("should succeed with no event when the pod UID conflicts", func() {
+			ExpectApplied(ctx, env.Client, pod)
+			Expect(queue.Evict(ctx, terminator.QueueKey{NamespacedName: client.ObjectKeyFromObject(pod), UID: uuid.NewUUID()})).To(BeTrue())
 			Expect(recorder.Events()).To(HaveLen(0))
 		})
 		It("should succeed with an evicted event when there are no PDBs", func() {
 			ExpectApplied(ctx, env.Client, pod)
-			Expect(queue.Evict(ctx, types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})).To(BeTrue())
+			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod))).To(BeTrue())
 			Expect(recorder.Calls("Evicted")).To(Equal(1))
 		})
 		It("should succeed with no event when there are PDBs that allow an eviction", func() {
@@ -106,12 +111,12 @@ var _ = Describe("Eviction/Queue", func() {
 				MaxUnavailable: &intstr.IntOrString{IntVal: 1},
 			})
 			ExpectApplied(ctx, env.Client, pod)
-			Expect(queue.Evict(ctx, types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})).To(BeTrue())
+			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod))).To(BeTrue())
 			Expect(recorder.Calls("Evicted")).To(Equal(1))
 		})
 		It("should return a NodeDrainError event when a PDB is blocking", func() {
 			ExpectApplied(ctx, env.Client, pdb, pod)
-			Expect(queue.Evict(ctx, types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})).To(BeFalse())
+			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod))).To(BeFalse())
 			Expect(recorder.Calls("FailedDraining")).To(Equal(1))
 		})
 		It("should fail when two PDBs refer to the same pod", func() {
@@ -120,7 +125,33 @@ var _ = Describe("Eviction/Queue", func() {
 				MaxUnavailable: &intstr.IntOrString{IntVal: 0},
 			})
 			ExpectApplied(ctx, env.Client, pdb, pdb2, pod)
-			Expect(queue.Evict(ctx, types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})).To(BeFalse())
+			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod))).To(BeFalse())
+		})
+		It("should ensure that calling Evict() is valid while making Add() calls", func() {
+			cancelCtx, cancel := context.WithCancel(ctx)
+			wg := sync.WaitGroup{}
+			DeferCleanup(func() {
+				cancel()
+				wg.Wait() // Ensure that we wait for reconcile loop to finish so that we don't get a RACE
+			})
+
+			// Keep calling Reconcile() for the entirety of this test
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+
+				for {
+					ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
+					if cancelCtx.Err() != nil {
+						return
+					}
+				}
+			}()
+
+			// Ensure that we add enough pods to the queue while we are pulling items off of the queue (enough to trigger a DATA RACE)
+			for i := 0; i < 10000; i++ {
+				queue.Add(test.Pod())
+			}
 		})
 	})
 })

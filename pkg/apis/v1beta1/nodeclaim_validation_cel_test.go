@@ -17,6 +17,7 @@ limitations under the License.
 package v1beta1_test
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/Pallinder/go-randomdata"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	"knative.dev/pkg/ptr"
 
 	. "sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -48,10 +50,12 @@ var _ = Describe("Validation", func() {
 					Kind: "NodeClaim",
 					Name: "default",
 				},
-				Requirements: []v1.NodeSelectorRequirement{
+				Requirements: []NodeSelectorRequirementWithMinValues{
 					{
-						Key:      CapacityTypeLabelKey,
-						Operator: v1.NodeSelectorOpExists,
+						NodeSelectorRequirement: v1.NodeSelectorRequirement{
+							Key:      CapacityTypeLabelKey,
+							Operator: v1.NodeSelectorOpExists,
+						},
 					},
 				},
 			},
@@ -94,27 +98,27 @@ var _ = Describe("Validation", func() {
 	})
 	Context("Requirements", func() {
 		It("should allow supported ops", func() {
-			nodeClaim.Spec.Requirements = []v1.NodeSelectorRequirement{
-				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
-				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"1"}},
-				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{"1"}},
-				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn},
-				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpExists},
+			nodeClaim.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}}},
+				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"1"}}},
+				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{"1"}}},
+				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn}},
+				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpExists}},
 			}
 			Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
 		})
 		It("should fail for unsupported ops", func() {
 			for _, op := range []v1.NodeSelectorOperator{"unknown"} {
-				nodeClaim.Spec.Requirements = []v1.NodeSelectorRequirement{
-					{Key: v1.LabelTopologyZone, Operator: op, Values: []string{"test"}},
+				nodeClaim.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: op, Values: []string{"test"}}},
 				}
 				Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
 			}
 		})
 		It("should fail for restricted domains", func() {
 			for label := range RestrictedLabelDomains {
-				nodeClaim.Spec.Requirements = []v1.NodeSelectorRequirement{
-					{Key: label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+				nodeClaim.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}}},
 				}
 				Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
 			}
@@ -122,8 +126,8 @@ var _ = Describe("Validation", func() {
 		It("should allow restricted domains exceptions", func() {
 			oldNodeClaim := nodeClaim.DeepCopy()
 			for label := range LabelDomainExceptions {
-				nodeClaim.Spec.Requirements = []v1.NodeSelectorRequirement{
-					{Key: label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+				nodeClaim.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}}},
 				}
 				Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
 				Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
@@ -133,8 +137,8 @@ var _ = Describe("Validation", func() {
 		It("should allow restricted subdomains exceptions", func() {
 			oldNodeClaim := nodeClaim.DeepCopy()
 			for label := range LabelDomainExceptions {
-				nodeClaim.Spec.Requirements = []v1.NodeSelectorRequirement{
-					{Key: "subdomain." + label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+				nodeClaim.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "subdomain." + label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}}},
 				}
 				Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
 				Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
@@ -144,8 +148,8 @@ var _ = Describe("Validation", func() {
 		It("should allow well known label exceptions", func() {
 			oldNodeClaim := nodeClaim.DeepCopy()
 			for label := range WellKnownLabels.Difference(sets.New(NodePoolLabelKey)) {
-				nodeClaim.Spec.Requirements = []v1.NodeSelectorRequirement{
-					{Key: label, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+				nodeClaim.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: label, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}}},
 				}
 				Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
 				Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
@@ -153,30 +157,64 @@ var _ = Describe("Validation", func() {
 			}
 		})
 		It("should allow non-empty set after removing overlapped value", func() {
-			nodeClaim.Spec.Requirements = []v1.NodeSelectorRequirement{
-				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test", "foo"}},
-				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn, Values: []string{"test", "bar"}},
+			nodeClaim.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test", "foo"}}},
+				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn, Values: []string{"test", "bar"}}},
 			}
 			Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
 		})
 		It("should allow empty requirements", func() {
-			nodeClaim.Spec.Requirements = []v1.NodeSelectorRequirement{}
+			nodeClaim.Spec.Requirements = []NodeSelectorRequirementWithMinValues{}
 			Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
 		})
 		It("should fail with invalid GT or LT values", func() {
-			for _, requirement := range []v1.NodeSelectorRequirement{
-				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{}},
-				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"1", "2"}},
-				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"a"}},
-				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"-1"}},
-				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{}},
-				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{"1", "2"}},
-				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{"a"}},
-				{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{"-1"}},
+			for _, requirement := range []NodeSelectorRequirementWithMinValues{
+				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{}}},
+				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"1", "2"}}},
+				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"a"}}},
+				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"-1"}}},
+				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{}}},
+				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{"1", "2"}}},
+				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{"a"}}},
+				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{"-1"}}},
 			} {
-				nodeClaim.Spec.Requirements = []v1.NodeSelectorRequirement{requirement}
+				nodeClaim.Spec.Requirements = []NodeSelectorRequirementWithMinValues{requirement}
 				Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
 			}
+		})
+		It("should error when minValues is negative", func() {
+			nodeClaim.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"insance-type-1"}}, MinValues: lo.ToPtr(-1)},
+			}
+			Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
+		})
+		It("should error when minValues is zero", func() {
+			nodeClaim.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"insance-type-1"}}, MinValues: lo.ToPtr(0)},
+			}
+			Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
+		})
+		It("should error when minValues is more than 50", func() {
+			nodeClaim.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpExists}, MinValues: lo.ToPtr(51)},
+			}
+			Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
+		})
+		It("should allow more than 50 values if minValues is not specified.", func() {
+			var instanceTypes []string
+			for i := 0; i < 90; i++ {
+				instanceTypes = append(instanceTypes, "instance"+strconv.Itoa(i))
+			}
+			nodeClaim.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: instanceTypes}},
+			}
+			Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
+		})
+		It("should error when minValues is greater than the number of unique values specified within In operator", func() {
+			nodeClaim.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"insance-type-1"}}, MinValues: lo.ToPtr(2)},
+			}
+			Expect(nodeClaim.Validate(ctx)).ToNot(Succeed())
 		})
 	})
 	Context("Kubelet", func() {

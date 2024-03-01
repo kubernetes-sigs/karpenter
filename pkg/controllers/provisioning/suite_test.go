@@ -30,7 +30,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
 	. "knative.dev/pkg/logging/testing"
@@ -77,7 +76,7 @@ var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeController = informer.NewNodeController(env.Client, cluster)
-	prov = provisioning.NewProvisioner(env.Client, corev1.NewForConfigOrDie(env.Config), events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster)
+	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
 	instanceTypes, _ := cloudProvider.GetInstanceTypes(ctx, nil)
 	instanceTypeMap = map[string]*cloudprovider.InstanceType{}
@@ -225,11 +224,13 @@ var _ = Describe("Provisioning", func() {
 				Template: v1beta1.NodeClaimTemplate{
 					Spec: v1beta1.NodeClaimSpec{
 						Kubelet: &v1beta1.KubeletConfiguration{MaxPods: ptr.Int32(1)},
-						Requirements: []v1.NodeSelectorRequirement{
+						Requirements: []v1beta1.NodeSelectorRequirementWithMinValues{
 							{
-								Key:      v1.LabelInstanceTypeStable,
-								Operator: v1.NodeSelectorOpIn,
-								Values:   []string{"single-pod-instance-type"},
+								NodeSelectorRequirement: v1.NodeSelectorRequirement{
+									Key:      v1.LabelInstanceTypeStable,
+									Operator: v1.NodeSelectorOpIn,
+									Values:   []string{"single-pod-instance-type"},
+								},
 							},
 						},
 					},
@@ -933,13 +934,13 @@ var _ = Describe("Provisioning", func() {
 							Labels: map[string]string{"test-key-1": "test-value-1"},
 						},
 						Spec: v1beta1.NodeClaimSpec{
-							Requirements: []v1.NodeSelectorRequirement{
-								{Key: "test-key-2", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value-2"}},
-								{Key: "test-key-3", Operator: v1.NodeSelectorOpNotIn, Values: []string{"test-value-3"}},
-								{Key: "test-key-4", Operator: v1.NodeSelectorOpLt, Values: []string{"4"}},
-								{Key: "test-key-5", Operator: v1.NodeSelectorOpGt, Values: []string{"5"}},
-								{Key: "test-key-6", Operator: v1.NodeSelectorOpExists},
-								{Key: "test-key-7", Operator: v1.NodeSelectorOpDoesNotExist},
+							Requirements: []v1beta1.NodeSelectorRequirementWithMinValues{
+								{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key-2", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value-2"}}},
+								{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key-3", Operator: v1.NodeSelectorOpNotIn, Values: []string{"test-value-3"}}},
+								{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key-4", Operator: v1.NodeSelectorOpLt, Values: []string{"4"}}},
+								{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key-5", Operator: v1.NodeSelectorOpGt, Values: []string{"5"}}},
+								{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key-6", Operator: v1.NodeSelectorOpExists}},
+								{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key-7", Operator: v1.NodeSelectorOpDoesNotExist}},
 							},
 						},
 					},
@@ -1080,16 +1081,20 @@ var _ = Describe("Provisioning", func() {
 				Spec: v1beta1.NodePoolSpec{
 					Template: v1beta1.NodeClaimTemplate{
 						Spec: v1beta1.NodeClaimSpec{
-							Requirements: []v1.NodeSelectorRequirement{
+							Requirements: []v1beta1.NodeSelectorRequirementWithMinValues{
 								{
-									Key:      "custom-requirement-key",
-									Operator: v1.NodeSelectorOpIn,
-									Values:   []string{"value"},
+									NodeSelectorRequirement: v1.NodeSelectorRequirement{
+										Key:      "custom-requirement-key",
+										Operator: v1.NodeSelectorOpIn,
+										Values:   []string{"value"},
+									},
 								},
 								{
-									Key:      "custom-requirement-key2",
-									Operator: v1.NodeSelectorOpIn,
-									Values:   []string{"value"},
+									NodeSelectorRequirement: v1.NodeSelectorRequirement{
+										Key:      "custom-requirement-key2",
+										Operator: v1.NodeSelectorOpIn,
+										Values:   []string{"value"},
+									},
 								},
 							},
 						},
@@ -1130,11 +1135,13 @@ var _ = Describe("Provisioning", func() {
 				Spec: v1beta1.NodePoolSpec{
 					Template: v1beta1.NodeClaimTemplate{
 						Spec: v1beta1.NodeClaimSpec{
-							Requirements: []v1.NodeSelectorRequirement{
+							Requirements: []v1beta1.NodeSelectorRequirementWithMinValues{
 								{
-									Key:      v1.LabelArchStable,
-									Operator: v1.NodeSelectorOpIn,
-									Values:   []string{"arm64"},
+									NodeSelectorRequirement: v1.NodeSelectorRequirement{
+										Key:      v1.LabelArchStable,
+										Operator: v1.NodeSelectorOpIn,
+										Values:   []string{"arm64"},
+									},
 								},
 							},
 						},
@@ -1167,11 +1174,13 @@ var _ = Describe("Provisioning", func() {
 				Spec: v1beta1.NodePoolSpec{
 					Template: v1beta1.NodeClaimTemplate{
 						Spec: v1beta1.NodeClaimSpec{
-							Requirements: []v1.NodeSelectorRequirement{
+							Requirements: []v1beta1.NodeSelectorRequirementWithMinValues{
 								{
-									Key:      v1.LabelOSStable,
-									Operator: v1.NodeSelectorOpIn,
-									Values:   []string{"ios"},
+									NodeSelectorRequirement: v1.NodeSelectorRequirement{
+										Key:      v1.LabelOSStable,
+										Operator: v1.NodeSelectorOpIn,
+										Values:   []string{"ios"},
+									},
 								},
 							},
 						},
@@ -1615,7 +1624,7 @@ var _ = Describe("Provisioning", func() {
 					Spec: v1beta1.NodePoolSpec{
 						Template: v1beta1.NodeClaimTemplate{
 							Spec: v1beta1.NodeClaimSpec{
-								Requirements: []v1.NodeSelectorRequirement{{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}},
+								Requirements: []v1beta1.NodeSelectorRequirementWithMinValues{{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}},
 							},
 						},
 					},
@@ -1691,7 +1700,7 @@ var _ = Describe("Provisioning", func() {
 					Spec: v1beta1.NodePoolSpec{
 						Template: v1beta1.NodeClaimTemplate{
 							Spec: v1beta1.NodeClaimSpec{
-								Requirements: []v1.NodeSelectorRequirement{{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}},
+								Requirements: []v1beta1.NodeSelectorRequirementWithMinValues{{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}},
 							},
 						},
 					},
@@ -1810,7 +1819,7 @@ var _ = Describe("Provisioning", func() {
 func ExpectNodeClaimRequirements(nodeClaim *v1beta1.NodeClaim, requirements ...v1.NodeSelectorRequirement) {
 	GinkgoHelper()
 	for _, requirement := range requirements {
-		req, ok := lo.Find(nodeClaim.Spec.Requirements, func(r v1.NodeSelectorRequirement) bool {
+		req, ok := lo.Find(nodeClaim.Spec.Requirements, func(r v1beta1.NodeSelectorRequirementWithMinValues) bool {
 			return r.Key == requirement.Key && r.Operator == requirement.Operator
 		})
 		Expect(ok).To(BeTrue())

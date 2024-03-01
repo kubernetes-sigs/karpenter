@@ -91,7 +91,7 @@ type Disruption struct {
 	// If there are multiple active budgets, Karpenter uses
 	// the most restrictive value. If left undefined,
 	// this will default to one budget with a value to 10%.
-	// +kubebuilder:validation:XValidation:message="'schedule' must be set with 'duration'",rule="!self.all(x, (has(x.schedule) && !has(x.duration)) || (!has(x.schedule) && has(x.duration)))"
+	// +kubebuilder:validation:XValidation:message="'schedule' must be set with 'duration'",rule="self.all(x, has(x.schedule) == has(x.duration))"
 	// +kubebuilder:default:={{nodes: "10%"}}
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
@@ -185,7 +185,8 @@ type NodePool struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   NodePoolSpec   `json:"spec,omitempty"`
+	// +required
+	Spec   NodePoolSpec   `json:"spec"`
 	Status NodePoolStatus `json:"status,omitempty"`
 }
 

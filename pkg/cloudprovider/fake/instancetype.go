@@ -48,6 +48,10 @@ func init() {
 }
 
 func NewInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
+	return NewInstanceTypeWithCustomRequirement(options, nil)
+}
+
+func NewInstanceTypeWithCustomRequirement(options InstanceTypeOptions, customReq *scheduling.Requirement) *cloudprovider.InstanceType {
 	if options.Resources == nil {
 		options.Resources = map[v1.ResourceName]resource.Quantity{}
 	}
@@ -85,6 +89,9 @@ func NewInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 		scheduling.NewRequirement(ExoticInstanceLabelKey, v1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(IntegerInstanceLabelKey, v1.NodeSelectorOpIn, fmt.Sprint(options.Resources.Cpu().Value())),
 	)
+	if customReq != nil {
+		requirements.Add(customReq)
+	}
 	if options.Resources.Cpu().Cmp(resource.MustParse("4")) > 0 &&
 		options.Resources.Memory().Cmp(resource.MustParse("8Gi")) > 0 {
 		requirements.Get(LabelInstanceSize).Insert("large")

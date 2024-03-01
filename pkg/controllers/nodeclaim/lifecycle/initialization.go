@@ -83,7 +83,7 @@ func (i *Initialization) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeC
 			return reconcile.Result{}, err
 		}
 	}
-	logging.FromContext(ctx).Infof("initialized nodeclaim")
+	logging.FromContext(ctx).With("allocatable", node.Status.Allocatable).Infof("initialized nodeclaim")
 	nodeClaim.StatusConditions().MarkTrue(v1beta1.Initialized)
 	metrics.NodeClaimsInitializedCounter.With(prometheus.Labels{
 		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],

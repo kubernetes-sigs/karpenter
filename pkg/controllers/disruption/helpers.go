@@ -41,6 +41,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -78,9 +79,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		pods = append(pods, n.reschedulablePods...)
 	}
 	pods = append(pods, deletingNodePods...)
-	scheduler, err := provisioner.NewScheduler(ctx, pods, stateNodes, pscheduling.SchedulerOptions{
-		SimulationMode: true,
-	})
+	scheduler, err := provisioner.NewScheduler(logging.WithLogger(ctx, operatorlogging.NopLogger), pods, stateNodes)
 	if err != nil {
 		return pscheduling.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
@@ -89,7 +88,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return client.ObjectKeyFromObject(p), nil
 	})
 
-	results := scheduler.Solve(ctx, pods)
+	results := scheduler.Solve(logging.WithLogger(ctx, operatorlogging.NopLogger), pods).TruncateInstanceTypes(pscheduling.MaxInstanceTypes)
 	for _, n := range results.ExistingNodes {
 		// We consider existing nodes for scheduling. When these nodes are unmanaged, their taint logic should
 		// tell us if we can schedule to them or not; however, if these nodes are managed, we will still schedule to them
@@ -145,15 +144,28 @@ func GetPodEvictionCost(ctx context.Context, p *v1.Pod) float64 {
 	return clamp(-10.0, cost, 10.0)
 }
 
-func filterByPrice(options []*cloudprovider.InstanceType, reqs scheduling.Requirements, price float64) []*cloudprovider.InstanceType {
+// filterByPriceWithMinValues returns the instanceTypes that are lower priced than the current candidate and iterates over the cumulative minimum requirement of the InstanceTypeOptions to see if it meets the minValues of requirements.
+// The minValues requirement is checked again after filterByPrice as it may result in more constrained InstanceTypeOptions for a NodeClaim
+func filterByPriceWithMinValues(options []*cloudprovider.InstanceType, reqs scheduling.Requirements, price float64) ([]*cloudprovider.InstanceType, string, int) {
 	var result []*cloudprovider.InstanceType
+
 	for _, it := range options {
 		launchPrice := worstLaunchPrice(it.Offerings.Available(), reqs)
 		if launchPrice < price {
 			result = append(result, it)
 		}
 	}
-	return result
+	var incompatibleReqKey string
+	var numInstanceTypes int
+	// Only try to find the incompatible minValue requirement key if requirements have minValues.
+	if reqs.HasMinValues() {
+		// We would have already filtered the invalid nodeclaim not meeting the minimum requirements in simulated scheduling results.
+		// Here the instanceTypeOptions changed again based on the price and requires re-validation.
+		incompatibleReqKey, numInstanceTypes = pscheduling.IncompatibleReqAcrossInstanceTypes(reqs, lo.Slice(result, 0, pscheduling.MaxInstanceTypes))
+	}
+	// If minValues is NOT met for any of the requirement across InstanceTypes, then return empty InstanceTypeOptions as we cannot launch with the remaining InstanceTypes.
+	result = lo.Ternary(len(incompatibleReqKey) > 0, []*cloudprovider.InstanceType{}, result)
+	return result, incompatibleReqKey, numInstanceTypes
 }
 
 func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
@@ -233,7 +245,7 @@ func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clo
 		if allowedDisruptions == 0 {
 			recorder.Publish(disruptionevents.NodePoolBlocked(lo.ToPtr(nodePool)))
 		}
-		disruptionBudgetsAllowedDisruptionsGauge.With(map[string]string{
+		BudgetsAllowedDisruptionsGauge.With(map[string]string{
 			metrics.NodePoolLabel: nodePool.Name,
 		}).Set(float64(allowedDisruptions))
 	}

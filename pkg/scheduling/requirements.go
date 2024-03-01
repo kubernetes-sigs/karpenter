@@ -43,11 +43,20 @@ func NewRequirements(requirements ...*Requirement) Requirements {
 	return r
 }
 
+// NewRequirements constructs requirements from NodeSelectorRequirementWithMinValues
+func NewNodeSelectorRequirementsWithMinValues(requirements ...v1beta1.NodeSelectorRequirementWithMinValues) Requirements {
+	r := NewRequirements()
+	for _, requirement := range requirements {
+		r.Add(NewRequirementWithFlexibility(requirement.Key, requirement.Operator, requirement.MinValues, requirement.Values...))
+	}
+	return r
+}
+
 // NewRequirements constructs requirements from NodeSelectorRequirements
 func NewNodeSelectorRequirements(requirements ...v1.NodeSelectorRequirement) Requirements {
 	r := NewRequirements()
 	for _, requirement := range requirements {
-		r.Add(NewRequirement(requirement.Key, requirement.Operator, requirement.Values...))
+		r.Add(NewRequirementWithFlexibility(requirement.Key, requirement.Operator, nil, requirement.Values...))
 	}
 	return r
 }
@@ -108,8 +117,8 @@ func HasPreferredNodeAffinity(p *v1.Pod) bool {
 	return p.Spec.Affinity != nil && p.Spec.Affinity.NodeAffinity != nil && len(p.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution) > 0
 }
 
-func (r Requirements) NodeSelectorRequirements() []v1.NodeSelectorRequirement {
-	return lo.Map(lo.Values(r), func(req *Requirement, _ int) v1.NodeSelectorRequirement {
+func (r Requirements) NodeSelectorRequirements() []v1beta1.NodeSelectorRequirementWithMinValues {
+	return lo.Map(lo.Values(r), func(req *Requirement, _ int) v1beta1.NodeSelectorRequirementWithMinValues {
 		return req.NodeSelectorRequirement()
 	})
 }
@@ -237,9 +246,38 @@ func labelHint(r Requirements, key string, allowedUndefined sets.Set[string]) st
 	return ""
 }
 
+// badKeyError allows lazily generating the error string in the case of a bad key error. When requirements fail
+// to match, we are most often interested in the failure and not why it fails.
+type badKeyError struct {
+	key      string
+	incoming *Requirement
+	existing *Requirement
+}
+
+func (b badKeyError) Error() string {
+	return fmt.Sprintf("key %s, %s not in %s", b.key, b.incoming, b.existing)
+}
+
+// intersectKeys is much faster and allocates less han getting the two key sets separately and intersecting them
+func (r Requirements) intersectKeys(rhs Requirements) sets.Set[string] {
+	smallest := r
+	largest := rhs
+	if len(smallest) > len(largest) {
+		smallest, largest = largest, smallest
+	}
+	keys := sets.Set[string]{}
+
+	for key := range smallest {
+		if _, ok := largest[key]; ok {
+			keys.Insert(key)
+		}
+	}
+	return keys
+}
+
 // Intersects returns errors if the requirements don't have overlapping values, undefined keys are allowed
 func (r Requirements) Intersects(requirements Requirements) (errs error) {
-	for key := range r.Keys().Intersection(requirements.Keys()) {
+	for key := range r.intersectKeys(requirements) {
 		existing := r.Get(key)
 		incoming := requirements.Get(key)
 		// There must be some value, except
@@ -251,7 +289,11 @@ func (r Requirements) Intersects(requirements Requirements) (errs error) {
 					continue
 				}
 			}
-			errs = multierr.Append(errs, fmt.Errorf("key %s, %s not in %s", key, incoming, existing))
+			errs = multierr.Append(errs, badKeyError{
+				key:      key,
+				incoming: incoming,
+				existing: existing,
+			})
 		}
 	}
 	return errs
@@ -267,6 +309,15 @@ func (r Requirements) Labels() map[string]string {
 		}
 	}
 	return labels
+}
+
+func (r Requirements) HasMinValues() bool {
+	for _, req := range r {
+		if req.MinValues != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func (r Requirements) String() string {

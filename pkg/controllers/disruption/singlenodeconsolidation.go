@@ -45,7 +45,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		return Command{}, scheduling.Results{}, nil
 	}
 	candidates = s.sortCandidates(candidates)
-	disruptionEligibleNodesGauge.With(map[string]string{
+	EligibleNodesGauge.With(map[string]string{
 		methodLabel:            s.Type(),
 		consolidationTypeLabel: s.ConsolidationType(),
 	}).Set(float64(len(candidates)))
@@ -65,7 +65,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 			continue
 		}
 		if s.clock.Now().After(timeout) {
-			disruptionConsolidationTimeoutTotalCounter.WithLabelValues(s.ConsolidationType()).Inc()
+			ConsolidationTimeoutTotalCounter.WithLabelValues(s.ConsolidationType()).Inc()
 			logging.FromContext(ctx).Debugf("abandoning single-node consolidation due to timeout after evaluating %d candidates", i)
 			return Command{}, scheduling.Results{}, nil
 		}

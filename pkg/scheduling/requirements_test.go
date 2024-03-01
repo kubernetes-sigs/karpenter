@@ -17,11 +17,16 @@ limitations under the License.
 package scheduling
 
 import (
+	"os"
+	"runtime/pprof"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
+
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 )
 
 var _ = Describe("Requirements", func() {
@@ -602,20 +607,70 @@ var _ = Describe("Requirements", func() {
 				lessThan9,
 			)
 			Expect(reqs.NodeSelectorRequirements()).To(ContainElements(
-				v1.NodeSelectorRequirement{Key: "exists", Operator: v1.NodeSelectorOpExists},
-				v1.NodeSelectorRequirement{Key: "doesNotExist", Operator: v1.NodeSelectorOpDoesNotExist},
-				v1.NodeSelectorRequirement{Key: "inA", Operator: v1.NodeSelectorOpIn, Values: []string{"A"}},
-				v1.NodeSelectorRequirement{Key: "inB", Operator: v1.NodeSelectorOpIn, Values: []string{"B"}},
-				v1.NodeSelectorRequirement{Key: "inAB", Operator: v1.NodeSelectorOpIn, Values: []string{"A", "B"}},
-				v1.NodeSelectorRequirement{Key: "notInA", Operator: v1.NodeSelectorOpNotIn, Values: []string{"A"}},
-				v1.NodeSelectorRequirement{Key: "in1", Operator: v1.NodeSelectorOpIn, Values: []string{"1"}},
-				v1.NodeSelectorRequirement{Key: "in9", Operator: v1.NodeSelectorOpIn, Values: []string{"9"}},
-				v1.NodeSelectorRequirement{Key: "in19", Operator: v1.NodeSelectorOpIn, Values: []string{"1", "9"}},
-				v1.NodeSelectorRequirement{Key: "notIn12", Operator: v1.NodeSelectorOpNotIn, Values: []string{"1", "2"}},
-				v1.NodeSelectorRequirement{Key: "greaterThan1", Operator: v1.NodeSelectorOpGt, Values: []string{"1"}},
-				v1.NodeSelectorRequirement{Key: "greaterThan9", Operator: v1.NodeSelectorOpGt, Values: []string{"9"}},
-				v1.NodeSelectorRequirement{Key: "lessThan1", Operator: v1.NodeSelectorOpLt, Values: []string{"1"}},
-				v1.NodeSelectorRequirement{Key: "lessThan9", Operator: v1.NodeSelectorOpLt, Values: []string{"9"}},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "exists", Operator: v1.NodeSelectorOpExists}},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "doesNotExist", Operator: v1.NodeSelectorOpDoesNotExist}},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "inA", Operator: v1.NodeSelectorOpIn, Values: []string{"A"}}},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "inB", Operator: v1.NodeSelectorOpIn, Values: []string{"B"}}},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "inAB", Operator: v1.NodeSelectorOpIn, Values: []string{"A", "B"}}},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "notInA", Operator: v1.NodeSelectorOpNotIn, Values: []string{"A"}}},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "in1", Operator: v1.NodeSelectorOpIn, Values: []string{"1"}}},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "in9", Operator: v1.NodeSelectorOpIn, Values: []string{"9"}}},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "in19", Operator: v1.NodeSelectorOpIn, Values: []string{"1", "9"}}},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "notIn12", Operator: v1.NodeSelectorOpNotIn, Values: []string{"1", "2"}}},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "greaterThan1", Operator: v1.NodeSelectorOpGt, Values: []string{"1"}}},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "greaterThan9", Operator: v1.NodeSelectorOpGt, Values: []string{"9"}}},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "lessThan1", Operator: v1.NodeSelectorOpLt, Values: []string{"1"}}},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "lessThan9", Operator: v1.NodeSelectorOpLt, Values: []string{"9"}}},
+			))
+			Expect(reqs.NodeSelectorRequirements()).To(HaveLen(14))
+		})
+		It("should convert combinations of labels with flexiblity to expected NodeSelectorRequirements", func() {
+			exists := NewRequirementWithFlexibility("exists", v1.NodeSelectorOpExists, lo.ToPtr(3))
+			doesNotExist := NewRequirementWithFlexibility("doesNotExist", v1.NodeSelectorOpDoesNotExist, lo.ToPtr(2))
+			inA := NewRequirementWithFlexibility("inA", v1.NodeSelectorOpIn, lo.ToPtr(1), "A")
+			inB := NewRequirementWithFlexibility("inB", v1.NodeSelectorOpIn, lo.ToPtr(1), "B")
+			inAB := NewRequirementWithFlexibility("inAB", v1.NodeSelectorOpIn, lo.ToPtr(2), "A", "B")
+			notInA := NewRequirementWithFlexibility("notInA", v1.NodeSelectorOpNotIn, lo.ToPtr(1), "A")
+			in1 := NewRequirementWithFlexibility("in1", v1.NodeSelectorOpIn, lo.ToPtr(1), "1")
+			in9 := NewRequirementWithFlexibility("in9", v1.NodeSelectorOpIn, lo.ToPtr(1), "9")
+			in19 := NewRequirementWithFlexibility("in19", v1.NodeSelectorOpIn, lo.ToPtr(2), "1", "9")
+			notIn12 := NewRequirementWithFlexibility("notIn12", v1.NodeSelectorOpNotIn, lo.ToPtr(2), "1", "2")
+			greaterThan1 := NewRequirementWithFlexibility("greaterThan1", v1.NodeSelectorOpGt, lo.ToPtr(1), "1")
+			greaterThan9 := NewRequirementWithFlexibility("greaterThan9", v1.NodeSelectorOpGt, lo.ToPtr(1), "9")
+			lessThan1 := NewRequirementWithFlexibility("lessThan1", v1.NodeSelectorOpLt, lo.ToPtr(1), "1")
+			lessThan9 := NewRequirementWithFlexibility("lessThan9", v1.NodeSelectorOpLt, lo.ToPtr(1), "9")
+
+			reqs := NewRequirements(
+				exists,
+				doesNotExist,
+				inA,
+				inB,
+				inAB,
+				notInA,
+				in1,
+				in9,
+				in19,
+				notIn12,
+				greaterThan1,
+				greaterThan9,
+				lessThan1,
+				lessThan9,
+			)
+			Expect(reqs.NodeSelectorRequirements()).To(ContainElements(
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "exists", Operator: v1.NodeSelectorOpExists}, MinValues: lo.ToPtr(3)},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "doesNotExist", Operator: v1.NodeSelectorOpDoesNotExist}, MinValues: lo.ToPtr(2)},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "inA", Operator: v1.NodeSelectorOpIn, Values: []string{"A"}}, MinValues: lo.ToPtr(1)},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "inB", Operator: v1.NodeSelectorOpIn, Values: []string{"B"}}, MinValues: lo.ToPtr(1)},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "inAB", Operator: v1.NodeSelectorOpIn, Values: []string{"A", "B"}}, MinValues: lo.ToPtr(2)},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "notInA", Operator: v1.NodeSelectorOpNotIn, Values: []string{"A"}}, MinValues: lo.ToPtr(1)},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "in1", Operator: v1.NodeSelectorOpIn, Values: []string{"1"}}, MinValues: lo.ToPtr(1)},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "in9", Operator: v1.NodeSelectorOpIn, Values: []string{"9"}}, MinValues: lo.ToPtr(1)},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "in19", Operator: v1.NodeSelectorOpIn, Values: []string{"1", "9"}}, MinValues: lo.ToPtr(2)},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "notIn12", Operator: v1.NodeSelectorOpNotIn, Values: []string{"1", "2"}}, MinValues: lo.ToPtr(2)},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "greaterThan1", Operator: v1.NodeSelectorOpGt, Values: []string{"1"}}, MinValues: lo.ToPtr(1)},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "greaterThan9", Operator: v1.NodeSelectorOpGt, Values: []string{"9"}}, MinValues: lo.ToPtr(1)},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "lessThan1", Operator: v1.NodeSelectorOpLt, Values: []string{"1"}}, MinValues: lo.ToPtr(1)},
+				v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "lessThan9", Operator: v1.NodeSelectorOpLt, Values: []string{"9"}}, MinValues: lo.ToPtr(1)},
 			))
 			Expect(reqs.NodeSelectorRequirements()).To(HaveLen(14))
 		})
@@ -653,4 +708,33 @@ func FuzzEditDistance(f *testing.F) {
 	f.Fuzz(func(t *testing.T, lhs, rhs string) {
 		editDistance(lhs, rhs)
 	})
+}
+
+// TestSchedulingProfile is used to gather profiling metrics, benchmarking is primarily done with standard
+// Go benchmark functions
+// go test -tags=test_performance -run=RequirementsProfile
+func TestRequirementsProfile(t *testing.T) {
+	cpuf, err := os.Create("requirements.cpuprofile")
+	if err != nil {
+		t.Fatalf("error creating CPU profile: %s", err)
+	}
+	lo.Must0(pprof.StartCPUProfile(cpuf))
+	defer pprof.StopCPUProfile()
+
+	heapf, err := os.Create("requirements.heapprofile")
+	if err != nil {
+		t.Fatalf("error creating heap profile: %s", err)
+	}
+	defer lo.Must0(pprof.WriteHeapProfile(heapf))
+
+	reqsA := NewRequirements(NewRequirement("foo", v1.NodeSelectorOpIn, "a", "b", "c"))
+	reqsB := NewRequirements(NewRequirement("foo", v1.NodeSelectorOpIn, "d", "e", "f"))
+
+	for i := 0; i < 525000; i++ {
+		_ = reqsA.Intersects(reqsB)
+		_ = reqsA.Compatible(reqsB)
+		_ = reqsA.NodeSelectorRequirements()
+		_ = reqsA.Keys()
+		_ = reqsA.Values()
+	}
 }

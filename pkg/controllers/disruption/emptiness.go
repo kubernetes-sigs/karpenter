@@ -68,7 +68,7 @@ func (e *Emptiness) ComputeCommand(_ context.Context, disruptionBudgetMapping ma
 		return cn.NodeClaim.DeletionTimestamp.IsZero() && len(cn.reschedulablePods) == 0
 	})
 
-	disruptionEligibleNodesGauge.With(map[string]string{
+	EligibleNodesGauge.With(map[string]string{
 		methodLabel:            e.Type(),
 		consolidationTypeLabel: e.ConsolidationType(),
 	}).Set(float64(len(candidates)))

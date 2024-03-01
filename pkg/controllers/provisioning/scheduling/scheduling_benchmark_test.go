@@ -20,6 +20,7 @@ package scheduling_test
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"math"
 	"math/rand"
@@ -40,6 +41,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/logging"
 
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
@@ -56,10 +58,25 @@ const PrintStats = false
 //nolint:gosec
 var r = rand.New(rand.NewSource(42))
 
+// To run the benchmarks use:
+// `go test -tags=test_performance -run=XXX -bench=.`
+//
+// To run the benchmarks with minValues included in NodePool requirements, use:
+// `go test -tags=test_performance -run=XXX -bench=. -minValues=true`
+//
+// to get something statistically significant for comparison we need to run them several times and then
+// compare the results between the old performance and the new performance.
+// ```sh
+//
+//	go test -tags=test_performance -run=XXX -bench=. -count=10 | tee /tmp/old
+//	# make your changes to the code
+//	go test -tags=test_performance -run=XXX -bench=. -count=10 | tee /tmp/new
+//	benchstat /tmp/old /tmp/new
+//
+// ```
 func BenchmarkScheduling1(b *testing.B) {
 	benchmarkScheduler(b, 400, 1)
 }
-
 func BenchmarkScheduling50(b *testing.B) {
 	benchmarkScheduler(b, 400, 50)
 }
@@ -77,6 +94,12 @@ func BenchmarkScheduling2000(b *testing.B) {
 }
 func BenchmarkScheduling5000(b *testing.B) {
 	benchmarkScheduler(b, 400, 5000)
+}
+
+var includeMinValues bool
+
+func init() {
+	flag.BoolVar(&includeMinValues, "minValues", false, "include minValues in NodePool requirement")
 }
 
 // TestSchedulingProfile is used to gather profiling metrics, benchmarking is primarily done with standard
@@ -102,7 +125,7 @@ func TestSchedulingProfile(t *testing.T) {
 	totalNodes := 0
 	var totalTime time.Duration
 	for _, instanceCount := range []int{400} {
-		for _, podCount := range []int{10, 100, 500, 1000, 1500, 2000, 2500} {
+		for _, podCount := range []int{10, 100, 500, 1000, 1500, 2000, 5000} {
 			start := time.Now()
 			res := testing.Benchmark(func(b *testing.B) { benchmarkScheduler(b, instanceCount, podCount) })
 			totalTime += time.Since(start) / time.Duration(res.N)
@@ -112,15 +135,32 @@ func TestSchedulingProfile(t *testing.T) {
 			totalNodes += int(nodeCount)
 		}
 	}
-	fmt.Println("scheduled", totalPods, "against", totalNodes, "nodes in total in", totalTime, float64(totalPods)/totalTime.Seconds(), "pods/sec")
+	fmt.Println("scheduled", totalPods, "against", totalNodes, "nodes in total in", totalTime, "with minValues included", includeMinValues, float64(totalPods)/totalTime.Seconds(), "pods/sec")
 	tw.Flush()
 }
 
 func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	// disable logging
 	ctx = logging.WithLogger(context.Background(), zap.NewNop().Sugar())
-	nodePool := test.NodePool()
-
+	nodePoolWithMinValues := test.NodePool(v1beta1.NodePool{
+		Spec: v1beta1.NodePoolSpec{
+			Template: v1beta1.NodeClaimTemplate{
+				Spec: v1beta1.NodeClaimSpec{
+					Requirements: []v1beta1.NodeSelectorRequirementWithMinValues{
+						{
+							NodeSelectorRequirement: v1.NodeSelectorRequirement{
+								Key:      v1.LabelInstanceTypeStable,
+								Operator: v1.NodeSelectorOpExists,
+							},
+							MinValues: lo.ToPtr(50), // Adding highest possible minValues and safest way to add it would be to instanceType requirement.
+						},
+					},
+				},
+			},
+		},
+	})
+	nodePoolWithoutMinValues := test.NodePool()
+	nodePool := lo.Ternary(includeMinValues, nodePoolWithMinValues, nodePoolWithoutMinValues)
 	instanceTypes := fake.InstanceTypes(instanceCount)
 	cloudProvider = fake.NewCloudProvider()
 	cloudProvider.InstanceTypes = instanceTypes
@@ -137,8 +177,7 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	scheduler := scheduling.NewScheduler(ctx, client, []*scheduling.NodeClaimTemplate{scheduling.NewNodeClaimTemplate(nodePool)},
 		nil, cluster, nil, topology,
 		map[string][]*cloudprovider.InstanceType{nodePool.Name: instanceTypes}, nil,
-		events.NewRecorder(&record.FakeRecorder{}),
-		scheduling.SchedulerOptions{})
+		events.NewRecorder(&record.FakeRecorder{}))
 
 	b.ResetTimer()
 	// Pack benchmark

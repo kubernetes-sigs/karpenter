@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
@@ -36,20 +35,13 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
-	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
-
-// SchedulerOptions can be used to control the scheduling, these options are currently only used during consolidation.
-type SchedulerOptions struct {
-	// SimulationMode if true will prevent recording of the pod nomination decisions as events
-	SimulationMode bool
-}
 
 func NewScheduler(ctx context.Context, kubeClient client.Client, nodeClaimTemplates []*NodeClaimTemplate,
 	nodePools []v1beta1.NodePool, cluster *state.Cluster, stateNodes []*state.StateNode, topology *Topology,
 	instanceTypes map[string][]*cloudprovider.InstanceType, daemonSetPods []*v1.Pod,
-	recorder events.Recorder, opts SchedulerOptions) *Scheduler {
+	recorder events.Recorder) *Scheduler {
 
 	// if any of the nodePools add a taint with a prefer no schedule effect, we add a toleration for the taint
 	// during preference relaxation
@@ -71,7 +63,6 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, nodeClaimTempla
 		instanceTypes:      instanceTypes,
 		daemonOverhead:     getDaemonOverhead(nodeClaimTemplates, daemonSetPods),
 		recorder:           recorder,
-		opts:               opts,
 		preferences:        &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
 		remainingResources: map[string]v1.ResourceList{},
 	}
@@ -94,7 +85,6 @@ type Scheduler struct {
 	topology           *Topology
 	cluster            *state.Cluster
 	recorder           events.Recorder
-	opts               SchedulerOptions
 	kubeClient         client.Client
 }
 
@@ -103,6 +93,45 @@ type Results struct {
 	NewNodeClaims []*NodeClaim
 	ExistingNodes []*ExistingNode
 	PodErrors     map[*v1.Pod]error
+}
+
+// Record sends eventing and log messages back for the results that were produced from a scheduling run
+// It also nominates nodes in the cluster state based on the scheduling run to signal to other components
+// leveraging the cluster state that a previous scheduling run that was recorded is relying on these nodes
+func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *state.Cluster) {
+	// Report failures and nominations
+	for p, err := range r.PodErrors {
+		logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(p)).Errorf("Could not schedule pod, %s", err)
+		recorder.Publish(PodFailedToScheduleEvent(p, err))
+	}
+	for _, existing := range r.ExistingNodes {
+		if len(existing.Pods) > 0 {
+			cluster.NominateNodeForPod(ctx, existing.ProviderID())
+		}
+		for _, p := range existing.Pods {
+			recorder.Publish(NominatePodEvent(p, existing.Node, existing.NodeClaim))
+		}
+	}
+	// Report new nodes, or exit to avoid log spam
+	newCount := 0
+	for _, nodeClaim := range r.NewNodeClaims {
+		newCount += len(nodeClaim.Pods)
+	}
+	if newCount == 0 {
+		return
+	}
+	logging.FromContext(ctx).With("nodeclaims", len(r.NewNodeClaims), "pods", newCount).Infof("computed new nodeclaim(s) to fit pod(s)")
+	// Report in flight newNodes, or exit to avoid log spam
+	inflightCount := 0
+	existingCount := 0
+	for _, node := range lo.Filter(r.ExistingNodes, func(node *ExistingNode, _ int) bool { return len(node.Pods) > 0 }) {
+		inflightCount++
+		existingCount += len(node.Pods)
+	}
+	if existingCount == 0 {
+		return
+	}
+	logging.FromContext(ctx).Infof("computed %d unready node(s) will fit %d pod(s)", inflightCount, existingCount)
 }
 
 // AllNonPendingPodsScheduled returns true if all pods scheduled.
@@ -137,9 +166,41 @@ func (r Results) NonPendingPodSchedulingErrors() string {
 	return msg.String()
 }
 
+// TruncateInstanceTypes filters the result based on the maximum number of instanceTypes that needs
+// to be considered. This could potentially impact if minValues is specified for a requirement key. So,
+// this method re-evaluates the NodeClaims in the result returned by the scheduler after truncation
+// and removes invalid NodeClaims, shifts the pods to errorPods so that the scheduler can re-consider those in the next iteration. This is a
+// corner case where even 100 instanceTypes in the NodeClaim are failing to meet the a particular minimum requirement.
+func (r Results) TruncateInstanceTypes(maxInstanceTypes int) Results {
+	var validNewNodeClaims []*NodeClaim
+	for _, newNodeClaim := range r.NewNodeClaims {
+		// The InstanceTypeOptions are truncated due to limitations in sending the number of instances to launch API which is capped to 100 today.
+		newNodeClaim.InstanceTypeOptions = lo.Slice(newNodeClaim.InstanceTypeOptions.OrderByPrice(newNodeClaim.NodeClaimTemplate.Requirements), 0, maxInstanceTypes)
+		// Only check for a validity of NodeClaim if its requirement has minValues in it.
+		if newNodeClaim.NodeClaimTemplate.Requirements.HasMinValues() {
+			// Check if the truncated InstanceTypeOptions in each NewNodeClaim from the results still satisfy the minimum requirements
+			incompatibleKey, _ := IncompatibleReqAcrossInstanceTypes(newNodeClaim.NodeClaimTemplate.Requirements, newNodeClaim.InstanceTypeOptions)
+			// If number of instancetypes in the nodeclaim cannot satisfy the minimum requirements, add its Pods to error map with reason.
+			if len(incompatibleKey) > 0 {
+				for _, pod := range newNodeClaim.Pods {
+					r.PodErrors[pod] = fmt.Errorf("pod didn’t schedule because NodePool %q couldn’t meet minValues requirements after truncating to 100 instance types", newNodeClaim.NodeClaimTemplate.NodePoolName)
+				}
+			} else {
+				// Add to valid nodeclaims since it meets minimum requirement.
+				validNewNodeClaims = append(validNewNodeClaims, newNodeClaim)
+			}
+		} else {
+			// NodeClaims which do not have minValues in requirement are already valid.
+			validNewNodeClaims = append(validNewNodeClaims, newNodeClaim)
+		}
+	}
+	// Assign the new valid NodeClaims to result.
+	r.NewNodeClaims = validNewNodeClaims
+	return r
+}
+
 func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) Results {
 	defer metrics.Measure(schedulingSimulationDuration)()
-	schedulingStart := time.Now()
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
 	// issues including pods with affinity to another pod in the batch. We could topo-sort to solve this, but it wouldn't
 	// solve the problem of scheduling pods where a particular order is needed to prevent a max-skew violation. E.g. if we
@@ -172,10 +233,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) Results {
 	for _, m := range s.newNodeClaims {
 		m.FinalizeScheduling()
 	}
-	if !s.opts.SimulationMode {
-		s.recordSchedulingResults(ctx, pods, q.List(), errors, time.Since(schedulingStart))
-	}
-	// clear any nil errors so we can know that len(PodErrors) == 0 => all pods scheduled
+	// clear any nil errors, so we can know that len(PodErrors) == 0 => all pods scheduled
 	for k, v := range errors {
 		if v == nil {
 			delete(errors, k)
@@ -186,53 +244,6 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) Results {
 		ExistingNodes: s.existingNodes,
 		PodErrors:     errors,
 	}
-}
-
-func (s *Scheduler) recordSchedulingResults(ctx context.Context, pods []*v1.Pod, failedToSchedule []*v1.Pod, errors map[*v1.Pod]error, schedulingDuration time.Duration) {
-	// Report failures and nominations
-	for _, pod := range failedToSchedule {
-		logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(pod)).Errorf("Could not schedule pod, %s", errors[pod])
-		s.recorder.Publish(PodFailedToScheduleEvent(pod, errors[pod]))
-	}
-
-	for _, existing := range s.existingNodes {
-		if len(existing.Pods) > 0 {
-			s.cluster.NominateNodeForPod(ctx, existing.ProviderID())
-		}
-		for _, pod := range existing.Pods {
-			s.recorder.Publish(NominatePodEvent(pod, existing.Node, existing.NodeClaim))
-		}
-	}
-
-	// Report new nodes, or exit to avoid log spam
-	newCount := 0
-	for _, nodeClaim := range s.newNodeClaims {
-		newCount += len(nodeClaim.Pods)
-	}
-	if newCount == 0 {
-		return
-	}
-	var podNames []string
-	for _, p := range pods {
-		podNames = append(podNames, fmt.Sprintf("%s/%s", p.Namespace, p.Name))
-	}
-
-	logging.FromContext(ctx).With("pods", pretty.Slice(podNames, 5)).
-		With("duration", schedulingDuration).
-		Infof("found provisionable pod(s)")
-
-	logging.FromContext(ctx).With("nodeclaims", len(s.newNodeClaims), "pods", newCount).Infof("computed new nodeclaim(s) to fit pod(s)")
-	// Report in flight newNodes, or exit to avoid log spam
-	inflightCount := 0
-	existingCount := 0
-	for _, node := range lo.Filter(s.existingNodes, func(node *ExistingNode, _ int) bool { return len(node.Pods) > 0 }) {
-		inflightCount++
-		existingCount += len(node.Pods)
-	}
-	if existingCount == 0 {
-		return
-	}
-	logging.FromContext(ctx).Infof("computed %d unready node(s) will fit %d pod(s)", inflightCount, existingCount)
 }
 
 func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
@@ -263,7 +274,7 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 			if len(instanceTypes) == 0 {
 				errs = multierr.Append(errs, fmt.Errorf("all available instance types exceed limits for nodepool: %q", nodeClaimTemplate.NodePoolName))
 				continue
-			} else if len(s.instanceTypes[nodeClaimTemplate.NodePoolName]) != len(instanceTypes) && !s.opts.SimulationMode {
+			} else if len(s.instanceTypes[nodeClaimTemplate.NodePoolName]) != len(instanceTypes) {
 				logging.FromContext(ctx).With("nodepool", nodeClaimTemplate.NodePoolName).Debugf("%d out of %d instance types were excluded because they would breach limits",
 					len(s.instanceTypes[nodeClaimTemplate.NodePoolName])-len(instanceTypes), len(s.instanceTypes[nodeClaimTemplate.NodePoolName]))
 			}
