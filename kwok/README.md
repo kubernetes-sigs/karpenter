@@ -49,9 +49,10 @@ EOF
 
 ## Specifying Instance Types
 
-By default, Karpenter will create a hypothetical set of instance types that it uses for node provisioning.  You can
-specify a custom set of instance types by providing a JSON file with the list of supported instance options.  Specify
-the location of this file using the `KWOK_INSTANCE_TYPES_FILE` environment variable.
+By default, the KWOK provider will create a hypothetical set of instance types that it uses for node provisioning.  You
+can specify a custom set of instance types by providing a JSON file with the list of supported instance options.
+This set of instance types is embedded into the binary in `kwok/cloudprovider/helpers.go`; if you want to change the
+instance types that Karpenter+KWOK support, you will need to adjust the embedded data and recompile.
 
 The format for this file is as follows:
 

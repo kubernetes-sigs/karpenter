@@ -28,7 +28,7 @@ build: ## Build the Karpenter KWOK controller images using ko build
 
 # Run make install-kwok to install the kwok controller in your cluster first
 # Webhooks are currently not supported in the kwok provider.
-apply: verify build ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
+apply: gen_instance_types verify build ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
 	hack/validation/kwok-requirements.sh
 	kubectl apply -f pkg/apis/crds
 	helm upgrade --install karpenter kwok/charts --namespace $(KARPENTER_NAMESPACE) --skip-crds \
@@ -96,7 +96,7 @@ download: ## Recursively "go mod download" on all directories where go.mod exist
 toolchain: ## Install developer toolchain
 	./hack/toolchain.sh
 
-gen_instances:
-	go run kwok/tools/gen_instances.go > kwok/charts/generic_instance_types.json
+gen_instance_types:
+	go run kwok/tools/gen_instance_types.go > kwok/cloudprovider/generic_instance_types.json
 
 .PHONY: help presubmit install-kwok uninstall-kwok build apply delete test deflake vulncheck licenses verify download toolchain gen_instances

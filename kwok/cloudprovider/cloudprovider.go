@@ -155,7 +155,7 @@ func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
 		}
 
 		availableOfferings := lo.Filter(it.Offerings.Available(), func(of cloudprovider.Offering, _ int) bool {
-			return offeringMatchesRequirements(&of, &requirements)
+			return offeringMatchesNodeClaimRequirements(&of, &requirements)
 		})
 
 		offeringsByPrice := lo.GroupBy(availableOfferings, func(of cloudprovider.Offering) float64 { return of.Price })
@@ -183,12 +183,12 @@ func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
 	}, nil
 }
 
-func offeringMatchesRequirements(of *cloudprovider.Offering, requirements *scheduling.Requirements) bool {
-	if !requirements.Get(v1beta1.CapacityTypeLabelKey).Has(of.CapacityType) {
+func offeringMatchesNodeClaimRequirements(of *cloudprovider.Offering, ncRequirements *scheduling.Requirements) bool {
+	if !ncRequirements.Get(v1beta1.CapacityTypeLabelKey).Has(of.CapacityType) {
 		return false
 	}
 
-	if !requirements.Get(v1.LabelTopologyZone).Has(of.Zone) {
+	if !ncRequirements.Get(v1.LabelTopologyZone).Has(of.Zone) {
 		return false
 	}
 

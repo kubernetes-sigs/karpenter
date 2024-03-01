@@ -33,9 +33,6 @@ const (
 	InstanceFamilyLabelKey = Group + "/instance-family"
 	InstanceMemoryLabelKey = Group + "/instance-memory"
 	InstanceCPULabelKey    = Group + "/instance-cpu"
-
-	// Environment variables for configuration
-	kwokInstanceTypeFileKey = "KWOK_INSTANCE_TYPES_FILE"
 )
 
 // Hard coded Kwok values
