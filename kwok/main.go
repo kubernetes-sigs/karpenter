@@ -41,7 +41,7 @@ func init() {
 func main() {
 	instanceTypes, err := kwok.ConstructInstanceTypes()
 	if err != nil {
-		fmt.Printf("kwok provider failed: %v\n", err)
+		fmt.Printf("failed to construct instance types: %v\n", err)
 		os.Exit(1)
 	}
 
