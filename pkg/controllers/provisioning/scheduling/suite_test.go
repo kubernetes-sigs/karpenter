@@ -72,6 +72,7 @@ var nodeClaimStateController controller.Controller
 var podStateController controller.Controller
 
 const csiProvider = "fake.csi.provider"
+const isDefaultStorageClassAnnotation = "storageclass.kubernetes.io/is-default-class"
 
 func TestScheduling(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -103,7 +104,6 @@ var _ = BeforeEach(func() {
 	newCP := fake.CloudProvider{}
 	cloudProvider.InstanceTypes, _ = newCP.GetInstanceTypes(ctx, nil)
 	cloudProvider.CreateCalls = nil
-	pscheduling.ResetDefaultStorageClass()
 	scheduling.MaxInstanceTypes = 100
 })
 
@@ -2860,7 +2860,7 @@ var _ = Context("NodePool", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "default-storage-class",
 					Annotations: map[string]string{
-						pscheduling.IsDefaultStorageClassAnnotation: "true",
+						isDefaultStorageClassAnnotation: "true",
 					},
 				},
 				Provisioner: ptr.String("other-provider"),
@@ -2965,7 +2965,7 @@ var _ = Context("NodePool", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "default-storage-class",
 					Annotations: map[string]string{
-						pscheduling.IsDefaultStorageClassAnnotation: "true",
+						isDefaultStorageClassAnnotation: "true",
 					},
 				},
 				Provisioner: ptr.String(csiProvider),
@@ -3063,7 +3063,7 @@ var _ = Context("NodePool", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "default-storage-class",
 					Annotations: map[string]string{
-						pscheduling.IsDefaultStorageClassAnnotation: "true",
+						isDefaultStorageClassAnnotation: "true",
 					},
 				},
 				Provisioner: ptr.String("other-provider"),
@@ -3072,7 +3072,7 @@ var _ = Context("NodePool", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "newer-default-storage-class",
 					Annotations: map[string]string{
-						pscheduling.IsDefaultStorageClassAnnotation: "true",
+						isDefaultStorageClassAnnotation: "true",
 					},
 				},
 				Provisioner: ptr.String(csiProvider),
@@ -3268,7 +3268,7 @@ var _ = Context("NodePool", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "in-tree-storage-class",
 						Annotations: map[string]string{
-							pscheduling.IsDefaultStorageClassAnnotation: "true",
+							isDefaultStorageClassAnnotation: "true",
 						},
 					},
 					Provisioner: ptr.String(plugins.AWSEBSInTreePluginName),
@@ -3326,7 +3326,7 @@ var _ = Context("NodePool", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "in-tree-storage-class",
 						Annotations: map[string]string{
-							pscheduling.IsDefaultStorageClassAnnotation: "true",
+							isDefaultStorageClassAnnotation: "true",
 						},
 					},
 					Provisioner: ptr.String(plugins.AWSEBSInTreePluginName),
