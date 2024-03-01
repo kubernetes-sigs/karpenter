@@ -1,22 +1,6 @@
 # Disruption Controls By Reason
 ## TOC and Overview
-1. [Overview](#overview)
-2. [User Scenarios](#user-scenarios)
-3. [Known Requirements](#clarifying-the-requirements-and-behavior)
-   - [Q: Default or Undefined Reason Case Handling](#q-default-or-undefined-reason-case-handling)
-   - [Q: Calculation of Allowed Disruptions in a Multi-Reason World](#q-calculation-of-allowed-disruptions-in-a-multi-reason-world)
-   - [Q: Handling an Unspecified Default Reason](#q-handling-an-unspecified-default-reason)
-   - [Q: Definition of Default in Budgets](#q-definition-of-default-in-budgets)
-4. [API Design](#api-design)
-   - [Approach A: Extending the Budget API to Specify a Reason](#approach-a-extending-the-budget-api-to-specify-a-reason)
-      * [List Approach: Multiple Reasons per Budget](#list-approach-multiple-reasons-per-budget)
-      * [Single Reason Approach: One Reason per Budget](#single-reason-approach-one-reason-per-budget)
-      * [Pros and Cons for Both Approaches](#pros-and-cons-for-both-approaches)
-      * [Preferred Option: List Approach](#preferred-option-list-approach)
-   - [Approach B: Defining Per Reason Controls](#approach-b-defining-per-reason-controls)
-      * [Pros and Cons](#pros-and-cons)
-   - [API Design Conclusion: Preferred Design](#api-design-conclusion-preferred-design)
-
+<Generate ME ChatGPT>
 ## User Scenarios 
 1. Users need the capability to schedule upgrades only during business hours or within more restricted time windows. Additionally, they require a system that doesn't compromise the cost savings from consolidation when upgrades are blocked due to drift.
 2. Users want to minimize workload disruptions during business hours but still want to be able to delete empty nodes throughout the day.  That is, empty can run all day, while limiting cost savings and upgrades due to drift to non-business hours only.
@@ -31,88 +15,6 @@ See Less Made Up Scenarios here:
 **Supported Reasons:** All disruption Reasons affected by the current Budgets implementation (underutilized, empty, expired, drifted) should be supported. 
 **Default Behavior for Unspecified Reasons:** Budgets should continue to support a default behavior for all disruption reasons. 
 
-
-### Q: How should Karpenter handle the default or undefined reason case? 
-If a budget reason is unspecified like budgets[1], we will assume this budget applies to all actions that are not specified 
-```yaml
-budgets: 
-  - nodes: 10
-    reasons: [Drifted, Underutilized]
-    schedule: "* * * * *"
-  - nodes: 30 
-    schedule: "* * * * *" 
-```
-Meaning that for any actions other than drifted + consolidation, the total amount of disrupting + unhealthy nodes has to be less than 30 for them to trigger disruption.
-
-### Q: How should allowed disruptions be calculated in a multi-reason world? 
-The calculation of allowed disruptions in a system with multiple disruption reasons has become more intricate following the introduction of Disruption Budget Reasons. Previously, the formula was straightforward:
-
-AllowedDisruptions = minNodeCountOfAnActiveBudget - unhealthyNodes - totalDisruptingNodes.
-
-When calculating by reason, two potential equations emerge:
-1. AllowedDisruptionByReason = minNodeCountOfActiveBudget[reason] - unhealthyNodes - totalDisruptingNodes[reason]
-2. AllowedDisruptionByReason = minNodeCountOfActiveBudget[reason] - unhealthyNodes - totalDisruptingNodes
-
-The second equation is the one we should opt into.
-Take this budget as an example
-```yaml
-budgets: 
-  - nodes: 15 
-    reasons: [Drifted, Underutilized]
-    schedule: "* * * * *"
-  - nodes: 10
-    reasons: [Drifted]
-    schedule: "* * * * *"
-  - nodes: 5 
-    schedule: "* * * * *" 
-```
-First, calculate minNodeCountOfActiveBudget. Given there are two budgets for drifted, we select the lower number:
-
-```
-minNodeCountOfActiveBudget = {
-  drifted: 10 
-  underutilized: 15 
-  Default: 5
-}
-```
-
-In the first equation, tracking the number of nodes disrupted by each reason is required. For example:
-```
-disrupting = {
-  drifted: 3 
-  underutilized: 6
-  Expriation: 3
-  empty: 2
-}
-```
-
-Assuming zero unhealthy nodes:
-**First Equation**
-- drifted = 10 - 3: Disruption allowed as drifted bucket isn't full.
-- underutilized = 15 - 6: Disruption allowed since 15 - 6 > 0.
-- Default = 5 - expired - empty = 0: No disruption allowed for reasons other than consolidation and drift.
-
-**Second Equation**
-- Total Disrupting = 3 + 6 + 5 = 14.
-- drifted = 10 - 14: No disruption allowed due to drift.
-- underutilized = 15 - 14: Disruption allowed for at least one node due to consolidation.
-- Default: 5 - 14: No disruption allowed for other methods.
-
-#### Decision
-The second equation simplifies reasoning for cluster operators. A node can be tagged for multiple disruption reasons (e.g., empty, drifted, underutilized), making it challenging to precisely calculate in-flight disruptions. The second equation streamlines this process by providing a clearer view of the overall disruption impact.
-### Q: How should we handle an unspecified reason when others are specified? 
-```yaml
-budgets: 
-  - nodes: 10
-    reasons: [Drifted, Underutilized]
-    schedule: "* * * * *"
-  - nodes: 5 
-    reasons: [Empty] 
-    schedule: "* * * * *" 
-```
-In the case of a budget like above, default is undefined. Should karpenter assume the user doesn't want to disrupt any other reasons? Or should we assume that if a default is unspecified, they want us to disrupt anyway?  
-The intuitive options if there is no active default budget is to allow disruption of either 0 or total number of nodes(meaning unbounded disruption).
-Lets choose total number of nodes, since this allows the user to also specify periods where no nodes are to be disrupted of a particular type of disruption, and makes more sense with the existing karpenter behavior today.
 
 # API Design
 ## Approach A: Extending the Budget API to specify a reason 
@@ -309,4 +211,146 @@ This proposal is currently scoped for disruptionBudgets by reason. However, we s
 After evaluating different approaches to extend the Karpenter API for specifying disruption reasons, the preferred design is the List Approach in Approach A. This approach offers flexibility in managing multiple disruption reasons under a single budget and reduces configuration complexity. It extends the existing API without introducing breaking changes and simplifies management for scenarios where multiple disruption reasons share similar constraints.
 
 While the idea of per-reason controls (Approach B) provides granular control and a foundation for future extensions, it involves significant API changes and increased complexity, making it less favorable at this stage. However, this approach remains a viable option for future considerations, especially if there is a need for more tailored control over each disruption reason.
+
+### Disruption Behavior
+The calculation of allowed disruptions in a system with multiple disruption reasons has become more intricate following the introduction of Disruption Budget Reasons. Previously, the formula was straightforward:
+
+AllowedDisruptions = minNodeCount - unhealthyNodes - totalDisruptingNodes.
+
+When calculating by reason, three potential equations emerge:
+1. BucketedDisruptionByReason = minNodeCount[reason] - unhealthyNodes - totalDisruptingNodes[reason]
+2. AllowedDisruptionByReason = minNodeCount[reason] - unhealthyNodes - totalDisruptingNodes
+3. minimumDisruptionAllowed = min(minNodeCount[reason], minNodeCount[default]) - unhealthyNodes - totalDisruptingNodes
+
+### Scenarios
+We will go through scenarios that users are expecting to face to drive home if the api can satisfy the users requirements for the end users of these features
+- Block Drift, but allow Expiration
+- Fully Block Drift && Expiration, but allow consolidation to occur 
+- Block Drift && Expiration, but allow emptiness 
+- Limit Drift && Expirationn while allowing agressive but not unbounded consolidationn
+- Allow Cost Saving operations only on weekends. 
+
+
+#### Block Drift and allow Expiration 
+Customers who roll out aggressive node image upgrades don't want to roll the nodes due to drift, but want to use node expiration to force users onto compliant node images eventually. The scenario here is an ML Training workload. Ideally we want to let it bake as long as possible, but not at the cost of compromising the security of the cluster. 
+
+```yaml 
+apiVersion: karpenter.sh/v1beta1
+kind: NodePool
+metadata:
+  name: worker-pool 
+spec: # This is not a complete NodePool Spec.
+  disruption:
+    consolidationPolicy: WhenEmpty 
+    expireAfter: 7d 
+    budgets:
+    - nodes: 0
+      reasons: [Drifted] 
+    - nodes: "100%" // All Disruption Other than drift(Expiration and Empty Nodes) are allowed
+```
+
+We could also allow a semantic like this
+```yaml
+apiVersion: karpenter.sh/v1beta1
+kind: NodePool
+metadata:
+  name: worker-pool 
+spec: # This is not a complete NodePool Spec.
+  disruption:
+    consolidationPolicy: WhenEmpty 
+    expireAfter: 7d 
+    budgets:
+    - nodes: "100%" # Always allow Expiration and Emptiness to disrupt 
+      reasons: [Expired, Empty]
+    - nodes: 0
+```
+So in this case, we would take the minimum node count, and it would block the 100% expiration budget of Expired and Empty. 
+But this semantic would not work for equation 3. Equation three will take the minimum between minNodeCount[reason] and the minNodeCount[default/unspecifed].  
+
+#### Fully Blocking Drift && Expiration while allowing consolidation
+```yaml 
+apiVersion: karpenter.sh/v1beta1
+kind: NodePool
+metadata:
+  name: worker-pool 
+spec: # This is not a complete NodePool Spec.
+  disruption:
+    consolidationPolicy: WhenUnderutilized 
+    expireAfter: Never 
+    budgets:
+    - nodes: 0
+      reasons: [Drifted] 
+    - nodes: "100%" // All Disruption Other than drift(Expiration and Consolidation) are allowed
+```
+
+#### Fully Blocking Drift and Expiration while allowing emptiness 
+```yaml 
+apiVersion: karpenter.sh/v1beta1
+kind: NodePool
+metadata:
+  name: worker-pool 
+spec: # This is not a complete NodePool Spec.
+  disruption:
+    consolidationPolicy: WhenEmpty
+    expireAfter: Never 
+    budgets:
+    - nodes: 0
+      reasons: [Drifted] 
+    - nodes: "100%" // All Disruption Other than drift(Expiration and Empty Nodes) are allowed
+```
+
+#### Limiting Drift & Expiration while allowing aggressive but not unbounded consolidation
+Drift and Expiration may not be desired reasons to remove many nodes in one interval, but Underutilization and Emptiness may be desired. We may want to still consolidate at a healthy threshold but not allow 
+```yaml
+apiVersion: karpenter.sh/v1beta1
+kind: NodePool
+metadata:
+  name: worker-pool 
+spec: # This is not a complete NodePool Spec.
+  disruption:
+    consolidationPolicy: WhenUnderutilized 
+    expireAfter: 1h 
+    budgets:
+    - nodes: 1
+      reasons: [Drifted, Expiration] # Only allow Drift and Expiration to occur one at a time 
+    - nodes: "33%" # All Consolidation actions taken either through replace or delete should be allowed to disrupt at least a third of the cluster at once 
+```
+
+#### Limiting Cost Saving disruption to occur during weekends 
+```yaml
+apiVersion: karpenter.sh/v1beta1
+kind: NodePool
+metadata:
+  name: worker-pool 
+spec: # This is not a complete NodePool Spec.
+  disruption:
+    consolidationPolicy: WhenUnderutilized 
+    expireAfter: 720h 
+    budgets:
+    - nodes: "33%"
+      reasons: [Drifted, Expiration] # Allow Large Drift and Expiration at All Times as these are required for cluster health 
+    - nodes: "0" # All Consolidation actions taken either through replace or delete should be allowed to disrupt at least a third of the cluster at once 
+      schedule: "* * * * mon-fri" 
+      duration: 24h 
+      reasons: ["underutilized"] 
+    - nodes: "100%" 
+      schedule: "* * * * sat"
+      duration: 48h
+      reasons: ["underutilized"]
+```
+
+#### Which Equation Best Covers all the scenarios? 
+### Q: How should we handle an unspecified reason when others are specified? 
+```yaml
+budgets: 
+  - nodes: 10
+    reasons: [Drifted, Underutilized]
+    schedule: "* * * * *"
+  - nodes: 5 
+    reasons: [Empty] 
+    schedule: "* * * * *" 
+```
+In the case of a budget like above, default is undefined. Should karpenter assume the user doesn't want to disrupt any other reasons? Or should we assume that if a default is unspecified, they want us to disrupt anyway?  
+The intuitive options if there is no active default budget is to allow disruption of either 0 or total number of nodes(meaning unbounded disruption).
+Lets choose total number of nodes, since this allows the user to also specify periods where no nodes are to be disrupted of a particular type of disruption, and makes more sense with the existing karpenter behavior today.
 
