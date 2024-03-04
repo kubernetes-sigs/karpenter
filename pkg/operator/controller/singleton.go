@@ -29,6 +29,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/ratelimiter"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
+
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
@@ -79,6 +81,7 @@ func (s *Singleton) initMetrics() {
 var singletonRequest = reconcile.Request{}
 
 func (s *Singleton) Start(ctx context.Context) error {
+	ctx = injection.WithControllerName(ctx, s.Name())
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(s.Name()))
 	logging.FromContext(ctx).Infof("starting controller")
 	defer logging.FromContext(ctx).Infof("stopping controller")

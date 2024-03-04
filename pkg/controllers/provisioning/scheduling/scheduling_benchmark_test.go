@@ -174,7 +174,7 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 		b.Fatalf("creating topology, %s", err)
 	}
 
-	scheduler := scheduling.NewScheduler(ctx, client, []*scheduling.NodeClaimTemplate{scheduling.NewNodeClaimTemplate(nodePool)},
+	scheduler := scheduling.NewScheduler(client, []*scheduling.NodeClaimTemplate{scheduling.NewNodeClaimTemplate(nodePool)},
 		nil, cluster, nil, topology,
 		map[string][]*cloudprovider.InstanceType{nodePool.Name: instanceTypes}, nil,
 		events.NewRecorder(&record.FakeRecorder{}))
