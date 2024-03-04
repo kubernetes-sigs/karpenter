@@ -67,7 +67,7 @@ vulncheck: ## Verify code vulnerabilities
 licenses: download ## Verifies dependency licenses
 	! go-licenses csv ./... | grep -v -e 'MIT' -e 'Apache-2.0' -e 'BSD-3-Clause' -e 'BSD-2-Clause' -e 'ISC' -e 'MPL-2.0'
 
-verify: ## Verify code. Includes codegen, dependencies, linting, formatting, etc
+verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatting, etc
 	go mod tidy
 	go generate ./...
 	hack/validation/kubelet.sh
@@ -81,6 +81,7 @@ verify: ## Verify code. Includes codegen, dependencies, linting, formatting, etc
 	@perl -i -pe 's/sets.Set/sets.Set[string]/g' pkg/scheduling/zz_generated.deepcopy.go
 	hack/boilerplate.sh
 	go vet ./...
+	cd kwok/charts && helm-docs
 	golangci-lint run
 	@git diff --quiet ||\
 		{ echo "New file modification detected in the Git working tree. Please check in before commit."; git --no-pager diff --name-only | uniq | awk '{print "  - " $$0}'; \
