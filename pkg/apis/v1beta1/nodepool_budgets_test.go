@@ -128,6 +128,16 @@ var _ = Describe("Budgets", func() {
 		})
 	})
 	Context("IsActive", func() {
+		It("should always consider a schedule and time in UTC", func() {
+			// Set the time to start of June 2000 in a time zone 1 hour ahead of UTC
+			fakeClock = clock.NewFakeClock(time.Date(2000, time.June, 0, 0, 0, 0, 0, time.FixedZone("fake-zone", 3600)))
+			budgets[0].Schedule = lo.ToPtr("@daily")
+			budgets[0].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("30m"))})
+			// IsActive should use UTC, not the location of the clock that's inputted.
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeFalse())
+		})
 		It("should return that a schedule is active when schedule and duration are nil", func() {
 			budgets[0].Schedule = nil
 			budgets[0].Duration = nil
