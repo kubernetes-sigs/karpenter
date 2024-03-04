@@ -99,682 +99,651 @@ var _ = Describe("Requirement", func() {
 			}
 		})
 	})
-	Context("Intersection", func() {
-		It("should intersect sets", func() {
-			// Intersection of requirement without minValues vs requirement without minValues
-			Expect(exists.Intersection(exists)).To(Equal(exists))
-			Expect(exists.Intersection(doesNotExist)).To(Equal(doesNotExist))
-			Expect(exists.Intersection(inA)).To(Equal(inA))
-			Expect(exists.Intersection(inB)).To(Equal(inB))
-			Expect(exists.Intersection(inAB)).To(Equal(inAB))
-			Expect(exists.Intersection(notInA)).To(Equal(notInA))
-			Expect(exists.Intersection(in1)).To(Equal(in1))
-			Expect(exists.Intersection(in9)).To(Equal(in9))
-			Expect(exists.Intersection(in19)).To(Equal(in19))
-			Expect(exists.Intersection(notIn12)).To(Equal(notIn12))
-			Expect(exists.Intersection(greaterThan1)).To(Equal(greaterThan1))
-			Expect(exists.Intersection(greaterThan9)).To(Equal(greaterThan9))
-			Expect(exists.Intersection(lessThan1)).To(Equal(lessThan1))
-			Expect(exists.Intersection(lessThan9)).To(Equal(lessThan9))
+	Context("Intersect requirements", func() {
+		DescribeTable("should intersect sets for existing requirement without minValues and new requirement without minValues",
+			func(existingRequirementWithoutMinValues, newRequirementWithoutMinValues, expectedRequirement *Requirement) {
+				Expect(existingRequirementWithoutMinValues.Intersection(newRequirementWithoutMinValues)).To(Equal(expectedRequirement))
+			},
+			Entry(exists, exists, exists),
+			Entry(exists, doesNotExist, doesNotExist),
+			Entry(exists, inA, inA),
+			Entry(exists, inB, inB),
+			Entry(exists, inAB, inAB),
+			Entry(exists, notInA, notInA),
+			Entry(exists, in1, in1),
+			Entry(exists, in9, in9),
+			Entry(exists, in19, in19),
+			Entry(exists, notIn12, notIn12),
+			Entry(exists, greaterThan1, greaterThan1),
+			Entry(exists, greaterThan9, greaterThan9),
+			Entry(exists, lessThan1, lessThan1),
+			Entry(exists, lessThan9, lessThan9),
 
-			// Intersection of requirement with minValues vs requirement without minValues
-			Expect(existsOperatorWithFlexibility.Intersection(exists)).To(Equal(existsOperatorWithFlexibility))
-			Expect(existsOperatorWithFlexibility.Intersection(doesNotExist)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(existsOperatorWithFlexibility.Intersection(inA)).To(Equal(inAOperatorWithFlexibility))
-			Expect(existsOperatorWithFlexibility.Intersection(inB)).To(Equal(inBOperatorWithFlexibility))
-			Expect(existsOperatorWithFlexibility.Intersection(inAB)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("A", "B"), MinValues: lo.ToPtr(1)}))
-			Expect(existsOperatorWithFlexibility.Intersection(notInA)).To(Equal(notInAOperatorWithFlexibility))
-			Expect(existsOperatorWithFlexibility.Intersection(in1)).To(Equal(in1OperatorWithFlexibility))
-			Expect(existsOperatorWithFlexibility.Intersection(in9)).To(Equal(in9OperatorWithFlexibility))
-			Expect(existsOperatorWithFlexibility.Intersection(in19)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("1", "9"), MinValues: lo.ToPtr(1)}))
-			Expect(existsOperatorWithFlexibility.Intersection(notIn12)).To(Equal(&Requirement{Key: "key", complement: true, values: sets.New("1", "2"), MinValues: lo.ToPtr(1)}))
-			Expect(existsOperatorWithFlexibility.Intersection(greaterThan1)).To(Equal(greaterThan1OperatorWithFlexibility))
-			Expect(existsOperatorWithFlexibility.Intersection(greaterThan9)).To(Equal(greaterThan9OperatorWithFlexibility))
-			Expect(existsOperatorWithFlexibility.Intersection(lessThan1)).To(Equal(lessThan1OperatorWithFlexibility))
-			Expect(existsOperatorWithFlexibility.Intersection(lessThan9)).To(Equal(lessThan9OperatorWithFlexibility))
-			Expect(existsOperatorWithFlexibility.Intersection(exists)).To(Equal(existsOperatorWithFlexibility))
+			Entry(doesNotExist, exists, doesNotExist),
+			Entry(doesNotExist, doesNotExist, doesNotExist),
+			Entry(doesNotExist, inA, doesNotExist),
+			Entry(doesNotExist, inB, doesNotExist),
+			Entry(doesNotExist, inAB, doesNotExist),
+			Entry(doesNotExist, notInA, doesNotExist),
+			Entry(doesNotExist, in1, doesNotExist),
+			Entry(doesNotExist, in9, doesNotExist),
+			Entry(doesNotExist, in19, doesNotExist),
+			Entry(doesNotExist, notIn12, doesNotExist),
+			Entry(doesNotExist, greaterThan1, doesNotExist),
+			Entry(doesNotExist, greaterThan9, doesNotExist),
+			Entry(doesNotExist, lessThan1, doesNotExist),
+			Entry(doesNotExist, lessThan9, doesNotExist),
 
-			// Intersection of requirement with minValues vs requirement with minValues
-			Expect(existsOperatorWithFlexibility.Intersection(existsOperatorWithFlexibility)).To(Equal(existsOperatorWithFlexibility))
-			Expect(existsOperatorWithFlexibility.Intersection(doesNotExistOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(existsOperatorWithFlexibility.Intersection(inAOperatorWithFlexibility)).To(Equal(inAOperatorWithFlexibility))
-			Expect(existsOperatorWithFlexibility.Intersection(inBOperatorWithFlexibility)).To(Equal(inBOperatorWithFlexibility))
-			Expect(existsOperatorWithFlexibility.Intersection(inABOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("A", "B"), MinValues: lo.ToPtr(2)}))
-			Expect(existsOperatorWithFlexibility.Intersection(notInAOperatorWithFlexibility)).To(Equal(notInAOperatorWithFlexibility))
-			Expect(existsOperatorWithFlexibility.Intersection(in1OperatorWithFlexibility)).To(Equal(in1OperatorWithFlexibility))
-			Expect(existsOperatorWithFlexibility.Intersection(in9OperatorWithFlexibility)).To(Equal(in9OperatorWithFlexibility))
-			Expect(existsOperatorWithFlexibility.Intersection(in19OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("1", "9"), MinValues: lo.ToPtr(2)}))
-			Expect(existsOperatorWithFlexibility.Intersection(notIn12OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: true, values: sets.New("1", "2"), MinValues: lo.ToPtr(2)}))
-			Expect(existsOperatorWithFlexibility.Intersection(greaterThan1OperatorWithFlexibility)).To(Equal(greaterThan1OperatorWithFlexibility))
-			Expect(existsOperatorWithFlexibility.Intersection(greaterThan9OperatorWithFlexibility)).To(Equal(greaterThan9OperatorWithFlexibility))
-			Expect(existsOperatorWithFlexibility.Intersection(lessThan1OperatorWithFlexibility)).To(Equal(lessThan1OperatorWithFlexibility))
-			Expect(existsOperatorWithFlexibility.Intersection(lessThan9OperatorWithFlexibility)).To(Equal(lessThan9OperatorWithFlexibility))
-			Expect(existsOperatorWithFlexibility.Intersection(existsOperatorWithFlexibility)).To(Equal(existsOperatorWithFlexibility))
+			Entry(inA, exists, inA),
+			Entry(inA, doesNotExist, doesNotExist),
+			Entry(inA, inA, inA),
+			Entry(inA, inB, doesNotExist),
+			Entry(inA, inAB, inA),
+			Entry(inA, notInA, doesNotExist),
+			Entry(inA, in1, doesNotExist),
+			Entry(inA, in9, doesNotExist),
+			Entry(inA, in19, doesNotExist),
+			Entry(inA, notIn12, inA),
+			Entry(inA, greaterThan1, doesNotExist),
+			Entry(inA, greaterThan9, doesNotExist),
+			Entry(inA, lessThan1, doesNotExist),
+			Entry(inA, lessThan9, doesNotExist),
 
-			// Intersection of requirement without minValues vs requirement without minValues
-			Expect(doesNotExist.Intersection(exists)).To(Equal(doesNotExist))
-			Expect(doesNotExist.Intersection(doesNotExist)).To(Equal(doesNotExist))
-			Expect(doesNotExist.Intersection(inA)).To(Equal(doesNotExist))
-			Expect(doesNotExist.Intersection(inB)).To(Equal(doesNotExist))
-			Expect(doesNotExist.Intersection(inAB)).To(Equal(doesNotExist))
-			Expect(doesNotExist.Intersection(notInA)).To(Equal(doesNotExist))
-			Expect(doesNotExist.Intersection(in1)).To(Equal(doesNotExist))
-			Expect(doesNotExist.Intersection(in9)).To(Equal(doesNotExist))
-			Expect(doesNotExist.Intersection(in19)).To(Equal(doesNotExist))
-			Expect(doesNotExist.Intersection(notIn12)).To(Equal(doesNotExist))
-			Expect(doesNotExist.Intersection(greaterThan1)).To(Equal(doesNotExist))
-			Expect(doesNotExist.Intersection(greaterThan9)).To(Equal(doesNotExist))
-			Expect(doesNotExist.Intersection(lessThan1)).To(Equal(doesNotExist))
-			Expect(doesNotExist.Intersection(lessThan9)).To(Equal(doesNotExist))
+			Entry(inB, exists, inB),
+			Entry(inB, doesNotExist, doesNotExist),
+			Entry(inB, inA, doesNotExist),
+			Entry(inB, inB, inB),
+			Entry(inB, inAB, inB),
+			Entry(inB, notInA, inB),
+			Entry(inB, in1, doesNotExist),
+			Entry(inB, in9, doesNotExist),
+			Entry(inB, in19, doesNotExist),
+			Entry(inB, notIn12, inB),
+			Entry(inB, greaterThan1, doesNotExist),
+			Entry(inB, greaterThan9, doesNotExist),
+			Entry(inB, lessThan1, doesNotExist),
+			Entry(inB, lessThan9, doesNotExist),
 
-			// Intersection of requirement with minValues vs requirement without minValues
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(exists)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(doesNotExist)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(inA)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(inB)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(inAB)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(notInA)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(in1)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(in9)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(in19)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(notIn12)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(greaterThan1)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(greaterThan9)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(lessThan1)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(lessThan9)).To(Equal(doesNotExistOperatorWithFlexibility))
+			Entry(inAB, exists, inAB),
+			Entry(inAB, doesNotExist, doesNotExist),
+			Entry(inAB, inA, inA),
+			Entry(inAB, inB, inB),
+			Entry(inAB, inAB, inAB),
+			Entry(inAB, notInA, inB),
+			Entry(inAB, in1, doesNotExist),
+			Entry(inAB, in9, doesNotExist),
+			Entry(inAB, in19, doesNotExist),
+			Entry(inAB, notIn12, inAB),
+			Entry(inAB, greaterThan1, doesNotExist),
+			Entry(inAB, greaterThan9, doesNotExist),
+			Entry(inAB, lessThan1, doesNotExist),
+			Entry(inAB, lessThan9, doesNotExist),
 
-			// Intersection of requirement with minValues vs requirement with minValues
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(existsOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(doesNotExistOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(inAOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(inBOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(inABOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(notInAOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(in1OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(in9OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(in19OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(notIn12OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(greaterThan1OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(greaterThan9OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(lessThan1OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(doesNotExistOperatorWithFlexibility.Intersection(lessThan9OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
+			Entry(notInA, exists, notInA),
+			Entry(notInA, doesNotExist, doesNotExist),
+			Entry(notInA, inA, doesNotExist),
+			Entry(notInA, inB, inB),
+			Entry(notInA, inAB, inB),
+			Entry(notInA, notInA, notInA),
+			Entry(notInA, in1, in1),
+			Entry(notInA, in9, in9),
+			Entry(notInA, in19, in19),
+			Entry(notInA, notIn12, &Requirement{Key: "key", complement: true, values: sets.New("A", "1", "2")}),
+			Entry(notInA, greaterThan1, greaterThan1),
+			Entry(notInA, greaterThan9, greaterThan9),
+			Entry(notInA, lessThan1, lessThan1),
+			Entry(notInA, lessThan9, lessThan9),
 
-			// Intersection of requirement without minValues vs requirement without minValues
-			Expect(inA.Intersection(exists)).To(Equal(inA))
-			Expect(inA.Intersection(doesNotExist)).To(Equal(doesNotExist))
-			Expect(inA.Intersection(inA)).To(Equal(inA))
-			Expect(inA.Intersection(inB)).To(Equal(doesNotExist))
-			Expect(inA.Intersection(inAB)).To(Equal(inA))
-			Expect(inA.Intersection(notInA)).To(Equal(doesNotExist))
-			Expect(inA.Intersection(in1)).To(Equal(doesNotExist))
-			Expect(inA.Intersection(in9)).To(Equal(doesNotExist))
-			Expect(inA.Intersection(in19)).To(Equal(doesNotExist))
-			Expect(inA.Intersection(notIn12)).To(Equal(inA))
-			Expect(inA.Intersection(greaterThan1)).To(Equal(doesNotExist))
-			Expect(inA.Intersection(greaterThan9)).To(Equal(doesNotExist))
-			Expect(inA.Intersection(lessThan1)).To(Equal(doesNotExist))
-			Expect(inA.Intersection(lessThan9)).To(Equal(doesNotExist))
+			Entry(in1, exists, in1),
+			Entry(in1, doesNotExist, doesNotExist),
+			Entry(in1, inA, doesNotExist),
+			Entry(in1, inB, doesNotExist),
+			Entry(in1, inAB, doesNotExist),
+			Entry(in1, notInA, in1),
+			Entry(in1, in1, in1),
+			Entry(in1, in9, doesNotExist),
+			Entry(in1, in19, in1),
+			Entry(in1, notIn12, doesNotExist),
+			Entry(in1, greaterThan1, doesNotExist),
+			Entry(in1, greaterThan9, doesNotExist),
+			Entry(in1, lessThan1, doesNotExist),
+			Entry(in1, lessThan9, in1),
 
-			// Intersection of requirement with minValues vs requirement without minValues
-			Expect(inAOperatorWithFlexibility.Intersection(exists)).To(Equal(inAOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(doesNotExist)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(inA)).To(Equal(inAOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(inB)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(inAB)).To(Equal(inAOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(notInA)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(in1)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(in9)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(in19)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(notIn12)).To(Equal(inAOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(greaterThan1)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(greaterThan9)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(lessThan1)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(lessThan9)).To(Equal(doesNotExistOperatorWithFlexibility))
+			Entry(in9, exists, in9),
+			Entry(in9, doesNotExist, doesNotExist),
+			Entry(in9, inA, doesNotExist),
+			Entry(in9, inB, doesNotExist),
+			Entry(in9, inAB, doesNotExist),
+			Entry(in9, notInA, in9),
+			Entry(in9, in1, doesNotExist),
+			Entry(in9, in9, in9),
+			Entry(in9, in19, in9),
+			Entry(in9, notIn12, in9),
+			Entry(in9, greaterThan1, in9),
+			Entry(in9, greaterThan9, doesNotExist),
+			Entry(in9, lessThan1, doesNotExist),
+			Entry(in9, lessThan9, doesNotExist),
 
-			// Intersection of requirement with minValues vs requirement with minValues
-			Expect(inAOperatorWithFlexibility.Intersection(existsOperatorWithFlexibility)).To(Equal(inAOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(doesNotExistOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(inAOperatorWithFlexibility)).To(Equal(inAOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(inBOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(inABOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("A"), MinValues: lo.ToPtr(2)}))
-			Expect(inAOperatorWithFlexibility.Intersection(notInAOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(in1OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(in9OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(in19OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(inAOperatorWithFlexibility.Intersection(notIn12OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("A"), MinValues: lo.ToPtr(2)}))
-			Expect(inAOperatorWithFlexibility.Intersection(greaterThan1OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(greaterThan9OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(lessThan1OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inAOperatorWithFlexibility.Intersection(lessThan9OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
+			Entry(in19, exists, in19),
+			Entry(in19, doesNotExist, doesNotExist),
+			Entry(in19, inA, doesNotExist),
+			Entry(in19, inB, doesNotExist),
+			Entry(in19, inAB, doesNotExist),
+			Entry(in19, notInA, in19),
+			Entry(in19, in1, in1),
+			Entry(in19, in9, in9),
+			Entry(in19, in19, in19),
+			Entry(in19, notIn12, in9),
+			Entry(in19, greaterThan1, in9),
+			Entry(in19, greaterThan9, doesNotExist),
+			Entry(in19, lessThan1, doesNotExist),
+			Entry(in19, lessThan9, in1),
 
-			// Intersection of requirement without minValues vs requirement without minValues
-			Expect(inB.Intersection(exists)).To(Equal(inB))
-			Expect(inB.Intersection(doesNotExist)).To(Equal(doesNotExist))
-			Expect(inB.Intersection(inA)).To(Equal(doesNotExist))
-			Expect(inB.Intersection(inB)).To(Equal(inB))
-			Expect(inB.Intersection(inAB)).To(Equal(inB))
-			Expect(inB.Intersection(notInA)).To(Equal(inB))
-			Expect(inB.Intersection(in1)).To(Equal(doesNotExist))
-			Expect(inB.Intersection(in9)).To(Equal(doesNotExist))
-			Expect(inB.Intersection(in19)).To(Equal(doesNotExist))
-			Expect(inB.Intersection(notIn12)).To(Equal(inB))
-			Expect(inB.Intersection(greaterThan1)).To(Equal(doesNotExist))
-			Expect(inB.Intersection(greaterThan9)).To(Equal(doesNotExist))
-			Expect(inB.Intersection(lessThan1)).To(Equal(doesNotExist))
-			Expect(inB.Intersection(lessThan9)).To(Equal(doesNotExist))
+			Entry(notIn12, exists, notIn12),
+			Entry(notIn12, doesNotExist, doesNotExist),
+			Entry(notIn12, inA, inA),
+			Entry(notIn12, inB, inB),
+			Entry(notIn12, inAB, inAB),
+			Entry(notIn12, notInA, &Requirement{Key: "key", complement: true, values: sets.New("A", "1", "2")}),
+			Entry(notIn12, in1, doesNotExist),
+			Entry(notIn12, in9, in9),
+			Entry(notIn12, in19, in9),
+			Entry(notIn12, notIn12, notIn12),
+			Entry(notIn12, greaterThan1, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, values: sets.New("2")}),
+			Entry(notIn12, greaterThan9, &Requirement{Key: "key", complement: true, greaterThan: greaterThan9.greaterThan, values: sets.New[string]()}),
+			Entry(notIn12, lessThan1, &Requirement{Key: "key", complement: true, lessThan: lessThan1.lessThan, values: sets.New[string]()}),
+			Entry(notIn12, lessThan9, &Requirement{Key: "key", complement: true, lessThan: lessThan9.lessThan, values: sets.New("1", "2")}),
 
-			// Intersection of requirement with minValues vs requirement without minValues
-			Expect(inBOperatorWithFlexibility.Intersection(exists)).To(Equal(inBOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(doesNotExist)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(inA)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(inB)).To(Equal(inBOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(inAB)).To(Equal(inBOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(notInA)).To(Equal(inBOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(in1)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(in9)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(in19)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(notIn12)).To(Equal(inBOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(greaterThan1)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(greaterThan9)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(lessThan1)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(lessThan9)).To(Equal(doesNotExistOperatorWithFlexibility))
+			Entry(greaterThan1, exists, greaterThan1),
+			Entry(greaterThan1, doesNotExist, doesNotExist),
+			Entry(greaterThan1, inA, doesNotExist),
+			Entry(greaterThan1, inB, doesNotExist),
+			Entry(greaterThan1, inAB, doesNotExist),
+			Entry(greaterThan1, notInA, greaterThan1),
+			Entry(greaterThan1, in1, doesNotExist),
+			Entry(greaterThan1, in9, in9),
+			Entry(greaterThan1, in19, in9),
+			Entry(greaterThan1, notIn12, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, values: sets.New("2")}),
+			Entry(greaterThan1, greaterThan1, greaterThan1),
+			Entry(greaterThan1, greaterThan9, greaterThan9),
+			Entry(greaterThan1, lessThan1, doesNotExist),
+			Entry(greaterThan1, lessThan9, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, lessThan: lessThan9.lessThan, values: sets.New[string]()}),
 
-			// Intersection of requirement with minValues vs requirement with minValues
-			Expect(inBOperatorWithFlexibility.Intersection(existsOperatorWithFlexibility)).To(Equal(inBOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(doesNotExistOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(inAOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(inBOperatorWithFlexibility)).To(Equal(inBOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(inABOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("B"), MinValues: lo.ToPtr(2)}))
-			Expect(inBOperatorWithFlexibility.Intersection(notInAOperatorWithFlexibility)).To(Equal(inBOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(in1OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(in9OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(in19OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(inBOperatorWithFlexibility.Intersection(notIn12OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("B"), MinValues: lo.ToPtr(2)}))
-			Expect(inBOperatorWithFlexibility.Intersection(greaterThan1OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(greaterThan9OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(lessThan1OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(inBOperatorWithFlexibility.Intersection(lessThan9OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
+			Entry(greaterThan9, exists, greaterThan9),
+			Entry(greaterThan9, doesNotExist, doesNotExist),
+			Entry(greaterThan9, inA, doesNotExist),
+			Entry(greaterThan9, inB, doesNotExist),
+			Entry(greaterThan9, inAB, doesNotExist),
+			Entry(greaterThan9, notInA, greaterThan9),
+			Entry(greaterThan9, in1, doesNotExist),
+			Entry(greaterThan9, in9, doesNotExist),
+			Entry(greaterThan9, in19, doesNotExist),
+			Entry(greaterThan9, notIn12, greaterThan9),
+			Entry(greaterThan9, greaterThan1, greaterThan9),
+			Entry(greaterThan9, greaterThan9, greaterThan9),
+			Entry(greaterThan9, lessThan1, doesNotExist),
+			Entry(greaterThan9, lessThan9, doesNotExist),
 
-			// Intersection of requirement without minValues vs requirement without minValues
-			Expect(inAB.Intersection(exists)).To(Equal(inAB))
-			Expect(inAB.Intersection(doesNotExist)).To(Equal(doesNotExist))
-			Expect(inAB.Intersection(inA)).To(Equal(inA))
-			Expect(inAB.Intersection(inB)).To(Equal(inB))
-			Expect(inAB.Intersection(inAB)).To(Equal(inAB))
-			Expect(inAB.Intersection(notInA)).To(Equal(inB))
-			Expect(inAB.Intersection(in1)).To(Equal(doesNotExist))
-			Expect(inAB.Intersection(in9)).To(Equal(doesNotExist))
-			Expect(inAB.Intersection(in19)).To(Equal(doesNotExist))
-			Expect(inAB.Intersection(notIn12)).To(Equal(inAB))
-			Expect(inAB.Intersection(greaterThan1)).To(Equal(doesNotExist))
-			Expect(inAB.Intersection(greaterThan9)).To(Equal(doesNotExist))
-			Expect(inAB.Intersection(lessThan1)).To(Equal(doesNotExist))
-			Expect(inAB.Intersection(lessThan9)).To(Equal(doesNotExist))
+			Entry(lessThan1, exists, lessThan1),
+			Entry(lessThan1, doesNotExist, doesNotExist),
+			Entry(lessThan1, inA, doesNotExist),
+			Entry(lessThan1, inB, doesNotExist),
+			Entry(lessThan1, inAB, doesNotExist),
+			Entry(lessThan1, notInA, lessThan1),
+			Entry(lessThan1, in1, doesNotExist),
+			Entry(lessThan1, in9, doesNotExist),
+			Entry(lessThan1, in19, doesNotExist),
+			Entry(lessThan1, notIn12, lessThan1),
+			Entry(lessThan1, greaterThan1, doesNotExist),
+			Entry(lessThan1, greaterThan9, doesNotExist),
+			Entry(lessThan1, lessThan1, lessThan1),
+			Entry(lessThan1, lessThan9, lessThan1),
 
-			// Intersection of requirement with minValues vs requirement without minValues
-			Expect(inABOperatorWithFlexibility.Intersection(exists)).To(Equal(inABOperatorWithFlexibility))
-			Expect(inABOperatorWithFlexibility.Intersection(doesNotExist)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(inABOperatorWithFlexibility.Intersection(inA)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("A"), MinValues: lo.ToPtr(2)}))
-			Expect(inABOperatorWithFlexibility.Intersection(inB)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("B"), MinValues: lo.ToPtr(2)}))
-			Expect(inABOperatorWithFlexibility.Intersection(inAB)).To(Equal(inABOperatorWithFlexibility))
-			Expect(inABOperatorWithFlexibility.Intersection(notInA)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("B"), MinValues: lo.ToPtr(2)}))
-			Expect(inABOperatorWithFlexibility.Intersection(in1)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(inABOperatorWithFlexibility.Intersection(in9)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(inABOperatorWithFlexibility.Intersection(in19)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(inABOperatorWithFlexibility.Intersection(notIn12)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("A", "B"), MinValues: lo.ToPtr(2)}))
-			Expect(inABOperatorWithFlexibility.Intersection(greaterThan1)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(inABOperatorWithFlexibility.Intersection(greaterThan9)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(inABOperatorWithFlexibility.Intersection(lessThan1)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(inABOperatorWithFlexibility.Intersection(lessThan9)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
+			Entry(lessThan9, exists, lessThan9),
+			Entry(lessThan9, doesNotExist, doesNotExist),
+			Entry(lessThan9, inA, doesNotExist),
+			Entry(lessThan9, inB, doesNotExist),
+			Entry(lessThan9, inAB, doesNotExist),
+			Entry(lessThan9, notInA, lessThan9),
+			Entry(lessThan9, in1, in1),
+			Entry(lessThan9, in9, doesNotExist),
+			Entry(lessThan9, in19, in1),
+			Entry(lessThan9, notIn12, &Requirement{Key: "key", complement: true, lessThan: lessThan9.lessThan, values: sets.New("1", "2")}),
+			Entry(lessThan9, greaterThan1, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, lessThan: lessThan9.lessThan, values: sets.New[string]()}),
+			Entry(lessThan9, greaterThan9, doesNotExist),
+			Entry(lessThan9, lessThan1, lessThan1),
+			Entry(lessThan9, lessThan9, lessThan9),
+		)
+		DescribeTable("should intersect sets for existing requirement with minValues and new requirement without minValues",
+			func(existingRequirementWithMinValues, newRequirementWithoutMinValues, expectedRequirement *Requirement) {
+				Expect(existingRequirementWithMinValues.Intersection(newRequirementWithoutMinValues)).To(Equal(expectedRequirement))
+			},
+			Entry(existsOperatorWithFlexibility, exists, existsOperatorWithFlexibility),
+			Entry(existsOperatorWithFlexibility, doesNotExist, doesNotExistOperatorWithFlexibility),
+			Entry(existsOperatorWithFlexibility, inA, inAOperatorWithFlexibility),
+			Entry(existsOperatorWithFlexibility, inB, inBOperatorWithFlexibility),
+			Entry(existsOperatorWithFlexibility, inAB, &Requirement{Key: "key", complement: false, values: sets.New("A", "B"), MinValues: lo.ToPtr(1)}),
+			Entry(existsOperatorWithFlexibility, notInA, notInAOperatorWithFlexibility),
+			Entry(existsOperatorWithFlexibility, in1, in1OperatorWithFlexibility),
+			Entry(existsOperatorWithFlexibility, in9, in9OperatorWithFlexibility),
+			Entry(existsOperatorWithFlexibility, in19, &Requirement{Key: "key", complement: false, values: sets.New("1", "9"), MinValues: lo.ToPtr(1)}),
+			Entry(existsOperatorWithFlexibility, notIn12, &Requirement{Key: "key", complement: true, values: sets.New("1", "2"), MinValues: lo.ToPtr(1)}),
+			Entry(existsOperatorWithFlexibility, greaterThan1, greaterThan1OperatorWithFlexibility),
+			Entry(existsOperatorWithFlexibility, greaterThan9, greaterThan9OperatorWithFlexibility),
+			Entry(existsOperatorWithFlexibility, lessThan1, lessThan1OperatorWithFlexibility),
+			Entry(existsOperatorWithFlexibility, lessThan9, lessThan9OperatorWithFlexibility),
+			Entry(existsOperatorWithFlexibility, exists, existsOperatorWithFlexibility),
 
-			// Intersection of requirement with minValues vs requirement with minValues
-			Expect(inABOperatorWithFlexibility.Intersection(existsOperatorWithFlexibility)).To(Equal(inABOperatorWithFlexibility))
-			Expect(inABOperatorWithFlexibility.Intersection(doesNotExistOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(inABOperatorWithFlexibility.Intersection(inAOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("A"), MinValues: lo.ToPtr(2)}))
-			Expect(inABOperatorWithFlexibility.Intersection(inBOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("B"), MinValues: lo.ToPtr(2)}))
-			Expect(inABOperatorWithFlexibility.Intersection(inABOperatorWithFlexibility)).To(Equal(inABOperatorWithFlexibility))
-			Expect(inABOperatorWithFlexibility.Intersection(notInAOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("B"), MinValues: lo.ToPtr(2)}))
-			Expect(inABOperatorWithFlexibility.Intersection(in1OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(inABOperatorWithFlexibility.Intersection(in9OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(inABOperatorWithFlexibility.Intersection(in19OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(inABOperatorWithFlexibility.Intersection(notIn12OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("A", "B"), MinValues: lo.ToPtr(2)}))
-			Expect(inABOperatorWithFlexibility.Intersection(greaterThan1OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(inABOperatorWithFlexibility.Intersection(greaterThan9OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(inABOperatorWithFlexibility.Intersection(lessThan1OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(inABOperatorWithFlexibility.Intersection(lessThan9OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
+			Entry(doesNotExistOperatorWithFlexibility, exists, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, doesNotExist, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, inA, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, inB, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, inAB, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, notInA, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, in1, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, in9, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, in19, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, notIn12, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, greaterThan1, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, greaterThan9, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, lessThan1, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, lessThan9, doesNotExistOperatorWithFlexibility),
 
-			// Intersection of requirement without minValues vs requirement without minValues
-			Expect(notInA.Intersection(exists)).To(Equal(notInA))
-			Expect(notInA.Intersection(doesNotExist)).To(Equal(doesNotExist))
-			Expect(notInA.Intersection(inA)).To(Equal(doesNotExist))
-			Expect(notInA.Intersection(inB)).To(Equal(inB))
-			Expect(notInA.Intersection(inAB)).To(Equal(inB))
-			Expect(notInA.Intersection(notInA)).To(Equal(notInA))
-			Expect(notInA.Intersection(in1)).To(Equal(in1))
-			Expect(notInA.Intersection(in9)).To(Equal(in9))
-			Expect(notInA.Intersection(in19)).To(Equal(in19))
-			Expect(notInA.Intersection(notIn12)).To(Equal(&Requirement{Key: "key", complement: true, values: sets.New("A", "1", "2")}))
-			Expect(notInA.Intersection(greaterThan1)).To(Equal(greaterThan1))
-			Expect(notInA.Intersection(greaterThan9)).To(Equal(greaterThan9))
-			Expect(notInA.Intersection(lessThan1)).To(Equal(lessThan1))
-			Expect(notInA.Intersection(lessThan9)).To(Equal(lessThan9))
+			Entry(inAOperatorWithFlexibility, exists, inAOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, doesNotExist, doesNotExistOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, inA, inAOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, inB, doesNotExistOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, inAB, inAOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, notInA, doesNotExistOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, in1, doesNotExistOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, in9, doesNotExistOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, in19, doesNotExistOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, notIn12, inAOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, greaterThan1, doesNotExistOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, greaterThan9, doesNotExistOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, lessThan1, doesNotExistOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, lessThan9, doesNotExistOperatorWithFlexibility),
 
-			// Intersection of requirement with minValues vs requirement without minValues
-			Expect(notInAOperatorWithFlexibility.Intersection(exists)).To(Equal(notInAOperatorWithFlexibility))
-			Expect(notInAOperatorWithFlexibility.Intersection(doesNotExist)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(notInAOperatorWithFlexibility.Intersection(inA)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(notInAOperatorWithFlexibility.Intersection(inB)).To(Equal(inBOperatorWithFlexibility))
-			Expect(notInAOperatorWithFlexibility.Intersection(inAB)).To(Equal(inBOperatorWithFlexibility))
-			Expect(notInAOperatorWithFlexibility.Intersection(notInA)).To(Equal(notInAOperatorWithFlexibility))
-			Expect(notInAOperatorWithFlexibility.Intersection(in1)).To(Equal(in1OperatorWithFlexibility))
-			Expect(notInAOperatorWithFlexibility.Intersection(in9)).To(Equal(in9OperatorWithFlexibility))
-			Expect(notInAOperatorWithFlexibility.Intersection(in19)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("1", "9"), MinValues: lo.ToPtr(1)}))
-			Expect(notInAOperatorWithFlexibility.Intersection(notIn12)).To(Equal(&Requirement{Key: "key", complement: true, values: sets.New("A", "1", "2"), MinValues: lo.ToPtr(1)}))
-			Expect(notInAOperatorWithFlexibility.Intersection(greaterThan1)).To(Equal(greaterThan1OperatorWithFlexibility))
-			Expect(notInAOperatorWithFlexibility.Intersection(greaterThan9)).To(Equal(greaterThan9OperatorWithFlexibility))
-			Expect(notInAOperatorWithFlexibility.Intersection(lessThan1)).To(Equal(lessThan1OperatorWithFlexibility))
-			Expect(notInAOperatorWithFlexibility.Intersection(lessThan9)).To(Equal(lessThan9OperatorWithFlexibility))
+			Entry(inBOperatorWithFlexibility, exists, inBOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, doesNotExist, doesNotExistOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, inA, doesNotExistOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, inB, inBOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, inAB, inBOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, notInA, inBOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, in1, doesNotExistOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, in9, doesNotExistOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, in19, doesNotExistOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, notIn12, inBOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, greaterThan1, doesNotExistOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, greaterThan9, doesNotExistOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, lessThan1, doesNotExistOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, lessThan9, doesNotExistOperatorWithFlexibility),
 
-			// Intersection of requirement with minValues vs requirement with minValues
-			Expect(notInAOperatorWithFlexibility.Intersection(existsOperatorWithFlexibility)).To(Equal(notInAOperatorWithFlexibility))
-			Expect(notInAOperatorWithFlexibility.Intersection(doesNotExistOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(notInAOperatorWithFlexibility.Intersection(inAOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(notInAOperatorWithFlexibility.Intersection(inBOperatorWithFlexibility)).To(Equal(inBOperatorWithFlexibility))
-			Expect(notInAOperatorWithFlexibility.Intersection(inABOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("B"), MinValues: lo.ToPtr(2)}))
-			Expect(notInAOperatorWithFlexibility.Intersection(notInAOperatorWithFlexibility)).To(Equal(notInAOperatorWithFlexibility))
-			Expect(notInAOperatorWithFlexibility.Intersection(in1OperatorWithFlexibility)).To(Equal(in1OperatorWithFlexibility))
-			Expect(notInAOperatorWithFlexibility.Intersection(in9OperatorWithFlexibility)).To(Equal(in9OperatorWithFlexibility))
-			Expect(notInAOperatorWithFlexibility.Intersection(in19OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("1", "9"), MinValues: lo.ToPtr(2)}))
-			Expect(notInAOperatorWithFlexibility.Intersection(notIn12OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: true, values: sets.New("A", "1", "2"), MinValues: lo.ToPtr(2)}))
-			Expect(notInAOperatorWithFlexibility.Intersection(greaterThan1OperatorWithFlexibility)).To(Equal(greaterThan1OperatorWithFlexibility))
-			Expect(notInAOperatorWithFlexibility.Intersection(greaterThan9OperatorWithFlexibility)).To(Equal(greaterThan9OperatorWithFlexibility))
-			Expect(notInAOperatorWithFlexibility.Intersection(lessThan1OperatorWithFlexibility)).To(Equal(lessThan1OperatorWithFlexibility))
-			Expect(notInAOperatorWithFlexibility.Intersection(lessThan9OperatorWithFlexibility)).To(Equal(lessThan9OperatorWithFlexibility))
+			Entry(inABOperatorWithFlexibility, exists, inABOperatorWithFlexibility),
+			Entry(inABOperatorWithFlexibility, doesNotExist, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(inABOperatorWithFlexibility, inA, &Requirement{Key: "key", complement: false, values: sets.New("A"), MinValues: lo.ToPtr(2)}),
+			Entry(inABOperatorWithFlexibility, inB, &Requirement{Key: "key", complement: false, values: sets.New("B"), MinValues: lo.ToPtr(2)}),
+			Entry(inABOperatorWithFlexibility, inAB, inABOperatorWithFlexibility),
+			Entry(inABOperatorWithFlexibility, notInA, &Requirement{Key: "key", complement: false, values: sets.New("B"), MinValues: lo.ToPtr(2)}),
+			Entry(inABOperatorWithFlexibility, in1, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(inABOperatorWithFlexibility, in9, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(inABOperatorWithFlexibility, in19, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(inABOperatorWithFlexibility, notIn12, &Requirement{Key: "key", complement: false, values: sets.New("A", "B"), MinValues: lo.ToPtr(2)}),
+			Entry(inABOperatorWithFlexibility, greaterThan1, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(inABOperatorWithFlexibility, greaterThan9, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(inABOperatorWithFlexibility, lessThan1, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(inABOperatorWithFlexibility, lessThan9, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
 
-			// Intersection of requirement without minValues vs requirement without minValues
-			Expect(in1.Intersection(exists)).To(Equal(in1))
-			Expect(in1.Intersection(doesNotExist)).To(Equal(doesNotExist))
-			Expect(in1.Intersection(inA)).To(Equal(doesNotExist))
-			Expect(in1.Intersection(inB)).To(Equal(doesNotExist))
-			Expect(in1.Intersection(inAB)).To(Equal(doesNotExist))
-			Expect(in1.Intersection(notInA)).To(Equal(in1))
-			Expect(in1.Intersection(in1)).To(Equal(in1))
-			Expect(in1.Intersection(in9)).To(Equal(doesNotExist))
-			Expect(in1.Intersection(in19)).To(Equal(in1))
-			Expect(in1.Intersection(notIn12)).To(Equal(doesNotExist))
-			Expect(in1.Intersection(greaterThan1)).To(Equal(doesNotExist))
-			Expect(in1.Intersection(greaterThan9)).To(Equal(doesNotExist))
-			Expect(in1.Intersection(lessThan1)).To(Equal(doesNotExist))
-			Expect(in1.Intersection(lessThan9)).To(Equal(in1))
+			Entry(notInAOperatorWithFlexibility, exists, notInAOperatorWithFlexibility),
+			Entry(notInAOperatorWithFlexibility, doesNotExist, doesNotExistOperatorWithFlexibility),
+			Entry(notInAOperatorWithFlexibility, inA, doesNotExistOperatorWithFlexibility),
+			Entry(notInAOperatorWithFlexibility, inB, inBOperatorWithFlexibility),
+			Entry(notInAOperatorWithFlexibility, inAB, inBOperatorWithFlexibility),
+			Entry(notInAOperatorWithFlexibility, notInA, notInAOperatorWithFlexibility),
+			Entry(notInAOperatorWithFlexibility, in1, in1OperatorWithFlexibility),
+			Entry(notInAOperatorWithFlexibility, in9, in9OperatorWithFlexibility),
+			Entry(notInAOperatorWithFlexibility, in19, &Requirement{Key: "key", complement: false, values: sets.New("1", "9"), MinValues: lo.ToPtr(1)}),
+			Entry(notInAOperatorWithFlexibility, notIn12, &Requirement{Key: "key", complement: true, values: sets.New("A", "1", "2"), MinValues: lo.ToPtr(1)}),
+			Entry(notInAOperatorWithFlexibility, greaterThan1, greaterThan1OperatorWithFlexibility),
+			Entry(notInAOperatorWithFlexibility, greaterThan9, greaterThan9OperatorWithFlexibility),
+			Entry(notInAOperatorWithFlexibility, lessThan1, lessThan1OperatorWithFlexibility),
+			Entry(notInAOperatorWithFlexibility, lessThan9, lessThan9OperatorWithFlexibility),
 
-			// Intersection of requirement with minValues vs requirement without minValues
-			Expect(in1OperatorWithFlexibility.Intersection(exists)).To(Equal(in1OperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(doesNotExist)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(inA)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(inB)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(inAB)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(notInA)).To(Equal(in1OperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(in1)).To(Equal(in1OperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(in9)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(in19)).To(Equal(in1OperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(notIn12)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(greaterThan1)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(greaterThan9)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(lessThan1)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(lessThan9)).To(Equal(in1OperatorWithFlexibility))
+			Entry(in1OperatorWithFlexibility, exists, in1OperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, doesNotExist, doesNotExistOperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, inA, doesNotExistOperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, inB, doesNotExistOperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, inAB, doesNotExistOperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, notInA, in1OperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, in1, in1OperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, in9, doesNotExistOperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, in19, in1OperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, notIn12, doesNotExistOperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, greaterThan1, doesNotExistOperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, greaterThan9, doesNotExistOperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, lessThan1, doesNotExistOperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, lessThan9, in1OperatorWithFlexibility),
 
-			// Intersection of requirement with minValues vs requirement with minValues
-			Expect(in1OperatorWithFlexibility.Intersection(existsOperatorWithFlexibility)).To(Equal(in1OperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(doesNotExistOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(inAOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(inBOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(inABOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(in1OperatorWithFlexibility.Intersection(notInAOperatorWithFlexibility)).To(Equal(in1OperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(in1OperatorWithFlexibility)).To(Equal(in1OperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(in9OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(in19OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("1"), MinValues: lo.ToPtr(2)}))
-			Expect(in1OperatorWithFlexibility.Intersection(notIn12OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(in1OperatorWithFlexibility.Intersection(greaterThan1OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(greaterThan9OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(lessThan1OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in1OperatorWithFlexibility.Intersection(lessThan9OperatorWithFlexibility)).To(Equal(in1OperatorWithFlexibility))
+			Entry(in9OperatorWithFlexibility, exists, in9OperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, doesNotExist, doesNotExistOperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, inA, doesNotExistOperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, inB, doesNotExistOperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, inAB, doesNotExistOperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, notInA, in9OperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, in1, doesNotExistOperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, in9, in9OperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, in19, in9OperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, notIn12, in9OperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, greaterThan1, in9OperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, greaterThan9, doesNotExistOperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, lessThan1, doesNotExistOperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, lessThan9, doesNotExistOperatorWithFlexibility),
 
-			// Intersection of requirement without minValues vs requirement without minValues
-			Expect(in9.Intersection(exists)).To(Equal(in9))
-			Expect(in9.Intersection(doesNotExist)).To(Equal(doesNotExist))
-			Expect(in9.Intersection(inA)).To(Equal(doesNotExist))
-			Expect(in9.Intersection(inB)).To(Equal(doesNotExist))
-			Expect(in9.Intersection(inAB)).To(Equal(doesNotExist))
-			Expect(in9.Intersection(notInA)).To(Equal(in9))
-			Expect(in9.Intersection(in1)).To(Equal(doesNotExist))
-			Expect(in9.Intersection(in9)).To(Equal(in9))
-			Expect(in9.Intersection(in19)).To(Equal(in9))
-			Expect(in9.Intersection(notIn12)).To(Equal(in9))
-			Expect(in9.Intersection(greaterThan1)).To(Equal(in9))
-			Expect(in9.Intersection(greaterThan9)).To(Equal(doesNotExist))
-			Expect(in9.Intersection(lessThan1)).To(Equal(doesNotExist))
-			Expect(in9.Intersection(lessThan9)).To(Equal(doesNotExist))
+			Entry(in19OperatorWithFlexibility, exists, in19OperatorWithFlexibility),
+			Entry(in19OperatorWithFlexibility, doesNotExist, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(in19OperatorWithFlexibility, inA, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(in19OperatorWithFlexibility, inB, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(in19OperatorWithFlexibility, inAB, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(in19OperatorWithFlexibility, notInA, &Requirement{Key: "key", complement: false, values: sets.New("1", "9"), MinValues: lo.ToPtr(2)}),
+			Entry(in19OperatorWithFlexibility, in1, &Requirement{Key: "key", complement: false, values: sets.New("1"), MinValues: lo.ToPtr(2)}),
+			Entry(in19OperatorWithFlexibility, in9, &Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}),
+			Entry(in19OperatorWithFlexibility, in19, in19OperatorWithFlexibility),
+			Entry(in19OperatorWithFlexibility, notIn12, &Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}),
+			Entry(in19OperatorWithFlexibility, greaterThan1, &Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}),
+			Entry(in19OperatorWithFlexibility, greaterThan9, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(in19OperatorWithFlexibility, lessThan1, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(in19OperatorWithFlexibility, lessThan9, &Requirement{Key: "key", complement: false, values: sets.New("1"), MinValues: lo.ToPtr(2)}),
 
-			// Intersection of requirement with minValues vs requirement without minValues
-			Expect(in9OperatorWithFlexibility.Intersection(exists)).To(Equal(in9OperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(doesNotExist)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(inA)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(inB)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(inAB)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(notInA)).To(Equal(in9OperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(in1)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(in9)).To(Equal(in9OperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(in19)).To(Equal(in9OperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(notIn12)).To(Equal(in9OperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(greaterThan1)).To(Equal(in9OperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(greaterThan9)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(lessThan1)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(lessThan9)).To(Equal(doesNotExistOperatorWithFlexibility))
+			Entry(notIn12OperatorWithFlexibility, exists, notIn12OperatorWithFlexibility),
+			Entry(notIn12OperatorWithFlexibility, doesNotExist, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(notIn12OperatorWithFlexibility, inA, &Requirement{Key: "key", complement: false, values: sets.New("A"), MinValues: lo.ToPtr(2)}),
+			Entry(notIn12OperatorWithFlexibility, inB, &Requirement{Key: "key", complement: false, values: sets.New("B"), MinValues: lo.ToPtr(2)}),
+			Entry(notIn12OperatorWithFlexibility, inAB, inABOperatorWithFlexibility),
+			Entry(notIn12OperatorWithFlexibility, notInA, &Requirement{Key: "key", complement: true, values: sets.New("A", "1", "2"), MinValues: lo.ToPtr(2)}),
+			Entry(notIn12OperatorWithFlexibility, in1, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(notIn12OperatorWithFlexibility, in9, &Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}),
+			Entry(notIn12OperatorWithFlexibility, in19, &Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}),
+			Entry(notIn12OperatorWithFlexibility, notIn12, notIn12OperatorWithFlexibility),
+			Entry(notIn12OperatorWithFlexibility, greaterThan1, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, values: sets.New("2"), MinValues: lo.ToPtr(2)}),
+			Entry(notIn12OperatorWithFlexibility, greaterThan9, &Requirement{Key: "key", complement: true, greaterThan: greaterThan9.greaterThan, values: sets.New[string](), MinValues: lo.ToPtr(2)}),
+			Entry(notIn12OperatorWithFlexibility, lessThan1, &Requirement{Key: "key", complement: true, lessThan: lessThan1.lessThan, values: sets.New[string](), MinValues: lo.ToPtr(2)}),
+			Entry(notIn12OperatorWithFlexibility, lessThan9, &Requirement{Key: "key", complement: true, lessThan: lessThan9.lessThan, values: sets.New("1", "2"), MinValues: lo.ToPtr(2)}),
 
-			// Intersection of requirement with minValues vs requirement with minValues
-			Expect(in9OperatorWithFlexibility.Intersection(existsOperatorWithFlexibility)).To(Equal(in9OperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(doesNotExistOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(inAOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(inBOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(inABOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(in9OperatorWithFlexibility.Intersection(notInAOperatorWithFlexibility)).To(Equal(in9OperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(in1OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(in9OperatorWithFlexibility)).To(Equal(in9OperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(in19OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}))
-			Expect(in9OperatorWithFlexibility.Intersection(notIn12OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}))
-			Expect(in9OperatorWithFlexibility.Intersection(greaterThan1OperatorWithFlexibility)).To(Equal(in9OperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(greaterThan9OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(lessThan1OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(in9OperatorWithFlexibility.Intersection(lessThan9OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
+			Entry(greaterThan1OperatorWithFlexibility, exists, greaterThan1OperatorWithFlexibility),
+			Entry(greaterThan1OperatorWithFlexibility, doesNotExist, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan1OperatorWithFlexibility, inA, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan1OperatorWithFlexibility, inB, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan1OperatorWithFlexibility, inAB, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan1OperatorWithFlexibility, notInA, greaterThan1OperatorWithFlexibility),
+			Entry(greaterThan1OperatorWithFlexibility, in1, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan1OperatorWithFlexibility, in9, in9OperatorWithFlexibility),
+			Entry(greaterThan1OperatorWithFlexibility, in19, in9OperatorWithFlexibility),
+			Entry(greaterThan1OperatorWithFlexibility, notIn12, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, values: sets.New("2"), MinValues: lo.ToPtr(1)}),
+			Entry(greaterThan1OperatorWithFlexibility, greaterThan1, greaterThan1OperatorWithFlexibility),
+			Entry(greaterThan1OperatorWithFlexibility, greaterThan9, greaterThan9OperatorWithFlexibility),
+			Entry(greaterThan1OperatorWithFlexibility, lessThan1, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan1OperatorWithFlexibility, lessThan9, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, lessThan: lessThan9.lessThan, values: sets.New[string](), MinValues: lo.ToPtr(1)}),
 
-			// Intersection of requirement without minValues vs requirement without minValues
-			Expect(in19.Intersection(exists)).To(Equal(in19))
-			Expect(in19.Intersection(doesNotExist)).To(Equal(doesNotExist))
-			Expect(in19.Intersection(inA)).To(Equal(doesNotExist))
-			Expect(in19.Intersection(inB)).To(Equal(doesNotExist))
-			Expect(in19.Intersection(inAB)).To(Equal(doesNotExist))
-			Expect(in19.Intersection(notInA)).To(Equal(in19))
-			Expect(in19.Intersection(in1)).To(Equal(in1))
-			Expect(in19.Intersection(in9)).To(Equal(in9))
-			Expect(in19.Intersection(in19)).To(Equal(in19))
-			Expect(in19.Intersection(notIn12)).To(Equal(in9))
-			Expect(in19.Intersection(greaterThan1)).To(Equal(in9))
-			Expect(in19.Intersection(greaterThan9)).To(Equal(doesNotExist))
-			Expect(in19.Intersection(lessThan1)).To(Equal(doesNotExist))
-			Expect(in19.Intersection(lessThan9)).To(Equal(in1))
+			Entry(greaterThan9OperatorWithFlexibility, exists, greaterThan9OperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, doesNotExist, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, inA, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, inB, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, inAB, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, notInA, greaterThan9OperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, in1, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, in9, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, in19, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, notIn12, greaterThan9OperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, greaterThan1, greaterThan9OperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, greaterThan9, greaterThan9OperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, lessThan1, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, lessThan9, doesNotExistOperatorWithFlexibility),
 
-			// Intersection of requirement with minValues vs requirement without minValues
-			Expect(in19OperatorWithFlexibility.Intersection(exists)).To(Equal(in19OperatorWithFlexibility))
-			Expect(in19OperatorWithFlexibility.Intersection(doesNotExist)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(in19OperatorWithFlexibility.Intersection(inA)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(in19OperatorWithFlexibility.Intersection(inB)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(in19OperatorWithFlexibility.Intersection(inAB)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(in19OperatorWithFlexibility.Intersection(notInA)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("1", "9"), MinValues: lo.ToPtr(2)}))
-			Expect(in19OperatorWithFlexibility.Intersection(in1)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("1"), MinValues: lo.ToPtr(2)}))
-			Expect(in19OperatorWithFlexibility.Intersection(in9)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}))
-			Expect(in19OperatorWithFlexibility.Intersection(in19)).To(Equal(in19OperatorWithFlexibility))
-			Expect(in19OperatorWithFlexibility.Intersection(notIn12)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}))
-			Expect(in19OperatorWithFlexibility.Intersection(greaterThan1)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}))
-			Expect(in19OperatorWithFlexibility.Intersection(greaterThan9)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(in19OperatorWithFlexibility.Intersection(lessThan1)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(in19OperatorWithFlexibility.Intersection(lessThan9)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("1"), MinValues: lo.ToPtr(2)}))
+			Entry(lessThan1OperatorWithFlexibility, exists, lessThan1OperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, doesNotExist, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, inA, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, inB, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, inAB, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, notInA, lessThan1OperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, in1, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, in9, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, in19, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, notIn12, lessThan1OperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, greaterThan1, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, greaterThan9, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, lessThan1, lessThan1OperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, lessThan9, lessThan1OperatorWithFlexibility),
 
-			// Intersection of requirement with minValues vs requirement with minValues
-			Expect(in19OperatorWithFlexibility.Intersection(existsOperatorWithFlexibility)).To(Equal(in19OperatorWithFlexibility))
-			Expect(in19OperatorWithFlexibility.Intersection(doesNotExistOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(in19OperatorWithFlexibility.Intersection(inAOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(in19OperatorWithFlexibility.Intersection(inBOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(in19OperatorWithFlexibility.Intersection(inABOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(in19OperatorWithFlexibility.Intersection(notInAOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("1", "9"), MinValues: lo.ToPtr(2)}))
-			Expect(in19OperatorWithFlexibility.Intersection(in1OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("1"), MinValues: lo.ToPtr(2)}))
-			Expect(in19OperatorWithFlexibility.Intersection(in9OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}))
-			Expect(in19OperatorWithFlexibility.Intersection(in19OperatorWithFlexibility)).To(Equal(in19OperatorWithFlexibility))
-			Expect(in19OperatorWithFlexibility.Intersection(notIn12OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}))
-			Expect(in19OperatorWithFlexibility.Intersection(greaterThan1OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}))
-			Expect(in19OperatorWithFlexibility.Intersection(greaterThan9OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(in19OperatorWithFlexibility.Intersection(lessThan1OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(in19OperatorWithFlexibility.Intersection(lessThan9OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("1"), MinValues: lo.ToPtr(2)}))
+			Entry(lessThan9OperatorWithFlexibility, exists, lessThan9OperatorWithFlexibility),
+			Entry(lessThan9OperatorWithFlexibility, doesNotExist, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan9OperatorWithFlexibility, inA, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan9OperatorWithFlexibility, inB, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan9OperatorWithFlexibility, inAB, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan9OperatorWithFlexibility, notInA, lessThan9OperatorWithFlexibility),
+			Entry(lessThan9OperatorWithFlexibility, in1, in1OperatorWithFlexibility),
+			Entry(lessThan9OperatorWithFlexibility, in9, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan9OperatorWithFlexibility, in19, in1OperatorWithFlexibility),
+			Entry(lessThan9OperatorWithFlexibility, notIn12, &Requirement{Key: "key", complement: true, lessThan: lessThan9.lessThan, values: sets.New("1", "2"), MinValues: lo.ToPtr(1)}),
+			Entry(lessThan9OperatorWithFlexibility, greaterThan1, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, lessThan: lessThan9.lessThan, values: sets.New[string](), MinValues: lo.ToPtr(1)}),
+			Entry(lessThan9OperatorWithFlexibility, greaterThan9, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan9OperatorWithFlexibility, lessThan1, lessThan1OperatorWithFlexibility),
+			Entry(lessThan9OperatorWithFlexibility, lessThan9, lessThan9OperatorWithFlexibility),
+		)
+		DescribeTable("should intersect sets for existing requirement with minValues and new requirement with minValues",
+			func(existingRequirementWithMinValues, newRequirementWithMinValues, expectedRequirement *Requirement) {
+				Expect(existingRequirementWithMinValues.Intersection(newRequirementWithMinValues)).To(Equal(expectedRequirement))
+			},
+			Entry(existsOperatorWithFlexibility, existsOperatorWithFlexibility, existsOperatorWithFlexibility),
+			Entry(existsOperatorWithFlexibility, doesNotExistOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(existsOperatorWithFlexibility, inAOperatorWithFlexibility, inAOperatorWithFlexibility),
+			Entry(existsOperatorWithFlexibility, inBOperatorWithFlexibility, inBOperatorWithFlexibility),
+			Entry(existsOperatorWithFlexibility, inABOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("A", "B"), MinValues: lo.ToPtr(2)}),
+			Entry(existsOperatorWithFlexibility, notInAOperatorWithFlexibility, notInAOperatorWithFlexibility),
+			Entry(existsOperatorWithFlexibility, in1OperatorWithFlexibility, in1OperatorWithFlexibility),
+			Entry(existsOperatorWithFlexibility, in9OperatorWithFlexibility, in9OperatorWithFlexibility),
+			Entry(existsOperatorWithFlexibility, in19OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("1", "9"), MinValues: lo.ToPtr(2)}),
+			Entry(existsOperatorWithFlexibility, notIn12OperatorWithFlexibility, &Requirement{Key: "key", complement: true, values: sets.New("1", "2"), MinValues: lo.ToPtr(2)}),
+			Entry(existsOperatorWithFlexibility, greaterThan1OperatorWithFlexibility, greaterThan1OperatorWithFlexibility),
+			Entry(existsOperatorWithFlexibility, greaterThan9OperatorWithFlexibility, greaterThan9OperatorWithFlexibility),
+			Entry(existsOperatorWithFlexibility, lessThan1OperatorWithFlexibility, lessThan1OperatorWithFlexibility),
+			Entry(existsOperatorWithFlexibility, lessThan9OperatorWithFlexibility, lessThan9OperatorWithFlexibility),
+			Entry(existsOperatorWithFlexibility, existsOperatorWithFlexibility, existsOperatorWithFlexibility),
 
-			// Intersection of requirement without minValues vs requirement without minValues
-			Expect(notIn12.Intersection(exists)).To(Equal(notIn12))
-			Expect(notIn12.Intersection(doesNotExist)).To(Equal(doesNotExist))
-			Expect(notIn12.Intersection(inA)).To(Equal(inA))
-			Expect(notIn12.Intersection(inB)).To(Equal(inB))
-			Expect(notIn12.Intersection(inAB)).To(Equal(inAB))
-			Expect(notIn12.Intersection(notInA)).To(Equal(&Requirement{Key: "key", complement: true, values: sets.New("A", "1", "2")}))
-			Expect(notIn12.Intersection(in1)).To(Equal(doesNotExist))
-			Expect(notIn12.Intersection(in9)).To(Equal(in9))
-			Expect(notIn12.Intersection(in19)).To(Equal(in9))
-			Expect(notIn12.Intersection(notIn12)).To(Equal(notIn12))
-			Expect(notIn12.Intersection(greaterThan1)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, values: sets.New("2")}))
-			Expect(notIn12.Intersection(greaterThan9)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan9.greaterThan, values: sets.New[string]()}))
-			Expect(notIn12.Intersection(lessThan1)).To(Equal(&Requirement{Key: "key", complement: true, lessThan: lessThan1.lessThan, values: sets.New[string]()}))
-			Expect(notIn12.Intersection(lessThan9)).To(Equal(&Requirement{Key: "key", complement: true, lessThan: lessThan9.lessThan, values: sets.New("1", "2")}))
+			Entry(doesNotExistOperatorWithFlexibility, existsOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, doesNotExistOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, inAOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, inBOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, inABOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(doesNotExistOperatorWithFlexibility, notInAOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, in1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, in9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, in19OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(doesNotExistOperatorWithFlexibility, notIn12OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(doesNotExistOperatorWithFlexibility, greaterThan1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, greaterThan9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, lessThan1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(doesNotExistOperatorWithFlexibility, lessThan9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
 
-			// Intersection of requirement with minValues vs requirement without minValues
-			Expect(notIn12OperatorWithFlexibility.Intersection(exists)).To(Equal(notIn12OperatorWithFlexibility))
-			Expect(notIn12OperatorWithFlexibility.Intersection(doesNotExist)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(notIn12OperatorWithFlexibility.Intersection(inA)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("A"), MinValues: lo.ToPtr(2)}))
-			Expect(notIn12OperatorWithFlexibility.Intersection(inB)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("B"), MinValues: lo.ToPtr(2)}))
-			Expect(notIn12OperatorWithFlexibility.Intersection(inAB)).To(Equal(inABOperatorWithFlexibility))
-			Expect(notIn12OperatorWithFlexibility.Intersection(notInA)).To(Equal(&Requirement{Key: "key", complement: true, values: sets.New("A", "1", "2"), MinValues: lo.ToPtr(2)}))
-			Expect(notIn12OperatorWithFlexibility.Intersection(in1)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(notIn12OperatorWithFlexibility.Intersection(in9)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}))
-			Expect(notIn12OperatorWithFlexibility.Intersection(in19)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}))
-			Expect(notIn12OperatorWithFlexibility.Intersection(notIn12)).To(Equal(notIn12OperatorWithFlexibility))
-			Expect(notIn12OperatorWithFlexibility.Intersection(greaterThan1)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, values: sets.New("2"), MinValues: lo.ToPtr(2)}))
-			Expect(notIn12OperatorWithFlexibility.Intersection(greaterThan9)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan9.greaterThan, values: sets.New[string](), MinValues: lo.ToPtr(2)}))
-			Expect(notIn12OperatorWithFlexibility.Intersection(lessThan1)).To(Equal(&Requirement{Key: "key", complement: true, lessThan: lessThan1.lessThan, values: sets.New[string](), MinValues: lo.ToPtr(2)}))
-			Expect(notIn12OperatorWithFlexibility.Intersection(lessThan9)).To(Equal(&Requirement{Key: "key", complement: true, lessThan: lessThan9.lessThan, values: sets.New("1", "2"), MinValues: lo.ToPtr(2)}))
+			Entry(inAOperatorWithFlexibility, existsOperatorWithFlexibility, inAOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, doesNotExistOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, inAOperatorWithFlexibility, inAOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, inBOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, inABOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("A"), MinValues: lo.ToPtr(2)}),
+			Entry(inAOperatorWithFlexibility, notInAOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, in1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, in9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, in19OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(inAOperatorWithFlexibility, notIn12OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("A"), MinValues: lo.ToPtr(2)}),
+			Entry(inAOperatorWithFlexibility, greaterThan1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, greaterThan9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, lessThan1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(inAOperatorWithFlexibility, lessThan9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
 
-			// Intersection of requirement with minValues vs requirement with minValues
-			Expect(notIn12OperatorWithFlexibility.Intersection(existsOperatorWithFlexibility)).To(Equal(notIn12OperatorWithFlexibility))
-			Expect(notIn12OperatorWithFlexibility.Intersection(doesNotExistOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(notIn12OperatorWithFlexibility.Intersection(inAOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("A"), MinValues: lo.ToPtr(2)}))
-			Expect(notIn12OperatorWithFlexibility.Intersection(inBOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("B"), MinValues: lo.ToPtr(2)}))
-			Expect(notIn12OperatorWithFlexibility.Intersection(inABOperatorWithFlexibility)).To(Equal(inABOperatorWithFlexibility))
-			Expect(notIn12OperatorWithFlexibility.Intersection(notInAOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: true, values: sets.New("A", "1", "2"), MinValues: lo.ToPtr(2)}))
-			Expect(notIn12OperatorWithFlexibility.Intersection(in1OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(notIn12OperatorWithFlexibility.Intersection(in9OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}))
-			Expect(notIn12OperatorWithFlexibility.Intersection(in19OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}))
-			Expect(notIn12OperatorWithFlexibility.Intersection(notIn12OperatorWithFlexibility)).To(Equal(notIn12OperatorWithFlexibility))
-			Expect(notIn12OperatorWithFlexibility.Intersection(greaterThan1OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, values: sets.New("2"), MinValues: lo.ToPtr(2)}))
-			Expect(notIn12OperatorWithFlexibility.Intersection(greaterThan9OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan9.greaterThan, values: sets.New[string](), MinValues: lo.ToPtr(2)}))
-			Expect(notIn12OperatorWithFlexibility.Intersection(lessThan1OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: true, lessThan: lessThan1.lessThan, values: sets.New[string](), MinValues: lo.ToPtr(2)}))
-			Expect(notIn12OperatorWithFlexibility.Intersection(lessThan9OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: true, lessThan: lessThan9.lessThan, values: sets.New("1", "2"), MinValues: lo.ToPtr(2)}))
+			Entry(inBOperatorWithFlexibility, existsOperatorWithFlexibility, inBOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, doesNotExistOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, inAOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, inBOperatorWithFlexibility, inBOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, inABOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("B"), MinValues: lo.ToPtr(2)}),
+			Entry(inBOperatorWithFlexibility, notInAOperatorWithFlexibility, inBOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, in1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, in9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, in19OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(inBOperatorWithFlexibility, notIn12OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("B"), MinValues: lo.ToPtr(2)}),
+			Entry(inBOperatorWithFlexibility, greaterThan1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, greaterThan9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, lessThan1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(inBOperatorWithFlexibility, lessThan9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
 
-			// Intersection of requirement without minValues vs requirement without minValues
-			Expect(greaterThan1.Intersection(exists)).To(Equal(greaterThan1))
-			Expect(greaterThan1.Intersection(doesNotExist)).To(Equal(doesNotExist))
-			Expect(greaterThan1.Intersection(inA)).To(Equal(doesNotExist))
-			Expect(greaterThan1.Intersection(inB)).To(Equal(doesNotExist))
-			Expect(greaterThan1.Intersection(inAB)).To(Equal(doesNotExist))
-			Expect(greaterThan1.Intersection(notInA)).To(Equal(greaterThan1))
-			Expect(greaterThan1.Intersection(in1)).To(Equal(doesNotExist))
-			Expect(greaterThan1.Intersection(in9)).To(Equal(in9))
-			Expect(greaterThan1.Intersection(in19)).To(Equal(in9))
-			Expect(greaterThan1.Intersection(notIn12)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, values: sets.New("2")}))
-			Expect(greaterThan1.Intersection(greaterThan1)).To(Equal(greaterThan1))
-			Expect(greaterThan1.Intersection(greaterThan9)).To(Equal(greaterThan9))
-			Expect(greaterThan1.Intersection(lessThan1)).To(Equal(doesNotExist))
-			Expect(greaterThan1.Intersection(lessThan9)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, lessThan: lessThan9.lessThan, values: sets.New[string]()}))
+			Entry(inABOperatorWithFlexibility, existsOperatorWithFlexibility, inABOperatorWithFlexibility),
+			Entry(inABOperatorWithFlexibility, doesNotExistOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(inABOperatorWithFlexibility, inAOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("A"), MinValues: lo.ToPtr(2)}),
+			Entry(inABOperatorWithFlexibility, inBOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("B"), MinValues: lo.ToPtr(2)}),
+			Entry(inABOperatorWithFlexibility, inABOperatorWithFlexibility, inABOperatorWithFlexibility),
+			Entry(inABOperatorWithFlexibility, notInAOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("B"), MinValues: lo.ToPtr(2)}),
+			Entry(inABOperatorWithFlexibility, in1OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(inABOperatorWithFlexibility, in9OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(inABOperatorWithFlexibility, in19OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(inABOperatorWithFlexibility, notIn12OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("A", "B"), MinValues: lo.ToPtr(2)}),
+			Entry(inABOperatorWithFlexibility, greaterThan1OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(inABOperatorWithFlexibility, greaterThan9OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(inABOperatorWithFlexibility, lessThan1OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(inABOperatorWithFlexibility, lessThan9OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
 
-			// Intersection of requirement with minValues vs requirement without minValues
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(exists)).To(Equal(greaterThan1OperatorWithFlexibility))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(doesNotExist)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(inA)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(inB)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(inAB)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(notInA)).To(Equal(greaterThan1OperatorWithFlexibility))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(in1)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(in9)).To(Equal(in9OperatorWithFlexibility))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(in19)).To(Equal(in9OperatorWithFlexibility))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(notIn12)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, values: sets.New("2"), MinValues: lo.ToPtr(1)}))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(greaterThan1)).To(Equal(greaterThan1OperatorWithFlexibility))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(greaterThan9)).To(Equal(greaterThan9OperatorWithFlexibility))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(lessThan1)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(lessThan9)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, lessThan: lessThan9.lessThan, values: sets.New[string](), MinValues: lo.ToPtr(1)}))
+			Entry(notInAOperatorWithFlexibility, existsOperatorWithFlexibility, notInAOperatorWithFlexibility),
+			Entry(notInAOperatorWithFlexibility, doesNotExistOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(notInAOperatorWithFlexibility, inAOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(notInAOperatorWithFlexibility, inBOperatorWithFlexibility, inBOperatorWithFlexibility),
+			Entry(notInAOperatorWithFlexibility, inABOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("B"), MinValues: lo.ToPtr(2)}),
+			Entry(notInAOperatorWithFlexibility, notInAOperatorWithFlexibility, notInAOperatorWithFlexibility),
+			Entry(notInAOperatorWithFlexibility, in1OperatorWithFlexibility, in1OperatorWithFlexibility),
+			Entry(notInAOperatorWithFlexibility, in9OperatorWithFlexibility, in9OperatorWithFlexibility),
+			Entry(notInAOperatorWithFlexibility, in19OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("1", "9"), MinValues: lo.ToPtr(2)}),
+			Entry(notInAOperatorWithFlexibility, notIn12OperatorWithFlexibility, &Requirement{Key: "key", complement: true, values: sets.New("A", "1", "2"), MinValues: lo.ToPtr(2)}),
+			Entry(notInAOperatorWithFlexibility, greaterThan1OperatorWithFlexibility, greaterThan1OperatorWithFlexibility),
+			Entry(notInAOperatorWithFlexibility, greaterThan9OperatorWithFlexibility, greaterThan9OperatorWithFlexibility),
+			Entry(notInAOperatorWithFlexibility, lessThan1OperatorWithFlexibility, lessThan1OperatorWithFlexibility),
+			Entry(notInAOperatorWithFlexibility, lessThan9OperatorWithFlexibility, lessThan9OperatorWithFlexibility),
 
-			// Intersection of requirement with minValues vs requirement with minValues
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(existsOperatorWithFlexibility)).To(Equal(greaterThan1OperatorWithFlexibility))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(doesNotExistOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(inAOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(inBOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(inABOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(notInAOperatorWithFlexibility)).To(Equal(greaterThan1OperatorWithFlexibility))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(in1OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(in9OperatorWithFlexibility)).To(Equal(in9OperatorWithFlexibility))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(in19OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(notIn12OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, values: sets.New("2"), MinValues: lo.ToPtr(2)}))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(greaterThan1OperatorWithFlexibility)).To(Equal(greaterThan1OperatorWithFlexibility))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(greaterThan9OperatorWithFlexibility)).To(Equal(greaterThan9OperatorWithFlexibility))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(lessThan1OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan1OperatorWithFlexibility.Intersection(lessThan9OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, lessThan: lessThan9.lessThan, values: sets.New[string](), MinValues: lo.ToPtr(1)}))
+			Entry(in1OperatorWithFlexibility, existsOperatorWithFlexibility, in1OperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, inAOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, inBOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, inABOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(in1OperatorWithFlexibility, notInAOperatorWithFlexibility, in1OperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, in1OperatorWithFlexibility, in1OperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, in9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, in19OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("1"), MinValues: lo.ToPtr(2)}),
+			Entry(in1OperatorWithFlexibility, notIn12OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(in1OperatorWithFlexibility, greaterThan1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, greaterThan9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, lessThan1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(in1OperatorWithFlexibility, lessThan9OperatorWithFlexibility, in1OperatorWithFlexibility),
 
-			// Intersection of requirement without minValues vs requirement without minValues
-			Expect(greaterThan9.Intersection(exists)).To(Equal(greaterThan9))
-			Expect(greaterThan9.Intersection(doesNotExist)).To(Equal(doesNotExist))
-			Expect(greaterThan9.Intersection(inA)).To(Equal(doesNotExist))
-			Expect(greaterThan9.Intersection(inB)).To(Equal(doesNotExist))
-			Expect(greaterThan9.Intersection(inAB)).To(Equal(doesNotExist))
-			Expect(greaterThan9.Intersection(notInA)).To(Equal(greaterThan9))
-			Expect(greaterThan9.Intersection(in1)).To(Equal(doesNotExist))
-			Expect(greaterThan9.Intersection(in9)).To(Equal(doesNotExist))
-			Expect(greaterThan9.Intersection(in19)).To(Equal(doesNotExist))
-			Expect(greaterThan9.Intersection(notIn12)).To(Equal(greaterThan9))
-			Expect(greaterThan9.Intersection(greaterThan1)).To(Equal(greaterThan9))
-			Expect(greaterThan9.Intersection(greaterThan9)).To(Equal(greaterThan9))
-			Expect(greaterThan9.Intersection(lessThan1)).To(Equal(doesNotExist))
-			Expect(greaterThan9.Intersection(lessThan9)).To(Equal(doesNotExist))
+			Entry(in9OperatorWithFlexibility, existsOperatorWithFlexibility, in9OperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, inAOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, inBOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, inABOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(in9OperatorWithFlexibility, notInAOperatorWithFlexibility, in9OperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, in1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, in9OperatorWithFlexibility, in9OperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, in19OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}),
+			Entry(in9OperatorWithFlexibility, notIn12OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}),
+			Entry(in9OperatorWithFlexibility, greaterThan1OperatorWithFlexibility, in9OperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, greaterThan9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, lessThan1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(in9OperatorWithFlexibility, lessThan9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
 
-			// Intersection of requirement with minValues vs requirement without minValues
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(exists)).To(Equal(greaterThan9OperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(doesNotExist)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(inA)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(inB)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(inAB)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(notInA)).To(Equal(greaterThan9OperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(in1)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(in9)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(in19)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(notIn12)).To(Equal(greaterThan9OperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(greaterThan1)).To(Equal(greaterThan9OperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(greaterThan9)).To(Equal(greaterThan9OperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(lessThan1)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(lessThan9)).To(Equal(doesNotExistOperatorWithFlexibility))
+			Entry(in19OperatorWithFlexibility, existsOperatorWithFlexibility, in19OperatorWithFlexibility),
+			Entry(in19OperatorWithFlexibility, doesNotExistOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(in19OperatorWithFlexibility, inAOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(in19OperatorWithFlexibility, inBOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(in19OperatorWithFlexibility, inABOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(in19OperatorWithFlexibility, notInAOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("1", "9"), MinValues: lo.ToPtr(2)}),
+			Entry(in19OperatorWithFlexibility, in1OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("1"), MinValues: lo.ToPtr(2)}),
+			Entry(in19OperatorWithFlexibility, in9OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}),
+			Entry(in19OperatorWithFlexibility, in19OperatorWithFlexibility, in19OperatorWithFlexibility),
+			Entry(in19OperatorWithFlexibility, notIn12OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}),
+			Entry(in19OperatorWithFlexibility, greaterThan1OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}),
+			Entry(in19OperatorWithFlexibility, greaterThan9OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(in19OperatorWithFlexibility, lessThan1OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(in19OperatorWithFlexibility, lessThan9OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("1"), MinValues: lo.ToPtr(2)}),
 
-			// Intersection of requirement with minValues vs requirement with minValues
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(existsOperatorWithFlexibility)).To(Equal(greaterThan9OperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(doesNotExistOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(inAOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(inBOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(inABOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(notInAOperatorWithFlexibility)).To(Equal(greaterThan9OperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(in1OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(in9OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(in19OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(notIn12OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan9.greaterThan, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(greaterThan1OperatorWithFlexibility)).To(Equal(greaterThan9OperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(greaterThan9OperatorWithFlexibility)).To(Equal(greaterThan9OperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(lessThan1OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(greaterThan9OperatorWithFlexibility.Intersection(lessThan9OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
+			Entry(notIn12OperatorWithFlexibility, existsOperatorWithFlexibility, notIn12OperatorWithFlexibility),
+			Entry(notIn12OperatorWithFlexibility, doesNotExistOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(notIn12OperatorWithFlexibility, inAOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("A"), MinValues: lo.ToPtr(2)}),
+			Entry(notIn12OperatorWithFlexibility, inBOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("B"), MinValues: lo.ToPtr(2)}),
+			Entry(notIn12OperatorWithFlexibility, inABOperatorWithFlexibility, inABOperatorWithFlexibility),
+			Entry(notIn12OperatorWithFlexibility, notInAOperatorWithFlexibility, &Requirement{Key: "key", complement: true, values: sets.New("A", "1", "2"), MinValues: lo.ToPtr(2)}),
+			Entry(notIn12OperatorWithFlexibility, in1OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(notIn12OperatorWithFlexibility, in9OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}),
+			Entry(notIn12OperatorWithFlexibility, in19OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}),
+			Entry(notIn12OperatorWithFlexibility, notIn12OperatorWithFlexibility, notIn12OperatorWithFlexibility),
+			Entry(notIn12OperatorWithFlexibility, greaterThan1OperatorWithFlexibility, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, values: sets.New("2"), MinValues: lo.ToPtr(2)}),
+			Entry(notIn12OperatorWithFlexibility, greaterThan9OperatorWithFlexibility, &Requirement{Key: "key", complement: true, greaterThan: greaterThan9.greaterThan, values: sets.New[string](), MinValues: lo.ToPtr(2)}),
+			Entry(notIn12OperatorWithFlexibility, lessThan1OperatorWithFlexibility, &Requirement{Key: "key", complement: true, lessThan: lessThan1.lessThan, values: sets.New[string](), MinValues: lo.ToPtr(2)}),
+			Entry(notIn12OperatorWithFlexibility, lessThan9OperatorWithFlexibility, &Requirement{Key: "key", complement: true, lessThan: lessThan9.lessThan, values: sets.New("1", "2"), MinValues: lo.ToPtr(2)}),
 
-			// Intersection of requirement without minValues vs requirement without minValues
-			Expect(lessThan1.Intersection(exists)).To(Equal(lessThan1))
-			Expect(lessThan1.Intersection(doesNotExist)).To(Equal(doesNotExist))
-			Expect(lessThan1.Intersection(inA)).To(Equal(doesNotExist))
-			Expect(lessThan1.Intersection(inB)).To(Equal(doesNotExist))
-			Expect(lessThan1.Intersection(inAB)).To(Equal(doesNotExist))
-			Expect(lessThan1.Intersection(notInA)).To(Equal(lessThan1))
-			Expect(lessThan1.Intersection(in1)).To(Equal(doesNotExist))
-			Expect(lessThan1.Intersection(in9)).To(Equal(doesNotExist))
-			Expect(lessThan1.Intersection(in19)).To(Equal(doesNotExist))
-			Expect(lessThan1.Intersection(notIn12)).To(Equal(lessThan1))
-			Expect(lessThan1.Intersection(greaterThan1)).To(Equal(doesNotExist))
-			Expect(lessThan1.Intersection(greaterThan9)).To(Equal(doesNotExist))
-			Expect(lessThan1.Intersection(lessThan1)).To(Equal(lessThan1))
-			Expect(lessThan1.Intersection(lessThan9)).To(Equal(lessThan1))
+			Entry(greaterThan1OperatorWithFlexibility, existsOperatorWithFlexibility, greaterThan1OperatorWithFlexibility),
+			Entry(greaterThan1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan1OperatorWithFlexibility, inAOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan1OperatorWithFlexibility, inBOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan1OperatorWithFlexibility, inABOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(greaterThan1OperatorWithFlexibility, notInAOperatorWithFlexibility, greaterThan1OperatorWithFlexibility),
+			Entry(greaterThan1OperatorWithFlexibility, in1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan1OperatorWithFlexibility, in9OperatorWithFlexibility, in9OperatorWithFlexibility),
+			Entry(greaterThan1OperatorWithFlexibility, in19OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}),
+			Entry(greaterThan1OperatorWithFlexibility, notIn12OperatorWithFlexibility, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, values: sets.New("2"), MinValues: lo.ToPtr(2)}),
+			Entry(greaterThan1OperatorWithFlexibility, greaterThan1OperatorWithFlexibility, greaterThan1OperatorWithFlexibility),
+			Entry(greaterThan1OperatorWithFlexibility, greaterThan9OperatorWithFlexibility, greaterThan9OperatorWithFlexibility),
+			Entry(greaterThan1OperatorWithFlexibility, lessThan1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan1OperatorWithFlexibility, lessThan9OperatorWithFlexibility, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, lessThan: lessThan9.lessThan, values: sets.New[string](), MinValues: lo.ToPtr(1)}),
 
-			// Intersection of requirement with minValues vs requirement without minValues
-			Expect(lessThan1OperatorWithFlexibility.Intersection(exists)).To(Equal(lessThan1OperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(doesNotExist)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(inA)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(inB)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(inAB)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(notInA)).To(Equal(lessThan1OperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(in1)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(in9)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(in19)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(notIn12)).To(Equal(lessThan1OperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(greaterThan1)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(greaterThan9)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(lessThan1)).To(Equal(lessThan1OperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(lessThan9)).To(Equal(lessThan1OperatorWithFlexibility))
+			Entry(greaterThan9OperatorWithFlexibility, existsOperatorWithFlexibility, greaterThan9OperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, inAOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, inBOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, inABOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(greaterThan9OperatorWithFlexibility, notInAOperatorWithFlexibility, greaterThan9OperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, in1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, in9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, in19OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(greaterThan9OperatorWithFlexibility, notIn12OperatorWithFlexibility, &Requirement{Key: "key", complement: true, greaterThan: greaterThan9.greaterThan, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(greaterThan9OperatorWithFlexibility, greaterThan1OperatorWithFlexibility, greaterThan9OperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, greaterThan9OperatorWithFlexibility, greaterThan9OperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, lessThan1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(greaterThan9OperatorWithFlexibility, lessThan9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
 
-			// Intersection of requirement with minValues vs requirement with minValues
-			Expect(lessThan1OperatorWithFlexibility.Intersection(existsOperatorWithFlexibility)).To(Equal(lessThan1OperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(doesNotExistOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(inAOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(inBOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(inABOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(notInAOperatorWithFlexibility)).To(Equal(lessThan1OperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(in1OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(in9OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(in19OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(notIn12OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: true, lessThan: lessThan1.lessThan, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(greaterThan1OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(greaterThan9OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(lessThan1OperatorWithFlexibility)).To(Equal(lessThan1OperatorWithFlexibility))
-			Expect(lessThan1OperatorWithFlexibility.Intersection(lessThan9OperatorWithFlexibility)).To(Equal(lessThan1OperatorWithFlexibility))
+			Entry(lessThan1OperatorWithFlexibility, existsOperatorWithFlexibility, lessThan1OperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, inAOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, inBOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, inABOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(lessThan1OperatorWithFlexibility, notInAOperatorWithFlexibility, lessThan1OperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, in1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, in9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, in19OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(lessThan1OperatorWithFlexibility, notIn12OperatorWithFlexibility, &Requirement{Key: "key", complement: true, lessThan: lessThan1.lessThan, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(lessThan1OperatorWithFlexibility, greaterThan1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, greaterThan9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, lessThan1OperatorWithFlexibility, lessThan1OperatorWithFlexibility),
+			Entry(lessThan1OperatorWithFlexibility, lessThan9OperatorWithFlexibility, lessThan1OperatorWithFlexibility),
 
-			// Intersection of requirement without minValues vs requirement without minValues
-			Expect(lessThan9.Intersection(exists)).To(Equal(lessThan9))
-			Expect(lessThan9.Intersection(doesNotExist)).To(Equal(doesNotExist))
-			Expect(lessThan9.Intersection(inA)).To(Equal(doesNotExist))
-			Expect(lessThan9.Intersection(inB)).To(Equal(doesNotExist))
-			Expect(lessThan9.Intersection(inAB)).To(Equal(doesNotExist))
-			Expect(lessThan9.Intersection(notInA)).To(Equal(lessThan9))
-			Expect(lessThan9.Intersection(in1)).To(Equal(in1))
-			Expect(lessThan9.Intersection(in9)).To(Equal(doesNotExist))
-			Expect(lessThan9.Intersection(in19)).To(Equal(in1))
-			Expect(lessThan9.Intersection(notIn12)).To(Equal(&Requirement{Key: "key", complement: true, lessThan: lessThan9.lessThan, values: sets.New("1", "2")}))
-			Expect(lessThan9.Intersection(greaterThan1)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, lessThan: lessThan9.lessThan, values: sets.New[string]()}))
-			Expect(lessThan9.Intersection(greaterThan9)).To(Equal(doesNotExist))
-			Expect(lessThan9.Intersection(lessThan1)).To(Equal(lessThan1))
-			Expect(lessThan9.Intersection(lessThan9)).To(Equal(lessThan9))
-
-			// Intersection of requirement with minValues vs requirement without minValues
-			Expect(lessThan9OperatorWithFlexibility.Intersection(exists)).To(Equal(lessThan9OperatorWithFlexibility))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(doesNotExist)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(inA)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(inB)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(inAB)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(notInA)).To(Equal(lessThan9OperatorWithFlexibility))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(in1)).To(Equal(in1OperatorWithFlexibility))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(in9)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(in19)).To(Equal(in1OperatorWithFlexibility))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(notIn12)).To(Equal(&Requirement{Key: "key", complement: true, lessThan: lessThan9.lessThan, values: sets.New("1", "2"), MinValues: lo.ToPtr(1)}))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(greaterThan1)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, lessThan: lessThan9.lessThan, values: sets.New[string](), MinValues: lo.ToPtr(1)}))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(greaterThan9)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(lessThan1)).To(Equal(lessThan1OperatorWithFlexibility))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(lessThan9)).To(Equal(lessThan9OperatorWithFlexibility))
-
-			// Intersection of requirement with minValues vs requirement with minValues
-			Expect(lessThan9OperatorWithFlexibility.Intersection(existsOperatorWithFlexibility)).To(Equal(lessThan9OperatorWithFlexibility))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(doesNotExistOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(inAOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(inBOperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(inABOperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(notInAOperatorWithFlexibility)).To(Equal(lessThan9OperatorWithFlexibility))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(in1OperatorWithFlexibility)).To(Equal(in1OperatorWithFlexibility))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(in9OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(in19OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: false, values: sets.New("1"), MinValues: lo.ToPtr(2)}))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(notIn12OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: true, lessThan: lessThan9.lessThan, values: sets.New("1", "2"), MinValues: lo.ToPtr(2)}))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(greaterThan1OperatorWithFlexibility)).To(Equal(&Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, lessThan: lessThan9.lessThan, values: sets.New[string](), MinValues: lo.ToPtr(1)}))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(greaterThan9OperatorWithFlexibility)).To(Equal(doesNotExistOperatorWithFlexibility))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(lessThan1OperatorWithFlexibility)).To(Equal(lessThan1OperatorWithFlexibility))
-			Expect(lessThan9OperatorWithFlexibility.Intersection(lessThan9OperatorWithFlexibility)).To(Equal(lessThan9OperatorWithFlexibility))
-		})
+			Entry(lessThan9OperatorWithFlexibility, existsOperatorWithFlexibility, lessThan9OperatorWithFlexibility),
+			Entry(lessThan9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan9OperatorWithFlexibility, inAOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan9OperatorWithFlexibility, inBOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan9OperatorWithFlexibility, inABOperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(lessThan9OperatorWithFlexibility, notInAOperatorWithFlexibility, lessThan9OperatorWithFlexibility),
+			Entry(lessThan9OperatorWithFlexibility, in1OperatorWithFlexibility, in1OperatorWithFlexibility),
+			Entry(lessThan9OperatorWithFlexibility, in9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan9OperatorWithFlexibility, in19OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("1"), MinValues: lo.ToPtr(2)}),
+			Entry(lessThan9OperatorWithFlexibility, notIn12OperatorWithFlexibility, &Requirement{Key: "key", complement: true, lessThan: lessThan9.lessThan, values: sets.New("1", "2"), MinValues: lo.ToPtr(2)}),
+			Entry(lessThan9OperatorWithFlexibility, greaterThan1OperatorWithFlexibility, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, lessThan: lessThan9.lessThan, values: sets.New[string](), MinValues: lo.ToPtr(1)}),
+			Entry(lessThan9OperatorWithFlexibility, greaterThan9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
+			Entry(lessThan9OperatorWithFlexibility, lessThan1OperatorWithFlexibility, lessThan1OperatorWithFlexibility),
+			Entry(lessThan9OperatorWithFlexibility, lessThan9OperatorWithFlexibility, lessThan9OperatorWithFlexibility),
+		)
 	})
 	Context("Has", func() {
 		It("should have the right values", func() {
