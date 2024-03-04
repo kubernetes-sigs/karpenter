@@ -286,7 +286,7 @@ func (in *Budget) IsActive(c clock.Clock) (bool, error) {
 	if in.Schedule == nil && in.Duration == nil {
 		return true, nil
 	}
-	schedule, err := cron.ParseStandard(lo.FromPtr(in.Schedule))
+	schedule, err := cron.ParseStandard(fmt.Sprintf("TZ=UTC %s", lo.FromPtr(in.Schedule)))
 	if err != nil {
 		// Should only occur if there's a discrepancy
 		// with the validation regex and the cron package.
