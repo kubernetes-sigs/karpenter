@@ -293,9 +293,9 @@ func (in *Budget) IsActive(c clock.Clock) (bool, error) {
 		return false, fmt.Errorf("invariant violated, invalid cron %s", schedule)
 	}
 	// Walk back in time for the duration associated with the schedule
-	checkPoint := c.Now().Add(-lo.FromPtr(in.Duration).Duration)
+	checkPoint := c.Now().UTC().Add(-lo.FromPtr(in.Duration).Duration)
 	nextHit := schedule.Next(checkPoint)
-	return !nextHit.After(c.Now()), nil
+	return !nextHit.After(c.Now().UTC()), nil
 }
 
 func GetIntStrFromValue(str string) intstr.IntOrString {
