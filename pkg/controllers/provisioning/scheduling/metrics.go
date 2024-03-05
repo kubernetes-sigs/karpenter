@@ -24,15 +24,37 @@ import (
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(schedulingSimulationDuration)
+	crmetrics.Registry.MustRegister(SimulationDurationSeconds, QueueDepth)
 }
 
-var schedulingSimulationDuration = prometheus.NewHistogram(
-	prometheus.HistogramOpts{
-		Namespace: metrics.Namespace,
-		Subsystem: "provisioner",
-		Name:      "scheduling_simulation_duration_seconds",
-		Help:      "Duration of scheduling simulations used for deprovisioning and provisioning in seconds.",
-		Buckets:   metrics.DurationBuckets(),
-	},
+const (
+	controllerLabel   = "controller"
+	schedulingIDLabel = "scheduling_id"
+)
+
+var (
+	SimulationDurationSeconds = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "provisioner",
+			Name:      "scheduling_simulation_duration_seconds",
+			Help:      "Duration of scheduling simulations used for deprovisioning and provisioning in seconds.",
+			Buckets:   metrics.DurationBuckets(),
+		},
+		[]string{
+			controllerLabel,
+		},
+	)
+	QueueDepth = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: "provisioner",
+			Name:      "scheduling_queue_depth",
+			Help:      "The number of pods currently waiting to be scheduled.",
+		},
+		[]string{
+			controllerLabel,
+			schedulingIDLabel,
+		},
+	)
 )

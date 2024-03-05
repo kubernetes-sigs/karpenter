@@ -86,17 +86,18 @@ var _ = Describe("Termination", func() {
 		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1beta1.TerminationFinalizer}}})
 		node.Labels[v1beta1.NodePoolLabelKey] = test.NodePool().Name
 		cloudProvider.CreatedNodeClaims[node.Spec.ProviderID] = nodeClaim
-		queue.Reset()
 	})
 
 	AfterEach(func() {
 		ExpectCleanedUp(ctx, env.Client)
 		fakeClock.SetTime(time.Now())
 		cloudProvider.Reset()
+		queue.Reset()
 
 		// Reset the metrics collectors
 		metrics.NodesTerminatedCounter.Reset()
 		termination.TerminationSummary.Reset()
+		terminator.EvictionQueueDepth.Set(0)
 	})
 
 	Context("Reconciliation", func() {
@@ -294,7 +295,7 @@ var _ = Describe("Termination", func() {
 			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should fail to evict pods that violate a PDB", func() {
-			minAvailable := intstr.FromInt(1)
+			minAvailable := intstr.FromInt32(1)
 			labelSelector := map[string]string{test.RandomName(): test.RandomName()}
 			pdb := test.PodDisruptionBudget(test.PDBOptions{
 				Labels: labelSelector,
@@ -657,6 +658,28 @@ var _ = Describe("Termination", func() {
 			m, ok := FindMetricWithLabelValues("karpenter_nodes_terminated", map[string]string{"nodepool": node.Labels[v1beta1.NodePoolLabelKey]})
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.GetCounter().Value)).To(BeNumerically("==", 1))
+		})
+		It("should update the eviction queueDepth metric when reconciling pods", func() {
+			minAvailable := intstr.FromInt32(0)
+			labelSelector := map[string]string{test.RandomName(): test.RandomName()}
+			pdb := test.PodDisruptionBudget(test.PDBOptions{
+				Labels: labelSelector,
+				// Don't let any pod evict
+				MinAvailable: &minAvailable,
+			})
+			ExpectApplied(ctx, env.Client, pdb, node)
+			pods := test.Pods(5, test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{
+				OwnerReferences: defaultOwnerRefs,
+				Labels:          labelSelector,
+			}})
+			ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *v1.Pod, _ int) client.Object { return p })...)
+
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{}) // Reconcile the queue so that we set the metric
+
+			ExpectMetricGaugeValue("karpenter_nodes_eviction_queue_depth", 5, map[string]string{})
 		})
 	})
 })

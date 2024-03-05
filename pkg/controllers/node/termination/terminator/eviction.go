@@ -125,6 +125,7 @@ func (q *Queue) Has(pod *v1.Pod) bool {
 }
 
 func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
+	EvictionQueueDepth.Set(float64(q.RateLimitingInterface.Len()))
 	// Check if the queue is empty. client-go recommends not using this function to gate the subsequent
 	// get call, but since we're popping items off the queue synchronously, there should be no synchonization
 	// issues.
