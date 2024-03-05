@@ -26,9 +26,10 @@ const (
 	// Common namespace for application metrics.
 	Namespace = "karpenter"
 
-	NodePoolLabel = "nodepool"
-	ReasonLabel   = "reason"
-	TypeLabel     = "type"
+	NodePoolLabel     = "nodepool"
+	ReasonLabel       = "reason"
+	TypeLabel         = "type"
+	CapacityTypeLabel = "capacity_type"
 
 	// Reasons for CREATE/DELETE shared metrics
 	ConsolidationReason = "consolidation"
