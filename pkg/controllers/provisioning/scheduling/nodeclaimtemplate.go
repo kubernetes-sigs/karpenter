@@ -31,8 +31,6 @@ import (
 
 // MaxInstanceTypes is a constant that restricts the number of instance types to be sent for launch. Note that this
 // is intentionally changed to var just to help in testing the code.
-// Increasing this value needs caution as it also requires stress testing the cloud provider API to launch so many instances
-// with various other combinatorial parameters such as zones, tags etc. in the largest region.
 var MaxInstanceTypes = 60
 
 // NodeClaimTemplate encapsulates the fields required to create a node and mirrors
