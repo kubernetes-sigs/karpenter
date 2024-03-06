@@ -43,36 +43,34 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
-func NewScheduler(kubeClient client.Client, nodeClaimTemplates []*NodeClaimTemplate,
-	nodePools []v1beta1.NodePool, cluster *state.Cluster, stateNodes []*state.StateNode, topology *Topology,
+func NewScheduler(ctx context.Context, kubeClient client.Client, nodePools []*v1beta1.NodePool,
+	cluster *state.Cluster, stateNodes []*state.StateNode, topology *Topology,
 	instanceTypes map[string][]*cloudprovider.InstanceType, daemonSetPods []*v1.Pod,
 	recorder events.Recorder) *Scheduler {
 
 	// if any of the nodePools add a taint with a prefer no schedule effect, we add a toleration for the taint
 	// during preference relaxation
 	toleratePreferNoSchedule := false
-	for _, prov := range nodePools {
-		for _, taint := range prov.Spec.Template.Spec.Taints {
+	for _, np := range nodePools {
+		for _, taint := range np.Spec.Template.Spec.Taints {
 			if taint.Effect == v1.TaintEffectPreferNoSchedule {
 				toleratePreferNoSchedule = true
 			}
 		}
 	}
 
+	templates := lo.Map(nodePools, func(np *v1beta1.NodePool, _ int) *NodeClaimTemplate { return NewNodeClaimTemplate(np) })
 	s := &Scheduler{
 		id:                 uuid.NewUUID(),
 		kubeClient:         kubeClient,
-		nodeClaimTemplates: nodeClaimTemplates,
+		nodeClaimTemplates: templates,
 		topology:           topology,
 		cluster:            cluster,
 		instanceTypes:      instanceTypes,
-		daemonOverhead:     getDaemonOverhead(nodeClaimTemplates, daemonSetPods),
+		daemonOverhead:     getDaemonOverhead(templates, daemonSetPods),
 		recorder:           recorder,
 		preferences:        &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
-		remainingResources: map[string]v1.ResourceList{},
-	}
-	for _, nodePool := range nodePools {
-		s.remainingResources[nodePool.Name] = v1.ResourceList(nodePool.Spec.Limits)
+		remainingResources: lo.SliceToMap(nodePools, func(np *v1beta1.NodePool) (string, v1.ResourceList) { return np.Name, v1.ResourceList(np.Spec.Limits) }),
 	}
 	s.calculateExistingNodeClaims(stateNodes, daemonSetPods)
 	return s
