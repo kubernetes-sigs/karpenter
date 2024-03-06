@@ -49,8 +49,8 @@ cat <<EOF > "${BASE}/kustomization.yaml"
     newTag: "${KWOK_LATEST_RELEASE}"
   resources:
   - "https://github.com/${KWOK_REPO}/kustomize/kwok?ref=${KWOK_LATEST_RELEASE}"
-  patchesStrategicMerge:
-  - tolerate-all.yaml
+  patches:
+  - path: tolerate-all.yaml
 EOF
 
 # Define 10 different kwok controllers to handle large load
