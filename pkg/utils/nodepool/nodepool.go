@@ -159,5 +159,8 @@ func HashAnnotation(nodePool *v1beta1.NodePool) map[string]string {
 		provisioner := provisionerutil.New(nodePool)
 		return map[string]string{v1alpha5.ProvisionerHashAnnotationKey: provisioner.Hash()}
 	}
-	return map[string]string{v1beta1.NodePoolHashAnnotationKey: nodePool.Hash()}
+	return map[string]string{
+		v1beta1.NodePoolHashAnnotationKey:        nodePool.Hash(),
+		v1beta1.NodePoolHashVersionAnnotationKey: v1beta1.NodePoolHashVersion,
+	}
 }
