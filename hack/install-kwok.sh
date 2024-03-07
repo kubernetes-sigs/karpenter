@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # This script uses kustomize to generate the manifests of the latest 
 # version of kwok, and will then either apply/delete the resources 
 # depending on the UNINSTALL_KWOK environment variable. Set this to 
