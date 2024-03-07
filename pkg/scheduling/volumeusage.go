@@ -87,7 +87,7 @@ func GetVolumes(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (Vol
 		// computing limits, otherwise Karpenter may never be able to update its cluster state.
 		if err != nil {
 			if errors.IsNotFound(err) {
-				logging.FromContext(ctx).With("pod", pod.Name, "volume", volume.Name).Errorf("failed updating volume limits for volume, %w", err)
+				logging.FromContext(ctx).With("pod", pod.Name, "volume", volume.Name).Errorf("failed tracking CSI volume limits for volume, %w", err)
 				continue
 			}
 			return nil, fmt.Errorf("failed updating volume limits, %w", err)
@@ -123,6 +123,8 @@ func resolveDriver(ctx context.Context, kubeClient client.Client, pod *v1.Pod, v
 		if driverName != "" {
 			return driverName, nil
 		}
+		// The PVC is bound, but not to a volume managed by a CSI driver or a known in-tree equivalent. This PVC can be ignored for the purposes of volume limit tracking.
+		return "", nil
 	}
 
 	// This can occur in two scenarios:
@@ -131,7 +133,7 @@ func resolveDriver(ctx context.Context, kubeClient client.Client, pod *v1.Pod, v
 	// In either of these cases, a PV must have been previously bound to the PVC and has since been removed. We can
 	// ignore this PVC while computing limits and continue.
 	if storageClassName == "" {
-		logging.FromContext(ctx).With("pod", pod.Name, "volume", volumeName, "pvc", pvc.Name).Errorf("failed updating volume limits for volume with unbound PVC, no storage class specified")
+		logging.FromContext(ctx).With("pod", pod.Name, "volume", volumeName, "pvc", pvc.Name).Debugf("failed tracking CSI volume limits for volume with unbound PVC, no storage class specified")
 		return "", nil
 	}
 
@@ -142,7 +144,7 @@ func resolveDriver(ctx context.Context, kubeClient client.Client, pod *v1.Pod, v
 		//  2. The StorageClass never existed and was used to bind the PVC to an existing PV, but that PV was removed
 		// In either of these cases, we should ignore the PVC while computing limits and continue.
 		if errors.IsNotFound(err) {
-			logging.FromContext(ctx).With("pod", pod.Name, "volume", volumeName, "pvc", pvc.Name, "storageclass", storageClassName).Errorf("failed updating volume limits for volume with unbound PVC, %w", err)
+			logging.FromContext(ctx).With("pod", pod.Name, "volume", volumeName, "pvc", pvc.Name, "storageclass", storageClassName).Debugf("failed tracking CSI volume limits for volume with unbound PVC, %w", err)
 			return "", nil
 		}
 		return "", err
