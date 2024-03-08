@@ -1540,6 +1540,117 @@ var _ = Describe("Provisioning", func() {
 			node := ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
 		})
+		DescribeTable("should ignore hostname affinity scheduling when using local path volumes",
+			func(volumeOptions test.PersistentVolumeOptions) {
+				// StorageClass that references "no-provisioner" and is used for local volume storage
+				storageClass = test.StorageClass(test.StorageClassOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "local-path",
+					},
+					Provisioner: lo.ToPtr("kubernetes.io/no-provisioner"),
+				})
+				// Create a PersistentVolume that is using a random node name for its affinity
+				persistentVolume := test.PersistentVolume(volumeOptions)
+				persistentVolume.Spec.NodeAffinity = &v1.VolumeNodeAffinity{
+					Required: &v1.NodeSelector{
+						NodeSelectorTerms: []v1.NodeSelectorTerm{
+							{
+								MatchExpressions: []v1.NodeSelectorRequirement{
+									{
+										Key:      v1.LabelHostname,
+										Operator: v1.NodeSelectorOpIn,
+										Values:   []string{test.RandomName()},
+									},
+								},
+							},
+						},
+					},
+				}
+				persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{VolumeName: persistentVolume.Name, StorageClassName: &storageClass.Name})
+				ExpectApplied(ctx, env.Client, test.NodePool(), storageClass, persistentVolumeClaim, persistentVolume)
+				pod := test.UnschedulablePod(test.PodOptions{
+					PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+				})
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				// Expect that we are still able to schedule this pod to a node, even though we had a hostname affinity on it
+				ExpectScheduled(ctx, env.Client, pod)
+			},
+			Entry("when using local volumes", test.PersistentVolumeOptions{UseLocal: true}),
+			Entry("when using hostpath volumes", test.PersistentVolumeOptions{UseHostPath: true}),
+		)
+		DescribeTable("should ignore hostname affinity scheduling when using local path volumes (ephemeral volume)",
+			func(volumeOptions test.PersistentVolumeOptions) {
+				// StorageClass that references "no-provisioner" and is used for local volume storage
+				storageClass = test.StorageClass(test.StorageClassOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "local-path",
+					},
+					Provisioner: lo.ToPtr("kubernetes.io/no-provisioner"),
+				})
+				pod := test.UnschedulablePod(test.PodOptions{
+					EphemeralVolumeTemplates: []test.EphemeralVolumeTemplateOptions{
+						{
+							StorageClassName: &storageClass.Name,
+						},
+					},
+				})
+				persistentVolume := test.PersistentVolume(volumeOptions)
+				persistentVolume.Spec.NodeAffinity = &v1.VolumeNodeAffinity{
+					Required: &v1.NodeSelector{
+						NodeSelectorTerms: []v1.NodeSelectorTerm{
+							{
+								MatchExpressions: []v1.NodeSelectorRequirement{
+									{
+										Key:      v1.LabelHostname,
+										Operator: v1.NodeSelectorOpIn,
+										Values:   []string{test.RandomName()},
+									},
+								},
+							},
+						},
+					},
+				}
+				persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: fmt.Sprintf("%s-%s", pod.Name, pod.Spec.Volumes[0].Name),
+					},
+					VolumeName:       persistentVolume.Name,
+					StorageClassName: &storageClass.Name,
+				})
+				ExpectApplied(ctx, env.Client, test.NodePool(), storageClass, pod, persistentVolumeClaim, persistentVolume)
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				ExpectScheduled(ctx, env.Client, pod)
+			},
+			Entry("when using local volumes", test.PersistentVolumeOptions{UseLocal: true}),
+			Entry("when using hostpath volumes", test.PersistentVolumeOptions{UseHostPath: true}),
+		)
+		It("should not ignore hostname affinity when using non-local path volumes", func() {
+			// This PersistentVolume is going to use a standard CSI volume for provisioning
+			persistentVolume := test.PersistentVolume()
+			persistentVolume.Spec.NodeAffinity = &v1.VolumeNodeAffinity{
+				Required: &v1.NodeSelector{
+					NodeSelectorTerms: []v1.NodeSelectorTerm{
+						{
+							MatchExpressions: []v1.NodeSelectorRequirement{
+								{
+									Key:      v1.LabelHostname,
+									Operator: v1.NodeSelectorOpIn,
+									Values:   []string{test.RandomName()},
+								},
+							},
+						},
+					},
+				},
+			}
+			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{VolumeName: persistentVolume.Name, StorageClassName: &storageClass.Name})
+			ExpectApplied(ctx, env.Client, test.NodePool(), storageClass, persistentVolumeClaim, persistentVolume)
+			pod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+			})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			// Expect that this pod can't schedule because we have a hostname affinity, and we don't currently have a pod that we can schedule to
+			ExpectNotScheduled(ctx, env.Client, pod)
+		})
 		It("should not schedule if volume zones are incompatible", func() {
 			persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{Zones: []string{"test-zone-3"}})
 			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{VolumeName: persistentVolume.Name, StorageClassName: &storageClass.Name})
