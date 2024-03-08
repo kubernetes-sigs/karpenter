@@ -85,7 +85,7 @@ spec: # This is not a complete NodePool Spec.
   disruption:
     budgets:
     - schedule: "* * * * *"
-      reason: [Drifted, Underutilized]
+      reasons: [Drifted, Underutilized]
       nodes: 10
     # For all other reasons , only allow 5 nodes to be disrupted at a time
     - nodes: 5
@@ -243,7 +243,7 @@ We will go through scenarios that users are expecting to face to drive home if t
 - Block Drift, but allow Expiration
 - Fully Block Drift && Expiration, but allow consolidation to occur 
 - Block Drift && Expiration, but allow emptiness 
-- Limit Drift && Expirationn while allowing agressive but not unbounded consolidationn
+- Limit Drift && Expiration while allowing agressive but not unbounded consolidation
 - Allow Cost Saving operations only on weekends. 
 
 
