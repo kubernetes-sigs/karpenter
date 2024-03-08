@@ -157,13 +157,12 @@ var _ = AfterEach(func() {
 
 var _ = Describe("Simulate Scheduling", func() {
 	var nodePool *v1beta1.NodePool
-	var nodeClaims []*v1beta1.NodeClaim
-	var nodes []*v1.Node
-	var numNodes int
 	BeforeEach(func() {
-		numNodes = 10
 		nodePool = test.NodePool()
-		nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
+	})
+	It("should allow pods on deleting nodes to reschedule to uninitialized nodes", func() {
+		numNodes := 10
+		nodeClaims, nodes := test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Finalizers: []string{"karpenter.sh/test-finalizer"},
 				Labels: map[string]string{
@@ -189,8 +188,6 @@ var _ = Describe("Simulate Scheduling", func() {
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-	})
-	It("should allow pods on deleting nodes to reschedule to uninitialized nodes", func() {
 		pod := test.Pod(test.PodOptions{
 			ResourceRequirements: v1.ResourceRequirements{
 				Requests: v1.ResourceList{
@@ -234,6 +231,33 @@ var _ = Describe("Simulate Scheduling", func() {
 		Expect(results.PodErrors[pod]).To(BeNil())
 	})
 	It("should allow multiple replace operations to happen successively", func() {
+		numNodes := 10
+		nodeClaims, nodes := test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Finalizers: []string{"karpenter.sh/test-finalizer"},
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1beta1.NodeClaimStatus{
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("3"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		for i := 0; i < numNodes; i++ {
+			ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+		}
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
 		// Create a pod for each node
 		pods := test.Pods(10, test.PodOptions{
 			ResourceRequirements: v1.ResourceRequirements{
@@ -335,6 +359,101 @@ var _ = Describe("Simulate Scheduling", func() {
 
 		ncs = ExpectNodeClaims(ctx, env.Client)
 		Expect(len(ncs)).To(Equal(13))
+	})
+	It("can replace node with a local PV (ignoring hostname affinity)", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1beta1.NodeClaimStatus{
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		ss := test.StatefulSet()
+		ExpectApplied(ctx, env.Client, ss)
+
+		// StorageClass that references "no-provisioner" and is used for local volume storage
+		storageClass := test.StorageClass(test.StorageClassOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "local-path",
+			},
+			Provisioner: lo.ToPtr("kubernetes.io/no-provisioner"),
+		})
+		persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{UseLocal: true})
+		persistentVolume.Spec.NodeAffinity = &v1.VolumeNodeAffinity{
+			Required: &v1.NodeSelector{
+				NodeSelectorTerms: []v1.NodeSelectorTerm{
+					{
+						// This PV is only valid for use against this node
+						MatchExpressions: []v1.NodeSelectorRequirement{
+							{
+								Key:      v1.LabelHostname,
+								Operator: v1.NodeSelectorOpIn,
+								Values:   []string{node.Name},
+							},
+						},
+					},
+				},
+			},
+		}
+		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{VolumeName: persistentVolume.Name, StorageClassName: &storageClass.Name})
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "StatefulSet",
+						Name:               ss.Name,
+						UID:                ss.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				},
+			},
+			PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+		})
+		ExpectApplied(ctx, env.Client, ss, pod, nodeClaim, node, nodePool, storageClass, persistentVolume, persistentVolumeClaim)
+
+		// bind pods to node
+		ExpectManualBinding(ctx, env.Client, pod, node)
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+		// disruption won't delete the old node until the new node is ready
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		wg.Wait()
+
+		// Process the item so that the nodes can be deleted.
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+		// Cascade any deletion of the nodeClaim to the node
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+		// Expect that the new nodeClaim was created, and it's different than the original
+		// We should succeed in getting a replacement, since we assume that the node affinity requirement will be invalid
+		// once we spin-down the old node
+		ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		nodeclaims := ExpectNodeClaims(ctx, env.Client)
+		nodes := ExpectNodes(ctx, env.Client)
+		Expect(nodeclaims).To(HaveLen(1))
+		Expect(nodes).To(HaveLen(1))
+		Expect(nodeclaims[0].Name).ToNot(Equal(nodeClaim.Name))
+		Expect(nodes[0].Name).ToNot(Equal(node.Name))
 	})
 })
 

@@ -99,7 +99,7 @@ var _ = Describe("GarbageCollection", func() {
 	})
 	AfterEach(func() {
 		// Reset the metrics collectors
-		leasegarbagecollection.NodeLeaseDeletedCounter.Reset()
+		leasegarbagecollection.NodeLeasesDeletedCounter.Reset()
 	})
 	Context("Metrics", func() {
 		It("should fire the leaseDeletedCounter metric when deleting leases", func() {

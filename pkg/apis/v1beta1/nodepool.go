@@ -190,6 +190,12 @@ type NodePool struct {
 	Status NodePoolStatus `json:"status,omitempty"`
 }
 
+// We need to bump the NodePoolHashVersion when we make an update to the NodePool CRD under these conditions:
+// 1. A field changes its default value for an existing field that is already hashed
+// 2. A field is added to the hash calculation with an already-set value
+// 3. A field is removed from the hash calculations
+const NodePoolHashVersion = "v1"
+
 func (in *NodePool) Hash() string {
 	return fmt.Sprint(lo.Must(hashstructure.Hash(in.Spec.Template, hashstructure.FormatV2, &hashstructure.HashOptions{
 		SlicesAsSets:    true,
@@ -286,16 +292,16 @@ func (in *Budget) IsActive(c clock.Clock) (bool, error) {
 	if in.Schedule == nil && in.Duration == nil {
 		return true, nil
 	}
-	schedule, err := cron.ParseStandard(lo.FromPtr(in.Schedule))
+	schedule, err := cron.ParseStandard(fmt.Sprintf("TZ=UTC %s", lo.FromPtr(in.Schedule)))
 	if err != nil {
 		// Should only occur if there's a discrepancy
 		// with the validation regex and the cron package.
 		return false, fmt.Errorf("invariant violated, invalid cron %s", schedule)
 	}
 	// Walk back in time for the duration associated with the schedule
-	checkPoint := c.Now().Add(-lo.FromPtr(in.Duration).Duration)
+	checkPoint := c.Now().UTC().Add(-lo.FromPtr(in.Duration).Duration)
 	nextHit := schedule.Next(checkPoint)
-	return !nextHit.After(c.Now()), nil
+	return !nextHit.After(c.Now().UTC()), nil
 }
 
 func GetIntStrFromValue(str string) intstr.IntOrString {

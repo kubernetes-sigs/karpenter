@@ -22,11 +22,16 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/uuid"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -38,43 +43,41 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
-func NewScheduler(ctx context.Context, kubeClient client.Client, nodeClaimTemplates []*NodeClaimTemplate,
-	nodePools []v1beta1.NodePool, cluster *state.Cluster, stateNodes []*state.StateNode, topology *Topology,
+func NewScheduler(ctx context.Context, kubeClient client.Client, nodePools []*v1beta1.NodePool,
+	cluster *state.Cluster, stateNodes []*state.StateNode, topology *Topology,
 	instanceTypes map[string][]*cloudprovider.InstanceType, daemonSetPods []*v1.Pod,
 	recorder events.Recorder) *Scheduler {
 
 	// if any of the nodePools add a taint with a prefer no schedule effect, we add a toleration for the taint
 	// during preference relaxation
 	toleratePreferNoSchedule := false
-	for _, prov := range nodePools {
-		for _, taint := range prov.Spec.Template.Spec.Taints {
+	for _, np := range nodePools {
+		for _, taint := range np.Spec.Template.Spec.Taints {
 			if taint.Effect == v1.TaintEffectPreferNoSchedule {
 				toleratePreferNoSchedule = true
 			}
 		}
 	}
 
+	templates := lo.Map(nodePools, func(np *v1beta1.NodePool, _ int) *NodeClaimTemplate { return NewNodeClaimTemplate(np) })
 	s := &Scheduler{
-		ctx:                ctx,
+		id:                 uuid.NewUUID(),
 		kubeClient:         kubeClient,
-		nodeClaimTemplates: nodeClaimTemplates,
+		nodeClaimTemplates: templates,
 		topology:           topology,
 		cluster:            cluster,
 		instanceTypes:      instanceTypes,
-		daemonOverhead:     getDaemonOverhead(nodeClaimTemplates, daemonSetPods),
+		daemonOverhead:     getDaemonOverhead(templates, daemonSetPods),
 		recorder:           recorder,
 		preferences:        &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
-		remainingResources: map[string]v1.ResourceList{},
-	}
-	for _, nodePool := range nodePools {
-		s.remainingResources[nodePool.Name] = v1.ResourceList(nodePool.Spec.Limits)
+		remainingResources: lo.SliceToMap(nodePools, func(np *v1beta1.NodePool) (string, v1.ResourceList) { return np.Name, v1.ResourceList(np.Spec.Limits) }),
 	}
 	s.calculateExistingNodeClaims(stateNodes, daemonSetPods)
 	return s
 }
 
 type Scheduler struct {
-	ctx                context.Context
+	id                 types.UID // Unique UUID attached to this scheduling loop
 	newNodeClaims      []*NodeClaim
 	existingNodes      []*ExistingNode
 	nodeClaimTemplates []*NodeClaimTemplate
@@ -200,15 +203,21 @@ func (r Results) TruncateInstanceTypes(maxInstanceTypes int) Results {
 }
 
 func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) Results {
-	defer metrics.Measure(schedulingSimulationDuration)()
+	defer metrics.Measure(SimulationDurationSeconds.With(
+		prometheus.Labels{controllerLabel: injection.GetControllerName(ctx)},
+	))()
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
 	// issues including pods with affinity to another pod in the batch. We could topo-sort to solve this, but it wouldn't
 	// solve the problem of scheduling pods where a particular order is needed to prevent a max-skew violation. E.g. if we
 	// had 5xA pods and 5xB pods were they have a zonal topology spread, but A can only go in one zone and B in another.
 	// We need to schedule them alternating, A, B, A, B, .... and this solution also solves that as well.
 	errors := map[*v1.Pod]error{}
+	QueueDepth.DeletePartialMatch(prometheus.Labels{controllerLabel: injection.GetControllerName(ctx)}) // Reset the metric for the controller, so we don't keep old ids around
 	q := NewQueue(pods...)
 	for {
+		QueueDepth.With(
+			prometheus.Labels{controllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.id)},
+		).Set(float64(len(q.pods)))
 		// Try the next pod
 		pod, ok := q.Pop()
 		if !ok {

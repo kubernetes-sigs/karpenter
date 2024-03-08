@@ -31,7 +31,7 @@ import (
 
 // MaxInstanceTypes is a constant that restricts the number of instance types to be sent for launch. Note that this
 // is intentionally changed to var just to help in testing the code.
-var MaxInstanceTypes = 100
+var MaxInstanceTypes = 60
 
 // NodeClaimTemplate encapsulates the fields required to create a node and mirrors
 // the fields in NodePool. These structs are maintained separately in order
@@ -66,8 +66,11 @@ func (i *NodeClaimTemplate) ToNodeClaim(nodePool *v1beta1.NodePool) *v1beta1.Nod
 	nc := &v1beta1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: fmt.Sprintf("%s-", i.NodePoolName),
-			Annotations:  lo.Assign(i.Annotations, map[string]string{v1beta1.NodePoolHashAnnotationKey: nodePool.Hash()}),
-			Labels:       i.Labels,
+			Annotations: lo.Assign(i.Annotations, map[string]string{
+				v1beta1.NodePoolHashAnnotationKey:        nodePool.Hash(),
+				v1beta1.NodePoolHashVersionAnnotationKey: v1beta1.NodePoolHashVersion,
+			}),
+			Labels: i.Labels,
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion:         v1beta1.SchemeGroupVersion.String(),
