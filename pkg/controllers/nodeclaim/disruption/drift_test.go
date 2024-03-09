@@ -491,15 +491,17 @@ var _ = Describe("Drift", func() {
 				Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).IsTrue()).To(BeTrue())
 			}
 		})
-		It("should not return drifted if karpenter.sh/nodePool-hash annotation is not present on the nodePool", func() {
+		It("should not return drifted if karpenter.sh/nodepool-hash annotation is not present on the NodePool", func() {
 			nodePool.ObjectMeta.Annotations = map[string]string{}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted)).To(BeNil())
 		})
-		It("should not return drifted if karpenter.sh/nodePool-hash annotation is not present on the nodeClaim", func() {
-			nodeClaim.ObjectMeta.Annotations = map[string]string{}
+		It("should not return drifted if karpenter.sh/nodepool-hash annotation is not present on the NodeClaim", func() {
+			nodeClaim.ObjectMeta.Annotations = map[string]string{
+				v1beta1.NodePoolHashVersionAnnotationKey: v1beta1.NodePoolHashVersion,
+			}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -513,6 +515,15 @@ var _ = Describe("Drift", func() {
 			nodeClaim.ObjectMeta.Annotations = map[string]string{
 				v1beta1.NodePoolHashAnnotationKey:        "test-hash-2",
 				v1beta1.NodePoolHashVersionAnnotationKey: "test-version-2",
+			}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted)).To(BeNil())
+		})
+		It("should not return drifted if karpenter.sh/nodepool-hash-version annotation is not present on the NodeClaim", func() {
+			nodeClaim.ObjectMeta.Annotations = map[string]string{
+				v1beta1.NodePoolHashAnnotationKey: "test-hash-111111111",
 			}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
