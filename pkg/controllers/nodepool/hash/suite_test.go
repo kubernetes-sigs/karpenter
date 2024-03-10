@@ -26,6 +26,7 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	. "knative.dev/pkg/logging/testing"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,6 +34,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -45,6 +47,7 @@ import (
 var nodePoolController controller.Controller
 var ctx context.Context
 var env *test.Environment
+var cp *fake.CloudProvider
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -54,7 +57,8 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
-	nodePoolController = hash.NewController(env.Client)
+	cp = fake.NewCloudProvider()
+	nodePoolController = hash.NewController(env.Client, cp)
 })
 
 var _ = AfterSuite(func() {
@@ -64,6 +68,7 @@ var _ = AfterSuite(func() {
 var _ = Describe("Static Drift Hash", func() {
 	var nodePool *v1beta1.NodePool
 	BeforeEach(func() {
+		cp.Reset()
 		nodePool = test.NodePool(v1beta1.NodePool{
 			Spec: v1beta1.NodePoolSpec{
 				Template: v1beta1.NodeClaimTemplate{
@@ -238,5 +243,42 @@ var _ = Describe("Static Drift Hash", func() {
 		// Expect NodeClaims hash to not have been updated
 		Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1beta1.NodePoolHashAnnotationKey, "123456"))
 		Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1beta1.NodePoolHashVersionAnnotationKey, v1beta1.NodePoolHashVersion))
+	})
+	Context("NodeClassRef Defaulting", func() {
+		BeforeEach(func() {
+			cp.NodeClassGroupVersionKind = schema.GroupVersionKind{
+				Group:   "testgroup.sh",
+				Version: "v1test1",
+				Kind:    "TestNodeClass",
+			}
+		})
+		It("should set a cloudprovider default apiversion on a nodeclassref when apiversion is not set", func() {
+			nodePool.Spec.Template.Spec.NodeClassRef.APIVersion = ""
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+			Expect(nodePool.Spec.Template.Spec.NodeClassRef.APIVersion).To(Equal(cp.NodeClassGroupVersionKind.GroupVersion().String()))
+		})
+		It("should not set a cloudprovider default apiversion on a nodeclassref when apiversion is set", func() {
+			nodePool.Spec.Template.Spec.NodeClassRef.APIVersion = "ExistingAPIVersion"
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+			Expect(nodePool.Spec.Template.Spec.NodeClassRef.APIVersion).To(Equal("ExistingAPIVersion"))
+		})
+		It("should set a cloudprovider default kind on a nodeclassref when kind is not set", func() {
+			nodePool.Spec.Template.Spec.NodeClassRef.Kind = ""
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+			Expect(nodePool.Spec.Template.Spec.NodeClassRef.Kind).To(Equal(cp.NodeClassGroupVersionKind.Kind))
+		})
+		It("should not set a cloudprovider default kind on a nodeclassref when kind is set", func() {
+			nodePool.Spec.Template.Spec.NodeClassRef.Kind = "ExistingKind"
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+			Expect(nodePool.Spec.Template.Spec.NodeClassRef.Kind).To(Equal("ExistingKind"))
+		})
 	})
 })
