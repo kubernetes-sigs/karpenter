@@ -63,9 +63,9 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		}
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
-		if disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonUnderutilized] > 0 { 
-			empty = append(empty, candidate) 
-			disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonUnderutilized]-- 
+		if disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonUnderutilized] > 0 {
+			empty = append(empty, candidate)
+			disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonUnderutilized]--
 		}
 	}
 	// none empty, so do nothing
@@ -110,7 +110,7 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	// 2. The node isn't a target of a recent scheduling simulation
 	// 3. the number of candidates for a given nodepool can no longer be disrupted as it would violate the budget
 	for _, n := range candidatesToDelete {
-		if len(n.reschedulablePods) != 0 || c.cluster.IsNodeNominated(n.ProviderID()) || postValidationMapping[n.nodePool.Name][ v1beta1.DisruptionReasonUnderutilized] == 0 {
+		if len(n.reschedulablePods) != 0 || c.cluster.IsNodeNominated(n.ProviderID()) || postValidationMapping[n.nodePool.Name][v1beta1.DisruptionReasonUnderutilized] == 0 {
 			logging.FromContext(ctx).Debugf("abandoning empty node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
 			return Command{}, scheduling.Results{}, nil
 		}

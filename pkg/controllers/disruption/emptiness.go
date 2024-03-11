@@ -82,7 +82,7 @@ func (e *Emptiness) ComputeCommand(_ context.Context, disruptionBudgetMapping ma
 		// add it to the list of candidates, and decrement the budget.
 		if disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonEmpty] > 0 {
 			empty = append(empty, candidate)
-			
+
 			disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonEmpty]--
 		}
 
