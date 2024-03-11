@@ -269,6 +269,109 @@ var _ = Describe("Queue Limits", func() {
 	})
 })
 
+var _ = Describe("Simulate Scheduling", func() {
+	var nodePool *v1beta1.NodePool
+	BeforeEach(func() {
+		nodePool = test.NodePool()
+	})
+	It("can replace node with a local PV (ignoring hostname affinity)", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+				},
+			},
+			Status: v1beta1.NodeClaimStatus{
+				Allocatable: map[v1.ResourceName]resource.Quantity{
+					v1.ResourceCPU:  resource.MustParse("32"),
+					v1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		ss := test.StatefulSet()
+		ExpectApplied(ctx, env.Client, ss)
+
+		// StorageClass that references "no-provisioner" and is used for local volume storage
+		storageClass := test.StorageClass(test.StorageClassOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "local-path",
+			},
+			Provisioner: lo.ToPtr("kubernetes.io/no-provisioner"),
+		})
+		persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{UseLocal: true})
+		persistentVolume.Spec.NodeAffinity = &v1.VolumeNodeAffinity{
+			Required: &v1.NodeSelector{
+				NodeSelectorTerms: []v1.NodeSelectorTerm{
+					{
+						// This PV is only valid for use against this node
+						MatchExpressions: []v1.NodeSelectorRequirement{
+							{
+								Key:      v1.LabelHostname,
+								Operator: v1.NodeSelectorOpIn,
+								Values:   []string{node.Name},
+							},
+						},
+					},
+				},
+			},
+		}
+		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{VolumeName: persistentVolume.Name, StorageClassName: &storageClass.Name})
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "StatefulSet",
+						Name:               ss.Name,
+						UID:                ss.UID,
+						Controller:         ptr.Bool(true),
+						BlockOwnerDeletion: ptr.Bool(true),
+					},
+				},
+			},
+			PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
+		})
+		ExpectApplied(ctx, env.Client, ss, pod, nodeClaim, node, nodePool, storageClass, persistentVolume, persistentVolumeClaim)
+
+		// bind pods to node
+		ExpectManualBinding(ctx, env.Client, pod, node)
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+		// disruption won't delete the old node until the new node is ready
+		var wg sync.WaitGroup
+		ExpectTriggerVerifyAction(&wg)
+		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		wg.Wait()
+
+		// Process the item but still expect it to be in the queue, since it's replacements aren't created
+		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
+		// Cascade any deletion of the nodeClaim to the node
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+		// Expect that the new nodeClaim was created, and it's different than the original
+		// We should succeed in getting a replacement, since we assume that the node affinity requirement will be invalid
+		// once we spin-down the old node
+		ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		nodeclaims := ExpectNodeClaims(ctx, env.Client)
+		nodes := ExpectNodes(ctx, env.Client)
+		Expect(nodeclaims).To(HaveLen(1))
+		Expect(nodes).To(HaveLen(1))
+		Expect(nodeclaims[0].Name).ToNot(Equal(nodeClaim.Name))
+		Expect(nodes[0].Name).ToNot(Equal(node.Name))
+	})
+})
+
 var _ = Describe("Disruption Taints", func() {
 	var nodePool *v1beta1.NodePool
 	var nodeClaim *v1beta1.NodeClaim
