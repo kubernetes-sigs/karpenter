@@ -41,8 +41,8 @@ import (
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
-	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
 )
 
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")
@@ -194,6 +194,7 @@ func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 
 // BuildDisruptionBudgets prepares our disruption budget mapping. The disruption budget maps for each disruption reason the number of allowed disruptions for each node pool.
 // We calculate allowed disruptions by taking the max disruptions allowed by disruption reason and subtracting the number of nodes that are already being deleted by that disruption reason.
+//
 //nolint:gocyclo
 func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clock.Clock, kubeClient client.Client, recorder events.Recorder) (map[string]map[v1beta1.DisruptionReason]int, error) {
 	disruptionBudgetMapping := map[string]map[v1beta1.DisruptionReason]int{}
@@ -226,20 +227,17 @@ func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clo
 		return nil, fmt.Errorf("listing node pools, %w", err)
 	}
 	for _, nodePool := range nodePoolList.Items {
-		minDisruptionsByReason, err := nodePool.GetAllowedDisruptionsByReason(ctx, clk, numNodes[nodePool.Name])
-		if err != nil {
-			return nil, fmt.Errorf("getting allowed disruptions by reason, %w", err)
-		}
+		minDisruptionsByReason := nodePool.MustGetAllowedDisruptions(ctx, clk, numNodes[nodePool.Name])
 		allowedDisruptionsTotal := 0
 
-		disruptionBudgetMapping[nodePool.Name] = map[v1beta1.DisruptionReason]int{} 
+		disruptionBudgetMapping[nodePool.Name] = map[v1beta1.DisruptionReason]int{}
 		for reason, minDisruptions := range minDisruptionsByReason {
 			// Subtract the allowed number of disruptions from the number of already disrupting nodes.
 			// Floor the value since the number of disrupting nodes can exceed the number of allowed disruptions.
 			// Allowing this value to be negative breaks assumptions in the code used to calculate how many nodes can be disrupted.
 			allowedDisruptions := lo.Clamp(minDisruptions-disrupting[nodePool.Name], 0, math.MaxInt32)
-			disruptionBudgetMapping[nodePool.Name][reason] = allowedDisruptions 
-			
+			disruptionBudgetMapping[nodePool.Name][reason] = allowedDisruptions
+
 			allowedDisruptionsTotal += allowedDisruptions
 			BudgetsAllowedDisruptionsGauge.With(map[string]string{
 				metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: string(reason),

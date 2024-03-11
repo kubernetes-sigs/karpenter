@@ -92,8 +92,8 @@ var _ = Describe("Budgets", func() {
 			}
 			disruptionsByReason, err := nodePool.GetAllowedDisruptionsByReason(ctx, fakeClock, 100)
 			Expect(err).To(BeNil())
-			
-			// All budgets should have unbounded disruptions when inactive	 
+
+			// All budgets should have unbounded disruptions when inactive
 			for _, disruptions := range disruptionsByReason {
 				Expect(disruptions).To(Equal(math.MaxInt32))
 			}
@@ -103,8 +103,8 @@ var _ = Describe("Budgets", func() {
 			budgets[4].Schedule = lo.ToPtr("@yearly")
 			disruptionsByReason, err := nodePool.GetAllowedDisruptionsByReason(ctx, fakeClock, 100)
 			Expect(err).To(BeNil())
-			for _, disruptions := range disruptionsByReason { 
-				Expect(disruptions).To(Equal(10)) 
+			for _, disruptions := range disruptionsByReason {
+				Expect(disruptions).To(Equal(10))
 			}
 		})
 		It("should return the budget", func() {
@@ -113,7 +113,7 @@ var _ = Describe("Budgets", func() {
 			disruptionsByReason, err := nodePool.GetAllowedDisruptionsByReason(ctx, fakeClock, 100)
 			Expect(err).To(BeNil())
 			Expect(len(budgets[0].Reasons)).To(Equal(0))
-			for _, disruptions := range disruptionsByReason { 
+			for _, disruptions := range disruptionsByReason {
 				Expect(disruptions).To(Equal(10))
 			}
 		})
@@ -121,7 +121,7 @@ var _ = Describe("Budgets", func() {
 			disruptionsByReason, err := nodePool.GetAllowedDisruptionsByReason(ctx, fakeClock, 100)
 			Expect(err).To(BeNil())
 			Expect(disruptionsByReason[DisruptionReasonDrifted]).To(Equal(5))
-			// The budget where reason == nil overrides the budget with a specified reason 
+			// The budget where reason == nil overrides the budget with a specified reason
 			Expect(disruptionsByReason[DisruptionReasonUnderutilized]).To(Equal(10))
 		})
 	})

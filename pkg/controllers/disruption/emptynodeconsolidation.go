@@ -60,9 +60,9 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		}
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
-		if disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonUnderutilized] > 0 { 
-			empty = append(empty, candidate) 
-			disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonUnderutilized]-- 
+		if disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonUnderutilized] > 0 {
+			empty = append(empty, candidate)
+			disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonUnderutilized]--
 		}
 	}
 	// none empty, so do nothing

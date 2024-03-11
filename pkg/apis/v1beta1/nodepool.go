@@ -152,9 +152,8 @@ const (
 	DisruptionReasonDrifted       DisruptionReason = "drifted"
 )
 
-
-var ( 
-	// DisruptionReasons is a list of all valid reasons for disruption budgets. 
+var (
+	// DisruptionReasons is a list of all valid reasons for disruption budgets.
 	DisruptionReasons = []DisruptionReason{DisruptionReasonUnderutilized, DisruptionReasonExpired, DisruptionReasonEmpty, DisruptionReasonDrifted}
 )
 
@@ -250,11 +249,22 @@ func (nl *NodePoolList) OrderByWeight() {
 	})
 }
 
+// MustGetAllowedDisruptions calls GetAllowedDisruptionsByReason if the error is not nil. This reduces the
+// amount of state that the disruption controller must reconcile, while allowing the GetAllowedDisruptionsByReason()
+// to bubble up any errors in validation.
+func (in *NodePool) MustGetAllowedDisruptions(ctx context.Context, c clock.Clock, numNodes int) map[DisruptionReason]int {
+	allowedDisruptions, err := in.GetAllowedDisruptionsByReason(ctx, c, numNodes)
+	if err != nil {
+		return map[DisruptionReason]int{}
+	}
+	return allowedDisruptions
+}
+
 // GetAllowedDisruptionsByMethod returns the minimum allowed disruptions across all disruption budgets, for all disruption methods for a given nodepool
 func (in *NodePool) GetAllowedDisruptionsByReason(ctx context.Context, c clock.Clock, numNodes int) (map[DisruptionReason]int, error) {
 	allowedDisruptions := map[DisruptionReason]int{}
 	for _, reason := range DisruptionReasons {
-		allowedDisruptions[reason] = math.MaxInt32	
+		allowedDisruptions[reason] = math.MaxInt32
 	}
 
 	for _, budget := range in.Spec.Disruption.Budgets {
@@ -262,12 +272,12 @@ func (in *NodePool) GetAllowedDisruptionsByReason(ctx context.Context, c clock.C
 		if err != nil {
 			return nil, err
 		}
-	reasons := lo.Ternary(budget.Reasons == nil, DisruptionReasons, budget.Reasons)
+		reasons := lo.Ternary(budget.Reasons == nil, DisruptionReasons, budget.Reasons)
 		for _, reason := range reasons {
 			allowedDisruptions[reason] = lo.Min([]int{allowedDisruptions[reason], val})
 		}
 	}
-	
+
 	return allowedDisruptions, nil
 }
 
