@@ -123,7 +123,7 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *v1.Node) error {
 	stored := n.DeepCopy()
 	controllerutil.RemoveFinalizer(n, v1beta1.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(stored, n) {
-		if err := c.kubeClient.Patch(ctx, n, client.MergeFrom(stored)); err != nil {
+		if err := c.kubeClient.Patch(ctx, n, client.StrategicMergeFrom(stored)); err != nil {
 			return client.IgnoreNotFound(fmt.Errorf("patching node, %w", err))
 		}
 		metrics.NodesTerminatedCounter.With(prometheus.Labels{
