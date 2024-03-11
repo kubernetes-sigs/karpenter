@@ -32,6 +32,8 @@ type PersistentVolumeOptions struct {
 	StorageClassName   string
 	Driver             string
 	UseAWSInTreeDriver bool
+	UseLocal           bool
+	UseHostPath        bool
 }
 
 func PersistentVolume(overrides ...PersistentVolumeOptions) *v1.PersistentVolume {
@@ -44,6 +46,18 @@ func PersistentVolume(overrides ...PersistentVolumeOptions) *v1.PersistentVolume
 	// Determine the PersistentVolumeSource based on the options
 	var source v1.PersistentVolumeSource
 	switch {
+	case options.UseLocal:
+		source = v1.PersistentVolumeSource{
+			Local: &v1.LocalVolumeSource{
+				Path: "/mnt/local-disks",
+			},
+		}
+	case options.UseHostPath:
+		source = v1.PersistentVolumeSource{
+			HostPath: &v1.HostPathVolumeSource{
+				Path: "/mnt/local-disks",
+			},
+		}
 	case options.UseAWSInTreeDriver:
 		source = v1.PersistentVolumeSource{
 			AWSElasticBlockStore: &v1.AWSElasticBlockStoreVolumeSource{
