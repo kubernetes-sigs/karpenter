@@ -71,7 +71,7 @@ type EphemeralVolumeTemplateOptions struct {
 	StorageClassName *string
 }
 
-const (
+var (
 	DefaultImage = "public.ecr.aws/eks-distro/kubernetes/pause:3.2"
 )
 
