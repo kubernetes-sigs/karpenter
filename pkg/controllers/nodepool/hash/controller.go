@@ -80,10 +80,10 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontr
 	)
 }
 
-// Updating `nodepool-hash-version` annotation inside the controller means a breaking change has made to the hash function calculating
-// `nodepool-hash` on both the NodePool and NodeClaim, automatically making the `nodepool-hash` on the NodeClaim different from
-// NodePool. Since we can not rely on the hash on the NodeClaims, we will need to re-calculate the hash and update the annotation.
-// Look at designs/drift-hash-version.md for more information.
+// Updating `nodepool-hash-version` annotation inside the karpenter controller means a breaking change has been made to the hash calculation.
+// The `nodepool-hash` annotation on the NodePool will be updated, due to the breaking change, making the `nodepool-hash` on the NodeClaim different from
+// NodePool. Since, we cannot rely on the `nodepool-hash` on the NodeClaims, due to the breaking change, we will need to re-calculate the hash and update the annotation.
+// For more information on the Drift Hash Versioning: https://github.com/kubernetes-sigs/karpenter/blob/main/designs/drift-hash-versioning.md
 func (c *Controller) updateNodeClaimHash(ctx context.Context, np *v1beta1.NodePool) error {
 	ncList := &v1beta1.NodeClaimList{}
 	if err := c.kubeClient.List(ctx, ncList, client.MatchingLabels(map[string]string{v1beta1.NodePoolLabelKey: np.Name})); err != nil {
@@ -101,7 +101,7 @@ func (c *Controller) updateNodeClaimHash(ctx context.Context, np *v1beta1.NodePo
 			})
 
 			// Any NodeClaim that is already drifted will remain drifted if the karpenter.sh/nodepool-hash-version doesn't match
-			// Since the hashing mechanism has changed we will not be able to determine if the drifted status of the node has changed
+			// Since the hashing mechanism has changed we will not be able to determine if the drifted status of the NodeClaim has changed
 			if nc.StatusConditions().GetCondition(v1beta1.Drifted) == nil {
 				nc.Annotations = lo.Assign(nc.Annotations, map[string]string{
 					v1beta1.NodePoolHashAnnotationKey: np.Hash(),
