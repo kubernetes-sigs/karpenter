@@ -112,8 +112,11 @@ func (c *Controller) deleteAllNodeClaims(ctx context.Context, node *v1.Node) err
 		return err
 	}
 	for i := range nodeClaimList.Items {
-		if err := c.kubeClient.Delete(ctx, &nodeClaimList.Items[i]); err != nil {
-			return client.IgnoreNotFound(err)
+		// If we still get the NodeClaim, but it's already marked as terminating, we don't need to call Delete again
+		if nodeClaimList.Items[i].DeletionTimestamp.IsZero() {
+			if err := c.kubeClient.Delete(ctx, &nodeClaimList.Items[i]); err != nil {
+				return client.IgnoreNotFound(err)
+			}
 		}
 	}
 	return nil
