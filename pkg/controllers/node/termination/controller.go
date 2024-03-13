@@ -41,6 +41,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
+	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
@@ -88,12 +89,18 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 			return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 		}
 		c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
-		// If the underlying nodeclaim no longer exists.
-		if _, err := c.cloudProvider.Get(ctx, node.Spec.ProviderID); err != nil {
-			if cloudprovider.IsNodeClaimNotFoundError(err) {
-				return reconcile.Result{}, c.removeFinalizer(ctx, node)
+		// If the underlying NodeClaim no longer exists, we want to delete to avoid trying to gracefully draining
+		// on nodes that are no longer alive. We do a check on the Ready condition of the node since, even
+		// though the CloudProvider says the instance is not around, we know that the kubelet process is still running
+		// if the Node Ready condition is true
+		// Similar logic to: https://github.com/kubernetes/kubernetes/blob/3a75a8c8d9e6a1ebd98d8572132e675d4980f184/staging/src/k8s.io/cloud-provider/controllers/nodelifecycle/node_lifecycle_controller.go#L144
+		if nodeutils.GetCondition(node, v1.NodeReady).Status != v1.ConditionTrue {
+			if _, err := c.cloudProvider.Get(ctx, node.Spec.ProviderID); err != nil {
+				if cloudprovider.IsNodeClaimNotFoundError(err) {
+					return reconcile.Result{}, c.removeFinalizer(ctx, node)
+				}
+				return reconcile.Result{}, fmt.Errorf("getting nodeclaim, %w", err)
 			}
-			return reconcile.Result{}, fmt.Errorf("getting nodeclaim, %w", err)
 		}
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}

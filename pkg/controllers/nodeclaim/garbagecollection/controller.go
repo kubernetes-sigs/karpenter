@@ -23,6 +23,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
@@ -30,6 +31,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
+	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -70,15 +74,28 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	cloudProviderProviderIDs := sets.New[string](lo.Map(cloudProviderNodeClaims, func(nc *v1beta1.NodeClaim, _ int) string {
 		return nc.Status.ProviderID
 	})...)
+	// Only consider NodeClaims that are Registered since we don't want to fully rely on the CloudProvider
+	// API to trigger deletion of the Node. Instead, we'll wait for our registration timeout to trigger
 	nodeClaims := lo.Filter(lo.ToSlicePtr(nodeClaimList.Items), func(n *v1beta1.NodeClaim, _ int) bool {
-		return n.StatusConditions().GetCondition(v1beta1.Launched).IsTrue() &&
+		return n.StatusConditions().GetCondition(v1beta1.Registered).IsTrue() &&
 			n.DeletionTimestamp.IsZero() &&
-			c.clock.Since(n.StatusConditions().GetCondition(v1beta1.Launched).LastTransitionTime.Inner.Time) > time.Second*10 &&
 			!cloudProviderProviderIDs.Has(n.Status.ProviderID)
 	})
 
 	errs := make([]error, len(nodeClaims))
 	workqueue.ParallelizeUntil(ctx, 20, len(nodeClaims), func(i int) {
+		node, err := nodeclaimutil.NodeForNodeClaim(ctx, c.kubeClient, nodeClaims[i])
+		// Ignore these errors since a registered NodeClaim should only have a NotFound node when
+		// the Node was deleted out from under us and a Duplicate Node is an invalid state
+		if nodeclaimutil.IgnoreDuplicateNodeError(nodeclaimutil.IgnoreNodeNotFoundError(err)) != nil {
+			errs[i] = err
+		}
+		// We do a check on the Ready condition of the node since, even though the CloudProvider says the instance
+		// is not around, we know that the kubelet process is still running if the Node Ready condition is true
+		// Similar logic to: https://github.com/kubernetes/kubernetes/blob/3a75a8c8d9e6a1ebd98d8572132e675d4980f184/staging/src/k8s.io/cloud-provider/controllers/nodelifecycle/node_lifecycle_controller.go#L144
+		if node != nil && nodeutils.GetCondition(node, v1.NodeReady).Status == v1.ConditionTrue {
+			return
+		}
 		if err := c.kubeClient.Delete(ctx, nodeClaims[i]); err != nil {
 			errs[i] = client.IgnoreNotFound(err)
 			return
