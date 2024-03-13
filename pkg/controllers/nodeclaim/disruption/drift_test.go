@@ -17,13 +17,14 @@ limitations under the License.
 package disruption_test
 
 import (
+	"time"
+
 	"github.com/imdario/mergo"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
-	"time"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
@@ -478,10 +479,10 @@ var _ = Describe("Drift", func() {
 								},
 								EvictionMaxPodGracePeriod: ptr.Int32(0),
 								EvictionSoftGracePeriod: map[string]metav1.Duration{
-									"nodefs.available": metav1.Duration{time.Second},
+									"nodefs.available": {Duration: time.Second},
 								},
-								ImageGCLowThresholdPercent:  ptr.Int32(0),
 								ImageGCHighThresholdPercent: ptr.Int32(11),
+								ImageGCLowThresholdPercent:  ptr.Int32(0),
 								CPUCFSQuota:                 lo.ToPtr(false),
 							},
 						},
@@ -513,26 +514,24 @@ var _ = Describe("Drift", func() {
 			Entry("Labels", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{ObjectMeta: v1beta1.ObjectMeta{Labels: map[string]string{"keyLabelTest": "valueLabelTest"}}}}}),
 			Entry("Taints", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Taints: []v1.Taint{{Key: "keytest2taint", Effect: v1.TaintEffectNoExecute}}}}}}),
 			Entry("StartupTaints", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{StartupTaints: []v1.Taint{{Key: "keytest2taint", Effect: v1.TaintEffectNoExecute}}}}}}),
-			// Updates on the NodeClassRef
-			Entry("APIVersion", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{NodeClassRef: &v1beta1.NodeClassReference{APIVersion: "testVersion"}}}}}),
-			Entry("Name", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{NodeClassRef: &v1beta1.NodeClassReference{Name: "testName"}}}}}),
-			Entry("Kind", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{NodeClassRef: &v1beta1.NodeClassReference{Kind: "testKind"}}}}}),
-			// Changes on the kubelet Configuration
-			Entry("ClusterDNS", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{ClusterDNS: []string{"testDNS"}}}}}}),
-			Entry("MaxPods", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{MaxPods: ptr.Int32(5)}}}}}),
-			Entry("PodsPerCore", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{PodsPerCore: ptr.Int32(5)}}}}}),
+			Entry("NodeClassRef APIVersion", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{NodeClassRef: &v1beta1.NodeClassReference{APIVersion: "testVersion"}}}}}),
+			Entry("NodeClassRef Name", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{NodeClassRef: &v1beta1.NodeClassReference{Name: "testName"}}}}}),
+			Entry("NodeClassRef Kind", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{NodeClassRef: &v1beta1.NodeClassReference{Kind: "testKind"}}}}}),
+			Entry("kubeletConfiguration ClusterDNS", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{ClusterDNS: []string{"testDNS"}}}}}}),
+			Entry("KubeletConfiguration MaxPods", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{MaxPods: ptr.Int32(5)}}}}}),
+			Entry("KubeletConfiguration PodsPerCore", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{PodsPerCore: ptr.Int32(5)}}}}}),
 			// Karpenter currently have a bug with systemReserved and kubeReserved will cause NodeClaims to not be drifted, when the field is updated
 			// TODO: Enable systemReserved and kubeReserved once they can be used for static drift
 			// For more information: https://github.com/kubernetes-sigs/karpenter/issues/1080
-			// Entry("SystemReserved", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{SystemReserved: v1.ResourceList{}}}}}}),
-			// Entry("KubeReserved", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{KubeReserved: v1.ResourceList{}}}}}}),
-			Entry("EvictionHard", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{EvictionHard: map[string]string{"memory.available": "30Gi"}}}}}}),
-			Entry("EvictionSoft", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{EvictionSoft: map[string]string{"nodefs.available": "30Gi"}}}}}}),
-			Entry("EvictionSoftGracePeriod", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{EvictionSoftGracePeriod: map[string]metav1.Duration{"nodefs.available": metav1.Duration{time.Minute}}}}}}}),
-			Entry("EvictionMaxPodGracePeriod", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{EvictionMaxPodGracePeriod: ptr.Int32(5)}}}}}),
-			Entry("ImageGCHighThresholdPercent", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{ImageGCHighThresholdPercent: ptr.Int32(20)}}}}}),
-			Entry("ImageGCLowThresholdPercent", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{ImageGCLowThresholdPercent: ptr.Int32(10)}}}}}),
-			Entry("CPUCFSQuota", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{CPUCFSQuota: lo.ToPtr(true)}}}}}),
+			// Entry("KubeletConfiguration SystemReserved", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{SystemReserved: v1.ResourceList{}}}}}}),
+			// Entry("KubeletConfiguration KubeReserved", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{KubeReserved: v1.ResourceList{}}}}}}),
+			Entry("KubeletConfiguration EvictionHard", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{EvictionHard: map[string]string{"memory.available": "30Gi"}}}}}}),
+			Entry("KubeletConfiguration EvictionSoft", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{EvictionSoft: map[string]string{"nodefs.available": "30Gi"}}}}}}),
+			Entry("KubeletConfiguration EvictionSoftGracePeriod", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{EvictionSoftGracePeriod: map[string]metav1.Duration{"nodefs.available": {Duration: time.Minute}}}}}}}),
+			Entry("KubeletConfiguration EvictionMaxPodGracePeriod", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{EvictionMaxPodGracePeriod: ptr.Int32(5)}}}}}),
+			Entry("KubeletConfiguration ImageGCHighThresholdPercent", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{ImageGCHighThresholdPercent: ptr.Int32(20)}}}}}),
+			Entry("KubeletConfiguration ImageGCLowThresholdPercent", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{ImageGCLowThresholdPercent: ptr.Int32(10)}}}}}),
+			Entry("KubeletConfiguration CPUCFSQuota", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{CPUCFSQuota: lo.ToPtr(true)}}}}}),
 		)
 		It("should not return drifted if karpenter.sh/nodepool-hash annotation is not present on the NodePool", func() {
 			nodePool.ObjectMeta.Annotations = map[string]string{}
