@@ -1,6 +1,6 @@
 # This is the format of an AWS ECR Public Repo as an example.
 export KWOK_REPO ?= ${ACCOUNT_ID}.dkr.ecr.${DEFAULT_REGION}.amazonaws.com
-export SYSTEM_NAMESPACE=kube-system
+export KARPENTER_NAMESPACE=kube-system
 
 HELM_OPTS ?= --set logLevel=debug \
 			--set controller.resources.requests.cpu=1 \
@@ -31,7 +31,7 @@ build: ## Build the Karpenter KWOK controller images using ko build
 apply: verify build ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
 	hack/validation/kwok-requirements.sh
 	kubectl apply -f pkg/apis/crds
-	helm upgrade --install karpenter kwok/charts --namespace kube-system --skip-crds \
+	helm upgrade --install karpenter kwok/charts --namespace $(KARPENTER_NAMESPACE) --skip-crds \
 		$(HELM_OPTS) \
 		--set controller.image.repository=$(IMG_REPOSITORY) \
 		--set controller.image.tag=$(IMG_TAG) \
@@ -40,7 +40,7 @@ apply: verify build ## Deploy the kwok controller from the current state of your
 		--set-string controller.env[0].value=true
 
 delete: ## Delete the controller from your ~/.kube/config cluster
-	helm uninstall karpenter --namespace ${KARPENTER_NAMESPACE}
+	helm uninstall karpenter --namespace $(KARPENTER_NAMESPACE)
 	
 test: ## Run tests
 	go test ./... \
