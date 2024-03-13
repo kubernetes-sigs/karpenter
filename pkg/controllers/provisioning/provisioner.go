@@ -352,7 +352,10 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 	metrics.NodeClaimsCreatedCounter.With(prometheus.Labels{
 		metrics.ReasonLabel:       options.Reason,
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+		metrics.ZoneLabel:         nodeClaim.Labels[v1.LabelTopologyZone],
+		metrics.ArchLabel:         nodeClaim.Labels[v1.LabelArchStable],
 		metrics.CapacityTypeLabel: nodeClaim.Labels[v1beta1.CapacityTypeLabelKey],
+		metrics.InstanceTypeLabel: nodeClaim.Labels[v1.LabelInstanceTypeStable],
 	}).Inc()
 	// Update the nodeclaim manually in state to avoid evenutal consistency delay races with our watcher.
 	// This is essential to avoiding races where disruption can create a replacement node, then immediately

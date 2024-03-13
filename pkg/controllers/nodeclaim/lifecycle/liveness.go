@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -59,7 +60,10 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) 
 	metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
 		metrics.ReasonLabel:       "liveness",
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+		metrics.ZoneLabel:         nodeClaim.Labels[v1.LabelTopologyZone],
+		metrics.ArchLabel:         nodeClaim.Labels[v1.LabelArchStable],
 		metrics.CapacityTypeLabel: nodeClaim.Labels[v1beta1.CapacityTypeLabelKey],
+		metrics.InstanceTypeLabel: nodeClaim.Labels[v1.LabelInstanceTypeStable],
 	}).Inc()
 
 	return reconcile.Result{}, nil

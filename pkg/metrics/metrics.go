@@ -37,7 +37,10 @@ var (
 		[]string{
 			ReasonLabel,
 			NodePoolLabel,
+			ZoneLabel,
+			ArchLabel,
 			CapacityTypeLabel,
+			InstanceTypeLabel,
 		},
 	)
 	NodeClaimsTerminatedCounter = prometheus.NewCounterVec(
@@ -50,7 +53,10 @@ var (
 		[]string{
 			ReasonLabel,
 			NodePoolLabel,
+			ZoneLabel,
+			ArchLabel,
 			CapacityTypeLabel,
+			InstanceTypeLabel,
 		},
 	)
 	NodeClaimsLaunchedCounter = prometheus.NewCounterVec(

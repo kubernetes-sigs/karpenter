@@ -90,7 +90,10 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeCla
 			metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
 				metrics.ReasonLabel:       "insufficient_capacity",
 				metrics.NodePoolLabel:     nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+				metrics.ZoneLabel:         nodeClaim.Labels[v1.LabelTopologyZone],
+				metrics.ArchLabel:         nodeClaim.Labels[v1.LabelArchStable],
 				metrics.CapacityTypeLabel: nodeClaim.Labels[v1beta1.CapacityTypeLabelKey],
+				metrics.InstanceTypeLabel: nodeClaim.Labels[v1.LabelInstanceTypeStable],
 			}).Inc()
 			return nil, nil
 		case cloudprovider.IsNodeClassNotReadyError(err):
