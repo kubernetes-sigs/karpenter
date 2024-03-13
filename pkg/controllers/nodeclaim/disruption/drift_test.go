@@ -17,11 +17,13 @@ limitations under the License.
 package disruption_test
 
 import (
+	"github.com/imdario/mergo"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
+	"time"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
@@ -425,20 +427,18 @@ var _ = Describe("Drift", func() {
 
 	})
 	Context("NodePool Static Drift", func() {
-		var nodePoolOptions v1beta1.NodePool
 		var nodePoolController controller.Controller
 		BeforeEach(func() {
 			cp.Drifted = ""
 			nodePoolController = hash.NewController(env.Client)
-			nodePoolOptions = v1beta1.NodePool{
+			nodePool = &v1beta1.NodePool{
 				ObjectMeta: nodePool.ObjectMeta,
 				Spec: v1beta1.NodePoolSpec{
 					Template: v1beta1.NodeClaimTemplate{
 						ObjectMeta: v1beta1.ObjectMeta{
 							Annotations: map[string]string{
-								"keyAnnotation":                          "valueAnnotation",
-								"keyAnnotation2":                         "valueAnnotation2",
-								v1beta1.NodePoolHashVersionAnnotationKey: v1beta1.NodePoolHashVersion,
+								"keyAnnotation":  "valueAnnotation",
+								"keyAnnotation2": "valueAnnotation2",
 							},
 							Labels: map[string]string{
 								"keyLabel":  "valueLabel",
@@ -446,6 +446,12 @@ var _ = Describe("Drift", func() {
 							},
 						},
 						Spec: v1beta1.NodeClaimSpec{
+							Requirements: nodePool.Spec.Template.Spec.Requirements,
+							NodeClassRef: &v1beta1.NodeClassReference{
+								Kind:       "fakeKind",
+								Name:       "fakeName",
+								APIVersion: "fakeGroup/fakeVerion",
+							},
 							Taints: []v1.Taint{
 								{
 									Key:    "keyvalue1",
@@ -459,7 +465,24 @@ var _ = Describe("Drift", func() {
 								},
 							},
 							Kubelet: &v1beta1.KubeletConfiguration{
-								MaxPods: ptr.Int32(10),
+								ClusterDNS:     []string{"fakeDNS"},
+								MaxPods:        ptr.Int32(0),
+								PodsPerCore:    ptr.Int32(0),
+								SystemReserved: v1.ResourceList{},
+								KubeReserved:   v1.ResourceList{},
+								EvictionHard: map[string]string{
+									"memory.available": "20Gi",
+								},
+								EvictionSoft: map[string]string{
+									"nodefs.available": "20Gi",
+								},
+								EvictionMaxPodGracePeriod: ptr.Int32(0),
+								EvictionSoftGracePeriod: map[string]metav1.Duration{
+									"nodefs.available": {time.Second},
+								},
+								ImageGCLowThresholdPercent:  ptr.Int32(0),
+								ImageGCHighThresholdPercent: ptr.Int32(11),
+								CPUCFSQuota:                 lo.ToPtr(false),
 							},
 						},
 					},
@@ -467,30 +490,50 @@ var _ = Describe("Drift", func() {
 			}
 			nodeClaim.ObjectMeta.Annotations[v1beta1.NodePoolHashAnnotationKey] = nodePool.Hash()
 		})
-		It("should detect drift on changes for all static fields", func() {
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
-			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
-			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted)).To(BeNil())
+		// We need to test each all the fields on the NodePool when we expect the field to be drifted
+		// This will also test that the NodePool fields can be hashed.
+		DescribeTable("should detect drift on changes to the static fields",
+			func(changes v1beta1.NodePool) {
+				ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+				ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+				Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted)).To(BeNil())
 
-			// Change one static field for the same nodePool
-			nodePoolFieldToChange := []*v1beta1.NodePool{
-				test.NodePool(nodePoolOptions, v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{ObjectMeta: v1beta1.ObjectMeta{Annotations: map[string]string{"keyAnnotationTest": "valueAnnotationTest"}}}}}),
-				test.NodePool(nodePoolOptions, v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{ObjectMeta: v1beta1.ObjectMeta{Labels: map[string]string{"keyLabelTest": "valueLabelTest"}}}}}),
-				test.NodePool(nodePoolOptions, v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Taints: []v1.Taint{{Key: "keytest2taint", Effect: v1.TaintEffectNoExecute}}}}}}),
-				test.NodePool(nodePoolOptions, v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{StartupTaints: []v1.Taint{{Key: "keytest2startuptaint", Effect: v1.TaintEffectNoExecute}}}}}}),
-				test.NodePool(nodePoolOptions, v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{MaxPods: ptr.Int32(30)}}}}}),
-			}
+				nodePool = ExpectExists(ctx, env.Client, nodePool)
+				Expect(mergo.Merge(nodePool, changes, mergo.WithOverride)).To(Succeed())
+				ExpectApplied(ctx, env.Client, nodePool)
 
-			for _, updatedNodePool := range nodePoolFieldToChange {
-				ExpectApplied(ctx, env.Client, updatedNodePool)
-				ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(updatedNodePool))
+				ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 				ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 				Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).IsTrue()).To(BeTrue())
-			}
-		})
+			},
+			Entry("Annoations", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{ObjectMeta: v1beta1.ObjectMeta{Annotations: map[string]string{"keyAnnotationTest": "valueAnnotationTest"}}}}}),
+			Entry("Labels", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{ObjectMeta: v1beta1.ObjectMeta{Labels: map[string]string{"keyLabelTest": "valueLabelTest"}}}}}),
+			Entry("Taints", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Taints: []v1.Taint{{Key: "keytest2taint", Effect: v1.TaintEffectNoExecute}}}}}}),
+			Entry("StartupTaints", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{StartupTaints: []v1.Taint{{Key: "keytest2taint", Effect: v1.TaintEffectNoExecute}}}}}}),
+			// Updates on the NodeClassRef
+			Entry("APIVersion", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{NodeClassRef: &v1beta1.NodeClassReference{APIVersion: "testVersion"}}}}}),
+			Entry("Name", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{NodeClassRef: &v1beta1.NodeClassReference{Name: "testName"}}}}}),
+			Entry("Kind", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{NodeClassRef: &v1beta1.NodeClassReference{Kind: "testKind"}}}}}),
+			// Changes on the kubelet Configuration
+			Entry("ClusterDNS", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{ClusterDNS: []string{"testDNS"}}}}}}),
+			Entry("MaxPods", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{MaxPods: ptr.Int32(5)}}}}}),
+			Entry("PodsPerCore", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{PodsPerCore: ptr.Int32(5)}}}}}),
+			// Karpenter currently have a bug with systemReserved and kubeReserved will cause NodeClaims to not be drifted, when the field is updated
+			// TODO: Enable systemReserved and kubeReserved once they can be used for static drift
+			// For more information: https://github.com/kubernetes-sigs/karpenter/issues/1080
+			// Entry("SystemReserved", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{SystemReserved: v1.ResourceList{}}}}}}),
+			// Entry("KubeReserved", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{KubeReserved: v1.ResourceList{}}}}}}),
+			Entry("EvictionHard", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{EvictionHard: map[string]string{"memory.available": "30Gi"}}}}}}),
+			Entry("EvictionSoft", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{EvictionSoft: map[string]string{"nodefs.available": "30Gi"}}}}}}),
+			Entry("EvictionSoftGracePeriod", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{EvictionSoftGracePeriod: map[string]metav1.Duration{"nodefs.available": {time.Minute}}}}}}}),
+			Entry("EvictionMaxPodGracePeriod", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{EvictionMaxPodGracePeriod: ptr.Int32(5)}}}}}),
+			Entry("ImageGCHighThresholdPercent", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{ImageGCHighThresholdPercent: ptr.Int32(20)}}}}}),
+			Entry("ImageGCLowThresholdPercent", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{ImageGCLowThresholdPercent: ptr.Int32(10)}}}}}),
+			Entry("CPUCFSQuota", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{CPUCFSQuota: lo.ToPtr(true)}}}}}),
+		)
 		It("should not return drifted if karpenter.sh/nodepool-hash annotation is not present on the NodePool", func() {
 			nodePool.ObjectMeta.Annotations = map[string]string{}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
