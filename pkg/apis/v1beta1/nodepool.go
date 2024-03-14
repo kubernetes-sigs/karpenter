@@ -99,7 +99,7 @@ type Disruption struct {
 // Budget defines when Karpenter will restrict the
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
-	// Reasons is a list of methods or reasons for disruption that apply to this budget. If Reasons is not set, this budget applies to all methods.
+	// Reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
 	// If omitted, it will apply to all well-known disruption reasons. Otherwise, this will apply to each reason defined. 
 	// allowed reasons are underutilized, expired, empty, and drifted.
 	// +optional
