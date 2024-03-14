@@ -102,7 +102,7 @@ type Budget struct {
 	// Reasons is a list of methods or reasons for disruption that apply to this budget. If Reasons is not set, this budget applies to all methods.
 	// If a reason == "default", it will apply to all reasons that don't have an active budget. If a reason is set, it will only apply to that method. If multiple reasons are specified,
 	// this budget will apply to all of them. If a budget is not specified for a method, the default budget will be used.
-	// allowed reasons are underutilized, expired, emptied, and drifted.
+	// allowed reasons are underutilized, expired, empty, and drifted.
 	// +optional
 	Reasons []DisruptionReason `json:"reasons"`
 	// Nodes dictates the maximum number of NodeClaims owned by this NodePool
