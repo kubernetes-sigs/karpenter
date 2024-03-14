@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package events_test
+package eventrecorder_test
 
 import (
 	"fmt"
@@ -32,11 +32,11 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	schedulingevents "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
-	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
-var eventRecorder events.Recorder
+var eventRecorder eventrecorder.Recorder
 var internalRecorder *InternalRecorder
 
 type InternalRecorder struct {
@@ -77,7 +77,7 @@ func TestRecorder(t *testing.T) {
 
 var _ = BeforeEach(func() {
 	internalRecorder = NewInternalRecorder()
-	eventRecorder = events.NewRecorder(internalRecorder)
+	eventRecorder = eventrecorder.NewRecorder(internalRecorder)
 	schedulingevents.PodNominationRateLimiter = flowcontrol.NewTokenBucketRateLimiter(5, 10)
 
 })

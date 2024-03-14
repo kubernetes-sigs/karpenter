@@ -32,7 +32,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	"sigs.k8s.io/karpenter/pkg/events"
 )
 
 // Validation is used to perform validation on a consolidation command.  It makes an assumption that when re-used, all
@@ -47,12 +46,11 @@ type Validation struct {
 	cloudProvider    cloudprovider.CloudProvider
 	provisioner      *provisioning.Provisioner
 	once             sync.Once
-	recorder         events.Recorder
 	queue            *orchestration.Queue
 }
 
 func NewValidation(validationPeriod time.Duration, clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cp cloudprovider.CloudProvider, recorder events.Recorder, queue *orchestration.Queue) *Validation {
+	cp cloudprovider.CloudProvider, queue *orchestration.Queue) *Validation {
 	return &Validation{
 		validationPeriod: validationPeriod,
 		clock:            clk,
@@ -60,7 +58,6 @@ func NewValidation(validationPeriod time.Duration, clk clock.Clock, cluster *sta
 		kubeClient:       kubeClient,
 		provisioner:      provisioner,
 		cloudProvider:    cp,
-		recorder:         recorder,
 		queue:            queue,
 	}
 }
@@ -83,7 +80,7 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 	// Get the current representation of the proposed candidates from before the validation timeout
 	// We do this so that we can re-validate that the candidates that were computed before we made the decision are the same
 	// We perform filtering here to ensure that none of the proposed candidates have blocking PDBs or do-not-evict/do-not-disrupt pods scheduled to them
-	validationCandidates, err := GetCandidates(ctx, v.cluster, v.kubeClient, v.recorder, v.clock, v.cloudProvider, v.ShouldDisrupt, v.queue)
+	validationCandidates, err := GetCandidates(ctx, v.cluster, v.kubeClient, v.clock, v.cloudProvider, v.ShouldDisrupt, v.queue)
 	if err != nil {
 		return false, fmt.Errorf("constructing validation candidates, %w", err)
 	}
@@ -93,7 +90,7 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 		return false, nil
 	}
 	// Rebuild the disruption budget mapping to see if any budgets have changed since validation.
-	postValidationMapping, err := BuildDisruptionBudgets(ctx, v.cluster, v.clock, v.kubeClient, v.recorder)
+	postValidationMapping, err := BuildDisruptionBudgets(ctx, v.cluster, v.clock, v.kubeClient)
 	if err != nil {
 		return false, fmt.Errorf("building disruption budgets, %w", err)
 	}

@@ -25,7 +25,7 @@ import (
 
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
-	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -34,19 +34,17 @@ import (
 // Emptiness is a subreconciler that deletes empty candidates.
 // Emptiness will respect TTLSecondsAfterEmpty
 type Emptiness struct {
-	clock    clock.Clock
-	recorder events.Recorder
+	clock clock.Clock
 }
 
-func NewEmptiness(clk clock.Clock, recorder events.Recorder) *Emptiness {
+func NewEmptiness(clk clock.Clock) *Emptiness {
 	return &Emptiness{
-		clock:    clk,
-		recorder: recorder,
+		clock: clk,
 	}
 }
 
 // ShouldDisrupt is a predicate used to filter candidates
-func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
+func (e *Emptiness) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 	// If we don't have the "WhenEmpty" policy set, we should not do this method, but
 	// we should also not fire an event here to users since this can be confusing when the field on the NodePool
 	// is named "consolidationPolicy"
@@ -54,7 +52,7 @@ func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 		return false
 	}
 	if c.nodePool.Spec.Disruption.ConsolidateAfter != nil && c.nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
-		e.recorder.Publish(disruptionevents.Unconsolidatable(c.Node, c.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", c.nodePool.Name))...)
+		eventrecorder.FromContext(ctx).Publish(disruptionevents.Unconsolidatable(c.Node, c.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", c.nodePool.Name))...)
 		return false
 	}
 	return c.NodeClaim.StatusConditions().GetCondition(v1beta1.Empty).IsTrue() &&

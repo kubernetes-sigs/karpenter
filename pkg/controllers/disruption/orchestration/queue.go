@@ -44,7 +44,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
 )
 
 const (
@@ -101,21 +101,19 @@ type Queue struct {
 	providerIDToCommand map[string]*Command // providerID -> command, maps a candidate to its command
 
 	kubeClient  client.Client
-	recorder    events.Recorder
 	cluster     *state.Cluster
 	clock       clock.Clock
 	provisioner *provisioning.Provisioner
 }
 
 // NewQueue creates a queue that will asynchronously orchestrate disruption commands
-func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clock.Clock,
+func NewQueue(kubeClient client.Client, cluster *state.Cluster, clock clock.Clock,
 	provisioner *provisioning.Provisioner,
 ) *Queue {
 	queue := &Queue{
 		RateLimitingInterface: workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(queueBaseDelay, queueMaxDelay)),
 		providerIDToCommand:   map[string]*Command{},
 		kubeClient:            kubeClient,
-		recorder:              recorder,
 		cluster:               cluster,
 		clock:                 clock,
 		provisioner:           provisioner,
@@ -124,14 +122,13 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 }
 
 // NewTestingQueue uses a test RateLimitingInterface that will immediately re-queue items.
-func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clock.Clock,
+func NewTestingQueue(kubeClient client.Client, recorder eventrecorder.Recorder, cluster *state.Cluster, clock clock.Clock,
 	provisioner *provisioning.Provisioner,
 ) *Queue {
 	queue := &Queue{
 		RateLimitingInterface: &controllertest.Queue{Interface: workqueue.New()},
 		providerIDToCommand:   map[string]*Command{},
 		kubeClient:            kubeClient,
-		recorder:              recorder,
 		cluster:               cluster,
 		clock:                 clock,
 		provisioner:           provisioner,
@@ -242,10 +239,10 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 		}
 		// We emitted this event when disruption was blocked on launching/termination.
 		// This does not block other forms of deprovisioning, but we should still emit this.
-		q.recorder.Publish(disruptionevents.Launching(nodeClaim, cmd.Reason()))
+		eventrecorder.FromContext(ctx).Publish(disruptionevents.Launching(nodeClaim, cmd.Reason()))
 		initializedStatus := nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized)
 		if !initializedStatus.IsTrue() {
-			q.recorder.Publish(disruptionevents.WaitingOnReadiness(nodeClaim))
+			eventrecorder.FromContext(ctx).Publish(disruptionevents.WaitingOnReadiness(nodeClaim))
 			waitErrs[i] = fmt.Errorf("nodeclaim %s not initialized", nodeClaim.Name)
 			continue
 		}
@@ -265,7 +262,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 	var multiErr error
 	for i := range cmd.candidates {
 		candidate := cmd.candidates[i]
-		q.recorder.Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, cmd.Reason())...)
+		eventrecorder.FromContext(ctx).Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, cmd.Reason())...)
 		if err := q.kubeClient.Delete(ctx, candidate.NodeClaim); err != nil {
 			multiErr = multierr.Append(multiErr, client.IgnoreNotFound(err))
 		} else {

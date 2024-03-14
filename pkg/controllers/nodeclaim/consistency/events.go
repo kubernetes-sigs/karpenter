@@ -20,11 +20,11 @@ import (
 	v1 "k8s.io/api/core/v1"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
 )
 
-func FailedConsistencyCheckEvent(nodeClaim *v1beta1.NodeClaim, message string) events.Event {
-	return events.Event{
+func FailedConsistencyCheckEvent(nodeClaim *v1beta1.NodeClaim, message string) eventrecorder.Event {
+	return eventrecorder.Event{
 		InvolvedObject: nodeClaim,
 		Type:           v1.EventTypeWarning,
 		Reason:         "FailedConsistencyCheck",

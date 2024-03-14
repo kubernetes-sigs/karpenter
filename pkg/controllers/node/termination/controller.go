@@ -34,11 +34,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
+
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
-	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
@@ -51,16 +52,14 @@ type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	terminator    *terminator.Terminator
-	recorder      events.Recorder
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, terminator *terminator.Terminator, recorder events.Recorder) operatorcontroller.Controller {
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, terminator *terminator.Terminator) operatorcontroller.Controller {
 	return operatorcontroller.Typed[*v1.Node](kubeClient, &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		terminator:    terminator,
-		recorder:      recorder,
 	})
 }
 
@@ -87,7 +86,7 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 		if !terminator.IsNodeDrainError(err) {
 			return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 		}
-		c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
+		eventrecorder.FromContext(ctx).Publish(terminatorevents.NodeFailedToDrain(node, err))
 		// If the underlying nodeclaim no longer exists.
 		if _, err := c.cloudProvider.Get(ctx, node.Spec.ProviderID); err != nil {
 			if cloudprovider.IsNodeClaimNotFoundError(err) {

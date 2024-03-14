@@ -22,11 +22,11 @@ import (
 	v1 "k8s.io/api/core/v1"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
 )
 
-func InsufficientCapacityErrorEvent(nodeClaim *v1beta1.NodeClaim, err error) events.Event {
-	return events.Event{
+func InsufficientCapacityErrorEvent(nodeClaim *v1beta1.NodeClaim, err error) eventrecorder.Event {
+	return eventrecorder.Event{
 		InvolvedObject: nodeClaim,
 		Type:           v1.EventTypeWarning,
 		Reason:         "InsufficientCapacityError",
@@ -35,8 +35,8 @@ func InsufficientCapacityErrorEvent(nodeClaim *v1beta1.NodeClaim, err error) eve
 	}
 }
 
-func NodeClassNotReadyEvent(nodeClaim *v1beta1.NodeClaim, err error) events.Event {
-	return events.Event{
+func NodeClassNotReadyEvent(nodeClaim *v1beta1.NodeClaim, err error) eventrecorder.Event {
+	return eventrecorder.Event{
 		InvolvedObject: nodeClaim,
 		Type:           v1.EventTypeWarning,
 		Reason:         "NodeClassNotReady",

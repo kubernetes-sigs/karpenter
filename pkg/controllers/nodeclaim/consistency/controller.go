@@ -35,7 +35,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
 	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
@@ -46,7 +46,6 @@ type Controller struct {
 	clock       clock.Clock
 	kubeClient  client.Client
 	checks      []Check
-	recorder    events.Recorder
 	lastScanned *cache.Cache
 }
 
@@ -61,13 +60,11 @@ type Check interface {
 // scanPeriod is how often we inspect and report issues that are found.
 const scanPeriod = 10 * time.Minute
 
-func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Recorder,
-	provider cloudprovider.CloudProvider) operatorcontroller.Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, provider cloudprovider.CloudProvider) operatorcontroller.Controller {
 
 	return operatorcontroller.Typed[*v1beta1.NodeClaim](kubeClient, &Controller{
 		clock:       clk,
 		kubeClient:  kubeClient,
-		recorder:    recorder,
 		lastScanned: cache.New(scanPeriod, 1*time.Minute),
 		checks: []Check{
 			NewTermination(clk, kubeClient),
@@ -105,7 +102,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 		for _, issue := range issues {
 			logging.FromContext(ctx).Errorf("check failed, %s", issue)
 			consistencyErrors.With(prometheus.Labels{checkLabel: reflect.TypeOf(check).Elem().Name()}).Inc()
-			c.recorder.Publish(FailedConsistencyCheckEvent(nodeClaim, string(issue)))
+			eventrecorder.FromContext(ctx).Publish(FailedConsistencyCheckEvent(nodeClaim, string(issue)))
 		}
 	}
 	return reconcile.Result{RequeueAfter: scanPeriod}, nil

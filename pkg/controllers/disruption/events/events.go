@@ -25,11 +25,11 @@ import (
 	v1 "k8s.io/api/core/v1"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
 )
 
-func Launching(nodeClaim *v1beta1.NodeClaim, reason string) events.Event {
-	return events.Event{
+func Launching(nodeClaim *v1beta1.NodeClaim, reason string) eventrecorder.Event {
+	return eventrecorder.Event{
 		InvolvedObject: nodeClaim,
 		Type:           v1.EventTypeNormal,
 		Reason:         "DisruptionLaunching",
@@ -38,8 +38,8 @@ func Launching(nodeClaim *v1beta1.NodeClaim, reason string) events.Event {
 	}
 }
 
-func WaitingOnReadiness(nodeClaim *v1beta1.NodeClaim) events.Event {
-	return events.Event{
+func WaitingOnReadiness(nodeClaim *v1beta1.NodeClaim) eventrecorder.Event {
+	return eventrecorder.Event{
 		InvolvedObject: nodeClaim,
 		Type:           v1.EventTypeNormal,
 		Reason:         "DisruptionWaitingReadiness",
@@ -48,8 +48,8 @@ func WaitingOnReadiness(nodeClaim *v1beta1.NodeClaim) events.Event {
 	}
 }
 
-func WaitingOnDeletion(nodeClaim *v1beta1.NodeClaim) events.Event {
-	return events.Event{
+func WaitingOnDeletion(nodeClaim *v1beta1.NodeClaim) eventrecorder.Event {
+	return eventrecorder.Event{
 		InvolvedObject: nodeClaim,
 		Type:           v1.EventTypeNormal,
 		Reason:         "DisruptionWaitingDeletion",
@@ -58,8 +58,8 @@ func WaitingOnDeletion(nodeClaim *v1beta1.NodeClaim) events.Event {
 	}
 }
 
-func Terminating(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) []events.Event {
-	return []events.Event{
+func Terminating(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) []eventrecorder.Event {
+	return []eventrecorder.Event{
 		{
 			InvolvedObject: node,
 			Type:           v1.EventTypeNormal,
@@ -79,8 +79,8 @@ func Terminating(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) []e
 
 // Unconsolidatable is an event that informs the user that a NodeClaim/Node combination cannot be consolidated
 // due to the state of the NodeClaim/Node or due to some state of the pods that are scheduled to the NodeClaim/Node
-func Unconsolidatable(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) []events.Event {
-	return []events.Event{
+func Unconsolidatable(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) []eventrecorder.Event {
+	return []eventrecorder.Event{
 		{
 			InvolvedObject: node,
 			Type:           v1.EventTypeNormal,
@@ -102,8 +102,8 @@ func Unconsolidatable(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string
 
 // Blocked is an event that informs the user that a NodeClaim/Node combination is blocked on deprovisioning
 // due to the state of the NodeClaim/Node or due to some state of the pods that are scheduled to the NodeClaim/Node
-func Blocked(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) []events.Event {
-	return []events.Event{
+func Blocked(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) []eventrecorder.Event {
+	return []eventrecorder.Event{
 		{
 			InvolvedObject: node,
 			Type:           v1.EventTypeNormal,
@@ -121,8 +121,8 @@ func Blocked(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) []event
 	}
 }
 
-func NodePoolBlocked(nodePool *v1beta1.NodePool) events.Event {
-	return events.Event{
+func NodePoolBlocked(nodePool *v1beta1.NodePool) eventrecorder.Event {
+	return eventrecorder.Event{
 		InvolvedObject: nodePool,
 		Type:           v1.EventTypeNormal,
 		Reason:         "DisruptionBlocked",

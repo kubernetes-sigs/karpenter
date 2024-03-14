@@ -88,7 +88,7 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		return Command{}, scheduling.Results{}, errors.New("interrupted")
 	case <-c.clock.After(consolidationTTL):
 	}
-	validationCandidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, c.ShouldDisrupt, c.queue)
+	validationCandidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.clock, c.cloudProvider, c.ShouldDisrupt, c.queue)
 	if err != nil {
 		logging.FromContext(ctx).Errorf("computing validation candidates %s", err)
 		return Command{}, scheduling.Results{}, err
@@ -97,7 +97,7 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	// We do this so that we can re-validate that the candidates that were computed before we made the decision are the same
 	candidatesToDelete := mapCandidates(cmd.candidates, validationCandidates)
 
-	postValidationMapping, err := BuildDisruptionBudgets(ctx, c.cluster, c.clock, c.kubeClient, c.recorder)
+	postValidationMapping, err := BuildDisruptionBudgets(ctx, c.cluster, c.clock, c.kubeClient)
 	if err != nil {
 		return Command{}, scheduling.Results{}, fmt.Errorf("building disruption budgets, %w", err)
 	}

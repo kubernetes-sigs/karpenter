@@ -30,7 +30,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
@@ -39,7 +39,6 @@ type Launch struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	cache         *cache.Cache // exists due to eventual consistency on the cache
-	recorder      events.Recorder
 }
 
 func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
@@ -82,7 +81,7 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeCla
 	if err != nil {
 		switch {
 		case cloudprovider.IsInsufficientCapacityError(err):
-			l.recorder.Publish(InsufficientCapacityErrorEvent(nodeClaim, err))
+			eventrecorder.FromContext(ctx).Publish(InsufficientCapacityErrorEvent(nodeClaim, err))
 			logging.FromContext(ctx).Error(err)
 			if err = l.kubeClient.Delete(ctx, nodeClaim); err != nil {
 				return nil, client.IgnoreNotFound(err)
@@ -94,7 +93,7 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeCla
 			}).Inc()
 			return nil, nil
 		case cloudprovider.IsNodeClassNotReadyError(err):
-			l.recorder.Publish(NodeClassNotReadyEvent(nodeClaim, err))
+			eventrecorder.FromContext(ctx).Publish(NodeClassNotReadyEvent(nodeClaim, err))
 			nodeClaim.StatusConditions().MarkFalse(v1beta1.Launched, "LaunchFailed", truncateMessage(err.Error()))
 			return nil, fmt.Errorf("launching nodeclaim, %w", err)
 		default:

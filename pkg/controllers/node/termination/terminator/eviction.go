@@ -39,7 +39,7 @@ import (
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
 
-	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
 )
 
 const (
@@ -82,15 +82,13 @@ type Queue struct {
 	set sets.Set[QueueKey]
 
 	kubeClient client.Client
-	recorder   events.Recorder
 }
 
-func NewQueue(kubeClient client.Client, recorder events.Recorder) *Queue {
+func NewQueue(kubeClient client.Client) *Queue {
 	queue := &Queue{
 		RateLimitingInterface: workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(evictionQueueBaseDelay, evictionQueueMaxDelay)),
 		set:                   sets.New[QueueKey](),
 		kubeClient:            kubeClient,
-		recorder:              recorder,
 	}
 	return queue
 }
@@ -174,7 +172,7 @@ func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 			return true
 		}
 		if apierrors.IsTooManyRequests(err) { // 429 - PDB violation
-			q.recorder.Publish(terminatorevents.NodeFailedToDrain(&v1.Node{ObjectMeta: metav1.ObjectMeta{
+			eventrecorder.FromContext(ctx).Publish(terminatorevents.NodeFailedToDrain(&v1.Node{ObjectMeta: metav1.ObjectMeta{
 				Name:      key.Name,
 				Namespace: key.Namespace,
 			}}, fmt.Errorf("evicting pod %s/%s violates a PDB", key.Namespace, key.Name)))
@@ -183,7 +181,7 @@ func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 		logging.FromContext(ctx).Errorf("evicting pod, %s", err)
 		return false
 	}
-	q.recorder.Publish(terminatorevents.EvictPod(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}))
+	eventrecorder.FromContext(ctx).Publish(terminatorevents.EvictPod(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}))
 	return true
 }
 
