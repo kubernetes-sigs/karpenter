@@ -193,7 +193,7 @@ func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 }
 
 // BuildDisruptionBudgets prepares our disruption budget mapping. The disruption budget maps for each disruption reason the number of allowed disruptions for each node pool.
-// We calculate allowed disruptions by taking the max disruptions allowed by disruption reason and subtracting the number of nodes that are already being deleted by that disruption reason.
+// We calculate allowed disruptions by taking the max disruptions allowed by disruption reason and subtracting the number of nodes that are NotReady and already being deleted by that disruption reason.
 //
 //nolint:gocyclo
 func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clock.Clock, kubeClient client.Client, recorder events.Recorder) (map[string]map[v1beta1.DisruptionReason]int, error) {
