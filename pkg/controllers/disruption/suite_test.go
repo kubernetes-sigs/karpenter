@@ -319,7 +319,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		})
 		Expect(new).To(BeTrue())
 		// which needs to be deployed
-		ExpectNodeClaimDeployed(ctx, env.Client, cluster, cloudProvider, nc)
+		ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
 		nodeClaimNames[nc.Name] = struct{}{}
 
 		ExpectTriggerVerifyAction(&wg)
@@ -334,7 +334,7 @@ var _ = Describe("Simulate Scheduling", func() {
 			return !ok
 		})
 		Expect(new).To(BeTrue())
-		ExpectNodeClaimDeployed(ctx, env.Client, cluster, cloudProvider, nc)
+		ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
 		nodeClaimNames[nc.Name] = struct{}{}
 
 		ExpectTriggerVerifyAction(&wg)
@@ -349,7 +349,7 @@ var _ = Describe("Simulate Scheduling", func() {
 			return !ok
 		})
 		Expect(new).To(BeTrue())
-		ExpectNodeClaimDeployed(ctx, env.Client, cluster, cloudProvider, nc)
+		ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
 		nodeClaimNames[nc.Name] = struct{}{}
 
 		// Try one more time, but fail since the budgets only allow 3 disruptions.
@@ -1976,7 +1976,7 @@ func ExpectMakeNewNodeClaimsReady(ctx context.Context, c client.Client, wg *sync
 					if existingNodeClaimNames.Has(nc.Name) {
 						continue
 					}
-					nc, n := ExpectNodeClaimDeployed(ctx, c, cluster, cloudProvider, nc)
+					nc, n := ExpectNodeClaimDeployedAndStateUpdated(ctx, c, cluster, cloudProvider, nc)
 					ExpectMakeNodeClaimsInitialized(ctx, c, nc)
 					ExpectMakeNodesInitialized(ctx, c, n)
 
