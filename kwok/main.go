@@ -43,7 +43,6 @@ func main() {
 			op.Clock,
 			op.GetClient(),
 			state.NewCluster(op.Clock, op.GetClient(), cloudProvider),
-			op.EventRecorder,
 			cloudProvider,
 		)...).Start(ctx)
 }

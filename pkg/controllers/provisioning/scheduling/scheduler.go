@@ -36,7 +36,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
@@ -45,8 +45,7 @@ import (
 
 func NewScheduler(ctx context.Context, kubeClient client.Client, nodePools []*v1beta1.NodePool,
 	cluster *state.Cluster, stateNodes []*state.StateNode, topology *Topology,
-	instanceTypes map[string][]*cloudprovider.InstanceType, daemonSetPods []*v1.Pod,
-	recorder events.Recorder) *Scheduler {
+	instanceTypes map[string][]*cloudprovider.InstanceType, daemonSetPods []*v1.Pod) *Scheduler {
 
 	// if any of the nodePools add a taint with a prefer no schedule effect, we add a toleration for the taint
 	// during preference relaxation
@@ -68,7 +67,6 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, nodePools []*v1
 		cluster:            cluster,
 		instanceTypes:      instanceTypes,
 		daemonOverhead:     getDaemonOverhead(templates, daemonSetPods),
-		recorder:           recorder,
 		preferences:        &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
 		remainingResources: lo.SliceToMap(nodePools, func(np *v1beta1.NodePool) (string, v1.ResourceList) { return np.Name, v1.ResourceList(np.Spec.Limits) }),
 	}
@@ -87,7 +85,6 @@ type Scheduler struct {
 	preferences        *Preferences
 	topology           *Topology
 	cluster            *state.Cluster
-	recorder           events.Recorder
 	kubeClient         client.Client
 }
 
@@ -101,18 +98,18 @@ type Results struct {
 // Record sends eventing and log messages back for the results that were produced from a scheduling run
 // It also nominates nodes in the cluster state based on the scheduling run to signal to other components
 // leveraging the cluster state that a previous scheduling run that was recorded is relying on these nodes
-func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *state.Cluster) {
+func (r Results) Record(ctx context.Context, cluster *state.Cluster) {
 	// Report failures and nominations
 	for p, err := range r.PodErrors {
 		logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(p)).Errorf("Could not schedule pod, %s", err)
-		recorder.Publish(PodFailedToScheduleEvent(p, err))
+		eventrecorder.FromContext(ctx).Publish(PodFailedToScheduleEvent(p, err))
 	}
 	for _, existing := range r.ExistingNodes {
 		if len(existing.Pods) > 0 {
 			cluster.NominateNodeForPod(ctx, existing.ProviderID())
 		}
 		for _, p := range existing.Pods {
-			recorder.Publish(NominatePodEvent(p, existing.Node, existing.NodeClaim))
+			eventrecorder.FromContext(ctx).Publish(NominatePodEvent(p, existing.Node, existing.NodeClaim))
 		}
 	}
 	// Report new nodes, or exit to avoid log spam

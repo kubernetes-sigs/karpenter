@@ -40,7 +40,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
 )
@@ -50,7 +49,6 @@ type Controller struct {
 	kubeClient    client.Client
 	cluster       *state.Cluster
 	provisioner   *provisioning.Provisioner
-	recorder      events.Recorder
 	clock         clock.Clock
 	cloudProvider cloudprovider.CloudProvider
 	methods       []Method
@@ -64,26 +62,25 @@ const pollingPeriod = 10 * time.Second
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 
 func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *orchestration.Queue,
+	cp cloudprovider.CloudProvider, cluster *state.Cluster, queue *orchestration.Queue,
 ) *Controller {
-	c := MakeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)
+	c := MakeConsolidation(clk, cluster, kubeClient, provisioner, cp, queue)
 	return &Controller{
 		queue:         queue,
 		clock:         clk,
 		kubeClient:    kubeClient,
 		cluster:       cluster,
 		provisioner:   provisioner,
-		recorder:      recorder,
 		cloudProvider: cp,
 		lastRun:       map[string]time.Time{},
 		methods: []Method{
 			// Expire any NodeClaims that must be deleted, allowing their pods to potentially land on currently
-			NewExpiration(clk, kubeClient, cluster, provisioner, recorder),
+			NewExpiration(clk, kubeClient, cluster, provisioner),
 			// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
-			NewDrift(kubeClient, cluster, provisioner, recorder),
+			NewDrift(kubeClient, cluster, provisioner),
 			// Delete any remaining empty NodeClaims as there is zero cost in terms of disruption.  Emptiness and
 			// emptyNodeConsolidation are mutually exclusive, only one of these will operate
-			NewEmptiness(clk, recorder),
+			NewEmptiness(clk),
 			NewEmptyNodeConsolidation(c),
 			// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
 			NewMultiNodeConsolidation(c),
@@ -148,7 +145,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		methodLabel:            disruption.Type(),
 		consolidationTypeLabel: disruption.ConsolidationType(),
 	}))()
-	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, c.queue)
+	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.clock, c.cloudProvider, disruption.ShouldDisrupt, c.queue)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}
@@ -156,7 +153,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	if len(candidates) == 0 {
 		return false, nil
 	}
-	disruptionBudgetMapping, err := BuildDisruptionBudgets(ctx, c.cluster, c.clock, c.kubeClient, c.recorder)
+	disruptionBudgetMapping, err := BuildDisruptionBudgets(ctx, c.cluster, c.clock, c.kubeClient)
 	if err != nil {
 		return false, fmt.Errorf("building disruption budgets, %w", err)
 	}
@@ -213,7 +210,7 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, 
 	// tainted with the Karpenter taint, the provisioning controller will continue
 	// to do scheduling simulations and nominate the pods on the candidate nodes until
 	// the node is cleaned up.
-	schedulingResults.Record(logging.WithLogger(ctx, operatorlogging.NopLogger), c.recorder, c.cluster)
+	schedulingResults.Record(logging.WithLogger(ctx, operatorlogging.NopLogger), c.cluster)
 
 	providerIDs := lo.Map(cmd.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
 	// We have the new NodeClaims created at the API server so mark the old NodeClaims for deletion

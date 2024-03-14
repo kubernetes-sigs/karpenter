@@ -14,9 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package events
+package eventrecorder
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -51,6 +52,22 @@ type Recorder interface {
 type recorder struct {
 	rec   record.EventRecorder
 	cache *cache.Cache
+}
+
+type eventRecorderKeyType struct{}
+
+var eventRecorderKey = eventRecorderKeyType{}
+
+func ToContext(ctx context.Context, recorder Recorder) context.Context {
+	return context.WithValue(ctx, eventRecorderKey, recorder)
+}
+
+func FromContext(ctx context.Context) Recorder {
+	r := ctx.Value(eventRecorderKey)
+	if r == nil {
+		return nil
+	}
+	return r.(Recorder)
 }
 
 const defaultDedupeTimeout = 2 * time.Minute

@@ -47,7 +47,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
@@ -78,20 +78,16 @@ type Provisioner struct {
 	batcher        *Batcher
 	volumeTopology *scheduler.VolumeTopology
 	cluster        *state.Cluster
-	recorder       events.Recorder
 	cm             *pretty.ChangeMonitor
 }
 
-func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
-	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster,
-) *Provisioner {
+func NewProvisioner(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Provisioner {
 	p := &Provisioner{
 		batcher:        NewBatcher(),
 		cloudProvider:  cloudProvider,
 		kubeClient:     kubeClient,
 		volumeTopology: scheduler.NewVolumeTopology(kubeClient),
 		cluster:        cluster,
-		recorder:       recorder,
 		cm:             pretty.NewChangeMonitor(),
 	}
 	return p
@@ -278,7 +274,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	if err != nil {
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
-	return scheduler.NewScheduler(ctx, p.kubeClient, lo.ToSlicePtr(nodePoolList.Items), p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder), nil
+	return scheduler.NewScheduler(ctx, p.kubeClient, lo.ToSlicePtr(nodePoolList.Items), p.cluster, stateNodes, topology, instanceTypes, daemonSetPods), nil
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
@@ -326,7 +322,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	logging.FromContext(ctx).With("pods", pretty.Slice(lo.Map(pods, func(p *v1.Pod, _ int) string { return client.ObjectKeyFromObject(p).String() }), 5)).
 		With("duration", time.Since(start)).
 		Infof("found provisionable pod(s)")
-	results.Record(ctx, p.recorder, p.cluster)
+	results.Record(ctx, p.cluster)
 	return results, nil
 }
 
@@ -362,7 +358,7 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 	p.cluster.UpdateNodeClaim(nodeClaim)
 	if functional.ResolveOptions(opts...).RecordPodNomination {
 		for _, pod := range n.Pods {
-			p.recorder.Publish(scheduler.NominatePodEvent(pod, nil, nodeClaim))
+			eventrecorder.FromContext(ctx).Publish(scheduler.NominatePodEvent(pod, nil, nodeClaim))
 		}
 	}
 	return nodeClaim.Name, nil

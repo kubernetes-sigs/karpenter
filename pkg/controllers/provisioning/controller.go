@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/events"
 	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
@@ -40,15 +39,13 @@ var _ operatorcontroller.TypedController[*v1.Pod] = (*PodController)(nil)
 type PodController struct {
 	kubeClient  client.Client
 	provisioner *Provisioner
-	recorder    events.Recorder
 }
 
 // NewPodController constructs a controller instance
-func NewPodController(kubeClient client.Client, provisioner *Provisioner, recorder events.Recorder) operatorcontroller.Controller {
+func NewPodController(kubeClient client.Client, provisioner *Provisioner) operatorcontroller.Controller {
 	return operatorcontroller.Typed[*v1.Pod](kubeClient, &PodController{
 		kubeClient:  kubeClient,
 		provisioner: provisioner,
-		recorder:    recorder,
 	})
 }
 
@@ -83,15 +80,13 @@ var _ operatorcontroller.TypedController[*v1.Node] = (*NodeController)(nil)
 type NodeController struct {
 	kubeClient  client.Client
 	provisioner *Provisioner
-	recorder    events.Recorder
 }
 
 // NewNodeController constructs a controller instance
-func NewNodeController(kubeClient client.Client, provisioner *Provisioner, recorder events.Recorder) operatorcontroller.Controller {
+func NewNodeController(kubeClient client.Client, provisioner *Provisioner) operatorcontroller.Controller {
 	return operatorcontroller.Typed[*v1.Node](kubeClient, &NodeController{
 		kubeClient:  kubeClient,
 		provisioner: provisioner,
-		recorder:    recorder,
 	})
 }
 

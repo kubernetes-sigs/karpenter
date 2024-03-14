@@ -21,11 +21,11 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 
-	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
 )
 
-func EvictPod(pod *v1.Pod) events.Event {
-	return events.Event{
+func EvictPod(pod *v1.Pod) eventrecorder.Event {
+	return eventrecorder.Event{
 		InvolvedObject: pod,
 		Type:           v1.EventTypeNormal,
 		Reason:         "Evicted",
@@ -34,8 +34,8 @@ func EvictPod(pod *v1.Pod) events.Event {
 	}
 }
 
-func NodeFailedToDrain(node *v1.Node, err error) events.Event {
-	return events.Event{
+func NodeFailedToDrain(node *v1.Node, err error) eventrecorder.Event {
+	return eventrecorder.Event{
 		InvolvedObject: node,
 		Type:           v1.EventTypeWarning,
 		Reason:         "FailedDraining",

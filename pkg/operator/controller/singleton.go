@@ -29,6 +29,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/ratelimiter"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
+
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -49,17 +51,19 @@ func NewSingletonManagedBy(m manager.Manager) SingletonBuilder {
 }
 
 func (b SingletonBuilder) Complete(r Reconciler) error {
-	return b.mgr.Add(newSingleton(r))
+	return b.mgr.Add(newSingleton(r, eventrecorder.NewRecorder(b.mgr.GetEventRecorderFor(r.Name()))))
 }
 
 type Singleton struct {
 	Reconciler
+	recorder    eventrecorder.Recorder
 	rateLimiter ratelimiter.RateLimiter
 }
 
-func newSingleton(r Reconciler) *Singleton {
+func newSingleton(r Reconciler, recorder eventrecorder.Recorder) *Singleton {
 	s := &Singleton{
 		Reconciler:  r,
+		recorder:    recorder,
 		rateLimiter: workqueue.DefaultItemBasedRateLimiter(),
 	}
 	s.initMetrics()
@@ -82,6 +86,7 @@ var singletonRequest = reconcile.Request{}
 
 func (s *Singleton) Start(ctx context.Context) error {
 	ctx = injection.WithControllerName(ctx, s.Name())
+	ctx = eventrecorder.ToContext(ctx, s.recorder)
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(s.Name()))
 	logging.FromContext(ctx).Infof("starting controller")
 	defer logging.FromContext(ctx).Infof("stopping controller")

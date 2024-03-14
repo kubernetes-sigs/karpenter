@@ -40,7 +40,6 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/events"
 	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/result"
@@ -65,11 +64,11 @@ type Controller struct {
 	liveness       *Liveness
 }
 
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) operatorcontroller.Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) operatorcontroller.Controller {
 	return operatorcontroller.Typed[*v1beta1.NodeClaim](kubeClient, &Controller{
 		kubeClient: kubeClient,
 
-		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Minute, time.Second*10), recorder: recorder},
+		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Minute, time.Second*10)},
 		registration:   &Registration{kubeClient: kubeClient},
 		initialization: &Initialization{kubeClient: kubeClient},
 		liveness:       &Liveness{clock: clk, kubeClient: kubeClient},

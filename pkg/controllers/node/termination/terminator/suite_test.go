@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
@@ -58,7 +59,8 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
 	ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(true)}}))
 	recorder = test.NewEventRecorder()
-	queue = terminator.NewQueue(env.Client, recorder)
+	ctx = eventrecorder.ToContext(ctx, recorder)
+	queue = terminator.NewQueue(env.Client)
 })
 
 var _ = AfterSuite(func() {

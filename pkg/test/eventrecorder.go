@@ -21,16 +21,16 @@ import (
 
 	"github.com/samber/lo"
 
-	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
 )
 
-var _ events.Recorder = (*EventRecorder)(nil)
+var _ eventrecorder.Recorder = (*EventRecorder)(nil)
 
 // EventRecorder is a mock event recorder that is used to facilitate testing.
 type EventRecorder struct {
 	mu     sync.RWMutex
 	calls  map[string]int
-	events []events.Event
+	events []eventrecorder.Event
 }
 
 func NewEventRecorder() *EventRecorder {
@@ -39,7 +39,7 @@ func NewEventRecorder() *EventRecorder {
 	}
 }
 
-func (e *EventRecorder) Publish(evts ...events.Event) {
+func (e *EventRecorder) Publish(evts ...eventrecorder.Event) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.events = append(e.events, evts...)
@@ -61,12 +61,12 @@ func (e *EventRecorder) Reset() {
 	e.calls = map[string]int{}
 }
 
-func (e *EventRecorder) Events() (res []events.Event) {
+func (e *EventRecorder) Events() (res []eventrecorder.Event) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
 	for _, evt := range e.events {
-		res = append(res, events.Event{
+		res = append(res, eventrecorder.Event{
 			InvolvedObject: evt.InvolvedObject,
 			Type:           evt.Type,
 			Reason:         evt.Reason,
@@ -79,7 +79,7 @@ func (e *EventRecorder) Events() (res []events.Event) {
 	return res
 }
 
-func (e *EventRecorder) ForEachEvent(f func(evt events.Event)) {
+func (e *EventRecorder) ForEachEvent(f func(evt eventrecorder.Event)) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	for _, e := range e.events {
@@ -89,7 +89,7 @@ func (e *EventRecorder) ForEachEvent(f func(evt events.Event)) {
 
 func (e *EventRecorder) DetectedEvent(msg string) bool {
 	foundEvent := false
-	e.ForEachEvent(func(evt events.Event) {
+	e.ForEachEvent(func(evt eventrecorder.Event) {
 		if evt.Message == msg {
 			foundEvent = true
 		}

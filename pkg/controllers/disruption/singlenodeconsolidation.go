@@ -50,7 +50,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		consolidationTypeLabel: s.ConsolidationType(),
 	}).Set(float64(len(candidates)))
 
-	v := NewValidation(consolidationTTL, s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder, s.queue)
+	v := NewValidation(consolidationTTL, s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.queue)
 
 	// Set a timeout
 	timeout := s.clock.Now().Add(SingleNodeConsolidationTimeoutDuration)

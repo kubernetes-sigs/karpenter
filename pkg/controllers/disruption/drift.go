@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
@@ -38,15 +38,13 @@ type Drift struct {
 	kubeClient  client.Client
 	cluster     *state.Cluster
 	provisioner *provisioning.Provisioner
-	recorder    events.Recorder
 }
 
-func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder) *Drift {
+func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner) *Drift {
 	return &Drift{
 		kubeClient:  kubeClient,
 		cluster:     cluster,
 		provisioner: provisioner,
-		recorder:    recorder,
 	}
 }
 
@@ -107,7 +105,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 		}
 		// Emit an event that we couldn't reschedule the pods on the node.
 		if !results.AllNonPendingPodsScheduled() {
-			d.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
+			eventrecorder.FromContext(ctx).Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
 			continue
 		}
 

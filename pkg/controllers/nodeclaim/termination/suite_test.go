@@ -40,7 +40,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
-	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
@@ -70,8 +70,9 @@ var _ = BeforeSuite(func() {
 		})
 	}))
 	ctx = options.ToContext(ctx, test.Options())
+	ctx = eventrecorder.ToContext(ctx, eventrecorder.NewRecorder(&record.FakeRecorder{}))
 	cloudProvider = fake.NewCloudProvider()
-	nodeClaimLifecycleController = nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
+	nodeClaimLifecycleController = nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider)
 	nodeClaimTerminationController = nodeclaimtermination.NewController(env.Client, cloudProvider)
 })
 

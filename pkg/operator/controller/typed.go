@@ -28,6 +28,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
+
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 )
@@ -46,6 +48,7 @@ type FinalizingTypedController[T client.Object] interface {
 
 type typedDecorator[T client.Object] struct {
 	kubeClient      client.Client
+	recorder        eventrecorder.Recorder
 	typedController TypedController[T]
 }
 
@@ -70,6 +73,7 @@ func (t *typedDecorator[T]) Reconcile(ctx context.Context, req reconcile.Request
 		),
 	)
 	ctx = injection.WithControllerName(ctx, t.typedController.Name())
+	ctx = eventrecorder.ToContext(ctx, t.recorder)
 
 	if err := t.kubeClient.Get(ctx, req.NamespacedName, obj); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
@@ -82,5 +86,6 @@ func (t *typedDecorator[T]) Reconcile(ctx context.Context, req reconcile.Request
 }
 
 func (t *typedDecorator[T]) Builder(ctx context.Context, m manager.Manager) Builder {
+	t.recorder = eventrecorder.NewRecorder(m.GetEventRecorderFor(t.Name()))
 	return t.typedController.Builder(ctx, m)
 }

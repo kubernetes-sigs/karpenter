@@ -25,13 +25,13 @@ import (
 	"k8s.io/client-go/util/flowcontrol"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
 )
 
 // PodNominationRateLimiter is a pointer so it rate-limits across events
 var PodNominationRateLimiter = flowcontrol.NewTokenBucketRateLimiter(5, 10)
 
-func NominatePodEvent(pod *v1.Pod, node *v1.Node, nodeClaim *v1beta1.NodeClaim) events.Event {
+func NominatePodEvent(pod *v1.Pod, node *v1.Node, nodeClaim *v1beta1.NodeClaim) eventrecorder.Event {
 	var info []string
 	if nodeClaim != nil {
 		info = append(info, fmt.Sprintf("nodeclaim/%s", nodeClaim.GetName()))
@@ -39,7 +39,7 @@ func NominatePodEvent(pod *v1.Pod, node *v1.Node, nodeClaim *v1beta1.NodeClaim) 
 	if node != nil {
 		info = append(info, fmt.Sprintf("node/%s", node.Name))
 	}
-	return events.Event{
+	return eventrecorder.Event{
 		InvolvedObject: pod,
 		Type:           v1.EventTypeNormal,
 		Reason:         "Nominated",
@@ -49,8 +49,8 @@ func NominatePodEvent(pod *v1.Pod, node *v1.Node, nodeClaim *v1beta1.NodeClaim) 
 	}
 }
 
-func PodFailedToScheduleEvent(pod *v1.Pod, err error) events.Event {
-	return events.Event{
+func PodFailedToScheduleEvent(pod *v1.Pod, err error) eventrecorder.Event {
+	return eventrecorder.Event{
 		InvolvedObject: pod,
 		Type:           v1.EventTypeWarning,
 		Reason:         "FailedScheduling",

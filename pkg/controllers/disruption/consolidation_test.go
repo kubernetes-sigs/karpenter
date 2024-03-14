@@ -45,7 +45,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
-	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -536,11 +536,11 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			emptyConsolidation := disruption.NewEmptyNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
-			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
+			emptyConsolidation := disruption.NewEmptyNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, queue))
+			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client)
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, queue)
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, queue)
 			Expect(err).To(Succeed())
 
 			var wg sync.WaitGroup
@@ -600,11 +600,11 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			emptyConsolidation := disruption.NewEmptyNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
-			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
+			emptyConsolidation := disruption.NewEmptyNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, queue))
+			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client)
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, queue)
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, queue)
 			Expect(err).To(Succeed())
 
 			var wg sync.WaitGroup
@@ -627,11 +627,11 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			multiConsolidation := disruption.NewMultiNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
-			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
+			multiConsolidation := disruption.NewMultiNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, queue))
+			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client)
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, queue)
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, queue)
 			Expect(err).To(Succeed())
 
 			var wg sync.WaitGroup
@@ -691,11 +691,11 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			multiConsolidation := disruption.NewMultiNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
-			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
+			multiConsolidation := disruption.NewMultiNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, queue))
+			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client)
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, queue)
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, queue)
 			Expect(err).To(Succeed())
 
 			var wg sync.WaitGroup
@@ -718,11 +718,11 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			singleConsolidation := disruption.NewSingleNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
-			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
+			singleConsolidation := disruption.NewSingleNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, queue))
+			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client)
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, queue)
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, queue)
 			Expect(err).To(Succeed())
 
 			var wg sync.WaitGroup
@@ -782,11 +782,11 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			singleConsolidation := disruption.NewSingleNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
-			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
+			singleConsolidation := disruption.NewSingleNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, queue))
+			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client)
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, queue)
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, queue)
 			Expect(err).To(Succeed())
 
 			var wg sync.WaitGroup
@@ -1243,7 +1243,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 
 			// Expect Unconsolidatable events to be fired
-			_, ok := lo.Find(recorder.Events(), func(e events.Event) bool {
+			_, ok := lo.Find(recorder.Events(), func(e eventrecorder.Event) bool {
 				return strings.Contains(e.Message, fmt.Sprintf("SpotToSpotConsolidation requires %d cheaper instance type options than the current candidate to consolidate, got %d",
 					disruption.MinInstanceTypesForSpotToSpotConsolidation, 1))
 			})
@@ -1289,7 +1289,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 
 			// Expect Unconsolidatable events to be fired
-			_, ok := lo.Find(recorder.Events(), func(e events.Event) bool {
+			_, ok := lo.Find(recorder.Events(), func(e eventrecorder.Event) bool {
 				return strings.Contains(e.Message, "SpotToSpotConsolidation is disabled, can't replace a spot node with a spot node")
 			})
 			Expect(ok).To(BeTrue())
@@ -3200,11 +3200,11 @@ var _ = Describe("Consolidation", func() {
 
 			// Expect Unconsolidatable events to be fired
 			evts := recorder.Events()
-			_, ok := lo.Find(evts, func(e events.Event) bool {
+			_, ok := lo.Find(evts, func(e eventrecorder.Event) bool {
 				return strings.Contains(e.Message, "not all pods would schedule")
 			})
 			Expect(ok).To(BeTrue())
-			_, ok = lo.Find(evts, func(e events.Event) bool {
+			_, ok = lo.Find(evts, func(e eventrecorder.Event) bool {
 				return strings.Contains(e.Message, "would schedule against a non-initialized node")
 			})
 			Expect(ok).To(BeTrue())
@@ -3345,7 +3345,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, consolidatableNodeClaim)
 			// Expect no events that state that the pods would schedule against a non-initialized node
 			evts := recorder.Events()
-			_, ok := lo.Find(evts, func(e events.Event) bool {
+			_, ok := lo.Find(evts, func(e eventrecorder.Event) bool {
 				return strings.Contains(e.Message, "would schedule against a non-initialized node")
 			})
 			Expect(ok).To(BeFalse())

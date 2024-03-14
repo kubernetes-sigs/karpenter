@@ -37,6 +37,8 @@ import (
 	"k8s.io/utils/clock"
 	fakecr "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
+
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/logging"
@@ -46,7 +48,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/test"
 
 	v1 "k8s.io/api/core/v1"
@@ -142,6 +143,7 @@ func TestSchedulingProfile(t *testing.T) {
 func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	// disable logging
 	ctx = logging.WithLogger(context.Background(), zap.NewNop().Sugar())
+	ctx = eventrecorder.ToContext(ctx, eventrecorder.NewRecorder(&record.FakeRecorder{}))
 	nodePoolWithMinValues := test.NodePool(v1beta1.NodePool{
 		Spec: v1beta1.NodePoolSpec{
 			Template: v1beta1.NodeClaimTemplate{
@@ -176,8 +178,7 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 
 	scheduler := scheduling.NewScheduler(ctx, client, []*v1beta1.NodePool{nodePool},
 		cluster, nil, topology,
-		map[string][]*cloudprovider.InstanceType{nodePool.Name: instanceTypes}, nil,
-		events.NewRecorder(&record.FakeRecorder{}))
+		map[string][]*cloudprovider.InstanceType{nodePool.Name: instanceTypes}, nil)
 
 	b.ResetTimer()
 	// Pack benchmark

@@ -39,7 +39,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	nodeclaimgarbagecollection "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/garbagecollection"
 	nodeclaimlifcycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
-	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
@@ -69,9 +69,10 @@ var _ = BeforeSuite(func() {
 		})
 	}))
 	ctx = options.ToContext(ctx, test.Options())
+	ctx = eventrecorder.ToContext(ctx, eventrecorder.NewRecorder(&record.FakeRecorder{}))
 	cloudProvider = fake.NewCloudProvider()
 	garbageCollectionController = nodeclaimgarbagecollection.NewController(fakeClock, env.Client, cloudProvider)
-	nodeClaimController = nodeclaimlifcycle.NewController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
+	nodeClaimController = nodeclaimlifcycle.NewController(fakeClock, env.Client, cloudProvider)
 })
 
 var _ = AfterSuite(func() {

@@ -31,7 +31,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/eventrecorder"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
@@ -42,16 +42,14 @@ type Expiration struct {
 	kubeClient  client.Client
 	cluster     *state.Cluster
 	provisioner *provisioning.Provisioner
-	recorder    events.Recorder
 }
 
-func NewExpiration(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder) *Expiration {
+func NewExpiration(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner) *Expiration {
 	return &Expiration{
 		clock:       clk,
 		kubeClient:  kubeClient,
 		cluster:     cluster,
 		provisioner: provisioner,
-		recorder:    recorder,
 	}
 }
 
@@ -113,7 +111,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping
 		}
 		// Emit an event that we couldn't reschedule the pods on the node.
 		if !results.AllNonPendingPodsScheduled() {
-			e.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
+			eventrecorder.FromContext(ctx).Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
 			continue
 		}
 		logging.FromContext(ctx).With("ttl", candidates[0].nodePool.Spec.Disruption.ExpireAfter.String()).Infof("triggering termination for expired node after TTL")
