@@ -98,7 +98,7 @@ var _ = Describe("Budgets", func() {
 				Expect(disruptions).To(Equal(math.MaxInt32))
 			}
 		})
-		It("should only return the empty reasons budgets for all actions when per reason budgets are undefined", func() {
+		It("should ignore reason-defined budgets when inactive", func() {
 			budgets[3].Schedule = lo.ToPtr("@yearly")
 			budgets[4].Schedule = lo.ToPtr("@yearly")
 			disruptionsByReason, err := nodePool.GetAllowedDisruptionsByReason(ctx, fakeClock, 100)
