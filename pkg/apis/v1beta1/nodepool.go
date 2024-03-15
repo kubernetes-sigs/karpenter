@@ -259,7 +259,7 @@ func (in *NodePool) MustGetAllowedDisruptions(ctx context.Context, c clock.Clock
 	return allowedDisruptions
 }
 
-// GetAllowedDisruptionsByMethod returns the minimum allowed disruptions across all disruption budgets, for all disruption methods for a given nodepool
+// GetAllowedDisruptionsByReason returns the minimum allowed disruptions across all disruption budgets, for all disruption methods for a given nodepool
 func (in *NodePool) GetAllowedDisruptionsByReason(ctx context.Context, c clock.Clock, numNodes int) (map[DisruptionReason]int, error) {
 	allowedDisruptions := map[DisruptionReason]int{}
 	for _, reason := range DisruptionReasons {
