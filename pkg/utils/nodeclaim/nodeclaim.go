@@ -31,7 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 // PodEventHandler is a watcher on v1.Pods that maps Pods to NodeClaim based on the node names
@@ -168,38 +167,6 @@ func AllNodesForNodeClaim(ctx context.Context, c client.Client, nodeClaim *v1bet
 		return nil, fmt.Errorf("listing nodes, %w", err)
 	}
 	return lo.ToSlicePtr(nodeList.Items), nil
-}
-
-// NewFromNode converts a node into a pseudo-NodeClaim using known values from the node
-// Deprecated: This NodeClaim generator function can be removed when v1beta1 migration has completed.
-func NewFromNode(node *v1.Node) *v1beta1.NodeClaim {
-	nc := &v1beta1.NodeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        node.Name,
-			Annotations: node.Annotations,
-			Labels:      node.Labels,
-			Finalizers:  []string{v1beta1.TerminationFinalizer},
-		},
-		Spec: v1beta1.NodeClaimSpec{
-			Taints:       node.Spec.Taints,
-			Requirements: scheduling.NewLabelRequirements(node.Labels).NodeSelectorRequirements(),
-			Resources: v1beta1.ResourceRequirements{
-				Requests: node.Status.Allocatable,
-			},
-		},
-		Status: v1beta1.NodeClaimStatus{
-			NodeName:    node.Name,
-			ProviderID:  node.Spec.ProviderID,
-			Capacity:    node.Status.Capacity,
-			Allocatable: node.Status.Allocatable,
-		},
-	}
-	if _, ok := node.Labels[v1beta1.NodeInitializedLabelKey]; ok {
-		nc.StatusConditions().MarkTrue(v1beta1.Initialized)
-	}
-	nc.StatusConditions().MarkTrue(v1beta1.Launched)
-	nc.StatusConditions().MarkTrue(v1beta1.Registered)
-	return nc
 }
 
 func UpdateNodeOwnerReferences(nodeClaim *v1beta1.NodeClaim, node *v1.Node) *v1.Node {
