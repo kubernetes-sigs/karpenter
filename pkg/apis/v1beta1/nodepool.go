@@ -271,8 +271,8 @@ func (in *NodePool) GetAllowedDisruptionsByReason(ctx context.Context, c clock.C
 		if err != nil {
 			return nil, err
 		}
-		reasons := lo.Ternary(budget.Reasons == nil, DisruptionReasons, budget.Reasons)
-		for _, reason := range reasons {
+                 // If reasons is nil, it applies to all well known disruption reasons
+		for _, reason := range lo.Ternary(budget.Reasons == nil, WellKnownDisruptionReasons, budget.Reasons) {
 			allowedDisruptions[reason] = lo.Min([]int{allowedDisruptions[reason], val})
 		}
 	}
