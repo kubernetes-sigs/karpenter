@@ -153,7 +153,7 @@ const (
 
 var (
 	// DisruptionReasons is a list of all valid reasons for disruption budgets.
-	DisruptionReasons = []DisruptionReason{DisruptionReasonUnderutilized, DisruptionReasonExpired, DisruptionReasonEmpty, DisruptionReasonDrifted}
+	WellKnownDisruptionReasons = []DisruptionReason{DisruptionReasonUnderutilized, DisruptionReasonExpired, DisruptionReasonEmpty, DisruptionReasonDrifted}
 )
 
 type Limits v1.ResourceList
