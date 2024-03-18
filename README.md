@@ -31,6 +31,8 @@ also feel free to reach out to discuss.
 
 See also our [contributor guide](CONTRIBUTING.md) and the Kubernetes [community page](https://kubernetes.io/community) for more details on how to get involved.
 
+If you want to use Karpenter to your own cloud provider, see [Porting Karpenter to your cloud provider](docs/port-karpenter-on-our-cloud.md).
+
 ### Code of conduct
 
 Participation in the Kubernetes community is governed by the [Kubernetes Code of Conduct](code-of-conduct.md).
