@@ -539,6 +539,9 @@ var _ = Describe("Termination", func() {
 			pods := test.Pods(2, test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
 			ExpectApplied(ctx, env.Client, node, pods[0], pods[1])
 
+			// Make Node NotReady since it's automatically marked as Ready on first deploy
+			ExpectMakeNodesNotReady(ctx, env.Client, node)
+
 			// Trigger Termination Controller
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
@@ -564,6 +567,37 @@ var _ = Describe("Termination", func() {
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 			ExpectNotFound(ctx, env.Client, node)
+		})
+		It("should not delete nodes with no underlying instance if the node is still Ready", func() {
+			pods := test.Pods(2, test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
+			ExpectApplied(ctx, env.Client, node, pods[0], pods[1])
+
+			// Trigger Termination Controller
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
+
+			// Expect the pods to be evicted
+			EventuallyExpectTerminating(ctx, env.Client, pods[0], pods[1])
+
+			// Expect node to exist and be draining, but not deleted
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
+
+			// After this, the node still has one pod that is evicting.
+			ExpectDeleted(ctx, env.Client, pods[1])
+
+			// Remove the node from created nodeclaims so that the cloud provider returns DNE
+			cloudProvider.CreatedNodeClaims = map[string]*v1beta1.NodeClaim{}
+
+			// Reconcile to try to delete the node, but don't succeed because the readiness condition
+			// of the node still won't let us delete it
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectNodeExists(ctx, env.Client, node.Name)
 		})
 		It("should wait for pods to terminate", func() {
 			pod := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})

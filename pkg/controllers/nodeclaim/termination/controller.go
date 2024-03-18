@@ -74,9 +74,12 @@ func (c *Controller) Finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 		return reconcile.Result{}, err
 	}
 	for _, node := range nodes {
-		// We delete nodes to trigger the node finalization and deletion flow
-		if err = c.kubeClient.Delete(ctx, node); client.IgnoreNotFound(err) != nil {
-			return reconcile.Result{}, err
+		// If we still get the Node, but it's already marked as terminating, we don't need to call Delete again
+		if node.DeletionTimestamp.IsZero() {
+			// We delete nodes to trigger the node finalization and deletion flow
+			if err = c.kubeClient.Delete(ctx, node); client.IgnoreNotFound(err) != nil {
+				return reconcile.Result{}, err
+			}
 		}
 	}
 	// We wait until all the nodes associated with this nodeClaim have completed their deletion before triggering the finalization of the nodeClaim

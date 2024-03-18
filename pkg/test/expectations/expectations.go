@@ -275,7 +275,7 @@ func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *s
 		}
 		nodeClaim := &v1beta1.NodeClaim{}
 		Expect(c.Get(ctx, types.NamespacedName{Name: nodeClaimName}, nodeClaim)).To(Succeed())
-		nodeClaim, node := ExpectNodeClaimDeployed(ctx, c, cluster, cloudProvider, nodeClaim)
+		nodeClaim, node := ExpectNodeClaimDeployedAndStateUpdated(ctx, c, cluster, cloudProvider, nodeClaim)
 		if nodeClaim != nil && node != nil {
 			for _, pod := range m.Pods {
 				bindings[pod] = &Binding{
@@ -298,8 +298,9 @@ func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *s
 	return bindings
 }
 
-func ExpectNodeClaimDeployedNoNode(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, nc *v1beta1.NodeClaim) (*v1beta1.NodeClaim, error) {
+func ExpectNodeClaimDeployedNoNode(ctx context.Context, c client.Client, cloudProvider cloudprovider.CloudProvider, nc *v1beta1.NodeClaim) (*v1beta1.NodeClaim, error) {
 	GinkgoHelper()
+
 	resolved, err := cloudProvider.Create(ctx, nc)
 	// TODO @joinnis: Check this error rather than swallowing it. This is swallowed right now due to how we are doing some testing in the cloudprovider
 	if err != nil {
@@ -311,15 +312,15 @@ func ExpectNodeClaimDeployedNoNode(ctx context.Context, c client.Client, cluster
 	nc = lifecycle.PopulateNodeClaimDetails(nc, resolved)
 	nc.StatusConditions().MarkTrue(v1beta1.Launched)
 	ExpectApplied(ctx, c, nc)
-	cluster.UpdateNodeClaim(nc)
 	return nc, nil
 }
 
-func ExpectNodeClaimDeployed(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, nc *v1beta1.NodeClaim) (*v1beta1.NodeClaim, *v1.Node) {
+func ExpectNodeClaimDeployed(ctx context.Context, c client.Client, cloudProvider cloudprovider.CloudProvider, nc *v1beta1.NodeClaim) (*v1beta1.NodeClaim, *v1.Node, error) {
 	GinkgoHelper()
-	nc, err := ExpectNodeClaimDeployedNoNode(ctx, c, cluster, cloudProvider, nc)
+
+	nc, err := ExpectNodeClaimDeployedNoNode(ctx, c, cloudProvider, nc)
 	if err != nil {
-		return nc, nil
+		return nc, nil, err
 	}
 	nc.StatusConditions().MarkTrue(v1beta1.Registered)
 
@@ -327,8 +328,18 @@ func ExpectNodeClaimDeployed(ctx context.Context, c client.Client, cluster *stat
 	node := test.NodeClaimLinkedNode(nc)
 	node.Labels = lo.Assign(node.Labels, map[string]string{v1beta1.NodeRegisteredLabelKey: "true"})
 	ExpectApplied(ctx, c, nc, node)
-	Expect(cluster.UpdateNode(ctx, node)).To(Succeed())
+	return nc, node, nil
+}
+
+func ExpectNodeClaimDeployedAndStateUpdated(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, nc *v1beta1.NodeClaim) (*v1beta1.NodeClaim, *v1.Node) {
+	GinkgoHelper()
+
+	nc, node, err := ExpectNodeClaimDeployed(ctx, c, cloudProvider, nc)
 	cluster.UpdateNodeClaim(nc)
+	if err != nil {
+		return nc, nil
+	}
+	Expect(cluster.UpdateNode(ctx, node)).To(Succeed())
 	return nc, node
 }
 
