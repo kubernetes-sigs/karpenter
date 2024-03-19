@@ -56,7 +56,7 @@ provider created ressource in order to be able to filter them out in the `List` 
 ### Delete method
 
 `Delete` method will receive a NodeClaim object and must implement the logic to Terminate a compute
-ressource. You don't need to manage the `Node` object, Karpenter engine will do it for you.
+resource. You don't need to manage the `Node` object, Karpenter engine will do it for you.
 
 ### Get method
 
