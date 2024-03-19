@@ -103,7 +103,7 @@ type Budget struct {
 	// If omitted, it will apply to all well-known disruption reasons. Otherwise, this will apply to each reason defined.
 	// allowed reasons are underutilized, expired, empty, and drifted.
 	// +optional
-	Reasons []DisruptionReason `json:"reasons"`
+	Reasons []DisruptionReason `json:"reasons,omitempty"`
 	// Nodes dictates the maximum number of NodeClaims owned by this NodePool
 	// that can be terminating at once. This is calculated by counting nodes that
 	// have a deletion timestamp set, or are actively being deleted by Karpenter.

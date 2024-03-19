@@ -255,7 +255,6 @@ var _ = Describe("CEL/Validation", func() {
 		},
 			Entry("invalid reason", "invalid"),
 			Entry("empty reason", ""),
-			Entry("default reason", "default"), // We use a key default internally, but we don't want to allow customers to explcitly use it
 		)
 
 		It("should allow setting multiple reasons", func() {

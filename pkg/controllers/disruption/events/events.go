@@ -124,7 +124,6 @@ func Blocked(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) (evs []
 	return evs
 }
 
-
 func NodePoolBlockedForDisruptionReason(nodePool *v1beta1.NodePool, reason v1beta1.DisruptionReason) events.Event {
 	return events.Event{
 		InvolvedObject: nodePool,
