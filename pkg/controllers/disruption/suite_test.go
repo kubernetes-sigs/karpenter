@@ -645,7 +645,7 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 		Expect(err).To(Succeed())
 		// This should not bring in the unmanaged node.
-		for _, reason := range v1beta1.DisruptionReasons {
+		for _, reason := range v1beta1.WellKnownDisruptionReasons {
 			Expect(budgets[nodePool.Name][reason]).To(Equal(10))
 		}
 	})
@@ -676,7 +676,7 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 		Expect(err).To(Succeed())
 		// This should not bring in the uninitialized node.
-		for _, reason := range v1beta1.DisruptionReasons {
+		for _, reason := range v1beta1.WellKnownDisruptionReasons {
 			Expect(budgets[nodePool.Name][reason]).To(Equal(10))
 		}
 	})
@@ -697,7 +697,7 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 
 		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 		Expect(err).To(Succeed())
-		for _, reason := range v1beta1.DisruptionReasons {
+		for _, reason := range v1beta1.WellKnownDisruptionReasons {
 			Expect(budgets[nodePool.Name][reason]).To(Equal(0))
 		}
 	})
@@ -722,7 +722,7 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 		Expect(err).To(Succeed())
 
-		for _, reason := range v1beta1.DisruptionReasons {
+		for _, reason := range v1beta1.WellKnownDisruptionReasons {
 			Expect(budgets[nodePool.Name][reason]).To(Equal(8))
 		}
 	})
@@ -743,7 +743,7 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 
 		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 		Expect(err).To(Succeed())
-		for _, reason := range v1beta1.DisruptionReasons {
+		for _, reason := range v1beta1.WellKnownDisruptionReasons {
 			Expect(budgets[nodePool.Name][reason]).To(Equal(8))
 		}
 	})
