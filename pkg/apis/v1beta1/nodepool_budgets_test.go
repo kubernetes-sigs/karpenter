@@ -107,7 +107,7 @@ var _ = Describe("Budgets", func() {
 				Expect(disruptions).To(Equal(10))
 			}
 		})
-		It("should return the budget", func() {
+		It("should return the budget for all disruption reasons when undefined", func() {
 			nodePool.Spec.Disruption.Budgets = budgets[:1]
 			Expect(len(nodePool.Spec.Disruption.Budgets)).To(Equal(1))
 			disruptionsByReason, err := nodePool.GetAllowedDisruptionsByReason(ctx, fakeClock, 100)
