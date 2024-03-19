@@ -100,7 +100,7 @@ type Disruption struct {
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
 	// Reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
-	// If omitted, it will apply to all well-known disruption reasons. Otherwise, this will apply to each reason defined. 
+	// If omitted, it will apply to all well-known disruption reasons. Otherwise, this will apply to each reason defined.
 	// allowed reasons are underutilized, expired, empty, and drifted.
 	// +optional
 	Reasons []DisruptionReason `json:"reasons"`
@@ -262,7 +262,7 @@ func (in *NodePool) MustGetAllowedDisruptions(ctx context.Context, c clock.Clock
 // GetAllowedDisruptionsByReason returns the minimum allowed disruptions across all disruption budgets, for all disruption methods for a given nodepool
 func (in *NodePool) GetAllowedDisruptionsByReason(ctx context.Context, c clock.Clock, numNodes int) (map[DisruptionReason]int, error) {
 	allowedDisruptions := map[DisruptionReason]int{}
-	for _, reason := range DisruptionReasons {
+	for _, reason := range WellKnownDisruptionReasons {
 		allowedDisruptions[reason] = math.MaxInt32
 	}
 
@@ -271,7 +271,7 @@ func (in *NodePool) GetAllowedDisruptionsByReason(ctx context.Context, c clock.C
 		if err != nil {
 			return nil, err
 		}
-                 // If reasons is nil, it applies to all well known disruption reasons
+		// If reasons is nil, it applies to all well known disruption reasons
 		for _, reason := range lo.Ternary(budget.Reasons == nil, WellKnownDisruptionReasons, budget.Reasons) {
 			allowedDisruptions[reason] = lo.Min([]int{allowedDisruptions[reason], val})
 		}

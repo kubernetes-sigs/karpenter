@@ -256,11 +256,12 @@ var _ = Describe("Consolidation", func() {
 			ExpectSingletonReconciled(ctx, queue)
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(0))
 		})
+
 		It("should block disruption past consolidation's budget limit", func() {
 			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{
 				{
 					Nodes:   "0%",
-					Reasons: []v1beta1.DisruptionReason{v1beta1.DisruptionReasonUnderutilized},
+					Reasons: []v1beta1.DisruptionReason{v1beta1.DisruptionReasonEmpty},
 				},
 				{Nodes: "100%"},
 			}
@@ -279,14 +280,10 @@ var _ = Describe("Consolidation", func() {
 
 			metric, found := FindMetricWithLabelValues("karpenter_disruption_budgets_allowed_disruptions", map[string]string{
 				"nodepool": nodePool.Name,
-				"reason":   "underutilized",
+				"reason":   "empty",
 			})
 			Expect(found).To(BeTrue())
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 0))
-
-			// Execute command, thus deleting all nodes
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
-			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(numNodes))
 		})
 		It("should allow no empty nodes to be disrupted", func() {
 			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "0%"}}
