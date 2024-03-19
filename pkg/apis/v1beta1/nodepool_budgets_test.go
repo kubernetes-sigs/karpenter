@@ -117,7 +117,7 @@ var _ = Describe("Budgets", func() {
 				Expect(disruptions).To(Equal(10))
 			}
 		})
-		It("should get the minimum by reason", func() {
+		It("should get the minimum budget for each reason", func() {
 			disruptionsByReason, err := nodePool.GetAllowedDisruptionsByReason(ctx, fakeClock, 100)
 			Expect(err).To(BeNil())
 			Expect(disruptionsByReason[DisruptionReasonDrifted]).To(Equal(5))
