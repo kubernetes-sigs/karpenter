@@ -50,7 +50,7 @@ the one you use don't handle this field, you should create a `Node` object with 
 directly in this call.
 
 A good idea, if your cloud provider support it, is to add a tag related to cluster context on the cloud
-provider created ressource in order to be able to filter them out in the `List` method
+provider created resource in order to be able to filter them out in the `List` method
 (ie. `karpenter.sh/cluster-name` tag).
 
 ### Delete method
