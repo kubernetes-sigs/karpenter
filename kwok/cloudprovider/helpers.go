@@ -34,7 +34,7 @@ import (
 
 var (
 	// AWS uses (family).(size) format
-	awsRegexp = regexp.MustCompile(`.*\.(nano|micro|small|medium|large|\d*xlarge|metal)`)
+	awsRegexp = regexp.MustCompile(`^\w+\.(nano|micro|small|medium|large|\d*xlarge|metal)$`)
 
 	familyDelim = regexp.MustCompile(`[.-]`)
 )
@@ -52,7 +52,7 @@ type InstanceTypeOptions struct {
 	instanceTypeLabels map[string]string
 }
 
-//go:embed generic_instance_types.json
+//go:embed instance_types.json
 var rawInstanceTypes []byte
 
 // ConstructInstanceTypes create many instance types based on the embedded instance type data

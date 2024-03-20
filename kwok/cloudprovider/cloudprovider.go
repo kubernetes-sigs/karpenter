@@ -154,9 +154,7 @@ func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
 			return nil, fmt.Errorf("instance type %s not found", val)
 		}
 
-		availableOfferings := lo.Filter(it.Offerings.Available(), func(of cloudprovider.Offering, _ int) bool {
-			return offeringMatchesNodeClaimRequirements(&of, &requirements)
-		})
+		availableOfferings := it.Offerings.Available().Compatible(requirements)
 
 		offeringsByPrice := lo.GroupBy(availableOfferings, func(of cloudprovider.Offering) float64 { return of.Price })
 		minOfferingPrice := lo.Min(lo.Keys(offeringsByPrice))
@@ -181,18 +179,6 @@ func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
 			Phase:       v1.NodePending,
 		},
 	}, nil
-}
-
-func offeringMatchesNodeClaimRequirements(of *cloudprovider.Offering, ncRequirements *scheduling.Requirements) bool {
-	if !ncRequirements.Get(v1beta1.CapacityTypeLabelKey).Has(of.CapacityType) {
-		return false
-	}
-
-	if !ncRequirements.Get(v1.LabelTopologyZone).Has(of.Zone) {
-		return false
-	}
-
-	return true
 }
 
 func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.InstanceType, nodeClaim *v1beta1.NodeClaim, offering *cloudprovider.Offering) map[string]string {
