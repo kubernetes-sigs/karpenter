@@ -100,12 +100,12 @@ type KubeletConfiguration struct {
 	// +kubebuilder:validation:XValidation:message="valid keys for systemReserved are ['cpu','memory','ephemeral-storage','pid']",rule="self.all(x, x=='cpu' || x=='memory' || x=='ephemeral-storage' || x=='pid')"
 	// +kubebuilder:validation:XValidation:message="systemReserved value cannot be a negative resource quantity",rule="self.all(x, !self[x].startsWith('-'))"
 	// +optional
-	SystemReserved v1.ResourceList `json:"systemReserved,omitempty"`
+	SystemReserved map[string]string `json:"systemReserved,omitempty"`
 	// KubeReserved contains resources reserved for Kubernetes system components.
 	// +kubebuilder:validation:XValidation:message="valid keys for kubeReserved are ['cpu','memory','ephemeral-storage','pid']",rule="self.all(x, x=='cpu' || x=='memory' || x=='ephemeral-storage' || x=='pid')"
 	// +kubebuilder:validation:XValidation:message="kubeReserved value cannot be a negative resource quantity",rule="self.all(x, !self[x].startsWith('-'))"
 	// +optional
-	KubeReserved v1.ResourceList `json:"kubeReserved,omitempty"`
+	KubeReserved map[string]string `json:"kubeReserved,omitempty"`
 	// EvictionHard is the map of signal names to quantities that define hard eviction thresholds
 	// +kubebuilder:validation:XValidation:message="valid keys for evictionHard are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']",rule="self.all(x, x in ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available'])"
 	// +optional

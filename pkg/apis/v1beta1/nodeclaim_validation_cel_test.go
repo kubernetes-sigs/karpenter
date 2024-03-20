@@ -21,8 +21,6 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/resource"
-
 	"github.com/Pallinder/go-randomdata"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -220,16 +218,16 @@ var _ = Describe("Validation", func() {
 	Context("Kubelet", func() {
 		It("should fail on kubeReserved with invalid keys", func() {
 			nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-				KubeReserved: v1.ResourceList{
-					v1.ResourcePods: resource.MustParse("2"),
+				KubeReserved: map[string]string{
+					string(v1.ResourcePods): "2",
 				},
 			}
 			Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
 		})
 		It("should fail on systemReserved with invalid keys", func() {
 			nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-				SystemReserved: v1.ResourceList{
-					v1.ResourcePods: resource.MustParse("2"),
+				SystemReserved: map[string]string{
+					string(v1.ResourcePods): "2",
 				},
 			}
 			Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
