@@ -54,39 +54,6 @@ can specify a custom set of instance types by providing a JSON file with the lis
 This set of instance types is embedded into the binary in `kwok/cloudprovider/helpers.go`; if you want to change the
 instance types that Karpenter+KWOK support, you will need to adjust the embedded data and recompile.
 
-The format for this file is as follows:
-
-```
-[
-    {
-        "name": "<instance type name>",
-        "offerings": {
-            // Karpenter instance type offerings,
-        },
-        "architecture": "(arm64|amd64)",
-        "operatingSystems": {
-            "linux": {}
-        },
-        "resources": {
-            "cpu": "<cpu count>",
-            "memory": "<memory amount>",
-            // ...
-        }
-    },
-    // ...
-]
-```
-
-The offerings struct has the following format:
-
-```
-{
-    "capacityType": "(on-demand|spot)",
-    "zone": "<zone or region name>",
-    "price": <instance type price>,
-}
-```
-
 There is an example instance types file in [examples/instance\_types.json](examples/instance_types.json).
 
 ## Notes
