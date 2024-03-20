@@ -92,7 +92,7 @@ func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1beta1.NodeClai
 		v1beta1.NodeRegisteredLabelKey: "true",
 	})
 	if !equality.Semantic.DeepEqual(stored, node) {
-		if err := r.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+		if err := r.kubeClient.Patch(ctx, node, client.StrategicMergeFrom(stored)); err != nil {
 			return fmt.Errorf("syncing node labels, %w", err)
 		}
 	}

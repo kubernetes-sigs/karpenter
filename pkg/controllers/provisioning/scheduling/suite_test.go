@@ -2387,10 +2387,11 @@ var _ = Context("Scheduling", func() {
 				})
 				ExpectApplied(ctx, env.Client, nc)
 				if i == elem {
-					nc, node = ExpectNodeClaimDeployed(ctx, env.Client, cluster, cloudProvider, nc)
+					nc, node = ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
 				} else {
 					var err error
-					nc, err = ExpectNodeClaimDeployedNoNode(ctx, env.Client, cluster, cloudProvider, nc)
+					nc, err = ExpectNodeClaimDeployedNoNode(ctx, env.Client, cloudProvider, nc)
+					cluster.UpdateNodeClaim(nc)
 					Expect(err).ToNot(HaveOccurred())
 				}
 				nodeClaims = append(nodeClaims, nc)
@@ -2481,7 +2482,7 @@ var _ = Context("Scheduling", func() {
 					},
 				})
 				ExpectApplied(ctx, env.Client, nc)
-				nc, n := ExpectNodeClaimDeployed(ctx, env.Client, cluster, cloudProvider, nc)
+				nc, n := ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
 				nodeClaims = append(nodeClaims, nc)
 				nodes = append(nodes, n)
 			}

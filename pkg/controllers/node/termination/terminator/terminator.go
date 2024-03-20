@@ -69,7 +69,7 @@ func (t *Terminator) Taint(ctx context.Context, node *v1.Node) error {
 		v1.LabelNodeExcludeBalancers: "karpenter",
 	})
 	if !equality.Semantic.DeepEqual(node, stored) {
-		if err := t.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+		if err := t.kubeClient.Patch(ctx, node, client.StrategicMergeFrom(stored)); err != nil {
 			return err
 		}
 		logging.FromContext(ctx).Infof("tainted node")
