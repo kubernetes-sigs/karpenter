@@ -15,6 +15,11 @@ Karpenter improves the efficiency and cost of running workloads on Kubernetes cl
 * **Provisioning** nodes that meet the requirements of the pods
 * **Removing** the nodes when the nodes are no longer needed
 
+## Supported CloudProviders 
+Karpenter is a multi-cloud project supported on the following cloud providers 
+- [AWS](https://github.com/aws/karpenter-provider-aws)
+- [Azure](https://github.com/Azure/karpenter-provider-azure)
+
 ## Community, discussion, contribution, and support
 
 If you have any questions or want to get the latest project news, you can connect with us in the following ways:
