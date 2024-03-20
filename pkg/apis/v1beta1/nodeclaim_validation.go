@@ -221,13 +221,17 @@ func (in *KubeletConfiguration) validateEvictionSoftPairs() (errs *apis.FieldErr
 	return errs
 }
 
-func validateReservedResources(m v1.ResourceList, fieldName string) (errs *apis.FieldError) {
+func validateReservedResources(m map[string]string, fieldName string) (errs *apis.FieldError) {
 	for k, v := range m {
-		if !SupportedReservedResources.Has(k.String()) {
-			errs = errs.Also(apis.ErrInvalidKeyName(k.String(), fieldName))
+		if !SupportedReservedResources.Has(k) {
+			errs = errs.Also(apis.ErrInvalidKeyName(k, fieldName))
 		}
-		if v.Value() < 0 {
-			errs = errs.Also(apis.ErrInvalidValue(v.String(), fmt.Sprintf(`%s["%s"]`, fieldName, k), "Value cannot be a negative resource quantity"))
+		quantity, err := resource.ParseQuantity(v)
+		if err != nil {
+			errs = errs.Also(apis.ErrInvalidValue(v, fmt.Sprintf(`%s["%s"]`, fieldName, k), "Value must be a quantity value"))
+		}
+		if quantity.Value() < 0 {
+			errs = errs.Also(apis.ErrInvalidValue(v, fmt.Sprintf(`%s["%s"]`, fieldName, k), "Value cannot be a negative resource quantity"))
 		}
 	}
 	return errs

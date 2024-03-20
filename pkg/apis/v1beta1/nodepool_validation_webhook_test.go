@@ -392,16 +392,16 @@ var _ = Describe("Webhook/Validation", func() {
 		Context("KubeletConfiguration", func() {
 			It("should fail on kubeReserved with invalid keys", func() {
 				nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-					KubeReserved: v1.ResourceList{
-						v1.ResourcePods: resource.MustParse("2"),
+					KubeReserved: map[string]string{
+						string(v1.ResourcePods): "2",
 					},
 				}
 				Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 			})
 			It("should fail on systemReserved with invalid keys", func() {
 				nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-					SystemReserved: v1.ResourceList{
-						v1.ResourcePods: resource.MustParse("2"),
+					SystemReserved: map[string]string{
+						string(v1.ResourcePods): "2",
 					},
 				}
 				Expect(nodePool.Validate(ctx)).ToNot(Succeed())

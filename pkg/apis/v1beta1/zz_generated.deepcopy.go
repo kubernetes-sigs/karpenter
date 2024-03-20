@@ -101,16 +101,16 @@ func (in *KubeletConfiguration) DeepCopyInto(out *KubeletConfiguration) {
 	}
 	if in.SystemReserved != nil {
 		in, out := &in.SystemReserved, &out.SystemReserved
-		*out = make(v1.ResourceList, len(*in))
+		*out = make(map[string]string, len(*in))
 		for key, val := range *in {
-			(*out)[key] = val.DeepCopy()
+			(*out)[key] = val
 		}
 	}
 	if in.KubeReserved != nil {
 		in, out := &in.KubeReserved, &out.KubeReserved
-		*out = make(v1.ResourceList, len(*in))
+		*out = make(map[string]string, len(*in))
 		for key, val := range *in {
-			(*out)[key] = val.DeepCopy()
+			(*out)[key] = val
 		}
 	}
 	if in.EvictionHard != nil {
