@@ -24,6 +24,7 @@ import (
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/util/workqueue"
 	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -63,6 +64,7 @@ func (c *Controller) Reconcile(_ context.Context, _ *v1beta1.NodeClaim) (reconci
 	return reconcile.Result{}, nil
 }
 
+//nolint:gocyclo
 func (c *Controller) Finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", nodeClaim.Status.NodeName, "provider-id", nodeClaim.Status.ProviderID))
 	stored := nodeClaim.DeepCopy()
@@ -93,7 +95,10 @@ func (c *Controller) Finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 	}
 	controllerutil.RemoveFinalizer(nodeClaim, v1beta1.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
-		if err = c.kubeClient.Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
+		if err = c.kubeClient.Update(ctx, nodeClaim); err != nil {
+			if errors.IsConflict(err) {
+				return reconcile.Result{Requeue: true}, nil
+			}
 			return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("removing termination finalizer, %w", err))
 		}
 		logging.FromContext(ctx).Infof("deleted nodeclaim")
