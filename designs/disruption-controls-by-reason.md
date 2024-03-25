@@ -14,8 +14,7 @@
       3. [Fully Blocking Drift and Expiration while Allowing Emptiness](#fully-blocking-drift-and-expiration-while-allowing-emptiness)
       4. [Limiting Drift & Expiration while Allowing Aggressive but Not Unbounded Consolidation](#limiting-drift--expiration-while-allowing-aggressive-but-not-unbounded-consolidation)
       5. [Limiting Cost Saving Disruption to Occur During Weekends](#limiting-cost-saving-disruption-to-occur-during-weekends)
-      6. [Which Equation Best Covers All the Scenarios?](#which-equation-best-covers-all-the-scenarios)
-      7. [How Should We Handle an Unspecified Reason When Others are Specified?](#how-should-we-handle-an-unspecified-reason-when-others-are-specified)
+      6. [How Should We Handle an Unspecified Reason When Others are Specified?](#how-should-we-handle-an-unspecified-reason-when-others-are-specified)
 
 ## User Scenarios 
 1. Users need the capability to schedule upgrades only during business hours or within more restricted time windows. Additionally, they require a system that doesn't compromise the cost savings from consolidation when upgrades are blocked due to drift.
@@ -25,6 +24,8 @@ See Less Made Up Scenarios here:
 - https://github.com/kubernetes-sigs/karpenter/issues/924 
 - https://github.com/kubernetes-sigs/karpenter/issues/753#issuecomment-1790110838
 - https://github.com/kubernetes-sigs/karpenter/issues/672
+
+See further breakdown of some additional scenarios towards the bottom of the document 
 
 ## Clarifying the requirements and behavior 
 **Reason and Budget Definition:** Users should be able to define an reason and a corresponding budget(s).
@@ -47,9 +48,9 @@ type Budget struct {
       // Reasons is a list of disruption reasons. If Reasons is not set, this budget applies to all methods.
       // If a reason is set, it will only apply to that method. If multiple reasons are specified,
       // this budget will apply to all of them. If a budget is not specified for a method, the default budget will be used.
-      // allowed reasons are "Underutilized", "Expired", "Empty", "Drifted"
+      // allowed reasons are "Underutilized", "expired", "Empty", "drifted"
       // +kubebuilder:validation:MaxItems=5
-      // +kubebuilder:validation:Enum:={"Underutilized","Expired","Empty","Drifted"}
+      // +kubebuilder:validation:Enum:={"Underutilized","expired","Empty","drifted"}
       // +optional
       Reasons []string `json:"reason,omitempty" hash:"ignore"`
       // Nodes dictates the maximum number of NodeClaims owned by this NodePool
@@ -85,7 +86,7 @@ spec: # This is not a complete NodePool Spec.
   disruption:
     budgets:
     - schedule: "* * * * *"
-      reasons: [Drifted, Underutilized]
+      reasons: [drifted, Underutilized]
       nodes: 10
     # For all other reasons , only allow 5 nodes to be disrupted at a time
     - nodes: 5
@@ -94,7 +95,7 @@ spec: # This is not a complete NodePool Spec.
 ```
 
 In the original proposed spec, karpenter allows the user to specify up to [50 budgets](https://github.com/kubernetes-sigs/karpenter/blob/main/pkg/apis/v1beta1/nodepool.go#L96)
-If there are multiple active budgets, karpenter takes the most restrictive budget. This same principle will be applied to the disruption budgets in this approach. The only difference in behavior is that each window will apply to list of reasons that are specifed rather than just all disruption methods. 
+If there are multiple active budgets, karpenter takes the most restrictive budget. This same principle will be applied to the disruption budgets in this approach. The only difference in behavior is that each window will apply to list of reasons that are specified rather than just all disruption methods. 
 ### Pros + Cons 
 👍👍 Flexibility in Budget Allocation: Allows more flexibility in allocating budgets across multiple disruption reasons.
 👍👍 Reduced Configuration Complexity: Simplifies the configuration process, especially for similar settings across multiple reasons.
@@ -112,7 +113,7 @@ In this approach, each budget entry specifies a single reason for disruption.
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
       // +optional
-      // +kubebuilder:validation:Enum:={"Underutilized","Expired","Empty","Drifted"}
+      // +kubebuilder:validation:Enum:={"Underutilized","expired","Empty","drifted"}
       Reason string `json:"reason,omitempty" hash:"ignore"`
       // Nodes dictates the maximum number of NodeClaims owned by this NodePool
       // that can be terminating at once. This is calculated by counting nodes that
@@ -243,9 +244,9 @@ We will go through scenarios that users are expecting to face to drive home if t
 - Block Drift, but allow Expiration
 - Fully Block Drift && Expiration, but allow consolidation to occur 
 - Block Drift && Expiration, but allow emptiness 
-- Limit Drift && Expiration while allowing agressive but not unbounded consolidation
-- Allow Cost Saving operations only on weekends. 
+- Limit Drift && Expiration while allowing aggressive but not unbounded consolidation
 
+Note that these samples are written with the intention to think through our design, and more formal documentation will be prepared for common customer scenarios.
 
 #### Block Drift and allow Expiration 
 Customers who roll out aggressive node image upgrades don't want to roll the nodes due to drift, but want to use node expiration to force users onto compliant node images eventually. The scenario here is an ML Training workload. Ideally we want to let it bake as long as possible, but not at the cost of compromising the security of the cluster. 
@@ -261,7 +262,7 @@ spec: # This is not a complete NodePool Spec.
     expireAfter: 7d 
     budgets:
     - nodes: 0
-      reasons: [Drifted] 
+      reasons: [drifted] 
     - nodes: "100%" // All Disruption Other than drift(Expiration and Empty Nodes) are allowed
 ```
 
@@ -277,10 +278,10 @@ spec: # This is not a complete NodePool Spec.
     expireAfter: 7d 
     budgets:
     - nodes: "100%" # Always allow Expiration and Emptiness to disrupt 
-      reasons: [Expired, Empty]
+      reasons: [expired, empty]
     - nodes: 0
 ```
-So in this case, we would take the minimum node count, and it would block the 100% expiration budget of Expired and Empty. 
+So in this case, we would take the minimum node count, and it would block the 100% expiration budget of expired and Empty. 
 But this semantic would not work for equation 3. Equation three will take the minimum between minNodeCount[reason] and the minNodeCount[default/unspecifed].  
 
 #### Fully Blocking Drift && Expiration while allowing consolidation
@@ -295,8 +296,8 @@ spec: # This is not a complete NodePool Spec.
     expireAfter: Never 
     budgets:
     - nodes: 0
-      reasons: [Drifted] 
-    - nodes: "100%" // All Disruption Other than drift(Expiration and Consolidation) are allowed
+      reasons: [drifted, expired] 
+    - nodes: "100%" // All Disruption Other than drift and expiration are allowed
 ```
 
 #### Fully Blocking Drift and Expiration while allowing emptiness 
@@ -311,7 +312,7 @@ spec: # This is not a complete NodePool Spec.
     expireAfter: Never 
     budgets:
     - nodes: 0
-      reasons: [Drifted] 
+      reasons: [drifted] 
     - nodes: "100%" // All Disruption Other than drift(Expiration and Empty Nodes) are allowed
 ```
 
@@ -328,45 +329,20 @@ spec: # This is not a complete NodePool Spec.
     expireAfter: 1h 
     budgets:
     - nodes: 1
-      reasons: [Drifted, Expiration] # Only allow Drift and Expiration to occur one at a time 
+      reasons: [drifted, expired] # Only allow Drift and Expiration to occur one at a time 
     - nodes: "33%" # All Consolidation actions taken either through replace or delete should be allowed to disrupt at least a third of the cluster at once 
 ```
 
-#### Limiting Cost Saving disruption to occur during weekends 
-```yaml
-apiVersion: karpenter.sh/v1beta1
-kind: NodePool
-metadata:
-  name: worker-pool 
-spec: # This is not a complete NodePool Spec.
-  disruption:
-    consolidationPolicy: WhenUnderutilized 
-    expireAfter: 720h 
-    budgets:
-    - nodes: "33%"
-      reasons: [Drifted, Expiration] # Allow Large Drift and Expiration at All Times as these are required for cluster health 
-    - nodes: "0" # All Consolidation actions taken either through replace or delete should be allowed to disrupt at least a third of the cluster at once 
-      schedule: "* * * * mon-fri" 
-      duration: 24h 
-      reasons: ["underutilized"] 
-    - nodes: "100%" 
-      schedule: "* * * * sat"
-      duration: 48h
-      reasons: ["underutilized"]
-```
-
-#### Which Equation Best Covers all the scenarios? 
 ### Q: How should we handle an unspecified reason when others are specified? 
 ```yaml
 budgets: 
   - nodes: 10
-    reasons: [Drifted, Underutilized]
+    reasons: [drifted, underutilized]
     schedule: "* * * * *"
   - nodes: 5 
-    reasons: [Empty] 
+    reasons: [empty] 
     schedule: "* * * * *" 
 ```
 In the case of a budget like above, default is undefined. Should karpenter assume the user doesn't want to disrupt any other reasons? Or should we assume that if a default is unspecified, they want us to disrupt anyway?  
 The intuitive options if there is no active default budget is to allow disruption of either 0 or total number of nodes(meaning unbounded disruption).
 Lets choose total number of nodes, since this allows the user to also specify periods where no nodes are to be disrupted of a particular type of disruption, and makes more sense with the existing karpenter behavior today.
-
