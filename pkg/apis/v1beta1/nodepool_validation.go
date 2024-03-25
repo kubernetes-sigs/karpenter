@@ -19,7 +19,6 @@ package v1beta1
 import (
 	"context"
 	"fmt"
-	"regexp"
 
 	"github.com/robfig/cron/v3"
 	"github.com/samber/lo"
@@ -121,12 +120,6 @@ func (in *Budget) validate() (errs *apis.FieldError) {
 	if in.Schedule != nil {
 		if _, err := cron.ParseStandard(lo.FromPtr(in.Schedule)); err != nil {
 			return apis.ErrInvalidValue(in.Schedule, "schedule", fmt.Sprintf("invalid schedule %s", err))
-		}
-	}
-	if in.Duration != nil {
-		goodDuration, err := regexp.Match("^((([0-9]+(h|m))|([0-9]+h[0-9]+m))(0s)?)$", []byte(in.Duration.Duration.String()))
-		if err != nil || !goodDuration {
-			return apis.ErrInvalidValue(in.Schedule, "duration", fmt.Sprintf("invalid duration %s", err))
 		}
 	}
 	return errs
