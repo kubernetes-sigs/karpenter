@@ -47,7 +47,8 @@ Add a simple field "reasons" is proposed to be added to the budgets.
 type Budget struct {
       // Reasons is a list of disruption reasons. If Reasons is not set, this budget applies to all methods.
       // If a reason is set, it will only apply to that method. If multiple reasons are specified,
-      // this budget will apply to all of them. If a budget is not specified for a method, the default budget will be used.
+      // this budget will apply to all of them. If a reason is unspecified we will take the min value of this budget and the rest of the active budgets.
+      // if an unspecified reason exists we will also override all other reasons with its value if they are smaller than the unspecified reason.
       // allowed reasons are "Underutilized", "expired", "Empty", "drifted"
       // +kubebuilder:validation:MaxItems=5
       // +kubebuilder:validation:Enum:={"Underutilized","expired","Empty","drifted"}
