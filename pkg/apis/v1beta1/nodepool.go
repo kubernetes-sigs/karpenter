@@ -124,7 +124,7 @@ type Budget struct {
 	// This is required if Schedule is set.
 	// This regex has an optional 0s at the end since the duration.String() always adds
 	// a 0s at the end.
-	// +kubebuilder:validation:Pattern=`^([0-9]+(m|h)+(0s)?)$`
+	// +kubebuilder:validation:Pattern=`^((([0-9]+(h|m))|([0-9]+h[0-9]+m))(0s)?)$`
 	// +kubebuilder:validation:Type="string"
 	// +optional
 	Duration *metav1.Duration `json:"duration,omitempty" hash:"ignore"`
