@@ -70,8 +70,11 @@ func (i *NodeClaimTemplate) ToNodeClaim(nodePool *v1beta1.NodePool) *v1beta1.Nod
 	nc := &v1beta1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: fmt.Sprintf("%s-", i.OwnerKey.Name),
-			Annotations:  lo.Assign(i.Annotations, map[string]string{v1beta1.NodePoolHashAnnotationKey: nodePool.Hash()}),
-			Labels:       i.Labels,
+			Annotations: lo.Assign(i.Annotations, map[string]string{
+				v1beta1.NodePoolHashAnnotationKey:        nodePool.Hash(),
+				v1beta1.NodePoolHashVersionAnnotationKey: v1beta1.NodePoolHashVersion,
+			}),
+			Labels: i.Labels,
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion:         v1beta1.SchemeGroupVersion.String(),
