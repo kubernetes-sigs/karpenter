@@ -88,7 +88,7 @@ spec: # This is not a complete NodePool Spec.
     - schedule: "* * * * *"
       reasons: [drifted, Underutilized]
       nodes: 10
-    # For all other reasons , only allow 5 nodes to be disrupted at a time
+    # For all other reasons, only allow 5 nodes to be disrupted at a time
     - nodes: 5
       schedule: "* * * * *"
 
@@ -97,9 +97,9 @@ spec: # This is not a complete NodePool Spec.
 In the original proposed spec, karpenter allows the user to specify up to [50 budgets](https://github.com/kubernetes-sigs/karpenter/blob/main/pkg/apis/v1beta1/nodepool.go#L96)
 If there are multiple active budgets, karpenter takes the most restrictive budget. This same principle will be applied to the disruption budgets in this approach. The only difference in behavior is that each window will apply to list of reasons that are specified rather than just all disruption methods. 
 ### Pros + Cons 
-👍👍 Flexibility in Budget Allocation: Allows more flexibility in allocating budgets across multiple disruption reasons.
-👍👍 Reduced Configuration Complexity: Simplifies the configuration process, especially for similar settings across multiple reasons.
-👎 Potential for API Complexity: There might be confusion over whether the node count is shared between actions or if each action gets the node count individually. 
+* 👍👍 Flexibility in Budget Allocation: Allows more flexibility in allocating budgets across multiple disruption reasons.
+* 👍👍 Reduced Configuration Complexity: Simplifies the configuration process, especially for similar settings across multiple reasons.
+* 👎 Potential for API Complexity: There might be confusion over whether the node count is shared between actions or if each action gets the node count individually. 
 
 Note some pros and cons between A + B can be shared, and are in a list next to the pros + cons for Single Reason Approach 
 
@@ -165,9 +165,9 @@ spec: # This is not a complete NodePool Spec.
 
 
 #### Pros and Cons
-👍 Simplicity and Clarity: Offers a straightforward and clear mapping of budget to disruption reason.
-👎 Increased Configuration Overhead: Requires duplicating settings for multiple reasons, increasing setup complexity.
-👎 Less Flexibility: Lacks the flexibility to share a budget across multiple reasons.
+* 👍 Simplicity and Clarity: Offers a straightforward and clear mapping of budget to disruption reason.
+* 👎 Increased Configuration Overhead: Requires duplicating settings for multiple reasons, increasing setup complexity.
+* 👎 Less Flexibility: Lacks the flexibility to share a budget across multiple reasons.
 
 #### Pros and Cons for List and Per Reason Definitions
 Some of the Pros and Cons are shared by both list and single reason, as they have the same advantages and disadvantages in comparison to Per Reason Controls 
