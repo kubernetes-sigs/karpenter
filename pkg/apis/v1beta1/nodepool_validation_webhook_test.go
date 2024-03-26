@@ -105,7 +105,7 @@ var _ = Describe("Webhook/Validation", func() {
 		It("should fail to validate a budget with a duration but no cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("-20m"))},
+				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
 			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 		})
@@ -128,6 +128,14 @@ var _ = Describe("Webhook/Validation", func() {
 				Nodes:    "10",
 				Schedule: ptr.String("@annually"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
+			}}
+			Expect(nodePool.Validate(ctx)).To(Succeed())
+		})
+		It("should succeed when creating a budget with hours and minutes in duration", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{{
+				Nodes:    "10",
+				Schedule: ptr.String("* * * * *"),
+				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("2h20m"))},
 			}}
 			Expect(nodePool.Validate(ctx)).To(Succeed())
 		})

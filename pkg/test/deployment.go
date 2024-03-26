@@ -44,7 +44,7 @@ func Deployment(overrides ...DeploymentOptions) *appsv1.Deployment {
 	objectMeta := NamespacedObjectMeta(options.ObjectMeta)
 
 	if options.PodOptions.Image == "" {
-		options.PodOptions.Image = "public.ecr.aws/eks-distro/kubernetes/pause:3.2"
+		options.PodOptions.Image = DefaultImage
 	}
 	if options.PodOptions.Labels == nil {
 		options.PodOptions.Labels = map[string]string{
