@@ -262,7 +262,7 @@ var _ = Describe("CEL/Validation", func() {
 				Nodes:    "10",
 				Schedule: ptr.String("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
-				Reasons:  []DisruptionReason{DisruptionReasonDrifted, DisruptionReasonUnderutilized},
+				Reasons:  []DisruptionReason{DisruptionReasonExpired, DisruptionReasonEmpty},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
