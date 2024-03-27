@@ -23,7 +23,8 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	"knative.dev/pkg/apis"
-	"knative.dev/pkg/logging"
+
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -48,13 +49,14 @@ type Drift struct {
 
 func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
 	hasDriftedCondition := nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted) != nil
+	reconcilieLog := log.FromContext(ctx).V(1)
 
 	// From here there are three scenarios to handle:
 	// 1. If drift is not enabled but the NodeClaim is drifted, remove the status condition
 	if !options.FromContext(ctx).FeatureGates.Drift {
 		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.Drifted)
 		if hasDriftedCondition {
-			logging.FromContext(ctx).Debugf("removing drift status condition, drift has been disabled")
+			reconcilieLog.V(1).Info("removing drift status condition, drift has been disabled")
 		}
 		return reconcile.Result{}, nil
 	}
@@ -62,7 +64,7 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 	if launchCond := nodeClaim.StatusConditions().GetCondition(v1beta1.Launched); launchCond == nil || launchCond.IsFalse() {
 		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.Drifted)
 		if hasDriftedCondition {
-			logging.FromContext(ctx).Debugf("removing drift status condition, isn't launched")
+			reconcilieLog.V(1).Info("removing drift status condition, isn't launched")
 		}
 		return reconcile.Result{}, nil
 	}
@@ -74,7 +76,7 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 	if driftedReason == "" {
 		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.Drifted)
 		if hasDriftedCondition {
-			logging.FromContext(ctx).Debugf("removing drifted status condition, not drifted")
+			reconcilieLog.V(1).Info("removing drifted status condition, not drifted")
 		}
 		return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
@@ -86,7 +88,7 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 		Reason:   string(driftedReason),
 	})
 	if !hasDriftedCondition {
-		logging.FromContext(ctx).With("reason", string(driftedReason)).Debugf("marking drifted")
+		log.FromContext(ctx).V(1).WithValues("reason", string(driftedReason)).Info("marking drifted")
 		metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
 			metrics.TypeLabel:     metrics.DriftReason,
 			metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],

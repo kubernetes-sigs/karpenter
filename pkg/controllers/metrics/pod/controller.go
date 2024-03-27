@@ -21,14 +21,15 @@ import (
 	"fmt"
 	"strings"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"knative.dev/pkg/logging"
-	controllerruntime "sigs.k8s.io/controller-runtime"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
@@ -118,7 +119,7 @@ func (c *Controller) Name() string {
 
 // Reconcile executes a termination control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("pod", req.Name))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithName(c.Name()).WithValues("pod", req.Name))
 	pod := &v1.Pod{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, pod); err != nil {
 		if errors.IsNotFound(err) {
@@ -189,7 +190,7 @@ func (c *Controller) makeLabels(ctx context.Context, pod *v1.Pod) (prometheus.La
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) controller.Builder {
 	return controller.Adapt(
-		controllerruntime.
+		ctrl.
 			NewControllerManagedBy(m).
 			For(&v1.Pod{}),
 	)

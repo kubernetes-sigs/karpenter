@@ -33,8 +33,11 @@ import (
 	"k8s.io/klog/v2"
 	"knative.dev/pkg/changeset"
 	"knative.dev/pkg/logging"
+
 	"knative.dev/pkg/logging/logkey"
-	ctrl "sigs.k8s.io/controller-runtime/pkg/log"
+
+	logctrl "sigs.k8s.io/controller-runtime/pkg/log"
+	logzap "sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
@@ -132,7 +135,7 @@ func loggerFromFile(ctx context.Context, component string) *zap.SugaredLogger {
 // to use the configured *zap.SugaredLogger from the context
 func ConfigureGlobalLoggers(ctx context.Context) {
 	klog.SetLogger(zapr.NewLogger(logging.FromContext(ctx).Desugar()))
-	ctrl.SetLogger(zapr.NewLogger(logging.FromContext(ctx).Desugar()))
+	logctrl.SetLogger(logzap.New())
 	w := &zapio.Writer{Log: logging.FromContext(ctx).Desugar(), Level: zap.DebugLevel}
 	log.SetFlags(0)
 	log.SetOutput(w)

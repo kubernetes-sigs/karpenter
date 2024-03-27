@@ -26,13 +26,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/util/workqueue"
-	"knative.dev/pkg/logging"
-	controllerruntime "sigs.k8s.io/controller-runtime"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -66,7 +66,7 @@ func (c *Controller) Reconcile(_ context.Context, _ *v1beta1.NodeClaim) (reconci
 
 //nolint:gocyclo
 func (c *Controller) Finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", nodeClaim.Status.NodeName, "provider-id", nodeClaim.Status.ProviderID))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("node", nodeClaim.Status.NodeName, "provider-id", nodeClaim.Status.ProviderID))
 	stored := nodeClaim.DeepCopy()
 	if !controllerutil.ContainsFinalizer(nodeClaim, v1beta1.TerminationFinalizer) {
 		return reconcile.Result{}, nil
@@ -104,7 +104,7 @@ func (c *Controller) Finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 			}
 			return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("removing termination finalizer, %w", err))
 		}
-		logging.FromContext(ctx).Infof("deleted nodeclaim")
+		log.FromContext(ctx).Info("deleted nodeclaim")
 	}
 	return reconcile.Result{}, nil
 }
@@ -114,7 +114,7 @@ func (*Controller) Name() string {
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.Adapt(controllerruntime.
+	return operatorcontroller.Adapt(ctrl.
 		NewControllerManagedBy(m).
 		For(&v1beta1.NodeClaim{}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).

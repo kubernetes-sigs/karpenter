@@ -23,7 +23,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/client-go/util/workqueue"
-	"knative.dev/pkg/logging"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/ratelimiter"
@@ -82,9 +82,9 @@ var singletonRequest = reconcile.Request{}
 
 func (s *Singleton) Start(ctx context.Context) error {
 	ctx = injection.WithControllerName(ctx, s.Name())
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(s.Name()))
-	logging.FromContext(ctx).Infof("starting controller")
-	defer logging.FromContext(ctx).Infof("stopping controller")
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithName(s.Name()))
+	log.FromContext(ctx).Info("starting controller")
+	defer log.FromContext(ctx).Info("stopping controller")
 
 	for {
 		select {
@@ -107,7 +107,7 @@ func (s *Singleton) reconcile(ctx context.Context) time.Duration {
 	case err != nil:
 		reconcileErrors.WithLabelValues(s.Name()).Inc()
 		reconcileTotal.WithLabelValues(s.Name(), labelError).Inc()
-		logging.FromContext(ctx).Error(err)
+		log.FromContext(ctx).Error(err, "")
 		return s.rateLimiter.When(singletonRequest)
 	case res.Requeue:
 		reconcileTotal.WithLabelValues(s.Name(), labelRequeue).Inc()

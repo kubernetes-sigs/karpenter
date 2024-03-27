@@ -19,7 +19,7 @@ package controller
 import (
 	"context"
 
-	controllerruntime "sigs.k8s.io/controller-runtime"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
@@ -40,18 +40,18 @@ type Controller interface {
 }
 
 // Builder is a struct, that when complete, registers the passed reconciler with the manager stored
-// insider of the builder. Typed reference implementations, see controllerruntime.Builder
+// insider of the builder. Typed reference implementations, see ctrl.Builder
 type Builder interface {
 	// Complete builds a builder by registering the Reconciler with the manager
 	Complete(Reconciler) error
 }
 
-// Adapter adapts a controllerruntime.Builder into the Builder interface
+// Adapter adapts a ctrl.Builder into the Builder interface
 type Adapter struct {
-	builder *controllerruntime.Builder
+	builder *ctrl.Builder
 }
 
-func Adapt(builder *controllerruntime.Builder) Builder {
+func Adapt(builder *ctrl.Builder) Builder {
 	return &Adapter{
 		builder: builder,
 	}

@@ -24,8 +24,8 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	nodeutil "sigs.k8s.io/karpenter/pkg/utils/node"
 
@@ -72,7 +72,7 @@ func (t *Terminator) Taint(ctx context.Context, node *v1.Node) error {
 		if err := t.kubeClient.Patch(ctx, node, client.StrategicMergeFrom(stored)); err != nil {
 			return err
 		}
-		logging.FromContext(ctx).Infof("tainted node")
+		log.FromContext(ctx).Info("tainted node")
 	}
 	return nil
 }
