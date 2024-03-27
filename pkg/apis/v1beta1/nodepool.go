@@ -45,7 +45,6 @@ type NodePoolSpec struct {
 	Template NodeClaimTemplate `json:"template"`
 	// Disruption contains the parameters that relate to Karpenter's disruption logic
 	// +kubebuilder:default={"consolidationPolicy": "WhenUnderutilized", "expireAfter": "720h"}
-	// +kubebuilder:validation:XValidation:message="consolidateAfter cannot be combined with consolidationPolicy=WhenUnderutilized",rule="has(self.consolidateAfter) ? self.consolidationPolicy != 'WhenUnderutilized' || self.consolidateAfter == 'Never' : true"
 	// +kubebuilder:validation:XValidation:message="consolidateAfter must be specified with consolidationPolicy=WhenEmpty",rule="self.consolidationPolicy == 'WhenEmpty' ? has(self.consolidateAfter) : true"
 	// +optional
 	Disruption Disruption `json:"disruption"`
@@ -77,6 +76,12 @@ type Disruption struct {
 	// +kubebuilder:validation:Enum:={WhenEmpty,WhenUnderutilized}
 	// +optional
 	ConsolidationPolicy ConsolidationPolicy `json:"consolidationPolicy,omitempty"`
+	// UtilizationThreshold is defined as sum of requested resources divided by capacity
+	// below which a node can be considered for disruption.
+	// +kubebuilder:validation:Minimum:=1
+	// +kubebuilder:validation:Maximum:=100
+	// +optional
+	UtilizationThreshold *int `json:"utilizationThreshold,omitempty"`
 	// ExpireAfter is the duration the controller will wait
 	// before terminating a node, measured from when the node is created. This
 	// is useful to implement features like eventually consistent node upgrade,

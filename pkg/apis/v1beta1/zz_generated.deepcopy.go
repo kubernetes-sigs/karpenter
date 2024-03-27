@@ -61,6 +61,11 @@ func (in *Disruption) DeepCopyInto(out *Disruption) {
 		*out = new(NillableDuration)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.UtilizationThreshold != nil {
+		in, out := &in.UtilizationThreshold, &out.UtilizationThreshold
+		*out = new(int)
+		**out = **in
+	}
 	in.ExpireAfter.DeepCopyInto(&out.ExpireAfter)
 	if in.Budgets != nil {
 		in, out := &in.Budgets, &out.Budgets
