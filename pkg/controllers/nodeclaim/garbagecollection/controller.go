@@ -110,7 +110,10 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
 			metrics.ReasonLabel:       "garbage_collected",
 			metrics.NodePoolLabel:     nodeClaims[i].Labels[v1beta1.NodePoolLabelKey],
+			metrics.ZoneLabel:         nodeClaims[i].Labels[v1.LabelTopologyZone],
+			metrics.ArchLabel:         nodeClaims[i].Labels[v1.LabelArchStable],
 			metrics.CapacityTypeLabel: nodeClaims[i].Labels[v1beta1.CapacityTypeLabelKey],
+			metrics.InstanceTypeLabel: nodeClaims[i].Labels[v1.LabelInstanceTypeStable],
 		}).Inc()
 	})
 	if err = multierr.Combine(errs...); err != nil {

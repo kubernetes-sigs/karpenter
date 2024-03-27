@@ -29,7 +29,10 @@ const (
 	NodePoolLabel     = "nodepool"
 	ReasonLabel       = "reason"
 	TypeLabel         = "type"
+	ZoneLabel         = "zone"
+	ArchLabel         = "arch"
 	CapacityTypeLabel = "capacity_type"
+	InstanceTypeLabel = "instance_type"
 
 	// Reasons for CREATE/DELETE shared metrics
 	ConsolidationReason = "consolidation"

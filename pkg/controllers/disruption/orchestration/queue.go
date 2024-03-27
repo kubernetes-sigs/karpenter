@@ -27,6 +27,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
@@ -272,7 +273,10 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 			metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
 				metrics.ReasonLabel:       cmd.method,
 				metrics.NodePoolLabel:     cmd.candidates[i].NodeClaim.Labels[v1beta1.NodePoolLabelKey],
+				metrics.ZoneLabel:         cmd.candidates[i].NodeClaim.Labels[v1.LabelTopologyZone],
+				metrics.ArchLabel:         cmd.candidates[i].NodeClaim.Labels[v1.LabelArchStable],
 				metrics.CapacityTypeLabel: cmd.candidates[i].NodeClaim.Labels[v1beta1.CapacityTypeLabelKey],
+				metrics.InstanceTypeLabel: cmd.candidates[i].NodeClaim.Labels[v1.LabelInstanceTypeStable],
 			}).Inc()
 		}
 	}
