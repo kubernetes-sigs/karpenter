@@ -60,7 +60,7 @@ func NewControllers(
 		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue),
 		provisioning.NewPodController(kubeClient, p, recorder),
 		provisioning.NewNodeController(kubeClient, p, recorder),
-		nodepoolhash.NewController(kubeClient),
+		nodepoolhash.NewController(kubeClient, cloudProvider),
 		informer.NewDaemonSetController(kubeClient, cluster),
 		informer.NewNodeController(kubeClient, cluster),
 		informer.NewPodController(kubeClient, cluster),
