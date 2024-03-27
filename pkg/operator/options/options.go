@@ -47,21 +47,23 @@ type FeatureGates struct {
 
 // Options contains all CLI flags / env vars for karpenter-core. It adheres to the options.Injectable interface.
 type Options struct {
-	ServiceName          string
-	DisableWebhook       bool
-	WebhookPort          int
-	MetricsPort          int
-	WebhookMetricsPort   int
-	HealthProbePort      int
-	KubeClientQPS        int
-	KubeClientBurst      int
-	EnableProfiling      bool
-	EnableLeaderElection bool
-	MemoryLimit          int64
-	LogLevel             string
-	BatchMaxDuration     time.Duration
-	BatchIdleDuration    time.Duration
-	FeatureGates         FeatureGates
+	ServiceName                        string
+	DisableWebhook                     bool
+	WebhookPort                        int
+	MetricsPort                        int
+	WebhookMetricsPort                 int
+	HealthProbePort                    int
+	KubeClientQPS                      int
+	KubeClientBurst                    int
+	EnableProfiling                    bool
+	EnableLeaderElection               bool
+	MemoryLimit                        int64
+	LogLevel                           string
+	BatchMaxDuration                   time.Duration
+	BatchIdleDuration                  time.Duration
+	FeatureGates                       FeatureGates
+	ConsolidationSingleTimeoutDuration time.Duration
+	ConsolidationMultiTimeoutDuration  time.Duration
 }
 
 type FlagSet struct {
@@ -97,6 +99,8 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.DurationVar(&o.BatchMaxDuration, "batch-max-duration", env.WithDefaultDuration("BATCH_MAX_DURATION", 10*time.Second), "The maximum length of a batch window. The longer this is, the more pods we can consider for provisioning at one time which usually results in fewer but larger nodes.")
 	fs.DurationVar(&o.BatchIdleDuration, "batch-idle-duration", env.WithDefaultDuration("BATCH_IDLE_DURATION", time.Second), "The maximum amount of time with no new pending pods that if exceeded ends the current batching window. If pods arrive faster than this time, the batching window will be extended up to the maxDuration. If they arrive slower, the pods will be batched separately.")
 	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "Drift=true,SpotToSpotConsolidation=false"), "Optional features can be enabled / disabled using feature gates. Current options are: Drift,SpotToSpotConsolidation")
+	fs.DurationVar(&o.ConsolidationSingleTimeoutDuration, "consolidation-single-timeout-duration", env.WithDefaultDuration("CONSOLIDATION_SINGLE_TIMEOUT_DURATION", 3*time.Minute), "The maximum amount of time to spend consolidating a single node, after this it times out and starts again.")
+	fs.DurationVar(&o.ConsolidationMultiTimeoutDuration, "consolidation-multi-timeout-duration", env.WithDefaultDuration("CONSOLIDATION_MULTI_TIMEOUT_DURATION", 1*time.Minute), "The maximum amount of time to spend consolidating multiple nodes, after this it times out and starts again.")
 }
 
 func (o *Options) Parse(fs *FlagSet, args ...string) error {

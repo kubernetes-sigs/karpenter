@@ -19,6 +19,7 @@ package disruption
 import (
 	"context"
 	"fmt"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"time"
 
 	"knative.dev/pkg/logging"
@@ -53,7 +54,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 	v := NewValidation(consolidationTTL, s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder, s.queue)
 
 	// Set a timeout
-	timeout := s.clock.Now().Add(SingleNodeConsolidationTimeoutDuration)
+	timeout := s.clock.Now().Add(options.FromContext(ctx).ConsolidationSingleTimeoutDuration)
 	constrainedByBudgets := false
 	// binary search to find the maximum number of NodeClaims we can terminate
 	for i, candidate := range candidates {

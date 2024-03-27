@@ -28,21 +28,23 @@ import (
 
 type OptionsFields struct {
 	// Vendor Neutral
-	ServiceName          *string
-	DisableWebhook       *bool
-	WebhookPort          *int
-	MetricsPort          *int
-	WebhookMetricsPort   *int
-	HealthProbePort      *int
-	KubeClientQPS        *int
-	KubeClientBurst      *int
-	EnableProfiling      *bool
-	EnableLeaderElection *bool
-	MemoryLimit          *int64
-	LogLevel             *string
-	BatchMaxDuration     *time.Duration
-	BatchIdleDuration    *time.Duration
-	FeatureGates         FeatureGates
+	ServiceName                        *string
+	DisableWebhook                     *bool
+	WebhookPort                        *int
+	MetricsPort                        *int
+	WebhookMetricsPort                 *int
+	HealthProbePort                    *int
+	KubeClientQPS                      *int
+	KubeClientBurst                    *int
+	EnableProfiling                    *bool
+	EnableLeaderElection               *bool
+	MemoryLimit                        *int64
+	LogLevel                           *string
+	BatchMaxDuration                   *time.Duration
+	BatchIdleDuration                  *time.Duration
+	FeatureGates                       FeatureGates
+	ConsolidationSingleTimeoutDuration *time.Duration
+	ConsolidationMultiTimeoutDuration  *time.Duration
 }
 
 type FeatureGates struct {
@@ -77,5 +79,7 @@ func Options(overrides ...OptionsFields) *options.Options {
 			Drift:                   lo.FromPtrOr(opts.FeatureGates.Drift, false),
 			SpotToSpotConsolidation: lo.FromPtrOr(opts.FeatureGates.SpotToSpotConsolidation, false),
 		},
+		ConsolidationSingleTimeoutDuration: lo.FromPtrOr(opts.ConsolidationSingleTimeoutDuration, 3*time.Minute),
+		ConsolidationMultiTimeoutDuration:  lo.FromPtrOr(opts.ConsolidationMultiTimeoutDuration, 1*time.Minute),
 	}
 }
