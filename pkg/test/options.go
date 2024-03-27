@@ -18,6 +18,7 @@ package test
 
 import (
 	"fmt"
+	v1 "k8s.io/api/core/v1"
 	"time"
 
 	"github.com/imdario/mergo"
@@ -28,21 +29,22 @@ import (
 
 type OptionsFields struct {
 	// Vendor Neutral
-	ServiceName          *string
-	DisableWebhook       *bool
-	WebhookPort          *int
-	MetricsPort          *int
-	WebhookMetricsPort   *int
-	HealthProbePort      *int
-	KubeClientQPS        *int
-	KubeClientBurst      *int
-	EnableProfiling      *bool
-	EnableLeaderElection *bool
-	MemoryLimit          *int64
-	LogLevel             *string
-	BatchMaxDuration     *time.Duration
-	BatchIdleDuration    *time.Duration
-	FeatureGates         FeatureGates
+	ServiceName             *string
+	DisableWebhook          *bool
+	WebhookPort             *int
+	MetricsPort             *int
+	WebhookMetricsPort      *int
+	HealthProbePort         *int
+	KubeClientQPS           *int
+	KubeClientBurst         *int
+	EnableProfiling         *bool
+	EnableLeaderElection    *bool
+	MemoryLimit             *int64
+	LogLevel                *string
+	BatchMaxDuration        *time.Duration
+	BatchIdleDuration       *time.Duration
+	IgnoredResourceRequests *options.IgnoredResourceRequests
+	FeatureGates            FeatureGates
 }
 
 type FeatureGates struct {
@@ -73,6 +75,9 @@ func Options(overrides ...OptionsFields) *options.Options {
 		LogLevel:             lo.FromPtrOr(opts.LogLevel, ""),
 		BatchMaxDuration:     lo.FromPtrOr(opts.BatchMaxDuration, 10*time.Second),
 		BatchIdleDuration:    lo.FromPtrOr(opts.BatchIdleDuration, time.Second),
+		IgnoredResourceRequests: lo.FromPtrOr(opts.IgnoredResourceRequests, options.IgnoredResourceRequests{
+			Keys: make(v1.ResourceList),
+		}),
 		FeatureGates: options.FeatureGates{
 			Drift:                   lo.FromPtrOr(opts.FeatureGates.Drift, false),
 			SpotToSpotConsolidation: lo.FromPtrOr(opts.FeatureGates.SpotToSpotConsolidation, false),
