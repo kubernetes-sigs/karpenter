@@ -22,6 +22,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/types"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -100,7 +101,7 @@ var _ = Describe("Requirement", func() {
 		})
 	})
 	Context("Intersect requirements", func() {
-		DescribeTable("should intersect sets for existing requirement without minValues and new requirement without minValues",
+		DescribeTable("should intersect two requirements without minValues",
 			func(existingRequirementWithoutMinValues, newRequirementWithoutMinValues, expectedRequirement *Requirement) {
 				Expect(existingRequirementWithoutMinValues.Intersection(newRequirementWithoutMinValues)).To(Equal(expectedRequirement))
 			},
@@ -314,7 +315,7 @@ var _ = Describe("Requirement", func() {
 			Entry(nil, lessThan9, lessThan1, lessThan1),
 			Entry(nil, lessThan9, lessThan9, lessThan9),
 		)
-		DescribeTable("should intersect sets for existing requirement with minValues and new requirement without minValues",
+		DescribeTable("should intersect requirement with minValues with a requirement without",
 			func(existingRequirementWithMinValues, newRequirementWithoutMinValues, expectedRequirement *Requirement) {
 				Expect(existingRequirementWithMinValues.Intersection(newRequirementWithoutMinValues)).To(Equal(expectedRequirement))
 			},
@@ -529,7 +530,7 @@ var _ = Describe("Requirement", func() {
 			Entry(nil, lessThan9OperatorWithFlexibility, lessThan1, lessThan1OperatorWithFlexibility),
 			Entry(nil, lessThan9OperatorWithFlexibility, lessThan9, lessThan9OperatorWithFlexibility),
 		)
-		DescribeTable("should intersect sets for existing requirement with minValues and new requirement with minValues",
+		DescribeTable("should intersect two requirements with minValues",
 			func(existingRequirementWithMinValues, newRequirementWithMinValues, expectedRequirement *Requirement) {
 				Expect(existingRequirementWithMinValues.Intersection(newRequirementWithMinValues)).To(Equal(expectedRequirement))
 			},
@@ -746,118 +747,130 @@ var _ = Describe("Requirement", func() {
 		)
 	})
 	Context("Has", func() {
-		It("should have the right values", func() {
-			Expect(exists.Has("A")).To(BeTrue())
-			Expect(doesNotExist.Has("A")).To(BeFalse())
-			Expect(inA.Has("A")).To(BeTrue())
-			Expect(inB.Has("A")).To(BeFalse())
-			Expect(inAB.Has("A")).To(BeTrue())
-			Expect(notInA.Has("A")).To(BeFalse())
-			Expect(in1.Has("A")).To(BeFalse())
-			Expect(in9.Has("A")).To(BeFalse())
-			Expect(in19.Has("A")).To(BeFalse())
-			Expect(notIn12.Has("A")).To(BeTrue())
-			Expect(greaterThan1.Has("A")).To(BeFalse())
-			Expect(greaterThan9.Has("A")).To(BeFalse())
-			Expect(lessThan1.Has("A")).To(BeFalse())
-			Expect(lessThan9.Has("A")).To(BeFalse())
+		DescribeTable("should have the right values",
+			func(requirement *Requirement, value string, expected types.GomegaMatcher) {
+				Expect(requirement.Has(value)).To(expected)
+			},
 
-			Expect(exists.Has("B")).To(BeTrue())
-			Expect(doesNotExist.Has("B")).To(BeFalse())
-			Expect(inA.Has("B")).To(BeFalse())
-			Expect(inB.Has("B")).To(BeTrue())
-			Expect(inAB.Has("B")).To(BeTrue())
-			Expect(notInA.Has("B")).To(BeTrue())
-			Expect(in1.Has("B")).To(BeFalse())
-			Expect(in9.Has("B")).To(BeFalse())
-			Expect(in19.Has("B")).To(BeFalse())
-			Expect(notIn12.Has("B")).To(BeTrue())
-			Expect(greaterThan1.Has("B")).To(BeFalse())
-			Expect(greaterThan9.Has("B")).To(BeFalse())
-			Expect(lessThan1.Has("B")).To(BeFalse())
-			Expect(lessThan9.Has("B")).To(BeFalse())
+			Entry(nil, exists, "A", BeTrue()),
+			Entry(nil, doesNotExist, "A", BeFalse()),
+			Entry(nil, inA, "A", BeTrue()),
+			Entry(nil, inB, "A", BeFalse()),
+			Entry(nil, inAB, "A", BeTrue()),
+			Entry(nil, notInA, "A", BeFalse()),
+			Entry(nil, in1, "A", BeFalse()),
+			Entry(nil, in9, "A", BeFalse()),
+			Entry(nil, in19, "A", BeFalse()),
+			Entry(nil, notIn12, "A", BeTrue()),
+			Entry(nil, greaterThan1, "A", BeFalse()),
+			Entry(nil, greaterThan9, "A", BeFalse()),
+			Entry(nil, lessThan1, "A", BeFalse()),
+			Entry(nil, lessThan9, "A", BeFalse()),
 
-			Expect(exists.Has("1")).To(BeTrue())
-			Expect(doesNotExist.Has("1")).To(BeFalse())
-			Expect(inA.Has("1")).To(BeFalse())
-			Expect(inB.Has("1")).To(BeFalse())
-			Expect(inAB.Has("1")).To(BeFalse())
-			Expect(notInA.Has("1")).To(BeTrue())
-			Expect(in1.Has("1")).To(BeTrue())
-			Expect(in9.Has("1")).To(BeFalse())
-			Expect(in19.Has("1")).To(BeTrue())
-			Expect(notIn12.Has("1")).To(BeFalse())
-			Expect(greaterThan1.Has("1")).To(BeFalse())
-			Expect(greaterThan9.Has("1")).To(BeFalse())
-			Expect(lessThan1.Has("1")).To(BeFalse())
-			Expect(lessThan9.Has("1")).To(BeTrue())
+			Entry(nil, exists, "B", BeTrue()),
+			Entry(nil, doesNotExist, "B", BeFalse()),
+			Entry(nil, inA, "B", BeFalse()),
+			Entry(nil, inB, "B", BeTrue()),
+			Entry(nil, inAB, "B", BeTrue()),
+			Entry(nil, notInA, "B", BeTrue()),
+			Entry(nil, in1, "B", BeFalse()),
+			Entry(nil, in9, "B", BeFalse()),
+			Entry(nil, in19, "B", BeFalse()),
+			Entry(nil, notIn12, "B", BeTrue()),
+			Entry(nil, greaterThan1, "B", BeFalse()),
+			Entry(nil, greaterThan9, "B", BeFalse()),
+			Entry(nil, lessThan1, "B", BeFalse()),
+			Entry(nil, lessThan9, "B", BeFalse()),
 
-			Expect(exists.Has("2")).To(BeTrue())
-			Expect(doesNotExist.Has("2")).To(BeFalse())
-			Expect(inA.Has("2")).To(BeFalse())
-			Expect(inB.Has("2")).To(BeFalse())
-			Expect(inAB.Has("2")).To(BeFalse())
-			Expect(notInA.Has("2")).To(BeTrue())
-			Expect(in1.Has("2")).To(BeFalse())
-			Expect(in9.Has("2")).To(BeFalse())
-			Expect(in19.Has("2")).To(BeFalse())
-			Expect(notIn12.Has("2")).To(BeFalse())
-			Expect(greaterThan1.Has("2")).To(BeTrue())
-			Expect(greaterThan9.Has("2")).To(BeFalse())
-			Expect(lessThan1.Has("2")).To(BeFalse())
-			Expect(lessThan9.Has("2")).To(BeTrue())
+			Entry(nil, exists, "1", BeTrue()),
+			Entry(nil, doesNotExist, "1", BeFalse()),
+			Entry(nil, inA, "1", BeFalse()),
+			Entry(nil, inB, "1", BeFalse()),
+			Entry(nil, inAB, "1", BeFalse()),
+			Entry(nil, notInA, "1", BeTrue()),
+			Entry(nil, in1, "1", BeTrue()),
+			Entry(nil, in9, "1", BeFalse()),
+			Entry(nil, in19, "1", BeTrue()),
+			Entry(nil, notIn12, "1", BeFalse()),
+			Entry(nil, greaterThan1, "1", BeFalse()),
+			Entry(nil, greaterThan9, "1", BeFalse()),
+			Entry(nil, lessThan1, "1", BeFalse()),
+			Entry(nil, lessThan9, "1", BeTrue()),
 
-			Expect(exists.Has("9")).To(BeTrue())
-			Expect(doesNotExist.Has("9")).To(BeFalse())
-			Expect(inA.Has("9")).To(BeFalse())
-			Expect(inB.Has("9")).To(BeFalse())
-			Expect(inAB.Has("9")).To(BeFalse())
-			Expect(notInA.Has("9")).To(BeTrue())
-			Expect(in1.Has("9")).To(BeFalse())
-			Expect(in9.Has("9")).To(BeTrue())
-			Expect(in19.Has("9")).To(BeTrue())
-			Expect(notIn12.Has("9")).To(BeTrue())
-			Expect(greaterThan1.Has("9")).To(BeTrue())
-			Expect(greaterThan9.Has("9")).To(BeFalse())
-			Expect(lessThan1.Has("9")).To(BeFalse())
-			Expect(lessThan9.Has("9")).To(BeFalse())
-		})
+			Entry(nil, exists, "2", BeTrue()),
+			Entry(nil, doesNotExist, "2", BeFalse()),
+			Entry(nil, inA, "2", BeFalse()),
+			Entry(nil, inB, "2", BeFalse()),
+			Entry(nil, inAB, "2", BeFalse()),
+			Entry(nil, notInA, "2", BeTrue()),
+			Entry(nil, in1, "2", BeFalse()),
+			Entry(nil, in9, "2", BeFalse()),
+			Entry(nil, in19, "2", BeFalse()),
+			Entry(nil, notIn12, "2", BeFalse()),
+			Entry(nil, greaterThan1, "2", BeTrue()),
+			Entry(nil, greaterThan9, "2", BeFalse()),
+			Entry(nil, lessThan1, "2", BeFalse()),
+			Entry(nil, lessThan9, "2", BeTrue()),
+
+			Entry(nil, exists, "9", BeTrue()),
+			Entry(nil, doesNotExist, "9", BeFalse()),
+			Entry(nil, inA, "9", BeFalse()),
+			Entry(nil, inB, "9", BeFalse()),
+			Entry(nil, inAB, "9", BeFalse()),
+			Entry(nil, notInA, "9", BeTrue()),
+			Entry(nil, in1, "9", BeFalse()),
+			Entry(nil, in9, "9", BeTrue()),
+			Entry(nil, in19, "9", BeTrue()),
+			Entry(nil, notIn12, "9", BeTrue()),
+			Entry(nil, greaterThan1, "9", BeTrue()),
+			Entry(nil, greaterThan9, "9", BeFalse()),
+			Entry(nil, lessThan1, "9", BeFalse()),
+			Entry(nil, lessThan9, "9", BeFalse()),
+		)
 	})
 	Context("Operator", func() {
-		It("should return the right operator", func() {
-			Expect(exists.Operator()).To(Equal(v1.NodeSelectorOpExists))
-			Expect(doesNotExist.Operator()).To(Equal(v1.NodeSelectorOpDoesNotExist))
-			Expect(inA.Operator()).To(Equal(v1.NodeSelectorOpIn))
-			Expect(inB.Operator()).To(Equal(v1.NodeSelectorOpIn))
-			Expect(inAB.Operator()).To(Equal(v1.NodeSelectorOpIn))
-			Expect(notInA.Operator()).To(Equal(v1.NodeSelectorOpNotIn))
-			Expect(in1.Operator()).To(Equal(v1.NodeSelectorOpIn))
-			Expect(in9.Operator()).To(Equal(v1.NodeSelectorOpIn))
-			Expect(in19.Operator()).To(Equal(v1.NodeSelectorOpIn))
-			Expect(notIn12.Operator()).To(Equal(v1.NodeSelectorOpNotIn))
-			Expect(greaterThan1.Operator()).To(Equal(v1.NodeSelectorOpExists))
-			Expect(greaterThan9.Operator()).To(Equal(v1.NodeSelectorOpExists))
-			Expect(lessThan1.Operator()).To(Equal(v1.NodeSelectorOpExists))
-			Expect(lessThan9.Operator()).To(Equal(v1.NodeSelectorOpExists))
-		})
+		DescribeTable("should return the right operator",
+			func(requirement *Requirement, expectedOperator v1.NodeSelectorOperator) {
+				Expect(requirement.Operator()).To(Equal(expectedOperator))
+			},
+
+			Entry(nil, exists, v1.NodeSelectorOpExists),
+			Entry(nil, doesNotExist, v1.NodeSelectorOpDoesNotExist),
+			Entry(nil, inA, v1.NodeSelectorOpIn),
+			Entry(nil, inB, v1.NodeSelectorOpIn),
+			Entry(nil, inAB, v1.NodeSelectorOpIn),
+			Entry(nil, notInA, v1.NodeSelectorOpNotIn),
+			Entry(nil, in1, v1.NodeSelectorOpIn),
+			Entry(nil, in9, v1.NodeSelectorOpIn),
+			Entry(nil, in19, v1.NodeSelectorOpIn),
+			Entry(nil, notIn12, v1.NodeSelectorOpNotIn),
+			Entry(nil, greaterThan1, v1.NodeSelectorOpExists),
+			Entry(nil, greaterThan9, v1.NodeSelectorOpExists),
+			Entry(nil, lessThan1, v1.NodeSelectorOpExists),
+			Entry(nil, lessThan9, v1.NodeSelectorOpExists),
+		)
 	})
 	Context("Len", func() {
-		It("should have the correct length", func() {
-			Expect(exists.Len()).To(Equal(math.MaxInt64))
-			Expect(doesNotExist.Len()).To(Equal(0))
-			Expect(inA.Len()).To(Equal(1))
-			Expect(inB.Len()).To(Equal(1))
-			Expect(inAB.Len()).To(Equal(2))
-			Expect(notInA.Len()).To(Equal(math.MaxInt64 - 1))
-			Expect(in1.Len()).To(Equal(1))
-			Expect(in9.Len()).To(Equal(1))
-			Expect(in19.Len()).To(Equal(2))
-			Expect(notIn12.Len()).To(Equal(math.MaxInt64 - 2))
-			Expect(greaterThan1.Len()).To(Equal(math.MaxInt64))
-			Expect(greaterThan9.Len()).To(Equal(math.MaxInt64))
-			Expect(lessThan1.Len()).To(Equal(math.MaxInt64))
-			Expect(lessThan9.Len()).To(Equal(math.MaxInt64))
-		})
+		DescribeTable("should have the correct length",
+			func(requirement *Requirement, expectedLength int) {
+				Expect(requirement.Len()).To(Equal(expectedLength))
+			},
+
+			Entry(nil, exists, math.MaxInt64),
+			Entry(nil, doesNotExist, 0),
+			Entry(nil, inA, 1),
+			Entry(nil, inB, 1),
+			Entry(nil, inAB, 2),
+			Entry(nil, notInA, math.MaxInt64-1),
+			Entry(nil, in1, 1),
+			Entry(nil, in9, 1),
+			Entry(nil, in19, 2),
+			Entry(nil, notIn12, math.MaxInt64-2),
+			Entry(nil, greaterThan1, math.MaxInt64),
+			Entry(nil, greaterThan9, math.MaxInt64),
+			Entry(nil, lessThan1, math.MaxInt64),
+			Entry(nil, lessThan9, math.MaxInt64),
+		)
 	})
 	Context("Any", func() {
 		It("should return any", func() {
@@ -878,57 +891,63 @@ var _ = Describe("Requirement", func() {
 		})
 	})
 	Context("String", func() {
-		It("should print the right string", func() {
-			Expect(exists.String()).To(Equal("key Exists"))
-			Expect(doesNotExist.String()).To(Equal("key DoesNotExist"))
-			Expect(inA.String()).To(Equal("key In [A]"))
-			Expect(inB.String()).To(Equal("key In [B]"))
-			Expect(inAB.String()).To(Equal("key In [A B]"))
-			Expect(notInA.String()).To(Equal("key NotIn [A]"))
-			Expect(in1.String()).To(Equal("key In [1]"))
-			Expect(in9.String()).To(Equal("key In [9]"))
-			Expect(in19.String()).To(Equal("key In [1 9]"))
-			Expect(notIn12.String()).To(Equal("key NotIn [1 2]"))
-			Expect(greaterThan1.String()).To(Equal("key Exists >1"))
-			Expect(greaterThan9.String()).To(Equal("key Exists >9"))
-			Expect(lessThan1.String()).To(Equal("key Exists <1"))
-			Expect(lessThan9.String()).To(Equal("key Exists <9"))
-			Expect(greaterThan1.Intersection(lessThan9).String()).To(Equal("key Exists >1 <9"))
-			Expect(greaterThan9.Intersection(lessThan1).String()).To(Equal("key DoesNotExist"))
-		})
+		DescribeTable("should print the right string",
+			func(requirement *Requirement, expectedValue string) {
+				Expect(requirement.String()).To(Equal(expectedValue))
+			},
+			Entry(nil, exists, "key Exists"),
+			Entry(nil, doesNotExist, "key DoesNotExist"),
+			Entry(nil, inA, "key In [A]"),
+			Entry(nil, inB, "key In [B]"),
+			Entry(nil, inAB, "key In [A B]"),
+			Entry(nil, notInA, "key NotIn [A]"),
+			Entry(nil, in1, "key In [1]"),
+			Entry(nil, in9, "key In [9]"),
+			Entry(nil, in19, "key In [1 9]"),
+			Entry(nil, notIn12, "key NotIn [1 2]"),
+			Entry(nil, greaterThan1, "key Exists >1"),
+			Entry(nil, greaterThan9, "key Exists >9"),
+			Entry(nil, lessThan1, "key Exists <1"),
+			Entry(nil, lessThan9, "key Exists <9"),
+			Entry(nil, greaterThan1.Intersection(lessThan9), "key Exists >1 <9"),
+			Entry(nil, greaterThan9.Intersection(lessThan1), "key DoesNotExist"),
+		)
 	})
 	Context("NodeSelectorRequirements Conversion", func() {
-		It("should return the expected NodeSelectorRequirement", func() {
-			Expect(exists.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpExists}}))
-			Expect(doesNotExist.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpDoesNotExist}}))
-			Expect(inA.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"A"}}}))
-			Expect(inB.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"B"}}}))
-			Expect(inAB.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"A", "B"}}}))
-			Expect(notInA.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"A"}}}))
-			Expect(in1.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"1"}}}))
-			Expect(in9.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"9"}}}))
-			Expect(in19.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"1", "9"}}}))
-			Expect(notIn12.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"1", "2"}}}))
-			Expect(greaterThan1.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpGt, Values: []string{"1"}}}))
-			Expect(greaterThan9.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpGt, Values: []string{"9"}}}))
-			Expect(lessThan1.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpLt, Values: []string{"1"}}}))
-			Expect(lessThan9.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpLt, Values: []string{"9"}}}))
+		DescribeTable("should return the expected NodeSelectorRequirement",
+			func(requirement v1beta1.NodeSelectorRequirementWithMinValues, expectedRequirement v1beta1.NodeSelectorRequirementWithMinValues) {
+				Expect(requirement).To(Equal(expectedRequirement))
+			},
+			Entry(nil, exists.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpExists}}),
+			Entry(nil, doesNotExist.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpDoesNotExist}}),
+			Entry(nil, inA.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"A"}}}),
+			Entry(nil, inB.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"B"}}}),
+			Entry(nil, inAB.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"A", "B"}}}),
+			Entry(nil, notInA.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"A"}}}),
+			Entry(nil, in1.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"1"}}}),
+			Entry(nil, in9.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"9"}}}),
+			Entry(nil, in19.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"1", "9"}}}),
+			Entry(nil, notIn12.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"1", "2"}}}),
+			Entry(nil, greaterThan1.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpGt, Values: []string{"1"}}}),
+			Entry(nil, greaterThan9.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpGt, Values: []string{"9"}}}),
+			Entry(nil, lessThan1.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpLt, Values: []string{"1"}}}),
+			Entry(nil, lessThan9.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpLt, Values: []string{"9"}}}),
 
-			Expect(existsOperatorWithFlexibility.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpExists}, MinValues: lo.ToPtr(1)}))
-			Expect(doesNotExistOperatorWithFlexibility.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpDoesNotExist}, MinValues: lo.ToPtr(1)}))
-			Expect(inAOperatorWithFlexibility.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"A"}}, MinValues: lo.ToPtr(1)}))
-			Expect(inBOperatorWithFlexibility.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"B"}}, MinValues: lo.ToPtr(1)}))
-			Expect(inABOperatorWithFlexibility.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"A", "B"}}, MinValues: lo.ToPtr(2)}))
-			Expect(notInAOperatorWithFlexibility.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"A"}}, MinValues: lo.ToPtr(1)}))
-			Expect(in1OperatorWithFlexibility.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"1"}}, MinValues: lo.ToPtr(1)}))
-			Expect(in9OperatorWithFlexibility.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"9"}}, MinValues: lo.ToPtr(1)}))
-			Expect(in19OperatorWithFlexibility.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"1", "9"}}, MinValues: lo.ToPtr(2)}))
-			Expect(notIn12OperatorWithFlexibility.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"1", "2"}}, MinValues: lo.ToPtr(2)}))
-			Expect(greaterThan1OperatorWithFlexibility.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpGt, Values: []string{"1"}}, MinValues: lo.ToPtr(1)}))
-			Expect(greaterThan9OperatorWithFlexibility.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpGt, Values: []string{"9"}}, MinValues: lo.ToPtr(1)}))
-			Expect(lessThan1OperatorWithFlexibility.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpLt, Values: []string{"1"}}, MinValues: lo.ToPtr(1)}))
-			Expect(lessThan9OperatorWithFlexibility.NodeSelectorRequirement()).To(Equal(v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpLt, Values: []string{"9"}}, MinValues: lo.ToPtr(1)}))
-		})
+			Entry(nil, existsOperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpExists}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, doesNotExistOperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpDoesNotExist}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, inAOperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"A"}}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, inBOperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"B"}}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, inABOperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"A", "B"}}, MinValues: lo.ToPtr(2)}),
+			Entry(nil, notInAOperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"A"}}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, in1OperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"1"}}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, in9OperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"9"}}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, in19OperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"1", "9"}}, MinValues: lo.ToPtr(2)}),
+			Entry(nil, notIn12OperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"1", "2"}}, MinValues: lo.ToPtr(2)}),
+			Entry(nil, greaterThan1OperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpGt, Values: []string{"1"}}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, greaterThan9OperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpGt, Values: []string{"9"}}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, lessThan1OperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpLt, Values: []string{"1"}}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, lessThan9OperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpLt, Values: []string{"9"}}, MinValues: lo.ToPtr(1)}),
+		)
 
 	})
 })
