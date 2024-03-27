@@ -19,17 +19,12 @@ package termination
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -86,13 +81,9 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 		return reconcile.Result{}, fmt.Errorf("deleting nodeclaims, %w", err)
 	}
 
-	nodeGracePeriodExpirationTime := c.terminationGracePeriodExpirationTime(ctx, node)
-	if nodeGracePeriodExpirationTime != nil && time.Now().After(*nodeGracePeriodExpirationTime) {
-		taint := v1beta1.DisruptionNonGracefulShutdown
-		logging.FromContext(ctx).With("taint.Key", taint.Key).With("taint.Effect", taint.Effect).With("taint.Value", taint.Value).Infof("node's terminationGracePeriod has expired, tainting")
-		if err := c.terminator.Taint(ctx, node, taint); err != nil {
-			return reconcile.Result{}, fmt.Errorf("tainting node: %w", err)
-		}
+	nodeGracePeriodExpirationTime, err := c.expireNode(ctx, node)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("expiring node, %w", err)
 	}
 
 	if err := c.terminator.Taint(ctx, node, v1beta1.DisruptionNoScheduleTaint); err != nil {
@@ -160,41 +151,26 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *v1.Node) error {
 	return nil
 }
 
-func (c *Controller) terminationGracePeriodExpirationTime(ctx context.Context, node *v1.Node) *time.Time {
+func (c *Controller) expireNode(ctx context.Context, node *v1.Node) (*time.Time, error) {
+	expirationTime := time.Time{}
+	if expirationTimeString, exists := node.Annotations[v1beta1.NodeExpirationTimeAnnotationKey]; exists {
+		c.recorder.Publish(terminatorevents.NodeTerminationGracePeriod(node, expirationTimeString))
 
-	nodeClaim := &v1beta1.NodeClaim{}
-
-	nodeClaimRef, ok := lo.Find(node.OwnerReferences, func(o metav1.OwnerReference) bool {
-		// verify that we're finding Karpenter's NodeClaim of any version permutation
-		groupVersion, err := schema.ParseGroupVersion(o.APIVersion)
+		expirationTime, err := time.Parse(time.RFC3339, expirationTimeString)
 		if err != nil {
-			logging.FromContext(ctx).Errorf("could not parse Node ownerRef: %v", err)
-			return false
+			return nil, fmt.Errorf("parsing %s annotation, %w", v1beta1.NodeExpirationTimeAnnotationKey, err)
 		}
-		return strings.HasPrefix(groupVersion.Group, v1beta1.Group) && o.Kind == "NodeClaim"
-	})
 
-	if !ok {
-		logging.FromContext(ctx).Errorf("node has no owner, could not find NodeClaim")
-		return nil
+		if time.Now().After(expirationTime) {
+			taint := v1beta1.DisruptionNonGracefulShutdown
+			logging.FromContext(ctx).With("taint.Key", taint.Key).With("taint.Effect", taint.Effect).With("taint.Value", taint.Value).Infof("terminationGracePeriod for the node has expired, tainting")
+			if err := c.terminator.Taint(ctx, node, taint); err != nil {
+				return &expirationTime, fmt.Errorf("tainting node: %w", err)
+			}
+		}
 	}
 
-	nodeClaimName := types.NamespacedName{
-		Name: nodeClaimRef.Name,
-	}
-
-	if err := c.kubeClient.Get(ctx, nodeClaimName, nodeClaim); err != nil {
-		logging.FromContext(ctx).Errorf("node has an owner, but could not find NodeClaim via the k8s api")
-		return nil
-	}
-
-	if nodeClaim.Spec.TerminationGracePeriod != nil && nodeClaim.DeletionTimestamp != nil {
-		expirationTime := nodeClaim.DeletionTimestamp.Time.Add(nodeClaim.Spec.TerminationGracePeriod.Duration)
-		c.recorder.Publish(terminatorevents.NodeTerminationGracePeriod(node, expirationTime, nodeClaim.Spec.TerminationGracePeriod.String()))
-		return &expirationTime
-	}
-
-	return nil
+	return &expirationTime, nil
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {

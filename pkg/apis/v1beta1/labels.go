@@ -47,6 +47,7 @@ const (
 	ManagedByAnnotationKey             = Group + "/managed-by"
 	NodePoolHashAnnotationKey          = Group + "/nodepool-hash"
 	NodePoolHashVersionAnnotationKey   = Group + "/nodepool-hash-version"
+	NodeExpirationTimeAnnotationKey    = Group + "/node-expiration-time"
 )
 
 // Karpenter specific finalizers

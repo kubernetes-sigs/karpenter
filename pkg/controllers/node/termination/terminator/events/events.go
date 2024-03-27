@@ -18,7 +18,6 @@ package events
 
 import (
 	"fmt"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
 
@@ -55,12 +54,12 @@ func NodeFailedToDrain(node *v1.Node, err error) events.Event {
 	}
 }
 
-func NodeTerminationGracePeriod(node *v1.Node, expirationTime time.Time, terminationGracePeriod string) events.Event {
+func NodeTerminationGracePeriod(node *v1.Node, expirationTime string) events.Event {
 	return events.Event{
 		InvolvedObject: node,
 		Type:           v1.EventTypeWarning,
 		Reason:         "TerminationGracePeriodExpiration",
-		Message:        fmt.Sprintf("Node will have the out-of-service taint applied at: %s (TerminationGracePeriod: %s)", expirationTime, terminationGracePeriod),
+		Message:        fmt.Sprintf("Node will have the out-of-service taint applied at: %s", expirationTime),
 		DedupeValues:   []string{node.Name},
 	}
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -84,9 +85,14 @@ func (t *Terminator) Drain(ctx context.Context, node *v1.Node, nodeGracePeriodEx
 	if err != nil {
 		return fmt.Errorf("listing pods on node, %w", err)
 	}
-	t.EvictOrDelete(pods, nodeGracePeriodExpirationTime)
 
-	// podsWaitingEvictionCount are the number of pods that either haven't had eviction called against them yet
+	t.DeleteExpiringPods(ctx, pods, nodeGracePeriodExpirationTime)
+
+	// evictablePods are pods that aren't yet terminating are eligible to have the eviction API called against them
+	evictablePods := lo.Filter(pods, func(p *v1.Pod, _ int) bool { return podutil.IsEvictable(p) })
+	t.Evict(evictablePods)
+
+	// podsWaitingEvictionCount is the number of pods that either haven't had eviction called against them yet
 	// or are still actively terminated and haven't exceeded their termination grace period yet
 	podsWaitingEvictionCount := lo.CountBy(pods, func(p *v1.Pod) bool { return podutil.IsWaitingEviction(p, t.clock) })
 	if podsWaitingEvictionCount > 0 {
@@ -95,22 +101,10 @@ func (t *Terminator) Drain(ctx context.Context, node *v1.Node, nodeGracePeriodEx
 	return nil
 }
 
-func (t *Terminator) EvictOrDelete(pods []*v1.Pod, nodeGracePeriodExpirationTime *time.Time) {
+func (t *Terminator) Evict(pods []*v1.Pod) {
 	// 1. Prioritize noncritical pods, non-daemon pods https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
 	var criticalNonDaemon, criticalDaemon, nonCriticalNonDaemon, nonCriticalDaemon []*v1.Pod
 	for _, pod := range pods {
-		// check if the node has an expiration time and the pod needs to be deleted
-		deleteTime := t.shouldDeletePodToEnsureGracePeriod(nodeGracePeriodExpirationTime, pod)
-		if deleteTime != nil {
-			t.evictionQueue.Add(deleteTime, pod)
-			continue
-		}
-
-		// evictablePods are pods that aren't yet terminating are eligible to have the eviction API called against them
-		if !podutil.IsEvictable(pod) {
-			continue // skip queueing this pod for eviction
-		}
-
 		if pod.Spec.PriorityClassName == "system-cluster-critical" || pod.Spec.PriorityClassName == "system-node-critical" {
 			if podutil.IsOwnedByDaemonSet(pod) {
 				criticalDaemon = append(criticalDaemon, pod)
@@ -125,11 +119,9 @@ func (t *Terminator) EvictOrDelete(pods []*v1.Pod, nodeGracePeriodExpirationTime
 			}
 		}
 	}
-	// 2. Evict in order:
-	// a. non-critical non-daemonsets
-	// b. non-critical daemonsets
-	// c. critical non-daemonsets
-	// d. critical daemonsets
+
+	// EvictInOrder evicts only the first list of pods which is not empty
+	// future Evict calls will catch later lists of pods that were not initially evicted
 	t.EvictInOrder([][]*v1.Pod{
 		nonCriticalNonDaemon,
 		nonCriticalDaemon,
@@ -142,8 +134,26 @@ func (t *Terminator) EvictInOrder(pods [][]*v1.Pod) {
 	for _, podList := range pods {
 		if len(podList) > 0 {
 			// evict the first list of pods that is not empty, ignore the rest
-			t.evictionQueue.Add(nil, podList...)
+			t.evictionQueue.Add(podList...)
 			return
+		}
+	}
+}
+
+func (t *Terminator) DeleteExpiringPods(ctx context.Context, pods []*v1.Pod, nodeGracePeriodExpirationTime *time.Time) {
+	for _, pod := range pods {
+		// check if the node has an expiration time and the pod needs to be deleted
+		deleteTime := t.shouldDeletePodToEnsureGracePeriod(nodeGracePeriodExpirationTime, pod)
+		if deleteTime != nil {
+
+			// delete pod proactively to give as much of its terminationGracePeriodSeconds as possible for deletion
+			if err := t.kubeClient.Delete(ctx, pod); err != nil {
+				if !apierrors.IsNotFound(err) { // ignore 404, not a problem
+					logging.FromContext(ctx).With("namespace", pod.Namespace).With("name", pod.Name).Errorf("deleting pod: %s", err)
+				}
+			}
+			logging.FromContext(ctx).With("namespace", pod.Namespace).With("name", pod.Name).Infof("deleted pod")
+			// t.recorder.Publish(terminatorevents.DeletePod(pod))		// TODO: how to publish event from terminator?
 		}
 	}
 }
