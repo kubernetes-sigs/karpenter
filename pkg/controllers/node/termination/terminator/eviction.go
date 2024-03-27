@@ -137,9 +137,11 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 	if shutdown {
 		return reconcile.Result{}, fmt.Errorf("EvictionQueue is broken and has shutdown")
 	}
+
 	qk := item.(QueueKey)
 	defer q.RateLimitingInterface.Done(qk)
-	// Evict pod
+
+	// Evict the pod
 	if q.Evict(ctx, qk) {
 		q.RateLimitingInterface.Forget(qk)
 		q.mu.Lock()
@@ -147,12 +149,13 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 		q.mu.Unlock()
 		return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 	}
+
 	// Requeue pod if eviction failed
 	q.RateLimitingInterface.AddRateLimited(qk)
 	return reconcile.Result{RequeueAfter: controller.Immediately}, nil
 }
 
-// Evict returns true if successful eviction call, and false if not an eviction-related error
+// Evict returns true if successful eviction call, and false if there was an eviction-related error
 func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("pod", key.NamespacedName))
 	if err := q.kubeClient.SubResource("eviction").Create(ctx,

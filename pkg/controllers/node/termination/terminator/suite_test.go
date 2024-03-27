@@ -154,4 +154,17 @@ var _ = Describe("Eviction/Queue", func() {
 			}
 		})
 	})
+
+	// Context("Pod Deletion API", func() {
+	// 	It("should succeed with no event when the pod is not found", func() {
+	// 		ExpectApplied(ctx, env.Client)
+	// 		Expect(queue.Delete(ctx, terminator.NewQueueKey(pod))).To(BeTrue())
+	// 		Expect(recorder.Events()).To(HaveLen(0))
+	// 	})
+	// 	It("should succeed with an deletion event", func() {
+	// 		ExpectApplied(ctx, env.Client, pod)
+	// 		Expect(queue.Delete(ctx, terminator.NewQueueKey(pod))).To(BeTrue())
+	// 		Expect(recorder.Calls("Deleted")).To(Equal(1))
+	// 	})
+	// })
 })

@@ -74,6 +74,14 @@ func NodeClaimLinkedNode(nodeClaim *v1beta1.NodeClaim) *v1.Node {
 				Labels:      nodeClaim.Labels,
 				Annotations: nodeClaim.Annotations,
 				Finalizers:  nodeClaim.Finalizers,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion: "karpenter.sh/v1beta1",
+						Kind:       "NodeClaim",
+						Name:       nodeClaim.Name,
+						UID:        "6ad01199-df8b-49dc-abde-5673d730f735",
+					},
+				},
 			},
 			Taints:      append(nodeClaim.Spec.Taints, nodeClaim.Spec.StartupTaints...),
 			Capacity:    nodeClaim.Status.Capacity,

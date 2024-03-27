@@ -80,10 +80,16 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 	if err := c.deleteAllNodeClaims(ctx, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("deleting nodeclaims, %w", err)
 	}
-	if err := c.terminator.Taint(ctx, node); err != nil {
-		return reconcile.Result{}, fmt.Errorf("tainting node, %w", err)
+
+	nodeGracePeriodExpirationTime, err := c.expireNode(ctx, node)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("expiring node, %w", err)
 	}
-	if err := c.terminator.Drain(ctx, node); err != nil {
+
+	if err := c.terminator.Taint(ctx, node, v1beta1.DisruptionNoScheduleTaint); err != nil {
+		return reconcile.Result{}, fmt.Errorf("tainting node with karpenter.sh/disruption taint, %w", err)
+	}
+	if err := c.terminator.Drain(ctx, node, nodeGracePeriodExpirationTime); err != nil {
 		if !terminator.IsNodeDrainError(err) {
 			return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 		}
@@ -101,6 +107,7 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 				return reconcile.Result{}, fmt.Errorf("getting nodeclaim, %w", err)
 			}
 		}
+
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 	if err := c.removeFinalizer(ctx, node); err != nil {
@@ -142,6 +149,28 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *v1.Node) error {
 		logging.FromContext(ctx).Infof("deleted node")
 	}
 	return nil
+}
+
+func (c *Controller) expireNode(ctx context.Context, node *v1.Node) (*time.Time, error) {
+	expirationTime := time.Time{}
+	if expirationTimeString, exists := node.Annotations[v1beta1.NodeExpirationTimeAnnotationKey]; exists {
+		c.recorder.Publish(terminatorevents.NodeTerminationGracePeriod(node, expirationTimeString))
+
+		expirationTime, err := time.Parse(time.RFC3339, expirationTimeString)
+		if err != nil {
+			return nil, fmt.Errorf("parsing %s annotation, %w", v1beta1.NodeExpirationTimeAnnotationKey, err)
+		}
+
+		if time.Now().After(expirationTime) {
+			taint := v1beta1.DisruptionNonGracefulShutdown
+			logging.FromContext(ctx).With("taint.Key", taint.Key).With("taint.Effect", taint.Effect).With("taint.Value", taint.Value).Infof("terminationGracePeriod for the node has expired, tainting")
+			if err := c.terminator.Taint(ctx, node, taint); err != nil {
+				return &expirationTime, fmt.Errorf("tainting node: %w", err)
+			}
+		}
+	}
+
+	return &expirationTime, nil
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
