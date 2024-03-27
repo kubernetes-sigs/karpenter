@@ -46,10 +46,9 @@ import (
 
 // Cluster maintains cluster state that is often needed but expensive to compute.
 type Cluster struct {
-	kubeClient    client.Client
-	cloudProvider cloudprovider.CloudProvider
-	clock         clock.Clock
-
+	kubeClient                client.Client
+	cloudProvider             cloudprovider.CloudProvider
+	clock                     clock.Clock
 	mu                        sync.RWMutex
 	nodes                     map[string]*StateNode           // provider id -> cached node
 	bindings                  map[types.NamespacedName]string // pod namespaced named -> node name
