@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 )
 
@@ -37,18 +38,34 @@ var _ operatorcontroller.TypedController[*v1beta1.NodePool] = (*Controller)(nil)
 // Controller is hash controller that constructs a hash based on the fields that are considered for static drift.
 // The hash is placed in the metadata for increased observability and should be found on each object.
 type Controller struct {
-	kubeClient client.Client
+	kubeClient    client.Client
+	cloudProvider cloudprovider.CloudProvider
 }
 
-func NewController(kubeClient client.Client) operatorcontroller.Controller {
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) operatorcontroller.Controller {
 	return operatorcontroller.Typed[*v1beta1.NodePool](kubeClient, &Controller{
-		kubeClient: kubeClient,
+		kubeClient:    kubeClient,
+		cloudProvider: cloudProvider,
 	})
 }
 
 // Reconcile the resource
 func (c *Controller) Reconcile(ctx context.Context, np *v1beta1.NodePool) (reconcile.Result, error) {
 	stored := np.DeepCopy()
+
+	// To avoid a breaking change on the NodePool API, we will be setting a default APIVersion and Kind
+	// defined by the cloudprovider to each nodeClassRef on every NodePool. This will be removed once
+	// the NodePool API requires APIVersion and Kind to be set at NodePool creation.
+	// TODO: remove at v1 when APIVersion and Kind are required fields on NodePool
+	supportedNodeClass := c.cloudProvider.GetSupportedNodeClass()
+	if len(supportedNodeClass) == 1 {
+		if np.Spec.Template.Spec.NodeClassRef.APIVersion == "" {
+			np.Spec.Template.Spec.NodeClassRef.APIVersion = supportedNodeClass[0].GroupVersion().String()
+		}
+		if np.Spec.Template.Spec.NodeClassRef.Kind == "" {
+			np.Spec.Template.Spec.NodeClassRef.Kind = supportedNodeClass[0].Kind
+		}
+	}
 
 	if np.Annotations[v1beta1.NodePoolHashVersionAnnotationKey] != v1beta1.NodePoolHashVersion {
 		if err := c.updateNodeClaimHash(ctx, np); err != nil {
