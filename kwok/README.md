@@ -50,16 +50,18 @@ EOF
 ## Specifying Instance Types
 
 By default, the KWOK provider will create a hypothetical set of instance types that it uses for node provisioning.  You
-can specify a custom set of instance types by providing a JSON file with the list of supported instance options.
-This set of instance types is embedded into the binary in `kwok/cloudprovider/helpers.go`; if you want to change the
-instance types that Karpenter+KWOK support, you will need to adjust the embedded data and recompile.
+can specify a custom set of instance types by providing a JSON file with the list of supported instance options.  This
+set of instance types is embedded into the binary on creation; if you want to change the instance types that
+Karpenter+KWOK support, you will need to adjust the embedded data and recompile.
 
-There is an example instance types file in [examples/instance\_types.json](examples/instance_types.json).
+There is an example instance types file in [examples/instance\_types.json](examples/instance_types.json) that you can
+regenerate with `make gen_instance_types`.
 
 ## Notes
-The kwok provider will have additional labels `karpenter.kwok.sh/instance-size`, `karpenter.kwok.sh/instance-family`,
-`karpenter.kwok.sh/instance-cpu`, and `karpenter.sh/instance-memory`. These are only available in the kwok provider to
-select fake generated instance types. These labels will not work with a real Karpenter installation.
+The kwok provider will have additional labels `karpenter.kwok.sh/instance-type`, `karpenter.kwok.sh/instance-size`,
+`karpenter.kwok.sh/instance-family`, `karpenter.kwok.sh/instance-cpu`, and `karpenter.sh/instance-memory`. These are
+only available in the kwok provider to select fake generated instance types. These labels will not work with a real
+Karpenter installation.
 
 ## Uninstalling
 ```bash
