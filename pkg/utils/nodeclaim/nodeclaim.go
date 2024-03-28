@@ -89,6 +89,22 @@ func NodePoolEventHandler(c client.Client) handler.EventHandler {
 	})
 }
 
+// NodePoolEventHandler is a watcher on v1beta1.NodeClaim that maps Provisioner to NodeClaims based
+// on the v1beta1.NodePoolLabelKey and enqueues reconcile.Requests for the NodeClaim
+func NodeClassEventHandler(c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
+		nodeClaimList := &v1beta1.NodeClaimList{}
+		if err := c.List(ctx, nodeClaimList, client.MatchingFields{"spec.nodeClassRef.name": o.GetName()}); err != nil {
+			return requests
+		}
+		return lo.Map(nodeClaimList.Items, func(n v1beta1.NodeClaim, _ int) reconcile.Request {
+			return reconcile.Request{
+				NamespacedName: client.ObjectKeyFromObject(&n),
+			}
+		})
+	})
+}
+
 // NodeNotFoundError is an error returned when no v1.Nodes are found matching the passed providerID
 type NodeNotFoundError struct {
 	ProviderID string

@@ -23,6 +23,8 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -48,7 +50,8 @@ type nodeClaimReconciler interface {
 // Controller is a disruption controller that adds StatusConditions to nodeclaims when they meet certain disruption conditions
 // e.g. When the NodeClaim has surpassed its owning provisioner's expirationTTL, then it is marked as "Expired" in the StatusConditions
 type Controller struct {
-	kubeClient client.Client
+	kubeClient         client.Client
+	supportedNodeClass []schema.GroupVersionKind
 
 	drift      *Drift
 	expiration *Expiration
@@ -58,10 +61,11 @@ type Controller struct {
 // NewController constructs a nodeclaim disruption controller
 func NewController(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider) operatorcontroller.Controller {
 	return operatorcontroller.Typed[*v1beta1.NodeClaim](kubeClient, &Controller{
-		kubeClient: kubeClient,
-		drift:      &Drift{cloudProvider: cloudProvider},
-		expiration: &Expiration{kubeClient: kubeClient, clock: clk},
-		emptiness:  &Emptiness{kubeClient: kubeClient, cluster: cluster, clock: clk},
+		kubeClient:         kubeClient,
+		supportedNodeClass: cloudProvider.GetSupportedNodeClass(),
+		drift:              &Drift{cloudProvider: cloudProvider},
+		expiration:         &Expiration{kubeClient: kubeClient, clock: clk},
+		emptiness:          &Emptiness{kubeClient: kubeClient, cluster: cluster, clock: clk},
 	})
 }
 
@@ -114,7 +118,7 @@ func (c *Controller) Name() string {
 }
 
 func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.Adapt(controllerruntime.
+	builder := controllerruntime.
 		NewControllerManagedBy(m).
 		For(&v1beta1.NodeClaim{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
@@ -125,6 +129,14 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontr
 		Watches(
 			&v1.Pod{},
 			nodeclaimutil.PodEventHandler(c.kubeClient),
-		),
-	)
+		)
+	for _, nodeclassGVK := range c.supportedNodeClass {
+		nodeclass := &unstructured.Unstructured{}
+		nodeclass.SetGroupVersionKind(nodeclassGVK)
+		builder.Watches(
+			nodeclass,
+			nodeclaimutil.NodeClassEventHandler(c.kubeClient),
+		)
+	}
+	return operatorcontroller.Adapt(builder)
 }
