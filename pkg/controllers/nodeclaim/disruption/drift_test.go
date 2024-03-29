@@ -466,11 +466,15 @@ var _ = Describe("Drift", func() {
 								},
 							},
 							Kubelet: &v1beta1.KubeletConfiguration{
-								ClusterDNS:     []string{"fakeDNS"},
-								MaxPods:        ptr.Int32(0),
-								PodsPerCore:    ptr.Int32(0),
-								SystemReserved: v1.ResourceList{},
-								KubeReserved:   v1.ResourceList{},
+								ClusterDNS:  []string{"fakeDNS"},
+								MaxPods:     ptr.Int32(0),
+								PodsPerCore: ptr.Int32(0),
+								SystemReserved: map[string]string{
+									"cpu": "2",
+								},
+								KubeReserved: map[string]string{
+									"memory": "10Gi",
+								},
 								EvictionHard: map[string]string{
 									"memory.available": "20Gi",
 								},
@@ -520,11 +524,8 @@ var _ = Describe("Drift", func() {
 			Entry("kubeletConfiguration ClusterDNS", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{ClusterDNS: []string{"testDNS"}}}}}}),
 			Entry("KubeletConfiguration MaxPods", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{MaxPods: ptr.Int32(5)}}}}}),
 			Entry("KubeletConfiguration PodsPerCore", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{PodsPerCore: ptr.Int32(5)}}}}}),
-			// Karpenter currently have a bug with systemReserved and kubeReserved will cause NodeClaims to not be drifted, when the field is updated
-			// TODO: Enable systemReserved and kubeReserved once they can be used for static drift
-			// For more information: https://github.com/kubernetes-sigs/karpenter/issues/1080
-			// Entry("KubeletConfiguration SystemReserved", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{SystemReserved: v1.ResourceList{}}}}}}),
-			// Entry("KubeletConfiguration KubeReserved", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{KubeReserved: v1.ResourceList{}}}}}}),
+			Entry("KubeletConfiguration SystemReserved", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{SystemReserved: map[string]string{"memory": "30Gi"}}}}}}),
+			Entry("KubeletConfiguration KubeReserved", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{KubeReserved: map[string]string{"cpu": "10"}}}}}}),
 			Entry("KubeletConfiguration EvictionHard", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{EvictionHard: map[string]string{"memory.available": "30Gi"}}}}}}),
 			Entry("KubeletConfiguration EvictionSoft", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{EvictionSoft: map[string]string{"nodefs.available": "30Gi"}}}}}}),
 			Entry("KubeletConfiguration EvictionSoftGracePeriod", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{Spec: v1beta1.NodeClaimSpec{Kubelet: &v1beta1.KubeletConfiguration{EvictionSoftGracePeriod: map[string]metav1.Duration{"nodefs.available": {Duration: time.Minute}}}}}}}),

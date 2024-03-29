@@ -232,34 +232,34 @@ var _ = Describe("CEL/Validation", func() {
 		})
 	})
 	Context("KubeletConfiguration", func() {
-		It("should succeed on kubeReserved with invalid keys", func() {
+		It("should succeed on kubeReserved with valid keys", func() {
 			nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-				KubeReserved: v1.ResourceList{
-					v1.ResourceCPU: resource.MustParse("2"),
+				KubeReserved: map[string]string{
+					string(v1.ResourceCPU): "2",
 				},
 			}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
-		It("should succeed on systemReserved with invalid keys", func() {
+		It("should succeed on systemReserved with valid keys", func() {
 			nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-				SystemReserved: v1.ResourceList{
-					v1.ResourceCPU: resource.MustParse("2"),
+				SystemReserved: map[string]string{
+					string(v1.ResourceCPU): "2",
 				},
 			}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
 		It("should fail on kubeReserved with invalid keys", func() {
 			nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-				KubeReserved: v1.ResourceList{
-					v1.ResourcePods: resource.MustParse("2"),
+				KubeReserved: map[string]string{
+					string(v1.ResourcePods): "2",
 				},
 			}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
 		It("should fail on systemReserved with invalid keys", func() {
 			nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-				SystemReserved: v1.ResourceList{
-					v1.ResourcePods: resource.MustParse("2"),
+				SystemReserved: map[string]string{
+					string(v1.ResourcePods): "2",
 				},
 			}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
