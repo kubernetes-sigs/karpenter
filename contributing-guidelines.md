@@ -18,6 +18,8 @@ Karpenter is a customer driven project, building solutions for real customer pro
 
 Lastly, as a library vended for and consumed by cloud providers, Karpenter aims to foster participation from all active cloud providers. Karpenter’s set of reviewers and approvers should have representatives from well known cloud provider implementations, as changes to upstream Karpenter can affect all dependent cloud provider implementations.
 
+To become a reviewer or approver, a user should begin by cutting an issue to track the approval process.
+
 ### Reviewers
 
 Reviewer status is an indication that the person is committed to Karpenter activities, demonstrates technical depth, has accumulated enough context, and is overall trustworthy to help inform approvers and aid contributors by applying a lgtm. Anyone is welcome to review a PR with a comment or feedback even if they do not have rights to apply a lgtm. The requirements listed in the [membership document](https://github.com/kubernetes/community/blob/master/community-membership.md#reviewer) highlight this as well.
