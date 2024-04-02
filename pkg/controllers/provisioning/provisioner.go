@@ -380,7 +380,7 @@ func (p *Provisioner) globalNodeClaimLimitsExceeded(ctx context.Context) error {
 		return nil
 	}
 
-	if nodeClaimLimit <= len(p.cluster.Nodes()) {
+	if nodeClaimLimit <= p.cluster.TotalNodes() {
 		return fmt.Errorf("number of NodeClaims has reached or exceeded global limit of %v", nodeClaimLimit)
 	}
 

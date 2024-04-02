@@ -384,6 +384,10 @@ func (c *Cluster) DeleteDaemonSet(key types.NamespacedName) {
 	c.daemonSetPods.Delete(key)
 }
 
+func (c *Cluster) TotalNodes() int {
+	return len(c.nodes)
+}
+
 // WARNING
 // Everything under this section of code assumes that you have already held a lock when you are calling into these functions
 // and explicitly modifying the cluster state. If you do not hold the cluster state lock before calling any of these helpers
