@@ -106,5 +106,7 @@ require (
 
 retract (
 	v0.100.101-test // accidentally published testing version
+	v0.35.3 // accidentally published incomplete patch release
+	v0.34.4 // accidentally published incomplete patch release
 	v0.27.7 // accidentally published incomplete patch release
 )
