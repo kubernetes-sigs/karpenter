@@ -77,6 +77,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) 
 
 func (c *Controller) resourceCountsFor(ownerLabel string, ownerName string) v1.ResourceList {
 	var res v1.ResourceList
+	var nodeCount int64
 	// Record all resources provisioned by the nodepools, we look at the cluster state nodes as their capacity
 	// is accurately reported even for nodes that haven't fully started yet. This allows us to update our nodepool
 	// status immediately upon node creation instead of waiting for the node to become ready.
@@ -88,9 +89,16 @@ func (c *Controller) resourceCountsFor(ownerLabel string, ownerName string) v1.R
 		}
 		if n.Labels()[ownerLabel] == ownerName {
 			res = resources.MergeInto(res, n.Capacity())
+			nodeCount++
 		}
 		return true
 	})
+
+	// Add node count to NodePool resources
+	resMap := make(map[v1.ResourceName]resource.Quantity)
+	resMap["nodes"] = *resource.NewQuantity(nodeCount, resource.DecimalSI)
+	res = resources.MergeInto(res, v1.ResourceList(resMap))
+
 	return functional.FilterMap(res, func(_ v1.ResourceName, v resource.Quantity) bool { return !v.IsZero() })
 }
 
