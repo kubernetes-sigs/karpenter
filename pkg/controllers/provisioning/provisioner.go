@@ -380,11 +380,7 @@ func (p *Provisioner) globalNodeClaimLimitsExceeded(ctx context.Context) error {
 		return nil
 	}
 
-	nodeClaims := &v1beta1.NodeClaimList{}
-	if err := p.kubeClient.List(ctx, nodeClaims); err != nil {
-		return fmt.Errorf("failed to list NodeClaims: %w", err)
-	}
-	if nodeClaimLimit <= len(nodeClaims.Items) {
+	if nodeClaimLimit <= len(p.cluster.Nodes()) {
 		return fmt.Errorf("number of NodeClaims has reached or exceeded global limit of %v", nodeClaimLimit)
 	}
 
