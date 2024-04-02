@@ -104,6 +104,10 @@ spec:
             - name: BATCH_IDLE_DURATION
               value: "{{ . }}"
           {{- end }}
+          {{- with .Values.settings.maxNodeClaims }}
+            - name: MAX_NODE_CLAIMS
+              value: "{{ . }}"
+          {{- end }}
           {{- with .Values.controller.env }}
             {{- toYaml . | nindent 12 }}
           {{- end }}

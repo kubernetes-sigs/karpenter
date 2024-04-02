@@ -2,7 +2,7 @@
 
 A Helm chart for Karpenter's KwoK Provider, integrated with https://github.com/kubernetes-sigs/kwok.
 
-![Version: 0.35.0](https://img.shields.io/badge/Version-0.35.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.35.0](https://img.shields.io/badge/AppVersion-0.35.0-informational?style=flat-square)
+![Version: 0.35.4](https://img.shields.io/badge/Version-0.35.4-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.35.4](https://img.shields.io/badge/AppVersion-0.35.4-informational?style=flat-square)
 
 ## Documentation
 
@@ -51,12 +51,13 @@ For full Karpenter documentation please checkout [https://karpenter.sh](https://
 | serviceMonitor.additionalLabels | object | `{}` | Additional labels for the ServiceMonitor. |
 | serviceMonitor.enabled | bool | `false` | Specifies whether a ServiceMonitor should be created. |
 | serviceMonitor.endpointConfig | object | `{}` | Endpoint configuration for the ServiceMonitor. |
-| settings | object | `{"batchIdleDuration":"1s","batchMaxDuration":"10s","featureGates":{"drift":true,"spotToSpotConsolidation":false}}` | Global Settings to configure Karpenter |
+| settings | object | `{"batchIdleDuration":"1s","batchMaxDuration":"10s","featureGates":{"drift":true,"spotToSpotConsolidation":false},"maxNodeClaims":"-1"}` | Global Settings to configure Karpenter |
 | settings.batchIdleDuration | string | `"1s"` | The maximum amount of time with no new ending pods that if exceeded ends the current batching window. If pods arrive faster than this time, the batching window will be extended up to the maxDuration. If they arrive slower, the pods will be batched separately. |
 | settings.batchMaxDuration | string | `"10s"` | The maximum length of a batch window. The longer this is, the more pods we can consider for provisioning at one time which usually results in fewer but larger nodes. |
 | settings.featureGates | object | `{"drift":true,"spotToSpotConsolidation":false}` | Feature Gate configuration values. Feature Gates will follow the same graduation process and requirements as feature gates in Kubernetes. More information here https://kubernetes.io/docs/reference/command-line-tools-reference/feature-gates/#feature-gates-for-alpha-or-beta-features |
 | settings.featureGates.drift | bool | `true` | drift is in BETA and is enabled by default. Setting drift to false disables the drift disruption method to watch for drift between currently deployed nodes and the desired state of nodes set in nodepools and nodeclasses |
 | settings.featureGates.spotToSpotConsolidation | bool | `false` | spotToSpotConsolidation is ALPHA and is disabled by default. Setting this to true will enable spot replacement consolidation for both single and multi-node consolidation. |
+| settings.maxNodeClaims | string | `"-1"` | The maximum allowed number of NodeClaims that if exceeded will stop additional creations. Negative values are treated as unlimited and is the default. |
 | strategy | object | `{"rollingUpdate":{"maxUnavailable":1}}` | Strategy for updating the pod. |
 | terminationGracePeriodSeconds | string | `nil` | Override the default termination grace period for the pod. |
 | tolerations | list | `[{"key":"CriticalAddonsOnly","operator":"Exists"}]` | Tolerations to allow the pod to be scheduled to nodes with taints. |

@@ -38,6 +38,7 @@ type OptionsFields struct {
 	KubeClientBurst      *int
 	EnableProfiling      *bool
 	EnableLeaderElection *bool
+	MaxNodeClaims        *int
 	MemoryLimit          *int64
 	LogLevel             *string
 	BatchMaxDuration     *time.Duration
@@ -69,6 +70,7 @@ func Options(overrides ...OptionsFields) *options.Options {
 		KubeClientBurst:      lo.FromPtrOr(opts.KubeClientBurst, 300),
 		EnableProfiling:      lo.FromPtrOr(opts.EnableProfiling, false),
 		EnableLeaderElection: lo.FromPtrOr(opts.EnableLeaderElection, true),
+		MaxNodeClaims:        lo.FromPtrOr(opts.MaxNodeClaims, -1),
 		MemoryLimit:          lo.FromPtrOr(opts.MemoryLimit, -1),
 		LogLevel:             lo.FromPtrOr(opts.LogLevel, ""),
 		BatchMaxDuration:     lo.FromPtrOr(opts.BatchMaxDuration, 10*time.Second),

@@ -54,6 +54,7 @@ var _ = Describe("Options", func() {
 		"KUBE_CLIENT_BURST",
 		"ENABLE_PROFILING",
 		"LEADER_ELECT",
+		"MAX_NODE_CLAIMS",
 		"MEMORY_LIMIT",
 		"LOG_LEVEL",
 		"BATCH_MAX_DURATION",
@@ -105,6 +106,7 @@ var _ = Describe("Options", func() {
 				KubeClientBurst:      lo.ToPtr(300),
 				EnableProfiling:      lo.ToPtr(false),
 				EnableLeaderElection: lo.ToPtr(true),
+				MaxNodeClaims:        lo.ToPtr(-1),
 				MemoryLimit:          lo.ToPtr[int64](-1),
 				LogLevel:             lo.ToPtr("info"),
 				BatchMaxDuration:     lo.ToPtr(10 * time.Second),
@@ -128,6 +130,7 @@ var _ = Describe("Options", func() {
 				"--kube-client-burst", "0",
 				"--enable-profiling",
 				"--leader-elect=false",
+				"--max-node-claims=0",
 				"--memory-limit", "0",
 				"--log-level", "debug",
 				"--batch-max-duration", "5s",
@@ -146,6 +149,7 @@ var _ = Describe("Options", func() {
 				KubeClientBurst:      lo.ToPtr(0),
 				EnableProfiling:      lo.ToPtr(true),
 				EnableLeaderElection: lo.ToPtr(false),
+				MaxNodeClaims:        lo.ToPtr(0),
 				MemoryLimit:          lo.ToPtr[int64](0),
 				LogLevel:             lo.ToPtr("debug"),
 				BatchMaxDuration:     lo.ToPtr(5 * time.Second),
@@ -167,6 +171,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("KUBE_CLIENT_BURST", "0")
 			os.Setenv("ENABLE_PROFILING", "true")
 			os.Setenv("LEADER_ELECT", "false")
+			os.Setenv("MAX_NODE_CLAIMS", "0")
 			os.Setenv("MEMORY_LIMIT", "0")
 			os.Setenv("LOG_LEVEL", "debug")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
@@ -189,6 +194,7 @@ var _ = Describe("Options", func() {
 				KubeClientBurst:      lo.ToPtr(0),
 				EnableProfiling:      lo.ToPtr(true),
 				EnableLeaderElection: lo.ToPtr(false),
+				MaxNodeClaims:        lo.ToPtr(0),
 				MemoryLimit:          lo.ToPtr[int64](0),
 				LogLevel:             lo.ToPtr("debug"),
 				BatchMaxDuration:     lo.ToPtr(5 * time.Second),
@@ -208,6 +214,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("KUBE_CLIENT_BURST", "0")
 			os.Setenv("ENABLE_PROFILING", "true")
 			os.Setenv("LEADER_ELECT", "false")
+			os.Setenv("MAX_NODE_CLAIMS", "0")
 			os.Setenv("MEMORY_LIMIT", "0")
 			os.Setenv("LOG_LEVEL", "debug")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
@@ -234,6 +241,7 @@ var _ = Describe("Options", func() {
 				KubeClientBurst:      lo.ToPtr(0),
 				EnableProfiling:      lo.ToPtr(true),
 				EnableLeaderElection: lo.ToPtr(false),
+				MaxNodeClaims:        lo.ToPtr(0),
 				MemoryLimit:          lo.ToPtr[int64](0),
 				LogLevel:             lo.ToPtr("debug"),
 				BatchMaxDuration:     lo.ToPtr(5 * time.Second),
@@ -294,6 +302,7 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.KubeClientBurst).To(Equal(optsB.KubeClientBurst))
 	Expect(optsA.EnableProfiling).To(Equal(optsB.EnableProfiling))
 	Expect(optsA.EnableLeaderElection).To(Equal(optsB.EnableLeaderElection))
+	Expect(optsA.MaxNodeClaims).To(Equal(optsB.MaxNodeClaims))
 	Expect(optsA.MemoryLimit).To(Equal(optsB.MemoryLimit))
 	Expect(optsA.LogLevel).To(Equal(optsB.LogLevel))
 	Expect(optsA.BatchMaxDuration).To(Equal(optsB.BatchMaxDuration))
