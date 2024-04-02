@@ -144,14 +144,14 @@ func GetPodEvictionCost(ctx context.Context, p *v1.Pod) float64 {
 	return clamp(-10.0, cost, 10.0)
 }
 
-// filterByPriceWithMinValues returns the instanceTypes that are lower priced than the current candidate and iterates over the cumulative minimum requirement of the InstanceTypeOptions to see if it meets the minValues of requirements.
+// filterByPriceWithMinValues returns the instanceTypes that are lower priced (or same priced, but fewer instances) than the current candidate and iterates over the cumulative minimum requirement of the InstanceTypeOptions to see if it meets the minValues of requirements.
 // The minValues requirement is checked again after filterByPrice as it may result in more constrained InstanceTypeOptions for a NodeClaim
-func filterByPriceWithMinValues(options []*cloudprovider.InstanceType, reqs scheduling.Requirements, price float64) ([]*cloudprovider.InstanceType, string, int) {
+func filterByPriceWithMinValues(options []*cloudprovider.InstanceType, reqs scheduling.Requirements, price float64, numCandidates int) ([]*cloudprovider.InstanceType, string, int) {
 	var result []*cloudprovider.InstanceType
 
 	for _, it := range options {
 		launchPrice := worstLaunchPrice(it.Offerings.Available(), reqs)
-		if launchPrice < price {
+		if launchPrice < price || (launchPrice == price && numCandidates > 1) {
 			result = append(result, it)
 		}
 	}
