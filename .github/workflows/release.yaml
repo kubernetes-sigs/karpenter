@@ -4,13 +4,16 @@ on:
     tags: ['v*.*.*']
 jobs:
   release:
+    permissions:
+      contents: write # Needed for creating and editing releases
+      id-token: write # Needed for cosigning build attestation files with tejolote
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Create Github Release
-        uses: "marvinpinto/action-automatic-releases@latest"
+        uses: marvinpinto/action-automatic-releases@919008cf3f741b179569b7a6fb4d8860689ab7f0 # v1.2.1
         with:
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
           prerelease: false
