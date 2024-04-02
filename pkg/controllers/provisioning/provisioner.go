@@ -40,6 +40,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/functional"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
@@ -332,11 +333,16 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 
 func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) (string, error) {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("nodepool", n.NodePoolName))
-	options := functional.ResolveOptions(opts...)
+	launchOptions := functional.ResolveOptions(opts...)
 	latest := &v1beta1.NodePool{}
 	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: n.NodePoolName}, latest); err != nil {
 		return "", fmt.Errorf("getting current resource usage, %w", err)
 	}
+
+	if err := p.globalNodeClaimLimitsExceeded(ctx); err != nil {
+		return "", err
+	}
+
 	if err := latest.Spec.Limits.ExceededBy(latest.Status.Resources); err != nil {
 		return "", err
 	}
@@ -350,7 +356,7 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 	})
 	logging.FromContext(ctx).With("nodeclaim", nodeClaim.Name, "requests", nodeClaim.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).Infof("created nodeclaim")
 	metrics.NodeClaimsCreatedCounter.With(prometheus.Labels{
-		metrics.ReasonLabel:       options.Reason,
+		metrics.ReasonLabel:       launchOptions.Reason,
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1beta1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: nodeClaim.Labels[v1beta1.CapacityTypeLabelKey],
 	}).Inc()
@@ -366,6 +372,23 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 		}
 	}
 	return nodeClaim.Name, nil
+}
+
+func (p *Provisioner) globalNodeClaimLimitsExceeded(ctx context.Context) error {
+	nodeClaimLimit := options.FromContext(ctx).MaxNodeClaims
+	if nodeClaimLimit < 0 {
+		return nil
+	}
+
+	nodeClaims := &v1beta1.NodeClaimList{}
+	if err := p.kubeClient.List(ctx, nodeClaims); err != nil {
+		return fmt.Errorf("failed to list NodeClaims: %v", err)
+	}
+	if nodeClaimLimit <= len(nodeClaims.Items) {
+		return fmt.Errorf("number of NodeClaims has reached or exceeded global limit of %v", nodeClaimLimit)
+	}
+
+	return nil
 }
 
 func instanceTypeList(names []string) string {
