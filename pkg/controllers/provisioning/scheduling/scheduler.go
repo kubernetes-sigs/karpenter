@@ -279,6 +279,10 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 		instanceTypes := s.instanceTypes[nodeClaimTemplate.NodePoolName]
 		// if limits have been applied to the nodepool, ensure we filter instance types to avoid violating those limits
 		if remaining, ok := s.remainingResources[nodeClaimTemplate.NodePoolName]; ok {
+			// If we have zero instancetypes before filtering, we should skip logging about about limits
+			if len(s.instanceTypes[nodeClaimTemplate.NodePoolName]) == 0 {
+				continue
+			}
 			instanceTypes = filterByRemainingResources(s.instanceTypes[nodeClaimTemplate.NodePoolName], remaining)
 			if len(instanceTypes) == 0 {
 				errs = multierr.Append(errs, fmt.Errorf("all available instance types exceed limits for nodepool: %q", nodeClaimTemplate.NodePoolName))
