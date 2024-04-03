@@ -87,7 +87,7 @@ spec: # This is not a complete NodePool Spec.
   disruption:
     budgets:
     - schedule: "* * * * *"
-      reasons: [drifted, Underutilized]
+      reasons: [drifted, underutilized]
       nodes: 10
     # For all other reasons, only allow 5 nodes to be disrupted at a time
     - nodes: 5
