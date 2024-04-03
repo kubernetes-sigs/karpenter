@@ -114,7 +114,7 @@ In this approach, each budget entry specifies a single reason for disruption.
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
       // +optional
-      // +kubebuilder:validation:Enum:={"Underutilized","expired","Empty","drifted"}
+      // +kubebuilder:validation:Enum:={"underutilized","expired","empty","drifted"}
       Reason string `json:"reason,omitempty" hash:"ignore"`
       // Nodes dictates the maximum number of NodeClaims owned by this NodePool
       // that can be terminating at once. This is calculated by counting nodes that
