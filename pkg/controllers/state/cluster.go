@@ -56,6 +56,9 @@ type Cluster struct {
 	nodeNameToProviderID      map[string]string               // node name -> provider id
 	nodeClaimNameToProviderID map[string]string               // node claim name -> provider id
 	daemonSetPods             sync.Map                        // daemonSet -> existing pod
+	
+	// Last Sync time when the cluster state was synced  with the apiserver 
+	lastSyncTime time.Time
 
 	clusterStateMu sync.RWMutex // Separate mutex as this is called in some places that mu is held
 	// A monotonically increasing timestamp representing the time state of the
@@ -66,6 +69,10 @@ type Cluster struct {
 	clusterState     time.Time
 	antiAffinityPods sync.Map // pod namespaced name -> *v1.Pod of pods that have required anti affinities
 }
+
+
+// AbormalClusterSyncDuration is the duration after which the cluster state is considered to be out of sync for a long enough time to alarm the customer
+const AbnormalClusterSyncDuration = 15 * time.Second
 
 func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudProvider) *Cluster {
 	return &Cluster{
@@ -90,6 +97,9 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 	// Set the metric to whatever the result of the Synced() call is
 	defer func() {
 		ClusterStateSynced.Set(lo.Ternary[float64](synced, 1, 0))
+		if synced { 
+			c.lastSyncTime = c.clock.Now()
+		}
 	}()
 	nodeClaimList := &v1beta1.NodeClaimList{}
 	if err := c.kubeClient.List(ctx, nodeClaimList); err != nil {
@@ -128,6 +138,11 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 	// that exists in the cluster state but not in the apiserver) but it ensures that we have a state
 	// representation for every node/nodeClaim that exists on the apiserver
 	return stateNodeClaimNames.IsSuperset(nodeClaimNames) && stateNodeNames.IsSuperset(nodeNames)
+}
+
+
+func (c *Cluster) LastSyncTime() time.Time {
+	return c.lastSyncTime
 }
 
 // ForPodsWithAntiAffinity calls the supplied function once for each pod with required anti affinity terms that is
@@ -197,7 +212,7 @@ func (c *Cluster) NominateNodeForPod(ctx context.Context, providerID string) {
 	}
 }
 
-// TODO remove this when v1alpha5 APIs are deprecated. With v1beta1 APIs Karpenter relies on the existence
+// TODO remove this when v1alpha5 APIs are eprecated. With v1beta1 APIs Karpenter relies on the existence
 // of the karpenter.sh/disruption taint to know when a node is marked for deletion.
 // UnmarkForDeletion removes the marking on the node as a node the controller intends to delete
 func (c *Cluster) UnmarkForDeletion(providerIDs ...string) {
