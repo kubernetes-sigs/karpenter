@@ -56,8 +56,8 @@ type Cluster struct {
 	nodeNameToProviderID      map[string]string               // node name -> provider id
 	nodeClaimNameToProviderID map[string]string               // node claim name -> provider id
 	daemonSetPods             sync.Map                        // daemonSet -> existing pod
-	
-	// Last Sync time when the cluster state was synced  with the apiserver 
+
+	// Last Sync time when the cluster state was synced  with the apiserver
 	lastSyncTime time.Time
 
 	clusterStateMu sync.RWMutex // Separate mutex as this is called in some places that mu is held
@@ -69,7 +69,6 @@ type Cluster struct {
 	clusterState     time.Time
 	antiAffinityPods sync.Map // pod namespaced name -> *v1.Pod of pods that have required anti affinities
 }
-
 
 // AbormalClusterSyncDuration is the duration after which the cluster state is considered to be out of sync for a long enough time to alarm the customer
 const AbnormalClusterSyncDuration = 15 * time.Second
@@ -97,7 +96,7 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 	// Set the metric to whatever the result of the Synced() call is
 	defer func() {
 		ClusterStateSynced.Set(lo.Ternary[float64](synced, 1, 0))
-		if synced { 
+		if synced {
 			c.lastSyncTime = c.clock.Now()
 		}
 	}()
@@ -139,7 +138,6 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 	// representation for every node/nodeClaim that exists on the apiserver
 	return stateNodeClaimNames.IsSuperset(nodeClaimNames) && stateNodeNames.IsSuperset(nodeNames)
 }
-
 
 func (c *Cluster) LastSyncTime() time.Time {
 	return c.lastSyncTime
