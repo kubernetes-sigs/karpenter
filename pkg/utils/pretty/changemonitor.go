@@ -42,7 +42,7 @@ func (c *ChangeMonitor) Reconfigure(expiration time.Duration) {
 	c.lastSeen = cache.New(expiration, expiration/2)
 }
 
-// HasChanged takes a key and value and returns true if the hash of the value has changed since the last tine the
+// HasChanged takes a key and value and returns true if the hash of the value has changed since the last time the
 // change monitor was called.
 func (c *ChangeMonitor) HasChanged(key string, value any) bool {
 	hv, _ := hashstructure.Hash(value, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
