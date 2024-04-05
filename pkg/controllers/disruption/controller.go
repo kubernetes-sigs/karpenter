@@ -113,7 +113,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	// a scheduling decision based on a smaller subset of nodes in our cluster state than actually exist.
 	if !c.cluster.Synced(ctx) {
 		if time.Since(c.cluster.LastSyncTime()) > state.AbnormalClusterSyncDuration {
-			logging.FromContext(ctx).Infof("cluster state has not been in sync since %v, waiting for sync", c.cluster.LastSyncTime())
+			logging.FromContext(ctx).Infof("detected abnormal duration since cluster was last synced %v", c.cluster.LastSyncTime())
 		}
 		logging.FromContext(ctx).Debugf("waiting on cluster sync")
 		return reconcile.Result{RequeueAfter: time.Second}, nil
