@@ -115,7 +115,6 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		if time.Since(c.cluster.LastSyncTime()) > state.AbnormalClusterSyncDuration {
 			logging.FromContext(ctx).Infof("detected abnormal duration since cluster was last synced %v", c.cluster.LastSyncTime())
 		}
-		logging.FromContext(ctx).Debugf("waiting on cluster sync")
 		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}
 
