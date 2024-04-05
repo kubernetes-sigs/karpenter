@@ -291,3 +291,10 @@ func IsRetryableError(err error) bool {
 	var retryableError *RetryableError
 	return errors.As(err, &retryableError)
 }
+
+func IgnoreRetryableError(err error) error {
+	if IsRetryableError(err) {
+		return nil
+	}
+	return err
+}
