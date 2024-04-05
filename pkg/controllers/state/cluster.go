@@ -85,7 +85,7 @@ func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudPro
 		clock:                     clk,
 		kubeClient:                client,
 		cloudProvider:             cp,
-		cm: 					  cm,
+		cm:                        cm,
 		nodes:                     map[string]*StateNode{},
 		bindings:                  map[types.NamespacedName]string{},
 		daemonSetPods:             sync.Map{},
