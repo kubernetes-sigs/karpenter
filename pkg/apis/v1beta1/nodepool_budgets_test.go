@@ -74,6 +74,17 @@ var _ = Describe("Budgets", func() {
 				Schedule: lo.ToPtr("* * * * *"),
 				Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 			},
+			{
+				Reasons: []DisruptionReason{
+					DisruptionReasonUnderutilized,
+					DisruptionReasonDrifted,
+					DisruptionReasonEmpty,
+					DisruptionReasonExpired,
+				},
+				Nodes:    "0",
+				Schedule: lo.ToPtr("@weekly"),
+				Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
+			},
 		}
 		nodePool = &NodePool{
 			ObjectMeta: metav1.ObjectMeta{Name: strings.ToLower(randomdata.SillyName())},
@@ -85,6 +96,17 @@ var _ = Describe("Budgets", func() {
 		}
 	})
 	Context("GetAllowedDisruptionsByReason", func() {
+		It("should return 0 for all reasons if a budget is active for all reasons", func() {
+			budgets[5].Schedule = lo.ToPtr("* * * * *")
+			budgets[5].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))})
+
+			disruptionsByReason, err := nodePool.GetAllowedDisruptionsByReason(ctx, fakeClock, 100)
+			Expect(err).To(BeNil())
+			Expect(disruptionsByReason[DisruptionReasonUnderutilized]).To(Equal(0))
+			Expect(disruptionsByReason[DisruptionReasonDrifted]).To(Equal(0))
+			Expect(disruptionsByReason[DisruptionReasonEmpty]).To(Equal(0))
+			Expect(disruptionsByReason[DisruptionReasonExpired]).To(Equal(0))
+		})
 		It("should return MaxInt32 for all reasons when there are no active budgets", func() {
 			for i := range budgets {
 				budgets[i].Schedule = lo.ToPtr("@yearly")
