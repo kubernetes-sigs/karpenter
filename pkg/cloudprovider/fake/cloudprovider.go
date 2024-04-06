@@ -50,6 +50,7 @@ type CloudProvider struct {
 	CreateCalls        []*v1beta1.NodeClaim
 	AllowedCreateCalls int
 	NextCreateErr      error
+	NextDeleteErr      error
 	DeleteCalls        []*v1beta1.NodeClaim
 
 	CreatedNodeClaims         map[string]*v1beta1.NodeClaim
@@ -77,6 +78,7 @@ func (c *CloudProvider) Reset() {
 	c.ErrorsForNodePool = map[string]error{}
 	c.AllowedCreateCalls = math.MaxInt
 	c.NextCreateErr = nil
+	c.NextDeleteErr = nil
 	c.DeleteCalls = []*v1beta1.NodeClaim{}
 	c.Drifted = "drifted"
 	c.NodeClassGroupVersionKind = []schema.GroupVersionKind{
@@ -226,6 +228,12 @@ func (c *CloudProvider) GetInstanceTypes(_ context.Context, np *v1beta1.NodePool
 func (c *CloudProvider) Delete(_ context.Context, nc *v1beta1.NodeClaim) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if c.NextDeleteErr != nil {
+		tempError := c.NextDeleteErr
+		c.NextDeleteErr = nil
+		return tempError
+	}
 
 	c.DeleteCalls = append(c.DeleteCalls, nc)
 	if _, ok := c.CreatedNodeClaims[nc.Status.ProviderID]; ok {
