@@ -75,7 +75,7 @@ const (
 	// AbnormalClusterSyncDuration is the duration after which the cluster state is considered to be out of sync for a long enough time to alarm the customer
 	AbnormalClusterSyncDuration = 15 * time.Second
 	// AbnormalClusterSyncLoggingInterval is the interval at which we will log about the cluster being out of sync if it is out of sync
-	AbnormalClusterSyncLoggingInterval = 5 * time.Minute
+	AbnormalClusterSyncLoggingInterval = 1 * time.Minute
 )
 
 func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudProvider) *Cluster {
@@ -105,11 +105,11 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 	defer func() {
 		ClusterStateSynced.Set(lo.Ternary[float64](synced, 1, 0))
 		if synced {
-			c.lastSynced = c.clock.Now()
+			c.lastSynced = time.Now() 
 		}
 		// If we have been out of sync for a while, and we haven't logged about it recently, log it
 		if time.Since(c.lastSynced) > AbnormalClusterSyncDuration && c.cm.HasChanged("ClusterSynced", synced) {
-			logging.FromContext(ctx).Warnf("cluster state is out of sync since %v", time.Since(c.lastSynced))
+			logging.FromContext(ctx).Infof("cluster state is out of sync for %v", time.Since(c.lastSynced))
 		}
 
 	}()
