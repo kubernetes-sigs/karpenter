@@ -25,7 +25,6 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/apimachinery/pkg/util/sets"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -43,7 +42,7 @@ type InstanceTypeOptions struct {
 	Name             string                  `json:"name"`
 	Offerings        cloudprovider.Offerings `json:"offerings"`
 	Architecture     string                  `json:"architecture"`
-	OperatingSystems sets.Set[string]        `json:"operatingSystems"`
+	OperatingSystems []v1.OSName             `json:"operatingSystems"`
 	Resources        v1.ResourceList         `json:"resources"`
 
 	// These are used for setting default requirements, they should not be used
@@ -90,10 +89,10 @@ func parseSizeFromType(ty, cpu string) string {
 // Azure - [Family] + [Sub-family]* + [# of vCPUs] + ... + [Version]
 //
 // So here, we split on [.-], and if that fails, fall back to the first character of the instance type name.
-func parseFamilyFromType(ty string) string {
-	familySplit := familyDelim.Split(ty, 2)
+func parseFamilyFromType(instanceType string) string {
+	familySplit := familyDelim.Split(instanceType, 2)
 	if len(familySplit) < 2 {
-		return ty[0:1]
+		return instanceType[0:1]
 	}
 	return familySplit[0]
 }
@@ -102,9 +101,9 @@ func setDefaultOptions(opts InstanceTypeOptions) InstanceTypeOptions {
 	var cpu, memory string
 	for res, q := range opts.Resources {
 		switch res {
-		case "cpu":
+		case v1.ResourceCPU:
 			cpu = q.String()
-		case "memory":
+		case v1.ResourceMemory:
 			memory = q.String()
 		}
 	}
@@ -131,10 +130,12 @@ func setDefaultOptions(opts InstanceTypeOptions) InstanceTypeOptions {
 }
 
 func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
+	osNames := lo.Map(options.OperatingSystems, func(os v1.OSName, _ int) string { return string(os) })
+
 	requirements := scheduling.NewRequirements(
 		scheduling.NewRequirement(v1.LabelInstanceTypeStable, v1.NodeSelectorOpIn, options.Name),
 		scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, options.Architecture),
-		scheduling.NewRequirement(v1.LabelOSStable, v1.NodeSelectorOpIn, sets.List(options.OperatingSystems)...),
+		scheduling.NewRequirement(v1.LabelOSStable, v1.NodeSelectorOpIn, osNames...),
 		scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string { return o.Zone })...),
 		scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string { return o.CapacityType })...),
 		scheduling.NewRequirement(InstanceSizeLabelKey, v1.NodeSelectorOpIn, options.instanceTypeLabels[InstanceSizeLabelKey]),

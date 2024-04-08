@@ -17,8 +17,7 @@ limitations under the License.
 package main
 
 import (
-	"fmt"
-	"os"
+	"knative.dev/pkg/logging"
 
 	kwok "sigs.k8s.io/karpenter/kwok/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -39,13 +38,12 @@ func init() {
 }
 
 func main() {
+	ctx, op := operator.NewOperator()
 	instanceTypes, err := kwok.ConstructInstanceTypes()
 	if err != nil {
-		fmt.Printf("failed to construct instance types: %v\n", err)
-		os.Exit(1)
+		logging.FromContext(ctx).Fatalf("failed to construct instance types: %s", err)
 	}
 
-	ctx, op := operator.NewOperator()
 	cloudProvider := kwok.NewCloudProvider(ctx, op.GetClient(), instanceTypes)
 	op.
 		WithControllers(ctx, controllers.NewControllers(

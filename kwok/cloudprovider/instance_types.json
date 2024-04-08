@@ -52,9 +52,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "1",
             "ephemeral-storage": "20G",
@@ -115,9 +115,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "1",
             "ephemeral-storage": "20G",
@@ -178,9 +178,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "1",
             "ephemeral-storage": "20G",
@@ -241,9 +241,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "1",
             "ephemeral-storage": "20G",
@@ -304,9 +304,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "1",
             "ephemeral-storage": "20G",
@@ -367,9 +367,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "1",
             "ephemeral-storage": "20G",
@@ -430,9 +430,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "1",
             "ephemeral-storage": "20G",
@@ -493,9 +493,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "1",
             "ephemeral-storage": "20G",
@@ -556,9 +556,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "1",
             "ephemeral-storage": "20G",
@@ -619,9 +619,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "1",
             "ephemeral-storage": "20G",
@@ -682,9 +682,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "1",
             "ephemeral-storage": "20G",
@@ -745,9 +745,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "1",
             "ephemeral-storage": "20G",
@@ -808,9 +808,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "2",
             "ephemeral-storage": "20G",
@@ -871,9 +871,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "2",
             "ephemeral-storage": "20G",
@@ -934,9 +934,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "2",
             "ephemeral-storage": "20G",
@@ -997,9 +997,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "2",
             "ephemeral-storage": "20G",
@@ -1060,9 +1060,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "2",
             "ephemeral-storage": "20G",
@@ -1123,9 +1123,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "2",
             "ephemeral-storage": "20G",
@@ -1186,9 +1186,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "2",
             "ephemeral-storage": "20G",
@@ -1249,9 +1249,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "2",
             "ephemeral-storage": "20G",
@@ -1312,9 +1312,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "2",
             "ephemeral-storage": "20G",
@@ -1375,9 +1375,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "2",
             "ephemeral-storage": "20G",
@@ -1438,9 +1438,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "2",
             "ephemeral-storage": "20G",
@@ -1501,9 +1501,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "2",
             "ephemeral-storage": "20G",
@@ -1564,9 +1564,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "4",
             "ephemeral-storage": "20G",
@@ -1627,9 +1627,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "4",
             "ephemeral-storage": "20G",
@@ -1690,9 +1690,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "4",
             "ephemeral-storage": "20G",
@@ -1753,9 +1753,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "4",
             "ephemeral-storage": "20G",
@@ -1816,9 +1816,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "4",
             "ephemeral-storage": "20G",
@@ -1879,9 +1879,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "4",
             "ephemeral-storage": "20G",
@@ -1942,9 +1942,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "4",
             "ephemeral-storage": "20G",
@@ -2005,9 +2005,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "4",
             "ephemeral-storage": "20G",
@@ -2068,9 +2068,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "4",
             "ephemeral-storage": "20G",
@@ -2131,9 +2131,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "4",
             "ephemeral-storage": "20G",
@@ -2194,9 +2194,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "4",
             "ephemeral-storage": "20G",
@@ -2257,9 +2257,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "4",
             "ephemeral-storage": "20G",
@@ -2320,9 +2320,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "8",
             "ephemeral-storage": "20G",
@@ -2383,9 +2383,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "8",
             "ephemeral-storage": "20G",
@@ -2446,9 +2446,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "8",
             "ephemeral-storage": "20G",
@@ -2509,9 +2509,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "8",
             "ephemeral-storage": "20G",
@@ -2572,9 +2572,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "8",
             "ephemeral-storage": "20G",
@@ -2635,9 +2635,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "8",
             "ephemeral-storage": "20G",
@@ -2698,9 +2698,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "8",
             "ephemeral-storage": "20G",
@@ -2761,9 +2761,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "8",
             "ephemeral-storage": "20G",
@@ -2824,9 +2824,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "8",
             "ephemeral-storage": "20G",
@@ -2887,9 +2887,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "8",
             "ephemeral-storage": "20G",
@@ -2950,9 +2950,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "8",
             "ephemeral-storage": "20G",
@@ -3013,9 +3013,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "8",
             "ephemeral-storage": "20G",
@@ -3076,9 +3076,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "16",
             "ephemeral-storage": "20G",
@@ -3139,9 +3139,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "16",
             "ephemeral-storage": "20G",
@@ -3202,9 +3202,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "16",
             "ephemeral-storage": "20G",
@@ -3265,9 +3265,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "16",
             "ephemeral-storage": "20G",
@@ -3328,9 +3328,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "16",
             "ephemeral-storage": "20G",
@@ -3391,9 +3391,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "16",
             "ephemeral-storage": "20G",
@@ -3454,9 +3454,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "16",
             "ephemeral-storage": "20G",
@@ -3517,9 +3517,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "16",
             "ephemeral-storage": "20G",
@@ -3580,9 +3580,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "16",
             "ephemeral-storage": "20G",
@@ -3643,9 +3643,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "16",
             "ephemeral-storage": "20G",
@@ -3706,9 +3706,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "16",
             "ephemeral-storage": "20G",
@@ -3769,9 +3769,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "16",
             "ephemeral-storage": "20G",
@@ -3832,9 +3832,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "32",
             "ephemeral-storage": "20G",
@@ -3895,9 +3895,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "32",
             "ephemeral-storage": "20G",
@@ -3958,9 +3958,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "32",
             "ephemeral-storage": "20G",
@@ -4021,9 +4021,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "32",
             "ephemeral-storage": "20G",
@@ -4084,9 +4084,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "32",
             "ephemeral-storage": "20G",
@@ -4147,9 +4147,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "32",
             "ephemeral-storage": "20G",
@@ -4210,9 +4210,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "32",
             "ephemeral-storage": "20G",
@@ -4273,9 +4273,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "32",
             "ephemeral-storage": "20G",
@@ -4336,9 +4336,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "32",
             "ephemeral-storage": "20G",
@@ -4399,9 +4399,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "32",
             "ephemeral-storage": "20G",
@@ -4462,9 +4462,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "32",
             "ephemeral-storage": "20G",
@@ -4525,9 +4525,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "32",
             "ephemeral-storage": "20G",
@@ -4588,9 +4588,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "48",
             "ephemeral-storage": "20G",
@@ -4651,9 +4651,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "48",
             "ephemeral-storage": "20G",
@@ -4714,9 +4714,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "48",
             "ephemeral-storage": "20G",
@@ -4777,9 +4777,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "48",
             "ephemeral-storage": "20G",
@@ -4840,9 +4840,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "48",
             "ephemeral-storage": "20G",
@@ -4903,9 +4903,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "48",
             "ephemeral-storage": "20G",
@@ -4966,9 +4966,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "48",
             "ephemeral-storage": "20G",
@@ -5029,9 +5029,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "48",
             "ephemeral-storage": "20G",
@@ -5092,9 +5092,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "48",
             "ephemeral-storage": "20G",
@@ -5155,9 +5155,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "48",
             "ephemeral-storage": "20G",
@@ -5218,9 +5218,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "48",
             "ephemeral-storage": "20G",
@@ -5281,9 +5281,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "48",
             "ephemeral-storage": "20G",
@@ -5344,9 +5344,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "64",
             "ephemeral-storage": "20G",
@@ -5407,9 +5407,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "64",
             "ephemeral-storage": "20G",
@@ -5470,9 +5470,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "64",
             "ephemeral-storage": "20G",
@@ -5533,9 +5533,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "64",
             "ephemeral-storage": "20G",
@@ -5596,9 +5596,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "64",
             "ephemeral-storage": "20G",
@@ -5659,9 +5659,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "64",
             "ephemeral-storage": "20G",
@@ -5722,9 +5722,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "64",
             "ephemeral-storage": "20G",
@@ -5785,9 +5785,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "64",
             "ephemeral-storage": "20G",
@@ -5848,9 +5848,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "64",
             "ephemeral-storage": "20G",
@@ -5911,9 +5911,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "64",
             "ephemeral-storage": "20G",
@@ -5974,9 +5974,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "64",
             "ephemeral-storage": "20G",
@@ -6037,9 +6037,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "64",
             "ephemeral-storage": "20G",
@@ -6100,9 +6100,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "96",
             "ephemeral-storage": "20G",
@@ -6163,9 +6163,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "96",
             "ephemeral-storage": "20G",
@@ -6226,9 +6226,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "96",
             "ephemeral-storage": "20G",
@@ -6289,9 +6289,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "96",
             "ephemeral-storage": "20G",
@@ -6352,9 +6352,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "96",
             "ephemeral-storage": "20G",
@@ -6415,9 +6415,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "96",
             "ephemeral-storage": "20G",
@@ -6478,9 +6478,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "96",
             "ephemeral-storage": "20G",
@@ -6541,9 +6541,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "96",
             "ephemeral-storage": "20G",
@@ -6604,9 +6604,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "96",
             "ephemeral-storage": "20G",
@@ -6667,9 +6667,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "96",
             "ephemeral-storage": "20G",
@@ -6730,9 +6730,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "96",
             "ephemeral-storage": "20G",
@@ -6793,9 +6793,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "96",
             "ephemeral-storage": "20G",
@@ -6856,9 +6856,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "128",
             "ephemeral-storage": "20G",
@@ -6919,9 +6919,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "128",
             "ephemeral-storage": "20G",
@@ -6982,9 +6982,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "128",
             "ephemeral-storage": "20G",
@@ -7045,9 +7045,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "128",
             "ephemeral-storage": "20G",
@@ -7108,9 +7108,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "128",
             "ephemeral-storage": "20G",
@@ -7171,9 +7171,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "128",
             "ephemeral-storage": "20G",
@@ -7234,9 +7234,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "128",
             "ephemeral-storage": "20G",
@@ -7297,9 +7297,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "128",
             "ephemeral-storage": "20G",
@@ -7360,9 +7360,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "128",
             "ephemeral-storage": "20G",
@@ -7423,9 +7423,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "128",
             "ephemeral-storage": "20G",
@@ -7486,9 +7486,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "128",
             "ephemeral-storage": "20G",
@@ -7549,9 +7549,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "128",
             "ephemeral-storage": "20G",
@@ -7612,9 +7612,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "192",
             "ephemeral-storage": "20G",
@@ -7675,9 +7675,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "192",
             "ephemeral-storage": "20G",
@@ -7738,9 +7738,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "192",
             "ephemeral-storage": "20G",
@@ -7801,9 +7801,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "192",
             "ephemeral-storage": "20G",
@@ -7864,9 +7864,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "192",
             "ephemeral-storage": "20G",
@@ -7927,9 +7927,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "192",
             "ephemeral-storage": "20G",
@@ -7990,9 +7990,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "192",
             "ephemeral-storage": "20G",
@@ -8053,9 +8053,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "192",
             "ephemeral-storage": "20G",
@@ -8116,9 +8116,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "192",
             "ephemeral-storage": "20G",
@@ -8179,9 +8179,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "192",
             "ephemeral-storage": "20G",
@@ -8242,9 +8242,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "192",
             "ephemeral-storage": "20G",
@@ -8305,9 +8305,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "192",
             "ephemeral-storage": "20G",
@@ -8368,9 +8368,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "256",
             "ephemeral-storage": "20G",
@@ -8431,9 +8431,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "256",
             "ephemeral-storage": "20G",
@@ -8494,9 +8494,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "256",
             "ephemeral-storage": "20G",
@@ -8557,9 +8557,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "256",
             "ephemeral-storage": "20G",
@@ -8620,9 +8620,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "256",
             "ephemeral-storage": "20G",
@@ -8683,9 +8683,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "256",
             "ephemeral-storage": "20G",
@@ -8746,9 +8746,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "256",
             "ephemeral-storage": "20G",
@@ -8809,9 +8809,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "256",
             "ephemeral-storage": "20G",
@@ -8872,9 +8872,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "256",
             "ephemeral-storage": "20G",
@@ -8935,9 +8935,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "linux": {}
-        },
+        "operatingSystems": [
+            "linux"
+        ],
         "resources": {
             "cpu": "256",
             "ephemeral-storage": "20G",
@@ -8998,9 +8998,9 @@
             }
         ],
         "architecture": "amd64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "256",
             "ephemeral-storage": "20G",
@@ -9061,9 +9061,9 @@
             }
         ],
         "architecture": "arm64",
-        "operatingSystems": {
-            "windows": {}
-        },
+        "operatingSystems": [
+            "windows"
+        ],
         "resources": {
             "cpu": "256",
             "ephemeral-storage": "20G",

@@ -19,9 +19,9 @@
 			}
 		],
 		"architecture": "amd64",
-		"operatingSystems": {
-			"linux": {}
-		},
+		"operatingSystems": [
+            "linux"
+		],
 		"resources": {
 			"cpu": "16",
 			"memory": "64Gi",

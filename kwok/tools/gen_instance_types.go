@@ -20,12 +20,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/apimachinery/pkg/util/sets"
 
 	kwok "sigs.k8s.io/karpenter/kwok/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -36,7 +34,7 @@ var (
 	KwokZones = []string{"test-zone-a", "test-zone-b", "test-zone-c", "test-zone-d"}
 )
 
-func makeGenericInstanceTypeName(cpu, memFactor int, arch string, os sets.Set[string]) string {
+func makeGenericInstanceTypeName(cpu, memFactor int, arch string, os v1.OSName) string {
 	size := fmt.Sprintf("%dx", cpu)
 	var family string
 	switch memFactor {
@@ -49,7 +47,7 @@ func makeGenericInstanceTypeName(cpu, memFactor int, arch string, os sets.Set[st
 	default:
 		family = "e" // exotic
 	}
-	return fmt.Sprintf("%s-%s-%s-%s", family, size, arch, strings.Join(sets.List(os), ","))
+	return fmt.Sprintf("%s-%s-%s-%s", family, size, arch, os)
 }
 
 func priceFromResources(resources v1.ResourceList) float64 {
@@ -72,7 +70,7 @@ func constructGenericInstanceTypes() []kwok.InstanceTypeOptions {
 
 	for _, cpu := range []int{1, 2, 4, 8, 16, 32, 48, 64, 96, 128, 192, 256} {
 		for _, memFactor := range []int{2, 4, 8} {
-			for _, os := range []sets.Set[string]{sets.New(string(v1.Linux)), sets.New(string(v1.Windows))} {
+			for _, os := range []v1.OSName{v1.Linux, v1.Windows} {
 				for _, arch := range []string{v1beta1.ArchitectureAmd64, v1beta1.ArchitectureArm64} {
 					// Construct instance type details, then construct offerings.
 					name := makeGenericInstanceTypeName(cpu, memFactor, arch, os)
@@ -81,7 +79,7 @@ func constructGenericInstanceTypes() []kwok.InstanceTypeOptions {
 					opts := kwok.InstanceTypeOptions{
 						Name:             name,
 						Architecture:     arch,
-						OperatingSystems: os,
+						OperatingSystems: []v1.OSName{os},
 						Resources: v1.ResourceList{
 							v1.ResourceCPU:              resource.MustParse(fmt.Sprintf("%d", cpu)),
 							v1.ResourceMemory:           resource.MustParse(fmt.Sprintf("%dGi", mem)),

@@ -146,7 +146,7 @@ func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
 	}
 
 	var instanceType *cloudprovider.InstanceType
-	var bestOffering *cloudprovider.Offering
+	var cheapestOffering *cloudprovider.Offering
 	// Loop through instance type values, as the node claim will only have the In operator.
 	for _, val := range req.Values {
 		it, err := c.getInstanceType(val)
@@ -158,8 +158,8 @@ func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
 
 		offeringsByPrice := lo.GroupBy(availableOfferings, func(of cloudprovider.Offering) float64 { return of.Price })
 		minOfferingPrice := lo.Min(lo.Keys(offeringsByPrice))
-		if bestOffering == nil || minOfferingPrice < bestOffering.Price {
-			bestOffering = lo.ToPtr(lo.Sample(offeringsByPrice[minOfferingPrice]))
+		if cheapestOffering == nil || minOfferingPrice < cheapestOffering.Price {
+			cheapestOffering = lo.ToPtr(lo.Sample(offeringsByPrice[minOfferingPrice]))
 			instanceType = it
 		}
 	}
@@ -167,7 +167,7 @@ func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
 	return &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        newName,
-			Labels:      addInstanceLabels(nodeClaim.Labels, instanceType, nodeClaim, bestOffering),
+			Labels:      addInstanceLabels(nodeClaim.Labels, instanceType, nodeClaim, cheapestOffering),
 			Annotations: addKwokAnnotation(nodeClaim.Annotations),
 		},
 		Spec: v1.NodeSpec{
