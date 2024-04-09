@@ -33,6 +33,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
+	"sigs.k8s.io/karpenter/pkg/global"
+
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/utils/env"
 	"sigs.k8s.io/karpenter/pkg/utils/functional"
@@ -80,6 +82,7 @@ func NodeClaimFieldIndexer(ctx context.Context) func(cache.Cache) error {
 func NewEnvironment(scheme *runtime.Scheme, options ...functional.Option[EnvironmentOptions]) *Environment {
 	opts := functional.ResolveOptions(options...)
 	ctx, cancel := context.WithCancel(context.Background())
+	_ = global.Initialize()
 
 	os.Setenv(system.NamespaceEnvKey, "default")
 	version := version.MustParseSemantic(strings.Replace(env.WithDefaultString("K8S_VERSION", "1.29.x"), ".x", ".0", -1))
@@ -137,4 +140,8 @@ func (e *Environment) Stop() error {
 	close(e.Done)
 	e.Cancel()
 	return e.Environment.Stop()
+}
+
+func (e *Environment) Reset() {
+	_ = global.Initialize()
 }

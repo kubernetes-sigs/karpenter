@@ -36,7 +36,7 @@ import (
 	"knative.dev/pkg/logging/logkey"
 	ctrl "sigs.k8s.io/controller-runtime/pkg/log"
 
-	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/global"
 )
 
 const (
@@ -50,7 +50,7 @@ var NopLogger = zap.NewNop().Sugar()
 
 func DefaultZapConfig(ctx context.Context, component string) zap.Config {
 	logLevel := lo.Ternary(component != "webhook", zap.NewAtomicLevelAt(zap.InfoLevel), zap.NewAtomicLevelAt(zap.ErrorLevel))
-	if l := options.FromContext(ctx).LogLevel; l != "" && component != "webhook" {
+	if l := global.Config.LogLevel; l != "" && component != "webhook" {
 		// Webhook log level can only be configured directly through the zap-config
 		// Webhooks are deprecated, so support for changing their log level is also deprecated
 		logLevel = lo.Must(zap.ParseAtomicLevel(l))

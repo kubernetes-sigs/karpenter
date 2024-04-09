@@ -59,6 +59,7 @@ var _ = AfterSuite(func() {
 
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
+	env.Reset()
 })
 
 var _ = Describe("NodeClaimUtils", func() {

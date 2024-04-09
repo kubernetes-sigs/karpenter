@@ -26,13 +26,14 @@ import (
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/global"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/metrics"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -51,7 +52,7 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 
 	// From here there are three scenarios to handle:
 	// 1. If drift is not enabled but the NodeClaim is drifted, remove the status condition
-	if !options.FromContext(ctx).FeatureGates.Drift {
+	if !global.Config.FeatureGates.Drift {
 		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.Drifted)
 		if hasDriftedCondition {
 			logging.FromContext(ctx).Debugf("removing drift status condition, drift has been disabled")

@@ -31,6 +31,8 @@ import (
 	"knative.dev/pkg/changeset"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
+	"sigs.k8s.io/karpenter/pkg/global"
+
 	"sigs.k8s.io/karpenter/pkg/metrics"
 
 	"github.com/go-logr/zapr"
@@ -56,9 +58,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
-	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/webhooks"
 )
@@ -102,27 +102,24 @@ func NewOperator() (context.Context, *Operator) {
 	ctx := signals.NewContext()
 	ctx = knativeinjection.WithNamespaceScope(ctx, system.Namespace())
 
-	// Options
-	ctx = injection.WithOptionsOrDie(ctx, options.Injectables...)
-
 	// Make the Karpenter binary aware of the container memory limit
 	// https://pkg.go.dev/runtime/debug#SetMemoryLimit
-	if options.FromContext(ctx).MemoryLimit > 0 {
-		newLimit := int64(float64(options.FromContext(ctx).MemoryLimit) * 0.9)
+	if global.Config.MemoryLimit > 0 {
+		newLimit := int64(float64(global.Config.MemoryLimit) * 0.9)
 		debug.SetMemoryLimit(newLimit)
 	}
 
 	// Webhook
 	ctx = webhook.WithOptions(ctx, webhook.Options{
-		Port:        options.FromContext(ctx).WebhookPort,
-		ServiceName: options.FromContext(ctx).ServiceName,
-		SecretName:  fmt.Sprintf("%s-cert", options.FromContext(ctx).ServiceName),
+		Port:        global.Config.WebhookPort,
+		ServiceName: global.Config.ServiceName,
+		SecretName:  fmt.Sprintf("%s-cert", global.Config.ServiceName),
 		GracePeriod: 5 * time.Second,
 	})
 
 	// Client Config
 	config := controllerruntime.GetConfigOrDie()
-	config.RateLimiter = flowcontrol.NewTokenBucketRateLimiter(float32(options.FromContext(ctx).KubeClientQPS), options.FromContext(ctx).KubeClientBurst)
+	config.RateLimiter = flowcontrol.NewTokenBucketRateLimiter(float32(global.Config.KubeClientQPS), global.Config.KubeClientBurst)
 	config.UserAgent = fmt.Sprintf("%s/%s", appName, Version)
 
 	// Client
@@ -138,20 +135,19 @@ func NewOperator() (context.Context, *Operator) {
 	// Manager
 	mgrOpts := controllerruntime.Options{
 		Logger:                        logging.IgnoreDebugEvents(zapr.NewLogger(logger.Desugar())),
-		LeaderElection:                options.FromContext(ctx).EnableLeaderElection,
+		LeaderElection:                global.Config.EnableLeaderElection,
 		LeaderElectionID:              "karpenter-leader-election",
 		LeaderElectionResourceLock:    resourcelock.LeasesResourceLock,
 		LeaderElectionNamespace:       system.Namespace(),
 		LeaderElectionReleaseOnCancel: true,
 		Scheme:                        scheme.Scheme,
 		Metrics: server.Options{
-			BindAddress: fmt.Sprintf(":%d", options.FromContext(ctx).MetricsPort),
+			BindAddress: fmt.Sprintf(":%d", global.Config.MetricsPort),
 		},
-		HealthProbeBindAddress: fmt.Sprintf(":%d", options.FromContext(ctx).HealthProbePort),
+		HealthProbeBindAddress: fmt.Sprintf(":%d", global.Config.HealthProbePort),
 		BaseContext: func() context.Context {
 			ctx := context.Background()
 			ctx = knativelogging.WithLogger(ctx, logger)
-			ctx = injection.WithOptionsOrDie(ctx, options.Injectables...)
 			return ctx
 		},
 		Cache: cache.Options{
@@ -162,7 +158,7 @@ func NewOperator() (context.Context, *Operator) {
 			},
 		},
 	}
-	if options.FromContext(ctx).EnableProfiling {
+	if global.Config.EnableProfiling {
 		// TODO @joinnis: Investigate the mgrOpts.PprofBindAddress that would allow native support for pprof
 		// On initial look, it seems like this native pprof doesn't support some of the routes that we have here
 		// like "/debug/pprof/heap" or "/debug/pprof/block"
@@ -222,7 +218,7 @@ func (o *Operator) WithControllers(ctx context.Context, controllers ...controlle
 }
 
 func (o *Operator) WithWebhooks(ctx context.Context, ctors ...knativeinjection.ControllerConstructor) *Operator {
-	if !options.FromContext(ctx).DisableWebhook {
+	if !global.Config.DisableWebhook {
 		o.webhooks = append(o.webhooks, ctors...)
 		lo.Must0(o.Manager.AddReadyzCheck("webhooks", webhooks.HealthProbe(ctx)))
 		lo.Must0(o.Manager.AddHealthzCheck("webhooks", webhooks.HealthProbe(ctx)))
@@ -237,7 +233,7 @@ func (o *Operator) Start(ctx context.Context) {
 		defer wg.Done()
 		lo.Must0(o.Manager.Start(ctx))
 	}()
-	if options.FromContext(ctx).DisableWebhook {
+	if global.Config.DisableWebhook {
 		knativelogging.FromContext(ctx).Infof("webhook disabled")
 	} else {
 		wg.Add(1)

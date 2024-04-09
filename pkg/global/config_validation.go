@@ -14,18 +14,24 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package options
+package global
 
-import "context"
+import (
+	"fmt"
 
-// Injectable defines a set of flag based options to be parsed and injected
-// into Karpenter's contexts
-type Injectable interface {
-	// AddFlags adds the injectable's flags to karpenter's flag set
-	AddFlags(*FlagSet)
-	// Parse parses the flag set and handles any required post-processing on
-	// the flags
-	Parse(*FlagSet, ...string) error
-	// ToContext injects the callee into the given context
-	ToContext(context.Context) context.Context
+	"github.com/samber/lo"
+	"go.uber.org/multierr"
+)
+
+func (c config) Validate() error {
+	return multierr.Combine(
+		c.validateLogLevel(),
+	)
+}
+
+func (c config) validateLogLevel() error {
+	if !lo.Contains(validLogLevels, c.LogLevel) {
+		return fmt.Errorf("validating cli flags / env vars, invalid log level %q", c.LogLevel)
+	}
+	return nil
 }

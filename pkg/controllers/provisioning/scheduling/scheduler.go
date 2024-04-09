@@ -109,7 +109,7 @@ func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *
 	}
 	for _, existing := range r.ExistingNodes {
 		if len(existing.Pods) > 0 {
-			cluster.NominateNodeForPod(ctx, existing.ProviderID())
+			cluster.NominateNodeForPod(existing.ProviderID())
 		}
 		for _, p := range existing.Pods {
 			recorder.Publish(NominatePodEvent(p, existing.Node, existing.NodeClaim))

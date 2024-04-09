@@ -35,7 +35,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
@@ -76,7 +75,6 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
-	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
@@ -101,6 +99,7 @@ var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 	cluster.Reset()
 	cloudProvider.Reset()
+	env.Reset()
 })
 
 var _ = Describe("Volume Usage/Limits", func() {
@@ -905,7 +904,7 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
-		cluster.NominateNodeForPod(ctx, node.Spec.ProviderID)
+		cluster.NominateNodeForPod(node.Spec.ProviderID)
 
 		// Expect that the node is now nominated
 		Expect(ExpectStateNodeExists(cluster, node).Nominated()).To(BeTrue())

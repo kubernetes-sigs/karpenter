@@ -31,13 +31,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"sigs.k8s.io/karpenter/pkg/global"
+
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	nodeclaimdisruption "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
@@ -64,7 +65,6 @@ var _ = BeforeSuite(func() {
 			return []string{obj.(*v1.Node).Spec.ProviderID}
 		})
 	}))
-	ctx = options.ToContext(ctx, test.Options())
 	cp = fake.NewCloudProvider()
 	cluster = state.NewCluster(fakeClock, env.Client, cp)
 	nodeClaimDisruptionController = nodeclaimdisruption.NewController(fakeClock, env.Client, cluster, cp)
@@ -75,7 +75,7 @@ var _ = AfterSuite(func() {
 })
 
 var _ = BeforeEach(func() {
-	ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(true)}}))
+	global.Config.FeatureGates.Drift = true
 	fakeClock.SetTime(time.Now())
 })
 
@@ -83,6 +83,7 @@ var _ = AfterEach(func() {
 	cp.Reset()
 	cluster.Reset()
 	ExpectCleanedUp(ctx, env.Client)
+	env.Reset()
 })
 
 var _ = Describe("Disruption", func() {
@@ -127,7 +128,7 @@ var _ = Describe("Disruption", func() {
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 
 		// Drift, Expiration, and Emptiness are disabled through configuration
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(false)}}))
+		global.Config.FeatureGates.Drift = false
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)

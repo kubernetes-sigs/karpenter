@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/controllers/leasegarbagecollection"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/test"
 
@@ -52,8 +51,6 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
-	ctx = options.ToContext(ctx, test.Options())
-
 	garbageCollectionController = leasegarbagecollection.NewController(env.Client)
 })
 
@@ -63,6 +60,7 @@ var _ = AfterSuite(func() {
 
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
+	env.Reset()
 })
 
 var _ = Describe("GarbageCollection", func() {

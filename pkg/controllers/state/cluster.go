@@ -188,12 +188,12 @@ func (c *Cluster) IsNodeNominated(providerID string) bool {
 }
 
 // NominateNodeForPod records that a node was the target of a pending pod during a scheduling batch
-func (c *Cluster) NominateNodeForPod(ctx context.Context, providerID string) {
+func (c *Cluster) NominateNodeForPod(providerID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if n, ok := c.nodes[providerID]; ok {
-		n.Nominate(ctx) // extends nomination window if already nominated
+		n.Nominate() // extends nomination window if already nominated
 	}
 }
 

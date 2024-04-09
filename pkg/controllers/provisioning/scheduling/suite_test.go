@@ -52,7 +52,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -86,7 +85,6 @@ func TestScheduling(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
-	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	instanceTypes, _ := cloudProvider.GetInstanceTypes(ctx, nil)
 	// set these on the cloud provider, so we can manipulate them if needed
@@ -116,6 +114,8 @@ var _ = AfterEach(func() {
 	cluster.Reset()
 	scheduling.QueueDepth.Reset()
 	scheduling.SimulationDurationSeconds.Reset()
+
+	env.Reset()
 })
 
 var _ = Context("Scheduling", func() {

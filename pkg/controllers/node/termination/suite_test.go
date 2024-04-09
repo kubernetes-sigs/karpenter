@@ -98,6 +98,8 @@ var _ = Describe("Termination", func() {
 		metrics.NodesTerminatedCounter.Reset()
 		termination.TerminationSummary.Reset()
 		terminator.EvictionQueueDepth.Set(0)
+
+		env.Reset()
 	})
 
 	Context("Reconciliation", func() {

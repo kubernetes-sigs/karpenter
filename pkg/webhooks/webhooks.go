@@ -42,9 +42,10 @@ import (
 	"knative.dev/pkg/webhook/resourcesemantics/validation"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 
+	"sigs.k8s.io/karpenter/pkg/global"
+
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
 const component = "webhook"
@@ -111,7 +112,7 @@ func Start(ctx context.Context, cfg *rest.Config, ctors ...knativeinjection.Cont
 			Component:      strings.ReplaceAll(component, "-", "_"),
 			ConfigMap:      lo.Must(metrics.NewObservabilityConfigFromConfigMap(nil)).GetConfigMap().Data,
 			Secrets:        sharedmain.SecretFetcher(ctx),
-			PrometheusPort: options.FromContext(ctx).WebhookMetricsPort,
+			PrometheusPort: global.Config.WebhookMetricsPort,
 		}, logger))
 		// Register webhook metrics
 		webhook.RegisterMetrics()
@@ -150,7 +151,7 @@ func HealthProbe(ctx context.Context) healthz.Checker {
 	// TODO: Add knative health check port for webhooks when health port can be configured
 	// Issue: https://github.com/knative/pkg/issues/2765
 	return func(req *http.Request) (err error) {
-		res, err := http.Get(fmt.Sprintf("http://localhost:%d", options.FromContext(ctx).WebhookPort))
+		res, err := http.Get(fmt.Sprintf("http://localhost:%d", global.Config.WebhookPort))
 		// If the webhook connection errors out, liveness/readiness should fail
 		if err != nil {
 			return err

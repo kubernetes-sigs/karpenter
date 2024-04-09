@@ -26,11 +26,12 @@ import (
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
 
+	"sigs.k8s.io/karpenter/pkg/global"
+
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -160,7 +161,7 @@ var _ = Describe("Drift", func() {
 	})
 	It("should not detect drift if the feature flag is disabled", func() {
 		cp.Drifted = "drifted"
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(false)}}))
+		global.Config.FeatureGates.Drift = false
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
@@ -169,7 +170,7 @@ var _ = Describe("Drift", func() {
 	})
 	It("should remove the status condition from the nodeClaim if the feature flag is disabled", func() {
 		cp.Drifted = "drifted"
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(false)}}))
+		global.Config.FeatureGates.Drift = false
 		nodeClaim.StatusConditions().MarkTrue(v1beta1.Drifted)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 

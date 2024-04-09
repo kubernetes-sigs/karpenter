@@ -40,7 +40,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/test"
 )
@@ -65,7 +64,6 @@ var _ = BeforeSuite(func() {
 			return []string{obj.(*v1.Node).Spec.ProviderID}
 		})
 	}))
-	ctx = options.ToContext(ctx, test.Options())
 	cp = &fake.CloudProvider{}
 	recorder = test.NewEventRecorder()
 	nodeClaimConsistencyController = consistency.NewController(fakeClock, env.Client, recorder, cp)
@@ -83,6 +81,7 @@ var _ = BeforeEach(func() {
 var _ = AfterEach(func() {
 	fakeClock.SetTime(time.Now())
 	ExpectCleanedUp(ctx, env.Client)
+	env.Reset()
 })
 
 var _ = Describe("NodeClaimController", func() {

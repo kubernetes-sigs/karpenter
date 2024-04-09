@@ -32,7 +32,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/metrics/node"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
@@ -62,8 +61,6 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
-
-	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 	fakeClock = clock.NewFakeClock(time.Now())

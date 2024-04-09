@@ -28,6 +28,8 @@ import (
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"sigs.k8s.io/karpenter/pkg/global"
+
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -37,7 +39,6 @@ import (
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -171,7 +172,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 
 	if allExistingAreSpot &&
 		results.NewNodeClaims[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeSpot) {
-		return c.computeSpotToSpotConsolidation(ctx, candidates, results, candidatePrice)
+		return c.computeSpotToSpotConsolidation(candidates, results, candidatePrice)
 	}
 
 	var incompatibleMinReqKey string
@@ -213,11 +214,11 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 //  2. For single-node consolidation:
 //     a. There are at least 15 cheapest instance type replacement options to consolidate.
 //     b. The current candidate is NOT part of the first 15 cheapest instance types inorder to avoid repeated consolidation.
-func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, candidates []*Candidate, results pscheduling.Results,
+func (c *consolidation) computeSpotToSpotConsolidation(candidates []*Candidate, results pscheduling.Results,
 	candidatePrice float64) (Command, pscheduling.Results, error) {
 
 	// Spot consolidation is turned off.
-	if !options.FromContext(ctx).FeatureGates.SpotToSpotConsolidation {
+	if !global.Config.FeatureGates.SpotToSpotConsolidation {
 		if len(candidates) == 1 {
 			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "SpotToSpotConsolidation is disabled, can't replace a spot node with a spot node")...)
 		}

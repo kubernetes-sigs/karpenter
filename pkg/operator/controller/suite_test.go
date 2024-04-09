@@ -72,6 +72,7 @@ var _ = AfterSuite(func() {
 var _ = Describe("Typed", func() {
 	AfterEach(func() {
 		ExpectCleanedUp(ctx, env.Client)
+		env.Reset()
 	})
 
 	It("should pass in expected node into reconcile", func() {

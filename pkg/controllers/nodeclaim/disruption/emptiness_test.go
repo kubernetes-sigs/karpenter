@@ -252,7 +252,7 @@ var _ = Describe("Emptiness", func() {
 
 		// Add the node to the cluster state and nominate it in the internal cluster state
 		Expect(cluster.UpdateNode(ctx, node)).To(Succeed())
-		cluster.NominateNodeForPod(ctx, node.Spec.ProviderID)
+		cluster.NominateNodeForPod(node.Spec.ProviderID)
 
 		result := ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 		Expect(result.RequeueAfter).To(Equal(time.Second * 30))

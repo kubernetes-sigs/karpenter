@@ -29,8 +29,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"sigs.k8s.io/karpenter/pkg/global"
+
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
@@ -322,8 +323,8 @@ func (in *StateNode) MarkedForDeletion() bool {
 		(in.Node != nil && in.NodeClaim == nil && !in.Node.DeletionTimestamp.IsZero())
 }
 
-func (in *StateNode) Nominate(ctx context.Context) {
-	in.nominatedUntil = metav1.Time{Time: time.Now().Add(nominationWindow(ctx))}
+func (in *StateNode) Nominate() {
+	in.nominatedUntil = metav1.Time{Time: time.Now().Add(nominationWindow())}
 }
 
 func (in *StateNode) Nominated() bool {
@@ -362,8 +363,8 @@ func (in *StateNode) cleanupForPod(podKey types.NamespacedName) {
 	delete(in.daemonSetLimits, podKey)
 }
 
-func nominationWindow(ctx context.Context) time.Duration {
-	nominationPeriod := 2 * options.FromContext(ctx).BatchMaxDuration
+func nominationWindow() time.Duration {
+	nominationPeriod := 2 * global.Config.BatchMaxDuration
 	if nominationPeriod < 10*time.Second {
 		nominationPeriod = 10 * time.Second
 	}

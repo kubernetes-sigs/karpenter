@@ -48,7 +48,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -82,7 +81,6 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(coreapis.CRDs...))
-	ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(true)}}))
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
@@ -112,9 +110,6 @@ var _ = BeforeEach(func() {
 	cluster.Reset()
 	queue.Reset()
 	cluster.MarkUnconsolidated()
-
-	// Reset Feature Flags to test defaults
-	ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(true)}}))
 
 	onDemandInstances = lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
 		for _, o := range i.Offerings.Available() {
@@ -153,6 +148,8 @@ var _ = AfterEach(func() {
 	disruption.ActionsPerformedCounter.Reset()
 	disruption.NodesDisruptedCounter.Reset()
 	disruption.PodsDisruptedCounter.Reset()
+
+	env.Reset()
 })
 
 var _ = Describe("Simulate Scheduling", func() {
@@ -1270,7 +1267,7 @@ var _ = Describe("Candidate Filtering", func() {
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
-		cluster.NominateNodeForPod(ctx, node.Spec.ProviderID)
+		cluster.NominateNodeForPod(node.Spec.ProviderID)
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
