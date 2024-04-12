@@ -41,6 +41,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
+	"github.com/qdm12/reprint"
 )
 
 func NewScheduler(ctx context.Context, kubeClient client.Client, nodePools []*v1beta1.NodePool,
@@ -266,10 +267,16 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 	// Consider using https://pkg.go.dev/container/heap
 	sort.Slice(s.newNodeClaims, func(a, b int) bool { return len(s.newNodeClaims[a].Pods) < len(s.newNodeClaims[b].Pods) })
 
+	var existingOriginalNodeClaim *NodeClaim = nil
+	var existingCopiedNodeClaim *NodeClaim = nil
 	// Pick existing node that we are about to create
 	for _, nodeClaim := range s.newNodeClaims {
-		if err := nodeClaim.Add(pod); err == nil {
-			return nil
+		copiedNodeClaim := reprint.This(nodeClaim).(*NodeClaim)
+		if err := copiedNodeClaim.Add(pod); err == nil {
+			existingCopiedNodeClaim = copiedNodeClaim
+			existingOriginalNodeClaim = nodeClaim
+			break
+			// return nil
 		}
 	}
 
@@ -295,6 +302,21 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 				resources.String(s.daemonOverhead[nodeClaimTemplate]),
 				err))
 			continue
+		}
+		if existingCopiedNodeClaim != nil {
+			existingCopiedNodeClaim.InstanceTypeOptions.OrderByPrice(existingCopiedNodeClaim.NodeClaimTemplate.Requirements)
+			nodeClaim.InstanceTypeOptions.OrderByPrice(nodeClaim.NodeClaimTemplate.Requirements)
+			existingMinPrice := existingCopiedNodeClaim.InstanceTypeOptions[0].Offerings.Available().Compatible(existingCopiedNodeClaim.NodeClaimTemplate.Requirements).Cheapest().Price
+			newMinPrice := nodeClaim.InstanceTypeOptions[0].Offerings.Available().Compatible(nodeClaim.NodeClaimTemplate.Requirements).Cheapest().Price
+
+			if existingMinPrice/float64(len(existingCopiedNodeClaim.Pods)) > newMinPrice {
+				logging.FromContext(ctx).With("nodeclaim", existingCopiedNodeClaim.NodePoolName).Infof("Creating a new node seems cheaper, existing node price per pod: %f is greater than new node price: %f", existingMinPrice/float64(len(existingCopiedNodeClaim.Pods)), newMinPrice)
+			} else {
+				logging.FromContext(ctx).With("nodeclaim", existingCopiedNodeClaim.NodePoolName).Infof("Adjusting within existing node makes more sense, existing node price per pod: %f is lesser than new node price: %f", existingMinPrice/float64(len(existingCopiedNodeClaim.Pods)), newMinPrice)
+				if err := existingOriginalNodeClaim.Add(pod); err == nil {
+					return nil
+				}
+			}
 		}
 		// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
 		s.newNodeClaims = append(s.newNodeClaims, nodeClaim)
