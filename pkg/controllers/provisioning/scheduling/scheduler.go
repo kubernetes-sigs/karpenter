@@ -276,7 +276,6 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 			existingCopiedNodeClaim = copiedNodeClaim
 			existingOriginalNodeClaim = nodeClaim
 			break
-			// return nil
 		}
 	}
 
