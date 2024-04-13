@@ -71,7 +71,7 @@ func NewControllers(
 		metricsnodepool.NewController(kubeClient),
 		metricsnode.NewController(cluster),
 		nodepoolcounter.NewController(kubeClient, cluster),
-		nodeclaimconsistency.NewController(clock, kubeClient, recorder, cloudProvider),
+		nodeclaimconsistency.NewController(clock, kubeClient, recorder),
 		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder),
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimtermination.NewController(kubeClient, cloudProvider),

@@ -68,7 +68,7 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 	cp = &fake.CloudProvider{}
 	recorder = test.NewEventRecorder()
-	nodeClaimConsistencyController = consistency.NewController(fakeClock, env.Client, recorder, cp)
+	nodeClaimConsistencyController = consistency.NewController(fakeClock, env.Client, recorder)
 })
 
 var _ = AfterSuite(func() {
