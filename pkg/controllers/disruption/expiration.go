@@ -67,10 +67,6 @@ func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping
 		return candidates[i].NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).LastTransitionTime.Inner.Time.Before(
 			candidates[j].NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).LastTransitionTime.Inner.Time)
 	})
-	EligibleNodesGauge.With(map[string]string{
-		methodLabel:            e.Type(),
-		consolidationTypeLabel: e.ConsolidationType(),
-	}).Set(float64(len(candidates)))
 
 	// Do a quick check through the candidates to see if they're empty.
 	// For each candidate that is empty with a nodePool allowing its disruption

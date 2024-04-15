@@ -134,6 +134,54 @@ var _ = Describe("Consolidation", func() {
 			Expect(recorder.Calls("Unconsolidatable")).To(Equal(6))
 		})
 	})
+	Context("Metrics", func() {
+		const eligibleNodesMetric = "karpenter_disruption_eligible_nodes"
+		var consolidationTypes = []string{"empty", "single", "multi"}
+		It("should correctly report eligible nodes", func() {
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1beta1.DoNotDisruptAnnotationKey: "true",
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+			wg := sync.WaitGroup{}
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			wg.Wait()
+
+			for _, ct := range consolidationTypes {
+				ExpectMetricGaugeValue(eligibleNodesMetric, 0, map[string]string{
+					"method":             "consolidation",
+					"consolidation_type": ct,
+				})
+			}
+
+			// remove the do-not-disturb annotation to make the node eligible for consolidation and update cluster state
+			pod.SetAnnotations(map[string]string{})
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			wg.Wait()
+
+			for _, ct := range consolidationTypes {
+				ExpectMetricGaugeValue(eligibleNodesMetric, 1, map[string]string{
+					"method":             "consolidation",
+					"consolidation_type": ct,
+				})
+			}
+		})
+	})
 	Context("Budgets", func() {
 		var numNodes = 10
 		var nodeClaims []*v1beta1.NodeClaim

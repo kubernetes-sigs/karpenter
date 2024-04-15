@@ -44,10 +44,6 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		return Command{}, scheduling.Results{}, nil
 	}
 	candidates = c.sortCandidates(candidates)
-	EligibleNodesGauge.With(map[string]string{
-		methodLabel:            c.Type(),
-		consolidationTypeLabel: c.ConsolidationType(),
-	}).Set(float64(len(candidates)))
 
 	empty := make([]*Candidate, 0, len(candidates))
 	constrainedByBudgets := false
