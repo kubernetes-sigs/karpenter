@@ -34,7 +34,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
 	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
@@ -61,8 +60,7 @@ type Check interface {
 // scanPeriod is how often we inspect and report issues that are found.
 const scanPeriod = 10 * time.Minute
 
-func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Recorder,
-	provider cloudprovider.CloudProvider) operatorcontroller.Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Recorder) operatorcontroller.Controller {
 
 	return operatorcontroller.Typed[*v1beta1.NodeClaim](kubeClient, &Controller{
 		clock:       clk,
@@ -71,7 +69,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Re
 		lastScanned: cache.New(scanPeriod, 1*time.Minute),
 		checks: []Check{
 			NewTermination(clk, kubeClient),
-			NewNodeShape(provider),
+			NewNodeShape(),
 		},
 	})
 }
