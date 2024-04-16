@@ -75,15 +75,13 @@ func (e *Emptiness) ComputeCommand(_ context.Context, disruptionBudgetMapping ma
 
 	empty := make([]*Candidate, 0, len(emptyCandidates))
 	for _, candidate := range emptyCandidates {
-		if len(candidate.reschedulablePods) > 0 {
-			continue
-		}
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
-		if disruptionBudgetMapping[candidate.nodePool.Name] > 0 {
-			empty = append(empty, candidate)
-			disruptionBudgetMapping[candidate.nodePool.Name]--
+		if disruptionBudgetMapping[candidate.nodePool.Name] == 0 {
+			continue
 		}
+		empty = append(empty, candidate)
+		disruptionBudgetMapping[candidate.nodePool.Name]--
 	}
 	return Command{
 		candidates: empty,
