@@ -23,18 +23,13 @@ import (
 	v1 "k8s.io/api/core/v1"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 )
 
 // NodeShape detects nodes that have launched with 10% or less of any resource than was expected.
-type NodeShape struct {
-	provider cloudprovider.CloudProvider
-}
+type NodeShape struct{}
 
-func NewNodeShape(provider cloudprovider.CloudProvider) Check {
-	return &NodeShape{
-		provider: provider,
-	}
+func NewNodeShape() Check {
+	return &NodeShape{}
 }
 
 func (n *NodeShape) Check(_ context.Context, node *v1.Node, nodeClaim *v1beta1.NodeClaim) ([]Issue, error) {
