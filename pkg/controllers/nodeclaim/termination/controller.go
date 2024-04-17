@@ -90,6 +90,12 @@ func (c *Controller) Finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 	}
 	if nodeClaim.Status.ProviderID != "" {
 		if err = c.cloudProvider.Delete(ctx, nodeClaim); cloudprovider.IgnoreNodeClaimNotFoundError(err) != nil {
+			// We expect cloudProvider to emit a Retryable Error when the underlying instance is not terminated and if that
+			// happens, we want to re-enqueue reconciliation until we terminate the underlying instance before removing
+			// finalizer from the nodeClaim.
+			if cloudprovider.IsRetryableError(err) {
+				return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
+			}
 			return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
 		}
 	}
