@@ -24,6 +24,7 @@ See Less Made Up Scenarios here:
 - https://github.com/kubernetes-sigs/karpenter/issues/924 
 - https://github.com/kubernetes-sigs/karpenter/issues/753#issuecomment-1790110838
 - https://github.com/kubernetes-sigs/karpenter/issues/672
+- https://github.com/kubernetes-sigs/karpenter/issues/1179 
 
 See further breakdown of some additional scenarios towards the bottom of the document 
 
@@ -238,10 +239,15 @@ AllowedDisruptions = minNodeCount - unhealthyNodes - totalDisruptingNodes.
 When calculating by reason, three potential equations emerge:
 1. BucketedDisruptionByReason = minNodeCount[reason] - unhealthyNodes - totalDisruptingNodes[reason]
 2. AllowedDisruptionByReason = minNodeCount[reason] - unhealthyNodes - totalDisruptingNodes
-3. minimumDisruptionAllowed = min(minNodeCount[reason], minNodeCount[default]) - unhealthyNodes - totalDisruptingNodes
+3.(Recommended) minimumDisruptionAllowed = min(minNodeCount[reason], minNodeCount[default]) - unhealthyNodes - totalDisruptingNodes
+
+
+#### Recommendation: minimumDisruptionAllowed equation(AKA Equation 3)
+Equation 3 is recommended as its the least intrusive change to the disruption equation, and avoids edge cases we see with the bucketed approach. Equation 2 doesn't follow the min budget principle that we have established in the original disruption controls api.
+For these reasons we can go ahead with equation 3. We will walk through the customer scenarios using nodepools defined with the disruption behavior being driven from equation three below to ensure our API can perform all of the customer asks we have received so far here. 
 
 ### Scenarios
-We will go through scenarios that users are expecting to face to drive home if the api can satisfy the users requirements for the end users of these features
+We will go through scenarios that users are expecting to face to drive home if the api with equation 3 can satisfy the users requirements for the end users of these features
 - Block Drift, but allow Expiration
 - Fully Block Drift && Expiration, but allow consolidation to occur 
 - Block Drift && Expiration, but allow emptiness 
@@ -318,7 +324,9 @@ spec: # This is not a complete NodePool Spec.
 ```
 
 #### Limiting Drift & Expiration while allowing aggressive but not unbounded consolidation
-Drift and Expiration may not be desired reasons to remove many nodes in one interval, but Underutilization and Emptiness may be desired. We may want to still consolidate at a healthy threshold but not allow 
+Drift and Expiration may not be desired reasons to remove many nodes in one interval, but Underutilization and Emptiness may be desired. We may want to still consolidate at a healthy threshold but not allow drift or expiration to trigger a [mass exodus of node removals](https://github.com/kubernetes-sigs/karpenter/issues/1179#issuecomment-2049160258).
+
+This avoids the situation where we have 100s of drift or expirations all lining up at once and mass rotating all active nodes at once.
 ```yaml
 apiVersion: karpenter.sh/v1beta1
 kind: NodePool
@@ -333,6 +341,8 @@ spec: # This is not a complete NodePool Spec.
       reasons: [drifted, expired] # Only allow Drift and Expiration to occur one at a time 
     - nodes: "33%" # All Consolidation actions taken either through replace or delete should be allowed to disrupt at least a third of the cluster at once 
 ```
+
+
 
 ### Q: How should we handle an unspecified reason when others are specified? 
 ```yaml
