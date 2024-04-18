@@ -42,6 +42,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
+	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 var _ operatorcontroller.FinalizingTypedController[*v1.Node] = (*Controller)(nil)
@@ -102,6 +103,9 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 			}
 		}
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
+	}
+	if err := c.cloudProvider.Delete(ctx, nodeclaimutil.NewFromNode(node)); cloudprovider.IgnoreNodeClaimNotFoundError(err) != nil {
+		return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
 	}
 	if err := c.removeFinalizer(ctx, node); err != nil {
 		return reconcile.Result{}, err

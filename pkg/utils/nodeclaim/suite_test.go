@@ -34,6 +34,7 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
@@ -109,6 +110,26 @@ var _ = Describe("NodeClaimUtils", func() {
 				v1.ResourceEphemeralStorage: resource.MustParse("95Gi"),
 			},
 		})
+	})
+	It("should convert a Node to a NodeClaim", func() {
+		nodeClaim := nodeclaimutil.NewFromNode(node)
+		for k, v := range node.Annotations {
+			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(k, v))
+		}
+		for k, v := range node.Labels {
+			Expect(nodeClaim.Labels).To(HaveKeyWithValue(k, v))
+		}
+		Expect(lo.Contains(nodeClaim.Finalizers, v1beta1.TerminationFinalizer)).To(BeTrue())
+		Expect(nodeClaim.Spec.Taints).To(Equal(node.Spec.Taints))
+		Expect(nodeClaim.Spec.Requirements).To(ContainElements(scheduling.NewLabelRequirements(node.Labels).NodeSelectorRequirements()))
+		Expect(nodeClaim.Spec.Resources.Requests).To(Equal(node.Status.Allocatable))
+		Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
+		Expect(nodeClaim.Status.ProviderID).To(Equal(node.Spec.ProviderID))
+		Expect(nodeClaim.Status.Capacity).To(Equal(node.Status.Capacity))
+		Expect(nodeClaim.Status.Allocatable).To(Equal(node.Status.Allocatable))
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Launched).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Registered).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized).IsTrue()).To(BeTrue())
 	})
 	It("should update the owner for a Node to a NodeClaim", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
