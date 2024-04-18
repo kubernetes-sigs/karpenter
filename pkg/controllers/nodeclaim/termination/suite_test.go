@@ -238,6 +238,10 @@ var _ = Describe("Termination", func() {
 		result := ExpectReconcileSucceeded(ctx, nodeClaimTerminationController, client.ObjectKeyFromObject(nodeClaim))
 		Expect(result.RequeueAfter).To(Equal(time.Second * 10))
 
+		// Instance still exists
+		_, err = cloudProvider.Get(ctx, node.Spec.ProviderID)
+		Expect(err).ToNot(HaveOccurred())
+
 		ExpectReconcileSucceeded(ctx, nodeClaimTerminationController, client.ObjectKeyFromObject(nodeClaim)) //re-enqueue reconciliation since we got retryable error previously
 		ExpectNotFound(ctx, env.Client, nodeClaim, node)
 
