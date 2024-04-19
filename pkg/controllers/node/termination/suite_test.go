@@ -18,12 +18,15 @@ package termination_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 
 	"github.com/samber/lo"
 	clock "k8s.io/utils/clock/testing"
@@ -714,6 +717,27 @@ var _ = Describe("Termination", func() {
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{}) // Reconcile the queue so that we set the metric
 
 			ExpectMetricGaugeValue("karpenter_nodes_eviction_queue_depth", 5, map[string]string{})
+		})
+		It("should retry node deletion when cloudProvider returns retryable error", func() {
+			ExpectApplied(ctx, env.Client, node)
+			cloudProvider.NextDeleteErr = cloudprovider.NewRetryableError(fmt.Errorf("underlying instance not terminated"))
+
+			// Expect the node to stick around and requeue while it gets a retryable error
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			result := ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			Expect(result.RequeueAfter).To(Equal(time.Second * 10))
+
+			// Instance still exists
+			_, err := cloudProvider.Get(ctx, node.Spec.ProviderID)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Requeue again and we should no longer get an error and succeed to delete the instance
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node)) // re-enqueue reconciliation since we got retryable error previously
+			ExpectNotFound(ctx, env.Client, node)
+
+			// Expect the instance to be gone from the cloudprovider
+			_, err = cloudProvider.Get(ctx, node.Spec.ProviderID)
+			Expect(cloudprovider.IsNodeClaimNotFoundError(err)).To(BeTrue())
 		})
 	})
 })
