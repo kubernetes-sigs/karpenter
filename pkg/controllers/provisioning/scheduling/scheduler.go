@@ -256,6 +256,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) Results {
 	}
 }
 
+//nolint:gocyclo
 func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 	// first try to schedule against an in-flight real node
 	for _, node := range s.existingNodes {
