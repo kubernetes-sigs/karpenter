@@ -32,6 +32,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -106,11 +107,14 @@ var _ = Describe("Emptiness", func() {
 		})
 	})
 	Context("Metrics", func() {
-		const eligibleNodesMetric = "karpenter_disruption_eligible_nodes"
+		var eligibleNodesMetric string
 		var eligibleNodesEmptinessLabels = map[string]string{
 			"method":             "emptiness",
 			"consolidation_type": "",
 		}
+		BeforeEach(func() {
+			eligibleNodesMetric = ExpectFullyQualifiedNameFromCollector(disruption.EligibleNodesGauge)
+		})
 		It("should correctly report eligible nodes", func() {
 			pod := test.Pod()
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)

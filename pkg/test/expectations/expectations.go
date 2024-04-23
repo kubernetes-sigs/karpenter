@@ -22,12 +22,14 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"regexp"
 	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2" //nolint:revive,stylecheck
 	. "github.com/onsi/gomega"    //nolint:revive,stylecheck
-	prometheus "github.com/prometheus/client_model/go"
+	"github.com/prometheus/client_golang/prometheus"
+	prometheusmodel "github.com/prometheus/client_model/go"
 	"github.com/samber/lo"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
@@ -461,14 +463,33 @@ func ExpectOwnerReferenceExists(obj, owner client.Object) metav1.OwnerReference 
 	return or
 }
 
+func ExpectFullyQualifiedNameFromCollector(collector prometheus.Collector) string {
+	GinkgoHelper()
+	result := make(chan *prometheus.Desc)
+	var desc *prometheus.Desc
+	go func() {
+		collector.Describe(result)
+	}()
+	select {
+	case desc = <-result:
+	// Add a timeout so a failure doesn't result in stalling the entire test suite. This should never occur.
+	case <-time.After(time.Second):
+	}
+	Expect(desc).ToNot(BeNil())
+	rgx := regexp.MustCompile(`^.*fqName:\s*"([^"]*).*$`)
+	matches := rgx.FindStringSubmatch(desc.String())
+	Expect(len(matches)).To(Equal(2))
+	return matches[1]
+}
+
 // FindMetricWithLabelValues attempts to find a metric with a name with a set of label values
-// If no metric is found, the *prometheus.Metric will be nil
-func FindMetricWithLabelValues(name string, labelValues map[string]string) (*prometheus.Metric, bool) {
+// If no metric is found, the *prometheusmodel.Metric will be nil
+func FindMetricWithLabelValues(name string, labelValues map[string]string) (*prometheusmodel.Metric, bool) {
 	GinkgoHelper()
 	metrics, err := crmetrics.Registry.Gather()
 	Expect(err).To(BeNil())
 
-	mf, found := lo.Find(metrics, func(mf *prometheus.MetricFamily) bool {
+	mf, found := lo.Find(metrics, func(mf *prometheusmodel.MetricFamily) bool {
 		return mf.GetName() == name
 	})
 	if !found {

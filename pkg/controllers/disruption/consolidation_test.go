@@ -135,8 +135,11 @@ var _ = Describe("Consolidation", func() {
 		})
 	})
 	Context("Metrics", func() {
-		const eligibleNodesMetric = "karpenter_disruption_eligible_nodes"
+		var eligibleNodesMetric string
 		var consolidationTypes = []string{"empty", "single", "multi"}
+		BeforeEach(func() {
+			eligibleNodesMetric = ExpectFullyQualifiedNameFromCollector(disruption.EligibleNodesGauge)
+		})
 		It("should correctly report eligible nodes", func() {
 			pod := test.Pod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{

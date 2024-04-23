@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -77,11 +78,14 @@ var _ = Describe("Expiration", func() {
 		nodeClaim.StatusConditions().MarkTrue(v1beta1.Expired)
 	})
 	Context("Metrics", func() {
-		const eligibleNodesMetric = "karpenter_disruption_eligible_nodes"
+		var eligibleNodesMetric string
 		var eligibleNodesLabels = map[string]string{
 			"method":             "expiration",
 			"consolidation_type": "",
 		}
+		BeforeEach(func() {
+			eligibleNodesMetric = ExpectFullyQualifiedNameFromCollector(disruption.EligibleNodesGauge)
+		})
 		It("should correctly report eligible nodes", func() {
 			pod := test.Pod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
