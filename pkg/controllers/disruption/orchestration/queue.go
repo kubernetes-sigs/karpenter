@@ -270,8 +270,9 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 			multiErr = multierr.Append(multiErr, client.IgnoreNotFound(err))
 		} else {
 			metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
-				metrics.ReasonLabel:   cmd.method,
-				metrics.NodePoolLabel: cmd.candidates[i].NodeClaim.Labels[v1beta1.NodePoolLabelKey],
+				metrics.ReasonLabel:       cmd.method,
+				metrics.NodePoolLabel:     cmd.candidates[i].NodeClaim.Labels[v1beta1.NodePoolLabelKey],
+				metrics.CapacityTypeLabel: cmd.candidates[i].NodeClaim.Labels[v1beta1.CapacityTypeLabelKey],
 			}).Inc()
 		}
 	}

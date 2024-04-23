@@ -22,9 +22,11 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
+	io_prometheus_client "github.com/prometheus/client_model/go"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	nodev1 "k8s.io/api/node/v1"
@@ -37,6 +39,8 @@ import (
 	"k8s.io/csi-translation-lib/plugins"
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -72,11 +76,12 @@ var nodeClaimStateController controller.Controller
 var podStateController controller.Controller
 
 const csiProvider = "fake.csi.provider"
+const isDefaultStorageClassAnnotation = "storageclass.kubernetes.io/is-default-class"
 
 func TestScheduling(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Controllers/Scheduling")
+	RunSpecs(t, "Scheduling")
 }
 
 var _ = BeforeSuite(func() {
@@ -103,16 +108,17 @@ var _ = BeforeEach(func() {
 	newCP := fake.CloudProvider{}
 	cloudProvider.InstanceTypes, _ = newCP.GetInstanceTypes(ctx, nil)
 	cloudProvider.CreateCalls = nil
-	pscheduling.ResetDefaultStorageClass()
 	scheduling.MaxInstanceTypes = 100
 })
 
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 	cluster.Reset()
+	scheduling.QueueDepth.Reset()
+	scheduling.SimulationDurationSeconds.Reset()
 })
 
-var _ = Context("NodePool", func() {
+var _ = Context("Scheduling", func() {
 	var nodePool *v1beta1.NodePool
 	BeforeEach(func() {
 		nodePool = test.NodePool(v1beta1.NodePool{
@@ -2381,10 +2387,11 @@ var _ = Context("NodePool", func() {
 				})
 				ExpectApplied(ctx, env.Client, nc)
 				if i == elem {
-					nc, node = ExpectNodeClaimDeployed(ctx, env.Client, cluster, cloudProvider, nc)
+					nc, node = ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
 				} else {
 					var err error
-					nc, err = ExpectNodeClaimDeployedNoNode(ctx, env.Client, cluster, cloudProvider, nc)
+					nc, err = ExpectNodeClaimDeployedNoNode(ctx, env.Client, cloudProvider, nc)
+					cluster.UpdateNodeClaim(nc)
 					Expect(err).ToNot(HaveOccurred())
 				}
 				nodeClaims = append(nodeClaims, nc)
@@ -2475,7 +2482,7 @@ var _ = Context("NodePool", func() {
 					},
 				})
 				ExpectApplied(ctx, env.Client, nc)
-				nc, n := ExpectNodeClaimDeployed(ctx, env.Client, cluster, cloudProvider, nc)
+				nc, n := ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
 				nodeClaims = append(nodeClaims, nc)
 				nodes = append(nodes, n)
 			}
@@ -2860,7 +2867,7 @@ var _ = Context("NodePool", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "default-storage-class",
 					Annotations: map[string]string{
-						pscheduling.IsDefaultStorageClassAnnotation: "true",
+						isDefaultStorageClassAnnotation: "true",
 					},
 				},
 				Provisioner: ptr.String("other-provider"),
@@ -2965,7 +2972,7 @@ var _ = Context("NodePool", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "default-storage-class",
 					Annotations: map[string]string{
-						pscheduling.IsDefaultStorageClassAnnotation: "true",
+						isDefaultStorageClassAnnotation: "true",
 					},
 				},
 				Provisioner: ptr.String(csiProvider),
@@ -3063,7 +3070,7 @@ var _ = Context("NodePool", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "default-storage-class",
 					Annotations: map[string]string{
-						pscheduling.IsDefaultStorageClassAnnotation: "true",
+						isDefaultStorageClassAnnotation: "true",
 					},
 				},
 				Provisioner: ptr.String("other-provider"),
@@ -3072,7 +3079,7 @@ var _ = Context("NodePool", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "newer-default-storage-class",
 					Annotations: map[string]string{
-						pscheduling.IsDefaultStorageClassAnnotation: "true",
+						isDefaultStorageClassAnnotation: "true",
 					},
 				},
 				Provisioner: ptr.String(csiProvider),
@@ -3268,7 +3275,7 @@ var _ = Context("NodePool", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "in-tree-storage-class",
 						Annotations: map[string]string{
-							pscheduling.IsDefaultStorageClassAnnotation: "true",
+							isDefaultStorageClassAnnotation: "true",
 						},
 					},
 					Provisioner: ptr.String(plugins.AWSEBSInTreePluginName),
@@ -3326,7 +3333,7 @@ var _ = Context("NodePool", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "in-tree-storage-class",
 						Annotations: map[string]string{
-							pscheduling.IsDefaultStorageClassAnnotation: "true",
+							isDefaultStorageClassAnnotation: "true",
 						},
 					},
 					Provisioner: ptr.String(plugins.AWSEBSInTreePluginName),
@@ -3621,6 +3628,72 @@ var _ = Context("NodePool", func() {
 			for _, n := range nodes {
 				Expect(n.Labels[v1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
 			}
+		})
+	})
+
+	Describe("Metrics", func() {
+		It("should surface the queueDepth metric while executing the scheduling loop", func() {
+			nodePool := test.NodePool()
+			ExpectApplied(ctx, env.Client, nodePool)
+			// all of these pods have anti-affinity to each other
+			labels := map[string]string{
+				"app": "nginx",
+			}
+			pods := test.Pods(1000, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
+				PodAntiRequirements: []v1.PodAffinityTerm{
+					{
+						LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
+						TopologyKey:   v1.LabelHostname,
+					},
+				},
+			}) // Create 1000 pods which should take long enough to schedule that we should be able to read the queueDepth metric with a value
+			s, err := prov.NewScheduler(ctx, pods, nil)
+			Expect(err).To(BeNil())
+
+			var wg sync.WaitGroup
+			wg.Add(1)
+			go func() {
+				defer GinkgoRecover()
+				defer wg.Done()
+				Eventually(func(g Gomega) {
+					m, ok := FindMetricWithLabelValues("karpenter_provisioner_scheduling_queue_depth", map[string]string{"controller": "provisioner"})
+					g.Expect(ok).To(BeTrue())
+					g.Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically(">", 0))
+				}, time.Second).Should(Succeed())
+			}()
+			s.Solve(injection.WithControllerName(ctx, "provisioner"), pods)
+			wg.Wait()
+		})
+		It("should surface the schedulingDuration metric after executing a scheduling loop", func() {
+			nodePool := test.NodePool()
+			ExpectApplied(ctx, env.Client, nodePool)
+			// all of these pods have anti-affinity to each other
+			labels := map[string]string{
+				"app": "nginx",
+			}
+			pods := test.Pods(1000, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
+				PodAntiRequirements: []v1.PodAffinityTerm{
+					{
+						LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
+						TopologyKey:   v1.LabelHostname,
+					},
+				},
+			}) // Create 1000 pods which should take long enough to schedule that we should be able to read the queueDepth metric with a value
+			s, err := prov.NewScheduler(ctx, pods, nil)
+			Expect(err).To(BeNil())
+			s.Solve(injection.WithControllerName(ctx, "provisioner"), pods)
+
+			m, ok := FindMetricWithLabelValues("karpenter_provisioner_scheduling_simulation_duration_seconds", map[string]string{"controller": "provisioner"})
+			Expect(ok).To(BeTrue())
+			Expect(lo.FromPtr(m.Histogram.SampleCount)).To(BeNumerically("==", 1))
+			_, ok = lo.Find(m.Histogram.Bucket, func(b *io_prometheus_client.Bucket) bool { return lo.FromPtr(b.CumulativeCount) > 0 })
+			Expect(ok).To(BeTrue())
 		})
 	})
 })

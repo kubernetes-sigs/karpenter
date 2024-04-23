@@ -411,7 +411,7 @@ func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTa
 			node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
 		}
 		if !equality.Semantic.DeepEqual(stored, node) {
-			if err := kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
+			if err := kubeClient.Patch(ctx, node, client.StrategicMergeFrom(stored)); err != nil {
 				multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
 			}
 		}

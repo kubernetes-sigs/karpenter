@@ -74,12 +74,32 @@ func NodeEventHandler(c client.Client) handler.EventHandler {
 	})
 }
 
-// NodePoolEventHandler is a watcher on v1beta1.NodeClaim that maps Provisioner to NodeClaims based
+// NodePoolEventHandler is a watcher on v1beta1.NodeClaim that maps NodePool to NodeClaims based
 // on the v1beta1.NodePoolLabelKey and enqueues reconcile.Requests for the NodeClaim
 func NodePoolEventHandler(c client.Client) handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
 		nodeClaimList := &v1beta1.NodeClaimList{}
 		if err := c.List(ctx, nodeClaimList, client.MatchingLabels(map[string]string{v1beta1.NodePoolLabelKey: o.GetName()})); err != nil {
+			return requests
+		}
+		return lo.Map(nodeClaimList.Items, func(n v1beta1.NodeClaim, _ int) reconcile.Request {
+			return reconcile.Request{
+				NamespacedName: client.ObjectKeyFromObject(&n),
+			}
+		})
+	})
+}
+
+// NodeClassEventHandler is a watcher on v1beta1.NodeClaim that maps NodeClass to NodeClaims based
+// on the nodeClassRef and enqueues reconcile.Requests for the NodeClaim
+func NodeClassEventHandler(c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
+		nodeClaimList := &v1beta1.NodeClaimList{}
+		if err := c.List(ctx, nodeClaimList, client.MatchingFields{
+			"spec.nodeClassRef.apiVersion": o.GetObjectKind().GroupVersionKind().GroupVersion().String(),
+			"spec.nodeClassRef.kind":       o.GetObjectKind().GroupVersionKind().Kind,
+			"spec.nodeClassRef.name":       o.GetName(),
+		}); err != nil {
 			return requests
 		}
 		return lo.Map(nodeClaimList.Items, func(n v1beta1.NodeClaim, _ int) reconcile.Request {

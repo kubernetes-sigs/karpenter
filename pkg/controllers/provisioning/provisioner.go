@@ -193,11 +193,6 @@ var ErrNodePoolsNotFound = errors.New("no nodepools found")
 
 //nolint:gocyclo
 func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNodes []*state.StateNode) (*scheduler.Scheduler, error) {
-	// Build node templates
-	var nodeClaimTemplates []*scheduler.NodeClaimTemplate
-	instanceTypes := map[string][]*cloudprovider.InstanceType{}
-	domains := map[string]sets.Set[string]{}
-
 	nodePoolList := &v1beta1.NodePoolList{}
 	err := p.kubeClient.List(ctx, nodePoolList)
 	if err != nil {
@@ -219,12 +214,11 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	// will always attempt to schedule on the first nodeTemplate
 	nodePoolList.OrderByWeight()
 
-	for i := range nodePoolList.Items {
-		nodePool := &nodePoolList.Items[i]
-		// Create node template
-		nodeClaimTemplates = append(nodeClaimTemplates, scheduler.NewNodeClaimTemplate(nodePool))
+	instanceTypes := map[string][]*cloudprovider.InstanceType{}
+	domains := map[string]sets.Set[string]{}
+	for _, nodePool := range nodePoolList.Items {
 		// Get instance type options
-		instanceTypeOptions, err := p.cloudProvider.GetInstanceTypes(ctx, nodePool)
+		instanceTypeOptions, err := p.cloudProvider.GetInstanceTypes(ctx, lo.ToPtr(nodePool))
 		if err != nil {
 			// we just log an error and skip the provisioner to prevent a single mis-configured provisioner from stopping
 			// all scheduling
@@ -273,7 +267,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	}
 
 	// inject topology constraints
-	pods = p.injectTopology(ctx, pods)
+	pods = p.injectVolumeTopologyRequirements(ctx, pods)
 
 	// Calculate cluster topology
 	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, domains, pods)
@@ -284,7 +278,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	if err != nil {
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
-	return scheduler.NewScheduler(ctx, p.kubeClient, nodeClaimTemplates, nodePoolList.Items, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder), nil
+	return scheduler.NewScheduler(ctx, p.kubeClient, lo.ToSlicePtr(nodePoolList.Items), p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder), nil
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
@@ -356,8 +350,9 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 	})
 	logging.FromContext(ctx).With("nodeclaim", nodeClaim.Name, "requests", nodeClaim.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).Infof("created nodeclaim")
 	metrics.NodeClaimsCreatedCounter.With(prometheus.Labels{
-		metrics.ReasonLabel:   options.Reason,
-		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+		metrics.ReasonLabel:       options.Reason,
+		metrics.NodePoolLabel:     nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+		metrics.CapacityTypeLabel: nodeClaim.Labels[v1beta1.CapacityTypeLabelKey],
 	}).Inc()
 	// Update the nodeclaim manually in state to avoid evenutal consistency delay races with our watcher.
 	// This is essential to avoiding races where disruption can create a replacement node, then immediately
@@ -436,7 +431,7 @@ func validateKarpenterManagedLabelCanExist(p *v1.Pod) error {
 	return nil
 }
 
-func (p *Provisioner) injectTopology(ctx context.Context, pods []*v1.Pod) []*v1.Pod {
+func (p *Provisioner) injectVolumeTopologyRequirements(ctx context.Context, pods []*v1.Pod) []*v1.Pod {
 	var schedulablePods []*v1.Pod
 	for _, pod := range pods {
 		if err := p.volumeTopology.Inject(ctx, pod); err != nil {

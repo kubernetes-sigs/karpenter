@@ -26,6 +26,7 @@ import (
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -55,6 +56,8 @@ type CloudProvider interface {
 	IsDrifted(context.Context, *v1beta1.NodeClaim) (DriftReason, error)
 	// Name returns the CloudProvider implementation name.
 	Name() string
+	// GetSupportedNodeClass returns the group, version, and kind of the CloudProvider NodeClass
+	GetSupportedNodeClasses() []schema.GroupVersionKind
 }
 
 // InstanceType describes the properties of a potential node (either concrete attributes of an instance of this type
@@ -195,8 +198,8 @@ func IsNodeClaimNotFoundError(err error) bool {
 	if err == nil {
 		return false
 	}
-	var mnfErr *NodeClaimNotFoundError
-	return errors.As(err, &mnfErr)
+	var ncnfErr *NodeClaimNotFoundError
+	return errors.As(err, &ncnfErr)
 }
 
 func IgnoreNodeClaimNotFoundError(err error) error {
@@ -261,6 +264,36 @@ func IsNodeClassNotReadyError(err error) bool {
 
 func IgnoreNodeClassNotReadyError(err error) error {
 	if IsNodeClassNotReadyError(err) {
+		return nil
+	}
+	return err
+}
+
+// RetryableError is an error type returned by CloudProviders when the action emitting the error has to be retried
+type RetryableError struct {
+	error
+}
+
+func NewRetryableError(err error) *RetryableError {
+	return &RetryableError{
+		error: err,
+	}
+}
+
+func (e *RetryableError) Error() string {
+	return fmt.Sprintf("retryable error, %s", e.error)
+}
+
+func IsRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var retryableError *RetryableError
+	return errors.As(err, &retryableError)
+}
+
+func IgnoreRetryableError(err error) error {
+	if IsRetryableError(err) {
 		return nil
 	}
 	return err

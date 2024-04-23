@@ -55,10 +55,11 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) 
 	if err := l.kubeClient.Delete(ctx, nodeClaim); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	logging.FromContext(ctx).With("ttl", registrationTTL).Debugf("terminating due to registration ttl")
+	logging.FromContext(ctx).With("ttl", registrationTTL).Infof("terminating due to registration ttl")
 	metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
-		metrics.ReasonLabel:   "liveness",
-		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+		metrics.ReasonLabel:       "liveness",
+		metrics.NodePoolLabel:     nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+		metrics.CapacityTypeLabel: nodeClaim.Labels[v1beta1.CapacityTypeLabelKey],
 	}).Inc()
 
 	return reconcile.Result{}, nil

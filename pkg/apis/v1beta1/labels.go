@@ -46,6 +46,7 @@ const (
 	ProviderCompatabilityAnnotationKey = CompatabilityGroup + "/provider"
 	ManagedByAnnotationKey             = Group + "/managed-by"
 	NodePoolHashAnnotationKey          = Group + "/nodepool-hash"
+	NodePoolHashVersionAnnotationKey   = Group + "/nodepool-hash-version"
 )
 
 // Karpenter specific finalizers

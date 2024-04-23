@@ -22,10 +22,13 @@ import (
 	"os"
 	"strings"
 
+	"github.com/avast/retry-go"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/client-go/kubernetes"
 	"knative.dev/pkg/system"
@@ -123,6 +126,12 @@ func NewEnvironment(scheme *runtime.Scheme, options ...functional.Option[Environ
 	} else {
 		c = lo.Must(client.New(environment.Config, client.Options{Scheme: scheme}))
 	}
+	// Retry getting the default namespace before the environment starts up
+	// We need this to solve https://github.com/kubernetes-sigs/karpenter/issues/887 until
+	// controller-runtime v0.18.0 is released, at which point we can remove this retry statement
+	lo.Must0(retry.Do(func() error {
+		return c.Get(ctx, types.NamespacedName{Name: metav1.NamespaceDefault}, &corev1.Namespace{})
+	}))
 	return &Environment{
 		Environment:         environment,
 		Client:              c,

@@ -115,12 +115,19 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 	return driftedReason, nil
 }
 
-// Eligible fields for static drift are described in the docs
+// Eligible fields for drift are described in the docs
 // https://karpenter.sh/docs/concepts/deprovisioning/#drift
 func areStaticFieldsDrifted(nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) cloudprovider.DriftReason {
-	nodePoolHash, foundHashNodePool := nodePool.Annotations[v1beta1.NodePoolHashAnnotationKey]
-	nodeClaimHash, foundHashNodeClaim := nodeClaim.Annotations[v1beta1.NodePoolHashAnnotationKey]
-	if !foundHashNodePool || !foundHashNodeClaim {
+	nodePoolHash, foundNodePoolHash := nodePool.Annotations[v1beta1.NodePoolHashAnnotationKey]
+	nodePoolHashVersion, foundNodePoolHashVersion := nodePool.Annotations[v1beta1.NodePoolHashVersionAnnotationKey]
+	nodeClaimHash, foundNodeClaimHash := nodeClaim.Annotations[v1beta1.NodePoolHashAnnotationKey]
+	nodeClaimHashVersion, foundNodeClaimHashVersion := nodeClaim.Annotations[v1beta1.NodePoolHashVersionAnnotationKey]
+
+	if !foundNodePoolHash || !foundNodePoolHashVersion || !foundNodeClaimHash || !foundNodeClaimHashVersion {
+		return ""
+	}
+	// validate that the hash version on the NodePool is the same as the NodeClaim before evaluating for static drift
+	if nodePoolHashVersion != nodeClaimHashVersion {
 		return ""
 	}
 	return lo.Ternary(nodePoolHash != nodeClaimHash, NodePoolDrifted, "")

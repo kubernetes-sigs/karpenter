@@ -18,12 +18,15 @@ package termination_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 
 	"github.com/samber/lo"
 	clock "k8s.io/utils/clock/testing"
@@ -86,17 +89,18 @@ var _ = Describe("Termination", func() {
 		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1beta1.TerminationFinalizer}}})
 		node.Labels[v1beta1.NodePoolLabelKey] = test.NodePool().Name
 		cloudProvider.CreatedNodeClaims[node.Spec.ProviderID] = nodeClaim
-		queue.Reset()
 	})
 
 	AfterEach(func() {
 		ExpectCleanedUp(ctx, env.Client)
 		fakeClock.SetTime(time.Now())
 		cloudProvider.Reset()
+		queue.Reset()
 
 		// Reset the metrics collectors
 		metrics.NodesTerminatedCounter.Reset()
 		termination.TerminationSummary.Reset()
+		terminator.EvictionQueueDepth.Set(0)
 	})
 
 	Context("Reconciliation", func() {
@@ -294,7 +298,7 @@ var _ = Describe("Termination", func() {
 			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should fail to evict pods that violate a PDB", func() {
-			minAvailable := intstr.FromInt(1)
+			minAvailable := intstr.FromInt32(1)
 			labelSelector := map[string]string{test.RandomName(): test.RandomName()}
 			pdb := test.PodDisruptionBudget(test.PDBOptions{
 				Labels: labelSelector,
@@ -538,6 +542,9 @@ var _ = Describe("Termination", func() {
 			pods := test.Pods(2, test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
 			ExpectApplied(ctx, env.Client, node, pods[0], pods[1])
 
+			// Make Node NotReady since it's automatically marked as Ready on first deploy
+			ExpectMakeNodesNotReady(ctx, env.Client, node)
+
 			// Trigger Termination Controller
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
@@ -563,6 +570,37 @@ var _ = Describe("Termination", func() {
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 			ExpectNotFound(ctx, env.Client, node)
+		})
+		It("should not delete nodes with no underlying instance if the node is still Ready", func() {
+			pods := test.Pods(2, test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
+			ExpectApplied(ctx, env.Client, node, pods[0], pods[1])
+
+			// Trigger Termination Controller
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
+			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
+
+			// Expect the pods to be evicted
+			EventuallyExpectTerminating(ctx, env.Client, pods[0], pods[1])
+
+			// Expect node to exist and be draining, but not deleted
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
+
+			// After this, the node still has one pod that is evicting.
+			ExpectDeleted(ctx, env.Client, pods[1])
+
+			// Remove the node from created nodeclaims so that the cloud provider returns DNE
+			cloudProvider.CreatedNodeClaims = map[string]*v1beta1.NodeClaim{}
+
+			// Reconcile to try to delete the node, but don't succeed because the readiness condition
+			// of the node still won't let us delete it
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectNodeExists(ctx, env.Client, node.Name)
 		})
 		It("should wait for pods to terminate", func() {
 			pod := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
@@ -657,6 +695,49 @@ var _ = Describe("Termination", func() {
 			m, ok := FindMetricWithLabelValues("karpenter_nodes_terminated", map[string]string{"nodepool": node.Labels[v1beta1.NodePoolLabelKey]})
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.GetCounter().Value)).To(BeNumerically("==", 1))
+		})
+		It("should update the eviction queueDepth metric when reconciling pods", func() {
+			minAvailable := intstr.FromInt32(0)
+			labelSelector := map[string]string{test.RandomName(): test.RandomName()}
+			pdb := test.PodDisruptionBudget(test.PDBOptions{
+				Labels: labelSelector,
+				// Don't let any pod evict
+				MinAvailable: &minAvailable,
+			})
+			ExpectApplied(ctx, env.Client, pdb, node)
+			pods := test.Pods(5, test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{
+				OwnerReferences: defaultOwnerRefs,
+				Labels:          labelSelector,
+			}})
+			ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *v1.Pod, _ int) client.Object { return p })...)
+
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{}) // Reconcile the queue so that we set the metric
+
+			ExpectMetricGaugeValue("karpenter_nodes_eviction_queue_depth", 5, map[string]string{})
+		})
+		It("should retry node deletion when cloudProvider returns retryable error", func() {
+			ExpectApplied(ctx, env.Client, node)
+			cloudProvider.NextDeleteErr = cloudprovider.NewRetryableError(fmt.Errorf("underlying instance not terminated"))
+
+			// Expect the node to stick around and requeue while it gets a retryable error
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			result := ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			Expect(result.RequeueAfter).To(Equal(time.Second * 10))
+
+			// Instance still exists
+			_, err := cloudProvider.Get(ctx, node.Spec.ProviderID)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Requeue again and we should no longer get an error and succeed to delete the instance
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node)) // re-enqueue reconciliation since we got retryable error previously
+			ExpectNotFound(ctx, env.Client, node)
+
+			// Expect the instance to be gone from the cloudprovider
+			_, err = cloudProvider.Get(ctx, node.Spec.ProviderID)
+			Expect(cloudprovider.IsNodeClaimNotFoundError(err)).To(BeTrue())
 		})
 	})
 })

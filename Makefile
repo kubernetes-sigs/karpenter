@@ -1,6 +1,6 @@
 # This is the format of an AWS ECR Public Repo as an example.
 export KWOK_REPO ?= ${ACCOUNT_ID}.dkr.ecr.${DEFAULT_REGION}.amazonaws.com
-export SYSTEM_NAMESPACE=kube-system
+export KARPENTER_NAMESPACE=kube-system
 
 HELM_OPTS ?= --set logLevel=debug \
 			--set controller.resources.requests.cpu=1 \
@@ -31,7 +31,7 @@ build: ## Build the Karpenter KWOK controller images using ko build
 apply: verify build ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
 	hack/validation/kwok-requirements.sh
 	kubectl apply -f pkg/apis/crds
-	helm upgrade --install karpenter kwok/charts --namespace kube-system --skip-crds \
+	helm upgrade --install karpenter kwok/charts --namespace $(KARPENTER_NAMESPACE) --skip-crds \
 		$(HELM_OPTS) \
 		--set controller.image.repository=$(IMG_REPOSITORY) \
 		--set controller.image.tag=$(IMG_TAG) \
@@ -40,7 +40,7 @@ apply: verify build ## Deploy the kwok controller from the current state of your
 		--set-string controller.env[0].value=true
 
 delete: ## Delete the controller from your ~/.kube/config cluster
-	helm uninstall karpenter --namespace ${KARPENTER_NAMESPACE}
+	helm uninstall karpenter --namespace $(KARPENTER_NAMESPACE)
 	
 test: ## Run tests
 	go test ./... \
@@ -67,7 +67,7 @@ vulncheck: ## Verify code vulnerabilities
 licenses: download ## Verifies dependency licenses
 	! go-licenses csv ./... | grep -v -e 'MIT' -e 'Apache-2.0' -e 'BSD-3-Clause' -e 'BSD-2-Clause' -e 'ISC' -e 'MPL-2.0'
 
-verify: ## Verify code. Includes codegen, dependencies, linting, formatting, etc
+verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatting, etc
 	go mod tidy
 	go generate ./...
 	hack/validation/kubelet.sh
@@ -81,6 +81,7 @@ verify: ## Verify code. Includes codegen, dependencies, linting, formatting, etc
 	@perl -i -pe 's/sets.Set/sets.Set[string]/g' pkg/scheduling/zz_generated.deepcopy.go
 	hack/boilerplate.sh
 	go vet ./...
+	cd kwok/charts && helm-docs
 	golangci-lint run
 	@git diff --quiet ||\
 		{ echo "New file modification detected in the Git working tree. Please check in before commit."; git --no-pager diff --name-only | uniq | awk '{print "  - " $$0}'; \

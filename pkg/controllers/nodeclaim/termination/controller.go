@@ -24,6 +24,7 @@ import (
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/util/workqueue"
 	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -63,6 +64,7 @@ func (c *Controller) Reconcile(_ context.Context, _ *v1beta1.NodeClaim) (reconci
 	return reconcile.Result{}, nil
 }
 
+//nolint:gocyclo
 func (c *Controller) Finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", nodeClaim.Status.NodeName, "provider-id", nodeClaim.Status.ProviderID))
 	stored := nodeClaim.DeepCopy()
@@ -74,9 +76,12 @@ func (c *Controller) Finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 		return reconcile.Result{}, err
 	}
 	for _, node := range nodes {
-		// We delete nodes to trigger the node finalization and deletion flow
-		if err = c.kubeClient.Delete(ctx, node); client.IgnoreNotFound(err) != nil {
-			return reconcile.Result{}, err
+		// If we still get the Node, but it's already marked as terminating, we don't need to call Delete again
+		if node.DeletionTimestamp.IsZero() {
+			// We delete nodes to trigger the node finalization and deletion flow
+			if err = c.kubeClient.Delete(ctx, node); client.IgnoreNotFound(err) != nil {
+				return reconcile.Result{}, err
+			}
 		}
 	}
 	// We wait until all the nodes associated with this nodeClaim have completed their deletion before triggering the finalization of the nodeClaim
@@ -85,12 +90,24 @@ func (c *Controller) Finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 	}
 	if nodeClaim.Status.ProviderID != "" {
 		if err = c.cloudProvider.Delete(ctx, nodeClaim); cloudprovider.IgnoreNodeClaimNotFoundError(err) != nil {
+			// We expect cloudProvider to emit a Retryable Error when the underlying instance is not terminated and if that
+			// happens, we want to re-enqueue reconciliation until we terminate the underlying instance before removing
+			// finalizer from the nodeClaim.
+			if cloudprovider.IsRetryableError(err) {
+				return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
+			}
 			return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
 		}
 	}
 	controllerutil.RemoveFinalizer(nodeClaim, v1beta1.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
-		if err = c.kubeClient.Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
+		// We call Update() here rather than Patch() because patching a list with a JSON merge patch
+		// can cause races due to the fact that it fully replaces the list on a change
+		// https://github.com/kubernetes/kubernetes/issues/111643#issuecomment-2016489732
+		if err = c.kubeClient.Update(ctx, nodeClaim); err != nil {
+			if errors.IsConflict(err) {
+				return reconcile.Result{Requeue: true}, nil
+			}
 			return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("removing termination finalizer, %w", err))
 		}
 		logging.FromContext(ctx).Infof("deleted nodeclaim")

@@ -23,11 +23,15 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
+func init() {
+	crmetrics.Registry.MustRegister(TerminationSummary)
+}
+
 var (
 	TerminationSummary = prometheus.NewSummaryVec(
 		prometheus.SummaryOpts{
-			Namespace:  "karpenter",
-			Subsystem:  "nodes",
+			Namespace:  metrics.Namespace,
+			Subsystem:  metrics.NodeSubsystem,
 			Name:       "termination_time_seconds",
 			Help:       "The time taken between a node's deletion request and the removal of its finalizer",
 			Objectives: metrics.SummaryObjectives(),
@@ -35,7 +39,3 @@ var (
 		[]string{metrics.NodePoolLabel},
 	)
 )
-
-func init() {
-	crmetrics.Registry.MustRegister(TerminationSummary)
-}
