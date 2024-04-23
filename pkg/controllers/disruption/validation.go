@@ -39,40 +39,37 @@ import (
 // of the commands passed to IsValid were constructed based off of the same consolidation state.  This allows it to
 // skip the validation TTL for all but the first command.
 type Validation struct {
-	validationPeriod time.Duration
-	start            time.Time
-	clock            clock.Clock
-	cluster          *state.Cluster
-	kubeClient       client.Client
-	cloudProvider    cloudprovider.CloudProvider
-	provisioner      *provisioning.Provisioner
-	once             sync.Once
-	recorder         events.Recorder
-	queue            *orchestration.Queue
+	start         time.Time
+	clock         clock.Clock
+	cluster       *state.Cluster
+	kubeClient    client.Client
+	cloudProvider cloudprovider.CloudProvider
+	provisioner   *provisioning.Provisioner
+	once          sync.Once
+	recorder      events.Recorder
+	queue         *orchestration.Queue
 }
 
-func NewValidation(validationPeriod time.Duration, clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
+func NewValidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
 	cp cloudprovider.CloudProvider, recorder events.Recorder, queue *orchestration.Queue) *Validation {
 	return &Validation{
-		validationPeriod: validationPeriod,
-		clock:            clk,
-		cluster:          cluster,
-		kubeClient:       kubeClient,
-		provisioner:      provisioner,
-		cloudProvider:    cp,
-		recorder:         recorder,
-		queue:            queue,
+		clock:         clk,
+		cluster:       cluster,
+		kubeClient:    kubeClient,
+		provisioner:   provisioner,
+		cloudProvider: cp,
+		recorder:      recorder,
+		queue:         queue,
 	}
 }
 
-//nolint:gocyclo
-func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
+func (v *Validation) IsValid(ctx context.Context, cmd Command, validationPeriod time.Duration) (bool, error) {
 	var err error
 	v.once.Do(func() {
 		v.start = v.clock.Now()
 	})
 
-	waitDuration := v.validationPeriod - v.clock.Since(v.start)
+	waitDuration := validationPeriod - v.clock.Since(v.start)
 	if waitDuration > 0 {
 		select {
 		case <-ctx.Done():
@@ -80,37 +77,56 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command) (bool, error) {
 		case <-v.clock.After(waitDuration):
 		}
 	}
-	// Get the current representation of the proposed candidates from before the validation timeout
-	// We do this so that we can re-validate that the candidates that were computed before we made the decision are the same
-	// We perform filtering here to ensure that none of the proposed candidates have blocking PDBs or do-not-evict/do-not-disrupt pods scheduled to them
-	validationCandidates, err := GetCandidates(ctx, v.cluster, v.kubeClient, v.recorder, v.clock, v.cloudProvider, v.ShouldDisrupt, v.queue)
-	if err != nil {
-		return false, fmt.Errorf("constructing validation candidates, %w", err)
+	validatedCandidates, err := v.ValidateCandidates(ctx, cmd.candidates...)
+	if len(validatedCandidates) == 0 || err != nil {
+		return false, err
 	}
-	validationCandidates = mapCandidates(cmd.candidates, validationCandidates)
-	// If we filtered out any candidates, return false as some NodeClaims in the consolidation decision have changed.
-	if len(validationCandidates) != len(cmd.candidates) {
-		return false, nil
-	}
-	// Rebuild the disruption budget mapping to see if any budgets have changed since validation.
-	postValidationMapping, err := BuildDisruptionBudgets(ctx, v.cluster, v.clock, v.kubeClient, v.recorder)
-	if err != nil {
-		return false, fmt.Errorf("building disruption budgets, %w", err)
-	}
-	// 1. a candidate we are about to delete is a target of a currently pending pod, wait for that to settle
-	// before continuing consolidation
-	// 2. the number of candidates for a given nodepool can no longer be disrupted as it would violate the budget
-	for _, n := range validationCandidates {
-		if v.cluster.IsNodeNominated(n.ProviderID()) || postValidationMapping[n.nodePool.Name] == 0 {
-			return false, nil
-		}
-		postValidationMapping[n.nodePool.Name]--
-	}
-	isValid, err := v.ValidateCommand(ctx, cmd, validationCandidates)
+	isValid, err := v.ValidateCommand(ctx, cmd, validatedCandidates)
 	if err != nil {
 		return false, fmt.Errorf("validating command, %w", err)
 	}
+	// Revalidate candidates after validating the command. This mitigates the chance of a race condition outlined in
+	// the following GitHub issue: https://github.com/kubernetes-sigs/karpenter/issues/1167.
+	validatedCandidates, err = v.ValidateCandidates(ctx, validatedCandidates...)
+	if len(validatedCandidates) == 0 || err != nil {
+		return false, err
+	}
 	return isValid, nil
+}
+
+// ValidateCandidates gets the current representation of the provided candidates and ensures that they are all still valid.
+// For a candidate to still be valid, the following conditions must be met:
+//
+//	a. It must pass the global candidate filtering logic (no blocking PDBs, no do-not-disrupt annotation, etc)
+//	b. It must not have any pods nominated for it
+//	c. It must still be disruptible without violating node disruption budgets
+//
+// If these conditions are met for all candidates, ValidateCandidates returns a slice with the updated representations.
+// Otherwise, ValidateCandidates returns an empty slice.
+func (v *Validation) ValidateCandidates(ctx context.Context, candidates ...*Candidate) ([]*Candidate, error) {
+	validatedCandidates, err := GetCandidates(ctx, v.cluster, v.kubeClient, v.recorder, v.clock, v.cloudProvider, v.ShouldDisrupt, v.queue)
+	if err != nil {
+		return nil, fmt.Errorf("constructing validation candidates, %w", err)
+	}
+	validatedCandidates = mapCandidates(candidates, validatedCandidates)
+	// If we filtered out any candidates, return nil as some NodeClaims in the consolidation decision have changed.
+	if len(validatedCandidates) != len(candidates) {
+		return nil, nil
+	}
+	disruptionBudgetMapping, err := BuildDisruptionBudgets(ctx, v.cluster, v.clock, v.kubeClient, v.recorder)
+	if err != nil {
+		return nil, fmt.Errorf("building disruption budgets, %w", err)
+	}
+	// Return nil if any candidate meets either of the following conditions:
+	//  a. A pod was nominated to the candidate
+	//  b. Disrupting the candidate would violate node disruption budgets
+	for _, vc := range validatedCandidates {
+		if v.cluster.IsNodeNominated(vc.ProviderID()) || disruptionBudgetMapping[vc.nodePool.Name] == 0 {
+			return nil, nil
+		}
+		disruptionBudgetMapping[vc.nodePool.Name]--
+	}
+	return validatedCandidates, nil
 }
 
 // ShouldDisrupt is a predicate used to filter candidates

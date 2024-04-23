@@ -96,6 +96,7 @@ var _ = Describe("Termination", func() {
 		fakeClock.SetTime(time.Now())
 		cloudProvider.Reset()
 		queue.Reset()
+		recorder.Reset()
 
 		// Reset the metrics collectors
 		metrics.NodesTerminatedCounter.Reset()
@@ -165,6 +166,39 @@ var _ = Describe("Termination", func() {
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			Expect(node.Labels[v1.LabelNodeExcludeBalancers]).Should(Equal("karpenter"))
+		})
+		It("should not evict pods with the karpenter.sh/do-not-disrupt annotation", func() {
+			pod := test.Pod(test.PodOptions{
+				NodeName: node.Name,
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations:     map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"},
+					OwnerReferences: defaultOwnerRefs,
+				},
+			})
+			ExpectApplied(ctx, env.Client, node, pod)
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			Expect(queue.Has(pod)).To(BeFalse())
+			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
+
+			// Expect the node to exist and be draining, it should have failed to drain on the first reconciliation attempt
+			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
+			Expect(recorder.Calls("FailedDraining")).To(Equal(1))
+
+			// Remove the do-not-disrupt annotation and re-reconcile the termination controller / eviction queue
+			pod = ExpectPodExists(ctx, env.Client, pod.Name, pod.Namespace)
+			pod.Annotations = nil
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			Expect(queue.Has(pod)).To(BeTrue())
+			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
+
+			// Expect pod to be evicting, and delete it
+			EventuallyExpectTerminating(ctx, env.Client, pod)
+			ExpectDeleted(ctx, env.Client, pod)
+			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
+			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should not evict pods that tolerate karpenter disruption taint with equal operator", func() {
 			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})

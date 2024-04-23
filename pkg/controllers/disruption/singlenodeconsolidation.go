@@ -50,7 +50,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		consolidationTypeLabel: s.ConsolidationType(),
 	}).Set(float64(len(candidates)))
 
-	v := NewValidation(consolidationTTL, s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder, s.queue)
+	v := NewValidation(s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder, s.queue)
 
 	// Set a timeout
 	timeout := s.clock.Now().Add(SingleNodeConsolidationTimeoutDuration)
@@ -78,7 +78,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		if cmd.Action() == NoOpAction {
 			continue
 		}
-		isValid, err := v.IsValid(ctx, cmd)
+		isValid, err := v.IsValid(ctx, cmd, consolidationTTL)
 		if err != nil {
 			return Command{}, scheduling.Results{}, fmt.Errorf("validating consolidation, %w", err)
 		}

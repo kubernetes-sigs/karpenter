@@ -53,10 +53,12 @@ func IsReschedulable(pod *v1.Pod) bool {
 // - Is an active pod (isn't terminal or actively terminating)
 // - Doesn't tolerate the "karpenter.sh/disruption=disrupting" taint
 // - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
+// - Doesn't have the "karpenter.sh/do-not-disrupt=true" annotation
 func IsEvictable(pod *v1.Pod) bool {
 	return IsActive(pod) &&
 		!ToleratesDisruptionNoScheduleTaint(pod) &&
-		!IsOwnedByNode(pod)
+		!IsOwnedByNode(pod) &&
+		IsDisruptable(pod)
 }
 
 // IsWaitingEviction checks if this is a pod that we are waiting to be removed from the node by ensuring that the pod:

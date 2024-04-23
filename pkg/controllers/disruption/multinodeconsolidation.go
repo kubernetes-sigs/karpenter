@@ -91,8 +91,8 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		return cmd, scheduling.Results{}, nil
 	}
 
-	v := NewValidation(consolidationTTL, m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder, m.queue)
-	isValid, err := v.IsValid(ctx, cmd)
+	v := NewValidation(m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder, m.queue)
+	isValid, err := v.IsValid(ctx, cmd, consolidationTTL)
 	if err != nil {
 		return Command{}, scheduling.Results{}, fmt.Errorf("validating, %w", err)
 	}
