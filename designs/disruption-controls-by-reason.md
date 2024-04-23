@@ -66,7 +66,12 @@ type Budget struct {
       // +kubebuilder:default:="10%"
       Nodes string `json:"nodes" hash:"ignore"`
       // Schedule specifies when a budget begins being active, following
-      // the upstream cronjob syntax. If omitted, the budget is always active. // Timezones are not supported. // This field is required if Duration is set. // +kubebuilder:validation:Pattern:=`^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$` // +optional Schedule *string `json:"schedule,omitempty" hash:"ignore"` // Duration determines how long a Budget is active since each Schedule hit. // Only minutes and hours are accepted, as cron does not work in seconds.
+      // the upstream cronjob syntax. If omitted, the budget is always active. 
+      // Timezones are not supported. This field is required if Duration is set. 
+      // +kubebuilder:validation:Pattern:=`^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$` 
+      // +optional Schedule *string `json:"schedule,omitempty" hash:"ignore"` 
+      // Duration determines how long a Budget is active since each Schedule hit. 
+      // Only minutes and hours are accepted, as cron does not work in seconds.
       // If omitted, the budget is always active.
       // This is required if Schedule is set.
       // This regex has an optional 0s at the end since the duration.String() always adds
