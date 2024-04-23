@@ -51,7 +51,7 @@ type Budget struct {
       // this budget will apply to all of them. If a reason is unspecified we will take the min value of this budget and the rest of the active budgets.
       // if an unspecified reason exists we will also override all other reasons with its value if they are smaller than the unspecified reason.
       // allowed reasons are "underutilized", "expired", "empty", "drifted"
-      // +kubebuilder:validation:MaxItems=5
+      // +kubebuilder:validation:MaxItems=4
       // +kubebuilder:validation:Enum:={"underutilized","expired","empty","drifted"}
       // +optional
       Reasons []string `json:"reason,omitempty" hash:"ignore"`
