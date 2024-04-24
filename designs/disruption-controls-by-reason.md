@@ -1,22 +1,6 @@
 # Disruption Controls By Reason
-# Table of Contents
-1. [Disruption Controls By Reason](#disruption-controls-by-reason)
-2. [API Design](#api-design)
-   1. [Approach A: Extending the Budget API to Specify a Reason](#approach-a-extending-the-budget-api-to-specify-a-reason)
-      1. [List Approach: Multiple Reasons per Budget - Recommended](#list-approach-multiple-reasons-per-budget---recommended)
-      2. [Single Reason Approach: One Reason per Budget](#single-reason-approach-one-reason-per-budget)
-   2. [Approach B: Defining Per Reason Controls](#approach-b-defining-per-reason-controls)
-   3. [Preferred Option: List Approach](#preferred-option-list-approach)
-   4. [Disruption Behavior](#disruption-behavior)
-   5. [Scenarios](#scenarios)
-      1. [Block Drift and Allow Expiration](#block-drift-and-allow-expiration)
-      2. [Fully Blocking Drift & Expiration while Allowing Consolidation](#fully-blocking-drift--expiration-while-allowing-consolidation)
-      3. [Fully Blocking Drift and Expiration while Allowing Emptiness](#fully-blocking-drift-and-expiration-while-allowing-emptiness)
-      4. [Limiting Drift & Expiration while Allowing Aggressive but Not Unbounded Consolidation](#limiting-drift--expiration-while-allowing-aggressive-but-not-unbounded-consolidation)
-      5. [Limiting Cost Saving Disruption to Occur During Weekends](#limiting-cost-saving-disruption-to-occur-during-weekends)
-      6. [How Should We Handle an Unspecified Reason When Others are Specified?](#how-should-we-handle-an-unspecified-reason-when-others-are-specified)
-
-## User Scenarios 
+[[_TOC_]]
+## User Stories
 1. Users need the capability to schedule upgrades only during business hours or within more restricted time windows. Additionally, they require a system that doesn't compromise the cost savings from consolidation when upgrades are blocked due to drift.
 2. Users want to minimize workload disruptions during business hours but still want to be able to delete empty nodes throughout the day.  That is, empty can run all day, while limiting cost savings and upgrades due to drift to non-business hours only.
 
@@ -237,23 +221,23 @@ After evaluating different approaches to extend the Karpenter API for specifying
 
 While the idea of per-reason controls (Approach B) provides granular control and a foundation for future extensions, it involves significant API changes and increased complexity, making it less favorable at this stage. However, this approach remains a viable option for future considerations, especially if there is a need for more tailored control over each disruption reason.
 
-### Disruption Behavior
+### Counting Disruptions Against a Budget 
 The calculation of allowed disruptions in a system with multiple disruption reasons has become more intricate following the introduction of Disruption Budget Reasons. Previously, the formula was straightforward:
 
 AllowedDisruptions = minNodeCount - unhealthyNodes - totalDisruptingNodes.
 
 When calculating by reason, three potential equations emerge:
-1. BucketedDisruptionByReason = minNodeCount[reason] - unhealthyNodes - totalDisruptingNodes[reason]
-2. AllowedDisruptionByReason = minNodeCount[reason] - unhealthyNodes - totalDisruptingNodes
-3.(Recommended) minimumDisruptionAllowed = min(minNodeCount[reason], minNodeCount[default]) - unhealthyNodes - totalDisruptingNodes
+1.(Recommended) minimumDisruptionAllowed = min(minNodeCount[reason], minNodeCount[default]) - unhealthyNodes - totalDisruptingNodes
+2. BucketedDisruptionByReason = minNodeCount[reason] - unhealthyNodes - totalDisruptingNodes[reason]
+3. AllowedDisruptionByReason = minNodeCount[reason] - unhealthyNodes - totalDisruptingNodes
 
 
-#### Recommendation: minimumDisruptionAllowed equation(AKA Equation 3)
-Equation 3 is recommended as its the least intrusive change to the disruption equation, and avoids edge cases we see with the bucketed approach. Equation 2 doesn't follow the min budget principle that we have established in the original disruption controls api.
-For these reasons we can go ahead with equation 3. We will walk through the customer scenarios using nodepools defined with the disruption behavior being driven from equation three below to ensure our API can perform all of the customer asks we have received so far here. 
+#### Recommendation: minimumDisruptionAllowed equation(AKA Equation 1)
+Equation 1 is recommended as its the least intrusive change to the disruption equation, and avoids edge cases we see with the bucketed approach. Equation 2 doesn't follow the min budget principle that we have established in the original disruption controls api.
+For these reasons we can go ahead with equation 1. We will walk through the customer scenarios using nodepools defined with the disruption behavior being driven from equation three below to ensure our API can perform all of the customer asks we have received so far here. 
 
-### Scenarios
-We will go through scenarios that users are expecting to face to drive home if the api with equation 3 can satisfy the users requirements for the end users of these features
+### User Stories
+We will go through scenarios that users are expecting to face to drive home if the api with equation 1 can satisfy the users requirements for the end users of these features
 - Block Drift, but allow Expiration
 - Fully Block Drift && Expiration, but allow consolidation to occur 
 - Block Drift && Expiration, but allow emptiness 
