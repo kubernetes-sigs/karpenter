@@ -50,7 +50,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		consolidationTypeLabel: s.ConsolidationType(),
 	}).Set(float64(len(candidates)))
 
-	v := NewValidation(consolidationTTL, s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder, s.queue)
+	v := NewValidation(s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder, s.queue)
 
 	// Set a timeout
 	timeout := s.clock.Now().Add(SingleNodeConsolidationTimeoutDuration)
@@ -78,13 +78,12 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		if cmd.Action() == NoOpAction {
 			continue
 		}
-		isValid, err := v.IsValid(ctx, cmd)
-		if err != nil {
+		if err := v.IsValid(ctx, cmd, consolidationTTL); err != nil {
+			if IsValidationError(err) {
+				logging.FromContext(ctx).Debugf("abandoning single-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+				return Command{}, scheduling.Results{}, nil
+			}
 			return Command{}, scheduling.Results{}, fmt.Errorf("validating consolidation, %w", err)
-		}
-		if !isValid {
-			logging.FromContext(ctx).Debugf("abandoning single-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
-			return Command{}, scheduling.Results{}, nil
 		}
 		return cmd, results, nil
 	}
