@@ -279,7 +279,7 @@ spec: # This is not a complete NodePool Spec.
     - nodes: 0
 ```
 So in this case, we would take the minimum node count, and it would block the 100% expiration budget of expired and Empty. 
-But this semantic would not work for equation 3. Equation three will take the minimum between minNodeCount[reason] and the minNodeCount[default/unspecifed].  
+But this semantic would not work for equation 1. Equation 1 will take the minimum between minNodeCount[reason] and the minNodeCount[default/unspecifed].  
 
 #### Fully Blocking Drift && Expiration while allowing consolidation
 ```yaml 
