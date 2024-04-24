@@ -133,7 +133,8 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *v1.Node) error {
 			return client.IgnoreNotFound(fmt.Errorf("patching node, %w", err))
 		}
 		metrics.NodesTerminatedCounter.With(prometheus.Labels{
-			metrics.NodePoolLabel: n.Labels[v1beta1.NodePoolLabelKey],
+			metrics.NodePoolLabel:     n.Labels[v1beta1.NodePoolLabelKey],
+			metrics.CapacityTypeLabel: n.Labels[v1beta1.CapacityTypeLabelKey],
 		}).Inc()
 		// We use stored.DeletionTimestamp since the api-server may give back a node after the patch without a deletionTimestamp
 		TerminationSummary.With(prometheus.Labels{
