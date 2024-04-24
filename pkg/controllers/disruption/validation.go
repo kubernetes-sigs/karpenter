@@ -35,6 +35,22 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 )
 
+type ValidationError struct {
+	error
+}
+
+func NewValidationError(err error) *ValidationError {
+	return &ValidationError{error: err}
+}
+
+func IsValidationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var validationError *ValidationError
+	return errors.As(err, &validationError)
+}
+
 // Validation is used to perform validation on a consolidation command.  It makes an assumption that when re-used, all
 // of the commands passed to IsValid were constructed based off of the same consolidation state.  This allows it to
 // skip the validation TTL for all but the first command.
@@ -78,7 +94,10 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command, validationPeriod 
 		}
 	}
 	validatedCandidates, err := v.ValidateCandidates(ctx, cmd.candidates...)
-	if len(validatedCandidates) == 0 || err != nil {
+	if err != nil {
+		if IsValidationError(err) {
+			return false, nil
+		}
 		return false, err
 	}
 	isValid, err := v.ValidateCommand(ctx, cmd, validatedCandidates)
@@ -87,8 +106,10 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command, validationPeriod 
 	}
 	// Revalidate candidates after validating the command. This mitigates the chance of a race condition outlined in
 	// the following GitHub issue: https://github.com/kubernetes-sigs/karpenter/issues/1167.
-	validatedCandidates, err = v.ValidateCandidates(ctx, validatedCandidates...)
-	if len(validatedCandidates) == 0 || err != nil {
+	if _, err = v.ValidateCandidates(ctx, validatedCandidates...); err != nil {
+		if IsValidationError(err) {
+			return false, nil
+		}
 		return false, err
 	}
 	return isValid, nil
@@ -102,7 +123,6 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command, validationPeriod 
 //	c. It must still be disruptible without violating node disruption budgets
 //
 // If these conditions are met for all candidates, ValidateCandidates returns a slice with the updated representations.
-// Otherwise, ValidateCandidates returns an empty slice.
 func (v *Validation) ValidateCandidates(ctx context.Context, candidates ...*Candidate) ([]*Candidate, error) {
 	validatedCandidates, err := GetCandidates(ctx, v.cluster, v.kubeClient, v.recorder, v.clock, v.cloudProvider, v.ShouldDisrupt, v.queue)
 	if err != nil {
@@ -111,7 +131,7 @@ func (v *Validation) ValidateCandidates(ctx context.Context, candidates ...*Cand
 	validatedCandidates = mapCandidates(candidates, validatedCandidates)
 	// If we filtered out any candidates, return nil as some NodeClaims in the consolidation decision have changed.
 	if len(validatedCandidates) != len(candidates) {
-		return nil, nil
+		return nil, NewValidationError(fmt.Errorf("%d candidates are no longer valid", len(candidates)-len(validatedCandidates)))
 	}
 	disruptionBudgetMapping, err := BuildDisruptionBudgets(ctx, v.cluster, v.clock, v.kubeClient, v.recorder)
 	if err != nil {
@@ -122,7 +142,7 @@ func (v *Validation) ValidateCandidates(ctx context.Context, candidates ...*Cand
 	//  b. Disrupting the candidate would violate node disruption budgets
 	for _, vc := range validatedCandidates {
 		if v.cluster.IsNodeNominated(vc.ProviderID()) || disruptionBudgetMapping[vc.nodePool.Name] == 0 {
-			return nil, nil
+			return nil, NewValidationError(fmt.Errorf("a candidate was nominated during validation"))
 		}
 		disruptionBudgetMapping[vc.nodePool.Name]--
 	}
