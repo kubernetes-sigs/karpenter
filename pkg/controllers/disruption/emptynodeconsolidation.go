@@ -19,8 +19,8 @@ package disruption
 import (
 	"context"
 	"errors"
-	"fmt"
 
+	"github.com/samber/lo"
 	"knative.dev/pkg/logging"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
@@ -88,31 +88,25 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		return Command{}, scheduling.Results{}, errors.New("interrupted")
 	case <-c.clock.After(consolidationTTL):
 	}
-	validationCandidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, c.ShouldDisrupt, c.queue)
-	if err != nil {
-		logging.FromContext(ctx).Errorf("computing validation candidates %s", err)
-		return Command{}, scheduling.Results{}, err
-	}
-	// Get the current representation of the proposed candidates from before the validation timeout
-	// We do this so that we can re-validate that the candidates that were computed before we made the decision are the same
-	candidatesToDelete := mapCandidates(cmd.candidates, validationCandidates)
 
-	postValidationMapping, err := BuildDisruptionBudgets(ctx, c.cluster, c.clock, c.kubeClient, c.recorder)
+	v := NewValidation(c.clock, c.cluster, c.kubeClient, c.provisioner, c.cloudProvider, c.recorder, c.queue)
+	validatedCandidates, err := v.ValidateCandidates(ctx, cmd.candidates...)
 	if err != nil {
-		return Command{}, scheduling.Results{}, fmt.Errorf("building disruption budgets, %w", err)
-	}
-
-	// The deletion of empty NodeClaims is easy to validate, we just ensure that:
-	// 1. All the candidatesToDelete are still empty
-	// 2. The node isn't a target of a recent scheduling simulation
-	// 3. the number of candidates for a given nodepool can no longer be disrupted as it would violate the budget
-	for _, n := range candidatesToDelete {
-		if len(n.reschedulablePods) != 0 || c.cluster.IsNodeNominated(n.ProviderID()) || postValidationMapping[n.nodePool.Name] == 0 {
+		if IsValidationError(err) {
 			logging.FromContext(ctx).Debugf("abandoning empty node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
 			return Command{}, scheduling.Results{}, nil
 		}
-		postValidationMapping[n.nodePool.Name]--
+		return Command{}, scheduling.Results{}, err
 	}
+
+	// TODO (jmdeal@): better encapsulate within validation
+	if lo.ContainsBy(validatedCandidates, func(c *Candidate) bool {
+		return len(c.reschedulablePods) != 0
+	}) {
+		logging.FromContext(ctx).Debugf("abandoning empty node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+		return Command{}, scheduling.Results{}, nil
+	}
+
 	return cmd, scheduling.Results{}, nil
 }
 
