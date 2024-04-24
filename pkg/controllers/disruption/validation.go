@@ -113,7 +113,7 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command, validationPeriod 
 //
 //	a. It must pass the global candidate filtering logic (no blocking PDBs, no do-not-disrupt annotation, etc)
 //	b. It must not have any pods nominated for it
-//	c. It must still be disruptible without violating node disruption budgets
+//	c. It must still be disruptable without violating node disruption budgets
 //
 // If these conditions are met for all candidates, ValidateCandidates returns a slice with the updated representations.
 func (v *Validation) ValidateCandidates(ctx context.Context, candidates ...*Candidate) ([]*Candidate, error) {
