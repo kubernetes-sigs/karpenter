@@ -92,10 +92,15 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	v := NewValidation(c.clock, c.cluster, c.kubeClient, c.provisioner, c.cloudProvider, c.recorder, c.queue)
 	validatedCandidates, err := v.ValidateCandidates(ctx, cmd.candidates...)
 	if err != nil {
+		if IsValidationError(err) {
+			logging.FromContext(ctx).Debugf("abandoning empty node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+			return Command{}, scheduling.Results{}, nil
+		}
 		return Command{}, scheduling.Results{}, err
 	}
-	// In addition to the normal candidate validation checks, also check that the nodes are still empty
-	if len(validatedCandidates) == 0 || lo.ContainsBy(validatedCandidates, func(c *Candidate) bool {
+
+	// TODO (jmdeal@): better encapsulate within validation
+	if lo.ContainsBy(validatedCandidates, func(c *Candidate) bool {
 		return len(c.reschedulablePods) != 0
 	}) {
 		logging.FromContext(ctx).Debugf("abandoning empty node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
