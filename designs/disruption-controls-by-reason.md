@@ -1,5 +1,4 @@
 # Disruption Controls By Reason
-[[_TOC_]]
 ## User Stories
 1. Users need the capability to schedule upgrades only during business hours or within more restricted time windows. Additionally, they require a system that doesn't compromise the cost savings from consolidation when upgrades are blocked due to drift.
 2. Users want to minimize workload disruptions during business hours but still want to be able to delete empty nodes throughout the day.  That is, empty can run all day, while limiting cost savings and upgrades due to drift to non-business hours only.
