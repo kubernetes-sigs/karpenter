@@ -170,7 +170,7 @@ Some of the Pros and Cons are shared by both list and single reason, as they hav
 ### Preferred Option: List Approach
 Given the comparison, the preferred design is the List Approach. It provides the necessary flexibility for managing multiple disruption reasons under a single budget, while reducing configuration complexity. This approach extends the existing API without introducing breaking changes and simplifies management for scenarios where multiple disruption reasons share similar constraints.
 
-### Approach: Defining Per Reason Controls  
+### Approach B: Defining Per Reason Controls  
 Ideally, we could move all generic controls that easily map into other reasons into one set of reason controls, this applies to budgets and other various disruption controls that could be more generic. 
 #### Example 
 
