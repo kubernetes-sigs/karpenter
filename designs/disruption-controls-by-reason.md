@@ -215,7 +215,7 @@ This proposal is currently scoped for disruptionBudgets by reason. However, we s
 * 👎 Complexity in Default Reason Handling: The model does not facilitate easy defaulting for unspecified ("default") disruption reasons.
 * 👎 Increased Budget Complexity: The use of budgets becomes more complex as they are now nested within another field, adding a layer of intricacy to their application.
 
-### API Design Conclusion: Preferred Design
+### API Design Conclusion: Use List Approach in Option A 
 After evaluating different approaches to extend the Karpenter API for specifying disruption reasons, the preferred design is the List Approach in Approach A. This approach offers flexibility in managing multiple disruption reasons under a single budget and reduces configuration complexity. It extends the existing API without introducing breaking changes and simplifies management for scenarios where multiple disruption reasons share similar constraints.
 
 While the idea of per-reason controls (Approach B) provides granular control and a foundation for future extensions, it involves significant API changes and increased complexity, making it less favorable at this stage. However, this approach remains a viable option for future considerations, especially if there is a need for more tailored control over each disruption reason.
