@@ -201,7 +201,7 @@ spec:
           schedule: "@monthly"
 ```
 #### Considerations 
-Some of the API choices for a given reason seem to follow a similar pattern. These include ConsolidateAfter, ExpireAfter, and there are discussions about introducing a global DisruptAfter. Moreover, when discussing disruption budgets, we talk about adding behavior for each reason. It appears there is a need for disruption controls within the budgets for each reason, not just overall.
+Some of the API choices for a given reason seem to follow a similar pattern. These include ConsolidateAfter, ExpireAfter. Moreover, when discussing disruption budgets, we talk about adding behavior for each reason. It appears there is a need for disruption controls within the budgets for each reason, not just overall.
 
 This approach aligns well with controls that apply to all existing reasons. The proposal presented here is similar to the one mentioned above in relation to the reasons we allow to be defined (underutilized, drifted, expired, empty).
 
