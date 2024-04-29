@@ -1,4 +1,4 @@
-# Disruption Controls By Reason
+ Disruption Controls By Reason
 ## User Stories
 1. Users need the capability to schedule upgrades only during business hours or within more restricted time windows. Additionally, they require a system that doesn't compromise the cost savings from consolidation when upgrades are blocked due to drift.
 2. Users want to minimize workload disruptions during business hours but still want to be able to delete empty nodes throughout the day.  That is, empty can run all day, while limiting cost savings and upgrades due to drift to non-business hours only.
@@ -16,12 +16,8 @@ See further breakdown of some additional scenarios towards the bottom of the doc
 **Supported Reasons:** All disruption Reasons affected by the current Budgets implementation (underutilized, empty, expired, drifted) should be supported. 
 **Default Behavior for Unspecified Reasons:** Budgets should continue to support a default behavior for all disruption reasons. 
 
-
 # API Design
-## Approach A: Extending the Budget API to specify a reason 
-This section contrasts two approaches for specifying disruption reasons in the v1beta1 nodepool API: a list of reasons (List Approach) and a single reason per budget (Single Reason Approach).
-
-### List Approach: Multiple Reasons per Budget - Recommended
+### Approach A: List Approach With Multiple Reasons per Budget - Recommended
 This approach allows specifying multiple disruption methods within a single budget entry. It is proposed to add a field Reasons to the budgets, which can include a list of reasons this budget applies to.
 #### Proposed Spec
 Add a simple field "reasons" is proposed to be added to the budgets. 
@@ -94,8 +90,7 @@ If there are multiple active budgets, karpenter takes the most restrictive budge
 
 Note some pros and cons between A + B can be shared, and are in a list next to the pros + cons for Single Reason Approach 
 
-#### Single Reason Approach: One Reason per Budget
-
+#### Approach B: Single Reason Approach With One Reason Per Budget
 ### Proposed Spec
 In this approach, each budget entry specifies a single reason for disruption.
 
@@ -166,11 +161,7 @@ Some of the Pros and Cons are shared by both list and single reason, as they hav
 * 👍 No Nesting Required: Leaves budgets at the top level of the api.
 * 👎 Limited Generalization of Reason Controls: With reason being clearly tied to budgets, and other api logic being driven by disruption reason, we lose the chance to generalize per Reason controls. If we ever decide we need a place per action,  there will be some duplication for reason. 
 
-
-### Preferred Option: List Approach
-Given the comparison, the preferred design is the List Approach. It provides the necessary flexibility for managing multiple disruption reasons under a single budget, while reducing configuration complexity. This approach extends the existing API without introducing breaking changes and simplifies management for scenarios where multiple disruption reasons share similar constraints.
-
-### Approach B: Defining Per Reason Controls  
+### Approach C: Defining Per Reason Controls  
 Ideally, we could move all generic controls that easily map into other reasons into one set of reason controls, this applies to budgets and other various disruption controls that could be more generic. 
 #### Example 
 
@@ -215,10 +206,10 @@ This proposal is currently scoped for disruptionBudgets by reason. However, we s
 * 👎 Complexity in Default Reason Handling: The model does not facilitate easy defaulting for unspecified ("default") disruption reasons.
 * 👎 Increased Budget Complexity: The use of budgets becomes more complex as they are now nested within another field, adding a layer of intricacy to their application.
 
-### API Design Conclusion: Use List Approach in Option A 
+### API Design Conclusion: Extend Disruption Budgets To Have A List Of Reasons 
 After evaluating different approaches to extend the Karpenter API for specifying disruption reasons, the preferred design is the List Approach in Approach A. This approach offers flexibility in managing multiple disruption reasons under a single budget and reduces configuration complexity. It extends the existing API without introducing breaking changes and simplifies management for scenarios where multiple disruption reasons share similar constraints.
 
-While the idea of per-reason controls (Approach B) provides granular control and a foundation for future extensions, it involves significant API changes and increased complexity, making it less favorable at this stage. However, this approach remains a viable option for future considerations, especially if there is a need for more tailored control over each disruption reason.
+While the idea of per-reason controls (Approach C) provides granular control and a foundation for future extensions, it involves significant API changes and increased complexity, making it less favorable at this stage. However, this approach remains a viable option for future considerations, especially if there is a need for more tailored control over each disruption reason.
 
 ### Counting Disruptions Against a Budget 
 The calculation of allowed disruptions in a system with multiple disruption reasons has become more intricate following the introduction of Disruption Budget Reasons. Previously, the formula was straightforward:
