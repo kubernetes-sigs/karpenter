@@ -81,8 +81,8 @@ func parseSizeFromType(ty, cpu string) string {
 	return cpu
 }
 
-// parseFamilyFromType will attempt to discover the instance family from the node type.  The three major cloud providers
-// have the following formats:
+// parseFamilyFromType will attempt to discover the instance family from the node type.  Some examples of
+// well-known cloud provider formats:
 //
 // AWS   - [Family].[Size]
 // GCP   - [Family]-[Configuration]-[# of vCPUs])
@@ -90,6 +90,10 @@ func parseSizeFromType(ty, cpu string) string {
 //
 // So here, we split on [.-], and if that fails, fall back to the first character of the instance type name.
 func parseFamilyFromType(instanceType string) string {
+	if instanceType == "" {
+		return ""
+	}
+
 	familySplit := familyDelim.Split(instanceType, 2)
 	if len(familySplit) < 2 {
 		return instanceType[0:1]

@@ -84,7 +84,7 @@ func constructGenericInstanceTypes() []kwok.InstanceTypeOptions {
 							v1.ResourceCPU:              resource.MustParse(fmt.Sprintf("%d", cpu)),
 							v1.ResourceMemory:           resource.MustParse(fmt.Sprintf("%dGi", mem)),
 							v1.ResourcePods:             resource.MustParse(fmt.Sprintf("%d", pods)),
-							v1.ResourceEphemeralStorage: resource.MustParse("20G"),
+							v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
 						},
 					}
 					price := priceFromResources(opts.Resources)

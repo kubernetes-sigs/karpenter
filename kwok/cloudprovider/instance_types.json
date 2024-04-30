@@ -57,7 +57,7 @@
         ],
         "resources": {
             "cpu": "1",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "2Gi",
             "pods": "16"
         }
@@ -120,7 +120,7 @@
         ],
         "resources": {
             "cpu": "1",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "2Gi",
             "pods": "16"
         }
@@ -183,7 +183,7 @@
         ],
         "resources": {
             "cpu": "1",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "2Gi",
             "pods": "16"
         }
@@ -246,7 +246,7 @@
         ],
         "resources": {
             "cpu": "1",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "2Gi",
             "pods": "16"
         }
@@ -309,7 +309,7 @@
         ],
         "resources": {
             "cpu": "1",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "4Gi",
             "pods": "16"
         }
@@ -372,7 +372,7 @@
         ],
         "resources": {
             "cpu": "1",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "4Gi",
             "pods": "16"
         }
@@ -435,7 +435,7 @@
         ],
         "resources": {
             "cpu": "1",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "4Gi",
             "pods": "16"
         }
@@ -498,7 +498,7 @@
         ],
         "resources": {
             "cpu": "1",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "4Gi",
             "pods": "16"
         }
@@ -561,7 +561,7 @@
         ],
         "resources": {
             "cpu": "1",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "8Gi",
             "pods": "16"
         }
@@ -624,7 +624,7 @@
         ],
         "resources": {
             "cpu": "1",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "8Gi",
             "pods": "16"
         }
@@ -687,7 +687,7 @@
         ],
         "resources": {
             "cpu": "1",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "8Gi",
             "pods": "16"
         }
@@ -750,7 +750,7 @@
         ],
         "resources": {
             "cpu": "1",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "8Gi",
             "pods": "16"
         }
@@ -813,7 +813,7 @@
         ],
         "resources": {
             "cpu": "2",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "4Gi",
             "pods": "32"
         }
@@ -876,7 +876,7 @@
         ],
         "resources": {
             "cpu": "2",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "4Gi",
             "pods": "32"
         }
@@ -939,7 +939,7 @@
         ],
         "resources": {
             "cpu": "2",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "4Gi",
             "pods": "32"
         }
@@ -1002,7 +1002,7 @@
         ],
         "resources": {
             "cpu": "2",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "4Gi",
             "pods": "32"
         }
@@ -1065,7 +1065,7 @@
         ],
         "resources": {
             "cpu": "2",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "8Gi",
             "pods": "32"
         }
@@ -1128,7 +1128,7 @@
         ],
         "resources": {
             "cpu": "2",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "8Gi",
             "pods": "32"
         }
@@ -1191,7 +1191,7 @@
         ],
         "resources": {
             "cpu": "2",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "8Gi",
             "pods": "32"
         }
@@ -1254,7 +1254,7 @@
         ],
         "resources": {
             "cpu": "2",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "8Gi",
             "pods": "32"
         }
@@ -1317,7 +1317,7 @@
         ],
         "resources": {
             "cpu": "2",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "16Gi",
             "pods": "32"
         }
@@ -1380,7 +1380,7 @@
         ],
         "resources": {
             "cpu": "2",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "16Gi",
             "pods": "32"
         }
@@ -1443,7 +1443,7 @@
         ],
         "resources": {
             "cpu": "2",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "16Gi",
             "pods": "32"
         }
@@ -1506,7 +1506,7 @@
         ],
         "resources": {
             "cpu": "2",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "16Gi",
             "pods": "32"
         }
@@ -1569,7 +1569,7 @@
         ],
         "resources": {
             "cpu": "4",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "8Gi",
             "pods": "64"
         }
@@ -1632,7 +1632,7 @@
         ],
         "resources": {
             "cpu": "4",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "8Gi",
             "pods": "64"
         }
@@ -1695,7 +1695,7 @@
         ],
         "resources": {
             "cpu": "4",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "8Gi",
             "pods": "64"
         }
@@ -1758,7 +1758,7 @@
         ],
         "resources": {
             "cpu": "4",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "8Gi",
             "pods": "64"
         }
@@ -1821,7 +1821,7 @@
         ],
         "resources": {
             "cpu": "4",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "16Gi",
             "pods": "64"
         }
@@ -1884,7 +1884,7 @@
         ],
         "resources": {
             "cpu": "4",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "16Gi",
             "pods": "64"
         }
@@ -1947,7 +1947,7 @@
         ],
         "resources": {
             "cpu": "4",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "16Gi",
             "pods": "64"
         }
@@ -2010,7 +2010,7 @@
         ],
         "resources": {
             "cpu": "4",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "16Gi",
             "pods": "64"
         }
@@ -2073,7 +2073,7 @@
         ],
         "resources": {
             "cpu": "4",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "32Gi",
             "pods": "64"
         }
@@ -2136,7 +2136,7 @@
         ],
         "resources": {
             "cpu": "4",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "32Gi",
             "pods": "64"
         }
@@ -2199,7 +2199,7 @@
         ],
         "resources": {
             "cpu": "4",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "32Gi",
             "pods": "64"
         }
@@ -2262,7 +2262,7 @@
         ],
         "resources": {
             "cpu": "4",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "32Gi",
             "pods": "64"
         }
@@ -2325,7 +2325,7 @@
         ],
         "resources": {
             "cpu": "8",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "16Gi",
             "pods": "128"
         }
@@ -2388,7 +2388,7 @@
         ],
         "resources": {
             "cpu": "8",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "16Gi",
             "pods": "128"
         }
@@ -2451,7 +2451,7 @@
         ],
         "resources": {
             "cpu": "8",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "16Gi",
             "pods": "128"
         }
@@ -2514,7 +2514,7 @@
         ],
         "resources": {
             "cpu": "8",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "16Gi",
             "pods": "128"
         }
@@ -2577,7 +2577,7 @@
         ],
         "resources": {
             "cpu": "8",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "32Gi",
             "pods": "128"
         }
@@ -2640,7 +2640,7 @@
         ],
         "resources": {
             "cpu": "8",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "32Gi",
             "pods": "128"
         }
@@ -2703,7 +2703,7 @@
         ],
         "resources": {
             "cpu": "8",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "32Gi",
             "pods": "128"
         }
@@ -2766,7 +2766,7 @@
         ],
         "resources": {
             "cpu": "8",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "32Gi",
             "pods": "128"
         }
@@ -2829,7 +2829,7 @@
         ],
         "resources": {
             "cpu": "8",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "64Gi",
             "pods": "128"
         }
@@ -2892,7 +2892,7 @@
         ],
         "resources": {
             "cpu": "8",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "64Gi",
             "pods": "128"
         }
@@ -2955,7 +2955,7 @@
         ],
         "resources": {
             "cpu": "8",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "64Gi",
             "pods": "128"
         }
@@ -3018,7 +3018,7 @@
         ],
         "resources": {
             "cpu": "8",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "64Gi",
             "pods": "128"
         }
@@ -3081,7 +3081,7 @@
         ],
         "resources": {
             "cpu": "16",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "32Gi",
             "pods": "256"
         }
@@ -3144,7 +3144,7 @@
         ],
         "resources": {
             "cpu": "16",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "32Gi",
             "pods": "256"
         }
@@ -3207,7 +3207,7 @@
         ],
         "resources": {
             "cpu": "16",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "32Gi",
             "pods": "256"
         }
@@ -3270,7 +3270,7 @@
         ],
         "resources": {
             "cpu": "16",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "32Gi",
             "pods": "256"
         }
@@ -3333,7 +3333,7 @@
         ],
         "resources": {
             "cpu": "16",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "64Gi",
             "pods": "256"
         }
@@ -3396,7 +3396,7 @@
         ],
         "resources": {
             "cpu": "16",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "64Gi",
             "pods": "256"
         }
@@ -3459,7 +3459,7 @@
         ],
         "resources": {
             "cpu": "16",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "64Gi",
             "pods": "256"
         }
@@ -3522,7 +3522,7 @@
         ],
         "resources": {
             "cpu": "16",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "64Gi",
             "pods": "256"
         }
@@ -3585,7 +3585,7 @@
         ],
         "resources": {
             "cpu": "16",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "128Gi",
             "pods": "256"
         }
@@ -3648,7 +3648,7 @@
         ],
         "resources": {
             "cpu": "16",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "128Gi",
             "pods": "256"
         }
@@ -3711,7 +3711,7 @@
         ],
         "resources": {
             "cpu": "16",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "128Gi",
             "pods": "256"
         }
@@ -3774,7 +3774,7 @@
         ],
         "resources": {
             "cpu": "16",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "128Gi",
             "pods": "256"
         }
@@ -3837,7 +3837,7 @@
         ],
         "resources": {
             "cpu": "32",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "64Gi",
             "pods": "512"
         }
@@ -3900,7 +3900,7 @@
         ],
         "resources": {
             "cpu": "32",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "64Gi",
             "pods": "512"
         }
@@ -3963,7 +3963,7 @@
         ],
         "resources": {
             "cpu": "32",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "64Gi",
             "pods": "512"
         }
@@ -4026,7 +4026,7 @@
         ],
         "resources": {
             "cpu": "32",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "64Gi",
             "pods": "512"
         }
@@ -4089,7 +4089,7 @@
         ],
         "resources": {
             "cpu": "32",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "128Gi",
             "pods": "512"
         }
@@ -4152,7 +4152,7 @@
         ],
         "resources": {
             "cpu": "32",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "128Gi",
             "pods": "512"
         }
@@ -4215,7 +4215,7 @@
         ],
         "resources": {
             "cpu": "32",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "128Gi",
             "pods": "512"
         }
@@ -4278,7 +4278,7 @@
         ],
         "resources": {
             "cpu": "32",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "128Gi",
             "pods": "512"
         }
@@ -4341,7 +4341,7 @@
         ],
         "resources": {
             "cpu": "32",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "256Gi",
             "pods": "512"
         }
@@ -4404,7 +4404,7 @@
         ],
         "resources": {
             "cpu": "32",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "256Gi",
             "pods": "512"
         }
@@ -4467,7 +4467,7 @@
         ],
         "resources": {
             "cpu": "32",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "256Gi",
             "pods": "512"
         }
@@ -4530,7 +4530,7 @@
         ],
         "resources": {
             "cpu": "32",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "256Gi",
             "pods": "512"
         }
@@ -4593,7 +4593,7 @@
         ],
         "resources": {
             "cpu": "48",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "96Gi",
             "pods": "768"
         }
@@ -4656,7 +4656,7 @@
         ],
         "resources": {
             "cpu": "48",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "96Gi",
             "pods": "768"
         }
@@ -4719,7 +4719,7 @@
         ],
         "resources": {
             "cpu": "48",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "96Gi",
             "pods": "768"
         }
@@ -4782,7 +4782,7 @@
         ],
         "resources": {
             "cpu": "48",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "96Gi",
             "pods": "768"
         }
@@ -4845,7 +4845,7 @@
         ],
         "resources": {
             "cpu": "48",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "192Gi",
             "pods": "768"
         }
@@ -4908,7 +4908,7 @@
         ],
         "resources": {
             "cpu": "48",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "192Gi",
             "pods": "768"
         }
@@ -4971,7 +4971,7 @@
         ],
         "resources": {
             "cpu": "48",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "192Gi",
             "pods": "768"
         }
@@ -5034,7 +5034,7 @@
         ],
         "resources": {
             "cpu": "48",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "192Gi",
             "pods": "768"
         }
@@ -5097,7 +5097,7 @@
         ],
         "resources": {
             "cpu": "48",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "384Gi",
             "pods": "768"
         }
@@ -5160,7 +5160,7 @@
         ],
         "resources": {
             "cpu": "48",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "384Gi",
             "pods": "768"
         }
@@ -5223,7 +5223,7 @@
         ],
         "resources": {
             "cpu": "48",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "384Gi",
             "pods": "768"
         }
@@ -5286,7 +5286,7 @@
         ],
         "resources": {
             "cpu": "48",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "384Gi",
             "pods": "768"
         }
@@ -5349,7 +5349,7 @@
         ],
         "resources": {
             "cpu": "64",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "128Gi",
             "pods": "1024"
         }
@@ -5412,7 +5412,7 @@
         ],
         "resources": {
             "cpu": "64",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "128Gi",
             "pods": "1024"
         }
@@ -5475,7 +5475,7 @@
         ],
         "resources": {
             "cpu": "64",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "128Gi",
             "pods": "1024"
         }
@@ -5538,7 +5538,7 @@
         ],
         "resources": {
             "cpu": "64",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "128Gi",
             "pods": "1024"
         }
@@ -5601,7 +5601,7 @@
         ],
         "resources": {
             "cpu": "64",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "256Gi",
             "pods": "1024"
         }
@@ -5664,7 +5664,7 @@
         ],
         "resources": {
             "cpu": "64",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "256Gi",
             "pods": "1024"
         }
@@ -5727,7 +5727,7 @@
         ],
         "resources": {
             "cpu": "64",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "256Gi",
             "pods": "1024"
         }
@@ -5790,7 +5790,7 @@
         ],
         "resources": {
             "cpu": "64",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "256Gi",
             "pods": "1024"
         }
@@ -5853,7 +5853,7 @@
         ],
         "resources": {
             "cpu": "64",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "512Gi",
             "pods": "1024"
         }
@@ -5916,7 +5916,7 @@
         ],
         "resources": {
             "cpu": "64",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "512Gi",
             "pods": "1024"
         }
@@ -5979,7 +5979,7 @@
         ],
         "resources": {
             "cpu": "64",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "512Gi",
             "pods": "1024"
         }
@@ -6042,7 +6042,7 @@
         ],
         "resources": {
             "cpu": "64",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "512Gi",
             "pods": "1024"
         }
@@ -6105,7 +6105,7 @@
         ],
         "resources": {
             "cpu": "96",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "192Gi",
             "pods": "1024"
         }
@@ -6168,7 +6168,7 @@
         ],
         "resources": {
             "cpu": "96",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "192Gi",
             "pods": "1024"
         }
@@ -6231,7 +6231,7 @@
         ],
         "resources": {
             "cpu": "96",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "192Gi",
             "pods": "1024"
         }
@@ -6294,7 +6294,7 @@
         ],
         "resources": {
             "cpu": "96",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "192Gi",
             "pods": "1024"
         }
@@ -6357,7 +6357,7 @@
         ],
         "resources": {
             "cpu": "96",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "384Gi",
             "pods": "1024"
         }
@@ -6420,7 +6420,7 @@
         ],
         "resources": {
             "cpu": "96",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "384Gi",
             "pods": "1024"
         }
@@ -6483,7 +6483,7 @@
         ],
         "resources": {
             "cpu": "96",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "384Gi",
             "pods": "1024"
         }
@@ -6546,7 +6546,7 @@
         ],
         "resources": {
             "cpu": "96",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "384Gi",
             "pods": "1024"
         }
@@ -6609,7 +6609,7 @@
         ],
         "resources": {
             "cpu": "96",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "768Gi",
             "pods": "1024"
         }
@@ -6672,7 +6672,7 @@
         ],
         "resources": {
             "cpu": "96",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "768Gi",
             "pods": "1024"
         }
@@ -6735,7 +6735,7 @@
         ],
         "resources": {
             "cpu": "96",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "768Gi",
             "pods": "1024"
         }
@@ -6798,7 +6798,7 @@
         ],
         "resources": {
             "cpu": "96",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "768Gi",
             "pods": "1024"
         }
@@ -6861,7 +6861,7 @@
         ],
         "resources": {
             "cpu": "128",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "256Gi",
             "pods": "1024"
         }
@@ -6924,7 +6924,7 @@
         ],
         "resources": {
             "cpu": "128",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "256Gi",
             "pods": "1024"
         }
@@ -6987,7 +6987,7 @@
         ],
         "resources": {
             "cpu": "128",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "256Gi",
             "pods": "1024"
         }
@@ -7050,7 +7050,7 @@
         ],
         "resources": {
             "cpu": "128",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "256Gi",
             "pods": "1024"
         }
@@ -7113,7 +7113,7 @@
         ],
         "resources": {
             "cpu": "128",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "512Gi",
             "pods": "1024"
         }
@@ -7176,7 +7176,7 @@
         ],
         "resources": {
             "cpu": "128",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "512Gi",
             "pods": "1024"
         }
@@ -7239,7 +7239,7 @@
         ],
         "resources": {
             "cpu": "128",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "512Gi",
             "pods": "1024"
         }
@@ -7302,7 +7302,7 @@
         ],
         "resources": {
             "cpu": "128",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "512Gi",
             "pods": "1024"
         }
@@ -7365,7 +7365,7 @@
         ],
         "resources": {
             "cpu": "128",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "1Ti",
             "pods": "1024"
         }
@@ -7428,7 +7428,7 @@
         ],
         "resources": {
             "cpu": "128",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "1Ti",
             "pods": "1024"
         }
@@ -7491,7 +7491,7 @@
         ],
         "resources": {
             "cpu": "128",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "1Ti",
             "pods": "1024"
         }
@@ -7554,7 +7554,7 @@
         ],
         "resources": {
             "cpu": "128",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "1Ti",
             "pods": "1024"
         }
@@ -7617,7 +7617,7 @@
         ],
         "resources": {
             "cpu": "192",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "384Gi",
             "pods": "1024"
         }
@@ -7680,7 +7680,7 @@
         ],
         "resources": {
             "cpu": "192",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "384Gi",
             "pods": "1024"
         }
@@ -7743,7 +7743,7 @@
         ],
         "resources": {
             "cpu": "192",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "384Gi",
             "pods": "1024"
         }
@@ -7806,7 +7806,7 @@
         ],
         "resources": {
             "cpu": "192",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "384Gi",
             "pods": "1024"
         }
@@ -7869,7 +7869,7 @@
         ],
         "resources": {
             "cpu": "192",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "768Gi",
             "pods": "1024"
         }
@@ -7932,7 +7932,7 @@
         ],
         "resources": {
             "cpu": "192",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "768Gi",
             "pods": "1024"
         }
@@ -7995,7 +7995,7 @@
         ],
         "resources": {
             "cpu": "192",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "768Gi",
             "pods": "1024"
         }
@@ -8058,7 +8058,7 @@
         ],
         "resources": {
             "cpu": "192",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "768Gi",
             "pods": "1024"
         }
@@ -8121,7 +8121,7 @@
         ],
         "resources": {
             "cpu": "192",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "1536Gi",
             "pods": "1024"
         }
@@ -8184,7 +8184,7 @@
         ],
         "resources": {
             "cpu": "192",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "1536Gi",
             "pods": "1024"
         }
@@ -8247,7 +8247,7 @@
         ],
         "resources": {
             "cpu": "192",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "1536Gi",
             "pods": "1024"
         }
@@ -8310,7 +8310,7 @@
         ],
         "resources": {
             "cpu": "192",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "1536Gi",
             "pods": "1024"
         }
@@ -8373,7 +8373,7 @@
         ],
         "resources": {
             "cpu": "256",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "512Gi",
             "pods": "1024"
         }
@@ -8436,7 +8436,7 @@
         ],
         "resources": {
             "cpu": "256",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "512Gi",
             "pods": "1024"
         }
@@ -8499,7 +8499,7 @@
         ],
         "resources": {
             "cpu": "256",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "512Gi",
             "pods": "1024"
         }
@@ -8562,7 +8562,7 @@
         ],
         "resources": {
             "cpu": "256",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "512Gi",
             "pods": "1024"
         }
@@ -8625,7 +8625,7 @@
         ],
         "resources": {
             "cpu": "256",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "1Ti",
             "pods": "1024"
         }
@@ -8688,7 +8688,7 @@
         ],
         "resources": {
             "cpu": "256",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "1Ti",
             "pods": "1024"
         }
@@ -8751,7 +8751,7 @@
         ],
         "resources": {
             "cpu": "256",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "1Ti",
             "pods": "1024"
         }
@@ -8814,7 +8814,7 @@
         ],
         "resources": {
             "cpu": "256",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "1Ti",
             "pods": "1024"
         }
@@ -8877,7 +8877,7 @@
         ],
         "resources": {
             "cpu": "256",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "2Ti",
             "pods": "1024"
         }
@@ -8940,7 +8940,7 @@
         ],
         "resources": {
             "cpu": "256",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "2Ti",
             "pods": "1024"
         }
@@ -9003,7 +9003,7 @@
         ],
         "resources": {
             "cpu": "256",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "2Ti",
             "pods": "1024"
         }
@@ -9066,7 +9066,7 @@
         ],
         "resources": {
             "cpu": "256",
-            "ephemeral-storage": "20G",
+            "ephemeral-storage": "20Gi",
             "memory": "2Ti",
             "pods": "1024"
         }
