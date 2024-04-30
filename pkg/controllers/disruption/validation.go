@@ -64,10 +64,11 @@ type Validation struct {
 	once          sync.Once
 	recorder      events.Recorder
 	queue         *orchestration.Queue
+	reason        v1beta1.DisruptionReason
 }
 
 func NewValidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cp cloudprovider.CloudProvider, recorder events.Recorder, queue *orchestration.Queue) *Validation {
+	cp cloudprovider.CloudProvider, recorder events.Recorder, queue *orchestration.Queue, reason v1beta1.DisruptionReason) *Validation {
 	return &Validation{
 		clock:         clk,
 		cluster:       cluster,
@@ -76,6 +77,7 @@ func NewValidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Cl
 		cloudProvider: cp,
 		recorder:      recorder,
 		queue:         queue,
+		reason:        reason,
 	}
 }
 
@@ -137,10 +139,10 @@ func (v *Validation) ValidateCandidates(ctx context.Context, candidates ...*Cand
 		if v.cluster.IsNodeNominated(vc.ProviderID()) {
 			return nil, NewValidationError(fmt.Errorf("a candidate was nominated during validation"))
 		}
-		if  disruptionBudgetMapping[vc.nodePool.Name][v1beta1.DisruptionReasonUnderutilized] == 0 {
+		if disruptionBudgetMapping[vc.nodePool.Name][v.reason] == 0 {
 			return nil, NewValidationError(fmt.Errorf("a candidate can no longer be disrupted without violating budgets"))
 		}
-		disruptionBudgetMapping[vc.nodePool.Name][v1beta1.DisruptionReasonUnderutilized]--
+		disruptionBudgetMapping[vc.nodePool.Name][v.reason]--
 	}
 	return validatedCandidates, nil
 }
