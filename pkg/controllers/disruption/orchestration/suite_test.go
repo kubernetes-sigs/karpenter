@@ -26,6 +26,7 @@ import (
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
@@ -167,7 +168,7 @@ var _ = Describe("Queue", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 
 			stateNode := ExpectStateNodeExists(cluster, node1)
-			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method", "fake-type"))).To(BeNil())
+			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method"))).To(BeNil())
 
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
 			Expect(node1.Spec.Taints).To(ContainElement(v1beta1.DisruptionNoScheduleTaint))
@@ -185,15 +186,15 @@ var _ = Describe("Queue", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
-			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method", "fake-type"))).To(BeNil())
-			ExpectSingletonReconciled(ctx, queue)
+			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method"))).To(BeNil())
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 		})
 		It("should untaint nodes when a command times out", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
-			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method", "fake-type"))).To(BeNil())
+			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method"))).To(BeNil())
 
 			// Step the clock to trigger the timeout.
 			fakeClock.Step(11 * time.Minute)
@@ -207,7 +208,7 @@ var _ = Describe("Queue", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
-			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method", "fake-type")
+			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method")
 			Expect(queue.Add(cmd)).To(BeNil())
 			ExpectSingletonReconciled(ctx, queue)
 
@@ -244,7 +245,7 @@ var _ = Describe("Queue", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
-			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method", "fake-type")
+			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method")
 			Expect(queue.Add(cmd)).To(BeNil())
 
 			ExpectSingletonReconciled(ctx, queue)
@@ -273,7 +274,7 @@ var _ = Describe("Queue", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
-			cmd := orchestration.NewCommand([]string{}, []*state.StateNode{stateNode}, "", "test-method", "fake-type")
+			cmd := orchestration.NewCommand([]string{}, []*state.StateNode{stateNode}, "", "test-method")
 			Expect(queue.Add(cmd)).To(BeNil())
 
 			ExpectSingletonReconciled(ctx, queue)
@@ -300,9 +301,9 @@ var _ = Describe("Queue", func() {
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 			stateNode2 := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim2)
 
-			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method", "fake-type")
+			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method")
 			Expect(queue.Add(cmd)).To(BeNil())
-			cmd2 := orchestration.NewCommand(replacements2, []*state.StateNode{stateNode2}, "", "test-method", "fake-type")
+			cmd2 := orchestration.NewCommand(replacements2, []*state.StateNode{stateNode2}, "", "test-method")
 			Expect(queue.Add(cmd2)).To(BeNil())
 
 			// Reconcile the first command and expect nothing to be initialized

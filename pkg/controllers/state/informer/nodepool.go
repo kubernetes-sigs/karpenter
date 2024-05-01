@@ -19,6 +19,8 @@ package informer
 import (
 	"context"
 
+	"k8s.io/apimachinery/pkg/api/errors"
+	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -49,6 +51,17 @@ func NewNodePoolController(kubeClient client.Client, cluster *state.Cluster) *No
 func (c *NodePoolController) Reconcile(ctx context.Context, np *v1beta1.NodePool) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "state.nodepool") //nolint:ineffassign,staticcheck
 
+func (c *NodePoolController) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("nodepool", nodePool.Name))
+	np := &v1beta1.NodePool{}
+	if err := c.kubeClient.Get(ctx, client.ObjectKeyFromObject(nodePool), np); err != nil {
+		if errors.IsNotFound(err) {
+			// notify cluster state of the node deletion
+			c.cluster.DeleteNodePool(nodePool.Name)
+		}
+		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
+	c.cluster.UpdateNodePool(nodePool)
 	// Something changed in the NodePool so we should re-consider consolidation
 	c.cluster.MarkUnconsolidated()
 	return reconcile.Result{}, nil

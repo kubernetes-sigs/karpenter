@@ -43,8 +43,7 @@ type NodePoolSpec struct {
 	// +required
 	Template NodeClaimTemplate `json:"template"`
 	// Disruption contains the parameters that relate to Karpenter's disruption logic
-	// +kubebuilder:default={"consolidationPolicy": "WhenUnderutilized", "expireAfter": "720h"}
-	// +kubebuilder:validation:XValidation:message="consolidateAfter cannot be combined with consolidationPolicy=WhenUnderutilized",rule="has(self.consolidateAfter) ? self.consolidationPolicy != 'WhenUnderutilized' || self.consolidateAfter == 'Never' : true"
+	// +kubebuilder:default={"consolidationPolicy": "WhenUnderutilized", "consolidateAfter": "15s", "expireAfter": "720h"}
 	// +kubebuilder:validation:XValidation:message="consolidateAfter must be specified with consolidationPolicy=WhenEmpty",rule="self.consolidationPolicy == 'WhenEmpty' ? has(self.consolidateAfter) : true"
 	// +optional
 	Disruption Disruption `json:"disruption"`
@@ -66,6 +65,7 @@ type Disruption struct {
 	// before attempting to terminate nodes that are underutilized.
 	// Refer to ConsolidationPolicy for how underutilization is considered.
 	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+)|(Never)$`
+	// +kubebuilder:default:="15s"
 	// +kubebuilder:validation:Type="string"
 	// +kubebuilder:validation:Schemaless
 	// +optional

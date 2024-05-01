@@ -143,15 +143,14 @@ func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster
 }
 
 // NewCommand creates a command key and adds in initial data for the orchestration queue.
-func NewCommand(replacements []string, candidates []*state.StateNode, id types.UID, method, consolidationType string) *Command {
+func NewCommand(replacements []string, candidates []*state.StateNode, id types.UID, method string) *Command {
 	return &Command{
 		Replacements: lo.Map(replacements, func(name string, _ int) Replacement {
 			return Replacement{name: name}
 		}),
-		candidates:        candidates,
-		method:            method,
-		consolidationType: consolidationType,
-		id:                id,
+		candidates: candidates,
+		method:     method,
+		id:         id,
 	}
 }
 

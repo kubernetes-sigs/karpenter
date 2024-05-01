@@ -73,10 +73,10 @@ var _ = Describe("Webhook/Validation", func() {
 			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmpty
 			Expect(nodePool.Validate(ctx)).To(Succeed())
 		})
-		It("should fail when setting consolidateAfter with consolidationPolicy=WhenUnderutilized", func() {
+		It("should succeed when setting consolidateAfter with consolidationPolicy=WhenUnderutilized", func() {
 			nodePool.Spec.Disruption.ConsolidateAfter = &NillableDuration{Duration: lo.ToPtr(lo.Must(time.ParseDuration("30s")))}
 			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenUnderutilized
-			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
+			Expect(nodePool.Validate(ctx)).To(Succeed())
 		})
 		It("should fail to validate a budget with an invalid cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{

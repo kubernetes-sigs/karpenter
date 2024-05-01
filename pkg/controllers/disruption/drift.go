@@ -118,7 +118,3 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 func (d *Drift) Type() string {
 	return metrics.DriftReason
 }
-
-func (d *Drift) ConsolidationType() string {
-	return ""
-}

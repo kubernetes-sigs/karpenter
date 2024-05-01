@@ -53,7 +53,8 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, nodeClaim); err != nil {
 		if errors.IsNotFound(err) {
 			// notify cluster state of the node deletion
-			c.cluster.DeleteNodeClaim(req.Name)
+			// also add in the nodepool name so that we can remove its representation from cluster state
+			c.cluster.DeleteNodeClaim(req.Name, nodeClaim.Labels[v1beta1.NodePoolLabelKey])
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}

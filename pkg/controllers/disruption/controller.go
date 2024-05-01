@@ -67,7 +67,7 @@ const pollingPeriod = 10 * time.Second
 func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
 	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *orchestration.Queue,
 ) *Controller {
-	c := MakeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)
+	// c := MakeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)
 	return &Controller{
 		queue:         queue,
 		clock:         clk,
@@ -85,11 +85,12 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 			// Delete any remaining empty NodeClaims as there is zero cost in terms of disruption.  Emptiness and
 			// emptyNodeConsolidation are mutually exclusive, only one of these will operate
 			NewEmptiness(clk, recorder),
-			NewEmptyNodeConsolidation(c),
+			NewConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue),
+			// NewEmptyNodeConsolidation(c),
 			// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
-			NewMultiNodeConsolidation(c),
+			// NewMultiNodeConsolidation(c),
 			// And finally fall back our single NodeClaim consolidation to further reduce cluster cost.
-			NewSingleNodeConsolidation(c),
+			// NewSingleNodeConsolidation(c),
 		},
 	}
 }
@@ -147,8 +148,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 
 func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {
 	defer metrics.Measure(EvaluationDurationHistogram.With(map[string]string{
-		methodLabel:            disruption.Type(),
-		consolidationTypeLabel: disruption.ConsolidationType(),
+		methodLabel: disruption.Type(),
 	}))()
 	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, c.queue)
 	if err != nil {
@@ -227,29 +227,26 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, 
 	c.cluster.MarkForDeletion(providerIDs...)
 
 	if err := c.queue.Add(orchestration.NewCommand(nodeClaimNames,
-		lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode }), commandID, m.Type(), m.ConsolidationType())); err != nil {
+		lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode }), commandID, m.Type())); err != nil {
 		c.cluster.UnmarkForDeletion(providerIDs...)
 		return fmt.Errorf("adding command to queue (command-id: %s), %w", commandID, multierr.Append(err, state.RequireNoScheduleTaint(ctx, c.kubeClient, false, stateNodes...)))
 	}
 
 	// An action is only performed and pods/nodes are only disrupted after a successful add to the queue
 	ActionsPerformedCounter.With(map[string]string{
-		actionLabel:            string(cmd.Action()),
-		methodLabel:            m.Type(),
-		consolidationTypeLabel: m.ConsolidationType(),
+		actionLabel: string(cmd.Action()),
+		methodLabel: m.Type(),
 	}).Inc()
 	for _, cd := range cmd.candidates {
 		NodesDisruptedCounter.With(map[string]string{
-			metrics.NodePoolLabel:  cd.nodePool.Name,
-			actionLabel:            string(cmd.Action()),
-			methodLabel:            m.Type(),
-			consolidationTypeLabel: m.ConsolidationType(),
+			metrics.NodePoolLabel: cd.nodePool.Name,
+			actionLabel:           string(cmd.Action()),
+			methodLabel:           m.Type(),
 		}).Inc()
 		PodsDisruptedCounter.With(map[string]string{
-			metrics.NodePoolLabel:  cd.nodePool.Name,
-			actionLabel:            string(cmd.Action()),
-			methodLabel:            m.Type(),
-			consolidationTypeLabel: m.ConsolidationType(),
+			metrics.NodePoolLabel: cd.nodePool.Name,
+			actionLabel:           string(cmd.Action()),
+			methodLabel:           m.Type(),
 		}).Add(float64(len(cd.reschedulablePods)))
 	}
 	return nil

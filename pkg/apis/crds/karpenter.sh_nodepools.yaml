@@ -55,6 +55,7 @@ spec:
               properties:
                 disruption:
                   default:
+                    consolidateAfter: 15s
                     consolidationPolicy: WhenUnderutilized
                     expireAfter: 720h
                   description: Disruption contains the parameters that relate to Karpenter's disruption logic
@@ -111,6 +112,7 @@ spec:
                         - message: '''schedule'' must be set with ''duration'''
                           rule: self.all(x, has(x.schedule) == has(x.duration))
                     consolidateAfter:
+                      default: 15s
                       description: |-
                         ConsolidateAfter is the duration the controller will wait
                         before attempting to terminate nodes that are underutilized.
@@ -137,8 +139,6 @@ spec:
                       type: string
                   type: object
                   x-kubernetes-validations:
-                    - message: consolidateAfter cannot be combined with consolidationPolicy=WhenUnderutilized
-                      rule: 'has(self.consolidateAfter) ? self.consolidationPolicy != ''WhenUnderutilized'' || self.consolidateAfter == ''Never'' : true'
                     - message: consolidateAfter must be specified with consolidationPolicy=WhenEmpty
                       rule: 'self.consolidationPolicy == ''WhenEmpty'' ? has(self.consolidateAfter) : true'
                 limits:
@@ -345,6 +345,8 @@ spec:
                                     rule: self != "karpenter.sh/nodepool"
                                   - message: label "kubernetes.io/hostname" is restricted
                                     rule: self != "kubernetes.io/hostname"
+                                  - message: label domain "karpenter.kwok.sh" is restricted
+                                    rule: self in ["karpenter.kwok.sh/instance-cpu", "karpenter.kwok.sh/instance-memory", "karpenter.kwok.sh/instance-family", "karpenter.kwok.sh/instance-size"] || !self.find("^([^/]+)").endsWith("karpenter.kwok.sh")
                               minValues:
                                 description: |-
                                   This field is ALPHA and can be dropped or replaced at any time

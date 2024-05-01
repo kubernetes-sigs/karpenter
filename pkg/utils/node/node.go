@@ -72,3 +72,8 @@ func GetCondition(n *v1.Node, match v1.NodeConditionType) v1.NodeCondition {
 	}
 	return v1.NodeCondition{}
 }
+
+func NotReady(n *v1.Node) bool {
+	cond := GetCondition(n, v1.NodeReady)
+	return cond.Status != v1.ConditionTrue
+}

@@ -35,6 +35,7 @@ import (
 	nodeclaimgarbagecollection "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/garbagecollection"
 	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	nodeclaimtermination "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/termination"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/underutilization"
 	nodepoolcounter "sigs.k8s.io/karpenter/pkg/controllers/nodepool/counter"
 	nodepoolhash "sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
@@ -58,6 +59,7 @@ func NewControllers(
 	return []controller.Controller{
 		p, evictionQueue, disruptionQueue,
 		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue),
+		underutilization.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster),
 		provisioning.NewPodController(kubeClient, p, recorder),
 		provisioning.NewNodeController(kubeClient, p, recorder),
 		nodepoolhash.NewController(kubeClient),

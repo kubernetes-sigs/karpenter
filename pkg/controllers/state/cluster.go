@@ -41,6 +41,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
@@ -56,6 +57,11 @@ type Cluster struct {
 	nodeNameToProviderID      map[string]string               // node name -> provider id
 	nodeClaimNameToProviderID map[string]string               // node claim name -> provider id
 	daemonSetPods             sync.Map                        // daemonSet -> existing pod
+	// consolidationCommandIDs   map[string]ConsolidationDecision // mapping of consolidation command ids to sets of provider ids
+	// consolidatingNodes        map[string]string                // provider-id -> command-id
+
+	nodePoolToNodeClaimNames map[string]sets.Set[string]  // nodepool name -> set of node claim names
+	nodePools                map[string]*v1beta1.NodePool // nodepool name -> nodepool
 
 	clusterStateMu sync.RWMutex // Separate mutex as this is called in some places that mu is held
 	// A monotonically increasing timestamp representing the time state of the
@@ -65,6 +71,13 @@ type Cluster struct {
 	// optimize and not try to disrupt if nothing about the cluster has changed.
 	clusterState     time.Time
 	antiAffinityPods sync.Map // pod namespaced name -> *v1.Pod of pods that have required anti affinities
+}
+
+type ConsolidationDecision struct {
+	Candidates       sets.Set[string]
+	StartTime        time.Time
+	ConsolidateAfter time.Duration
+	CommandID        string
 }
 
 func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudProvider) *Cluster {
@@ -77,7 +90,35 @@ func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudPro
 		daemonSetPods:             sync.Map{},
 		nodeNameToProviderID:      map[string]string{},
 		nodeClaimNameToProviderID: map[string]string{},
+		nodePoolToNodeClaimNames:  map[string]sets.Set[string]{},
+		nodePools:                 map[string]*v1beta1.NodePool{},
 	}
+}
+
+// AllowedNodePoolDisruptions returns the number of allowed disruptions for a given NodePool.
+// This lives in cluster state as there are special dirty bits that are maintained in cluster state.
+func (c *Cluster) AllowedNodePoolDisruptions(ctx context.Context, nodePoolName string, clk clock.Clock) int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	providerIDs, ok := c.nodePoolToNodeClaimNames[nodePoolName]
+	if !ok {
+		return 0
+	}
+	// We only calculate the number of allowed disruptions from the initialized nodes
+	budget := len(lo.Filter(providerIDs.UnsortedList(), func(providerID string, _ int) bool {
+		return c.nodes[providerID].Initialized()
+	}))
+
+	nodePool := c.nodePools[nodePoolName]
+	budget = nodePool.MustGetAllowedDisruptions(ctx, clk, budget)
+	for providerID := range providerIDs {
+		node := c.nodes[providerID]
+		// If the node is deleting or not ready, decrement from the allowed disruptions
+		if node.MarkedForDeletion() || nodeutils.NotReady(node.Node) {
+			budget--
+		}
+	}
+	return lo.Clamp(budget, 0, len(providerIDs))
 }
 
 // Synced validates that the NodeClaims and the Nodes that are stored in the apiserver
@@ -164,6 +205,14 @@ func (c *Cluster) ForEachNode(f func(n *StateNode) bool) {
 	}
 }
 
+// Nodes creates a DeepCopy of all nodepools.
+// NOTE: This is very inefficient so this should only be used when DeepCopying is absolutely necessary
+func (c *Cluster) NodePools() map[string]*v1beta1.NodePool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.nodePools
+}
+
 // Nodes creates a DeepCopy of all state nodes.
 // NOTE: This is very inefficient so this should only be used when DeepCopying is absolutely necessary
 func (c *Cluster) Nodes() StateNodes {
@@ -225,6 +274,22 @@ func (c *Cluster) MarkForDeletion(providerIDs ...string) {
 	}
 }
 
+func (c *Cluster) UpdateNodePool(nodePool *v1beta1.NodePool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.nodePools[nodePool.Name] = nodePool
+	nodeClaimNames, ok := c.nodePoolToNodeClaimNames[nodePool.Name]
+	// Add an empty set even if there are no active nodes so that we can know it exists
+	c.nodePoolToNodeClaimNames[nodePool.Name] = lo.Ternary(ok, nodeClaimNames, sets.Set[string]{})
+}
+
+func (c *Cluster) DeleteNodePool(name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cleanupNodePool(name)
+}
+
 func (c *Cluster) UpdateNodeClaim(nodeClaim *v1beta1.NodeClaim) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -235,6 +300,11 @@ func (c *Cluster) UpdateNodeClaim(nodeClaim *v1beta1.NodeClaim) {
 	if nodeClaim.Status.ProviderID != "" {
 		n := c.newStateFromNodeClaim(nodeClaim, c.nodes[nodeClaim.Status.ProviderID])
 		c.nodes[nodeClaim.Status.ProviderID] = n
+		_, ok := c.nodePoolToNodeClaimNames[nodeClaim.Labels[v1beta1.NodePoolLabelKey]]
+		if !ok {
+			c.nodePoolToNodeClaimNames[nodeClaim.Labels[v1beta1.NodePoolLabelKey]] = sets.Set[string]{}
+		}
+		c.nodePoolToNodeClaimNames[nodeClaim.Labels[v1beta1.NodePoolLabelKey]].Insert(nodeClaim.Name)
 	}
 	// If the nodeclaim hasn't launched yet, we want to add it into cluster state to ensure
 	// that we're not racing with the internal cache for the cluster, assuming the node doesn't exist.
@@ -242,12 +312,12 @@ func (c *Cluster) UpdateNodeClaim(nodeClaim *v1beta1.NodeClaim) {
 	ClusterStateNodesCount.Set(float64(len(c.nodes)))
 }
 
-func (c *Cluster) DeleteNodeClaim(name string) {
+func (c *Cluster) DeleteNodeClaim(name string, nodePoolName string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.cleanupNodeClaim(name)
-	ClusterStateNodesCount.Set(float64(len(c.nodes)))
+	c.cleanupNodeClaim(name, nodePoolName)
+	clusterStateNodesCount.Set(float64(len(c.nodes)))
 }
 
 func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
@@ -394,31 +464,36 @@ func (c *Cluster) newStateFromNodeClaim(nodeClaim *v1beta1.NodeClaim, oldNode *S
 		oldNode = NewNode()
 	}
 	n := &StateNode{
-		Node:              oldNode.Node,
-		NodeClaim:         nodeClaim,
-		daemonSetRequests: oldNode.daemonSetRequests,
-		daemonSetLimits:   oldNode.daemonSetLimits,
-		podRequests:       oldNode.podRequests,
-		podLimits:         oldNode.podLimits,
-		hostPortUsage:     oldNode.hostPortUsage,
-		volumeUsage:       oldNode.volumeUsage,
-		markedForDeletion: oldNode.markedForDeletion,
-		nominatedUntil:    oldNode.nominatedUntil,
+		Node:                   oldNode.Node,
+		NodeClaim:              nodeClaim,
+		daemonSetRequests:      oldNode.daemonSetRequests,
+		daemonSetLimits:        oldNode.daemonSetLimits,
+		podRequests:            oldNode.podRequests,
+		podLimits:              oldNode.podLimits,
+		hostPortUsage:          oldNode.hostPortUsage,
+		volumeUsage:            oldNode.volumeUsage,
+		markedForDeletion:      oldNode.markedForDeletion,
+		nominatedUntil:         oldNode.nominatedUntil,
+		consolidationCommandID: oldNode.consolidationCommandID,
 	}
 	// Cleanup the old nodeClaim with its old providerID if its providerID changes
 	// This can happen since nodes don't get created with providerIDs. Rather, CCM picks up the
 	// created node and injects the providerID into the spec.providerID
 	if id, ok := c.nodeClaimNameToProviderID[nodeClaim.Name]; ok && id != nodeClaim.Status.ProviderID {
-		c.cleanupNodeClaim(nodeClaim.Name)
+		c.cleanupNodeClaim(nodeClaim.Name, nodeClaim.Labels[v1beta1.NodePoolLabelKey])
 	}
 	c.triggerConsolidationOnChange(oldNode, n)
 	return n
 }
 
-func (c *Cluster) cleanupNodeClaim(name string) {
-	if id := c.nodeClaimNameToProviderID[name]; id != "" {
+// cleanupNodeClaim takes in the nodeclaim name and nodepool name to clean up the
+// appropriate data structures in cluster state
+func (c *Cluster) cleanupNodeClaim(nodeClaimName, nodePoolName string) {
+	if id := c.nodeClaimNameToProviderID[nodeClaimName]; id != "" {
 		if c.nodes[id].Node == nil {
 			delete(c.nodes, id)
+		} else if _, ok := c.nodePoolToNodeClaimNames[nodePoolName]; ok {
+			c.nodePoolToNodeClaimNames[nodePoolName].Delete(nodeClaimName)
 		} else {
 			c.nodes[id].NodeClaim = nil
 		}
@@ -427,7 +502,12 @@ func (c *Cluster) cleanupNodeClaim(name string) {
 	// Delete the node claim from the nodeClaimNameToProviderID in the case that the provider ID hasn't resolved
 	// yet. This ensures that if a nodeClaim is created and then deleted before it was able to launch that
 	// this is cleaned up.
-	delete(c.nodeClaimNameToProviderID, name)
+	delete(c.nodeClaimNameToProviderID, nodeClaimName)
+}
+
+func (c *Cluster) cleanupNodePool(name string) {
+	delete(c.nodePools, name)
+	delete(c.nodePoolToNodeClaimNames, name)
 }
 
 func (c *Cluster) newStateFromNode(ctx context.Context, node *v1.Node, oldNode *StateNode) (*StateNode, error) {

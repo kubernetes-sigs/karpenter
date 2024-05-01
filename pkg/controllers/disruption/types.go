@@ -43,7 +43,6 @@ type Method interface {
 	ShouldDisrupt(context.Context, *Candidate) bool
 	ComputeCommand(context.Context, map[string]int, ...*Candidate) (Command, scheduling.Results, error)
 	Type() string
-	ConsolidationType() string
 }
 
 type CandidateFilter func(context.Context, *Candidate) bool
@@ -52,12 +51,12 @@ type CandidateFilter func(context.Context, *Candidate) bool
 // making that determination
 type Candidate struct {
 	*state.StateNode
-	instanceType      *cloudprovider.InstanceType
-	nodePool          *v1beta1.NodePool
-	zone              string
-	capacityType      string
-	disruptionCost    float64
-	reschedulablePods []*v1.Pod
+	instanceType      *cloudprovider.InstanceType // probably the only necessary one?
+	nodePool          *v1beta1.NodePool           // not necessary since in cluster state
+	zone              string                      // probably not necessary
+	capacityType      string                      // probably not necessary
+	disruptionCost    float64                     // we don't need anymore, as no ordering is necessary
+	reschedulablePods []*v1.Pod                   // can query from cluster state
 }
 
 //nolint:gocyclo

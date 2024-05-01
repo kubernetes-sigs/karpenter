@@ -124,7 +124,3 @@ func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping
 func (e *Expiration) Type() string {
 	return metrics.ExpirationReason
 }
-
-func (e *Expiration) ConsolidationType() string {
-	return ""
-}

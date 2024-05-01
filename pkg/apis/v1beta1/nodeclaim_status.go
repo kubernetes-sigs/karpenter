@@ -22,12 +22,13 @@ import (
 )
 
 const (
-	ConditionTypeLaunched    = "Launched"
-	ConditionTypeRegistered  = "Registered"
-	ConditionTypeInitialized = "Initialized"
-	ConditionTypeEmpty       = "Empty"
-	ConditionTypeDrifted     = "Drifted"
-	ConditionTypeExpired     = "Expired"
+	ConditionTypeLaunched      = "Launched"
+	ConditionTypeRegistered    = "Registered"
+	ConditionTypeInitialized   = "Initialized"
+	ConditionTypeEmpty         = "Empty"
+	ConditionTypeDrifted       = "Drifted"
+	ConditionTypeExpired       = "Expired"
+	ConditionTypeUnderutilized = "Underutilized"
 )
 
 // NodeClaimStatus defines the observed state of NodeClaim

@@ -41,7 +41,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
-	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -569,279 +568,6 @@ var _ = Describe("Consolidation", func() {
 			// Execute the command in the queue, deleting all node claims
 			ExpectSingletonReconciled(ctx, queue)
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(30))
-		})
-		It("should not mark empty node consolidated if the candidates can't be disrupted due to budgets with one nodepool", func() {
-			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "0%"}}
-
-			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < numNodes; i++ {
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
-			}
-			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-			emptyConsolidation := disruption.NewEmptyNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
-			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
-			Expect(err).To(Succeed())
-
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, queue)
-			Expect(err).To(Succeed())
-
-			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
-			cmd, results, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
-			Expect(err).To(Succeed())
-			Expect(results).To(Equal(pscheduling.Results{}))
-			Expect(cmd).To(Equal(disruption.Command{}))
-			wg.Wait()
-
-			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
-		})
-		It("should not mark empty node consolidated if all candidates can't be disrupted due to budgets with many nodepools", func() {
-			// Create 10 nodepools
-			nps := test.NodePools(10, v1beta1.NodePool{
-				Spec: v1beta1.NodePoolSpec{
-					Disruption: v1beta1.Disruption{
-						ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenUnderutilized,
-						Budgets: []v1beta1.Budget{{
-							Nodes: "0%",
-						}},
-					},
-				},
-			})
-			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < len(nps); i++ {
-				ExpectApplied(ctx, env.Client, nps[i])
-			}
-			nodeClaims = make([]*v1beta1.NodeClaim, 0, 30)
-			nodes = make([]*v1.Node, 0, 30)
-			// Create 3 nodes for each nodePool
-			for _, np := range nps {
-				ncs, ns := test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: map[string]string{
-							v1beta1.NodePoolLabelKey:     np.Name,
-							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-							v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
-						},
-					},
-					Status: v1beta1.NodeClaimStatus{
-						Allocatable: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceCPU:  resource.MustParse("32"),
-							v1.ResourcePods: resource.MustParse("100"),
-						},
-					},
-				})
-				nodeClaims = append(nodeClaims, ncs...)
-				nodes = append(nodes, ns...)
-			}
-			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < len(nodeClaims); i++ {
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
-			}
-
-			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-			emptyConsolidation := disruption.NewEmptyNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
-			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
-			Expect(err).To(Succeed())
-
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, queue)
-			Expect(err).To(Succeed())
-
-			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
-			cmd, results, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
-			Expect(err).To(Succeed())
-			Expect(results).To(Equal(pscheduling.Results{}))
-			Expect(cmd).To(Equal(disruption.Command{}))
-			wg.Wait()
-
-			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
-		})
-		It("should not mark multi node consolidated if the candidates can't be disrupted due to budgets with one nodepool", func() {
-			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "0%"}}
-
-			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < numNodes; i++ {
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
-			}
-			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-			multiConsolidation := disruption.NewMultiNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
-			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
-			Expect(err).To(Succeed())
-
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, queue)
-			Expect(err).To(Succeed())
-
-			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
-			cmd, results, err := multiConsolidation.ComputeCommand(ctx, budgets, candidates...)
-			Expect(err).To(Succeed())
-			Expect(results).To(Equal(pscheduling.Results{}))
-			Expect(cmd).To(Equal(disruption.Command{}))
-			wg.Wait()
-
-			Expect(multiConsolidation.IsConsolidated()).To(BeFalse())
-		})
-		It("should not mark multi node consolidated if all candidates can't be disrupted due to budgets with many nodepools", func() {
-			// Create 10 nodepools
-			nps := test.NodePools(10, v1beta1.NodePool{
-				Spec: v1beta1.NodePoolSpec{
-					Disruption: v1beta1.Disruption{
-						ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenUnderutilized,
-						Budgets: []v1beta1.Budget{{
-							Nodes: "0%",
-						}},
-					},
-				},
-			})
-			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < len(nps); i++ {
-				ExpectApplied(ctx, env.Client, nps[i])
-			}
-			nodeClaims = make([]*v1beta1.NodeClaim, 0, 30)
-			nodes = make([]*v1.Node, 0, 30)
-			// Create 3 nodes for each nodePool
-			for _, np := range nps {
-				ncs, ns := test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: map[string]string{
-							v1beta1.NodePoolLabelKey:     np.Name,
-							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-							v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
-						},
-					},
-					Status: v1beta1.NodeClaimStatus{
-						Allocatable: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceCPU:  resource.MustParse("32"),
-							v1.ResourcePods: resource.MustParse("100"),
-						},
-					},
-				})
-				nodeClaims = append(nodeClaims, ncs...)
-				nodes = append(nodes, ns...)
-			}
-			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < len(nodeClaims); i++ {
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
-			}
-
-			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-			multiConsolidation := disruption.NewMultiNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
-			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
-			Expect(err).To(Succeed())
-
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, queue)
-			Expect(err).To(Succeed())
-
-			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
-			cmd, results, err := multiConsolidation.ComputeCommand(ctx, budgets, candidates...)
-			Expect(err).To(Succeed())
-			Expect(results).To(Equal(pscheduling.Results{}))
-			Expect(cmd).To(Equal(disruption.Command{}))
-			wg.Wait()
-
-			Expect(multiConsolidation.IsConsolidated()).To(BeFalse())
-		})
-		It("should not mark single node consolidated if the candidates can't be disrupted due to budgets with one nodepool", func() {
-			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "0%"}}
-
-			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < numNodes; i++ {
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
-			}
-			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-			singleConsolidation := disruption.NewSingleNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
-			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
-			Expect(err).To(Succeed())
-
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, queue)
-			Expect(err).To(Succeed())
-
-			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
-			cmd, results, err := singleConsolidation.ComputeCommand(ctx, budgets, candidates...)
-			Expect(err).To(Succeed())
-			Expect(results).To(Equal(pscheduling.Results{}))
-			Expect(cmd).To(Equal(disruption.Command{}))
-			wg.Wait()
-
-			Expect(singleConsolidation.IsConsolidated()).To(BeFalse())
-		})
-		It("should not mark single node consolidated if all candidates can't be disrupted due to budgets with many nodepools", func() {
-			// Create 10 nodepools
-			nps := test.NodePools(10, v1beta1.NodePool{
-				Spec: v1beta1.NodePoolSpec{
-					Disruption: v1beta1.Disruption{
-						ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenUnderutilized,
-						Budgets: []v1beta1.Budget{{
-							Nodes: "0%",
-						}},
-					},
-				},
-			})
-			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < len(nps); i++ {
-				ExpectApplied(ctx, env.Client, nps[i])
-			}
-			nodeClaims = make([]*v1beta1.NodeClaim, 0, 30)
-			nodes = make([]*v1.Node, 0, 30)
-			// Create 3 nodes for each nodePool
-			for _, np := range nps {
-				ncs, ns := test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: map[string]string{
-							v1beta1.NodePoolLabelKey:     np.Name,
-							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-							v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
-						},
-					},
-					Status: v1beta1.NodeClaimStatus{
-						Allocatable: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceCPU:  resource.MustParse("32"),
-							v1.ResourcePods: resource.MustParse("100"),
-						},
-					},
-				})
-				nodeClaims = append(nodeClaims, ncs...)
-				nodes = append(nodes, ns...)
-			}
-			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < len(nodeClaims); i++ {
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
-			}
-
-			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-			singleConsolidation := disruption.NewSingleNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
-			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
-			Expect(err).To(Succeed())
-
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, queue)
-			Expect(err).To(Succeed())
-
-			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
-			cmd, results, err := singleConsolidation.ComputeCommand(ctx, budgets, candidates...)
-			Expect(err).To(Succeed())
-			Expect(results).To(Equal(pscheduling.Results{}))
-			Expect(cmd).To(Equal(disruption.Command{}))
-			wg.Wait()
-
-			Expect(singleConsolidation.IsConsolidated()).To(BeFalse())
 		})
 	})
 	Context("Empty", func() {
@@ -4135,6 +3861,182 @@ var _ = Describe("Consolidation", func() {
 		})
 	})
 
+<<<<<<< HEAD
+=======
+	// Context("Timeout", func() {
+	// 	It("should return the last valid command when multi-nodeclaim consolidation times out", func() {
+	// 		numNodes := 20
+	// 		nodeClaims, nodes := test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
+	// 			ObjectMeta: metav1.ObjectMeta{
+	// 				Labels: map[string]string{
+	// 					v1beta1.NodePoolLabelKey:     nodePool.Name,
+	// 					v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
+	// 					v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.CapacityType,
+	// 					v1.LabelTopologyZone:         leastExpensiveOffering.Zone,
+	// 				},
+	// 			},
+	// 			Status: v1beta1.NodeClaimStatus{
+	// 				Allocatable: map[v1.ResourceName]resource.Quantity{
+	// 					v1.ResourceCPU:  resource.MustParse("32"),
+	// 					v1.ResourcePods: resource.MustParse("100"),
+	// 				},
+	// 			}},
+	// 		)
+	// 		// create our RS so we can link a pod to it
+	// 		rs := test.ReplicaSet()
+	// 		ExpectApplied(ctx, env.Client, rs)
+	// 		pods := test.Pods(numNodes, test.PodOptions{
+	// 			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+	// 				OwnerReferences: []metav1.OwnerReference{
+	// 					{
+	// 						APIVersion:         "apps/v1",
+	// 						Kind:               "ReplicaSet",
+	// 						Name:               rs.Name,
+	// 						UID:                rs.UID,
+	// 						Controller:         ptr.Bool(true),
+	// 						BlockOwnerDeletion: ptr.Bool(true),
+	// 					},
+	// 				}},
+	// 			ResourceRequirements: v1.ResourceRequirements{
+	// 				Requests: v1.ResourceList{
+	// 					// Make the resource requests small so that many nodes can be consolidated at once.
+	// 					v1.ResourceCPU: resource.MustParse("10m"),
+	// 				},
+	// 			},
+	// 		})
+
+	// 		ExpectApplied(ctx, env.Client, rs, nodePool)
+	// 		for _, nodeClaim := range nodeClaims {
+	// 			ExpectApplied(ctx, env.Client, nodeClaim)
+	// 		}
+	// 		for _, node := range nodes {
+	// 			ExpectApplied(ctx, env.Client, node)
+	// 		}
+	// 		for i, pod := range pods {
+	// 			ExpectApplied(ctx, env.Client, pod)
+	// 			ExpectManualBinding(ctx, env.Client, pod, nodes[i])
+	// 		}
+
+	// 		// inform cluster state about nodes and nodeClaims
+	// 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+	// 		var wg sync.WaitGroup
+	// 		wg.Add(1)
+	// 		finished := atomic.Bool{}
+	// 		go func() {
+	// 			defer GinkgoRecover()
+	// 			defer wg.Done()
+	// 			defer finished.Store(true)
+	// 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+	// 		}()
+
+	// 		// advance the clock so that the timeout expires
+	// 		fakeClock.Step(disruption.MultiNodeConsolidationTimeoutDuration)
+
+	// 		// wait for the controller to block on the validation timeout
+	// 		Eventually(fakeClock.HasWaiters, time.Second*10).Should(BeTrue())
+
+	// 		ExpectTriggerVerifyAction(&wg)
+
+	// 		// controller should be blocking during the timeout
+	// 		Expect(finished.Load()).To(BeFalse())
+
+	// 		// and the node should not be deleted yet
+	// 		for i := range nodeClaims {
+	// 			ExpectExists(ctx, env.Client, nodeClaims[i])
+	// 		}
+
+	// 		// controller should finish
+	// 		Eventually(finished.Load, 10*time.Second).Should(BeTrue())
+	// 		wg.Wait()
+
+	// 		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
+	// 		// should have at least two nodes deleted from multi nodeClaim consolidation
+	// 		Expect(len(ExpectNodeClaims(ctx, env.Client))).To(BeNumerically("<=", numNodes-2))
+	// 	})
+	// 	It("should exit single-nodeclaim consolidation if it times out", func() {
+	// 		numNodes := 25
+	// 		nodeClaims, nodes := test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
+	// 			ObjectMeta: metav1.ObjectMeta{
+	// 				Labels: map[string]string{
+	// 					v1beta1.NodePoolLabelKey:     nodePool.Name,
+	// 					v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
+	// 					v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.CapacityType,
+	// 					v1.LabelTopologyZone:         leastExpensiveOffering.Zone,
+	// 				},
+	// 			},
+	// 			Status: v1beta1.NodeClaimStatus{
+	// 				Allocatable: map[v1.ResourceName]resource.Quantity{
+	// 					v1.ResourceCPU:  resource.MustParse("32"),
+	// 					v1.ResourcePods: resource.MustParse("100"),
+	// 				},
+	// 			}},
+	// 		)
+	// 		// create our RS so we can link a pod to it
+	// 		rs := test.ReplicaSet()
+	// 		ExpectApplied(ctx, env.Client, rs)
+	// 		pods := test.Pods(numNodes, test.PodOptions{
+	// 			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+	// 				OwnerReferences: []metav1.OwnerReference{
+	// 					{
+	// 						APIVersion:         "apps/v1",
+	// 						Kind:               "ReplicaSet",
+	// 						Name:               rs.Name,
+	// 						UID:                rs.UID,
+	// 						Controller:         ptr.Bool(true),
+	// 						BlockOwnerDeletion: ptr.Bool(true),
+	// 					},
+	// 				}},
+	// 			ResourceRequirements: v1.ResourceRequirements{
+	// 				Requests: v1.ResourceList{
+	// 					// Make the pods more than half of the allocatable so that only one nodeclaim can be done at any time
+	// 					v1.ResourceCPU: resource.MustParse("20"),
+	// 				},
+	// 			},
+	// 		})
+
+	// 		ExpectApplied(ctx, env.Client, rs, nodePool)
+	// 		for _, nodeClaim := range nodeClaims {
+	// 			ExpectApplied(ctx, env.Client, nodeClaim)
+	// 		}
+	// 		for _, node := range nodes {
+	// 			ExpectApplied(ctx, env.Client, node)
+	// 		}
+	// 		for i, pod := range pods {
+	// 			ExpectApplied(ctx, env.Client, pod)
+	// 			ExpectManualBinding(ctx, env.Client, pod, nodes[i])
+	// 		}
+
+	// 		// inform cluster state about nodes and nodeClaims
+	// 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+	// 		var wg sync.WaitGroup
+	// 		wg.Add(1)
+	// 		finished := atomic.Bool{}
+	// 		go func() {
+	// 			defer GinkgoRecover()
+	// 			defer wg.Done()
+	// 			defer finished.Store(true)
+	// 			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+	// 		}()
+
+	// 		// advance the clock so that the timeout expires for multi-nodeClaim
+	// 		fakeClock.Step(disruption.MultiNodeConsolidationTimeoutDuration)
+	// 		// advance the clock so that the timeout expires for single-nodeClaim
+	// 		fakeClock.Step(disruption.SingleNodeConsolidationTimeoutDuration)
+
+	// 		ExpectTriggerVerifyAction(&wg)
+
+	// 		// controller should finish
+	// 		Eventually(finished.Load, 10*time.Second).Should(BeTrue())
+	// 		wg.Wait()
+
+	// 		// should have no nodeClaims deleted from single nodeClaim consolidation
+	// 		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(numNodes))
+	// 	})
+	// })
+>>>>>>> 8fe253f (feat: implement consolidateAfter)
 	Context("Multi-NodeClaim", func() {
 		var nodeClaims, spotNodeClaims []*v1beta1.NodeClaim
 		var nodes, spotNodes []*v1.Node

@@ -30,7 +30,7 @@ func init() {
 		NodesDisruptedCounter,
 		PodsDisruptedCounter,
 		EligibleNodesGauge,
-		ConsolidationTimeoutTotalCounter,
+		// ConsolidationTimeoutTotalCounter,
 		BudgetsAllowedDisruptionsGauge,
 	)
 }
@@ -51,7 +51,7 @@ var (
 			Help:      "Duration of the disruption evaluation process in seconds. Labeled by method and consolidation type.",
 			Buckets:   metrics.DurationBuckets(),
 		},
-		[]string{methodLabel, consolidationTypeLabel},
+		[]string{methodLabel},
 	)
 	ActionsPerformedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -60,7 +60,7 @@ var (
 			Name:      "actions_performed_total",
 			Help:      "Number of disruption actions performed. Labeled by disruption action, method, and consolidation type.",
 		},
-		[]string{actionLabel, methodLabel, consolidationTypeLabel},
+		[]string{actionLabel, methodLabel},
 	)
 	NodesDisruptedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -69,7 +69,7 @@ var (
 			Name:      "nodes_disrupted_total",
 			Help:      "Total number of nodes disrupted. Labeled by NodePool, disruption action, method, and consolidation type.",
 		},
-		[]string{metrics.NodePoolLabel, actionLabel, methodLabel, consolidationTypeLabel},
+		[]string{metrics.NodePoolLabel, actionLabel, methodLabel},
 	)
 	PodsDisruptedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -78,7 +78,7 @@ var (
 			Name:      "pods_disrupted_total",
 			Help:      "Total number of reschedulable pods disrupted on nodes. Labeled by NodePool, disruption action, method, and consolidation type.",
 		},
-		[]string{metrics.NodePoolLabel, actionLabel, methodLabel, consolidationTypeLabel},
+		[]string{metrics.NodePoolLabel, actionLabel, methodLabel},
 	)
 	EligibleNodesGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -87,17 +87,17 @@ var (
 			Name:      "eligible_nodes",
 			Help:      "Number of nodes eligible for disruption by Karpenter. Labeled by disruption method and consolidation type.",
 		},
-		[]string{methodLabel, consolidationTypeLabel},
+		[]string{methodLabel},
 	)
-	ConsolidationTimeoutTotalCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: disruptionSubsystem,
-			Name:      "consolidation_timeouts_total",
-			Help:      "Number of times the Consolidation algorithm has reached a timeout. Labeled by consolidation type.",
-		},
-		[]string{consolidationTypeLabel},
-	)
+	// ConsolidationTimeoutTotalCounter = prometheus.NewCounterVec(
+	// 	prometheus.CounterOpts{
+	// 		Namespace: metrics.Namespace,
+	// 		Subsystem: disruptionSubsystem,
+	// 		Name:      "consolidation_timeouts_total",
+	// 		Help:      "Number of times the Consolidation algorithm has reached a timeout. Labeled by consolidation type.",
+	// 	},
+	// 	[]string{consolidationTypeLabel},
+	// )
 	BudgetsAllowedDisruptionsGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
