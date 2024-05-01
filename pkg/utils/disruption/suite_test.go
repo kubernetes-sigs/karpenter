@@ -39,22 +39,6 @@ import (
 var ctx context.Context
 var env *test.Environment
 
-// var cluster *state.Cluster
-
-// var prov *provisioning.Provisioner
-// var cloudProvider *fake.CloudProvider
-// var nodeStateController controller.Controller
-// var nodeClaimStateController controller.Controller
-// var recorder *test.EventRecorder
-
-// var queue *orchestration.Queue
-// var onDemandInstances []*cloudprovider.InstanceType
-// var spotInstances []*cloudprovider.InstanceType
-// var leastExpensiveInstance, mostExpensiveInstance *cloudprovider.InstanceType
-// var leastExpensiveOffering, mostExpensiveOffering cloudprovider.Offering
-// var leastExpensiveSpotInstance, mostExpensiveSpotInstance *cloudprovider.InstanceType
-// var leastExpensiveSpotOffering, mostExpensiveSpotOffering cloudprovider.Offering
-
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
@@ -64,11 +48,6 @@ func TestAPIs(t *testing.T) {
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(coreapis.CRDs...))
 	ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(true)}}))
-	// cloudProvider = fake.NewCloudProvider()
-	// nodeStateController = informer.NewNodeController(env.Client, cluster)
-	// nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
-	// recorder = test.NewEventRecorder()
-	// prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster)
 })
 
 var _ = AfterSuite(func() {
