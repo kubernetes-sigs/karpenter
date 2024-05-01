@@ -1,6 +1,6 @@
 name: Feature
 description: Suggest an idea for a new feature
-labels: ['kind/feature', 'needs-triage']
+labels: ['kind/feature']
 body:
 - type: textarea
   attributes:

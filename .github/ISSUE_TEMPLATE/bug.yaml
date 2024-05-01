@@ -1,6 +1,6 @@
 name: Bug
 description: Report a bug
-labels: ['kind/bug', 'needs-triage']
+labels: ['kind/bug']
 body:
 - type: textarea
   attributes:
