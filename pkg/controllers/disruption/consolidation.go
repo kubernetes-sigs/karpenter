@@ -54,7 +54,6 @@ type Consolidation struct {
 	provisioner   *provisioning.Provisioner
 	cloudProvider cloudprovider.CloudProvider
 	recorder      events.Recorder
-	// lastConsolidationState time.Time
 }
 
 type ConsolidationCommand struct {
@@ -75,16 +74,6 @@ func NewConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient clie
 		recorder:      recorder,
 	}
 }
-
-// IsConsolidated returns true if nothing has changed since markConsolidated was called.
-// func (c *Consolidation) IsConsolidated() bool {
-// 	return c.lastConsolidationState.Equal(c.cluster.ConsolidationState())
-// }
-
-// // markConsolidated records the current state of the cluster.
-// func (c *Consolidation) markConsolidated() {
-// 	c.lastConsolidationState = c.cluster.ConsolidationState()
-// }
 
 func (c *Consolidation) Type() string {
 	return "underutilization"
@@ -110,23 +99,12 @@ func (c *Consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
 	return cn.NodeClaim.StatusConditions().GetCondition(v1beta1.Underutilized).IsTrue()
 }
 
-// // sortCandidates sorts candidates by disruption cost (where the lowest disruption cost is first) and returns the result
-// func (c *Consolidation) sortCandidates(candidates []*Candidate) []*Candidate {
-// 	sort.Slice(candidates, func(i int, j int) bool {
-// 		return candidates[i].disruptionCost < candidates[j].disruptionCost
-// 	})
-// 	return candidates
-// }
-
 // ComputeCommand computes a consolidation action to take
 //
 // nolint:gocyclo
 func (c *Consolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, pscheduling.Results, error) {
 	// All the candidates here all have the v1beta1.Underutilized condition
 	commands := c.getActiveValidConsolidations(ctx, candidates...)
-	// if len(commands) == 0 {
-	// 	c.markConsolidated()
-	// }
 	for _, cmd := range commands {
 		// Run scheduling simulation to compute consolidation option
 		results, err := SimulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, cmd.candidates...)

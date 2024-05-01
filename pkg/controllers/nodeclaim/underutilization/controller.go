@@ -92,8 +92,7 @@ func (c *Controller) markConsolidated() {
 	c.lastConsolidationState = c.cluster.ConsolidationState()
 }
 
-// Reconcile will try to find consolidation decisions in the cluster
-// It will:
+// Reconcile will try to find consolidation decisions in the cluster:
 //  1. First get the active consolidation decisions in the cluster and see if any decisions
 //     can be invalidated, removing the Underutilization condition from the nodeclaims if invalid.
 //  2. If there are no actively progressing consolidations, do not do anything until cluster
@@ -170,23 +169,14 @@ func (c *Controller) getActiveConsolidations(ctx context.Context) map[string]dis
 	return commands
 }
 
-// validates the nomination, if the nomination is not valid, we invalidate it and unmark all the candidates
-
-/*
-1. If a pod blocking eviction gets scheduled onto it,
-2. If budgets are blocking, we may not want to unmark
- 1. both ndb and pdb
-
-3. If the node is in the orchestration queue (e.g. expired/drifted)
-4. do-not-consolidate
-5. lack of labels
-6. nomination?
- 1. Could make a case that this shouldn’t matter
-
-7. If re-calculation of the command would require a different set of replacements and not save on cost
-*/
 // Returns true if the candidates should be unmarked if used to validate existing commands.
-// Returns a nil error if the candidates are valid
+// Returns a nil error if the candidates are valid.
+// This intentionally does a quick check rather than doing a scheduling simulation.
+// TODO @njtran ^ Probably needs to
+// Candidates are considered invalid if
+// 1. They're not disruptable from cluster state's perspective
+// 2. ConsolidateAfter is disabled
+// 3. NodePool Disruption Budgets do not allow any disruption
 func (c *Controller) validateCandidates(ctx context.Context, candidates ...*state.StateNode) (keepCondition bool, invalid error) {
 	newCandidates := lo.Filter(candidates, func(candidate *state.StateNode, _ int) bool {
 		return candidate.IsDisruptable(ctx, c.kubeClient, c.recorder) != nil
@@ -203,8 +193,8 @@ func (c *Controller) validateCandidates(ctx context.Context, candidates ...*stat
 	// 2. check if node disruption budgets allowed disruptions is 0
 	for npName := range nodePoolsToCandidates {
 		nodePool := nodePools[npName]
-		if nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
-			return false, fmt.Errorf("consolidation is not enabled for nodepool %s", npName)
+		if nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil || nodePool.Spec.Disruption.ConsolidationPolicy != v1beta1.ConsolidationPolicyWhenUnderutilized {
+			return false, fmt.Errorf("underutilization consolidation is not enabled for nodepool %s", npName)
 		}
 		// If the nodepool has no allowed disruptions, we know we can't disrupt this node
 		if c.cluster.AllowedNodePoolDisruptions(ctx, npName, c.clk) == 0 {
@@ -220,10 +210,10 @@ const maxBatchSize = 100
 // const singleTimeout = 3 * time.Minute
 // const multiTimeout = 1 * time.Minute
 
-// computeConsolidation will optimistically tries to find a consolidation decision. It will:
+// computeConsolidation optimistically tries to find a consolidation decision:
 //  1. Iterate through the candidate nodes one at a time
 //     a. If the node cannot be consolidated, continue to the next node in the list.
-//  2. If the first node can be consolidated, start increasing the batch size.
+//  2. If the currently considered node can be consolidated, start increasing the batch size.
 //  3. Increase the batch size by a factor of 2 for every valid scheduling simulation.
 //     a. With a max batch size of 100, this means the max number of scheduling simulations for each starting point will be
 //     1 -> 2 -> 4 -> 8 -> 16 -> 32 -> 64 -> 100 = 8
@@ -262,7 +252,7 @@ func (c *Controller) computeConsolidation(ctx context.Context) ([]*state.StateNo
 			return candidates[i:lastValidMax], nil
 		}
 	}
-	// If we reach here, this means we never found a consolidation decision.
+	// If we reach here, this means we never found a consolidation decision, so we return no candidates.
 	return nil, nil
 }
 
@@ -346,16 +336,6 @@ func (c *Controller) analyzeResults(ctx context.Context, results scheduling.Resu
 		}
 		return false, nil
 	}
-
-	// // We are consolidating a node from OD -> [OD,Spot] but have filtered the instance types by cost based on the
-	// // assumption, that the spot variant will launch. We also need to add a requirement to the node to ensure that if
-	// // spot capacity is insufficient we don't replace the node with a more expensive on-demand node.  Instead the launch
-	// // should fail and we'll just leave the node alone.
-	// ctReq := results.NewNodeClaims[0].Requirements.Get(v1beta1.CapacityTypeLabelKey)
-	// if ctReq.Has(v1beta1.CapacityTypeSpot) && ctReq.Has(v1beta1.CapacityTypeOnDemand) {
-	// 	results.NewNodeClaims[0].Requirements.Add(scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, v1beta1.CapacityTypeSpot))
-	// }
-
 	return true, nil
 }
 
@@ -410,62 +390,8 @@ func (c *Controller) getCandidatePrices(ctx context.Context, candidates ...*stat
 	return price, nil
 }
 
-// BuildNodePoolMap builds a nodePoolName -> nodePool map and a nodePoolName -> instanceName -> instance type map
-func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[string]*v1beta1.NodePool, map[string]map[string]*cloudprovider.InstanceType, error) {
-	nodePoolMap := map[string]*v1beta1.NodePool{}
-	nodePoolList := &v1beta1.NodePoolList{}
-	if err := kubeClient.List(ctx, nodePoolList); err != nil {
-		return nil, nil, fmt.Errorf("listing node pools, %w", err)
-	}
-	nodePoolToInstanceTypesMap := map[string]map[string]*cloudprovider.InstanceType{}
-	for i := range nodePoolList.Items {
-		np := &nodePoolList.Items[i]
-		nodePoolMap[np.Name] = np
-
-		nodePoolInstanceTypes, err := cloudProvider.GetInstanceTypes(ctx, np)
-		if err != nil {
-			// don't error out on building the node pool, we just won't be able to handle any nodes that
-			// were created by it
-			logging.FromContext(ctx).Errorf("listing instance types for %s, %s", np.Name, err)
-			continue
-		}
-		if len(nodePoolInstanceTypes) == 0 {
-			continue
-		}
-		nodePoolToInstanceTypesMap[np.Name] = map[string]*cloudprovider.InstanceType{}
-		for _, it := range nodePoolInstanceTypes {
-			nodePoolToInstanceTypesMap[np.Name][it.Name] = it
-		}
-	}
-	return nodePoolMap, nodePoolToInstanceTypesMap, nil
-}
-
-// // helpers
-// func (c *Controller) refreshDataMappings(ctx context.Context) error {
-// 	if err := c.refreshNodePools(ctx); err != nil {
-// 		return err
-// 	}
-// 	if err := c.refreshInstanceTypeMapping(ctx); err != nil {
-// 		return err
-// 	}
-// 	return nil
-// }
-
-// func (c *Controller) refreshNodePools(ctx context.Context) error {
-// 	nodePoolMap := map[string]*v1beta1.NodePool{}
-// 	nodePoolList := &v1beta1.NodePoolList{}
-// 	c.cluster.NodePools()
-// 	if err := c.kubeClient.List(ctx, nodePoolList); err != nil {
-// 		return fmt.Errorf("listing node pools, %w", err)
-// 	}
-// 	for i := range nodePoolList.Items {
-// 		np := &nodePoolList.Items[i]
-// 		nodePoolMap[np.Name] = np
-// 	}
-// 	c.nodePools = nodePoolMap
-// 	return nil
-// }
-
+// refreshInstanceTypeMapping tries to update the Controller's NodePoolToInstanceTypesMap
+// If the NodePool's instance types can't be discovered, the data is simply omitted.
 func (c *Controller) refreshInstanceTypeMapping(ctx context.Context) {
 	nodePoolToInstanceTypesMap := map[string]map[string]*cloudprovider.InstanceType{}
 	var errs error
