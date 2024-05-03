@@ -5,7 +5,7 @@ on:
   pull_request:
   workflow_dispatch:
 jobs:
-  presubmit:
+  test-kind:
     permissions:
       issues: write
     runs-on: ubuntu-latest
@@ -20,39 +20,27 @@ jobs:
     - name: Kind Cluster
       uses: helm/kind-action@v1.10.0
     - name: check kind cluster
+      shell: bash
       run: |
         kubectl config current-context
         kubectl get nodes
     - name: Enable the actionlint matcher
+      shell: bash
       run: echo "::add-matcher::.github/actionlint-matcher.json"
-    - run: K8S_VERSION=${{ matrix.k8sVersion }} make presubmit
-    - name: Send coverage
-      # should only send converage once https://docs.coveralls.io/parallel-builds
-      if: matrix.k8sVersion == '1.29.x'
-      env:
-        COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: goveralls -coverprofile=coverage.out -service=github
     - name: install pyroscope dependency
+      shell: bash
       run: | 
         curl -fL https://github.com/grafana/pyroscope/releases/download/v1.1.5/profilecli_1.1.5_linux_amd64.tar.gz | tar xvz
         chmod +x profilecli
         sudo mv profilecli /usr/local/bin
-    - name: test
-      run: |
-        kubectl cluster-info
-        kubectl get storageclass standard
-        ls
-        echo $github_workspace
-        echo "checking karpenter folder"
-        mv ./Makefile_substitute ./karpenter/Makefile
-        ls ./karpenter/
-        cd ./karpenter/
     - name: install kwok and controller
+      shell: bash
       run: |
         make toolchain
         make install-kwok
-        KWOK_REPO=kind.local make apply
+        KWOK_REPO=kind.local KIND_CLUSTER_NAME=chart-testing make apply-with-kind
     - name: install prometheus and grafana
+      shell: bash
       run: |
         helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
         helm repo add grafana https://grafana.github.io/helm-charts
@@ -66,6 +54,7 @@ jobs:
         echo "Installed prometheus"
         kubectl --namespace prometheus get pods -l "release=prometheus"
     - name: enable profiling
+      shell: bash
       run: |
         kubectl annotate -n kube-system pods profiles.grafana.com/memory.scrape="true" -l app.kubernetes.io/name="karpenter"
         kubectl annotate -n kube-system pods profiles.grafana.com/memory.port="8000" -l app.kubernetes.io/name="karpenter"
@@ -77,6 +66,7 @@ jobs:
         kubectl annotate -n kube-system pods profiles.grafana.com/goroutine.port="8000" -l app.kubernetes.io/name="karpenter"
         # Testing out pyroscope for profiling
     - name: apply pyroscope 
+      shell: bash
       run: |
         helm -n kube-system install pyroscope grafana/pyroscope
         #Setup Metrics Endpoint
@@ -99,6 +89,7 @@ jobs:
               path: /metrics
         EOF
     - name: apply nodepool 
+      shell: bash
       run: |
         # Setup node pool
         cat <<EOF | envsubst | kubectl apply -f -
@@ -128,11 +119,13 @@ jobs:
             expireAfter: 720h # 30 * 24h = 720h
         EOF
     - name: ping cluster
+      shell: bash
       run: | 
         kubectl get pods -n kube-system | grep karpenter 
         kubectl get nodepools
         kubectl get pods -A
     - name: cleanup 
+      shell: bash
       run: | 
         kubectl delete nodepools --all 
         make delete
