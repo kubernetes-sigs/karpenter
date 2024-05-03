@@ -33,17 +33,6 @@ jobs:
         curl -fL https://github.com/grafana/pyroscope/releases/download/v1.1.5/profilecli_1.1.5_linux_amd64.tar.gz | tar xvz
         chmod +x profilecli
         sudo mv profilecli /usr/local/bin
-    - name: test
-      shell: bash
-      run: |
-        kubectl cluster-info
-        kubectl get storageclass standard
-        ls
-        echo "$github_workspace"
-        echo "checking karpenter folder"
-        mv ./Makefile_substitute ./karpenter/Makefile
-        ls ./karpenter/
-        cd ./karpenter/
     - name: install kwok and controller
       shell: bash
       run: |
