@@ -101,7 +101,7 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 	defer func() {
 		ClusterStateSynced.Set(lo.Ternary[float64](synced, 1, 0))
 		if c.em.Alarm(synced) {
-			logging.FromContext(ctx).Infof("cluster state is out of sync for %v", time.Since(c.em.LastResolved()))
+			logging.FromContext(ctx).Infof("cluster state is out of sync for the last %v", time.Since(c.em.LastResolved()))
 		}
 
 	}()
