@@ -1,4 +1,4 @@
-name: presubmit
+name: test-kind
 on:
   push:
     branches: [main]
