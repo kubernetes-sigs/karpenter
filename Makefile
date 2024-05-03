@@ -20,7 +20,7 @@ uninstall-kwok: ## Uninstall kwok provider
 	UNINSTALL_KWOK=true ./hack/install-kwok.sh
 
 build-with-kind: 
-	$(eval CONTROLLER_IMG=$(shell $(WITH_GOFLAGS) KO_DOCKER_REPO="$(KWOK_REPO)" ko build -B sigs.k8s.io/karpenter/kwok))
+	$(eval CONTROLLER_IMG=$(shell $(WITH_GOFLAGS) KO_DOCKER_REPO="$(KWOK_REPO)" ko build sigs.k8s.io/karpenter/kwok))
 	$(eval IMG_REPOSITORY=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 1 | cut -d ":" -f 1))
 	$(eval IMG_TAG=latest)
 
