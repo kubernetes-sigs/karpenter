@@ -5,7 +5,7 @@ on:
   pull_request:
   workflow_dispatch:
 jobs:
-  presubmit:
+  test-kind:
     permissions:
       issues: write
     runs-on: ubuntu-latest
