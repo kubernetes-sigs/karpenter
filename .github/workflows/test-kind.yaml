@@ -1,0 +1,140 @@
+name: presubmit
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+jobs:
+  presubmit:
+    permissions:
+      issues: write
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        k8sVersion: ["1.29.x" ]
+    steps:
+    - uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
+    - uses: ./.github/actions/install-deps
+      with:
+          k8sVersion: ${{ matrix.k8sVersion }}
+    - name: Kind Cluster
+      uses: helm/kind-action@v1.10.0
+    - name: check kind cluster
+      run: |
+        kubectl config current-context
+        kubectl get nodes
+    - name: Enable the actionlint matcher
+      run: echo "::add-matcher::.github/actionlint-matcher.json"
+    - run: K8S_VERSION=${{ matrix.k8sVersion }} make presubmit
+    - name: Send coverage
+      # should only send converage once https://docs.coveralls.io/parallel-builds
+      if: matrix.k8sVersion == '1.29.x'
+      env:
+        COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: goveralls -coverprofile=coverage.out -service=github
+    - name: install pyroscope dependency
+      run: | 
+        curl -fL https://github.com/grafana/pyroscope/releases/download/v1.1.5/profilecli_1.1.5_linux_amd64.tar.gz | tar xvz
+        chmod +x profilecli
+        sudo mv profilecli /usr/local/bin
+    - name: test
+      run: |
+        kubectl cluster-info
+        kubectl get storageclass standard
+        ls
+        echo $github_workspace
+        echo "checking karpenter folder"
+        mv ./Makefile_substitute ./karpenter/Makefile
+        ls ./karpenter/
+        cd ./karpenter/
+    - name: install kwok and controller
+      run: |
+        make toolchain
+        make install-kwok
+        KWOK_REPO=kind.local make apply
+    - name: install prometheus and grafana
+      run: |
+        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+        helm repo add grafana https://grafana.github.io/helm-charts
+        helm repo update
+        kubectl create namespace prometheus
+        helm upgrade --install prometheus prometheus-community/kube-prometheus-stack -n prometheus \
+          --set "kubelet.serviceMonitor.cAdvisorRelabelings[0].targetLabel=metrics_path" \
+          --set "kubelet.serviceMonitor.cAdvisorRelabelings[0].action=replace" \
+          --set "kubelet.serviceMonitor.cAdvisorRelabelings[0].sourceLabels[0]=__metrics_path__" \
+          --wait
+        echo "Installed prometheus"
+        kubectl --namespace prometheus get pods -l "release=prometheus"
+    - name: enable profiling
+      run: |
+        kubectl annotate -n kube-system pods profiles.grafana.com/memory.scrape="true" -l app.kubernetes.io/name="karpenter"
+        kubectl annotate -n kube-system pods profiles.grafana.com/memory.port="8000" -l app.kubernetes.io/name="karpenter"
+
+        kubectl annotate -n kube-system pods profiles.grafana.com/cpu.scrape="true" -l app.kubernetes.io/name="karpenter"
+        kubectl annotate -n kube-system pods profiles.grafana.com/cpu.port="8000" -l app.kubernetes.io/name="karpenter"
+
+        kubectl annotate -n kube-system pods profiles.grafana.com/goroutine.scrape="true" -l app.kubernetes.io/name="karpenter"
+        kubectl annotate -n kube-system pods profiles.grafana.com/goroutine.port="8000" -l app.kubernetes.io/name="karpenter"
+        # Testing out pyroscope for profiling
+    - name: apply pyroscope 
+      run: |
+        helm -n kube-system install pyroscope grafana/pyroscope
+        #Setup Metrics Endpoint
+        cat <<EOF | envsubst | kubectl apply -f -
+        apiVersion: monitoring.coreos.com/v1
+        kind: ServiceMonitor
+        metadata:
+          name: karpenter
+          labels:
+            release: prometheus
+        spec:
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: karpenter
+          namespaceSelector:
+            matchNames:
+              - kube-system
+          endpoints:
+            - port: "8000"
+              path: /metrics
+        EOF
+    - name: apply nodepool 
+      run: |
+        # Setup node pool
+        cat <<EOF | envsubst | kubectl apply -f -
+        apiVersion: karpenter.sh/v1beta1
+        kind: NodePool
+        metadata:
+          name: default
+        spec:
+          template:
+            spec:
+              requirements:
+                - key: kubernetes.io/arch
+                  operator: In
+                  values: ["amd64"]
+                - key: kubernetes.io/os
+                  operator: In
+                  values: ["linux"]
+                - key: karpenter.sh/capacity-type
+                  operator: In
+                  values: ["spot"]
+              nodeClassRef:
+                name: nil
+          limits:
+            cpu: 1500
+          disruption:
+            consolidationPolicy: WhenUnderutilized
+            expireAfter: 720h # 30 * 24h = 720h
+        EOF
+    - name: ping cluster
+      run: | 
+        kubectl get pods -n kube-system | grep karpenter 
+        kubectl get nodepools
+        kubectl get pods -A
+    - name: cleanup 
+      run: | 
+        kubectl delete nodepools --all 
+        make delete
+        make uninstall-kwok
+        
