@@ -44,23 +44,40 @@ var _ = Describe("ErrorStateMonitor", func() {
 	})
 
 	Describe("Alarm", func() {
-		Context("when the actual state matches the goal state", func() {
-			It("should reset the lastResolved time and not alarm", func() {
-				Expect(monitor.Alarm("synced")).To(BeFalse())
-				Expect(monitor.LastResolved()).To(Equal(mockClock.Now()))
+		Context("when the actual state does not match the goal state and the error threshold is exceeded", func() {
+			It("should trigger an alarm as soon as the error threshold is exceeded", func() {
+				// Move time to exceed the error threshold but not the interval
+				mockClock.SetTime(mockClock.Now().Add(1*time.Minute + 1*time.Second))
+				Expect(monitor.Alarm("unsynced")).To(BeTrue())
 			})
 		})
 
-		Context("when the actual state does not match the goal state", func() {
-			It("should alarm after threshold and interval have passed", func() {
-				mockClock.SetTime(mockClock.Now().Add(61 * time.Second))
+		Context("subsequent alarms after the first", func() {
+			BeforeEach(func() {
+				// Set up initial condition: First alarm triggered by exceeding error threshold
+				mockClock.SetTime(mockClock.Now().Add(1*time.Minute + 1*time.Second))
+				monitor.Alarm("unsynced")
+			})
+
+			It("should not trigger a subsequent alarm until the interval has passed since the last alarm", func() {
+
+				mockClock.SetTime(mockClock.Now().Add(3 * time.Minute))
 				Expect(monitor.Alarm("unsynced")).To(BeFalse())
-				currentTime := mockClock.Now()
-				mockClock.SetTime(currentTime.Add(5 * time.Minute))
+				mockClock.SetTime(mockClock.Now().Add(1*time.Minute + 59*time.Second))
+				Expect(monitor.Alarm("unsynced")).To(BeFalse())
+				// We exceed the 5 minute interval, we should fire an alarm
+				mockClock.SetTime(mockClock.Now().Add(2 * time.Second))
 				Expect(monitor.Alarm("unsynced")).To(BeTrue())
-				Expect(monitor.LastAlarmed()).To(Equal(mockClock.Now()))
+			})
+
+			It("should alarm when reaching errorThreshold again after we have synced", func() {
+				// If state reaches the goal, future uses of the same monitor getting out of state
+				// should fire right as errorThreshold is reached
+				Expect(monitor.Alarm("synced")).To(BeFalse())
+
+				mockClock.SetTime(mockClock.Now().Add(1*time.Minute + 1*time.Second))
+				Expect(monitor.Alarm("unsynced")).To(BeTrue())
 			})
 		})
 	})
-
 })

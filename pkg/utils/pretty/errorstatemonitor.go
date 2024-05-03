@@ -34,28 +34,28 @@ type ErrorStateMonitor struct {
 }
 
 func NewErrorStateMonitor(goal interface{}, errorThreshold, interval time.Duration, clk clock.Clock) *ErrorStateMonitor {
-	now := clk.Now()
 	return &ErrorStateMonitor{
 		goal:           goal,
 		errorThreshold: errorThreshold,
 		interval:       interval,
 		clk:            clk,
-		lastResolved:   now,
-		lastAlarmed:    now,
+		lastResolved:   clk.Now(),
+		lastAlarmed:    time.Time{},
 	}
 }
 
 // Alarm returns a boolean value on if we need to alarm based on  if our actual state has been out of sync with our goal state for longer than the allowed errorThreshold
 func (e *ErrorStateMonitor) Alarm(actual any) bool {
 	now := e.clk.Now()
-
 	if actual == e.goal {
 		e.lastResolved = now
+		// When reaching the goal state, we want all future alarms to fire when reaching errorThreshold
+		// so we should reset lastAlarmed here.
+		e.lastAlarmed = time.Time{}
 		return false
 	}
-
-	if now.Sub(e.lastResolved) >= e.errorThreshold {
-		if now.Sub(e.lastAlarmed) > e.interval {
+	if now.Sub(e.lastResolved) > e.errorThreshold {
+		if e.lastAlarmed.IsZero() || now.Sub(e.lastAlarmed) > e.interval {
 			e.lastAlarmed = now
 			return true
 		}
