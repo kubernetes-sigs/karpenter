@@ -46,7 +46,8 @@ jobs:
         kubectl cluster-info
         kubectl get storageclass standard
         ls
-        echo $github_workspace
+        echo "$github_workspace"
+        echo "checking karpenter folder"
         mv ./Makefile_substitute ./karpenter/Makefile
         ls ./karpenter/
         cd ./karpenter/
