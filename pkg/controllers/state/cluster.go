@@ -58,9 +58,7 @@ type Cluster struct {
 	nodeClaimNameToProviderID map[string]string               // node claim name -> provider id
 	daemonSetPods             sync.Map                        // daemonSet -> existing pod
 
-	lastSynced time.Time
-	cm         *pretty.ChangeMonitor
-
+	em             *pretty.ErrorStateMonitor
 	clusterStateMu sync.RWMutex // Separate mutex as this is called in some places that mu is held
 	// A monotonically increasing timestamp representing the time state of the
 	// cluster with respect to consolidation. This increases when something has
@@ -79,14 +77,11 @@ const (
 )
 
 func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudProvider) *Cluster {
-	cm := pretty.NewChangeMonitor()
-	cm.Reconfigure(AbnormalClusterSyncLoggingInterval)
 	return &Cluster{
 		clock:                     clk,
 		kubeClient:                client,
 		cloudProvider:             cp,
-		lastSynced:                time.Now(),
-		cm:                        cm,
+		em:                        pretty.NewErrorStateMonitor(true, AbnormalClusterSyncDuration, AbnormalClusterSyncLoggingInterval, clk),
 		nodes:                     map[string]*StateNode{},
 		bindings:                  map[types.NamespacedName]string{},
 		daemonSetPods:             sync.Map{},
@@ -105,12 +100,8 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 	// Set the metric to whatever the result of the Synced() call is
 	defer func() {
 		ClusterStateSynced.Set(lo.Ternary[float64](synced, 1, 0))
-		if synced {
-			c.lastSynced = time.Now()
-		}
-		// If we have been out of sync for a while, and we haven't logged about it recently, log it
-		if time.Since(c.lastSynced) > AbnormalClusterSyncDuration && c.cm.HasChanged("ClusterSynced", synced) {
-			logging.FromContext(ctx).Infof("cluster state is out of sync for %v", time.Since(c.lastSynced))
+		if c.em.Alarm(synced) {
+			logging.FromContext(ctx).Infof("cluster state is out of sync for %v", time.Since(c.em.LastResolved()))
 		}
 
 	}()
