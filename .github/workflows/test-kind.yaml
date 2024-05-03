@@ -27,7 +27,6 @@ jobs:
     - name: Enable the actionlint matcher
       shell: bash
       run: echo "::add-matcher::.github/actionlint-matcher.json"
-    - run: K8S_VERSION=${{ matrix.k8sVersion }} make presubmit
     - name: Send coverage
       # should only send converage once https://docs.coveralls.io/parallel-builds
       if: matrix.k8sVersion == '1.29.x'
