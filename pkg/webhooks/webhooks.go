@@ -42,8 +42,6 @@ import (
 	"knative.dev/pkg/webhook/resourcesemantics/validation"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 
-	logctrl "sigs.k8s.io/controller-runtime/pkg/log"
-
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
@@ -92,7 +90,7 @@ func Start(ctx context.Context, cfg *rest.Config, ctors ...knativeinjection.Cont
 	ctx, startInformers := knativeinjection.EnableInjectionOrDie(ctx, cfg)
 	logger := logging.NewLogger(ctx, component).Sugar()
 	ctx = knativelogging.WithLogger(ctx, logger)
-	cmw := sharedmain.SetupConfigMapWatchOrDie(ctx, knativelogging.FromContext(ctx))
+	cmw := sharedmain.SetupConfigMapWatchOrDie(ctx, logger)
 	controllers, webhooks := sharedmain.ControllersAndWebhooksFromCtors(ctx, cmw, ctors...)
 
 	// Many of the webhooks rely on configuration, e.g. configurable defaults, feature flags.
@@ -102,7 +100,7 @@ func Start(ctx context.Context, cfg *rest.Config, ctors ...knativeinjection.Cont
 	if err := cmw.Start(ctx.Done()); err != nil {
 		// The controller-runtime log package lacks native support for fatal level logging,
 		// hence we utilize os.Exit() to signify encountering a fatal error.
-		logctrl.Log.Error(err, "Failed to start configuration manager")
+		logger.Error(err, "Failed to start configuration manager")
 		os.Exit(1)
 	}
 
@@ -126,7 +124,7 @@ func Start(ctx context.Context, cfg *rest.Config, ctors ...knativeinjection.Cont
 		if err != nil {
 			// The controller-runtime log package lacks native support for fatal level logging,
 			// hence we utilize os.Exit() to signify encountering a fatal error.
-			logctrl.Log.Error(err, "Failed to create webhook")
+			logger.Error(err, "Failed to create webhook")
 			os.Exit(1)
 		}
 		eg.Go(func() error {
