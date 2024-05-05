@@ -52,9 +52,16 @@ spec:
   disruption:
     budgets:
       - nodes: 0
-        schedule: "0 9 * * mon-fri"
-        duration: 8h
+        schedule: "0 10 * * mon-fri"
+        duration: 16h
+        reasons:
+          - drifted
+          - expired
+      - nodes: 100%
+        reasons:
+          - empty
       - nodes: "10%"
+      - nodes: 5
     expireAfter: 720h | Never
     consolidationPolicy: WhenUnderutilized | WhenEmpty
     consolidateAfter: 1m | Never # Added to allow additional control over consolidation aggressiveness
@@ -64,7 +71,6 @@ spec:
     memory: 1000Gi
 status:
   conditions:
-    # Abnormal True Conditions
     - lastTransitionTime: "2024-02-02T19:54:34Z"
       status: "True"
       type: NodeClassReady
@@ -72,8 +78,8 @@ status:
       status: "True"
       type: Ready
   resources:
-    cpu: "2"
-    memory: "100Mi"
+    cpu: "20"
+    memory: "8192Mi"
     ephemeral-storage: "100Gi"
 ```
 
@@ -213,8 +219,8 @@ spec:
       minValues: 2
   resources: 
     requests:
-      cpu: "1"
-      memory: "100Mi"
+      cpu: "20"
+      memory: "8192Mi"
 status:
   allocatable:
     cpu: 1930m

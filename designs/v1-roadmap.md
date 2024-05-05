@@ -51,7 +51,7 @@ Karpenter needs to stabalize a set of metrics, status conditions, and events tha
 
 **Category:** Breaking
 
-Karpenter wants to expand the usage of the `karpenter.sh/disruption=disrupting:NoSchedule` taint that it currently leverages to cordon nodes during disruption, to also taint nodes with a `karpenterh.sh/disruption-candidate:NoSchedule` taint. By tainting nodes when they become candidates (past expiry, drifted, etc.), we ensure that we will launch new nodes when we get more pods that join the cluster, reducing the chance that we will continue to get `karpenter.sh/do-not-disrupt` pods that continue to schedule to the same node.
+Karpenter wants to expand the usage of the `karpenter.sh/disruption=disrupting:NoSchedule` taint that it currently leverages to cordon nodes during disruption, to also taint nodes with a `karpenter.sh/disruption-candidate:NoSchedule` taint. By tainting nodes when they become candidates (past expiry, drifted, etc.), we ensure that we will launch new nodes when we get more pods that join the cluster, reducing the chance that we will continue to get `karpenter.sh/do-not-disrupt` pods that continue to schedule to the same node.
 
 #### Tasks
 
@@ -170,6 +170,8 @@ Karpenter has [used knative](https://github.com/knative/pkg) from the beginning 
 As part of Karpenter completely removing its dependency on Knative, we need to remove our coupling on the knative webhook certificate reconciliation logic. Currently, we leverage knative’s webhook reconciler to reconcile a certificate needed to enable the TLS webhook traffic. To remove this dependency that `kubernetes-sigs/karpenter` has on the knative webhook reconciliation logic, Karpenter should create a separate `go.mod` for the webhook-specific logic.
 
 Cloud Providers that want to leverage the webhook for their users can use the knative webhook in a separate container from the Karpenter controller. This ensures that the knative client-go versions will not affect the client-go versions used by the main Karpenter controller. Practically, we can drop support for the webhook container entirely when Karpenter stops supporting K8s versions < 1.25 since K8s versions 1.25+ have support for CustomResourceValidations driven through Common Expression Language.
+
+[`Azure/karpenter-provider-azure`](https://github.com/Azure/karpenter) dropped support for Kubernetes 1.25 since AKS [dropped support for this version in 2023.](https://learn.microsoft.com/en-us/azure/aks/supported-kubernetes-versions?tabs=azure-cli#aks-kubernetes-release-calendar) [`aws/karpenter-provider-aws`](https://github.com/aws/karpenter-provider-aws) still supports versions [all the way back to Kubernetes 1.23 due to extended support](https://docs.aws.amazon.com/eks/latest/userguide/kubernetes-versions.html). The AWS provider will continue to support versions prior to 1.25 until January 31, 2025. At this point, if not other providers support versions prior to 1.25, we will drop support for webhooks in [`kubernetes-sigs/karpenter`](https://github.com/kubernetes-sigs/karpenter).
 
 #### Tasks
 
