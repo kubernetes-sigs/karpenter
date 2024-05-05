@@ -90,7 +90,7 @@ func NewConfigValidationWebhook(ctx context.Context, _ configmap.Watcher) *contr
 // https://github.com/knative/pkg/blob/0f52db700d63/injection/sharedmain/main.go#L227
 func Start(ctx context.Context, cfg *rest.Config, ctors ...knativeinjection.ControllerConstructor) {
 	ctx, startInformers := knativeinjection.EnableInjectionOrDie(ctx, cfg)
-	logger := logging.NewLogger(ctx, component)
+	logger := logging.NewLogger(ctx, component).Sugar()
 	ctx = knativelogging.WithLogger(ctx, logger)
 	cmw := sharedmain.SetupConfigMapWatchOrDie(ctx, knativelogging.FromContext(ctx))
 	controllers, webhooks := sharedmain.ControllersAndWebhooksFromCtors(ctx, cmw, ctors...)
@@ -118,7 +118,7 @@ func Start(ctx context.Context, cfg *rest.Config, ctors ...knativeinjection.Cont
 			ConfigMap:      lo.Must(metrics.NewObservabilityConfigFromConfigMap(nil)).GetConfigMap().Data,
 			Secrets:        sharedmain.SecretFetcher(ctx),
 			PrometheusPort: options.FromContext(ctx).WebhookMetricsPort,
-		}, logging.NewLogger(ctx, component)))
+		}, logger))
 		// Register webhook metrics
 		webhook.RegisterMetrics()
 

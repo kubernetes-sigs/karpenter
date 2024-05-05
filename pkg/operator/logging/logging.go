@@ -81,15 +81,15 @@ func DefaultZapConfig(ctx context.Context, component string) zap.Config {
 }
 
 // NewLogger returns a configured *zap.SugaredLogger
-func NewLogger(ctx context.Context, component string) *zap.SugaredLogger {
+func NewLogger(ctx context.Context, component string) *zap.Logger {
 	if logger := loggerFromFile(ctx, component); logger != nil {
-		logger.Debugf("loaded log configuration from file %q", loggerCfgFilePath)
+		logger.Debug(fmt.Sprintf("loaded log configuration from file %q", loggerCfgFilePath))
 		return logger
 	}
 	return defaultLogger(ctx, component)
 }
 
-func WithCommit(logger *zap.SugaredLogger) *zap.SugaredLogger {
+func WithCommit(logger *zap.Logger) *zap.Logger {
 	revision := changeset.Get()
 	if revision == changeset.Unknown {
 		logger.Info("Unable to read vcs.revision from binary")
@@ -99,11 +99,11 @@ func WithCommit(logger *zap.SugaredLogger) *zap.SugaredLogger {
 	return logger.With(zap.String(logkey.Commit, revision))
 }
 
-func defaultLogger(ctx context.Context, component string) *zap.SugaredLogger {
-	return WithCommit(lo.Must(DefaultZapConfig(ctx, component).Build()).Sugar()).Named(component)
+func defaultLogger(ctx context.Context, component string) *zap.Logger {
+	return WithCommit(lo.Must(DefaultZapConfig(ctx, component).Build())).Named(component)
 }
 
-func loggerFromFile(ctx context.Context, component string) *zap.SugaredLogger {
+func loggerFromFile(ctx context.Context, component string) *zap.Logger {
 	raw, err := os.ReadFile(loggerCfgFilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -121,7 +121,7 @@ func loggerFromFile(ctx context.Context, component string) *zap.SugaredLogger {
 	if raw != nil {
 		cfg.Level = lo.Must(zap.ParseAtomicLevel(string(raw)))
 	}
-	return WithCommit(lo.Must(cfg.Build()).Sugar()).Named(component)
+	return WithCommit(lo.Must(cfg.Build())).Named(component)
 }
 
 type ignoreDebugEventsSink struct {

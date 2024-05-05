@@ -55,7 +55,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	zapr "sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"github.com/go-logr/zapr"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -135,7 +135,7 @@ func NewOperator() (context.Context, *Operator) {
 	kubernetesInterface := kubernetes.NewForConfigOrDie(config)
 
 	// Logging
-	logger := zapr.New().WithName(component)
+	logger := zapr.NewLogger(logging.NewLogger(ctx, component))
 	log.SetLogger(logger)
 	klog.SetLogger(logger)
 
