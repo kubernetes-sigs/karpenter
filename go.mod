@@ -14,8 +14,8 @@ require (
 	github.com/onsi/gomega v1.33.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/prometheus/client_golang v1.19.0
-	github.com/qdm12/reprint v0.0.0-20200326205758-722754a53494
 	github.com/prometheus/client_model v0.6.1
+	github.com/qdm12/reprint v0.0.0-20200326205758-722754a53494
 	github.com/samber/lo v1.39.0
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.0
