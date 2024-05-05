@@ -88,7 +88,7 @@ func GetVolumes(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (Vol
 		// computing limits, otherwise Karpenter may never be able to update its cluster state.
 		if err != nil {
 			if errors.IsNotFound(err) {
-				log.FromContext(ctx).WithValues("pod", pod.Name, "volume", volume.Name).Error(err, "failed tracking CSI volume limits for volume, %w")
+				log.FromContext(ctx).WithValues("pod", pod.Name, "volume", volume.Name).Error(err, "failed tracking CSI volume limits for volume")
 				continue
 			}
 			return nil, fmt.Errorf("failed updating volume limits, %w", err)
@@ -145,7 +145,7 @@ func resolveDriver(ctx context.Context, kubeClient client.Client, pod *v1.Pod, v
 		//  2. The StorageClass never existed and was used to bind the PVC to an existing PV, but that PV was removed
 		// In either of these cases, we should ignore the PVC while computing limits and continue.
 		if errors.IsNotFound(err) {
-			log.FromContext(ctx).WithValues("pod", pod.Name, "volume", volumeName, "pvc", pvc.Name, "storageclass", storageClassName).V(1).Info("failed tracking CSI volume limits for volume with unbound PVC, %w")
+			log.FromContext(ctx).WithValues("pod", pod.Name, "volume", volumeName, "pvc", pvc.Name, "storageclass", storageClassName).V(1).Info(fmt.Sprintf("failed tracking CSI volume limits for volume with unbound PVC, %s", err))
 			return "", nil
 		}
 		return "", err

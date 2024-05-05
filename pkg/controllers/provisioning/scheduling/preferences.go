@@ -51,7 +51,7 @@ func (p *Preferences) Relax(ctx context.Context, pod *v1.Pod) bool {
 
 	for _, relaxFunc := range relaxations {
 		if reason := relaxFunc(pod); reason != nil {
-			log.FromContext(ctx).V(1).Info("relaxing soft constraints for pod since it previously failed to schedule, %s", ptr.StringValue(reason))
+			log.FromContext(ctx).V(1).Info(fmt.Sprintf("relaxing soft constraints for pod since it previously failed to schedule, %s", ptr.StringValue(reason)))
 			return true
 		}
 	}

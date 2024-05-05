@@ -178,7 +178,7 @@ func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 			}}, fmt.Errorf("evicting pod %s/%s violates a PDB", key.Namespace, key.Name)))
 			return false
 		}
-		log.FromContext(ctx).Error(err, "evicting pod, %s")
+		log.FromContext(ctx).Error(err, "evicting pod")
 		return false
 	}
 	q.recorder.Publish(terminatorevents.EvictPod(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}))

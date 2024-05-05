@@ -159,7 +159,7 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*v1.Pod, error) {
 	}
 	return lo.Reject(pods, func(po *v1.Pod, _ int) bool {
 		if err := p.Validate(ctx, po); err != nil {
-			log.FromContext(ctx).WithValues("pod", client.ObjectKeyFromObject(po)).V(1).Info("ignoring pod, %s", err)
+			log.FromContext(ctx).WithValues("pod", client.ObjectKeyFromObject(po)).V(1).Info(fmt.Sprintf("ignoring pod, %s", err))
 			return true
 		}
 		p.consolidationWarnings(ctx, po)
@@ -199,7 +199,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	}
 	nodePoolList.Items = lo.Filter(nodePoolList.Items, func(n v1beta1.NodePool, _ int) bool {
 		if err := n.RuntimeValidate(); err != nil {
-			log.FromContext(ctx).WithValues("nodepool", n.Name).Error(err, "nodepool failed validation, %s")
+			log.FromContext(ctx).WithValues("nodepool", n.Name).Error(err, "nodepool failed validation")
 			return false
 		}
 		return n.DeletionTimestamp.IsZero()
@@ -221,7 +221,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 		if err != nil {
 			// we just log an error and skip the provisioner to prevent a single mis-configured provisioner from stopping
 			// all scheduling
-			log.FromContext(ctx).WithValues("nodepool", nodePool.Name).Error(err, "skipping, unable to resolve instance types, %s")
+			log.FromContext(ctx).WithValues("nodepool", nodePool.Name).Error(err, "skipping, unable to resolve instance types")
 			continue
 		}
 		if len(instanceTypeOptions) == 0 {
@@ -437,7 +437,7 @@ func (p *Provisioner) injectVolumeTopologyRequirements(ctx context.Context, pods
 	var schedulablePods []*v1.Pod
 	for _, pod := range pods {
 		if err := p.volumeTopology.Inject(ctx, pod); err != nil {
-			log.FromContext(ctx).WithValues("pod", client.ObjectKeyFromObject(pod)).Error(err, "getting volume topology requirements, %s")
+			log.FromContext(ctx).WithValues("pod", client.ObjectKeyFromObject(pod)).Error(err, "getting volume topology requirements")
 		} else {
 			schedulablePods = append(schedulablePods, pod)
 		}

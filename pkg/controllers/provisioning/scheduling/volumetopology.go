@@ -72,7 +72,7 @@ func (v *VolumeTopology) Inject(ctx context.Context, pod *v1.Pod) error {
 
 	log.FromContext(ctx).
 		WithValues("pod", client.ObjectKeyFromObject(pod)).
-		V(1).Info("adding requirements derived from pod volumes, %s", requirements)
+		V(1).Info(fmt.Sprintf("adding requirements derived from pod volumes, %s", requirements))
 	return nil
 }
 

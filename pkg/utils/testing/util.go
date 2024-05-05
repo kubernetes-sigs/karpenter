@@ -19,23 +19,17 @@ package testing
 import (
 	"context"
 
+	"github.com/go-logr/zapr"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
-
-	"knative.dev/pkg/logging"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// TestLogger gets a logger to use in unit and end to end tests
-func TestLogger(t zaptest.TestingT) *zap.SugaredLogger {
+// TestContextWithLogger returns a context with a logger to be used in tests
+func TestContextWithLogger(t zaptest.TestingT) context.Context {
 	opts := zaptest.WrapOptions(
 		zap.AddCaller(),
 		zap.Development(),
 	)
-
-	return zaptest.NewLogger(t, opts).Sugar()
-}
-
-// TestContextWithLogger returns a context with a logger to be used in tests
-func TestContextWithLogger(t zaptest.TestingT) context.Context {
-	return logging.WithLogger(context.Background(), TestLogger(t))
+	return log.IntoContext(context.Background(), zapr.NewLogger(zaptest.NewLogger(t, opts)))
 }

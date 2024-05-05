@@ -104,7 +104,7 @@ type Results struct {
 func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *state.Cluster) {
 	// Report failures and nominations
 	for p, err := range r.PodErrors {
-		log.FromContext(ctx).WithValues("pod", client.ObjectKeyFromObject(p)).Error(err, "Could not schedule pod, %s")
+		log.FromContext(ctx).WithValues("pod", client.ObjectKeyFromObject(p)).Error(err, "could not schedule pod")
 		recorder.Publish(PodFailedToScheduleEvent(p, err))
 	}
 	for _, existing := range r.ExistingNodes {
@@ -134,7 +134,7 @@ func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *
 	if existingCount == 0 {
 		return
 	}
-	log.FromContext(ctx).Info("computed %d unready node(s) will fit %d pod(s)", inflightCount, existingCount)
+	log.FromContext(ctx).Info(fmt.Sprintf("computed %d unready node(s) will fit %d pod(s)", inflightCount, existingCount))
 }
 
 // AllNonPendingPodsScheduled returns true if all pods scheduled.
@@ -223,7 +223,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) Results {
 		q.Push(pod, relaxed)
 		if relaxed {
 			if err := s.topology.Update(ctx, pod); err != nil {
-				log.FromContext(ctx).Error(err, "updating topology, %s")
+				log.FromContext(ctx).Error(err, "updating topology")
 			}
 		}
 	}
@@ -274,8 +274,8 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 				continue
 			} else if len(s.instanceTypes[nodeClaimTemplate.NodePoolName]) != len(instanceTypes) {
 
-				log.FromContext(ctx).V(1).WithValues("nodepool", nodeClaimTemplate.NodePoolName).Info("%d out of %d instance types were excluded because they would breach limits",
-					len(s.instanceTypes[nodeClaimTemplate.NodePoolName])-len(instanceTypes), len(s.instanceTypes[nodeClaimTemplate.NodePoolName]))
+				log.FromContext(ctx).V(1).WithValues("nodepool", nodeClaimTemplate.NodePoolName).Info(fmt.Sprintf("%d out of %d instance types were excluded because they would breach limits",
+					len(s.instanceTypes[nodeClaimTemplate.NodePoolName])-len(instanceTypes), len(s.instanceTypes[nodeClaimTemplate.NodePoolName])))
 			}
 		}
 		nodeClaim := NewNodeClaim(nodeClaimTemplate, s.topology, s.daemonOverhead[nodeClaimTemplate], instanceTypes)

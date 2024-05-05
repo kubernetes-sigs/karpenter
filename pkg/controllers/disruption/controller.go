@@ -185,7 +185,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 // 3. Add Command to orchestration.Queue to wait to delete the candiates.
 func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, schedulingResults scheduling.Results) error {
 	commandID := uuid.NewUUID()
-	log.FromContext(ctx).WithValues("command-id", commandID).Info("disrupting via %s %s", m.Type(), cmd)
+	log.FromContext(ctx).WithValues("command-id", commandID).Info(fmt.Sprintf("disrupting via %s %s", m.Type(), cmd))
 
 	stateNodes := lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode {
 		return c.StateNode
@@ -275,7 +275,7 @@ func (c *Controller) logAbnormalRuns(ctx context.Context) {
 	defer c.mu.Unlock()
 	for name, runTime := range c.lastRun {
 		if timeSince := c.clock.Since(runTime); timeSince > AbnormalTimeLimit {
-			log.FromContext(ctx).V(1).Info("abnormal time between runs of %s = %s", name, timeSince)
+			log.FromContext(ctx).V(1).Info(fmt.Sprintf("abnormal time between runs of %s = %s", name, timeSince))
 		}
 	}
 }
