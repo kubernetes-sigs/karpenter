@@ -116,7 +116,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	}
 	pods, err := node.Pods(ctx, kubeClient)
 	if err != nil {
-		log.FromContext(ctx).Error(err, "determining node pods")
+		log.FromContext(ctx).Error(fmt.Errorf("determining node pods, %w", err), "Disruption error")
 		return nil, fmt.Errorf("getting pods from state node, %w", err)
 	}
 	for _, po := range pods {
