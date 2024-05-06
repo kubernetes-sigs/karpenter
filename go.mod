@@ -5,13 +5,13 @@ go 1.22.2
 require (
 	github.com/Pallinder/go-randomdata v1.2.0
 	github.com/avast/retry-go v3.0.0+incompatible
-	github.com/docker/docker v26.1.0+incompatible
+	github.com/docker/docker v26.1.1+incompatible
 	github.com/go-logr/logr v1.4.1
 	github.com/go-logr/zapr v1.3.0
 	github.com/imdario/mergo v0.3.16
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/onsi/ginkgo/v2 v2.17.2
-	github.com/onsi/gomega v1.33.0
+	github.com/onsi/gomega v1.33.1
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/prometheus/client_golang v1.19.0
 	github.com/prometheus/client_model v0.6.1
@@ -19,7 +19,7 @@ require (
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/sync v0.7.0
-	golang.org/x/text v0.14.0
+	golang.org/x/text v0.15.0
 	golang.org/x/time v0.5.0
 	k8s.io/api v0.30.0
 	k8s.io/apiextensions-apiserver v0.30.0
