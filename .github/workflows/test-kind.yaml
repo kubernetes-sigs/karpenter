@@ -19,7 +19,7 @@ jobs:
       with:
           k8sVersion: ${{ matrix.k8sVersion }}
     - name: Kind Cluster
-      uses: helm/kind-action@v1.10.0
+      uses: helm/kind-action@0025e74a8c7512023d06dc019c617aa3cf561fde # v1.10.0
     - name: check kind cluster
       shell: bash
       run: |
