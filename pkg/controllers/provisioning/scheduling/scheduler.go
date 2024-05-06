@@ -329,7 +329,7 @@ func (s *Scheduler) calculateExistingNodeClaims(stateNodes []*state.StateNode, d
 	}
 	// Order the existing nodes for scheduling with initialized nodes first
 	// This is done specifically for consolidation where we want to make sure we schedule to initialized nodes
-	// before we attempt to schedule un-initialized ones
+	// before we attempt to schedule uninitialized ones
 	sort.SliceStable(s.existingNodes, func(i, j int) bool {
 		if s.existingNodes[i].Initialized() && !s.existingNodes[j].Initialized() {
 			return true

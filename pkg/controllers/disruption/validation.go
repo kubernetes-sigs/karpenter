@@ -165,7 +165,7 @@ func (v *Validation) ValidateCommand(ctx context.Context, cmd Command, candidate
 		return fmt.Errorf("simluating scheduling, %w", err)
 	}
 	if !results.AllNonPendingPodsScheduled() {
-		return NewValidationError(fmt.Errorf("all pending pods could not be scheduled"))
+		return NewValidationError(fmt.Errorf(results.NonPendingPodSchedulingErrors()))
 	}
 
 	// We want to ensure that the re-simulated scheduling using the current cluster state produces the same result.

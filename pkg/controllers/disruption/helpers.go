@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 
 	"github.com/samber/lo"
 
@@ -44,6 +45,8 @@ import (
 	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
+
+var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 
 //nolint:gocyclo
 func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
@@ -104,13 +107,33 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 				//    for this command, and we assume it will be successful. If it is not successful, the node will become
 				//    not terminating, and we will no longer need to consider these pods.
 				if _, ok := deletingNodePodKeys[client.ObjectKeyFromObject(p)]; !ok {
-					results.PodErrors[p] = fmt.Errorf("would schedule against a non-initialized node %s", n.Name())
+					results.PodErrors[p] = NewUninitializedNodeError(n)
 				}
 			}
 		}
 	}
-
 	return results, nil
+}
+
+// UninitializedNodeError tracks a special pod error for disruption where pods schedule to a node
+// that hasn't been initialized yet, meaning that we can't be confident to make a disruption decision based off of it
+type UninitializedNodeError struct {
+	*pscheduling.ExistingNode
+}
+
+func NewUninitializedNodeError(node *pscheduling.ExistingNode) *UninitializedNodeError {
+	return &UninitializedNodeError{ExistingNode: node}
+}
+
+func (u *UninitializedNodeError) Error() string {
+	var info []string
+	if u.NodeClaim != nil {
+		info = append(info, fmt.Sprintf("nodeclaim/%s", u.NodeClaim.Name))
+	}
+	if u.Node != nil {
+		info = append(info, fmt.Sprintf("node/%s", u.Node.Name))
+	}
+	return fmt.Sprintf("would schedule against uninitialized %s", strings.Join(info, ", "))
 }
 
 // instanceTypesAreSubset returns true if the lhs slice of instance types are a subset of the rhs.
