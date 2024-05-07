@@ -107,14 +107,10 @@ var _ = Describe("Emptiness", func() {
 		})
 	})
 	Context("Metrics", func() {
-		var eligibleNodesMetric string
 		var eligibleNodesEmptinessLabels = map[string]string{
 			"method":             "emptiness",
 			"consolidation_type": "",
 		}
-		BeforeEach(func() {
-			eligibleNodesMetric = ExpectFullyQualifiedNameFromCollector(disruption.EligibleNodesGauge)
-		})
 		It("should correctly report eligible nodes", func() {
 			pod := test.Pod()
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
@@ -129,7 +125,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 			wg.Wait()
 
-			ExpectMetricGaugeValue(eligibleNodesMetric, 0, eligibleNodesEmptinessLabels)
+			ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 0, eligibleNodesEmptinessLabels)
 
 			// delete pod and update cluster state, node should now be disruptable
 			ExpectDeleted(ctx, env.Client, pod)
@@ -140,7 +136,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 			wg.Wait()
 
-			ExpectMetricGaugeValue(eligibleNodesMetric, 1, eligibleNodesEmptinessLabels)
+			ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 1, eligibleNodesEmptinessLabels)
 		})
 	})
 	Context("Budgets", func() {

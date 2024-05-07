@@ -463,8 +463,13 @@ func ExpectOwnerReferenceExists(obj, owner client.Object) metav1.OwnerReference 
 	return or
 }
 
-func ExpectFullyQualifiedNameFromCollector(collector prometheus.Collector) string {
+// ExpectMetricName attempts to resolve a metric name from a collector. This function will work so long as the fully
+// qualified name is a single metric name. This holds true for the built in types, but may not for custom collectors.
+func ExpectMetricName(collector prometheus.Collector) string {
 	GinkgoHelper()
+
+	// Prometheus defines an async method to resolve the description for a collector. This is simpler than it looks,
+	// Describe just returns a string through the provided channel.
 	result := make(chan *prometheus.Desc)
 	var desc *prometheus.Desc
 	go func() {
@@ -476,6 +481,9 @@ func ExpectFullyQualifiedNameFromCollector(collector prometheus.Collector) strin
 	case <-time.After(time.Second):
 	}
 	Expect(desc).ToNot(BeNil())
+
+	// Extract the fully qualified name from the description string. This is just different enough from json that we
+	// need to parse with regex.
 	rgx := regexp.MustCompile(`^.*fqName:\s*"([^"]*).*$`)
 	matches := rgx.FindStringSubmatch(desc.String())
 	Expect(len(matches)).To(Equal(2))
@@ -509,15 +517,17 @@ func FindMetricWithLabelValues(name string, labelValues map[string]string) (*pro
 	return nil, false
 }
 
-func ExpectMetricGaugeValue(metricName string, expectedValue float64, labels map[string]string) {
+func ExpectMetricGaugeValue(collector prometheus.Collector, expectedValue float64, labels map[string]string) {
 	GinkgoHelper()
+	metricName := ExpectMetricName(collector)
 	metric, ok := FindMetricWithLabelValues(metricName, labels)
 	Expect(ok).To(BeTrue(), "Metric "+metricName+" should be available")
 	Expect(lo.FromPtr(metric.Gauge.Value)).To(Equal(expectedValue), "Metric "+metricName+" should have the expected value")
 }
 
-func ExpectMetricCounterValue(metricName string, expectedValue float64, labels map[string]string) {
+func ExpectMetricCounterValue(collector prometheus.Collector, expectedValue float64, labels map[string]string) {
 	GinkgoHelper()
+	metricName := ExpectMetricName(collector)
 	metric, ok := FindMetricWithLabelValues(metricName, labels)
 	Expect(ok).To(BeTrue(), "Metric "+metricName+" should be available")
 	Expect(lo.FromPtr(metric.Counter.Value)).To(Equal(expectedValue), "Metric "+metricName+" should have the expected value")

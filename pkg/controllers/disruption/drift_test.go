@@ -80,14 +80,10 @@ var _ = Describe("Drift", func() {
 		nodeClaim.StatusConditions().MarkTrue(v1beta1.Drifted)
 	})
 	Context("Metrics", func() {
-		var eligibleNodesMetric string
 		var eligibleNodesLabels = map[string]string{
 			"method":             "drift",
 			"consolidation_type": "",
 		}
-		BeforeEach(func() {
-			eligibleNodesMetric = ExpectFullyQualifiedNameFromCollector(disruption.EligibleNodesGauge)
-		})
 		It("should correctly report eligible nodes", func() {
 			pod := test.Pod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
@@ -108,9 +104,9 @@ var _ = Describe("Drift", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 			wg.Wait()
 
-			ExpectMetricGaugeValue(eligibleNodesMetric, 0, eligibleNodesLabels)
+			ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 0, eligibleNodesLabels)
 
-			// remove the do-not-disturb annotation to make the node eligible for drift and update cluster state
+			// remove the do-not-disrupt annotation to make the node eligible for drift and update cluster state
 			pod.SetAnnotations(map[string]string{})
 			ExpectApplied(ctx, env.Client, pod)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
@@ -120,7 +116,7 @@ var _ = Describe("Drift", func() {
 			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 			wg.Wait()
 
-			ExpectMetricGaugeValue(eligibleNodesMetric, 1, eligibleNodesLabels)
+			ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 1, eligibleNodesLabels)
 		})
 	})
 	Context("Budgets", func() {

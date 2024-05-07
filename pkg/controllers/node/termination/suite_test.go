@@ -676,10 +676,6 @@ var _ = Describe("Termination", func() {
 		})
 	})
 	Context("Metrics", func() {
-		var evictionQueueDepthMetric string
-		BeforeEach(func() {
-			evictionQueueDepthMetric = ExpectFullyQualifiedNameFromCollector(terminator.EvictionQueueDepth)
-		})
 		It("should fire the terminationSummary metric when deleting nodes", func() {
 			ExpectApplied(ctx, env.Client, node)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
@@ -720,7 +716,7 @@ var _ = Describe("Termination", func() {
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{}) // Reconcile the queue so that we set the metric
 
-			ExpectMetricGaugeValue(evictionQueueDepthMetric, 5, map[string]string{})
+			ExpectMetricGaugeValue(terminator.EvictionQueueDepth, 5, map[string]string{})
 		})
 		It("should retry node deletion when cloudProvider returns retryable error", func() {
 			ExpectApplied(ctx, env.Client, node)

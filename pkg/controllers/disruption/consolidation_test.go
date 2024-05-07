@@ -135,11 +135,7 @@ var _ = Describe("Consolidation", func() {
 		})
 	})
 	Context("Metrics", func() {
-		var eligibleNodesMetric string
 		var consolidationTypes = []string{"empty", "single", "multi"}
-		BeforeEach(func() {
-			eligibleNodesMetric = ExpectFullyQualifiedNameFromCollector(disruption.EligibleNodesGauge)
-		})
 		It("should correctly report eligible nodes", func() {
 			pod := test.Pod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
@@ -161,13 +157,13 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			for _, ct := range consolidationTypes {
-				ExpectMetricGaugeValue(eligibleNodesMetric, 0, map[string]string{
+				ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 0, map[string]string{
 					"method":             "consolidation",
 					"consolidation_type": ct,
 				})
 			}
 
-			// remove the do-not-disturb annotation to make the node eligible for consolidation and update cluster state
+			// remove the do-not-disrupt annotation to make the node eligible for consolidation and update cluster state
 			pod.SetAnnotations(map[string]string{})
 			ExpectApplied(ctx, env.Client, pod)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
@@ -178,7 +174,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			for _, ct := range consolidationTypes {
-				ExpectMetricGaugeValue(eligibleNodesMetric, 1, map[string]string{
+				ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 1, map[string]string{
 					"method":             "consolidation",
 					"consolidation_type": ct,
 				})
