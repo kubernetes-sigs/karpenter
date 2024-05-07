@@ -31,7 +31,7 @@ jobs:
     - name: install pyroscope
       shell: bash
       run: | 
-        curl -fL https://github.com/grafana/pyroscope/releases/download/v1.1.5/profilecli_1.1.5_linux_amd64.tar.gz | tar xvz
+        curl -fL https://github.com/grafana/pyroscope/releases/download/v1.1.5/profilecli_1.1.5_linux_amd64.tar.gz | tar xz profilecli
         chmod +x profilecli
         sudo mv profilecli /usr/local/bin
     - name: install kwok and controller
