@@ -3835,6 +3835,8 @@ var _ = Describe("Consolidation", func() {
 			Eventually(finished.Load, 10*time.Second).Should(BeTrue())
 			wg.Wait()
 
+			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+
 			// nothing should be removed since the node is no longer empty
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))

@@ -87,15 +87,12 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		return cmd, scheduling.Results{}, nil
 	}
 
-	v := NewValidation(consolidationTTL, m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder, m.queue)
-	isValid, err := v.IsValid(ctx, cmd)
-	if err != nil {
-		return Command{}, scheduling.Results{}, fmt.Errorf("validating, %w", err)
-	}
-
-	if !isValid {
-		logging.FromContext(ctx).Debugf("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
-		return Command{}, scheduling.Results{}, nil
+	if err := NewValidation(m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder, m.queue).IsValid(ctx, cmd, consolidationTTL); err != nil {
+		if IsValidationError(err) {
+			logging.FromContext(ctx).Debugf("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+			return Command{}, scheduling.Results{}, nil
+		}
+		return Command{}, scheduling.Results{}, fmt.Errorf("validating consolidation, %w", err)
 	}
 	return cmd, results, nil
 }
