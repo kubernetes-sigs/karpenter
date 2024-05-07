@@ -28,6 +28,7 @@ const (
 	kwokPartitionLabelKey = "kwok-partition"
 
 	// Labels that can be selected on and are propagated to the node
+	InstanceTypeLabelKey   = Group + "/instance-type"
 	InstanceSizeLabelKey   = Group + "/instance-size"
 	InstanceFamilyLabelKey = Group + "/instance-family"
 	InstanceMemoryLabelKey = Group + "/instance-memory"
@@ -36,7 +37,6 @@ const (
 
 // Hard coded Kwok values
 var (
-	KwokZones      = []string{"test-zone-a", "test-zone-b", "test-zone-c", "test-zone-d"}
 	KwokPartitions = []string{"partition-a", "partition-b", "partition-c", "partition-d", "partition-e",
 		"partition-f", "partition-g", "partition-h", "partition-i", "partition-j"}
 )

@@ -6,7 +6,7 @@ HELM_OPTS ?= --set logLevel=debug \
 			--set controller.resources.requests.cpu=1 \
 			--set controller.resources.requests.memory=1Gi \
 			--set controller.resources.limits.cpu=1 \
-			--set controller.resources.limits.memory=1Gi 
+			--set controller.resources.limits.memory=1Gi
 
 help: ## Display help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
@@ -24,7 +24,7 @@ build: ## Build the Karpenter KWOK controller images using ko build
 	$(eval IMG_REPOSITORY=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 1 | cut -d ":" -f 1))
 	$(eval IMG_TAG=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 1 | cut -d ":" -f 2 -s))
 	$(eval IMG_DIGEST=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 2))
-	
+
 
 # Run make install-kwok to install the kwok controller in your cluster first
 # Webhooks are currently not supported in the kwok provider.
@@ -41,7 +41,7 @@ apply: verify build ## Deploy the kwok controller from the current state of your
 
 delete: ## Delete the controller from your ~/.kube/config cluster
 	helm uninstall karpenter --namespace $(KARPENTER_NAMESPACE)
-	
+
 test: ## Run tests
 	go test ./... \
 		-race \
@@ -96,4 +96,7 @@ download: ## Recursively "go mod download" on all directories where go.mod exist
 toolchain: ## Install developer toolchain
 	./hack/toolchain.sh
 
-.PHONY: help presubmit install-kwok uninstall-kwok build apply delete test deflake vulncheck licenses verify download toolchain
+gen_instance_types:
+	go run kwok/tools/gen_instance_types.go > kwok/cloudprovider/instance_types.json
+
+.PHONY: help presubmit install-kwok uninstall-kwok build apply delete test deflake vulncheck licenses verify download toolchain gen_instance_types
