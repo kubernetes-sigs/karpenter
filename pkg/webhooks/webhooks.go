@@ -87,9 +87,10 @@ func NewConfigValidationWebhook(ctx context.Context, _ configmap.Watcher) *contr
 // Start copies the relevant portions for starting the webhooks from sharedmain.MainWithConfig
 // https://github.com/knative/pkg/blob/0f52db700d63/injection/sharedmain/main.go#L227
 func Start(ctx context.Context, cfg *rest.Config, ctors ...knativeinjection.ControllerConstructor) {
-	ctx, startInformers := knativeinjection.EnableInjectionOrDie(ctx, cfg)
 	logger := logging.NewLogger(ctx, component).Sugar()
 	ctx = knativelogging.WithLogger(ctx, logger)
+
+	ctx, startInformers := knativeinjection.EnableInjectionOrDie(ctx, cfg)
 	cmw := sharedmain.SetupConfigMapWatchOrDie(ctx, logger)
 	controllers, webhooks := sharedmain.ControllersAndWebhooksFromCtors(ctx, cmw, ctors...)
 
