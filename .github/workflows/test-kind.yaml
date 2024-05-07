@@ -39,8 +39,6 @@ jobs:
       run: |
         make toolchain
         make install-kwok
-        git status
-        git diff
         KWOK_REPO=kind.local KIND_CLUSTER_NAME=chart-testing make apply-with-kind
     - name: install prometheus and grafana
       shell: bash
