@@ -2370,7 +2370,7 @@ var _ = Context("Scheduling", func() {
 			// shouldn't create a second node
 			Expect(nodes.Items).To(HaveLen(1))
 		})
-		It("should order initialized nodes for scheduling un-initialized nodes when all other nodes are inflight", func() {
+		It("should order initialized nodes for scheduling uninitialized nodes when all other nodes are inflight", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			var nodeClaims []*v1beta1.NodeClaim
@@ -2468,7 +2468,7 @@ var _ = Context("Scheduling", func() {
 				Expect(node.Name).To(Equal(scheduledNode.Name))
 			}
 		})
-		It("should order initialized nodes for scheduling un-initialized nodes", func() {
+		It("should order initialized nodes for scheduling uninitialized nodes", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			var nodeClaims []*v1beta1.NodeClaim

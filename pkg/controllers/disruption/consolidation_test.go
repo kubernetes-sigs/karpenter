@@ -3161,7 +3161,7 @@ var _ = Describe("Consolidation", func() {
 			// and will not be recreated
 			ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
 		})
-		It("won't delete node if it would require pods to schedule on an un-initialized node", func() {
+		It("won't delete node if it would require pods to schedule on an uninitialized node", func() {
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
@@ -3205,11 +3205,11 @@ var _ = Describe("Consolidation", func() {
 			})
 			Expect(ok).To(BeTrue())
 			_, ok = lo.Find(evts, func(e events.Event) bool {
-				return strings.Contains(e.Message, "would schedule against a non-initialized node")
+				return strings.Contains(e.Message, "would schedule against uninitialized nodeclaim")
 			})
 			Expect(ok).To(BeTrue())
 		})
-		It("should consider initialized nodes before un-initialized nodes", func() {
+		It("should consider initialized nodes before uninitialized nodes", func() {
 			defaultInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
 				Name: "default-instance-type",
 				Resources: v1.ResourceList{
@@ -3343,10 +3343,10 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, consolidatableNodeClaim)
-			// Expect no events that state that the pods would schedule against a non-initialized node
+			// Expect no events that state that the pods would schedule against a uninitialized node
 			evts := recorder.Events()
 			_, ok := lo.Find(evts, func(e events.Event) bool {
-				return strings.Contains(e.Message, "would schedule against a non-initialized node")
+				return strings.Contains(e.Message, "would schedule against uninitialized nodeclaim")
 			})
 			Expect(ok).To(BeFalse())
 
