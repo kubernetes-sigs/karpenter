@@ -46,10 +46,6 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		return Command{}, scheduling.Results{}, nil
 	}
 	candidates = m.sortCandidates(candidates)
-	EligibleNodesGauge.With(map[string]string{
-		methodLabel:            m.Type(),
-		consolidationTypeLabel: m.ConsolidationType(),
-	}).Set(float64(len(candidates)))
 
 	// In order, filter out all candidates that would violate the budget.
 	// Since multi-node consolidation relies on the ordering of

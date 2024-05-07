@@ -150,6 +150,11 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}
+	EligibleNodesGauge.With(map[string]string{
+		methodLabel:            disruption.Type(),
+		consolidationTypeLabel: disruption.ConsolidationType(),
+	}).Set(float64(len(candidates)))
+
 	// If there are no candidates, move to the next disruption
 	if len(candidates) == 0 {
 		return false, nil

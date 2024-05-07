@@ -57,36 +57,24 @@ func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 		e.recorder.Publish(disruptionevents.Unconsolidatable(c.Node, c.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", c.nodePool.Name))...)
 		return false
 	}
+	if len(c.reschedulablePods) != 0 {
+		return false
+	}
 	return c.NodeClaim.StatusConditions().GetCondition(v1beta1.Empty).IsTrue() &&
 		!e.clock.Now().Before(c.NodeClaim.StatusConditions().GetCondition(v1beta1.Empty).LastTransitionTime.Inner.Add(*c.nodePool.Spec.Disruption.ConsolidateAfter.Duration))
 }
 
 // ComputeCommand generates a disruption command given candidates
 func (e *Emptiness) ComputeCommand(_ context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
-	// First check how many nodes are empty so that we can emit a metric on how many nodes are eligible
-	emptyCandidates := lo.Filter(candidates, func(cn *Candidate, _ int) bool {
-		return cn.NodeClaim.DeletionTimestamp.IsZero() && len(cn.reschedulablePods) == 0
-	})
-
-	EligibleNodesGauge.With(map[string]string{
-		methodLabel:            e.Type(),
-		consolidationTypeLabel: e.ConsolidationType(),
-	}).Set(float64(len(candidates)))
-
-	empty := make([]*Candidate, 0, len(emptyCandidates))
-	for _, candidate := range emptyCandidates {
-		if len(candidate.reschedulablePods) > 0 {
-			continue
-		}
-		// If there's disruptions allowed for the candidate's nodepool,
-		// add it to the list of candidates, and decrement the budget.
-		if disruptionBudgetMapping[candidate.nodePool.Name] > 0 {
-			empty = append(empty, candidate)
-			disruptionBudgetMapping[candidate.nodePool.Name]--
-		}
-	}
 	return Command{
-		candidates: empty,
+		candidates: lo.Filter(candidates, func(c *Candidate, _ int) bool {
+			// Include candidate iff disruptions are allowed for its nodepool.
+			if disruptionBudgetMapping[c.nodePool.Name] > 0 {
+				disruptionBudgetMapping[c.nodePool.Name]--
+				return true
+			}
+			return false
+		}),
 	}, scheduling.Results{}, nil
 }
 

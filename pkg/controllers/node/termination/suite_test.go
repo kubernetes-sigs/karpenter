@@ -716,7 +716,7 @@ var _ = Describe("Termination", func() {
 			ExpectReconcileSucceeded(ctx, terminationController, client.ObjectKeyFromObject(node))
 			ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{}) // Reconcile the queue so that we set the metric
 
-			ExpectMetricGaugeValue("karpenter_nodes_eviction_queue_depth", 5, map[string]string{})
+			ExpectMetricGaugeValue(terminator.EvictionQueueDepth, 5, map[string]string{})
 		})
 		It("should retry node deletion when cloudProvider returns retryable error", func() {
 			ExpectApplied(ctx, env.Client, node)

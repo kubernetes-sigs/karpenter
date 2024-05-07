@@ -32,6 +32,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -103,6 +104,39 @@ var _ = Describe("Emptiness", func() {
 			// We get six calls here because we have Nodes and NodeClaims that fired for this event
 			// and each of the consolidation mechanisms specifies that this event should be fired
 			Expect(recorder.Calls("Unconsolidatable")).To(Equal(2))
+		})
+	})
+	Context("Metrics", func() {
+		var eligibleNodesEmptinessLabels = map[string]string{
+			"method":             "emptiness",
+			"consolidation_type": "",
+		}
+		It("should correctly report eligible nodes", func() {
+			pod := test.Pod()
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+			wg := sync.WaitGroup{}
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			wg.Wait()
+
+			ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 0, eligibleNodesEmptinessLabels)
+
+			// delete pod and update cluster state, node should now be disruptable
+			ExpectDeleted(ctx, env.Client, pod)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			wg.Wait()
+
+			ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 1, eligibleNodesEmptinessLabels)
 		})
 	})
 	Context("Budgets", func() {

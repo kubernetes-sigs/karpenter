@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -75,6 +76,46 @@ var _ = Describe("Expiration", func() {
 			},
 		})
 		nodeClaim.StatusConditions().MarkTrue(v1beta1.Expired)
+	})
+	Context("Metrics", func() {
+		var eligibleNodesLabels = map[string]string{
+			"method":             "expiration",
+			"consolidation_type": "",
+		}
+		It("should correctly report eligible nodes", func() {
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1beta1.DoNotDisruptAnnotationKey: "true",
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+			wg := sync.WaitGroup{}
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			wg.Wait()
+
+			ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 0, eligibleNodesLabels)
+
+			// remove the do-not-disrupt annotation to make the node eligible for drift and update cluster state
+			pod.SetAnnotations(map[string]string{})
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			wg.Wait()
+
+			ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 1, eligibleNodesLabels)
+		})
 	})
 	Context("Budgets", func() {
 		var numNodes = 10
