@@ -58,7 +58,6 @@ type Controller struct {
 	clk                    clock.Clock
 	instanceTypes          map[string]map[string]*cloudprovider.InstanceType
 	lastConsolidationState time.Time
-	// nodePools     map[string]*v1beta1.NodePool
 }
 
 func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,

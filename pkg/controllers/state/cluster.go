@@ -57,8 +57,6 @@ type Cluster struct {
 	nodeNameToProviderID      map[string]string               // node name -> provider id
 	nodeClaimNameToProviderID map[string]string               // node claim name -> provider id
 	daemonSetPods             sync.Map                        // daemonSet -> existing pod
-	// consolidationCommandIDs   map[string]ConsolidationDecision // mapping of consolidation command ids to sets of provider ids
-	// consolidatingNodes        map[string]string                // provider-id -> command-id
 
 	nodePoolToNodeClaimNames map[string]sets.Set[string]  // nodepool name -> set of node claim names
 	nodePools                map[string]*v1beta1.NodePool // nodepool name -> nodepool
