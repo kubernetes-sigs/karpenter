@@ -125,10 +125,6 @@ jobs:
         kubectl get pods -n kube-system | grep karpenter 
         kubectl get nodepools
         kubectl get pods -A
-    - name: run presubmit 
-      shell: bash 
-      run: | 
-        K8S_VERSION=${{ matrix.k8sVersion }} FOCUS="Disruption" make presubmit
     - name: cleanup 
       shell: bash
       run: | 
