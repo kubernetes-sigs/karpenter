@@ -47,7 +47,13 @@ import (
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 )
 
-const maxConcurrentNominations = 5
+const (
+	maxConcurrentNominations = 5
+	maxBatchSize             = 100
+
+	singleTimeout = 3 * time.Minute
+	multiTimeout  = 1 * time.Minute
+)
 
 type Controller struct {
 	kubeClient             client.Client
@@ -113,8 +119,8 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 		for _, cmd := range noms {
 			// If any nomination is invalid, remove the nomination and requeue
 			// Short circuit and only unmark one of the commands to optimistically save work done
-			if keepCondition, err := c.validateCandidates(ctx, cmd.Candidates...); err != nil {
-				err = multierr.Append(err, c.setNodeClaimsUnderutilized(ctx, keepCondition, "", cmd.Candidates...))
+			if err := c.validateCandidates(ctx, cmd.Candidates...); err != nil {
+				err = multierr.Append(err, c.setNodeClaimsUnderutilized(ctx, false, "", cmd.Candidates...))
 				return reconcile.Result{}, fmt.Errorf("validating candidates, %w", err)
 			}
 		}
@@ -171,15 +177,18 @@ func (c *Controller) getActiveConsolidations(ctx context.Context) map[string]dis
 // Returns true if the candidates should be unmarked if used to validate existing commands.
 // Returns a nil error if the candidates are valid.
 // This intentionally does a quick check rather than doing a scheduling simulation.
-// TODO @njtran ^ Probably needs to
-// Candidates are considered invalid if
+// Candidates are considered invalid if:
 // 1. They're not disruptable from cluster state's perspective
 // 2. ConsolidateAfter is disabled
-// 3. NodePool Disruption Budgets do not allow any disruption
-func (c *Controller) validateCandidates(ctx context.Context, candidates ...*state.StateNode) (keepCondition bool, invalid error) {
+// 3. Is NotEmpty, but it's NodePool only allows WhenEmpty consolidation
+// 4. NodePool Disruption Budgets do not allow any disruption
+func (c *Controller) validateCandidates(ctx context.Context, candidates ...*state.StateNode) error {
 	newCandidates := lo.Filter(candidates, func(candidate *state.StateNode, _ int) bool {
 		return candidate.IsDisruptable(ctx, c.kubeClient, c.recorder) != nil
 	})
+	if len(newCandidates) != len(candidates) {
+		return fmt.Errorf("detected non-disruptable candidates")
+	}
 
 	nodePools := c.cluster.NodePools()
 	// Group candidates by their NodePool so that we can calculate allowed disruptions
@@ -187,27 +196,36 @@ func (c *Controller) validateCandidates(ctx context.Context, candidates ...*stat
 		return candidate.Labels()[v1beta1.NodePoolLabelKey]
 	})
 
+	for _, cn := range newCandidates {
+		// If the NodePool isn't using WhenEmpty, checking if it's an invalid candidate can't be done quickly.
+		if nodePools[cn.Labels()[v1beta1.NodePoolLabelKey]].Spec.Disruption.ConsolidationPolicy != v1beta1.ConsolidationPolicyWhenEmpty {
+			continue
+		}
+		pods, err := cn.ReschedulablePods(ctx, c.kubeClient)
+		if err != nil {
+			return fmt.Errorf("getting candidate pods, %w", err)
+		}
+		if len(pods) > 0 {
+			return fmt.Errorf("found non-empty node with NodePool consolidationPolicy set to %q", v1beta1.ConsolidationPolicyWhenEmpty)
+		}
+	}
+
 	// Cross reference each node to its nodepool:
 	// 1. check if consolidation is enabled
 	// 2. check if node disruption budgets allowed disruptions is 0
 	for npName := range nodePoolsToCandidates {
 		nodePool := nodePools[npName]
-		if nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil || nodePool.Spec.Disruption.ConsolidationPolicy != v1beta1.ConsolidationPolicyWhenUnderutilized {
-			return false, fmt.Errorf("underutilization consolidation is not enabled for nodepool %s", npName)
+		if nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
+			return fmt.Errorf("consolidation is not enabled for nodepool %s", npName)
 		}
 		// If the nodepool has no allowed disruptions, we know we can't disrupt this node
 		if c.cluster.AllowedNodePoolDisruptions(ctx, npName, c.clk) == 0 {
-			return false, fmt.Errorf("nodepool %q has no allowed disruptions", npName)
+			return fmt.Errorf("nodepool %q has no allowed disruptions", npName)
 		}
 	}
-	return len(candidates) != len(newCandidates), nil
+
+	return nil
 }
-
-const maxBatchSize = 100
-
-// TODO @njtran to add back in timeouts if necessary
-// const singleTimeout = 3 * time.Minute
-// const multiTimeout = 1 * time.Minute
 
 // computeConsolidation optimistically tries to find a consolidation decision:
 //  1. Iterate through the candidate nodes one at a time
@@ -219,11 +237,23 @@ const maxBatchSize = 100
 func (c *Controller) computeConsolidation(ctx context.Context) ([]*state.StateNode, error) {
 	candidates := c.Candidates(ctx)
 	lastValidMax := -1
+	start := c.clk.Now()
 	for i := range candidates {
+		// add a timeout for finding a single valid command.
+		if c.clk.Since(start) > singleTimeout {
+			ConsolidationTimeoutTotalCounter.Inc()
+			break
+		}
 		batchSize := 1
+		multiBatchStart := c.clk.Now()
 		// Get the subset of candidates at indices [i, i + batchSize), and do a scheduling simulation. If we succeed, double
 		// the size of the subset by doubling the batch size, where the batch size will be <= len(candidates) and <= 100.
 		for ; batchSize <= maxBatchSize; batchSize = lo.Clamp(batchSize*2, 1, maxBatchSize) {
+			// add a timeout on increasing the batch size.
+			if c.clk.Since(multiBatchStart) > multiTimeout {
+				ConsolidationTimeoutTotalCounter.Inc()
+				break
+			}
 			maxIndex := lo.Clamp(i+batchSize, 0, len(candidates))
 			nodesToConsolidate := lo.Slice(candidates, i, maxIndex)
 			results, err := SimulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, c.recorder, nodesToConsolidate...)

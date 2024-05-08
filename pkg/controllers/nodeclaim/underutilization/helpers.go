@@ -102,7 +102,7 @@ func (c *Controller) validateSpotToSpotConsolidation(ctx context.Context, candid
 func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
 	recorder events.Recorder, candidates ...*state.StateNode,
 ) (pscheduling.Results, error) {
-	nodes := cluster.Nodes().Defined()
+	nodes := cluster.Nodes()
 	deletingNodes := nodes.Deleting()
 
 	// We get the pods that are on nodes that are deleting

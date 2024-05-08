@@ -30,7 +30,6 @@ func init() {
 		NodesDisruptedCounter,
 		PodsDisruptedCounter,
 		EligibleNodesGauge,
-		// ConsolidationTimeoutTotalCounter,
 		BudgetsAllowedDisruptionsGauge,
 	)
 }
@@ -89,15 +88,6 @@ var (
 		},
 		[]string{methodLabel},
 	)
-	// ConsolidationTimeoutTotalCounter = prometheus.NewCounterVec(
-	// 	prometheus.CounterOpts{
-	// 		Namespace: metrics.Namespace,
-	// 		Subsystem: disruptionSubsystem,
-	// 		Name:      "consolidation_timeouts_total",
-	// 		Help:      "Number of times the Consolidation algorithm has reached a timeout. Labeled by consolidation type.",
-	// 	},
-	// 	[]string{consolidationTypeLabel},
-	// )
 	BudgetsAllowedDisruptionsGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
