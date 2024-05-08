@@ -1,8 +1,8 @@
 name: kind-ci
 on:
-  push:
-    branches: [main]
-  # enable this when the yaml is ready to be used
+  # enable running this on merges + presubmits when the action has tests that it will execute
+  # push:
+  #   branches: [main]
   # pull_request:
   workflow_dispatch:
 jobs:
