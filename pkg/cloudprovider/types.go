@@ -268,33 +268,3 @@ func IgnoreNodeClassNotReadyError(err error) error {
 	}
 	return err
 }
-
-// RetryableError is an error type returned by CloudProviders when the action emitting the error has to be retried
-type RetryableError struct {
-	error
-}
-
-func NewRetryableError(err error) *RetryableError {
-	return &RetryableError{
-		error: err,
-	}
-}
-
-func (e *RetryableError) Error() string {
-	return fmt.Sprintf("retryable error, %s", e.error)
-}
-
-func IsRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-	var retryableError *RetryableError
-	return errors.As(err, &retryableError)
-}
-
-func IgnoreRetryableError(err error) error {
-	if IsRetryableError(err) {
-		return nil
-	}
-	return err
-}

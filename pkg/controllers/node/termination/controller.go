@@ -108,12 +108,6 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 	// This delete call is needed so that we ensure that we don't remove the node from the cluster
 	// until the full instance shutdown has taken place
 	if err := c.cloudProvider.Delete(ctx, nodeclaimutil.NewFromNode(node)); cloudprovider.IgnoreNodeClaimNotFoundError(err) != nil {
-		// We expect cloudProvider to emit a Retryable Error when the underlying instance is not terminated and if that
-		// happens, we want to re-enqueue reconciliation until we terminate the underlying instance before removing
-		// finalizer from the node.
-		if cloudprovider.IsRetryableError(err) {
-			return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
-		}
 		return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
 	}
 	if err := c.removeFinalizer(ctx, node); err != nil {
