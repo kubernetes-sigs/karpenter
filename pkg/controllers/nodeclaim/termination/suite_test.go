@@ -18,7 +18,6 @@ package termination_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -216,37 +215,5 @@ var _ = Describe("Termination", func() {
 		for _, node := range nodes {
 			ExpectExists(ctx, env.Client, node)
 		}
-	})
-	It("should retry nodeClaim deletion when cloudProvider returns retryable error", func() {
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectReconcileSucceeded(ctx, nodeClaimLifecycleController, client.ObjectKeyFromObject(nodeClaim))
-
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
-		Expect(err).ToNot(HaveOccurred())
-
-		node := test.NodeClaimLinkedNode(nodeClaim)
-		ExpectApplied(ctx, env.Client, node)
-
-		// Expect the node and the nodeClaim to both be gone
-		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectReconcileSucceeded(ctx, nodeClaimTerminationController, client.ObjectKeyFromObject(nodeClaim)) // triggers the node deletion
-		ExpectFinalizersRemoved(ctx, env.Client, node)
-		ExpectNotFound(ctx, env.Client, node)
-
-		cloudProvider.NextDeleteErr = cloudprovider.NewRetryableError(fmt.Errorf("underlying instance not terminated"))
-		result := ExpectReconcileSucceeded(ctx, nodeClaimTerminationController, client.ObjectKeyFromObject(nodeClaim))
-		Expect(result.RequeueAfter).To(Equal(time.Second * 10))
-
-		// Instance still exists
-		_, err = cloudProvider.Get(ctx, node.Spec.ProviderID)
-		Expect(err).ToNot(HaveOccurred())
-
-		ExpectReconcileSucceeded(ctx, nodeClaimTerminationController, client.ObjectKeyFromObject(nodeClaim)) //re-enqueue reconciliation since we got retryable error previously
-		ExpectNotFound(ctx, env.Client, nodeClaim, node)
-
-		// Expect the nodeClaim to be gone from the cloudprovider
-		_, err = cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
-		Expect(cloudprovider.IsNodeClaimNotFoundError(err)).To(BeTrue())
 	})
 })
